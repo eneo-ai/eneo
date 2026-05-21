@@ -33,6 +33,10 @@ from intric.flows.ai_builder.ai_builder_discovery_followup import (
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
     build_discovery_block_message_runtime,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    BuilderPlan,
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_edit_proposal import (
     edit_flow_retry_config,
     process_edit_arguments,
@@ -46,6 +50,9 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorPhase,
     build_ai_builder_error_event,
     coerce_ai_builder_error_code,
+)
+from intric.flows.ai_builder.ai_builder_event_models import (
+    RequirementsSummaryPayload,
 )
 from intric.flows.ai_builder.ai_builder_events import (
     build_requirements_summary_event,
@@ -70,12 +77,6 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
     mcp_selection_answer_allows_planning,
 )
 from intric.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
-from intric.flows.ai_builder.ai_builder_models import (
-    BuilderPlan,
-    ConversationMessage,
-    FlowDraftSpecCore,
-    RequirementsSummaryPayload,
-)
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
@@ -133,6 +134,9 @@ from intric.flows.ai_builder.ai_builder_tools import (
 )
 from intric.flows.ai_builder.planning_state import PlanningState
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+)
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:

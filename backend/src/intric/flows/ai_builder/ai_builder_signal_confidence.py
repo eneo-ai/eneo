@@ -19,7 +19,9 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
 from intric.flows.ai_builder.ai_builder_discovery_signal_inference import (
     infer_answer_signals_from_text,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 
 Confidence = Literal["high", "medium", "low"]
 

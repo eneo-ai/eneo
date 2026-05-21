@@ -46,7 +46,11 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     find_named_mcp_reference_issue,
 )
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+    PlannerPatternSignals,
+)
+from intric.flows.ai_builder.planning_state import AggregationIntent
+from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
@@ -54,10 +58,6 @@ from intric.flows.ai_builder.ai_builder_models import (
     OutputType,
     StepSpec,
 )
-from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
-    PlannerPatternSignals,
-)
-from intric.flows.ai_builder.planning_state import AggregationIntent
 from intric.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,

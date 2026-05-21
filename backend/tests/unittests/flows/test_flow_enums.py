@@ -17,7 +17,7 @@ from intric.database.tables.flow_tables import (
     FLOW_STEP_RESULT_STATUS_VALUES,
     FLOW_TEMPLATE_ASSET_STATUS_VALUES,
 )
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     InputSource,
     InputType,

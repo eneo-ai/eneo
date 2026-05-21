@@ -11,11 +11,13 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
     build_discovery_followup_runtime,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_events import (
     build_question_event,
     build_text_event,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_tools import ASK_STRUCTURED_QUESTION_TOOL_NAME

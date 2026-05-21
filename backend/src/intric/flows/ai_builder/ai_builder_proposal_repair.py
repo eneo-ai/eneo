@@ -6,6 +6,9 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 from uuid import uuid4
 
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
     AIBuilderErrorPhase,
@@ -18,7 +21,6 @@ from intric.flows.ai_builder.ai_builder_events import (
 from intric.flows.ai_builder.ai_builder_interaction_utils import (
     looks_like_information_request,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ToolProcessingFailureKind,
 )

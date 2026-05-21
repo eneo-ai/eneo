@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from intric.flows.ai_builder.ai_builder_models import FlowDraftSpecCore, FormFieldSpec
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.domain.flow import FlowStep
 from intric.flows.enums import (
@@ -12,6 +11,10 @@ from intric.flows.enums import (
     FlowMcpPolicy,
     FlowOutputMode,
     FlowOutputType,
+)
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+    FormFieldSpec,
 )
 from intric.flows.flow_authoring_variable_rewriting import (
     build_ref_to_order,

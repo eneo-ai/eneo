@@ -7,16 +7,14 @@ from typing import TYPE_CHECKING, Literal
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     ui_language_from_metadata,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    BuilderPlan,
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     extract_answer_signals,
     resolve_output_intent,
-)
-from intric.flows.ai_builder.ai_builder_models import (
-    BuilderPlan,
-    ConversationMessage,
-    FlowDraftSpecCore,
-    OutputType,
 )
 from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_aware_quality_feedback,
@@ -27,6 +25,10 @@ from intric.flows.ai_builder.ai_builder_plan_store import (
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.ai_builder.planning_state import AggregationIntent
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+    OutputType,
+)
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_plan_edit_context import (

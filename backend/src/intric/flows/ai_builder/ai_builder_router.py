@@ -27,6 +27,7 @@ from intric.flows.ai_builder.ai_builder_api_models import (
     PlanResponse,
     RevisePlanRequest,
     SendMessageRequest,
+    SessionListItemResponse,
     SessionListResponse,
     SessionModelOption,
     SessionModelsResponse,
@@ -34,9 +35,16 @@ from intric.flows.ai_builder.ai_builder_api_models import (
     SessionResponse,
     SessionTelemetrySummary,
 )
+from intric.flows.ai_builder.ai_builder_api_models import (
+    ApplyResultResponse as ApplyResult,
+)
 from intric.flows.ai_builder.ai_builder_context import (
     resolve_planner_model,
     serialize_space_models,
+)
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    BuilderPlan,
+    BuilderSession,
 )
 from intric.flows.ai_builder.ai_builder_error_contract import (
     AI_BUILDER_ERROR_REGISTRY,
@@ -59,14 +67,6 @@ from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_USAGE,
     build_done_event,
     build_usage_event,
-)
-from intric.flows.ai_builder.ai_builder_models import (
-    ApplyResultResponse as ApplyResult,
-)
-from intric.flows.ai_builder.ai_builder_models import (
-    BuilderPlan,
-    BuilderSession,
-    SessionListItemResponse,
 )
 from intric.flows.ai_builder.ai_builder_service import (
     AIBuilderService,

@@ -9,8 +9,11 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepEditOperation,
     StepPlacement,
 )
-from intric.flows.ai_builder.ai_builder_models import InputSource, InputType
 from intric.flows.domain.flow import FlowStep
+from intric.flows.flow_authoring_spec import (
+    InputSource,
+    InputType,
+)
 
 
 def _existing_step(*, step_order: int, input_source: str = "flow_input") -> FlowStep:

@@ -10,7 +10,6 @@ from intric.flows.ai_builder.ai_builder_critic_invariants import (
 from intric.flows.ai_builder.ai_builder_mechanical_refs import (
     clean_raw_previous_field_refs,
 )
-from intric.flows.ai_builder.ai_builder_models import InputSource, InputType, OutputType
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     PreviousFieldRef,
@@ -21,6 +20,11 @@ from intric.flows.ai_builder.ai_builder_source_material import (
 )
 from intric.flows.ai_builder.ai_builder_structured_field_paths import (
     missing_draft_field_path,
+)
+from intric.flows.flow_authoring_spec import (
+    InputSource,
+    InputType,
+    OutputType,
 )
 
 if TYPE_CHECKING:

@@ -12,8 +12,10 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     requirements_summary_from_metadata,
     tool_calls_from_message,
 )
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
+)
+from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
 

@@ -7,7 +7,7 @@ from intric.flows.ai_builder.ai_builder_description_semantics import (
     FlowSemanticSignature,
     _description_hash,
 )
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     InputSource,
     InputType,

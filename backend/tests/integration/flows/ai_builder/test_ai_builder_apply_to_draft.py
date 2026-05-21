@@ -28,13 +28,15 @@ from intric.flows.ai_builder.ai_builder_materialization_bridge import (
     apply_to_draft,
     materialize,
 )
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    PlannerPlanEnvelope,
+    TargetKind,
+)
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
-    PlannerPlanEnvelope,
     StepSpec,
-    TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.planning_state import ArchitectureCommit, StepTriple

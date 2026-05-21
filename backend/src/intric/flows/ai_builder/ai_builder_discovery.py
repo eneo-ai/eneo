@@ -103,12 +103,14 @@ from intric.flows.ai_builder.ai_builder_discovery_questions import (
     runtime_metadata_fields_question,
     structured_analysis_need_question,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     canonical_question_id,
     has_explicit_structured_answer,
     question_is_already_resolved,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     detect_planner_pattern_signals,
 )

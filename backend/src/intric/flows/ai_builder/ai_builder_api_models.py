@@ -12,7 +12,6 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
-    JsonObject,
     PlannerPlanEnvelope,
     PlanStatus,
     SessionStatus,
@@ -24,6 +23,9 @@ from intric.flows.ai_builder.ai_builder_plan_edit_context import (
 )
 from intric.flows.ai_builder.ai_builder_telemetry_models import (
     SessionTelemetrySummary,
+)
+from intric.flows.flow_authoring_spec import (
+    JsonObject,
 )
 
 AI_BUILDER_SESSION_RESPONSE_EXAMPLE: JsonObject = {

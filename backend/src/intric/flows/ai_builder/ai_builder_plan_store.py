@@ -6,14 +6,15 @@ from typing import TYPE_CHECKING, Any
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     make_persisted_assistant_tool_call,
 )
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
-    BuilderPlanEditResult,
     ConversationMessage,
-    FlowDraftSpecCore,
     LintSeverity,
     LintWarning,
     PlannerPlanEnvelope,
+)
+from intric.flows.ai_builder.ai_builder_edit_models import (
+    BuilderPlanEditResult,
 )
 from intric.flows.ai_builder.ai_builder_prompts import build_plan_summary
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
@@ -25,6 +26,9 @@ from intric.flows.ai_builder.ai_builder_validation_common import (
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
+)
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
 )
 from intric.flows.flow_resource_bindings import LocalResourceBinding
 

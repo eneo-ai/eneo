@@ -15,6 +15,9 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_edit_models import (
     CompiledEditResult,
     FlowEditDiff,
@@ -30,17 +33,6 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
     MCP_SELECTION_USE_SERVER_PREFIX,
     MCP_SELECTION_WITHOUT,
-)
-from intric.flows.ai_builder.ai_builder_models import (
-    AssistantSpec,
-    ConversationMessage,
-    FlowDraftSpecCore,
-    InputSource,
-    InputType,
-    MCPPolicy,
-    OutputMode,
-    OutputType,
-    StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
@@ -72,6 +64,16 @@ from intric.flows.ai_builder.ai_builder_tools import (
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.domain.flow import FlowStep
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    MCPPolicy,
+    OutputMode,
+    OutputType,
+    StepSpec,
+)
 
 
 def _make_processor(**overrides) -> AIBuilderProposalProcessor:

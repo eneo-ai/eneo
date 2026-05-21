@@ -8,9 +8,11 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepEditOperation,
     StepPatch,
 )
-from intric.flows.ai_builder.ai_builder_models import OutputType
 from intric.flows.ai_builder.ai_builder_new_step_compiler import compile_output_contract
 from intric.flows.domain.flow import FlowStep
+from intric.flows.flow_authoring_spec import (
+    OutputType,
+)
 
 
 @dataclass

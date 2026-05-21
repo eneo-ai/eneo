@@ -12,8 +12,10 @@ import pytest
 from pydantic import ValidationError
 
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    TargetKind,
+)
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
-from intric.flows.ai_builder.ai_builder_models import TargetKind
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     APPLY_TELEMETRY_LOG_KEY,
     APPLY_TELEMETRY_SCHEMA_VERSION,

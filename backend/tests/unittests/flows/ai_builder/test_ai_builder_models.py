@@ -6,21 +6,23 @@ import pytest
 from pydantic import ValidationError
 
 from intric.flows.ai_builder.ai_builder_api_models import SendMessageRequest
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    FlowChangeSet,
+    PlannerPlanEnvelope,
+    PlanStatus,
+    SessionStatus,
+    TargetKind,
+)
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     AssistantSpecLocalRefNotPortableError,
-    FlowChangeSet,
     FlowDraftSpecCore,
     InputSource,
     InputType,
     MCPPolicy,
     OutputMode,
     OutputType,
-    PlannerPlanEnvelope,
-    PlanStatus,
-    SessionStatus,
     StepSpec,
-    TargetKind,
 )
 
 # ---------------------------------------------------------------------------
@@ -177,7 +179,9 @@ class TestFlowDraftSpecCore:
         assert step.input_bindings == {"question": "{{ step_a.output.text }}"}
 
     def test_form_fields(self) -> None:
-        from intric.flows.ai_builder.ai_builder_models import FormFieldSpec
+        from intric.flows.flow_authoring_spec import (
+            FormFieldSpec,
+        )
 
         spec = FlowDraftSpecCore(
             flow_name="With form",
@@ -243,10 +247,14 @@ class TestFlowChangeSet:
         assert cs.compiled_steps == []
 
     def test_changeset_with_creates(self) -> None:
-        from intric.flows.ai_builder.ai_builder_models import (
-            AssistantToCreate,
-            CompiledStep,
-            StepChangeKind,
+        from intric.flows.application.flow_draft_materialization import (
+            FlowDraftAssistantToCreate as AssistantToCreate,
+        )
+        from intric.flows.application.flow_draft_materialization import (
+            FlowDraftCompiledStep as CompiledStep,
+        )
+        from intric.flows.application.flow_draft_materialization import (
+            FlowDraftStepChangeKind as StepChangeKind,
         )
 
         cs = FlowChangeSet(

@@ -18,15 +18,6 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
 from intric.flows.ai_builder.ai_builder_edit_models import (
     FormFieldSpec as EditFormFieldSpec,
 )
-from intric.flows.ai_builder.ai_builder_models import (
-    AssistantSpec,
-    FormFieldSpec,
-    InputSource,
-    InputType,
-    OutputMode,
-    OutputType,
-    StepSpec,
-)
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     AssistantSnapshotResourceUnavailableError,
@@ -39,6 +30,15 @@ from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringSnapshots,
 )
 from intric.flows.flow import FlowStep
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FormFieldSpec,
+    InputSource,
+    InputType,
+    OutputMode,
+    OutputType,
+    StepSpec,
+)
 from intric.flows.flow_authoring_variable_rewriting import (
     build_ref_to_order,
     rewrite_step_spec_variables,
@@ -137,8 +137,10 @@ def _make_mcp_assistant_snapshot_context(
             }
         ],
     )
-    return {step.assistant_id: snapshot}, catalog, catalog.assistant_spec_from_snapshot(
-        snapshot
+    return (
+        {step.assistant_id: snapshot},
+        catalog,
+        catalog.assistant_spec_from_snapshot(snapshot),
     )
 
 
@@ -147,16 +149,16 @@ def _make_knowledge_assistant_snapshot_context(
 ) -> tuple[AssistantAuthoringSnapshots, AIBuilderResourceCatalog, AssistantSpec]:
     snapshot = AssistantAuthoringSnapshot(
         instructions="Original prompt",
-        knowledge_refs=(
-            AssistantAuthoringResourceRef(local_ref="kb-1", label="kb-1"),
-        ),
+        knowledge_refs=(AssistantAuthoringResourceRef(local_ref="kb-1", label="kb-1"),),
     )
     catalog = build_ai_builder_resource_catalog(
         available_models=[],
         available_kbs=[{"id": "kb-1", "ref": "kb-1", "name": "kb-1"}],
     )
-    return {step.assistant_id: snapshot}, catalog, catalog.assistant_spec_from_snapshot(
-        snapshot
+    return (
+        {step.assistant_id: snapshot},
+        catalog,
+        catalog.assistant_spec_from_snapshot(snapshot),
     )
 
 
@@ -838,8 +840,8 @@ def test_edit_compiler_switches_knowledge_step_to_mcp_without_stale_kb_refs() ->
         ],
         plan_rationale="Replace static policy lookup with live case lookup.",
     )
-    assistant_snapshots, resource_catalog, _ = _make_knowledge_assistant_snapshot_context(
-        existing_step
+    assistant_snapshots, resource_catalog, _ = (
+        _make_knowledge_assistant_snapshot_context(existing_step)
     )
 
     result = compile_edit_draft(
@@ -1008,9 +1010,7 @@ def test_edit_compiler_preserves_audio_transcription_mode_when_patch_only_rename
     assert step.output_type == OutputType.TEXT
 
 
-def test_edit_compiler_preserves_generated_docx_mode_when_patch_only_renames() -> (
-    None
-):
+def test_edit_compiler_preserves_generated_docx_mode_when_patch_only_renames() -> None:
     existing_step = _make_flow_step(
         step_order=1,
         user_description="Skapa dokument",

@@ -46,6 +46,11 @@ from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
     build_discovery_block_message_runtime,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    BuilderPlan,
+    ConversationMessage,
+    SessionStatus,
+)
 from intric.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
     AIBuilderErrorPhase,
@@ -72,11 +77,6 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
     mcp_resource_selection_values,
 )
 from intric.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
-from intric.flows.ai_builder.ai_builder_models import (
-    BuilderPlan,
-    ConversationMessage,
-    SessionStatus,
-)
 from intric.flows.ai_builder.ai_builder_orchestrator import (
     AskQuestionAction,
     CommitArchitectureAction,

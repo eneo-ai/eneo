@@ -21,7 +21,9 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     structured_question_payload_from_tool_arguments,
     tool_calls_from_message,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 
 
 @dataclass(frozen=True, slots=True)

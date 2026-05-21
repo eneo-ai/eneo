@@ -1,7 +1,9 @@
-from intric.flows.ai_builder.ai_builder_models import InputType
 from intric.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
     primary_input_shadow_alias_input_types,
+)
+from intric.flows.flow_authoring_spec import (
+    InputType,
 )
 
 

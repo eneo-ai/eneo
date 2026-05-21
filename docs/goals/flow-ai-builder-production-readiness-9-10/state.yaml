@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T021
+active_task: T023
 
 scoring_target:
   dimensions:
@@ -50,28 +50,29 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T020 implementation/post-review: conversation metadata/tool-call JSONB, public error diagnostics, frontend diagnostic reports, and the targeted runtime-field intent gap now have typed canonical ownership or behavior coverage. The prompt 'the user supplies customer name, analysis request...' now produces concrete flow-scope form fields in an authenticated local API eval. The broader score floor remains blocked by DB lock invariant, readability/test topology, AI slop cleanup, and broader normal-user output quality."
+  source: "After T022 implementation/post-review: conversation metadata/tool-call JSONB, public error diagnostics, frontend diagnostic reports, targeted runtime-field intent, and AI Builder model import ownership now have typed/canonical ownership or behavior coverage. The fake ai_builder_models.py aggregation layer is deleted, ai_builder_domain_models.py no longer re-exports portable/materialization aliases, and an AST guard prevents the fake-owner pattern from returning. The broader score floor is still below 9 because DB lock invariants, full-source Pyright baseline failures, broader live eval/output coverage, test topology, large orchestration files, and remaining AI-slop/readability cleanup still block production-readiness."
   Maintainability: 8
   Code_Quality: 8
   Clean_Architecture: 8
   Separation_of_Concerns: 8
   Single_Source_of_Truth: 9
-  Human_Readability: 7
+  Human_Readability: 8
   Human_Reviewability: 8
   Runtime_Reliability: 8
   Data_Model_Schema_Quality: 8
   API_Contract_Quality: 8
   Test_Coverage_Quality: 8
   Developer_Diagnostic_Experience: 9
-  AI_Slop_Comment_Naming_Quality: 6
+  AI_Slop_Comment_Naming_Quality: 8
   Normal_User_Output_Quality: 8
-  Overall: 6
+  Overall: 8
   blockers:
     - "Public/lifecycle/CAS error-code discipline improved, but calls that omit code= entirely can still silently use generic codes; future error-contract work must continue without creating a third public context carrier."
     - "builder_sessions can still persist a corrupt lock_token with NULL lock_expires_at; runtime fails safe, but schema-level lock invariants need a migration or explicit corruption policy."
     - "The targeted runtime-field prompt now produces form fields, but the broader five-case live eval gate is still incomplete and other vague/edit/document-output cases remain unproven."
     - "ai_builder_proposal_processor.py is materially smaller after T011 but still oversized at 1830 LOC; structured-question recovery, confirm requirements, and retry orchestration remain in one processor."
-    - "Normal-user output quality, test topology, readability/module topology, and AI slop cleanup remain below 9 until live eval and consolidation tranches force product and code fixes."
+    - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, and full-source Pyright baseline failures outside AI Builder."
+    - "Overall remains 8 until DB lock invariant, broad live eval/output quality, full-source typing/test baseline, and consolidation/readability tranches prove every dimension is honestly at least 9."
 
 score_floor_completion_gates:
   source: "2026-05-21 user review: the board must prevent 'plan executed' from being confused with '9/10 achieved'."
@@ -2433,7 +2434,7 @@ tasks:
   - id: T020
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Fix the normal-user runtime-field intent gap for prompts where the run user supplies/provides/provided/providing named values, using the existing runtime-field owner and behavior tests."
     inputs:
@@ -2538,7 +2539,7 @@ tasks:
   - id: T021
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: xhigh
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T020, with special pressure on the remaining 6/10 AI-slop/readability floor, DB lock invariants, broader live eval coverage, and test topology."
     inputs:
@@ -2556,6 +2557,198 @@ tasks:
       - "Allowed files, acceptance criteria, verification commands, and stop_if conditions for the next worker."
       - "Codex self-review and Claude plan gate result before implementation."
       - "Updated scorecard showing which dimension the next tranche is intended to move."
+    receipt:
+      result: done
+      completed_at: "2026-05-22T00:35:35+02:00"
+      artifact: ".codex/artifacts/flow-ai-builder-t021-next-tranche-ranking.md"
+      summary: "Re-ranked the next tranche after T020. Selected a real AI-slop/readability deletion tranche: delete the top-level ai_builder_models.py wildcard aggregation layer, strip the secondary portable-spec/materialization alias exports from ai_builder_domain_models.py, and rewrite callers to explicit owner modules with a static ownership guard."
+      decision:
+        selected_next_task: T022
+        selected_reason: "AI Slop / Comment / Naming Quality remains the only 6/10 score after T020. The fake model-owner seams hide API/domain/event/edit/flow-authoring/materialization ownership across 119 files and make reviewers open indirection layers before the real owner."
+        rejected:
+          - candidate: "DB lock invariant migration"
+            reason: "Still important and queued, but it moves Runtime/Data from 8 toward 9 while leaving the current 6/10 floor unchanged."
+          - candidate: "Delete only ai_builder_models.py"
+            reason: "Rejected after Claude R1 because it would route many symbols through ai_builder_domain_models.py, preserving the same fake-owner smell one layer down."
+          - candidate: "Broad ai_builder_proposal_processor.py split"
+            reason: "Rejected because previous peer review warned that splitting without a stable responsibility target creates shallow modules and harder navigation."
+          - candidate: "Broader five-case live eval now"
+            reason: "Needed soon, but Normal-User Output Quality is currently 8 after T020; this tranche targets the remaining 6/10 score floor."
+      evidence:
+        - "backend/src/intric/flows/ai_builder/ai_builder_models.py:1-5 is a five-line compatibility aggregation layer using wildcard re-exports."
+        - "119 backend source/test files import from intric.flows.ai_builder.ai_builder_models; 132 import statements route 495 imported names through the fake owner."
+        - "backend/src/intric/flows/ai_builder/ai_builder_domain_models.py:18-49 imports portable flow-authoring and materialization types, and :210-238 re-exports them through __all__."
+        - "backend/src/intric/flows/flow_authoring_spec.py:1 identifies the portable Flow authoring graph as the canonical owner for StepSpec/FlowDraftSpecCore/AssistantSpec/input-output enums/FormFieldSpec/MCPPolicy."
+        - "backend/src/intric/flows/application/flow_draft_materialization.py:31-80 owns FlowDraftStepChangeKind, FlowDraftAssistantToCreate/Update/Delete, and FlowDraftCompiledStep."
+      peer_review:
+        claude:
+          - artifact: ".codex/artifacts/claude-peer-loop-t021-next-tranche-ranking-after-runtime-field-intent-20260521T222905Z.md"
+            result: "VERDICT changes_required; GREEN_LIGHT no; MIN_SCORE 6"
+            codex_response: "Accepted blocker: deleting only ai_builder_models.py would preserve the same aggregation smell through ai_builder_domain_models.py."
+          - artifact: ".codex/artifacts/claude-peer-loop-t021-revised-aggregation-deletion-plan-20260521T223508Z.md"
+            result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
+            codex_response: "Proceed to T022 with both aggregation layers in scope, explicit symbol-owner map, static ownership guard, no migration-trail comments, wildcard smoke check, and receipt documentation for any domain imports kept for internal annotations."
+        antigravity:
+          status: "SKIPPED_DUE_TO_QUOTA"
+          evidence: "Quota status on 2026-05-22T00:21:26+02:00 recommended skipping Antigravity; current Gemini model remaining percent was 0. Missing coverage, not a pass."
+      scorecard_impact:
+        AI_Slop_Comment_Naming_Quality: "T022 can raise this from 6 to 7/8 if it deletes both fake owner seams and adds a static guard. It cannot reach 9 alone because stale names/comments/test topology and larger orchestration readability remain."
+        Overall: "Expected to remain below 9 after T022; DB lock invariant, broader live eval, test topology, and large-module readability still block the broader goal."
+
+  - id: T022
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Delete AI Builder model aggregation layers and rewrite imports to explicit owner modules, with a static ownership guard that prevents the fake owner pattern from returning."
+    inputs:
+      - "T021 receipt and artifact"
+      - "Current dirty worktree after the T020 commit"
+    constraints:
+      - "Keep the source diff import-only except deleting ai_builder_models.py, trimming ai_builder_domain_models.py alias imports/exports, adding the static ownership guard test, and updating board receipts."
+      - "Do not add a new models/types/common/shared/compat aggregation module."
+      - "Do not add comments that mention migration, old import paths, or the refactor. Imports should communicate ownership."
+      - "JsonObject imports should use intric.flows.flow_authoring_spec as the Flow-authoring front door; do not broaden this tranche into the deeper domain.flow alias cleanup."
+      - "Preserve unrelated dirty files."
+      - "Antigravity remains SKIPPED_DUE_TO_QUOTA unless quota status proves available."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_models.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_domain_models.py"
+      - "Current backend/src/**/*.py files importing intric.flows.ai_builder.ai_builder_models or banned secondary aliases from ai_builder_domain_models; import-only edits."
+      - "Current backend/tests/**/*.py files importing intric.flows.ai_builder.ai_builder_models or banned secondary aliases from ai_builder_domain_models; import-only edits."
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    acceptance_criteria:
+      - "backend/src/intric/flows/ai_builder/ai_builder_models.py is deleted."
+      - "No backend source/test file imports intric.flows.ai_builder.ai_builder_models."
+      - "ai_builder_domain_models.__all__ no longer exports portable flow-authoring or flow-draft-materialization symbols."
+      - "ai_builder_domain_models.py no longer imports materialization aliases solely to re-export them."
+      - "Portable flow-authoring symbols import from intric.flows.flow_authoring_spec, not ai_builder_models or ai_builder_domain_models."
+      - "Flow draft materialization symbols import from intric.flows.application.flow_draft_materialization, with local aliases only where needed to preserve existing short names."
+      - "API request/response symbols import from ai_builder_api_models.py; event symbols import from ai_builder_event_models.py; edit result symbols import from ai_builder_edit_models.py; AI Builder session/plan/domain symbols import from ai_builder_domain_models.py."
+      - "A static AST-based ownership guard test encodes the banned import rules and asserts importlib.util.find_spec('intric.flows.ai_builder.ai_builder_models') is None."
+      - "No wildcard imports from ai_builder_domain_models remain."
+      - "No source/test comments mention the migration or old import path."
+      - "The receipt lists which imports from flow_authoring_spec remain inside ai_builder_domain_models.py for internal annotations and why."
+    verify:
+      - "rg -n \"intric\\.flows\\.ai_builder\\.ai_builder_models|from intric\\.flows\\.ai_builder\\.ai_builder_models import\" backend/src backend/tests"
+      - "rg -n \"from intric\\.flows\\.ai_builder\\.ai_builder_domain_models import .*\\(AssistantSpec|AssistantSpecLocalRefNotPortableError|FlowDraftSpecCore|FormFieldSpec|InputSource|InputType|JsonObject|MCPPolicy|OutputMode|OutputType|StepSpec|AssistantToCreate|AssistantToDelete|AssistantToUpdate|CompiledStep|StepChangeKind\\)\" backend/src backend/tests"
+      - "rg -n \"from intric\\.flows\\.ai_builder\\.ai_builder_domain_models import \\*\" backend"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder tests/unittests/flows/ai_builder tests/unit/test_server_startup_imports.py tests/unit/test_ai_builder_openapi_contract.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder tests/unittests/flows/ai_builder tests/unit/test_server_startup_imports.py tests/unit/test_ai_builder_openapi_contract.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider --collect-only tests/unittests/flows/ai_builder tests/integration/flows/ai_builder tests/integration/flows/test_ai_builder_session_api_regressions.py tests/integration/flows/test_ai_builder_edit_apply_regressions.py -q"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unit/test_server_startup_imports.py tests/unit/test_ai_builder_openapi_contract.py tests/unittests/flows/ai_builder/test_ai_builder_models.py tests/unittests/flows/ai_builder/test_ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_router.py -q"
+      - "git diff --check"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+    stop_if:
+      - "The rewrite cannot be expressed through a mechanical symbol-owner map and requires ad-hoc per-file design decisions."
+      - "Behavior changes are required outside import ownership."
+      - "A new compatibility or aggregation module seems necessary."
+      - "Pyright or import collection exposes non-local dependency breakage that requires broader architecture decisions."
+      - "The diff starts moving functions/classes or renaming test files instead of only import ownership cleanup."
+    receipt:
+      result: done
+      completed_at: "2026-05-22T00:48:33+02:00"
+      implementation_artifact: ".codex/artifacts/flow-ai-builder-t022-implementation-review.md"
+      summary: "Deleted the fake ai_builder_models.py wildcard aggregation module, stripped portable flow-authoring/materialization alias exports from ai_builder_domain_models.py, rewrote current imports to canonical owner modules, and added an AST guard preventing the fake-owner pattern from returning. The source/test diff is an import-owner rewrite plus deletion and Ruff-format reflow on touched files; no runtime behavior change was intended."
+      canonical_owner_decisions:
+        API_request_response_models: "backend/src/intric/flows/ai_builder/ai_builder_api_models.py"
+        AI_Builder_domain_records_statuses: "backend/src/intric/flows/ai_builder/ai_builder_domain_models.py"
+        Plan_edit_result: "backend/src/intric/flows/ai_builder/ai_builder_edit_models.py"
+        Event_only_payloads: "backend/src/intric/flows/ai_builder/ai_builder_event_models.py"
+        Portable_Flow_authoring_graph: "backend/src/intric/flows/flow_authoring_spec.py"
+        Flow_draft_materialization_records: "backend/src/intric/flows/application/flow_draft_materialization.py"
+      domain_model_imports_kept:
+        - "FlowDraftChangeSet remains imported from flow_draft_materialization because FlowChangeSet subclasses it inside ai_builder_domain_models.py."
+        - "FlowDraftSpecCore remains imported from flow_authoring_spec because PlannerPlanEnvelope.spec and BuilderPlan.spec are AI Builder domain annotations."
+        - "JsonObject remains imported from flow_authoring_spec because ConversationMessage.tool_calls and metadata persist planner-internal JSON traces."
+        - "BuilderPlanEditResult remains imported from ai_builder_edit_models.py because BuilderPlan.edit_result references the typed edit-result owner."
+      validation:
+        passed:
+          - "rg -n \"intric\\.flows\\.ai_builder\\.ai_builder_models|from intric\\.flows\\.ai_builder\\.ai_builder_models import\" backend/src backend/tests: no matches"
+          - "rg -n \"from intric\\.flows\\.ai_builder\\.ai_builder_domain_models import .*(AssistantSpec|AssistantSpecLocalRefNotPortableError|FlowDraftSpecCore|FormFieldSpec|InputSource|InputType|JsonObject|MCPPolicy|OutputMode|OutputType|StepSpec|AssistantToCreate|AssistantToDelete|AssistantToUpdate|CompiledStep|StepChangeKind)\" backend/src backend/tests: no matches"
+          - "rg -n \"from intric\\.flows\\.ai_builder\\.ai_builder_domain_models import \\*\" backend/src backend/tests: no matches"
+          - "cd backend && uv run ruff format --check src/intric/flows/ai_builder tests/unittests/flows/ai_builder tests/unit/test_server_startup_imports.py tests/unit/test_ai_builder_openapi_contract.py: 261 files already formatted"
+          - "cd backend && uv run ruff check src/intric/flows/ai_builder tests/unittests/flows/ai_builder tests/unit/test_server_startup_imports.py tests/unit/test_ai_builder_openapi_contract.py: All checks passed"
+          - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q: 1 passed"
+          - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder: 0 errors, 0 warnings, 0 informations"
+          - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider --collect-only tests/unittests/flows/ai_builder tests/integration/flows/ai_builder tests/integration/flows/test_ai_builder_session_api_regressions.py tests/integration/flows/test_ai_builder_edit_apply_regressions.py -q: 2292/2312 tests collected, 20 deselected"
+          - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unit/test_server_startup_imports.py tests/unit/test_ai_builder_openapi_contract.py tests/unittests/flows/ai_builder/test_ai_builder_models.py tests/unittests/flows/ai_builder/test_ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_router.py -q: 180 passed"
+          - "git diff --check: clean"
+          - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"': yaml ok"
+        baseline_failure:
+          command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src"
+          result: "112 errors outside the touched AI Builder source package, mainly SQLAlchemy rowcount typing, deprecated asynccontextmanager return annotations, sqlalchemy.exc attribute typing, and unrelated integration/worker unknown types. No pre-T022 full-source baseline count was available for exact delta comparison; src/intric/flows/ai_builder passed cleanly."
+      peer_review:
+        claude:
+          artifact: ".codex/artifacts/claude-peer-loop-t022-ai-builder-import-ownership-implementation-20260521T224753Z.md"
+          result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
+          codex_response: "Accepted non-blocking notes: receipt describes Ruff reflow honestly, records full-source Pyright baseline failure, and keeps test rename/compatibility-comment cleanup as follow-up rather than widening T022."
+        antigravity:
+          status: "SKIPPED_DUE_TO_QUOTA"
+          evidence: "Antigravity quota was unavailable for this goal window; T022 was reviewed by Codex and Claude only. This is missing coverage, not a pass."
+      codex_self_review:
+        production_ready_for_tranche: true
+        answer: "This is the cleaner maintainable direction for T022 because it deletes two fake owner seams instead of creating more modules, keeps one canonical owner per symbol family, and adds a behavior-neutral static guard. The scope is large but mechanically reviewable because it is an import-owner rewrite plus Ruff reflow."
+      scorecard_after_t022:
+        Maintainability: 8
+        Code_Quality: 8
+        Clean_Architecture: 8
+        Separation_of_Concerns: 8
+        Single_Source_of_Truth: 9
+        Human_Readability: 8
+        Human_Reviewability: 8
+        Runtime_Reliability: 8
+        Data_Model_Schema_Quality: 8
+        API_Contract_Quality: 8
+        Test_Coverage_Quality: 8
+        Developer_Diagnostic_Experience: 9
+        AI_Slop_Comment_Naming_Quality: 8
+        Normal_User_Output_Quality: 8
+        Overall: 8
+      residual_risks:
+        - "DB schema still lacks a lock-field invariant for builder_sessions active_request_id/lock_token/lock_expires_at."
+        - "Full-source Pyright still fails outside this tranche, so Test Coverage/Code Quality cannot be scored 9 globally."
+        - "Normal-user output quality is not yet proven by the broader five-case live eval gate."
+        - "ai_builder_proposal_processor.py and ai_builder_planner.py remain large orchestration files; future simplification must improve traceability without shallow splits."
+        - "test_ai_builder_models.py is now a misleading test filename and pre-existing compatibility comments remain in planner/router; these are follow-up AI-slop cleanup items."
+
+  - id: T023
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: xhigh
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T022, with special pressure on the remaining 8/10 floor: DB lock invariants, broad live eval/output quality, full-source typing/test baseline, and readability/consolidation work."
+    inputs:
+      - "T022 receipt and Claude post-implementation artifact"
+      - "Current scorecard after T022"
+      - "Known remaining blockers: DB lock invariant, pyright src baseline, broad five-case live eval, large orchestration files, misleading test names/comments, and test topology"
+    constraints:
+      - "Do not start implementation until the next tranche plan passes Codex self-review and Claude. Antigravity remains SKIPPED_DUE_TO_QUOTA unless quota is available."
+      - "Prefer the highest-score-moving tranche, not the easiest small cleanup."
+      - "If choosing readability/module topology, require deletion/consolidation or clearer entry points; splitting large files into shallow modules does not count."
+      - "If choosing DB lock invariants, require migration, corruption behavior, and DB-backed tests."
+      - "If choosing live eval/output quality, failures must drive product fixes, not only measurement."
+      - "Preserve unrelated dirty files and do not push."
+    allowed_files:
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/**"
+    acceptance_criteria:
+      - "Current worktree and T022 commit state are reconciled."
+      - "The next tranche is selected with file:line evidence and rejected alternatives."
+      - "The plan states canonical owner decisions, allowed files, acceptance criteria, verification commands, live eval impact if relevant, residual risks, and scorecard movement."
+      - "Claude challenges the plan and returns GREEN_LIGHT yes / MIN_SCORE >= 8, or Codex records verified disagreement with evidence."
+      - "Antigravity is either run if quota is available or recorded as SKIPPED_DUE_TO_QUOTA."
+    verify:
+      - "git status --short --branch"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+      - "Claude peer-loop plan gate for selected next tranche"
+    stop_if:
+      - "The next slice requires a broader product decision or new architecture direction not covered by existing goal artifacts."
+      - "Reviewer gates disagree on blockers after two rounds."
+      - "Antigravity or Claude tooling failure removes required review coverage and the remaining evidence is not strong enough to proceed."
     receipt: null
 
 checks:
@@ -2564,16 +2757,20 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T020 implementation validation and Claude post-implementation review are green; targeted authenticated local API eval passed for the runtime-field prompt; Antigravity post-implementation review is missing due quota; T021 is active to re-rank the next score-moving tranche."
-    task: T020
+    result: "T022 implementation validation and Claude post-implementation review are green; AI Builder model aggregation layers are deleted/trimmed and import ownership is guarded. Antigravity review is missing due quota; T023 is active to re-rank the next score-moving tranche. Broader goal remains incomplete with overall strict floor 8/10."
+    task: T022
     commands:
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_planning_state_builder.py -q: 74 passed"
-      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_planning_state_builder.py: All checks passed"
-      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_planning_state_builder.py: 3 files already formatted"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py: 0 errors, 0 warnings, 0 informations"
-      - "T020 deterministic probe: detailed_case_metadata; extracted customer_name, analysis_request, optional_uploaded_files"
-      - "T020 authenticated local API eval: session a7a0a8ea-0967-48bc-a658-3eeb98b08fb1 produced plan d330f443-5646-48d5-a1cd-8efd9d47adff with form_fields customer_name and analysis_request"
-      - "Claude T020 commit gate: .codex/artifacts/claude-peer-loop-t020-runtime-field-intent-implementation-review-20260521T221359Z.md: GREEN_LIGHT yes; MIN_SCORE 8"
-      - "Antigravity T020 post-implementation gate: SKIPPED_DUE_TO_QUOTA; not passed"
+      - "rg -n \"intric\\.flows\\.ai_builder\\.ai_builder_models|from intric\\.flows\\.ai_builder\\.ai_builder_models import\" backend/src backend/tests: no matches"
+      - "rg -n \"from intric\\.flows\\.ai_builder\\.ai_builder_domain_models import .*(AssistantSpec|AssistantSpecLocalRefNotPortableError|FlowDraftSpecCore|FormFieldSpec|InputSource|InputType|JsonObject|MCPPolicy|OutputMode|OutputType|StepSpec|AssistantToCreate|AssistantToDelete|AssistantToUpdate|CompiledStep|StepChangeKind)\" backend/src backend/tests: no matches"
+      - "rg -n \"from intric\\.flows\\.ai_builder\\.ai_builder_domain_models import \\*\" backend/src backend/tests: no matches"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder tests/unittests/flows/ai_builder tests/unit/test_server_startup_imports.py tests/unit/test_ai_builder_openapi_contract.py: 261 files already formatted"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder tests/unittests/flows/ai_builder tests/unit/test_server_startup_imports.py tests/unit/test_ai_builder_openapi_contract.py: All checks passed"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q: 1 passed"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder: 0 errors, 0 warnings, 0 informations"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src: failed with 112 existing errors outside touched AI Builder source; recorded as baseline blocker"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider --collect-only tests/unittests/flows/ai_builder tests/integration/flows/ai_builder tests/integration/flows/test_ai_builder_session_api_regressions.py tests/integration/flows/test_ai_builder_edit_apply_regressions.py -q: 2292/2312 tests collected, 20 deselected"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unit/test_server_startup_imports.py tests/unit/test_ai_builder_openapi_contract.py tests/unittests/flows/ai_builder/test_ai_builder_models.py tests/unittests/flows/ai_builder/test_ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_router.py -q: 180 passed"
+      - "Claude T022 commit gate: .codex/artifacts/claude-peer-loop-t022-ai-builder-import-ownership-implementation-20260521T224753Z.md: GREEN_LIGHT yes; MIN_SCORE 8"
+      - "Antigravity T022 post-implementation gate: SKIPPED_DUE_TO_QUOTA; not passed"
       - "git diff --check: clean"
       - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"': yaml ok"

@@ -37,12 +37,6 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
 from intric.flows.ai_builder.ai_builder_mcp_resources import (
     AIBuilderMCPResourceInput,
 )
-from intric.flows.ai_builder.ai_builder_models import (
-    InputSource,
-    InputType,
-    OutputMode,
-    OutputType,
-)
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     StructuredFieldDraft,
@@ -85,6 +79,12 @@ from intric.flows.ai_builder.planning_state import (
     PlanningState,
 )
 from intric.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
+from intric.flows.flow_authoring_spec import (
+    InputSource,
+    InputType,
+    OutputMode,
+    OutputType,
+)
 from intric.flows.flow_review_policy import FlowStepReviewMode
 
 OUTLINE_FLOW_TOOL_NAME = "outline_flow"
@@ -945,10 +945,9 @@ def _aggregation_intent_for_compile_context(
     not have to know when Eneo Flow should use `all_previous_steps`.
     """
 
-    runtime_input_type = (
-        _runtime_input_type_from_architecture(architecture)
-        or _runtime_input_type_from_planning_state(state)
-    )
+    runtime_input_type = _runtime_input_type_from_architecture(
+        architecture
+    ) or _runtime_input_type_from_planning_state(state)
     if architecture is not None:
         if architecture.aggregation_intent != "linear":
             return architecture.aggregation_intent
@@ -967,7 +966,8 @@ def _aggregation_intent_for_compile_context(
         return "compare"
     if (
         runtime_input_type in _DOCUMENT_MATERIAL_RUNTIME_INPUT_TYPES
-        and comparison_scope in {"same_run_multiple_documents", "multiple_documents_case"}
+        and comparison_scope
+        in {"same_run_multiple_documents", "multiple_documents_case"}
     ):
         return "compare"
     return "linear"

@@ -9,14 +9,16 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     question_answer_from_metadata,
     question_answer_question_id,
 )
-from intric.flows.ai_builder.ai_builder_models import (
-    AssistantSpec,
+from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
-    FlowDraftSpecCore,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     AIBuilderResourceCatalogEntry,
+)
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
 )
 
 MCP_RESOURCE_SELECTION_QUESTION_ID = "mcp_resource_selection"

@@ -13,6 +13,10 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from intric.flows.ai_builder.ai_builder_api_models import PlanResponse
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    PlannerPlanEnvelope,
+    PlanStatus,
+)
 from intric.flows.ai_builder.ai_builder_edit_models import (
     BuilderPlanEditResult,
     CompiledEditResult,
@@ -20,7 +24,12 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     FlowEditDraft,
     StepChange,
 )
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_repo import (
+    _envelope_json_for_storage,
+    _plan_from_row,
+    _resource_bindings_json_for_storage,
+)
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -28,14 +37,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     MCPPolicy,
     OutputMode,
     OutputType,
-    PlannerPlanEnvelope,
-    PlanStatus,
     StepSpec,
-)
-from intric.flows.ai_builder.ai_builder_repo import (
-    _envelope_json_for_storage,
-    _plan_from_row,
-    _resource_bindings_json_for_storage,
 )
 from intric.flows.flow_resource_bindings import (
     LocalResourceBinding,

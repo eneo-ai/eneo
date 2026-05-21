@@ -12,13 +12,15 @@ from intric.flows.ai_builder.ai_builder_discovery_families import (
 )
 from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryProfile
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import mentions_any
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     canonical_question_id,
     latest_pending_structured_question,
     mentions_output_change,
     mentions_runtime_metadata,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     detect_planner_pattern_signals,
 )

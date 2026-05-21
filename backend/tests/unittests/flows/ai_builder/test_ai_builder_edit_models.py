@@ -23,7 +23,7 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepPlacement,
     TranscriptionPatch,
 )
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,

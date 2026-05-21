@@ -10,10 +10,12 @@ from intric.flows.ai_builder.ai_builder_discovery import (
     build_discovery_followup,
 )
 from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_slot_classifier import (
     SlotClassificationResult,
     classify_slots,
@@ -163,11 +165,15 @@ async def build_discovery_block_message_runtime(
         planning_state=context.planning_state,
         slot_classification_result=context.slot_classification_result,
     )
-    return build_discovery_block_message(
-        conversation,
-        flow=flow,
-        analysis=analysis,
-    ), analysis, context.planning_state
+    return (
+        build_discovery_block_message(
+            conversation,
+            flow=flow,
+            analysis=analysis,
+        ),
+        analysis,
+        context.planning_state,
+    )
 
 
 async def build_discovery_followup_runtime(
@@ -197,8 +203,12 @@ async def build_discovery_followup_runtime(
         planning_state=context.planning_state,
         slot_classification_result=context.slot_classification_result,
     )
-    return build_discovery_followup(
-        conversation,
-        flow=flow,
-        analysis=analysis,
-    ), analysis, context.planning_state
+    return (
+        build_discovery_followup(
+            conversation,
+            flow=flow,
+            analysis=analysis,
+        ),
+        analysis,
+        context.planning_state,
+    )

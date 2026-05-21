@@ -3,16 +3,16 @@ from __future__ import annotations
 import string
 from typing import Any
 
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    NewStepDraft,
+    StructuredFieldDraft,
+)
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     MCPPolicy,
     OutputMode,
     OutputType,
     StepSpec,
-)
-from intric.flows.ai_builder.ai_builder_new_step_models import (
-    NewStepDraft,
-    StructuredFieldDraft,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from intric.flows.flow_variable_definitions import form_field_reference_expression

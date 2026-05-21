@@ -12,7 +12,9 @@ from intric.flows.ai_builder.ai_builder_discovery_runtime import (
     build_discovery_block_message_runtime,
     build_runtime_planning_state,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
@@ -139,7 +141,9 @@ async def test_runtime_planning_state_classifies_weak_existing_slots(
     )
 
     assert state.resolved_slots["runtime_metadata_fields"].source == "model"
-    assert state.resolved_slots["runtime_metadata_fields"].value == "basic_case_metadata"
+    assert (
+        state.resolved_slots["runtime_metadata_fields"].value == "basic_case_metadata"
+    )
 
 
 @pytest.mark.asyncio

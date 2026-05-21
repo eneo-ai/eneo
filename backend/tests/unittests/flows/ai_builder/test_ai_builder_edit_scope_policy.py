@@ -6,8 +6,10 @@ from intric.flows.ai_builder.ai_builder_discovery import analyze_discovery
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_edit_scope import build_active_request_window
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.flow import Flow, FlowStep
 
 

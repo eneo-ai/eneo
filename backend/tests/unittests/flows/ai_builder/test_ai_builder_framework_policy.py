@@ -8,6 +8,9 @@ from intric.flows.ai_builder.ai_builder_canonicalization import canonical_questi
 from intric.flows.ai_builder.ai_builder_discovery_signal_inference import (
     is_high_confidence_source_to_source_comparison,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     build_framework_guardrails_block,
@@ -27,11 +30,13 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     resolve_pdf_generation_mode,
 )
 from intric.flows.ai_builder.ai_builder_keywords import OUTPUT_CHANGE_KEYWORDS
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage, OutputType
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
 from intric.flows.flow import Flow, FlowStep
+from intric.flows.flow_authoring_spec import (
+    OutputType,
+)
 
 _AUDIO_TO_WORD_REPORT_PROMPT = (
     "Skapa ett flöde i Eneo Flödesbyggaren. "
@@ -1089,9 +1094,7 @@ def test_extract_answer_signals_does_not_treat_input_pdfs_as_pdf_output_mode() -
     assert intent.docx_output_mode == "generated_docx"
 
 
-def test_extract_answer_signals_ignores_tool_requirements_summary_output_mode() -> (
-    None
-):
+def test_extract_answer_signals_ignores_tool_requirements_summary_output_mode() -> None:
     signals = extract_answer_signals(
         [
             {
@@ -1128,9 +1131,7 @@ def test_extract_answer_signals_ignores_tool_requirements_summary_input_mode() -
     assert signals == {}
 
 
-def test_extract_answer_signals_does_not_treat_edit_summary_as_user_answer() -> (
-    None
-):
+def test_extract_answer_signals_does_not_treat_edit_summary_as_user_answer() -> None:
     signals = extract_answer_signals(
         [
             {
@@ -1182,9 +1183,7 @@ def test_requirements_summary_normalization_keeps_existing_audio_input() -> None
     }
 
 
-def test_requirements_summary_normalization_preserves_explicit_input_change() -> (
-    None
-):
+def test_requirements_summary_normalization_preserves_explicit_input_change() -> None:
     requirements_data = {
         "summary": "Flödet ska ta emot dokument och leverera DOCX.",
         "key_decisions": [{"topic": "Indata", "decision": "Dokument vid körning."}],

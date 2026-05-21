@@ -12,7 +12,7 @@ from intric.flows.ai_builder.ai_builder_edit_repair import (
     should_attempt_description_repair,
     validate_repair_invariance,
 )
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -40,7 +40,9 @@ def _spec(*, description: str = "Test flow", **kwargs) -> FlowDraftSpecCore:
 
 
 class TestShouldAttemptDescriptionRepair:
-    def test_returns_true_when_advisory_present_and_builder_managed_and_hash_matches(self) -> None:
+    def test_returns_true_when_advisory_present_and_builder_managed_and_hash_matches(
+        self,
+    ) -> None:
         current_desc = "Old description"
         provenance = DescriptionProvenance(
             mode="builder_managed",
@@ -60,19 +62,25 @@ class TestShouldAttemptDescriptionRepair:
                 field="flow_description",
             )
         ]
-        assert should_attempt_description_repair(
-            advisories=advisories,
-            current_description=current_desc,
-            current_provenance=provenance,
-        ) is True
+        assert (
+            should_attempt_description_repair(
+                advisories=advisories,
+                current_description=current_desc,
+                current_provenance=provenance,
+            )
+            is True
+        )
 
     def test_returns_false_when_no_advisory(self) -> None:
         provenance = DescriptionProvenance(mode="builder_managed")
-        assert should_attempt_description_repair(
-            advisories=[],
-            current_description="Any",
-            current_provenance=provenance,
-        ) is False
+        assert (
+            should_attempt_description_repair(
+                advisories=[],
+                current_description="Any",
+                current_provenance=provenance,
+            )
+            is False
+        )
 
     def test_returns_false_when_manual_provenance(self) -> None:
         provenance = DescriptionProvenance(mode="manual")
@@ -84,11 +92,14 @@ class TestShouldAttemptDescriptionRepair:
                 field="flow_description",
             )
         ]
-        assert should_attempt_description_repair(
-            advisories=advisories,
-            current_description="Any",
-            current_provenance=provenance,
-        ) is False
+        assert (
+            should_attempt_description_repair(
+                advisories=advisories,
+                current_description="Any",
+                current_provenance=provenance,
+            )
+            is False
+        )
 
     def test_returns_false_when_hash_mismatch(self) -> None:
         """Hash mismatch means description was manually edited — don't repair."""
@@ -104,11 +115,14 @@ class TestShouldAttemptDescriptionRepair:
                 field="flow_description",
             )
         ]
-        assert should_attempt_description_repair(
-            advisories=advisories,
-            current_description="User edited this manually",
-            current_provenance=provenance,
-        ) is False
+        assert (
+            should_attempt_description_repair(
+                advisories=advisories,
+                current_description="User edited this manually",
+                current_provenance=provenance,
+            )
+            is False
+        )
 
     def test_returns_false_when_no_provenance(self) -> None:
         advisories = [
@@ -119,11 +133,14 @@ class TestShouldAttemptDescriptionRepair:
                 field="flow_description",
             )
         ]
-        assert should_attempt_description_repair(
-            advisories=advisories,
-            current_description="Any",
-            current_provenance=None,
-        ) is False
+        assert (
+            should_attempt_description_repair(
+                advisories=advisories,
+                current_description="Any",
+                current_provenance=None,
+            )
+            is False
+        )
 
 
 class TestValidateRepairInvariance:

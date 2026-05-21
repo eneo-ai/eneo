@@ -28,6 +28,12 @@ from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
     should_prefer_structured_intermediate,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
+from intric.flows.ai_builder.ai_builder_event_models import (
+    RequirementsSummaryPayload,
+)
 from intric.flows.ai_builder.ai_builder_flow_context import (
     build_available_kbs_context,
     build_available_mcp_context,
@@ -58,10 +64,6 @@ from intric.flows.ai_builder.ai_builder_knowledge_pack import (
 )
 from intric.flows.ai_builder.ai_builder_mcp_resources import (
     normalize_ai_builder_mcp_resources,
-)
-from intric.flows.ai_builder.ai_builder_models import (
-    ConversationMessage,
-    RequirementsSummaryPayload,
 )
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     build_confirmed_requirements_prompt_block,

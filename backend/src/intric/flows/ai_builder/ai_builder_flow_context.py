@@ -11,7 +11,6 @@ from intric.flows.ai_builder.ai_builder_mcp_resources import (
     AIBuilderMCPResourceInput,
     normalize_ai_builder_mcp_resources,
 )
-from intric.flows.ai_builder.ai_builder_models import FlowDraftSpecCore
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     AIBuilderResourceCatalogEntry,
@@ -22,6 +21,9 @@ from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringSnapshots,
 )
 from intric.flows.domain.flow import Flow, FlowStep, JsonObject
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+)
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_edit_scope import EditScopeResolution

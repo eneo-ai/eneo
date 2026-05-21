@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
-from intric.flows.ai_builder.ai_builder_models import OutputType
 from intric.flows.ai_builder.ai_builder_new_step_mechanics import (
     validate_new_step_mechanics,
 )
@@ -9,6 +8,9 @@ from intric.flows.ai_builder.ai_builder_structured_field_paths import (
     missing_draft_field_path,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from intric.flows.flow_authoring_spec import (
+    OutputType,
+)
 
 
 def validate_create_draft(draft: FlowCreateDraft) -> SpecValidationResult:

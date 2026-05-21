@@ -4,7 +4,13 @@ from intric.flows.ai_builder.ai_builder_material_metrics import (
     compute_step_material_metrics,
     material_metric_steps_from_draft,
 )
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_source_material import (
+    question_binding,
+)
+from intric.flows.ai_builder.ai_builder_step_transition_policy import (
+    normalize_ai_builder_spec,
+)
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,
@@ -13,12 +19,6 @@ from intric.flows.ai_builder.ai_builder_models import (
     OutputMode,
     OutputType,
     StepSpec,
-)
-from intric.flows.ai_builder.ai_builder_source_material import (
-    question_binding,
-)
-from intric.flows.ai_builder.ai_builder_step_transition_policy import (
-    normalize_ai_builder_spec,
 )
 
 

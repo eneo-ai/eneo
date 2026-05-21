@@ -147,8 +147,8 @@ def test_flow_and_ai_builder_routes_have_unique_contracts_and_docs() -> None:
 
 def test_flow_and_ai_builder_request_models_expose_openapi_examples() -> None:
     flow_models = importlib.import_module("intric.flows.api.flow_models")
-    ai_builder_models = importlib.import_module(
-        "intric.flows.ai_builder.ai_builder_models"
+    ai_builder_api_models = importlib.import_module(
+        "intric.flows.ai_builder.ai_builder_api_models"
     )
     file_models = importlib.import_module("intric.files.file_models")
     assistant_models = importlib.import_module("intric.assistants.api.assistant_models")
@@ -159,9 +159,9 @@ def test_flow_and_ai_builder_request_models_expose_openapi_examples() -> None:
         flow_models.FlowRunCreateRequest,
         flow_models.FlowRunStepRerunRequest,
         flow_models.FlowAssistantCreateRequest,
-        ai_builder_models.CreateSessionRequest,
-        ai_builder_models.SendMessageRequest,
-        ai_builder_models.ApplyPlanRequest,
+        ai_builder_api_models.CreateSessionRequest,
+        ai_builder_api_models.SendMessageRequest,
+        ai_builder_api_models.ApplyPlanRequest,
         file_models.SignedURLRequest,
         assistant_models.AssistantUpdatePublic,
     ]
@@ -173,8 +173,8 @@ def test_flow_and_ai_builder_request_models_expose_openapi_examples() -> None:
 
 def test_flow_and_ai_builder_response_models_expose_openapi_examples() -> None:
     flow_models = importlib.import_module("intric.flows.api.flow_models")
-    ai_builder_models = importlib.import_module(
-        "intric.flows.ai_builder.ai_builder_models"
+    ai_builder_api_models = importlib.import_module(
+        "intric.flows.ai_builder.ai_builder_api_models"
     )
 
     models_with_examples = [
@@ -191,13 +191,13 @@ def test_flow_and_ai_builder_response_models_expose_openapi_examples() -> None:
         flow_models.FlowRunDebugExport,
         flow_models.FlowRunEvidenceResponse,
         flow_models.FlowRunEvidenceExportResponse,
-        ai_builder_models.SessionResponse,
-        ai_builder_models.SessionListResponse,
-        ai_builder_models.SessionModelsResponse,
-        ai_builder_models.PlanResponse,
-        ai_builder_models.SessionPlansResponse,
-        ai_builder_models.PlanApprovalResponse,
-        ai_builder_models.ApplyResultResponse,
+        ai_builder_api_models.SessionResponse,
+        ai_builder_api_models.SessionListResponse,
+        ai_builder_api_models.SessionModelsResponse,
+        ai_builder_api_models.PlanResponse,
+        ai_builder_api_models.SessionPlansResponse,
+        ai_builder_api_models.PlanApprovalResponse,
+        ai_builder_api_models.ApplyResultResponse,
     ]
 
     for model in models_with_examples:

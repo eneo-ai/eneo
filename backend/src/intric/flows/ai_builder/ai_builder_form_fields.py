@@ -3,8 +3,10 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, cast
 
-from intric.flows.ai_builder.ai_builder_domain_models import FormFieldSpec
 from intric.flows.ai_builder.ai_builder_edit_models import FormFieldOperation
+from intric.flows.flow_authoring_spec import (
+    FormFieldSpec,
+)
 
 
 def extract_form_fields_from_metadata(

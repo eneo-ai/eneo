@@ -7,7 +7,9 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     RuntimeToolCall,
     persisted_assistant_tool_call_from_runtime,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     append_retry_feedback_turn,
 )

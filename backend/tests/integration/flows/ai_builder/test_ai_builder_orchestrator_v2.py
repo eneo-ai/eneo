@@ -42,7 +42,9 @@ from intric.flows.ai_builder.ai_builder_architecture_commit import (
     canonical_architecture_commit_payload,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_models import TargetKind
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    TargetKind,
+)
 from intric.flows.ai_builder.ai_builder_orchestrator import OrchestrationContext
 from intric.flows.ai_builder.ai_builder_planner_turn import run_planner_turn
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository

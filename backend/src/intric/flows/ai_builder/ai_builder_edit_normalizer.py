@@ -42,9 +42,7 @@ from intric.main.logging import get_logger
 
 _ADDITIVE_PATCH_FIELDS = frozenset({"uses_previous_fields", "uses_form_fields"})
 _STEP_PATCH_FIELDS = frozenset(StepPatch.model_fields)
-_REVIEW_MODE_OUTPUT_MODE_ALIASES = frozenset(
-    mode.value for mode in FlowStepReviewMode
-)
+_REVIEW_MODE_OUTPUT_MODE_ALIASES = frozenset(mode.value for mode in FlowStepReviewMode)
 _OUTPUT_MODE_DOCUMENT_DELIVERY_ALIASES: dict[str, DocumentDeliveryMode] = {
     "generated": "generated"
 }

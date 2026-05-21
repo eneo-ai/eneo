@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from intric.flows.ai_builder.ai_builder_form_field_usage import (
+    find_unused_form_fields,
+)
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,
     InputSource,
     StepSpec,
-)
-from intric.flows.ai_builder.ai_builder_form_field_usage import (
-    find_unused_form_fields,
 )
 
 

@@ -15,6 +15,9 @@ from typing import Literal
 from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_discovery_defaults,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     extract_answer_signals,
@@ -27,7 +30,6 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
     resolve_requirements_state,
@@ -594,7 +596,9 @@ def _requirements_summary_supports_slot(
     slot_value: str,
 ) -> bool:
     if question_id == "input_material_mode":
-        return resolve_input_intent(summary_value, {}).primary_runtime_input == slot_value
+        return (
+            resolve_input_intent(summary_value, {}).primary_runtime_input == slot_value
+        )
 
     output_intent = resolve_output_intent(summary_value, {})
     if question_id == "final_output_mode":

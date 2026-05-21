@@ -8,9 +8,12 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_output_type_values,
     document_delivery_mode_values,
 )
-from intric.flows.ai_builder.ai_builder_models import InputType, OutputType
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     MAX_STRUCTURED_FIELD_DEPTH,
+)
+from intric.flows.flow_authoring_spec import (
+    InputType,
+    OutputType,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode
 

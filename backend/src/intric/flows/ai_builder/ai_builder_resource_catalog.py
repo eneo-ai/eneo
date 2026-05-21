@@ -14,15 +14,15 @@ from intric.flows.ai_builder.ai_builder_mcp_resources import (
     AIBuilderMCPServerResource,
     normalize_ai_builder_mcp_resources,
 )
-from intric.flows.ai_builder.ai_builder_models import (
-    AssistantSpec,
-    FlowDraftSpecCore,
-    StepSpec,
-)
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
+)
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    StepSpec,
 )
 from intric.flows.flow_resource_bindings import (
     LocalResourceBinding,
@@ -146,10 +146,7 @@ class AIBuilderResourceCatalog:
         *,
         limit: int = 15,
     ) -> list[str] | None:
-        refs = {
-            entry.authoring_ref
-            for entry in self._entries_for_kind(kind)
-        }
+        refs = {entry.authoring_ref for entry in self._entries_for_kind(kind)}
         if not refs or len(refs) > limit:
             return None
         return sorted(refs)
@@ -367,9 +364,7 @@ def build_ai_builder_resource_catalog(
     mcp_servers = tuple(
         _build_entries(normalized_mcps, kind="mcp_server", allocator=allocator)
     )
-    mcp_server_entries_by_local_ref = {
-        entry.local_ref: entry for entry in mcp_servers
-    }
+    mcp_server_entries_by_local_ref = {entry.local_ref: entry for entry in mcp_servers}
     mcp_tools = tuple(
         _build_mcp_tool_entries(
             normalized_mcps,

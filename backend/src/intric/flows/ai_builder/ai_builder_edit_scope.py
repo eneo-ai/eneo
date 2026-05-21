@@ -17,6 +17,9 @@ from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
     normalize_discovery_text,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     OutputIntentResolution,
     extract_freeform_user_messages,
@@ -27,7 +30,6 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     InputIntentResolution,
     resolve_input_intent,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 
 # Architecture note:
 # Prefer structural signals from the current flow state, typed discovery state,

@@ -9,18 +9,11 @@ from uuid import uuid4
 import pytest
 
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
-from intric.flows.ai_builder.ai_builder_domain_models import LintSeverity, LintWarning
-from intric.flows.ai_builder.ai_builder_models import (
-    AssistantSpec,
+from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
-    FlowDraftSpecCore,
-    InputSource,
-    InputType,
-    MCPPolicy,
-    OutputMode,
-    OutputType,
+    LintSeverity,
+    LintWarning,
     PlannerPlanEnvelope,
-    StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_plan_store import (
     _persist_active_send_plan_proposal,
@@ -38,6 +31,16 @@ from intric.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationResult,
 )
 from intric.flows.ai_builder.planning_state import PlanningState
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    MCPPolicy,
+    OutputMode,
+    OutputType,
+    StepSpec,
+)
 from intric.flows.flow_resource_bindings import (
     LocalResourceBinding,
     LocalResourceKind,

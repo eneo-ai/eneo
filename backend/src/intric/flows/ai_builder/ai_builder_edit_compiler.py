@@ -29,17 +29,6 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
 from intric.flows.ai_builder.ai_builder_form_fields import (
     extract_form_fields_from_metadata,
 )
-from intric.flows.ai_builder.ai_builder_models import (
-    AssistantSpec,
-    FlowDraftSpecCore,
-    FormFieldSpec,
-    InputSource,
-    InputType,
-    MCPPolicy,
-    OutputMode,
-    OutputType,
-    StepSpec,
-)
 from intric.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_new_step_draft,
     compile_review_policy,
@@ -63,6 +52,17 @@ from intric.flows.ai_builder.ai_builder_step_transition_policy import (
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_name import normalize_flow_name
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    FormFieldSpec,
+    InputSource,
+    InputType,
+    MCPPolicy,
+    OutputMode,
+    OutputType,
+    StepSpec,
+)
 from intric.flows.flow_variable_definitions import form_field_reference_expression
 
 _RUNTIME_STEP_ALIAS_PATTERN = re.compile(r"\{\{\s*step_(\d+)(\.[^{}]+?)\s*\}\}")

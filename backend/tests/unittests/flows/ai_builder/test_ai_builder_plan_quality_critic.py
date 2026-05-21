@@ -12,7 +12,15 @@ from intric.flows.ai_builder.ai_builder_critic_invariants import (
     enforce_architecture_critic_invariants,
     evaluate_critic_invariants,
 )
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
+    build_conversation_aware_quality_feedback,
+    build_conversation_critic_context,
+    build_quality_feedback_from_critic_context,
+)
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
+)
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,
@@ -21,14 +29,6 @@ from intric.flows.ai_builder.ai_builder_models import (
     OutputMode,
     OutputType,
     StepSpec,
-)
-from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
-    build_conversation_aware_quality_feedback,
-    build_conversation_critic_context,
-    build_quality_feedback_from_critic_context,
-)
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
-    build_ai_builder_resource_catalog,
 )
 
 if TYPE_CHECKING:

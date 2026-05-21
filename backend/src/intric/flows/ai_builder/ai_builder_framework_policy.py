@@ -37,6 +37,9 @@ from intric.flows.ai_builder.ai_builder_discovery_signal_inference import (
 from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
@@ -51,11 +54,13 @@ from intric.flows.ai_builder.ai_builder_keywords import (
     PDF_TEMPLATE_GENERIC_MARKERS,
     STRUCTURED_EXTRACTION_KEYWORDS,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage, OutputType
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     infer_runtime_metadata_slot,
 )
 from intric.flows.domain.flow import Flow
+from intric.flows.flow_authoring_spec import (
+    OutputType,
+)
 
 __all__ = [
     "aggregate_freeform_user_text",

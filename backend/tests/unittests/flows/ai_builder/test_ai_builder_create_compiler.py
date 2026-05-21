@@ -35,12 +35,6 @@ from intric.flows.ai_builder.ai_builder_create_validator import validate_create_
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_output_type_values,
 )
-from intric.flows.ai_builder.ai_builder_models import (
-    InputSource,
-    InputType,
-    OutputMode,
-    OutputType,
-)
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
     canonicalize_create_draft_resources,
@@ -63,6 +57,12 @@ from intric.flows.ai_builder.planning_state import (
     PlanningState,
     ResolvedSlot,
     StepTriple,
+)
+from intric.flows.flow_authoring_spec import (
+    InputSource,
+    InputType,
+    OutputMode,
+    OutputType,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode
 

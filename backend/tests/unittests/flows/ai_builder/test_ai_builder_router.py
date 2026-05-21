@@ -14,21 +14,23 @@ from fastapi.testclient import TestClient
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.files.file_models import FilePublic
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_api_models import (
     ApplyPlanRequest,
     ApplyResultResponse,
-    BuilderPlan,
-    BuilderSession,
-    ConversationMessage,
     CreateSessionRequest,
     PlanResponse,
-    PlanStatus,
     RevisePlanRequest,
     SendMessageRequest,
     SessionListItemResponse,
     SessionListResponse,
     SessionModelsResponse,
     SessionPlansResponse,
+)
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    BuilderPlan,
+    BuilderSession,
+    ConversationMessage,
+    PlanStatus,
     SessionStatus,
     TargetKind,
 )
@@ -364,11 +366,13 @@ def _make_plan_domain(
     session_id=None,
     status=PlanStatus.APPROVED,
 ) -> BuilderPlan:
-    from intric.flows.ai_builder.ai_builder_models import (
+    from intric.flows.ai_builder.ai_builder_domain_models import (
+        PlannerPlanEnvelope,
+    )
+    from intric.flows.flow_authoring_spec import (
         AssistantSpec,
         FlowDraftSpecCore,
         InputSource,
-        PlannerPlanEnvelope,
         StepSpec,
     )
 

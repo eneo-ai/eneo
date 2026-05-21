@@ -19,7 +19,7 @@ from intric.flows.ai_builder.ai_builder_materializer import (
     compile_changeset,
     execute_changeset,
 )
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     InputSource,
     InputType,

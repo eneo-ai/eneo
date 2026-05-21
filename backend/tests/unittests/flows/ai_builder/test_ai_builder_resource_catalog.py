@@ -9,16 +9,6 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepEditOperation,
     StepPlacement,
 )
-from intric.flows.ai_builder.ai_builder_models import (
-    AssistantSpec,
-    FlowDraftSpecCore,
-    InputSource,
-    InputType,
-    MCPPolicy,
-    OutputMode,
-    OutputType,
-    StepSpec,
-)
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     RESOURCE_DESCRIPTION_MAX_CHARS,
@@ -34,6 +24,16 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
+)
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    MCPPolicy,
+    OutputMode,
+    OutputType,
+    StepSpec,
 )
 from intric.flows.flow_resource_bindings import (
     LocalResourceBinding,

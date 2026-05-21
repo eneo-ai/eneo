@@ -4,10 +4,12 @@ import json
 from dataclasses import dataclass
 from typing import Any, cast
 
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     latest_pending_structured_question,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)

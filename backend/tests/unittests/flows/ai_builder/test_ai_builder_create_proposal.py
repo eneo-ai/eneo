@@ -18,21 +18,14 @@ from intric.flows.ai_builder.ai_builder_create_proposal import (
     outline_flow_retry_config,
     process_outline_arguments,
 )
-from intric.flows.ai_builder.ai_builder_mcp_intent import (
-    MCP_RESOURCE_SELECTION_QUESTION_ID,
-)
-from intric.flows.ai_builder.ai_builder_models import (
-    AssistantSpec,
+from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
-    FlowDraftSpecCore,
-    InputSource,
-    InputType,
-    OutputMode,
-    OutputType,
     PlannerPlanEnvelope,
     PlanStatus,
-    StepSpec,
+)
+from intric.flows.ai_builder.ai_builder_mcp_intent import (
+    MCP_RESOURCE_SELECTION_QUESTION_ID,
 )
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
@@ -55,6 +48,15 @@ from intric.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     PlanningState,
     StepTriple,
+)
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    OutputMode,
+    OutputType,
+    StepSpec,
 )
 
 

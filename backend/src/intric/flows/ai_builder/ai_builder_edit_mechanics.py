@@ -10,8 +10,11 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     FlowEditDraft,
     StepEditOperation,
 )
-from intric.flows.ai_builder.ai_builder_models import InputSource, InputType
 from intric.flows.domain.flow import FlowStep
+from intric.flows.flow_authoring_spec import (
+    InputSource,
+    InputType,
+)
 
 _FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
 

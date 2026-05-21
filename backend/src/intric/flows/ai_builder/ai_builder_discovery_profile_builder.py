@@ -15,6 +15,9 @@ from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryProfile,
 )
 from intric.flows.ai_builder.ai_builder_discovery_questions import localized_text
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_edit_scope import (
     build_active_request_window,
     resolve_edit_scope,
@@ -30,7 +33,6 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     InputIntentResolution,
     resolve_input_intent,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.planning_state import PlanningState
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,

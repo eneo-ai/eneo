@@ -19,14 +19,14 @@ from intric.flows.ai_builder.ai_builder_edit_normalizer import (
     normalize_loose_edit_arguments,
 )
 from intric.flows.ai_builder.ai_builder_edit_validator import validate_edit_draft
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
+from intric.flows.flow import FlowStep
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     InputSource,
     InputType,
     OutputType,
 )
-from intric.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
-from intric.flows.flow import FlowStep
 
 VALID_REFS = ["existing_step_1", "existing_step_2", "existing_step_3"]
 
@@ -297,8 +297,9 @@ def test_normalize_loose_edit_arguments_logs_when_output_fields_are_dropped(
     assert "ai_builder_structured_field_list_dropped" in caplog.text
 
 
-def test_normalize_loose_edit_arguments_recovers_live_patch_output_mode_aliases(
-) -> None:
+def test_normalize_loose_edit_arguments_recovers_live_patch_output_mode_aliases() -> (
+    None
+):
     arguments = {
         "plan_rationale": "Improve review and final document steps.",
         "operations": [
@@ -615,7 +616,9 @@ def test_normalize_edit_draft_mechanics_does_not_clear_existing_bindings_on_nois
     ).valid
 
 
-def test_canonicalize_duplicate_modify_operations_merges_disjoint_patch_fields() -> None:
+def test_canonicalize_duplicate_modify_operations_merges_disjoint_patch_fields() -> (
+    None
+):
     draft = FlowEditDraft(
         plan_rationale="Update final report step.",
         operations=[
@@ -779,9 +782,9 @@ def test_canonicalize_duplicate_modify_operations_reports_assistant_spec_conflic
     result = canonicalize_duplicate_modify_operations(draft)
 
     assert result.draft == draft
-    assert [(conflict.target_ref, conflict.field_name) for conflict in result.conflicts] == [
-        ("existing_step_2", "assistant_spec")
-    ]
+    assert [
+        (conflict.target_ref, conflict.field_name) for conflict in result.conflicts
+    ] == [("existing_step_2", "assistant_spec")]
 
 
 def test_canonicalize_duplicate_modify_operations_preserves_add_order() -> None:
@@ -842,9 +845,9 @@ def test_canonicalize_duplicate_modify_operations_reports_scalar_conflict() -> N
     result = canonicalize_duplicate_modify_operations(draft)
 
     assert result.draft == draft
-    assert [(conflict.target_ref, conflict.field_name) for conflict in result.conflicts] == [
-        ("existing_step_2", "name")
-    ]
+    assert [
+        (conflict.target_ref, conflict.field_name) for conflict in result.conflicts
+    ] == [("existing_step_2", "name")]
 
 
 def test_canonicalize_duplicate_modify_operations_treats_explicit_clear_as_conflict() -> (
@@ -869,12 +872,14 @@ def test_canonicalize_duplicate_modify_operations_treats_explicit_clear_as_confl
     result = canonicalize_duplicate_modify_operations(draft)
 
     assert result.draft == draft
-    assert [(conflict.target_ref, conflict.field_name) for conflict in result.conflicts] == [
-        ("existing_step_2", "output_config")
-    ]
+    assert [
+        (conflict.target_ref, conflict.field_name) for conflict in result.conflicts
+    ] == [("existing_step_2", "output_config")]
 
 
-def test_canonicalize_duplicate_modify_operations_drops_patch_for_removed_step() -> None:
+def test_canonicalize_duplicate_modify_operations_drops_patch_for_removed_step() -> (
+    None
+):
     draft = FlowEditDraft(
         plan_rationale="Remove and modify same step.",
         operations=[

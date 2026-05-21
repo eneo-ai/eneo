@@ -9,15 +9,6 @@ from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_token_prefix,
     normalize_discovery_text,
 )
-from intric.flows.ai_builder.ai_builder_models import (
-    AssistantSpec,
-    FlowDraftSpecCore,
-    InputSource,
-    InputType,
-    OutputMode,
-    OutputType,
-    StepSpec,
-)
 from intric.flows.ai_builder.ai_builder_source_material import (
     SourceMaterialBindingStatus,
     iter_compiled_source_material_boundaries,
@@ -29,6 +20,15 @@ from intric.flows.ai_builder.ai_builder_step_capabilities import (
     is_citation_capable_step,
 )
 from intric.flows.citation_sidecar import resolve_citation_mode
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    OutputMode,
+    OutputType,
+    StepSpec,
+)
 from intric.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,

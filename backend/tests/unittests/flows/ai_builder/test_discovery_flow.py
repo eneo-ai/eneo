@@ -16,10 +16,12 @@ from intric.flows.ai_builder.ai_builder_discovery import (
     build_discovery_followup,
     build_discovery_followup_text,
 )
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
-    RequirementsSummaryPayload,
     SessionStatus,
+)
+from intric.flows.ai_builder.ai_builder_event_models import (
+    RequirementsSummaryPayload,
 )
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_prompts import (

@@ -223,7 +223,9 @@ class TestBuildEditFlowToolSchema:
         assert props["input_type"]["enum"] == builder_input_type_values()
         assert "output_mode" not in props
         assert props["output_type"]["enum"] == builder_output_type_values()
-        assert props["document_delivery_mode"]["enum"] == document_delivery_mode_values()
+        assert (
+            props["document_delivery_mode"]["enum"] == document_delivery_mode_values()
+        )
         assert props["review_mode"]["enum"] == ["view", "edit", None]
 
 

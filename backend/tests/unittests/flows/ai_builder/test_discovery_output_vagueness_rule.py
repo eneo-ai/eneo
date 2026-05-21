@@ -17,7 +17,9 @@ from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 
 
 def _profile_for(text: str, ui_language: str = "sv"):

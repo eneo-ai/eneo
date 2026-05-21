@@ -165,10 +165,10 @@ def _aggregation_intent_from_state(
     comparison_scope = _resolved_slot_value(state, "comparison_scope")
     if comparison_scope == "same_run_compare":
         return "compare"
-    if (
-        input_type in _DOCUMENT_MATERIAL_INPUT_TYPES
-        and comparison_scope in {"same_run_multiple_documents", "multiple_documents_case"}
-    ):
+    if input_type in _DOCUMENT_MATERIAL_INPUT_TYPES and comparison_scope in {
+        "same_run_multiple_documents",
+        "multiple_documents_case",
+    }:
         return "compare"
 
     document_scope = _resolved_slot_value(state, "document_material_scope")

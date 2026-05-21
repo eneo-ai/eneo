@@ -8,10 +8,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
+)
+from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     StepSpec,
 )
-from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from intric.main.exceptions import BadRequestException
 
 if TYPE_CHECKING:

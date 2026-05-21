@@ -9,13 +9,6 @@ from __future__ import annotations
 
 import jsonschema
 
-from intric.flows.ai_builder.ai_builder_models import (
-    FlowDraftSpecCore,
-    InputSource,
-    InputType,
-    OutputMode,
-    OutputType,
-)
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.ai_builder.ai_builder_validation_flow_parity import (
     validate_flow_service_parity,
@@ -35,6 +28,13 @@ from intric.flows.ai_builder.ai_builder_validation_quality import (
 )
 from intric.flows.ai_builder.ai_builder_validation_references import (
     validate_variable_references,
+)
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    OutputMode,
+    OutputType,
 )
 from intric.flows.output_modes import transcribe_only_violation
 from intric.flows.step_chain_rules import find_first_step_chain_violation

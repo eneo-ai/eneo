@@ -30,7 +30,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_planner_turn import TurnTelemetry

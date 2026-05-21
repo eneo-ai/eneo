@@ -4,12 +4,14 @@ from uuid import UUID, uuid4
 import pytest
 
 from intric.flows.ai_builder.ai_builder_domain_models import (
-    AssistantSpec,
     ConversationMessage,
+    PlannerPlanEnvelope,
+)
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,
     OutputType,
-    PlannerPlanEnvelope,
     StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (

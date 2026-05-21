@@ -11,8 +11,10 @@ and gate later flows on user confirmation.
 
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
+)
+from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
 from intric.flows.ai_builder.ai_builder_requirements_state import (

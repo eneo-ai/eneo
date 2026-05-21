@@ -68,17 +68,17 @@ from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
+    FlowChangeSet,
     PlannerPlanEnvelope,
+    TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_draft_plan import DraftPlanEnvelope
 from intric.flows.ai_builder.ai_builder_materializer import compile_changeset
-from intric.flows.ai_builder.ai_builder_models import (
-    FlowChangeSet,
-    FlowDraftSpecCore,
-    TargetKind,
-)
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.planning_state import ArchitectureCommit
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+)
 
 
 class MaterializationError(AIBuilderArchitectureError):

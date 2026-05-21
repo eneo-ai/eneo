@@ -5,7 +5,14 @@ from unittest.mock import MagicMock, patch
 from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    TargetKind,
+)
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
+)
+from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -14,12 +21,7 @@ from intric.flows.ai_builder.ai_builder_models import (
     OutputMode,
     OutputType,
     StepSpec,
-    TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
-    build_ai_builder_resource_catalog,
-)
-from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 
 _DEFAULT_HELPER_INPUT_BINDINGS = object()
 
@@ -61,7 +63,9 @@ def _duplicate_step_name_spec() -> FlowDraftSpecCore:
             StepSpec(
                 plan_step_ref="step_b",
                 name="förbered docx-innehåll",
-                assistant_spec=AssistantSpec(instructions="Prepare final document text."),
+                assistant_spec=AssistantSpec(
+                    instructions="Prepare final document text."
+                ),
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.TEXT,
                 output_mode=OutputMode.PASS_THROUGH,

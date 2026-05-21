@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    LintSeverity,
+)
+from intric.flows.ai_builder.ai_builder_validator import validate_spec
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     FormFieldSpec,
     InputSource,
     InputType,
-    LintSeverity,
     OutputMode,
     OutputType,
     StepSpec,
 )
-from intric.flows.ai_builder.ai_builder_validator import validate_spec
 
 # ---------------------------------------------------------------------------
 # Helpers

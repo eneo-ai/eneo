@@ -18,7 +18,6 @@ from intric.flows.ai_builder.ai_builder_critic_invariants import (
     CriticContext,
     evaluate_critic_invariants,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import FlowDraftSpecCore
 from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
 from intric.flows.ai_builder.ai_builder_edit_models import (
     FlowEditDraft,
@@ -32,6 +31,9 @@ from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
 )
 from intric.flows.ai_builder.ai_builder_validator import validate_spec
 from intric.flows.flow import FlowStep
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+)
 
 
 def test_declared_input_field_without_step_use_stays_unused_for_multi_step_repair() -> (

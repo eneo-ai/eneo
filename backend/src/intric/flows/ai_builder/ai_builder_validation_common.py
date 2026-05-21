@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from intric.flows.ai_builder.ai_builder_models import LintSeverity, LintWarning
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    LintSeverity,
+    LintWarning,
+)
 
 
 @dataclass(frozen=True)
@@ -22,7 +25,9 @@ class SpecValidationResult:
         return len(self.errors) == 0
 
     def add_error(self, *, step_ref: str | None, code: str, message: str) -> None:
-        self.errors.append(SpecValidationError(step_ref=step_ref, code=code, message=message))
+        self.errors.append(
+            SpecValidationError(step_ref=step_ref, code=code, message=message)
+        )
 
     def add_warning(
         self,
@@ -33,5 +38,7 @@ class SpecValidationResult:
         severity: LintSeverity = LintSeverity.WARNING,
     ) -> None:
         self.warnings.append(
-            LintWarning(step_ref=step_ref, code=code, message=message, severity=severity)
+            LintWarning(
+                step_ref=step_ref, code=code, message=message, severity=severity
+            )
         )

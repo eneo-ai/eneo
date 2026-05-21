@@ -37,9 +37,12 @@ from intric.flows.ai_builder.ai_builder_action_policy import (
     PlannerActionPolicy,
     build_planner_action_policy,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import BuilderSession
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    BuilderSession,
+    SessionStatus,
+    TargetKind,
+)
 from intric.flows.ai_builder.ai_builder_event_models import KeyDecisionPayload
-from intric.flows.ai_builder.ai_builder_models import SessionStatus, TargetKind
 from intric.flows.ai_builder.ai_builder_orchestrator import (
     AskQuestionAction,
     AskQuestionPayload,

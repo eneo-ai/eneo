@@ -10,16 +10,16 @@ from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_token_prefix,
     normalize_discovery_text,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import StepSpec
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    NewStepDraft,
+    PreviousOutputRef,
+)
+from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
     OutputType,
-)
-from intric.flows.ai_builder.ai_builder_new_step_models import (
-    NewStepDraft,
-    PreviousOutputRef,
+    StepSpec,
 )
 from intric.flows.template_reference_analyzer import (
     TemplateReference,

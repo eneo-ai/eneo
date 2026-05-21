@@ -24,7 +24,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from intric.flows.ai_builder.ai_builder_models import TargetKind
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    TargetKind,
+)
 from intric.flows.ai_builder.ai_builder_telemetry import build_planner_telemetry
 from intric.flows.ai_builder.ai_builder_token_usage import (
     CompletionTokenUsage,

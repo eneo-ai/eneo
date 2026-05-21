@@ -23,10 +23,6 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
 from intric.flows.ai_builder.ai_builder_form_fields import (
     effective_form_field_names,
 )
-from intric.flows.ai_builder.ai_builder_models import (
-    InputType,
-    OutputType,
-)
 from intric.flows.ai_builder.ai_builder_new_step_mechanics import (
     validate_new_step_mechanics,
 )
@@ -41,6 +37,10 @@ from intric.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationResult,
 )
 from intric.flows.domain.flow import FlowStep
+from intric.flows.flow_authoring_spec import (
+    InputType,
+    OutputType,
+)
 
 
 def validate_edit_draft(
@@ -379,10 +379,10 @@ def _validate_patch_document_delivery_mode(
         )
         return
 
-    if (
-        patch.document_delivery_mode != "not_applicable"
-        and output_type_value not in {OutputType.DOCX.value, OutputType.PDF.value}
-    ):
+    if patch.document_delivery_mode != "not_applicable" and output_type_value not in {
+        OutputType.DOCX.value,
+        OutputType.PDF.value,
+    }:
         result.add_error(
             step_ref=step_ref,
             code="document_delivery_mode_type_mismatch",

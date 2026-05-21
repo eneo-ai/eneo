@@ -7,6 +7,9 @@ from intric.flows.ai_builder.ai_builder_critic_invariants import (
     CriticContext,
     evaluate_critic_invariants,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     extract_answer_signals,
@@ -14,10 +17,6 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
 )
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
-)
-from intric.flows.ai_builder.ai_builder_models import (
-    ConversationMessage,
-    FlowDraftSpecCore,
 )
 from intric.flows.ai_builder.ai_builder_plan_store import format_revision_feedback
 from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
@@ -29,6 +28,9 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
 )
 from intric.flows.ai_builder.planning_state import AggregationIntent
 from intric.flows.domain.flow import Flow
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+)
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_resource_catalog import (

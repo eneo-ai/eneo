@@ -44,21 +44,20 @@ import pytest
 
 from intric.files.file_models import File, FileType
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
-from intric.flows.ai_builder.ai_builder_models import (
-    AssistantSpec,
+from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
-    BuilderPlanEditResult,
     BuilderSession,
     ConversationMessage,
-    FlowDraftSpecCore,
-    InputSource,
-    InputType,
     PlannerPlanEnvelope,
     PlanStatus,
-    RequirementsSummaryPayload,
     SessionStatus,
-    StepSpec,
     TargetKind,
+)
+from intric.flows.ai_builder.ai_builder_edit_models import (
+    BuilderPlanEditResult,
+)
+from intric.flows.ai_builder.ai_builder_event_models import (
+    RequirementsSummaryPayload,
 )
 from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
@@ -81,6 +80,13 @@ from intric.flows.ai_builder.planning_state import (
     PlanningState,
     ResolvedSlot,
     StepTriple,
+)
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    StepSpec,
 )
 from intric.flows.flow_resource_bindings import (
     LocalResourceBinding,
@@ -1839,7 +1845,9 @@ class TestApplyPlan:
     async def test_apply_edit_passes_expected_revision_to_executor(
         self, mock_compile, mock_execute
     ):
-        from intric.flows.ai_builder.ai_builder_models import ApplyResultResponse
+        from intric.flows.ai_builder.ai_builder_api_models import (
+            ApplyResultResponse,
+        )
 
         user = _make_user()
         repo = AsyncMock()
@@ -1911,7 +1919,9 @@ class TestApplyPlan:
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.compile_changeset")
     async def test_apply_create_session_success(self, mock_compile, mock_execute):
-        from intric.flows.ai_builder.ai_builder_models import ApplyResultResponse
+        from intric.flows.ai_builder.ai_builder_api_models import (
+            ApplyResultResponse,
+        )
 
         user = _make_user()
         repo = AsyncMock()
@@ -2032,7 +2042,9 @@ class TestApplyPlan:
     async def test_apply_edit_session_does_not_update_flow_id(
         self, mock_compile, mock_execute
     ):
-        from intric.flows.ai_builder.ai_builder_models import ApplyResultResponse
+        from intric.flows.ai_builder.ai_builder_api_models import (
+            ApplyResultResponse,
+        )
 
         user = _make_user()
         repo = AsyncMock()
@@ -2118,7 +2130,9 @@ class TestApplyPlan:
     async def test_apply_edit_matching_revision_succeeds(
         self, mock_compile, mock_execute
     ):
-        from intric.flows.ai_builder.ai_builder_models import ApplyResultResponse
+        from intric.flows.ai_builder.ai_builder_api_models import (
+            ApplyResultResponse,
+        )
 
         user = _make_user()
         repo = AsyncMock()
@@ -2167,7 +2181,9 @@ class TestApplyPlan:
     async def test_apply_plan_passes_manual_description_override_to_compile(
         self, mock_compile, mock_execute
     ):
-        from intric.flows.ai_builder.ai_builder_models import ApplyResultResponse
+        from intric.flows.ai_builder.ai_builder_api_models import (
+            ApplyResultResponse,
+        )
 
         user = _make_user()
         repo = AsyncMock()
@@ -2668,7 +2684,9 @@ class TestReasoningLeakRegression:
     def test_session_response_with_compact_arguments_has_no_reasoning(self):
         """SessionResponse with compact arguments (from append_plan_messages)
         should never contain reasoning."""
-        from intric.flows.ai_builder.ai_builder_models import SessionResponse
+        from intric.flows.ai_builder.ai_builder_api_models import (
+            SessionResponse,
+        )
 
         # Simulate what append_plan_messages now stores (compact summary)
         conversation = [

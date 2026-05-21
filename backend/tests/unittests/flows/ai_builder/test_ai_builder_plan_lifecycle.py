@@ -8,32 +8,34 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_edit_models import (
-    CompiledEditResult,
-    FlowEditDiff,
-    FlowEditDraft,
-    StepChange,
-)
-from intric.flows.ai_builder.ai_builder_models import (
-    AssistantSpec,
+from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
-    BuilderPlanEditResult,
     BuilderSession,
     FlowChangeSet,
-    FlowDraftSpecCore,
-    InputSource,
-    InputType,
     LintSeverity,
     LintWarning,
     PlannerPlanEnvelope,
     PlanStatus,
     SessionStatus,
-    StepSpec,
     TargetKind,
+)
+from intric.flows.ai_builder.ai_builder_edit_models import (
+    BuilderPlanEditResult,
+    CompiledEditResult,
+    FlowEditDiff,
+    FlowEditDraft,
+    StepChange,
 )
 from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     MaterializerProgressSnapshot,
+)
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    StepSpec,
 )
 from intric.flows.flow_resource_bindings import (
     LocalResourceBinding,

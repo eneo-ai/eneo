@@ -9,7 +9,9 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
 from intric.flows.ai_builder.ai_builder_discovery import build_discovery_block_message
 
 if TYPE_CHECKING:
-    from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+    from intric.flows.ai_builder.ai_builder_domain_models import (
+        ConversationMessage,
+    )
     from intric.flows.domain.flow import Flow
 
 

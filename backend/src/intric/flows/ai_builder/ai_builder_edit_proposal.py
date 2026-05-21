@@ -11,6 +11,11 @@ from intric.flows.ai_builder.ai_builder_create_feedback import (
 from intric.flows.ai_builder.ai_builder_description_semantics import (
     DescriptionProvenance,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    BuilderPlan,
+    ConversationMessage,
+    TargetKind,
+)
 from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
 from intric.flows.ai_builder.ai_builder_edit_mechanics import fill_edit_draft_mechanics
 from intric.flows.ai_builder.ai_builder_edit_models import (
@@ -31,12 +36,6 @@ from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_N
 from intric.flows.ai_builder.ai_builder_edit_validator import validate_edit_draft
 from intric.flows.ai_builder.ai_builder_events import build_plan_event
 from intric.flows.ai_builder.ai_builder_mcp_intent import mcp_selection_policy_feedback
-from intric.flows.ai_builder.ai_builder_models import (
-    BuilderPlan,
-    ConversationMessage,
-    FlowDraftSpecCore,
-    TargetKind,
-)
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     validate_scoped_plan_revision,
@@ -63,6 +62,9 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+)
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:

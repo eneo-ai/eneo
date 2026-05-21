@@ -4,29 +4,29 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from intric.flows.ai_builder.ai_builder_api_models import (
+    ApplyResultResponse,
+)
 from intric.flows.ai_builder.ai_builder_context import (
     serialize_space_kbs,
     serialize_space_mcps,
     serialize_space_models,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    BuilderPlan,
+    BuilderSession,
+    FlowChangeSet,
+    PlanStatus,
+    SessionStatus,
+    TargetKind,
+)
+from intric.flows.ai_builder.ai_builder_edit_models import (
+    BuilderPlanEditResult,
+)
 from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from intric.flows.ai_builder.ai_builder_materializer import (
     compile_changeset,
     execute_changeset,
-)
-from intric.flows.ai_builder.ai_builder_models import (
-    ApplyResultResponse,
-    BuilderPlan,
-    BuilderPlanEditResult,
-    BuilderSession,
-    FlowChangeSet,
-    FlowDraftSpecCore,
-    InputSource,
-    InputType,
-    PlanStatus,
-    SessionStatus,
-    StepChangeKind,
-    TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ChangesetCountSummary,
@@ -44,6 +44,14 @@ from intric.flows.ai_builder.ai_builder_session_spec_validator import (
 )
 from intric.flows.ai_builder.ai_builder_step_transition_policy import (
     normalize_ai_builder_spec,
+)
+from intric.flows.application.flow_draft_materialization import (
+    FlowDraftStepChangeKind as StepChangeKind,
+)
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
 )
 from intric.flows.flow_resource_bindings import LocalResourceBinding, LocalResourceKind
 from intric.main.exceptions import BadRequestException, UnauthorizedException

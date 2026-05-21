@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    TargetKind,
+)
+from intric.flows.ai_builder.ai_builder_session_spec_validator import (
+    normalize_compiled_spec_for_session,
+    validate_compiled_spec_for_session,
+)
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -9,11 +16,6 @@ from intric.flows.ai_builder.ai_builder_models import (
     OutputMode,
     OutputType,
     StepSpec,
-    TargetKind,
-)
-from intric.flows.ai_builder.ai_builder_session_spec_validator import (
-    normalize_compiled_spec_for_session,
-    validate_compiled_spec_for_session,
 )
 
 

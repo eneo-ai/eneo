@@ -10,7 +10,9 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     make_persisted_assistant_tool_call,
 )
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_repair_transport import (
     build_tool_retry_messages,
     persist_tool_turn,

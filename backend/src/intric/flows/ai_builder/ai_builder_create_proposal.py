@@ -34,6 +34,11 @@ from intric.flows.ai_builder.ai_builder_critic_invariants import (
     enforce_architecture_critic_invariants,
     evaluate_critic_invariants,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    BuilderPlan,
+    ConversationMessage,
+    TargetKind,
+)
 from intric.flows.ai_builder.ai_builder_events import build_plan_event
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
@@ -42,12 +47,6 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
     mcp_resource_selection_values,
     mcp_selected_server_refs_from_values,
     mcp_selection_policy_feedback,
-)
-from intric.flows.ai_builder.ai_builder_models import (
-    BuilderPlan,
-    ConversationMessage,
-    FlowDraftSpecCore,
-    TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
@@ -86,6 +85,9 @@ from intric.flows.ai_builder.ai_builder_tools import (
     parse_outline_flow_arguments,
 )
 from intric.flows.ai_builder.planning_state import AggregationIntent, PlanningState
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+)
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:

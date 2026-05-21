@@ -37,14 +37,7 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
-    AssistantSpec,
-    InputSource,
-    InputType,
-    MCPPolicy,
-    OutputMode,
-    OutputType,
     PlannerPlanEnvelope,
-    StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_draft_plan import DraftPlanEnvelope
 from intric.flows.ai_builder.ai_builder_materialization_bridge import (
@@ -54,7 +47,6 @@ from intric.flows.ai_builder.ai_builder_materialization_bridge import (
     materialize,
 )
 from intric.flows.ai_builder.ai_builder_materializer import compile_changeset
-from intric.flows.ai_builder.ai_builder_models import FlowDraftSpecCore
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.ai_builder.planning_state import ArchitectureCommit, StepTriple
@@ -65,6 +57,16 @@ from intric.flows.enums import (
     FlowMcpPolicy,
     FlowOutputMode,
     FlowOutputType,
+)
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    MCPPolicy,
+    OutputMode,
+    OutputType,
+    StepSpec,
 )
 
 _FIXED_COMMIT_TIMESTAMP = datetime(2026, 4, 23, 12, 0, tzinfo=timezone.utc)

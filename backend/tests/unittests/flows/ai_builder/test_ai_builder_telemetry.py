@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 
 from intric.flows.ai_builder.ai_builder_api_models import SessionTelemetrySummary
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_planner_turn import TurnTelemetry
 from intric.flows.ai_builder.ai_builder_telemetry import (
     _empty_session_telemetry,

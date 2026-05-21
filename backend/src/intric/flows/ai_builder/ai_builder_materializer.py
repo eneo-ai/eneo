@@ -7,23 +7,16 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable
 from uuid import UUID
 
+from intric.flows.ai_builder.ai_builder_api_models import (
+    ApplyResultResponse,
+)
 from intric.flows.ai_builder.ai_builder_description_semantics import (
     DescriptionProvenance,
     FlowSemanticSignature,
     description_hash,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
-    InputSource,
-    InputType,
-    OutputMode,
-    OutputType,
-)
-from intric.flows.ai_builder.ai_builder_models import (
-    ApplyResultResponse,
-    AssistantSpec,
     FlowChangeSet,
-    FlowDraftSpecCore,
-    StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     MaterializerProgressSnapshot,
@@ -40,6 +33,15 @@ from intric.flows.application.flow_draft_materialization_executor import (
     FlowDraftMaterializer,
 )
 from intric.flows.domain.flow import Flow, FlowStep
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    OutputMode,
+    OutputType,
+    StepSpec,
+)
 from intric.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,

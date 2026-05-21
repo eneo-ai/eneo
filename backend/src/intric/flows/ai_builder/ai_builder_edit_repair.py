@@ -12,7 +12,9 @@ from intric.flows.ai_builder.ai_builder_description_semantics import (
     description_hash,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import EditAdvisory
-from intric.flows.ai_builder.ai_builder_models import FlowDraftSpecCore
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+)
 
 
 def should_attempt_description_repair(

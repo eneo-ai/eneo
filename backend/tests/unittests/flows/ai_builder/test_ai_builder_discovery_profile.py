@@ -8,8 +8,10 @@ from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_edit_scope import has_change_semantics
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.flow import Flow, FlowStep
 
 

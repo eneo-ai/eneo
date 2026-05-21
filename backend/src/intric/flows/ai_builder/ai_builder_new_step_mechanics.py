@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_models import InputSource, InputType, OutputType
 from intric.flows.ai_builder.ai_builder_new_step_compiler import (
     derive_new_step_output_mode,
 )
@@ -9,6 +8,11 @@ from intric.flows.ai_builder.ai_builder_step_capabilities import (
     supports_step_io_mode_combo,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from intric.flows.flow_authoring_spec import (
+    InputSource,
+    InputType,
+    OutputType,
+)
 
 _FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
 _DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}

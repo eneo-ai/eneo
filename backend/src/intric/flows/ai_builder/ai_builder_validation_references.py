@@ -4,16 +4,16 @@ import json
 from difflib import get_close_matches
 from typing import Any
 
-from intric.flows.ai_builder.ai_builder_models import (
-    FlowDraftSpecCore,
-    OutputType,
-    StepSpec,
-)
 from intric.flows.ai_builder.ai_builder_structured_field_paths import (
     missing_structured_output_path,
     schema_property_names,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+    OutputType,
+    StepSpec,
+)
 from intric.flows.flow_variable_definitions import RESERVED_RUNTIME_VARIABLES
 from intric.flows.template_reference_analyzer import (
     TemplateReference,

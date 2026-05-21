@@ -8,6 +8,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    FlowChangeSet,
+)
 from intric.flows.ai_builder.ai_builder_edit_compiler import compile_edit_draft
 from intric.flows.ai_builder.ai_builder_edit_models import (
     FlowEditDraft,
@@ -19,21 +22,6 @@ from intric.flows.ai_builder.ai_builder_materializer import (
     compile_changeset,
     execute_changeset,
 )
-from intric.flows.ai_builder.ai_builder_models import (
-    AssistantSpec,
-    AssistantToCreate,
-    AssistantToDelete,
-    AssistantToUpdate,
-    FlowChangeSet,
-    FlowDraftSpecCore,
-    InputSource,
-    InputType,
-    MCPPolicy,
-    OutputMode,
-    OutputType,
-    StepChangeKind,
-    StepSpec,
-)
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     MaterializerProgressSnapshot,
@@ -42,11 +30,33 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
 from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
+from intric.flows.application.flow_draft_materialization import (
+    FlowDraftAssistantToCreate as AssistantToCreate,
+)
+from intric.flows.application.flow_draft_materialization import (
+    FlowDraftAssistantToDelete as AssistantToDelete,
+)
+from intric.flows.application.flow_draft_materialization import (
+    FlowDraftAssistantToUpdate as AssistantToUpdate,
+)
+from intric.flows.application.flow_draft_materialization import (
+    FlowDraftStepChangeKind as StepChangeKind,
+)
 from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
 )
 from intric.flows.flow import Flow, FlowStep
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    MCPPolicy,
+    OutputMode,
+    OutputType,
+    StepSpec,
+)
 from intric.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
@@ -398,7 +408,9 @@ class TestCompileCreateFlow:
         }
 
     def test_form_fields_become_metadata_json(self) -> None:
-        from intric.flows.ai_builder.ai_builder_models import FormFieldSpec
+        from intric.flows.flow_authoring_spec import (
+            FormFieldSpec,
+        )
 
         spec = FlowDraftSpecCore(
             flow_name="Form flow",
@@ -864,7 +876,9 @@ class TestCompileMetadata:
 
     def test_form_fields_override_existing_form_schema(self) -> None:
         """When spec has form_fields, they replace existing form_schema."""
-        from intric.flows.ai_builder.ai_builder_models import FormFieldSpec
+        from intric.flows.flow_authoring_spec import (
+            FormFieldSpec,
+        )
 
         flow = _make_flow(
             metadata_json={
@@ -2732,7 +2746,9 @@ def _compiled_step(
     input_bindings: dict | None = None,
     review_policy: FlowStepReviewPolicy | None = None,
 ) -> Any:
-    from intric.flows.ai_builder.ai_builder_models import CompiledStep
+    from intric.flows.application.flow_draft_materialization import (
+        FlowDraftCompiledStep as CompiledStep,
+    )
 
     return CompiledStep(
         plan_step_ref=plan_step_ref,

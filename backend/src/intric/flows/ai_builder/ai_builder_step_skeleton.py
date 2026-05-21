@@ -5,12 +5,6 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Literal
 
-from intric.flows.ai_builder.ai_builder_models import (
-    InputSource,
-    InputType,
-    OutputMode,
-    OutputType,
-)
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     DocumentDeliveryMode,
     NewStepDraft,
@@ -28,6 +22,12 @@ from intric.flows.ai_builder.pattern_registry import (
     compiled_chain_pattern_ids,
 )
 from intric.flows.ai_builder.planning_state import AggregationIntent
+from intric.flows.flow_authoring_spec import (
+    InputSource,
+    InputType,
+    OutputMode,
+    OutputType,
+)
 from intric.flows.flow_review_policy import FlowStepReviewMode
 
 StepSkeletonRole = Literal[

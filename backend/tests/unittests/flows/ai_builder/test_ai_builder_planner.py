@@ -10,12 +10,15 @@ from uuid import uuid4
 import pytest
 
 from intric.files.file_models import File, FileType
-from intric.flows.ai_builder.ai_builder_domain_models import BuilderPlan
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    BuilderPlan,
+    ConversationMessage,
+    SessionStatus,
+)
 from intric.flows.ai_builder.ai_builder_event_models import (
     KeyDecisionPayload,
     RequirementsSummaryPayload,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage, SessionStatus
 from intric.flows.ai_builder.ai_builder_planner import (
     AIBuilderPlanner,
     PlannerMetadataResolution,

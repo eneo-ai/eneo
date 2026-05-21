@@ -9,7 +9,9 @@ import pytest
 from intric.flows.ai_builder.ai_builder_discovery_followup import (
     persist_backend_question,
 )
-from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,

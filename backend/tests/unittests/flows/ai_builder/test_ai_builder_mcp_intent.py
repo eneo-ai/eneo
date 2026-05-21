@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_events import build_question_event
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     build_mcp_resource_selection_question,
@@ -13,17 +16,16 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
     mcp_selection_answer_allows_planning,
     mcp_selection_policy_feedback,
 )
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
+)
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
-    ConversationMessage,
     FlowDraftSpecCore,
     InputSource,
     OutputMode,
     OutputType,
     StepSpec,
-)
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
-    build_ai_builder_resource_catalog,
 )
 
 SVELTE_SERVER_SLOT = "mcp_server.svelte-mcp"
@@ -592,7 +594,7 @@ def test_policy_feedback_rejects_unselected_mcp_server() -> None:
                 metadata={
                     "question_answer": {
                         "question_id": "mcp_resource_selection",
-                            "selected_values": [f"use_mcp_server:{TIME_SERVER_SLOT}"],
+                        "selected_values": [f"use_mcp_server:{TIME_SERVER_SLOT}"],
                     }
                 },
             )
@@ -619,7 +621,7 @@ def test_policy_feedback_accepts_selected_mcp_tool() -> None:
                 metadata={
                     "question_answer": {
                         "question_id": "mcp_resource_selection",
-                            "selected_values": [f"use_mcp_server:{TIME_SERVER_SLOT}"],
+                        "selected_values": [f"use_mcp_server:{TIME_SERVER_SLOT}"],
                     }
                 },
             )

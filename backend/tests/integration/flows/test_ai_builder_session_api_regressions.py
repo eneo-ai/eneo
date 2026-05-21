@@ -23,19 +23,21 @@ from intric.database.tables.spaces_table import (
 from intric.database.tables.tenant_table import Tenants
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_domain_models import SessionStatus
-from intric.flows.ai_builder.ai_builder_models import (
-    AssistantSpec,
+from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
+    PlanStatus,
+    PlannerPlanEnvelope,
+    TargetKind,
+)
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
     InputType,
     MCPPolicy,
     OutputMode,
     OutputType,
-    PlannerPlanEnvelope,
-    PlanStatus,
     StepSpec,
-    TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_session_turn import (

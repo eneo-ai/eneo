@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import re
 
-from intric.flows.ai_builder.ai_builder_models import (
-    FlowDraftSpecCore,
-    StepSpec,
+from intric.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+    StepSpec,
+)
 
 _EXISTING_STEP_REF_RE = re.compile(r"^existing_step_[1-9]\d*$")
 

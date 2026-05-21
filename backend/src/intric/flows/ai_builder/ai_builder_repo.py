@@ -26,18 +26,19 @@ from intric.flows.ai_builder.ai_builder_conversation_compaction import (
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     file_ids_from_metadata,
 )
-from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
-    BuilderPlanEditResult,
     BuilderSession,
     ConversationMessage,
-    FlowDraftSpecCore,
     PlannerPlanEnvelope,
     PlanStatus,
     SessionStatus,
     TargetKind,
 )
+from intric.flows.ai_builder.ai_builder_edit_models import (
+    BuilderPlanEditResult,
+)
+from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from intric.flows.ai_builder.ai_builder_session_transitions import (
     ensure_valid_session_status_transition,
 )
@@ -52,6 +53,9 @@ from intric.flows.ai_builder.planning_state import (
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
+)
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
 )
 from intric.flows.flow_resource_bindings import LocalResourceBinding
 from intric.main.exceptions import BadRequestException, NotFoundException

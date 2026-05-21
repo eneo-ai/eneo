@@ -9,12 +9,6 @@ from intric.flows.ai_builder.ai_builder_create_outline import (
     compile_outline_to_create_draft,
     parse_outline_flow_arguments,
 )
-from intric.flows.ai_builder.ai_builder_models import (
-    InputSource,
-    InputType,
-    OutputMode,
-    OutputType,
-)
 from intric.flows.ai_builder.ai_builder_step_skeleton import (
     _LEGAL_STEP_SKELETON_POLICIES,
     StepSkeleton,
@@ -30,6 +24,12 @@ from intric.flows.ai_builder.pattern_registry import (
     STRUCTURED_EXTRACTION_STEP,
     TEMPLATE_FILL_DOCX_STEP,
     TERMINAL_ARTIFACT_STEP,
+)
+from intric.flows.flow_authoring_spec import (
+    InputSource,
+    InputType,
+    OutputMode,
+    OutputType,
 )
 
 

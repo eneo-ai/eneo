@@ -12,7 +12,9 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from intric.flows.ai_builder.ai_builder_models import StepSpec
+from intric.flows.flow_authoring_spec import (
+    StepSpec,
+)
 
 
 class FlowSemanticSignature(BaseModel):

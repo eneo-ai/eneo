@@ -3,16 +3,11 @@ from __future__ import annotations
 import json
 from typing import cast
 
-from intric.flows.ai_builder.ai_builder_domain_models import JsonObject
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    LintSeverity,
+)
 from intric.flows.ai_builder.ai_builder_form_field_usage import (
     find_unused_form_fields,
-)
-from intric.flows.ai_builder.ai_builder_models import (
-    FlowDraftSpecCore,
-    InputSource,
-    LintSeverity,
-    OutputType,
-    StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_source_material import (
     SourceMaterialBindingStatus,
@@ -20,6 +15,13 @@ from intric.flows.ai_builder.ai_builder_source_material import (
     source_material_binding_status,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+    InputSource,
+    JsonObject,
+    OutputType,
+    StepSpec,
+)
 from intric.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,

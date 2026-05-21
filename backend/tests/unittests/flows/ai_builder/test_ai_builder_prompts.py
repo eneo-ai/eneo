@@ -9,15 +9,11 @@ from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_
 from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_capability_profile,
 )
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
 from intric.flows.ai_builder.ai_builder_edit_scope import (
     EditScopeResolution,
-)
-from intric.flows.ai_builder.ai_builder_models import (
-    AssistantSpec,
-    ConversationMessage,
-    FlowDraftSpecCore,
-    FormFieldSpec,
-    StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_prompts import (
     build_available_kbs_context,
@@ -38,6 +34,12 @@ from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringSnapshot,
 )
 from intric.flows.flow import Flow, FlowStep
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    FormFieldSpec,
+    StepSpec,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers

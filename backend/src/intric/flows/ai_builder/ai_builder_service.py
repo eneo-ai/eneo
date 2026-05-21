@@ -19,6 +19,10 @@ from intric.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputCapabilityDecision,
 )
 from intric.files.file_models import File
+from intric.flows.ai_builder.ai_builder_api_models import (
+    ApplyResultResponse,
+    SessionListItemResponse,
+)
 from intric.flows.ai_builder.ai_builder_attachment_context import (
     readable_attachment_text,
 )
@@ -28,6 +32,11 @@ from intric.flows.ai_builder.ai_builder_context import (
 )
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerInput,
+)
+from intric.flows.ai_builder.ai_builder_domain_models import (
+    BuilderPlan,
+    BuilderSession,
+    TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from intric.flows.ai_builder.ai_builder_events import (
@@ -52,13 +61,6 @@ from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_USAGE as _SSE_EVENT_USAGE,
 )
 from intric.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
-from intric.flows.ai_builder.ai_builder_models import (
-    ApplyResultResponse,
-    BuilderPlan,
-    BuilderSession,
-    SessionListItemResponse,
-    TargetKind,
-)
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from intric.flows.ai_builder.ai_builder_domain_models import (
+from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     StepSpec,
 )

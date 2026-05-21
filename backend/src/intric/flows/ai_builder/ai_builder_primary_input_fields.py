@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_models import InputType
+from intric.flows.flow_authoring_spec import (
+    InputType,
+)
 
 _PRIMARY_INPUT_FIELD_ALIASES: dict[InputType, frozenset[str]] = {
     InputType.TEXT: frozenset({"text", "input", "indata_text"}),

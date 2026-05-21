@@ -6,11 +6,13 @@ import json
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_event_models import (
+    RequirementsSummaryPayload,
+)
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_REQUIREMENTS_SUMMARY,
     build_requirements_summary_event,
 )
-from intric.flows.ai_builder.ai_builder_models import RequirementsSummaryPayload
 from intric.flows.ai_builder.ai_builder_tools import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
     OUTLINE_FLOW_TOOL_NAME,

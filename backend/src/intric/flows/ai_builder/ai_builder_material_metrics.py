@@ -5,9 +5,11 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from intric.flows.ai_builder.ai_builder_domain_models import FlowDraftSpecCore
 from intric.flows.ai_builder.ai_builder_source_material import question_binding
 from intric.flows.enums import AIBuilderInputSource, AIBuilderInputType, FlowOutputType
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+)
 from intric.flows.template_reference_analyzer import (
     TemplateReference,
     TemplateReferenceKind,

@@ -3,10 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, cast
 
-from intric.flows.ai_builder.ai_builder_models import (
-    FlowDraftSpecCore,
-    OutputType,
-    StepSpec,
+from intric.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
@@ -23,6 +20,11 @@ from intric.flows.ai_builder.ai_builder_step_transition_policy import (
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from intric.flows.ai_builder.ai_builder_validator import validate_spec
+from intric.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+    OutputType,
+    StepSpec,
+)
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
