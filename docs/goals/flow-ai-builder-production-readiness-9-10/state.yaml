@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T008
+active_task: T009
 
 scoring_target:
   dimensions:
@@ -891,7 +891,7 @@ tasks:
   - id: T008
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: xhigh
     objective: "Plan and peer-gate the next tranche after T007, starting from typed proposal retry context / processor= injection cleanup unless current evidence proves JSONB/SSE/live-eval now outranks it."
     inputs:
@@ -911,6 +911,121 @@ tasks:
       - "Allowed files and bounded write areas."
       - "Acceptance criteria and verification plan."
       - "Peer synthesis with Codex/Claude/Antigravity verdicts or exact Antigravity tooling failure."
+    receipt:
+      completed_at: "2026-05-21T12:26:00+02:00"
+      result: done
+      selected_scope: "Typed ToolRetryInvocation retry boundary."
+      summary: "Peer-gated the next tranche after T007. The selected slice replaces retry-only process_tool_kwargs and signature-probed callback invocation with a typed ToolRetryInvocation. It deletes retry introspection and the create session_id shim, while explicitly leaving first-attempt submission kwargs and broader processor= dependency cleanup for a later handler/dependency tranche."
+      architecture_diagnosis:
+        - "The root defect is untyped, signature-probed retry invocation, not just a dict named process_tool_kwargs."
+        - "Repair dynamically inspects process callables and injects kwargs, while processor/create/edit/confirm retries rebuild near-duplicate dicts."
+        - "A dataclass wrapper around the dict would be a fake seam. A stable ToolRetryInvocation callable boundary is earned because it removes dynamic kwargs, signature introspection, and the create session_id compatibility shim."
+        - "The first-attempt submission path still uses _build_submission_processing_kwargs and is explicitly out of T008 because it carries submission-only callbacks; it belongs to later handler extraction."
+      canonical_owners:
+        retry_invocation_contract: "ai_builder_proposal_tool_contracts.py"
+        retry_state_machine: "ai_builder_proposal_repair.py"
+        outline_retry_adaptation: "ai_builder_create_proposal.py"
+        edit_retry_adaptation: "ai_builder_edit_proposal.py"
+        confirm_requirements_retry_adaptation: "ai_builder_proposal_processor.py"
+        first_attempt_submission_kwargs: "ai_builder_proposal_processor.py for now; later handler-extraction tranche"
+      codex_self_review:
+        verdict: "pass"
+        notes:
+          - "Cleanest local direction: yes; it deletes the dynamic retry kwargs seam instead of wrapping it."
+          - "Reduces debt: yes; one typed invocation replaces scattered retry dicts and signature introspection."
+          - "Canonical owners: yes; contracts, repair state machine, and tool-specific factories each own one responsibility."
+          - "Avoids parallel implementation: yes if process_tool_kwargs/process_tool_arguments retry fields and introspection helpers are deleted."
+          - "Scope size: correct after excluding _build_submission_processing_kwargs, broad processor= dependency cleanup, JSONB/SSE/live-eval, and full processor split."
+      claude_gate:
+        iteration_1:
+          artifact: ".codex/artifacts/claude-peer-loop-t008-typed-retry-invocation-plan-gate-20260521T111814Z.md"
+          verdict: "GREEN_LIGHT no; VERDICT changes_required; MIN_SCORE 7"
+          blockers: "Needed false-by-construction test replacements, explicit submission-boundary out-of-scope note, explicit repair turn signature, expanded stale-field grep, and RED-test requirement."
+        iteration_2:
+          artifact: ".codex/artifacts/claude-peer-loop-t008-typed-retry-invocation-plan-gate-v2-20260521T112214Z.md"
+          verdict: "GREEN_LIGHT yes; VERDICT green; MIN_SCORE 8"
+      parallel_architecture_reviewer:
+        agent_id: "019e4a35-f5f3-7da0-9120-268ded8b430c"
+        verdict: "T008 is the right next tranche; ToolRetryInvocation is earned only if it deletes dict-bag, runtime introspection, and avoids carrying AIBuilderProposalProcessor in the retry invocation."
+        codex_response: "Accepted the no-processor-in-invocation bar and kept broad create/edit processor dependency replacement as a follow-up because adding deps/services would materially change the Claude-green T008 plan and widen the diff."
+      antigravity_gate:
+        status: "missing_due_tooling_failure_not_passed"
+        artifact: ".codex/artifacts/antigravity-peer-loop-t008-retry-invocation-plan-arbitration-20260521T112308Z.md"
+        exact_failure: "Runner exited 0 and provider usage was not exhausted, but Antigravity Output was empty and parsed no VERDICT/GREEN_LIGHT/MIN_SCORE."
+        codex_decision_after_missing_antigravity: "Proceed because Claude returned green on the revised plan, the parallel reviewer independently agreed T008 is the next tranche, and Antigravity failure is an empty-output tooling failure rather than a blocking finding."
+      rejected_alternatives:
+        - "JSONB/SSE/live-eval next: still major 9/10 blockers, but this local retry boundary blocks further processor extraction and is the immediate post-T007 debt."
+        - "Dataclass around process_tool_kwargs: rejected as fake seam."
+        - "Including _build_submission_processing_kwargs: rejected for T008; first-attempt submission has submission-only callbacks and belongs to later handler extraction."
+        - "Broad CreateProposalService/EditProposalDeps or full processor split: rejected until retry invocation boundary is stable."
+      selected_worker_slice:
+        objective: "Replace retry-only process_tool_kwargs/signature probing with ToolRetryInvocation and update tests."
+        allowed_files:
+          - "backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_create_proposal.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py"
+          - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+          - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+
+  - id: T009
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Implement the approved typed ToolRetryInvocation retry boundary without broad processor dependency or submission-handler refactors."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_proposal.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py"
+      - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    implementation_requirements:
+      - "RED first: add a failing test proving retry_forced_tool_after_text builds one ToolRetryInvocation and passes it to a single-argument process_tool_invocation callable with turn, flow, resource_catalog, assistant_metadata, and parsed arguments."
+      - "Add frozen ToolRetryInvocation in ai_builder_proposal_tool_contracts.py."
+      - "Replace ToolRetryConfig.process_tool_arguments/process_tool_kwargs with process_tool_invocation: Callable[[ToolRetryInvocation], Awaitable[ToolProcessingResult]]."
+      - "Change proposal repair entrypoints to take turn: SessionSendTurn and derive turn.session_id internally when session_id is needed."
+      - "Delete retry signature introspection helpers and any **invocation_kwargs processor call."
+      - "Update outline/edit/confirm retry factories to capture static context in closures and call processors via explicit ToolRetryInvocation fields."
+      - "Delete the create retry wrapper's session_id: Any = None shim."
+      - "Replace false-by-construction tests that assert process_tool_kwargs or flow-skipping signature introspection with behavior assertions on ToolRetryInvocation."
+      - "Do not broaden into _build_submission_processing_kwargs, JSONB/SSE/live-eval, broad processor dependency replacement, repair transport deletion, or full processor split."
+      - "Do not add generic manager/helper/utils/service files, type ignores, casts, or AI-slop comments."
+    verify:
+      - "RED test first: run the new retry invocation test before implementation and record the failing assertion."
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py -q"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_rejects_lost_session_send_lease_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_edit_flow_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_confirm_requirements_with_lost_lease_rolls_back -q"
+      - "scripts/gate-local/check_ai_builder_session_turn_contract.sh"
+      - "uv run ruff check <T009 touched source/test files>"
+      - "uv run ruff format --check <T009 touched source/test files>"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pyright <T009 touched source files>"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run python -c \"import intric.flows.ai_builder.ai_builder_proposal_repair; import intric.flows.ai_builder.ai_builder_create_proposal; import intric.flows.ai_builder.ai_builder_edit_proposal; import intric.flows.ai_builder.ai_builder_proposal_processor; print('imports ok')\""
+      - "rg -n \"process_tool_kwargs|process_tool_arguments|_build_process_tool_kwargs|_add_assistant_metadata_if_supported|session_id: Any = None|\\*\\*invocation_kwargs|Callable\\[\\.\\.\\.,\\s*Awaitable\\[ToolProcessingResult\\]\\]\" backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py backend/tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Need to preserve process_tool_kwargs or retry-path signature introspection."
+      - "Need to carry AIBuilderProposalProcessor inside ToolRetryInvocation."
+      - "Need to broaden into submission-handler extraction, JSONB/SSE/live-eval, or broad create/edit dependency replacement."
+      - "Verification fails twice for the same reason."
+      - "Implementation would require staging unrelated dirty files."
+    expected_output:
+      - "Typed retry invocation source changes."
+      - "Tests proving outline/edit/confirm/prose/JSON-text retry behavior through ToolRetryInvocation."
+      - "Verification results."
+      - "Post-implementation Codex and Claude review; Antigravity attempt or exact failure."
+      - "Receipt with remaining processor= dependency cleanup and JSONB/SSE/live-eval blockers."
     receipt: null
 
 checks:
