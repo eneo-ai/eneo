@@ -3,14 +3,24 @@
 # Licensed under the MIT License.
 
 
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from intric.main.exceptions import BadRequestException, NotFoundException
+from intric.main.exceptions import (
+    BadRequestException,
+    NameCollisionException,
+    NotFoundException,
+)
 from intric.main.models import NOT_PROVIDED, NotProvided
 from intric.prompt_library.domain.prompt_library import PromptLibraryEntry
 from intric.prompt_library.domain.prompt_library_repo import PromptLibraryRepo
 from intric.roles.permissions import Permission, validate_permission
 from intric.users.user import UserInDB
+
+if TYPE_CHECKING:
+    from intric.personal_chat_policy.domain.personal_chat_policy_repo import (
+        PersonalChatPolicyRepo,
+    )
 
 
 class PromptLibraryService:
@@ -18,9 +28,13 @@ class PromptLibraryService:
         self,
         user: UserInDB,
         repo: PromptLibraryRepo,
+        personal_chat_policy_repo: Optional["PersonalChatPolicyRepo"] = None,
     ) -> None:
         self.user = user
         self.repo = repo
+        # Optional dependency: when Phase 2 is in place, deletes consult the
+        # policy repo so we can give a friendly 409 instead of a raw FK violation.
+        self.personal_chat_policy_repo = personal_chat_policy_repo
 
     async def list_entries(self) -> list[PromptLibraryEntry]:
         validate_permission(self.user, Permission.ADMIN)
@@ -82,5 +96,19 @@ class PromptLibraryService:
 
     async def delete_entry(self, id: UUID) -> None:
         validate_permission(self.user, Permission.ADMIN)
-        await self.get_entry(id)
+        entry = await self.get_entry(id)
+
+        # Belt-and-suspenders: the FK has ON DELETE RESTRICT so the DB will
+        # refuse the delete anyway, but consulting the policy repo first lets
+        # us give a friendly error with context instead of a 500.
+        if self.personal_chat_policy_repo is not None:
+            policy = await self.personal_chat_policy_repo.get_by_prompt_library_id(
+                tenant_id=self.user.tenant_id, prompt_library_id=id
+            )
+            if policy is not None:
+                raise NameCollisionException(
+                    f"Prompt '{entry.name}' is referenced by the personal "
+                    f"chat policy. Unset it on the policy before deleting."
+                )
+
         await self.repo.delete(id=id, tenant_id=self.user.tenant_id)

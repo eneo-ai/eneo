@@ -6,6 +6,7 @@ import pytest
 
 from intric.main.exceptions import (
     BadRequestException,
+    NameCollisionException,
     NotFoundException,
     UnauthorizedException,
 )
@@ -128,7 +129,24 @@ async def test_update_rejects_duplicate_name():
 
 
 @pytest.mark.asyncio
-async def test_delete_calls_repo():
+async def test_delete_blocked_when_policy_uses_prompt():
+    tenant_id = uuid4()
+    target = _entry(tenant_id)
+    repo = AsyncMock()
+    repo.get.return_value = target
+    policy_repo = AsyncMock()
+    policy_repo.get_by_prompt_library_id.return_value = object()  # any non-None
+    service = PromptLibraryService(
+        user=_admin_user(tenant_id), repo=repo, personal_chat_policy_repo=policy_repo
+    )
+
+    with pytest.raises(NameCollisionException):
+        await service.delete_entry(target.id)
+    repo.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_proceeds_when_policy_repo_not_wired():
     tenant_id = uuid4()
     target = _entry(tenant_id)
     repo = AsyncMock()
