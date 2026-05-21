@@ -22,6 +22,19 @@
   const defaultAssistant = $derived($currentSpace.default_assistant!);
   const initialDefaultAssistant = $currentSpace.default_assistant!;
 
+  // Personal-chat policy: when admin has locked the model selection to a
+  // single option, hide the dropdown and show the locked name instead.
+  const effectiveConfig = $derived(defaultAssistant.effective_config);
+  const lockedModel = $derived(
+    effectiveConfig?.models_enforced && effectiveConfig.locked_model
+      ? effectiveConfig.locked_model
+      : null
+  );
+  const policyAllowedModels = $derived(
+    effectiveConfig?.models_enforced ? effectiveConfig.available_models : null
+  );
+  const visibleModels = $derived(policyAllowedModels ?? $currentSpace.completion_models);
+
   const {
     elements: { trigger, menu, option },
     helpers: { isSelected }
@@ -47,46 +60,57 @@
   });
 </script>
 
-<button
-  {...$trigger}
-  use:trigger
-  in:fly|global={{ x: -5, duration: parent ? 300 : 0, easing: quadInOut, opacity: 0.3 }}
-  class=" group border-default text-primary hover:border-dimmer hover:bg-hover-default flex max-w-[calc(100%_-_4rem)] cursor-pointer items-center justify-between gap-2 overflow-hidden rounded-lg border py-1 pr-1 pl-2 text-[1.4rem] leading-normal font-extrabold"
->
-  <span class="truncate text-base font-medium">
-    {#if defaultAssistant.completion_model}
-      {defaultAssistant.completion_model.nickname}
-    {:else}
-      {m.select_a_model()}
-    {/if}
-  </span>
-  <IconChevronUpDown class="text-secondary group-hover:text-primary min-w-6" />
-</button>
-
-<div
-  class="border-default bg-primary z-10 flex min-w-[24vw] flex-col overflow-y-auto rounded-lg border shadow-xl"
-  {...$menu}
-  use:menu
->
+{#if lockedModel}
   <div
-    class="bg-frosted-glass-secondary border-default sticky top-0 border-b px-4 py-2 pr-12 font-mono text-sm"
+    in:fly|global={{ x: -5, duration: 300, easing: quadInOut, opacity: 0.3 }}
+    class="border-default text-primary flex max-w-[calc(100%_-_4rem)] items-center gap-2 overflow-hidden rounded-lg border py-1 pr-3 pl-2 text-[1.4rem] leading-normal font-extrabold"
+    title="Låst av administratör"
   >
-    {m.choose_a_completion_model()}
+    <span class="truncate text-base font-medium">{lockedModel.nickname}</span>
+    <span class="text-muted text-xs">(låst)</span>
   </div>
-  {#each sortModels($currentSpace.completion_models) as model (model.id)}
+{:else}
+  <button
+    {...$trigger}
+    use:trigger
+    in:fly|global={{ x: -5, duration: parent ? 300 : 0, easing: quadInOut, opacity: 0.3 }}
+    class=" group border-default text-primary hover:border-dimmer hover:bg-hover-default flex max-w-[calc(100%_-_4rem)] cursor-pointer items-center justify-between gap-2 overflow-hidden rounded-lg border py-1 pr-1 pl-2 text-[1.4rem] leading-normal font-extrabold"
+  >
+    <span class="truncate text-base font-medium">
+      {#if defaultAssistant.completion_model}
+        {defaultAssistant.completion_model.nickname}
+      {:else}
+        {m.select_a_model()}
+      {/if}
+    </span>
+    <IconChevronUpDown class="text-secondary group-hover:text-primary min-w-6" />
+  </button>
+
+  <div
+    class="border-default bg-primary z-10 flex min-w-[24vw] flex-col overflow-y-auto rounded-lg border shadow-xl"
+    {...$menu}
+    use:menu
+  >
     <div
-      class="border-default hover:bg-hover-default flex min-h-16 items-center gap-4 border-b px-4 hover:cursor-pointer"
-      {...$option({ value: { id: model.id } })}
-      use:option
+      class="bg-frosted-glass-secondary border-default sticky top-0 border-b px-4 py-2 pr-12 font-mono text-sm"
     >
-      <ModelNameAndVendor {model}></ModelNameAndVendor>
-      <div class="flex-grow"></div>
-      <div class="check {$isSelected({ id: model.id }) ? 'block' : 'hidden'}">
-        <IconCheck class="text-positive-stronger !size-8"></IconCheck>
-      </div>
+      {m.choose_a_completion_model()}
     </div>
-  {/each}
-</div>
+    {#each sortModels(visibleModels) as model (model.id)}
+      <div
+        class="border-default hover:bg-hover-default flex min-h-16 items-center gap-4 border-b px-4 hover:cursor-pointer"
+        {...$option({ value: { id: model.id } })}
+        use:option
+      >
+        <ModelNameAndVendor {model}></ModelNameAndVendor>
+        <div class="flex-grow"></div>
+        <div class="check {$isSelected({ id: model.id }) ? 'block' : 'hidden'}">
+          <IconCheck class="text-positive-stronger !size-8"></IconCheck>
+        </div>
+      </div>
+    {/each}
+  </div>
+{/if}
 
 <style lang="postcss">
   @reference "@intric/ui/styles";

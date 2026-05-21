@@ -5483,6 +5483,61 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/prompt-library/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List Prompt Library Entries */
+    get: operations["list_prompt_library_entries_api_v1_admin_prompt_library__get"];
+    put?: never;
+    /** Create Prompt Library Entry */
+    post: operations["create_prompt_library_entry_api_v1_admin_prompt_library__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/prompt-library/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Prompt Library Entry */
+    get: operations["get_prompt_library_entry_api_v1_admin_prompt_library__id___get"];
+    /** Update Prompt Library Entry */
+    put: operations["update_prompt_library_entry_api_v1_admin_prompt_library__id___put"];
+    post?: never;
+    /** Delete Prompt Library Entry */
+    delete: operations["delete_prompt_library_entry_api_v1_admin_prompt_library__id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/personal-chat-policy/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Personal Chat Policy */
+    get: operations["get_personal_chat_policy_api_v1_admin_personal_chat_policy__get"];
+    /** Update Personal Chat Policy */
+    put: operations["update_personal_chat_policy_api_v1_admin_personal_chat_policy__put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/integrations/sharepoint/webhook/": {
     parameters: {
       query?: never;
@@ -8216,6 +8271,8 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
+      /** @description Personal-chat governance hints. Only populated when is_default=True and a tenant policy applies. */
+      effective_config?: components["schemas"]["EffectiveConfigPublic"] | null;
     };
     /** AssistantSparse */
     AssistantSparse: {
@@ -9855,6 +9912,8 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
+      /** @description Personal-chat governance hints. Only populated when is_default=True and a tenant policy applies. */
+      effective_config?: components["schemas"]["EffectiveConfigPublic"] | null;
     };
     /**
      * DeleteCredentialResponse
@@ -9924,6 +9983,26 @@ export interface components {
        * @description List of setting keys that were removed
        */
       deleted_keys: string[];
+    };
+    /**
+     * EffectiveConfigPublic
+     * @description Frontend hint surface for personal-chat governance.
+     *
+     *     Only meaningful on default assistants. `prompt_locked` is exposed as a
+     *     boolean — we never leak the admin-prompt text to the user-facing API.
+     */
+    EffectiveConfigPublic: {
+      /** Models Enforced */
+      models_enforced: boolean;
+      /** Available Models */
+      available_models: components["schemas"]["CompletionModelSparse"][];
+      locked_model: components["schemas"]["CompletionModelSparse"] | null;
+      /** Mcp Enforced */
+      mcp_enforced: boolean;
+      /** Available Mcp Servers */
+      available_mcp_servers?: components["schemas"]["MCPServerPublicDict"][];
+      /** Prompt Locked */
+      prompt_locked: boolean;
     };
     /** EmbeddingModelCreate */
     EmbeddingModelCreate: {
@@ -11557,6 +11636,23 @@ export interface components {
       /** Is Enabled */
       is_enabled: boolean;
     };
+    /** McpRestrictionInput */
+    McpRestrictionInput: {
+      /** Enabled */
+      enabled: boolean;
+      /**
+       * Server Ids
+       * @default []
+       */
+      server_ids?: string[];
+    };
+    /** McpRestrictionPublic */
+    McpRestrictionPublic: {
+      /** Enabled */
+      enabled: boolean;
+      /** Server Ids */
+      server_ids: string[];
+    };
     /** Message */
     Message: {
       /** Created At */
@@ -12057,6 +12153,23 @@ export interface components {
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelSecurityStatus"][];
     };
+    /** ModelsRestrictionInput */
+    ModelsRestrictionInput: {
+      /** Enabled */
+      enabled: boolean;
+      /**
+       * Models
+       * @default []
+       */
+      models?: components["schemas"]["PolicyCompletionModelInput"][];
+    };
+    /** ModelsRestrictionPublic */
+    ModelsRestrictionPublic: {
+      /** Enabled */
+      enabled: boolean;
+      /** Models */
+      models: components["schemas"]["PolicyCompletionModelPublic"][];
+    };
     /** ModuleBase */
     ModuleBase: {
       /** Name */
@@ -12538,6 +12651,19 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["ModuleInDB"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** PaginatedResponse[PromptLibraryEntrySparse] */
+    PaginatedResponse_PromptLibraryEntrySparse_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["PromptLibraryEntrySparse"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -13124,6 +13250,45 @@ export interface components {
       /** Description */
       description: string;
     };
+    /** PersonalChatPolicyPublic */
+    PersonalChatPolicyPublic: {
+      models_restriction: components["schemas"]["ModelsRestrictionPublic"];
+      mcp_restriction: components["schemas"]["McpRestrictionPublic"];
+      prompt_enforcement: components["schemas"]["PromptEnforcementPublic"];
+      /** Updated At */
+      updated_at: string | null;
+      /** Updated By User Id */
+      updated_by_user_id: string | null;
+    };
+    /** PersonalChatPolicyUpdate */
+    PersonalChatPolicyUpdate: {
+      models_restriction?: components["schemas"]["ModelsRestrictionInput"] | null;
+      mcp_restriction?: components["schemas"]["McpRestrictionInput"] | null;
+      prompt_enforcement?: components["schemas"]["PromptEnforcementInput"] | null;
+    };
+    /** PolicyCompletionModelInput */
+    PolicyCompletionModelInput: {
+      /**
+       * Completion Model Id
+       * Format: uuid
+       */
+      completion_model_id: string;
+      /**
+       * Is Default
+       * @default false
+       */
+      is_default?: boolean;
+    };
+    /** PolicyCompletionModelPublic */
+    PolicyCompletionModelPublic: {
+      /**
+       * Completion Model Id
+       * Format: uuid
+       */
+      completion_model_id: string;
+      /** Is Default */
+      is_default: boolean;
+    };
     /** PrivacyPolicy */
     PrivacyPolicy: {
       /** Url */
@@ -13135,6 +13300,97 @@ export interface components {
       text: string;
       /** Description */
       description?: string | null;
+    };
+    /** PromptEnforcementInput */
+    PromptEnforcementInput: {
+      /** Enabled */
+      enabled: boolean;
+      /** Prompt Library Id */
+      prompt_library_id?: string | null;
+    };
+    /** PromptEnforcementPublic */
+    PromptEnforcementPublic: {
+      /** Enabled */
+      enabled: boolean;
+      /** Prompt Library Id */
+      prompt_library_id: string | null;
+    };
+    /** PromptLibraryEntryCreate */
+    PromptLibraryEntryCreate: {
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Text */
+      text: string;
+    };
+    /** PromptLibraryEntryPublic */
+    PromptLibraryEntryPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Text */
+      text: string;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * PromptLibraryEntrySparse
+     * @description List view — text excluded for payload size.
+     */
+    PromptLibraryEntrySparse: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /** PromptLibraryEntryUpdate */
+    PromptLibraryEntryUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Description */
+      description?: string | null;
+      /** Text */
+      text?: string | null;
     };
     /** PromptPublic */
     PromptPublic: {
@@ -32613,6 +32869,333 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_prompt_library_entries_api_v1_admin_prompt_library__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_PromptLibraryEntrySparse_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  create_prompt_library_entry_api_v1_admin_prompt_library__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PromptLibraryEntryCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PromptLibraryEntryPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_prompt_library_entry_api_v1_admin_prompt_library__id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PromptLibraryEntryPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_prompt_library_entry_api_v1_admin_prompt_library__id___put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PromptLibraryEntryUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PromptLibraryEntryPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_prompt_library_entry_api_v1_admin_prompt_library__id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_personal_chat_policy_api_v1_admin_personal_chat_policy__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PersonalChatPolicyPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_personal_chat_policy_api_v1_admin_personal_chat_policy__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PersonalChatPolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PersonalChatPolicyPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

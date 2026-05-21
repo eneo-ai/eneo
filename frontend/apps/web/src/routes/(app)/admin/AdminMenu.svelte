@@ -14,7 +14,7 @@
   import { IconHistory } from "@intric/icons/history";
   import { page } from "$app/stores";
   import { Navigation } from "$lib/components/layout";
-  import { ChartPie, LayoutTemplate, Cloud, Plug, ShieldCheck } from "lucide-svelte";
+  import { ChartPie, LayoutTemplate, Cloud, Plug, ShieldCheck, MessageSquare } from "lucide-svelte";
   import { IconKey } from "@intric/icons/key";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
@@ -73,6 +73,12 @@
     isActive={isSelected("/admin/mcp-servers", currentRoute)}
     icon={Plug}
     label={m.mcp()}
+  />
+  <Navigation.Link
+    href={localizeHref("/admin/personal-chat")}
+    isActive={isSelected("/admin/personal-chat", currentRoute)}
+    icon={MessageSquare}
+    label="Personlig chatt"
   />
   <Navigation.Link
     href="/admin/audit-logs"
