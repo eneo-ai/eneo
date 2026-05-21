@@ -70,6 +70,7 @@ async def test_persist_tool_turn_commits_turn_with_flow_and_lease() -> None:
         session_id=session_id,
         conversation=conversation,
         new_messages_start=1,
+        base_planning_state_version=6,
         tool_call=tool_call,
         arguments={"summary": "Kort sammanfattning"},
         tool_content="saved",
@@ -101,6 +102,7 @@ async def test_persist_tool_turn_commits_turn_with_flow_and_lease() -> None:
     assert kwargs["flow"] is flow
     assert kwargs["request_id"] == request_id
     assert kwargs["lock_token"] == lock_token
+    assert kwargs["base_version"] == 6
     new_messages = kwargs["new_messages"]
     assert [message.role for message in new_messages] == ["assistant", "tool"]
     assert new_messages[1].metadata == {"requirements_version": "req-v1"}

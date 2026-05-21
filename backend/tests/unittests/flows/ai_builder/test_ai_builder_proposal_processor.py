@@ -100,6 +100,7 @@ def _make_context(**overrides) -> ProposalContext:
         "resource_catalog": None,
         "max_output_tokens": 4096,
         "request_id": "req-1",
+        "base_planning_state_version": 0,
         "flow": None,
         "assistant_snapshots": None,
         "text_content": None,
@@ -555,6 +556,7 @@ async def test_request_non_question_continuation_uses_backend_followup_when_only
                     ),
                 ],
                 new_messages_start=2,
+                base_planning_state_version=0,
                 llm_messages=[],
                 tool_call=repeated_question,
                 tool_schemas=[
@@ -651,6 +653,7 @@ async def test_request_non_question_continuation_recovers_with_requirements_summ
                     ),
                 ],
                 new_messages_start=2,
+                base_planning_state_version=0,
                 llm_messages=[],
                 tool_call=repeated_question,
                 tool_schemas=[
@@ -724,6 +727,7 @@ async def test_request_non_question_continuation_returns_typed_error_when_no_fol
                     ConversationMessage(role="user", content="Bygg ett flöde")
                 ],
                 new_messages_start=1,
+                base_planning_state_version=0,
                 llm_messages=[],
                 tool_call=repeated_question,
                 tool_schemas=[
@@ -828,6 +832,7 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
                 session_id=uuid4(),
                 conversation=[ConversationMessage(role="user", content="Build a flow")],
                 new_messages_start=1,
+                base_planning_state_version=0,
                 llm_messages=[{"role": "system", "content": "Prompt"}],
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
@@ -891,6 +896,7 @@ async def test_propose_plan_asks_before_planning_when_named_mcp_is_unavailable()
             session_id=session_id,
             conversation=conversation,
             new_messages_start=0,
+            base_planning_state_version=0,
             llm_messages=[{"role": "system", "content": "Prompt"}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
@@ -949,6 +955,7 @@ async def test_propose_plan_asks_before_planning_when_named_mcp_is_enabled() -> 
             session_id=uuid4(),
             conversation=conversation,
             new_messages_start=0,
+            base_planning_state_version=0,
             llm_messages=[{"role": "system", "content": "Prompt"}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
@@ -1022,6 +1029,7 @@ async def test_propose_plan_continues_after_user_declines_mcp_usage() -> None:
                 session_id=uuid4(),
                 conversation=conversation,
                 new_messages_start=2,
+                base_planning_state_version=0,
                 llm_messages=[{"role": "system", "content": "Prompt"}],
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
@@ -1089,6 +1097,7 @@ async def test_propose_plan_reasks_when_user_requests_mcp_after_declining() -> N
             session_id=uuid4(),
             conversation=conversation,
             new_messages_start=2,
+            base_planning_state_version=0,
             llm_messages=[{"role": "system", "content": "Prompt"}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
@@ -1149,6 +1158,7 @@ async def test_outline_processing_enforces_without_mcp_selection() -> None:
         session_id=uuid4(),
         conversation=conversation,
         new_messages_start=0,
+        base_planning_state_version=0,
         arguments={
             "flow_name": "Time flow",
             "plan_rationale": "Use MCP despite the user's decline.",
@@ -1181,6 +1191,7 @@ async def test_outline_validation_failure_preserves_duplicate_step_name_code() -
         session_id=uuid4(),
         conversation=[ConversationMessage(role="user", content="Bygg ett textflöde.")],
         new_messages_start=0,
+        base_planning_state_version=0,
         arguments={
             "flow_name": "Duplicate names",
             "plan_rationale": "Two semantic steps accidentally share a name.",
@@ -1700,6 +1711,7 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
                     ConversationMessage(role="user", content="Bygg ett flöde")
                 ],
                 new_messages_start=1,
+                base_planning_state_version=0,
                 llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
                 litellm_model="openai/gpt-5.4-nano",
                 litellm_kwargs={},
@@ -1797,6 +1809,7 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
                     ConversationMessage(role="user", content="Bygg ett flöde")
                 ],
                 new_messages_start=1,
+                base_planning_state_version=0,
                 llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
                 litellm_model="openai/gpt-5.4-nano",
                 litellm_kwargs={},
@@ -1882,6 +1895,7 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
                     ConversationMessage(role="user", content="Bygg ett flöde")
                 ],
                 new_messages_start=1,
+                base_planning_state_version=0,
                 llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
                 litellm_model="openai/gpt-5.4-nano",
                 litellm_kwargs={},
@@ -1982,7 +1996,9 @@ async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> No
 
 
 @pytest.mark.asyncio
-async def test_edit_proposal_returns_validation_when_snapshot_resource_is_unavailable() -> None:
+async def test_edit_proposal_returns_validation_when_snapshot_resource_is_unavailable() -> (
+    None
+):
     processor = _make_processor()
     flow = MagicMock()
     flow.steps = [
@@ -2033,6 +2049,7 @@ async def test_edit_proposal_returns_validation_when_snapshot_resource_is_unavai
             session_id=uuid4(),
             conversation=[],
             new_messages_start=0,
+            base_planning_state_version=7,
             arguments=arguments,
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2048,7 +2065,9 @@ async def test_edit_proposal_returns_validation_when_snapshot_resource_is_unavai
 
     assert result.failure_kind == "validation"
     assert result.feedback is not None
-    assert "resource used by the existing flow is no longer available" in result.feedback
+    assert (
+        "resource used by the existing flow is no longer available" in result.feedback
+    )
     assert "missing-kb" not in result.feedback
 
 
@@ -2132,6 +2151,7 @@ async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> Non
             session_id=uuid4(),
             conversation=[],
             new_messages_start=0,
+            base_planning_state_version=0,
             arguments=arguments,
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2223,6 +2243,7 @@ async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
             session_id=uuid4(),
             conversation=[],
             new_messages_start=0,
+            base_planning_state_version=7,
             arguments=draft.model_dump(mode="json"),
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2317,6 +2338,7 @@ async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
                 )
             ],
             new_messages_start=0,
+            base_planning_state_version=0,
             arguments=draft.model_dump(mode="json"),
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2422,6 +2444,7 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
                 )
             ],
             new_messages_start=0,
+            base_planning_state_version=0,
             arguments=draft.model_dump(mode="json"),
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2514,6 +2537,7 @@ async def test_edit_proposal_passes_metadata_to_edit_validator() -> None:
             session_id=uuid4(),
             conversation=[],
             new_messages_start=0,
+            base_planning_state_version=7,
             arguments=draft.model_dump(mode="json"),
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2532,6 +2556,7 @@ async def test_edit_proposal_passes_metadata_to_edit_validator() -> None:
     store_plan.assert_awaited_once()
     assert store_plan.await_args is not None
     assert store_plan.await_args.kwargs["flow"] is flow
+    assert store_plan.await_args.kwargs["base_planning_state_version"] == 7
 
 
 @pytest.mark.asyncio
@@ -2614,6 +2639,7 @@ async def test_edit_proposal_canonicalizes_duplicate_modify_ops_before_validatio
             session_id=uuid4(),
             conversation=[],
             new_messages_start=0,
+            base_planning_state_version=0,
             arguments=arguments,
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2685,6 +2711,7 @@ async def test_edit_proposal_returns_specific_feedback_for_conflicting_duplicate
             session_id=uuid4(),
             conversation=[],
             new_messages_start=0,
+            base_planning_state_version=0,
             arguments=arguments,
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2784,6 +2811,7 @@ async def test_edit_proposal_normalizes_mechanical_refs_before_validation() -> N
             session_id=uuid4(),
             conversation=[],
             new_messages_start=0,
+            base_planning_state_version=0,
             arguments=arguments,
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2862,6 +2890,7 @@ async def test_edit_proposal_returns_validation_feedback_for_explicit_mechanics_
             session_id=uuid4(),
             conversation=[],
             new_messages_start=0,
+            base_planning_state_version=0,
             arguments=arguments,
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2917,6 +2946,7 @@ async def test_handle_tool_call_builds_proposal_context_for_edit_handler() -> No
                 session_id=uuid4(),
                 conversation=[],
                 new_messages_start=0,
+                base_planning_state_version=0,
                 tool_calls=[tool_call],
                 text_content="draft",
                 llm_messages=[{"role": "system", "content": "Prompt"}],
@@ -2941,6 +2971,7 @@ async def test_handle_tool_call_builds_proposal_context_for_edit_handler() -> No
     )
     assert captured_ctx is not None
     assert captured_ctx.request_id == "req-ctx"
+    assert captured_ctx.base_planning_state_version == 0
     assert captured_ctx.text_content == "draft"
     assert captured_ctx.flow is flow
     assert captured_ctx.assistant_snapshots == snapshots
@@ -2977,6 +3008,7 @@ async def test_handle_tool_call_preserves_text_when_tool_is_clarification_only()
                 session_id=uuid4(),
                 conversation=[],
                 new_messages_start=0,
+                base_planning_state_version=0,
                 tool_calls=[tool_call],
                 text_content="Jag behöver en detalj till.",
                 llm_messages=[{"role": "system", "content": "Prompt"}],
@@ -3030,6 +3062,7 @@ async def test_request_self_correction_returns_typed_error_when_proposal_complet
                     ConversationMessage(role="user", content="Bygg ett flöde")
                 ],
                 new_messages_start=1,
+                base_planning_state_version=0,
                 error_message="Invalid flow specification: missing steps",
                 llm_messages=[{"role": "system", "content": "Prompt"}],
                 tool_call=tool_call,
@@ -3126,6 +3159,7 @@ async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mod
             session_id=uuid4(),
             conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
             new_messages_start=1,
+            base_planning_state_version=0,
             available_model_refs=None,
             available_kb_refs=None,
             resource_catalog=None,
@@ -3137,6 +3171,7 @@ async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mod
     kwargs = retry_forced_tool.await_args.kwargs
     assert kwargs["target_tool_name"] == OUTLINE_FLOW_TOOL_NAME
     assert kwargs["process_tool_arguments"] == processor._process_outline_arguments
+    assert kwargs["process_tool_kwargs"]["base_planning_state_version"] == 0
     assert "Now call outline_flow" in kwargs["forced_tool_prompt"]
 
 

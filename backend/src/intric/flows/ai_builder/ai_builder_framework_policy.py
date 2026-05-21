@@ -27,7 +27,6 @@ from intric.flows.ai_builder.ai_builder_discovery_signal_inference import (
 )
 from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
-    contains_phrase,
 )
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
@@ -98,6 +97,26 @@ _DOCX_TEMPLATE_FILL_ACTION_MARKERS: tuple[str, ...] = (
     "fill a template",
     "populate the template",
 )
+
+_ARTIFACT_NEGATION_WORDS: frozenset[str] = frozenset(
+    {
+        "aldrig",
+        "dont",
+        "ej",
+        "inga",
+        "inget",
+        "inte",
+        "istallet",
+        "no",
+        "not",
+        "utan",
+        "without",
+    }
+)
+_ARTIFACT_TRAILING_NEGATION_WORDS: frozenset[str] = frozenset({"ej", "inte", "not"})
+_ARTIFACT_NEGATION_LOOKBEHIND_WORDS = 3
+_ARTIFACT_NEGATION_LOOKAHEAD_WORDS = 3
+_NEGATION_TOKEN_STRIP_CHARS = ".,;!?:\")'`"
 
 
 def latest_pending_structured_question(
@@ -778,8 +797,20 @@ def _resolve_direct_output_choice(
         return "structured_json"
     if "structured_text" in output_values:
         return "structured_text"
-    docx_index = _first_phrase_index(role_scoped_text, DOCX_CONTEXT_MARKERS)
-    pdf_index = _first_phrase_index(role_scoped_text, PDF_OUTPUT_CONTEXT_MARKERS)
+    if _looks_like_final_json_output(role_scoped_text) or _looks_like_final_json_output(
+        fallback_text
+    ):
+        return "structured_json"
+    docx_index = _first_phrase_index(
+        role_scoped_text,
+        DOCX_CONTEXT_MARKERS,
+        ignore_negated=True,
+    )
+    pdf_index = _first_phrase_index(
+        role_scoped_text,
+        PDF_OUTPUT_CONTEXT_MARKERS,
+        ignore_negated=True,
+    )
     if docx_index is not None and (pdf_index is None or docx_index <= pdf_index):
         return "docx_document"
     if role_scoped_text and (
@@ -790,12 +821,23 @@ def _resolve_direct_output_choice(
     explicit_output_role_text = (
         scoped_text.replacement_target_text or scoped_text.output_text
     )
-    if contains_phrase(explicit_output_role_text, "docx") or contains_phrase(
-        explicit_output_role_text,
-        "word",
+    if (
+        _first_phrase_index(
+            explicit_output_role_text,
+            ("docx", "word"),
+            ignore_negated=True,
+        )
+        is not None
     ):
         return "docx_document"
-    if contains_phrase(explicit_output_role_text, "pdf"):
+    if (
+        _first_phrase_index(
+            explicit_output_role_text,
+            ("pdf",),
+            ignore_negated=True,
+        )
+        is not None
+    ):
         return "pdf_document"
     if contains_any_phrase(
         fallback_text,
@@ -807,8 +849,6 @@ def _resolve_direct_output_choice(
         ),
     ):
         return "structured_text"
-    if _looks_like_final_json_output(role_scoped_text or fallback_text):
-        return "structured_json"
     if _looks_like_text_terminal_output(
         role_scoped_text
     ) or _looks_like_text_terminal_output(fallback_text):
@@ -912,13 +952,27 @@ def _looks_like_final_json_output(text: str) -> bool:
             "output ska vara json",
             "utdata ska vara json",
             "slutresultatet ska vara strukturerad json",
+            "slutresultatet ska vara strikt json",
             "slutresultat json",
+            "slutresultat strikt json",
             "slutresultatet ska vara json",
             "final output should be structured json",
+            "final output should be strict json",
             "final output json",
             "final output should be json",
+            "final answer must be json",
+            "final answer should be json",
+            "final answer json",
+            "return strict json",
             "return json",
+            "returns strict json",
+            "returns json",
+            "returning strict json",
+            "returning json",
+            "returnera strikt json",
             "returnera json",
+            "returnerar strikt json",
+            "returnerar json",
             "respond with json",
             "svara med json",
             "only json",
@@ -1114,19 +1168,56 @@ def _has_explicit_output_mode_text(
     )
 
 
-def _first_phrase_index(text: str, phrases: Sequence[str]) -> int | None:
+def _first_phrase_index(
+    text: str,
+    phrases: Sequence[str],
+    *,
+    ignore_negated: bool = False,
+) -> int | None:
+    """Return the first phrase index after skipping locally negated matches."""
+
     if not text:
         return None
 
     indexes: list[int] = []
     for phrase in phrases:
         normalized_phrase = normalize_signal_text(phrase)
-        if not normalized_phrase or normalized_phrase not in text:
+        if not normalized_phrase:
             continue
-        indexes.append(text.find(normalized_phrase))
+        start_idx = text.find(normalized_phrase)
+        while start_idx != -1:
+            end_idx = start_idx + len(normalized_phrase)
+            if not ignore_negated or not _is_negated_at_index(
+                text,
+                start_idx,
+                end_idx,
+            ):
+                indexes.append(start_idx)
+                break
+            start_idx = text.find(normalized_phrase, start_idx + 1)
     if not indexes:
         return None
     return min(indexes)
+
+
+def _is_negated_at_index(text: str, start_idx: int, end_idx: int) -> bool:
+    before_words = _normalized_negation_words(text[:start_idx])
+    after_words = _normalized_negation_words(text[end_idx:])
+    return any(
+        word in _ARTIFACT_NEGATION_WORDS
+        for word in before_words[-_ARTIFACT_NEGATION_LOOKBEHIND_WORDS:]
+    ) or any(
+        word in _ARTIFACT_TRAILING_NEGATION_WORDS
+        for word in after_words[:_ARTIFACT_NEGATION_LOOKAHEAD_WORDS]
+    )
+
+
+def _normalized_negation_words(text: str) -> tuple[str, ...]:
+    return tuple(
+        normalized
+        for word in text.split()
+        if (normalized := word.lower().strip(_NEGATION_TOKEN_STRIP_CHARS))
+    )
 
 
 def _looks_like_pdf_template_expectation(text: str) -> bool:

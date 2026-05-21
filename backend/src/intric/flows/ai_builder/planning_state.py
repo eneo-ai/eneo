@@ -33,6 +33,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from intric.flows.enums import AIBuilderInputType
+
 FCM_VERSION: int = 1
 PLANNER_CONTRACT_VERSION: int = 1
 BUILDER_SCHEMA_VERSION: int = 1
@@ -71,7 +73,6 @@ SlotConfidence = Literal["high", "medium", "low"]
 
 InvariantResult = Literal["pass", "fail", "warning"]
 
-StepInputType = Literal["text", "json", "image", "audio", "document", "file", "any"]
 StepOutputType = Literal["text", "json", "pdf", "docx"]
 StepOutputMode = Literal[
     "pass_through",
@@ -118,7 +119,7 @@ class ResolvedSlot(_PlanningModel):
 
 
 class StepTriple(_PlanningModel):
-    input_type: StepInputType
+    input_type: AIBuilderInputType
     output_type: StepOutputType
     output_mode: StepOutputMode
 

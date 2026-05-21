@@ -444,6 +444,7 @@ class ProposalContext:
     resource_catalog: AIBuilderResourceCatalog | None
     max_output_tokens: int
     request_id: str
+    base_planning_state_version: int
     lease_request_id: UUID | None = None
     lease_lock_token: UUID | None = None
     flow: "Flow | None" = None
@@ -548,6 +549,7 @@ class AIBuilderProposalProcessor:
         session_id: UUID,
         conversation: list[ConversationMessage],
         new_messages_start: int,
+        base_planning_state_version: int,
         arguments: dict[str, Any],
         assistant_content: str,
         tool_call_id: str,
@@ -629,6 +631,7 @@ class AIBuilderProposalProcessor:
             session_id=session_id,
             conversation=conversation,
             new_messages_start=new_messages_start,
+            base_planning_state_version=base_planning_state_version,
             draft=draft,
             arguments=arguments,
             assistant_content=assistant_content,
@@ -658,6 +661,7 @@ class AIBuilderProposalProcessor:
         session_id: UUID,
         conversation: list[ConversationMessage],
         new_messages_start: int,
+        base_planning_state_version: int,
         draft: FlowCreateDraft,
         arguments: dict[str, Any],
         assistant_content: str,
@@ -791,6 +795,7 @@ class AIBuilderProposalProcessor:
             session_id=session_id,
             conversation=conversation,
             new_messages_start=new_messages_start,
+            base_planning_state_version=base_planning_state_version,
             spec=spec,
             resource_catalog=resource_catalog,
             flow=flow,
@@ -818,7 +823,7 @@ class AIBuilderProposalProcessor:
                 "session_id=%s tool_call_id=%s",
                 session_id,
                 tool_call_id,
-        )
+            )
 
         if not validation.valid:
             logger.info(
@@ -846,7 +851,9 @@ class AIBuilderProposalProcessor:
                 )
                 if feedback
             )
-            combined_feedback = format_create_outline_quality_feedback(combined_feedback)
+            combined_feedback = format_create_outline_quality_feedback(
+                combined_feedback
+            )
             return ToolProcessingResult(
                 feedback=combined_feedback,
                 failure_kind="validation",
@@ -887,6 +894,7 @@ class AIBuilderProposalProcessor:
             session_id=session_id,
             conversation=conversation,
             new_messages_start=new_messages_start,
+            base_planning_state_version=base_planning_state_version,
             assistant_content=assistant_content,
             assistant_metadata=_accepted_proposal_metadata(),
             tool_call_id=tool_call_id,
@@ -916,6 +924,7 @@ class AIBuilderProposalProcessor:
         session_id: UUID,
         conversation: list[ConversationMessage],
         new_messages_start: int,
+        base_planning_state_version: int,
         spec: FlowDraftSpecCore,
         resource_catalog: AIBuilderResourceCatalog | None,
         flow: "Flow | None",
@@ -967,6 +976,7 @@ class AIBuilderProposalProcessor:
             session_id=session_id,
             conversation=conversation,
             new_messages_start=new_messages_start,
+            base_planning_state_version=base_planning_state_version,
             question_data=question_data,
             assistant_text=assistant_text,
             assistant_metadata=metadata,
@@ -1019,6 +1029,7 @@ class AIBuilderProposalProcessor:
         available_kb_refs: set[str] | None,
         max_output_tokens: int,
         request_id: str,
+        base_planning_state_version: int,
         assistant_metadata: dict[str, Any] | None = None,
         lease_request_id: UUID | None = None,
         lease_lock_token: UUID | None = None,
@@ -1043,6 +1054,7 @@ class AIBuilderProposalProcessor:
             resource_catalog=resource_catalog,
             max_output_tokens=max_output_tokens,
             request_id=request_id,
+            base_planning_state_version=base_planning_state_version,
             lease_request_id=lease_request_id,
             lease_lock_token=lease_lock_token,
             flow=flow,
@@ -1081,6 +1093,7 @@ class AIBuilderProposalProcessor:
         max_output_tokens: int,
         proposal_temperature: float,
         request_id: str,
+        base_planning_state_version: int,
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         assistant_metadata: dict[str, Any] | None = None,
@@ -1106,6 +1119,7 @@ class AIBuilderProposalProcessor:
             resource_catalog=resource_catalog,
             flow=flow,
             assistant_metadata=assistant_metadata,
+            base_planning_state_version=base_planning_state_version,
             lease_request_id=lease_request_id,
             lease_lock_token=lease_lock_token,
         )
@@ -1168,6 +1182,7 @@ class AIBuilderProposalProcessor:
                 resource_catalog=resource_catalog,
                 max_output_tokens=max_output_tokens,
                 request_id=request_id,
+                base_planning_state_version=base_planning_state_version,
                 assistant_metadata=assistant_metadata,
                 lease_request_id=lease_request_id,
                 lease_lock_token=lease_lock_token,
@@ -1212,6 +1227,7 @@ class AIBuilderProposalProcessor:
             flow=flow,
             assistant_snapshots=assistant_snapshots,
             planning_state=planning_state,
+            base_planning_state_version=base_planning_state_version,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
             lease_request_id=lease_request_id,
@@ -1272,6 +1288,7 @@ class AIBuilderProposalProcessor:
         resource_catalog: AIBuilderResourceCatalog | None,
         flow: "Flow | None",
         assistant_metadata: dict[str, Any] | None,
+        base_planning_state_version: int,
         lease_request_id: UUID | None,
         lease_lock_token: UUID | None,
     ) -> list[dict[str, str]]:
@@ -1304,6 +1321,7 @@ class AIBuilderProposalProcessor:
             session_id=session_id,
             conversation=conversation,
             new_messages_start=new_messages_start,
+            base_planning_state_version=base_planning_state_version,
             question_data=question_data,
             assistant_text=assistant_text,
             assistant_metadata=assistant_metadata,
@@ -1330,6 +1348,7 @@ class AIBuilderProposalProcessor:
             session_id=ctx.session_id,
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,
+            base_planning_state_version=ctx.base_planning_state_version,
             flow=ctx.flow,
             litellm_model=ctx.litellm_model,
             litellm_kwargs=ctx.litellm_kwargs,
@@ -1439,6 +1458,7 @@ class AIBuilderProposalProcessor:
             session_id=ctx.session_id,
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,
+            base_planning_state_version=ctx.base_planning_state_version,
             arguments=arguments,
             assistant_content="Här är mitt förslag:",
             assistant_metadata=None,
@@ -1513,6 +1533,7 @@ class AIBuilderProposalProcessor:
         session_id: UUID,
         conversation: list[ConversationMessage],
         new_messages_start: int,
+        base_planning_state_version: int,
         arguments: dict[str, Any],
         assistant_content: str,
         assistant_metadata: dict[str, Any] | None = None,
@@ -1531,6 +1552,7 @@ class AIBuilderProposalProcessor:
             "session_id": session_id,
             "conversation": conversation,
             "new_messages_start": new_messages_start,
+            "base_planning_state_version": base_planning_state_version,
             "arguments": arguments,
             "assistant_content": assistant_content,
             "assistant_metadata": assistant_metadata,
@@ -1646,6 +1668,7 @@ class AIBuilderProposalProcessor:
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
         max_output_tokens: int,
+        base_planning_state_version: int,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
@@ -1663,6 +1686,7 @@ class AIBuilderProposalProcessor:
             resource_catalog=resource_catalog,
             max_output_tokens=max_output_tokens,
             request_id=request_id,
+            base_planning_state_version=base_planning_state_version,
             flow=flow,
         )
         retry_config = self._submission_retry_config(
@@ -1690,6 +1714,9 @@ class AIBuilderProposalProcessor:
         retry_config: ToolRetryConfig,
     ) -> AsyncGenerator[dict[str, str], None]:
         merged_process_kwargs = dict(retry_config.process_tool_kwargs)
+        merged_process_kwargs["base_planning_state_version"] = (
+            ctx.base_planning_state_version
+        )
         merged_process_kwargs.setdefault("resource_catalog", ctx.resource_catalog)
 
         def _build_assistant_metadata() -> dict[str, Any] | None:
@@ -1852,6 +1879,7 @@ class AIBuilderProposalProcessor:
         available_kb_refs: set[str] | None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         max_output_tokens: int,
+        base_planning_state_version: int,
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         planning_state: PlanningState | None = None,
@@ -1873,6 +1901,8 @@ class AIBuilderProposalProcessor:
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
         )
+        process_tool_kwargs = dict(retry_config.process_tool_kwargs)
+        process_tool_kwargs["base_planning_state_version"] = base_planning_state_version
         outcome = await self.retry_forced_tool_after_text(
             correction_messages=correction_messages,
             assistant_text=assistant_text,
@@ -1888,7 +1918,7 @@ class AIBuilderProposalProcessor:
             target_tool_name=retry_config.target_tool_name,
             forced_tool_prompt=retry_config.forced_tool_prompt,
             process_tool_arguments=retry_config.process_tool_arguments,
-            process_tool_kwargs=retry_config.process_tool_kwargs,
+            process_tool_kwargs=process_tool_kwargs,
             resource_catalog=resource_catalog,
             flow=flow,
             usage_tracker=usage_tracker,
@@ -1918,6 +1948,7 @@ class AIBuilderProposalProcessor:
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
         max_output_tokens: int,
+        base_planning_state_version: int,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         flow: "Flow | None" = None,
         original_question_id: str | None = None,
@@ -1937,6 +1968,7 @@ class AIBuilderProposalProcessor:
                 session_id=session_id,
                 conversation=conversation,
                 new_messages_start=new_messages_start,
+                base_planning_state_version=base_planning_state_version,
                 flow=flow,
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs,
@@ -2065,6 +2097,7 @@ class AIBuilderProposalProcessor:
                     resource_catalog=resource_catalog,
                     max_output_tokens=max_output_tokens,
                     request_id="question-recovery",
+                    base_planning_state_version=base_planning_state_version,
                     flow=flow,
                     assistant_snapshots=assistant_snapshots,
                     usage_tracker=usage_tracker,
@@ -2086,6 +2119,7 @@ class AIBuilderProposalProcessor:
             session_id=ctx.session_id,
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,
+            base_planning_state_version=ctx.base_planning_state_version,
             flow=ctx.flow,
             litellm_model=ctx.litellm_model,
             litellm_kwargs=ctx.litellm_kwargs,
@@ -2131,6 +2165,7 @@ class AIBuilderProposalProcessor:
                 session_id=ctx.session_id,
                 conversation=ctx.conversation,
                 new_messages_start=ctx.new_messages_start,
+                base_planning_state_version=ctx.base_planning_state_version,
                 tool_call=tool_call,
                 arguments=arguments,
                 tool_content=(
@@ -2168,6 +2203,7 @@ class AIBuilderProposalProcessor:
                 session_id=ctx.session_id,
                 conversation=ctx.conversation,
                 new_messages_start=ctx.new_messages_start,
+                base_planning_state_version=ctx.base_planning_state_version,
                 question_data=backend_question_data,
                 assistant_text=assistant_text,
                 assistant_metadata=_assistant_metadata_with_usage(
@@ -2199,6 +2235,7 @@ class AIBuilderProposalProcessor:
             available_kb_refs=ctx.available_kb_refs,
             resource_catalog=ctx.resource_catalog,
             max_output_tokens=ctx.max_output_tokens,
+            base_planning_state_version=ctx.base_planning_state_version,
             flow=ctx.flow,
             original_question_id=question_id,
             assistant_snapshots=ctx.assistant_snapshots,
@@ -2212,6 +2249,7 @@ class AIBuilderProposalProcessor:
         session_id: UUID,
         conversation: list[ConversationMessage],
         new_messages_start: int,
+        base_planning_state_version: int,
         arguments: dict[str, Any],
         assistant_content: str,
         tool_call_id: str,
@@ -2287,6 +2325,7 @@ class AIBuilderProposalProcessor:
             session_id=session_id,
             conversation=conversation,
             new_messages_start=new_messages_start,
+            base_planning_state_version=base_planning_state_version,
             tool_call=tool_call,
             arguments=arguments,
             tool_content="Requirements presented to user. Awaiting confirmation.",
@@ -2325,6 +2364,7 @@ class AIBuilderProposalProcessor:
             session_id=ctx.session_id,
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,
+            base_planning_state_version=ctx.base_planning_state_version,
             arguments=arguments,
             assistant_content=ctx.text_content or "",
             assistant_metadata=_assistant_metadata_with_usage(
@@ -2346,6 +2386,7 @@ class AIBuilderProposalProcessor:
                     session_id=ctx.session_id,
                     conversation=ctx.conversation,
                     new_messages_start=ctx.new_messages_start,
+                    base_planning_state_version=ctx.base_planning_state_version,
                     flow=ctx.flow,
                     litellm_model=ctx.litellm_model,
                     litellm_kwargs=ctx.litellm_kwargs,
@@ -2434,6 +2475,7 @@ class AIBuilderProposalProcessor:
             session_id=ctx.session_id,
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,
+            base_planning_state_version=ctx.base_planning_state_version,
             arguments=raw_args,
             assistant_content=ctx.text_content or "",
             tool_call_id=tool_call.id,
@@ -2495,6 +2537,7 @@ class AIBuilderProposalProcessor:
         session_id: UUID,
         conversation: list[ConversationMessage],
         new_messages_start: int,
+        base_planning_state_version: int,
         litellm_model: str | None = None,
         litellm_kwargs: dict[str, Any] | None = None,
         ui_language: str | None = None,
@@ -2509,6 +2552,7 @@ class AIBuilderProposalProcessor:
             session_id=session_id,
             conversation=conversation,
             new_messages_start=new_messages_start,
+            base_planning_state_version=base_planning_state_version,
             flow=flow,
             litellm_client=self.litellm_client,
             litellm_model=litellm_model,

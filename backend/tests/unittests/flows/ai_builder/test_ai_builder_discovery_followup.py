@@ -30,6 +30,7 @@ async def test_persist_backend_question_commits_turn_with_flow_and_lease() -> No
         session_id=session_id,
         conversation=conversation,
         new_messages_start=1,
+        base_planning_state_version=5,
         question_data={
             "question_id": "runtime_metadata_fields",
             "question": "Vilka fält behöver vi?",
@@ -62,6 +63,7 @@ async def test_persist_backend_question_commits_turn_with_flow_and_lease() -> No
     assert kwargs["flow"] is flow
     assert kwargs["request_id"] == request_id
     assert kwargs["lock_token"] == lock_token
+    assert kwargs["base_version"] == 5
     new_messages = kwargs["new_messages"]
     assert [message.role for message in new_messages] == ["assistant", "tool"]
     assert len(events) == 2

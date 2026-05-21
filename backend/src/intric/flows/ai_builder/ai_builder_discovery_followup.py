@@ -23,6 +23,7 @@ async def persist_backend_question(
     session_id: UUID,
     conversation: list[ConversationMessage],
     new_messages_start: int,
+    base_planning_state_version: int,
     question_data: dict[str, object],
     assistant_text: str,
     assistant_metadata: dict[str, Any] | None = None,
@@ -70,6 +71,7 @@ async def persist_backend_question(
         flow=flow,
         request_id=lease_request_id,
         lock_token=lease_lock_token,
+        base_version=base_planning_state_version,
     )
 
     return [
@@ -85,6 +87,7 @@ async def emit_discovery_followup_if_needed(
     session_id: UUID,
     conversation: list[ConversationMessage],
     new_messages_start: int,
+    base_planning_state_version: int,
     flow: Flow | None = None,
     litellm_client: Any | None = None,
     litellm_model: str | None = None,
@@ -114,6 +117,7 @@ async def emit_discovery_followup_if_needed(
         session_id=session_id,
         conversation=conversation,
         new_messages_start=new_messages_start,
+        base_planning_state_version=base_planning_state_version,
         question_data=question_data,
         assistant_text=assistant_text,
         flow=flow,

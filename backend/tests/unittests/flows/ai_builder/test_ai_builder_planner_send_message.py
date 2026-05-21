@@ -106,6 +106,7 @@ def _make_prepared_request(
         discovery_block_message=None,
         llm_messages=[{"role": "system", "content": "system"}],
         should_emit_forced_followup=should_emit_forced_followup,
+        base_planning_state_version=0,
     )
 
 
@@ -824,6 +825,7 @@ async def test_send_message_orchestration_context_uses_rebuilt_state() -> None:
         discovery_block_message=None,
         llm_messages=[{"role": "system", "content": "system"}],
         should_emit_forced_followup=False,
+        base_planning_state_version=0,
         rebuilt_planning_state=rebuilt_both_resolved,
     )
 
@@ -919,6 +921,7 @@ async def test_send_message_orchestration_context_blocks_commit_until_core_slots
         discovery_block_message=None,
         llm_messages=[{"role": "system", "content": "system"}],
         should_emit_forced_followup=False,
+        base_planning_state_version=0,
         rebuilt_planning_state=partial,
     )
 
@@ -980,6 +983,7 @@ async def test_send_message_uses_discovery_selected_questions_as_non_core_ask_su
         discovery_block_message=None,
         llm_messages=[{"role": "system", "content": "system"}],
         should_emit_forced_followup=False,
+        base_planning_state_version=0,
         rebuilt_planning_state=PlanningState.empty(),
         action_policy=build_planner_action_policy(
             session_state=PlanningState.empty(),
@@ -1072,6 +1076,7 @@ async def test_send_message_passes_server_precomputed_commit_to_turn_runner() ->
         discovery_block_message=None,
         llm_messages=[],
         should_emit_forced_followup=False,
+        base_planning_state_version=0,
         rebuilt_planning_state=state,
         action_policy=action_policy,
         server_output=build_server_planner_output(
@@ -1178,6 +1183,7 @@ async def test_send_message_auto_advances_server_commit_to_requirements_summary(
         discovery_block_message=None,
         llm_messages=[],
         should_emit_forced_followup=False,
+        base_planning_state_version=0,
         rebuilt_planning_state=state,
         action_policy=action_policy,
         server_output=server_output,
@@ -1244,6 +1250,7 @@ async def test_send_message_routes_proposal_mode_to_task_specific_proposer() -> 
         discovery_block_message=None,
         llm_messages=[{"role": "system", "content": "proposal task"}],
         should_emit_forced_followup=False,
+        base_planning_state_version=0,
         rebuilt_planning_state=PlanningState.empty(),
         action_policy=PlannerActionPolicy(allowed_action_kinds=("propose_plan",)),
         proposal_mode=True,

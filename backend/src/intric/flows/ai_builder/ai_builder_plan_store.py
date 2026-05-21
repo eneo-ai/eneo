@@ -148,6 +148,7 @@ async def store_plan_and_update_conversation(
     session_id: UUID,
     conversation: list[ConversationMessage],
     new_messages_start: int,
+    base_planning_state_version: int,
     assistant_content: str,
     assistant_metadata: dict[str, Any] | None = None,
     tool_call_id: str,
@@ -213,6 +214,7 @@ async def store_plan_and_update_conversation(
             session_id=session_id,
             tenant_id=tenant_id,
             state=planning_state,
+            base_version=base_planning_state_version,
         )
     return plan, envelope
 

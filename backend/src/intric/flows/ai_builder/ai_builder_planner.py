@@ -236,6 +236,7 @@ class PlannerPreparedRequest:
     # invoking the planner LLM. Computed once per turn alongside the
     # other prompt-context signals.
     should_emit_forced_followup: bool
+    base_planning_state_version: int
     # Rebuilt-from-current-conversation planning state — the same one
     # the capability projection rendered into the system prompt.
     # `send_message` derives the `OrchestrationContext` slot sets from
@@ -562,11 +563,11 @@ class AIBuilderPlanner:
         max_output_tokens: int,
         budget_policy: AIBuilderBudgetPolicy,
         is_requirements_confirmation: bool,
+        base_planning_state_version: int,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
         allow_discovery_semantic_adjudication: bool = True,
         persisted_planning_state: PlanningState | None = None,
-        base_planning_state_version: int | None = None,
         available_mcps: AIBuilderMCPResourceInput = None,
     ) -> PlannerPreparedRequest:
         requirements_state = resolve_requirements_state(conversation)
@@ -662,15 +663,11 @@ class AIBuilderPlanner:
             discovery_analysis=discovery_analysis,
             flow=flow,
         )
-        server_output = (
-            build_server_planner_output(
-                action_policy=action_policy,
-                session_state=rebuilt_planning_state,
-                base_planning_state_version=base_planning_state_version,
-                ui_language=ui_language,
-            )
-            if base_planning_state_version is not None
-            else None
+        server_output = build_server_planner_output(
+            action_policy=action_policy,
+            session_state=rebuilt_planning_state,
+            base_planning_state_version=base_planning_state_version,
+            ui_language=ui_language,
         )
         confirmed_requirements = latest_confirmed_requirements(conversation)
         attachment_context_result = build_ai_builder_attachment_context(
@@ -683,6 +680,7 @@ class AIBuilderPlanner:
                 discovery_block_message=None,
                 llm_messages=[],
                 should_emit_forced_followup=False,
+                base_planning_state_version=base_planning_state_version,
                 rebuilt_planning_state=rebuilt_planning_state,
                 action_policy=action_policy,
                 server_output=server_output,
@@ -756,6 +754,7 @@ class AIBuilderPlanner:
                     *trimmed,
                 ],
                 should_emit_forced_followup=should_emit_forced_followup,
+                base_planning_state_version=base_planning_state_version,
                 rebuilt_planning_state=rebuilt_planning_state,
                 action_policy=action_policy,
                 system_prompt_hash=stable_hash(proposal_system_prompt),
@@ -844,6 +843,7 @@ class AIBuilderPlanner:
                 discovery_block_message=discovery_block_message,
                 llm_messages=[],
                 should_emit_forced_followup=should_emit_forced_followup,
+                base_planning_state_version=base_planning_state_version,
                 rebuilt_planning_state=rebuilt_planning_state,
                 action_policy=action_policy,
             )
@@ -854,6 +854,7 @@ class AIBuilderPlanner:
             discovery_block_message=discovery_block_message,
             llm_messages=[{"role": "system", "content": system_prompt}] + trimmed,
             should_emit_forced_followup=should_emit_forced_followup,
+            base_planning_state_version=base_planning_state_version,
             rebuilt_planning_state=rebuilt_planning_state,
             action_policy=action_policy,
             system_prompt_hash=stable_hash(system_prompt),
@@ -990,6 +991,7 @@ class AIBuilderPlanner:
         session_id: UUID,
         conversation: list[ConversationMessage],
         new_messages_start: int,
+        base_planning_state_version: int,
         flow: "Flow | None",
         request_uuid: UUID,
         lock_token: UUID,
@@ -1018,6 +1020,7 @@ class AIBuilderPlanner:
             session_id=session_id,
             conversation=conversation,
             new_messages_start=new_messages_start,
+            base_planning_state_version=base_planning_state_version,
             question_data=question_data,
             assistant_text=assistant_text,
             flow=flow,
@@ -1204,6 +1207,7 @@ class AIBuilderPlanner:
                     session_id=session_id,
                     conversation=conversation,
                     new_messages_start=new_messages_start,
+                    base_planning_state_version=prepared_request.base_planning_state_version,
                     flow=flow,
                     litellm_model=litellm_model,
                     litellm_kwargs=litellm_kwargs,
@@ -1229,6 +1233,7 @@ class AIBuilderPlanner:
                     session_id=session_id,
                     conversation=conversation,
                     new_messages_start=new_messages_start,
+                    base_planning_state_version=prepared_request.base_planning_state_version,
                     flow=flow,
                     assistant_metadata=build_assistant_message_metadata(
                         conversation,
@@ -1294,6 +1299,7 @@ class AIBuilderPlanner:
                     session_id=session_id,
                     conversation=conversation,
                     new_messages_start=new_messages_start,
+                    base_planning_state_version=prepared_request.base_planning_state_version,
                     flow=flow,
                     request_uuid=request_uuid,
                     lock_token=lock_token,
@@ -1316,6 +1322,7 @@ class AIBuilderPlanner:
                     session_id=session_id,
                     conversation=conversation,
                     new_messages_start=new_messages_start,
+                    base_planning_state_version=prepared_request.base_planning_state_version,
                     llm_messages=prepared_request.llm_messages,
                     litellm_model=litellm_model,
                     litellm_kwargs=litellm_kwargs,

@@ -33,6 +33,7 @@ from intric.flows.ai_builder.planning_state import (
     ResolvedSlot,
     StepTriple,
 )
+from intric.flows.enums import AIBuilderInputType
 
 _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
@@ -257,6 +258,34 @@ class TestResolvedSlotValidation:
 
 
 class TestStepTripleValidation:
+    def test_step_input_type_uses_canonical_ai_builder_enum(self) -> None:
+        assert StepTriple.model_fields["input_type"].annotation is AIBuilderInputType
+
+    @pytest.mark.parametrize("input_type", [item.value for item in AIBuilderInputType])
+    def test_canonical_input_type_values_load_from_jsonb_payload(
+        self,
+        input_type: str,
+    ) -> None:
+        triple = StepTriple.model_validate(
+            {
+                "input_type": input_type,
+                "output_type": "text",
+                "output_mode": "pass_through",
+            }
+        )
+
+        assert triple.input_type == input_type
+
+    def test_image_input_type_rejected_from_jsonb_payload(self) -> None:
+        with pytest.raises(ValidationError):
+            StepTriple.model_validate(
+                {
+                    "input_type": "image",
+                    "output_type": "text",
+                    "output_mode": "pass_through",
+                }
+            )
+
     def test_unknown_input_type_rejected(self) -> None:
         with pytest.raises(ValidationError):
             StepTriple(

@@ -1086,6 +1086,7 @@ async def test_persist_tool_turn_refreshes_planning_state_with_requirements_summ
             session_id=session.id,
             conversation=conversation,
             new_messages_start=0,
+            base_planning_state_version=session.planning_state_version,
             tool_call=tool_call,
             arguments={"summary": "Kort sammanfattning"},
             tool_content="Requirements presented to user. Awaiting confirmation.",
@@ -1525,6 +1526,177 @@ async def test_ai_builder_repo_commit_turn_replaces_persisted_commit_when_kwarg_
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_store_plan_and_update_conversation_rejects_stale_planning_state_version_and_rolls_back(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """A stale proposal save must fail CAS and leave the savepoint untouched."""
+    from intric.flows.ai_builder.ai_builder_plan_store import (
+        store_plan_and_update_conversation,
+    )
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Plan Proposal Stale CAS",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        session_id = session.id
+        tenant_id = user.tenant_id
+
+    concurrent_state = _planning_state_fixture()
+    concurrent_state.phase = "awaiting_input"
+    concurrent_state.evidence = EvidenceRef(conversation_message_ids=["concurrent"])
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        advanced_version = await repo.save_planning_state(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            state=concurrent_state,
+            base_version=0,
+        )
+    assert advanced_version == 1
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        with pytest.raises(BadRequestException) as exc:
+            await store_plan_and_update_conversation(
+                repo=repo,
+                tenant_id=tenant_id,
+                session_id=session_id,
+                conversation=[],
+                new_messages_start=0,
+                base_planning_state_version=0,
+                assistant_content="stale plan ready",
+                tool_call_id="call-stale-1",
+                tool_name=OUTLINE_FLOW_TOOL_NAME,
+                arguments={},
+                spec=_make_builder_plan_spec(existing_step_ref=None),
+                assumptions=[],
+                plan_rationale=None,
+                reasoning=None,
+                validation=MagicMock(warnings=[]),
+                flow=None,
+            )
+
+    assert exc.value.code == "planning_state_version_mismatch"
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        plans = await repo.list_session_plans(
+            session_id=session_id, tenant_id=tenant_id
+        )
+        fetched = await repo.get_session(session_id=session_id, tenant_id=tenant_id)
+        loaded_state = await repo.load_planning_state(
+            session_id=session_id, tenant_id=tenant_id
+        )
+        version = (
+            await repo.session.execute(
+                select(BuilderSessions.planning_state_version).where(
+                    BuilderSessions.id == session_id
+                )
+            )
+        ).scalar_one()
+
+    assert plans == []
+    assert fetched.latest_plan_id is None
+    assert fetched.status == SessionStatus.CHATTING
+    assert fetched.conversation == []
+    assert version == 1
+    assert loaded_state is not None
+    assert loaded_state.phase == "awaiting_input"
+    assert loaded_state.evidence.conversation_message_ids == ["concurrent"]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_store_plan_and_update_conversation_accepts_matching_planning_state_version(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    from intric.flows.ai_builder.ai_builder_plan_store import (
+        store_plan_and_update_conversation,
+    )
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Plan Proposal Matching CAS",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        session_id = session.id
+        tenant_id = user.tenant_id
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        plan, _envelope = await store_plan_and_update_conversation(
+            repo=repo,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            conversation=[],
+            new_messages_start=0,
+            base_planning_state_version=0,
+            assistant_content="plan ready",
+            tool_call_id="call-match-1",
+            tool_name=OUTLINE_FLOW_TOOL_NAME,
+            arguments={},
+            spec=_make_builder_plan_spec(existing_step_ref=None),
+            assumptions=[],
+            plan_rationale=None,
+            reasoning=None,
+            validation=MagicMock(warnings=[]),
+            flow=None,
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        fetched = await repo.get_session(session_id=session_id, tenant_id=tenant_id)
+        loaded_state = await repo.load_planning_state(
+            session_id=session_id, tenant_id=tenant_id
+        )
+        version = (
+            await repo.session.execute(
+                select(BuilderSessions.planning_state_version).where(
+                    BuilderSessions.id == session_id
+                )
+            )
+        ).scalar_one()
+
+    assert fetched.latest_plan_id == plan.id
+    assert loaded_state is not None
+    assert loaded_state.draft_plan_id == plan.id
+    assert loaded_state.phase == "plan_proposed"
+    assert version == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_store_plan_and_update_conversation_preserves_persisted_architecture_commit(
     client,
     bearer_token,
@@ -1596,6 +1768,7 @@ async def test_store_plan_and_update_conversation_preserves_persisted_architectu
             session_id=session.id,
             conversation=working_conversation,
             new_messages_start=len(working_conversation),
+            base_planning_state_version=fetched.planning_state_version,
             assistant_content="Here is the plan",
             assistant_metadata=None,
             tool_call_id="call_plan",
@@ -1676,6 +1849,7 @@ async def test_store_plan_and_update_conversation_rolls_back_when_append_fails(
                     session_id=session_id,
                     conversation=[],
                     new_messages_start=0,
+                    base_planning_state_version=0,
                     assistant_content="simulated",
                     tool_call_id="call-1",
                     tool_name=OUTLINE_FLOW_TOOL_NAME,
@@ -1749,6 +1923,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state(
             session_id=session_id,
             conversation=[],
             new_messages_start=0,
+            base_planning_state_version=0,
             assistant_content="plan ready",
             tool_call_id="call-ps-1",
             tool_name=OUTLINE_FLOW_TOOL_NAME,
@@ -1835,6 +2010,7 @@ async def test_store_plan_and_update_conversation_stamps_plan_identity_on_state(
             session_id=session_id,
             conversation=[],
             new_messages_start=0,
+            base_planning_state_version=0,
             assistant_content="plan ready",
             tool_call_id="call-identity-1",
             tool_name=OUTLINE_FLOW_TOOL_NAME,
@@ -1912,6 +2088,7 @@ async def test_store_plan_and_update_conversation_state_matches_compacted_conver
             session_id=session_id,
             conversation=list(pre_compaction_conversation),
             new_messages_start=0,
+            base_planning_state_version=0,
             assistant_content="plan ready",
             tool_call_id="call-cmp-1",
             tool_name=OUTLINE_FLOW_TOOL_NAME,
@@ -2619,9 +2796,7 @@ async def test_ai_builder_api_edit_mode_output_only_change_updates_description_a
             flow_id=flow.id,
             assistant_id=assistant.id,
             update=FlowAssistantUpdateCommand(
-                prompt=PromptCreate(
-                    text="Skriv ett kort beslutsunderlag i textformat."
-                )
+                prompt=PromptCreate(text="Skriv ett kort beslutsunderlag i textformat.")
             ),
         )
         flow = await flow_service.update_flow(

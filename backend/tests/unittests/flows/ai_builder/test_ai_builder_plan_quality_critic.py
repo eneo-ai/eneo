@@ -201,6 +201,37 @@ def test_quality_feedback_from_context_keeps_semantic_issues() -> None:
     assert "form_fields" in feedback
 
 
+def test_negated_document_artifacts_do_not_trigger_terminal_alignment_for_json() -> (
+    None
+):
+    prompt = (
+        "Build a flow that reads a long procurement document and returns strict "
+        "JSON with ranked offers, risk flags, and missing information. Do not "
+        "create Word, DOCX, PDF, or a document output."
+    )
+    context = build_conversation_critic_context(
+        [{"role": "user", "content": prompt}],
+        FlowDraftSpecCore(
+            flow_name="Offer ranking",
+            steps=[
+                _step(
+                    "step_json",
+                    "Rank offers",
+                    "Return ranked offers, risks, and missing information as JSON.",
+                    output_type=OutputType.JSON,
+                )
+            ],
+        ),
+    )
+
+    issues = evaluate_critic_invariants(context)
+    issue_ids = {issue.id for issue in issues}
+
+    assert context.output_intent.terminal_output == "structured_json"
+    assert "docx_terminal_output_alignment" not in issue_ids
+    assert "pdf_terminal_output_alignment" not in issue_ids
+
+
 def test_flags_missing_form_fields_when_runtime_metadata_was_requested() -> None:
     conversation = [
         {

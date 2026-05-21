@@ -16,6 +16,7 @@ from intric.flows.ai_builder.planning_state import (
     StepTriple,
 )
 from intric.flows.enums import (
+    AIBuilderInputType,
     FlowInputSource,
     FlowInputType,
     FlowOutputMode,
@@ -69,7 +70,7 @@ def derive_architecture_commit_draft(
     return ArchitectureCommitDraft(
         tuples_chain=[
             StepTriple(
-                input_type=input_type.value,
+                input_type=AIBuilderInputType(input_type.value),
                 output_type=output_type.value,
                 output_mode=output_mode.value,
             )

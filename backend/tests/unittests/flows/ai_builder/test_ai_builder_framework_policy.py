@@ -1409,6 +1409,76 @@ def test_explicit_terminal_structured_json_survives_intermediate_json_mentions()
     assert intent.terminal_output == "structured_json"
 
 
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        (
+            "Build a flow that reads a long procurement document and returns "
+            "strict JSON with ranked offers, risk flags, and missing information. "
+            "Do not create Word, DOCX, PDF, or a document output."
+        ),
+        (
+            "Analyze uploaded documents and return JSON only with the extracted "
+            "obligations; no Word or DOCX file."
+        ),
+        (
+            "Use the contract PDF as input, but the final answer must be JSON, "
+            "not PDF or DOCX."
+        ),
+        (
+            "Läs dokumentet och returnera strikt JSON med risker och luckor; "
+            "skapa inte Word, DOCX, PDF eller dokument."
+        ),
+        (
+            "Analysera PDF-underlaget men slutresultatet ska vara JSON, inte "
+            "PDF eller DOCX."
+        ),
+        (
+            "Ta emot dokument men leverera bara JSON med fält för status; "
+            "inget Word-dokument."
+        ),
+        (
+            "Slutresultatet ska vara strikt JSON med klassificeringar; "
+            "Word-dokument behövs inte."
+        ),
+        (
+            "Analyze the procurement documents and return strict JSON with "
+            "ranked suppliers and missing information."
+        ),
+    ],
+)
+def test_explicit_terminal_json_ignores_negated_document_artifacts(
+    prompt: str,
+) -> None:
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output == "structured_json"
+    assert intent.docx_output_mode is None
+    assert intent.pdf_generation_mode is None
+
+
+def test_later_positive_docx_marker_survives_earlier_negated_marker() -> None:
+    prompt = "Skapa inte Word-utkast i mellansteget men leverera en Word-rapport."
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output == "docx_document"
+
+
+def test_later_positive_pdf_marker_survives_earlier_negated_docx_marker() -> None:
+    prompt = "Skapa inte Word-dokument, gör en PDF-rapport som slutresultat."
+
+    intent = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert intent.terminal_output == "pdf_document"
+
+
 def test_explicit_terminal_json_wins_over_final_prose_wording() -> None:
     prompt = (
         "Extrahera nyckelfakta som strukturerad JSON från varje fil och "

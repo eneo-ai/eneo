@@ -227,6 +227,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state_inside_sa
         session_id=uuid4(),
         conversation=[],
         new_messages_start=0,
+        base_planning_state_version=7,
         assistant_content="plan ready",
         tool_call_id="call-unit-1",
         tool_name=OUTLINE_FLOW_TOOL_NAME,
@@ -244,6 +245,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state_inside_sa
     assert isinstance(saved_state, PlanningState)
     assert saved_state.draft_plan_id == repo.create_plan.return_value.id
     assert saved_state.phase == "plan_proposed"
+    assert repo.save_planning_state.await_args.kwargs["base_version"] == 7
 
 
 @pytest.mark.asyncio
@@ -259,6 +261,7 @@ async def test_store_plan_and_update_conversation_passes_resource_bindings_to_re
         session_id=uuid4(),
         conversation=[],
         new_messages_start=0,
+        base_planning_state_version=0,
         assistant_content="plan ready",
         tool_call_id="call-unit-1",
         tool_name=OUTLINE_FLOW_TOOL_NAME,

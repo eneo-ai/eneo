@@ -210,14 +210,14 @@ async def test_resolve_message_metadata_marks_auxiliary_llm_when_pending_answer_
                 selected_values=("pdf_document",),
             ),
         ),
-        ):
-            result = await planner._resolve_message_metadata(
-                conversation=conversation,
-                message="Make it a PDF",
-                question_answer=None,
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
-            )
+    ):
+        result = await planner._resolve_message_metadata(
+            conversation=conversation,
+            message="Make it a PDF",
+            question_answer=None,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+        )
 
     assert result.used_auxiliary_llm is True
 
@@ -335,6 +335,10 @@ async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_he
             return_value=None,
         ),
         patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_server_planner_output",
+            return_value=None,
+        ),
+        patch(
             "intric.flows.ai_builder.ai_builder_planner.build_system_prompt",
             return_value="system prompt",
         ) as build_system_prompt,
@@ -368,6 +372,7 @@ async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_he
                 unknown_model_context_window_tokens=8192,
             ),
             is_requirements_confirmation=False,
+            base_planning_state_version=0,
         )
 
     assert prepared.requirements_state is requirements_state
@@ -534,6 +539,10 @@ async def test_prepare_planner_request_passes_attachment_context_into_system_pro
             return_value=None,
         ),
         patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_server_planner_output",
+            return_value=None,
+        ),
+        patch(
             "intric.flows.ai_builder.ai_builder_planner.build_ai_builder_attachment_context",
             return_value=SimpleNamespace(
                 context="attachment context",
@@ -573,6 +582,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_system_pro
                 unknown_model_context_window_tokens=8192,
             ),
             is_requirements_confirmation=False,
+            base_planning_state_version=0,
         )
 
     build_attachment_context.assert_called_once()
@@ -692,6 +702,10 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
             return_value=None,
         ),
         patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_server_planner_output",
+            return_value=None,
+        ),
+        patch(
             "intric.flows.ai_builder.ai_builder_planner.build_system_prompt",
             return_value="system prompt",
         ),
@@ -722,6 +736,7 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
                 unknown_model_context_window_tokens=8192,
             ),
             is_requirements_confirmation=False,
+            base_planning_state_version=0,
             allow_discovery_semantic_adjudication=False,
         )
 
@@ -747,6 +762,10 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_planner.latest_confirmed_requirements",
+            return_value=None,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_server_planner_output",
             return_value=None,
         ),
         patch(
@@ -781,6 +800,7 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
                 unknown_model_context_window_tokens=8192,
             ),
             is_requirements_confirmation=False,
+            base_planning_state_version=0,
         )
 
     assert any(
@@ -809,6 +829,10 @@ async def test_prepare_planner_request_projects_pre_commit_into_system_prompt() 
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_planner.latest_confirmed_requirements",
+            return_value=None,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_server_planner_output",
             return_value=None,
         ),
         patch(
@@ -842,6 +866,7 @@ async def test_prepare_planner_request_projects_pre_commit_into_system_prompt() 
                 unknown_model_context_window_tokens=8192,
             ),
             is_requirements_confirmation=False,
+            base_planning_state_version=0,
             persisted_planning_state=None,
         )
 
@@ -891,6 +916,10 @@ async def test_prepare_planner_request_threads_unresolved_core_slots_into_system
             return_value=None,
         ),
         patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_server_planner_output",
+            return_value=None,
+        ),
+        patch(
             "intric.flows.ai_builder.ai_builder_planner.build_system_prompt",
             return_value="system prompt",
         ) as build_system_prompt,
@@ -921,6 +950,7 @@ async def test_prepare_planner_request_threads_unresolved_core_slots_into_system
                 unknown_model_context_window_tokens=8192,
             ),
             is_requirements_confirmation=False,
+            base_planning_state_version=0,
             persisted_planning_state=None,
         )
 
@@ -978,6 +1008,10 @@ async def test_prepare_planner_request_carries_forward_persisted_commit_into_pro
             return_value=None,
         ),
         patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_server_planner_output",
+            return_value=None,
+        ),
+        patch(
             "intric.flows.ai_builder.ai_builder_planner.build_system_prompt",
             return_value="system prompt",
         ) as build_system_prompt,
@@ -1008,6 +1042,7 @@ async def test_prepare_planner_request_carries_forward_persisted_commit_into_pro
                 unknown_model_context_window_tokens=8192,
             ),
             is_requirements_confirmation=False,
+            base_planning_state_version=0,
             persisted_planning_state=persisted,
         )
 
@@ -1085,13 +1120,12 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
             discovery_block_message=None,
             llm_messages=[{"role": "system", "content": "proposal"}],
             should_emit_forced_followup=False,
+            base_planning_state_version=0,
             rebuilt_planning_state=PlanningState.empty(),
             proposal_mode=True,
             prior_plan_for_revision=cast(BuilderPlan, prior_plan),
             proposal_resource_catalog=build_ai_builder_resource_catalog(
-                available_models=[
-                    {"id": str(local_model_id), "name": "Renamed model"}
-                ],
+                available_models=[{"id": str(local_model_id), "name": "Renamed model"}],
                 available_kbs=[],
                 prior_bindings=(prior_binding,),
             ),

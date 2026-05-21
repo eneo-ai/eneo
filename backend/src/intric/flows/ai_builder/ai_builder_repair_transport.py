@@ -52,6 +52,7 @@ async def persist_tool_turn(
     session_id: UUID,
     conversation: list[ConversationMessage],
     new_messages_start: int,
+    base_planning_state_version: int,
     tool_call: Any,
     arguments: dict[str, Any],
     tool_content: str,
@@ -99,6 +100,7 @@ async def persist_tool_turn(
         flow=flow,
         request_id=lease_request_id,
         lock_token=lease_lock_token,
+        base_version=base_planning_state_version,
     )
 
 
