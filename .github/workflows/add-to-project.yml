@@ -1,0 +1,20 @@
+name: Add new issues and PRs to Eneo project
+
+on:
+  issues:
+    types: [opened, reopened]
+  pull_request_target:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  add-to-project:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add to Eneo project
+        uses: actions/add-to-project@v1.0.2
+        with:
+          project-url: https://github.com/orgs/eneo-ai/projects/5
+          github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}

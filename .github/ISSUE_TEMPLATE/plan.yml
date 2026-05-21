@@ -1,0 +1,60 @@
+name: Plan (AI-planering)
+description: Strukturerad lapp med sammanfattning, diagram, plan och delsteg — lämpar sig för planeringsarbete tillsammans med AI.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Använd den här mallen för lappar som ska planeras innan de byggs. Sammanfattningen är skriven för icke-tekniker, plan-sektionen för utvecklare.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Sammanfattning
+      description: 2–4 meningar som beskriver vad och varför, utan tekniska detaljer.
+      placeholder: Vi vill att användare ska kunna ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagram
+    attributes:
+      label: Flöde / arkitektur
+      description: Mermaid-diagram (flowchart, sequence, state, etc). Tas bort om det inte behövs.
+      value: |
+        ```mermaid
+        flowchart LR
+          A[Användare] --> B[Frontend]
+          B --> C[Backend]
+        ```
+
+  - type: textarea
+    id: plan
+    attributes:
+      label: Teknisk plan
+      description: Hur det ska byggas. Berörda filer/moduler, datamodell, API, edge-cases.
+    validations:
+      required: true
+
+  - type: textarea
+    id: tasks
+    attributes:
+      label: Delsteg
+      description: Checklist som syns på projektkortet och räknas som progress.
+      value: |
+        - [ ] Backend-ändring
+        - [ ] Frontend-ändring
+        - [ ] Tester
+        - [ ] Dokumentation
+
+  - type: textarea
+    id: open_questions
+    attributes:
+      label: Öppna frågor
+      description: Saker som behöver beslutas innan eller under arbetet.
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Inte i scope
+      description: Vad denna lapp uttryckligen INTE löser — för att skydda mot scope creep.
