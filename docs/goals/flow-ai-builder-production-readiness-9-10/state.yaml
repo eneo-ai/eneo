@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T018b
+active_task: T019
 
 scoring_target:
   dimensions:
@@ -50,7 +50,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T017b implementation/post-review: conversation metadata/tool-call JSONB and AI Builder public errors now have typed canonical ownership. Public AI Builder errors use diagnostic_context for correlation and details for bounded scalar per-error facts, with generated-client proof. The broader score floor remains blocked by frontend copyable diagnostic reports, DB lock invariant, readability/test topology, AI slop cleanup, and normal-user output quality."
+  source: "After T018b implementation/post-review: conversation metadata/tool-call JSONB, AI Builder public errors, and frontend diagnostic reports now have typed canonical ownership. Public AI Builder errors use diagnostic_context for correlation and details for bounded scalar per-error facts, and the frontend has a copyable allow-listed diagnostic bundle for stream/apply/quality reports. The broader score floor remains blocked by DB lock invariant, readability/test topology, AI slop cleanup, and normal-user output quality."
   Maintainability: 8
   Code_Quality: 8
   Clean_Architecture: 8
@@ -62,13 +62,12 @@ current_scorecard:
   Data_Model_Schema_Quality: 8
   API_Contract_Quality: 8
   Test_Coverage_Quality: 8
-  Developer_Diagnostic_Experience: 8
+  Developer_Diagnostic_Experience: 9
   AI_Slop_Comment_Naming_Quality: 6
   Normal_User_Output_Quality: 6
   Overall: 6
   blockers:
-    - "Copyable frontend diagnostic reports for stream/apply/quality reports are still queued; backend public errors are typed, but support handoff is not yet 9/10 until T018b."
-    - "Public/lifecycle/CAS error-code discipline improved, but calls that omit code= entirely can still silently use generic codes; T017b/T018b must continue error-contract discipline without creating a third public context carrier."
+    - "Public/lifecycle/CAS error-code discipline improved, but calls that omit code= entirely can still silently use generic codes; future error-contract work must continue without creating a third public context carrier."
     - "builder_sessions can still persist a corrupt lock_token with NULL lock_expires_at; runtime fails safe, but schema-level lock invariants need a migration or explicit corruption policy."
     - "Live eval still shows runtime-input/form-field prompts can produce no form fields."
     - "ai_builder_proposal_processor.py is materially smaller after T011 but still oversized at 1830 LOC; structured-question recovery, confirm requirements, and retry orchestration remain in one processor."
@@ -2290,6 +2289,7 @@ tasks:
     allowed_files:
       - "frontend/apps/web/src/lib/features/flows/ai-builder/aiBuilderDiagnosticReport.ts"
       - "frontend/apps/web/src/lib/features/flows/ai-builder/aiBuilderDiagnosticReport.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderDiagnosticCopyButton.svelte"
       - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderChat.svelte"
       - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte"
       - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.svelte"
@@ -2297,8 +2297,8 @@ tasks:
       - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderDriver.ts"
       - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts"
       - "frontend/apps/web/src/lib/features/flows/ai-builder/protocol.ts"
-      - "frontend/apps/web/src/paraglide/messages/en.json"
-      - "frontend/apps/web/src/paraglide/messages/sv.json"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
       - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
     acceptance_criteria:
       - "aiBuilderDiagnosticReport.ts defines AIBuilderIssueKind: wrong_step, missing_form_fields, wrong_output_type, unclear_question, bad_edit_result, other."
@@ -2316,6 +2316,81 @@ tasks:
       - "The report builder needs arbitrary blob redaction to work."
       - "The UI scope expands into a support-ticket workflow or persisted report system."
       - "Non-error quality reports cannot identify plan_id/plan_step_ref without ambiguous session inference."
+    receipt:
+      result: done
+      completed_at: "2026-05-21T23:43:00+02:00"
+      summary: "Implemented the frontend AI Builder diagnostic report builder and reusable copy-technical-details affordance. Reports use typed allow-listed inputs for public errors and non-error quality reports, keep issue_kind separate from fake errors, include explicit plan_step_ref for step reports, and avoid raw prompt/conversation/full-plan/file/LLM payloads."
+      changed_files:
+        - "frontend/apps/web/src/lib/features/flows/ai-builder/aiBuilderDiagnosticReport.ts"
+        - "frontend/apps/web/src/lib/features/flows/ai-builder/aiBuilderDiagnosticReport.test.ts"
+        - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderDiagnosticCopyButton.svelte"
+        - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderChat.svelte"
+        - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte"
+        - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.svelte"
+        - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.test.ts"
+        - "frontend/apps/web/messages/en.json"
+        - "frontend/apps/web/messages/sv.json"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      architecture_decisions:
+        - "Canonical frontend owner is aiBuilderDiagnosticReport.ts: it owns AIBuilderIssueKind, report input unions, report assembly, and plain-text formatting."
+        - "FlowAIBuilderDiagnosticCopyButton.svelte is the single reusable copy affordance for chat stream errors, apply/conflict errors, plan quality warnings, and step quality reports."
+        - "Step diagnostics build lazily through buildDiagnosticReport callbacks so PlanPane does not materialize one report object for every step on every render."
+        - "The report builder uses typed allow-listed session/plan/step/error summaries instead of accepting arbitrary objects and redacting later."
+      verification:
+        - command: "cd frontend/apps/web && bun run test:unit --run src/lib/features/flows/ai-builder/aiBuilderDiagnosticReport.test.ts src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.test.ts src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts"
+          result: "44 passed"
+        - command: "cd frontend/apps/web && bun x eslint src/lib/features/flows/ai-builder/aiBuilderDiagnosticReport.ts src/lib/features/flows/ai-builder/aiBuilderDiagnosticReport.test.ts src/lib/features/flows/ai-builder/FlowAIBuilderDiagnosticCopyButton.svelte src/lib/features/flows/ai-builder/FlowAIBuilderChat.svelte src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.svelte src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.test.ts"
+          result: "passed"
+        - command: "cd frontend && bun --filter @intric/web check"
+          result: "0 errors; 1 pre-existing unrelated warning in frontend/apps/web/src/lib/features/api-keys/ExtendExpirationDialog.svelte"
+        - command: "rg -n \"raw_prompt|fullConversation|fullPlan|plan_json|conversation_json|file_contents|llm_payload\" frontend/apps/web/src/lib/features/flows/ai-builder --glob '!*.test.ts'"
+          result: "no matches"
+        - command: "rg -n \"diagnosticReport=\" frontend/apps/web/src/lib/features/flows/ai-builder"
+          result: "no matches"
+        - command: "git diff --check"
+          result: "passed"
+      peer_review:
+        claude:
+          - artifact: ".codex/artifacts/claude-peer-loop-t018b-frontend-diagnostic-report-commit-gate-20260521T213202Z.md"
+            result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
+            codex_response: "Accepted Claude's P2 lazy-step-report finding and changed StepCard to build diagnostic reports on copy rather than PlanPane building every step report eagerly."
+          - artifact: ".codex/artifacts/claude-peer-loop-t018b-frontend-diagnostic-report-verification-20260521T213736Z.md"
+            result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
+            codex_response: "Accepted the test-quality suggestion and added a lazy-callback assertion proving report construction does not happen before copy."
+        antigravity:
+          status: "SKIPPED_DUE_TO_QUOTA"
+          evidence: "Diagnostic/DX planning already recorded Antigravity quota exhausted until 2026-05-28T08:49:49.406842+02:00; this is missing coverage, not a pass."
+      codex_self_review:
+        production_ready_for_tranche: true
+        clean_architecture_assessment: "The tranche adds one canonical frontend owner and one reusable copy affordance rather than an observability subsystem. It keeps backend diagnostic_context/details semantics intact and separates non-error issue_kind reports from public errors."
+        human_reviewability_assessment: "The diff is scoped to AI Builder frontend diagnostics, messages, tests, and the board. Unrelated dirty files remain unstaged and outside the tranche."
+        remaining_below_9:
+          - "AI Slop / Comment / Naming Quality remains 6 until a real cleanup/deletion tranche removes stale names, comments, and shallow module/test clutter."
+          - "Normal-User Output Quality remains 6 until live evals drive product fixes for vague prompts, form fields, and runtime-input behavior."
+          - "Runtime Reliability remains below 9 until DB lock invariant and remaining retry/idempotency edges are hardened."
+          - "Human Readability remains below 9 until module/test topology is consolidated around clearer entry points."
+
+  - id: T019
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: xhigh
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T018b, with special pressure on DB lock invariants, readability/module topology, AI slop cleanup, tests, and normal-user output quality."
+    inputs:
+      - "T018b receipt and current scorecard"
+      - ".codex/artifacts/flow-ai-builder-9-10-architecture-goal-synthesis-v4.md"
+      - ".codex/artifacts/flow-ai-builder-live-eval.md"
+      - "Current dirty worktree after the T018b commit"
+    constraints:
+      - "Read-only except board/artifact updates until a new implementation plan passes Codex and Claude."
+      - "Antigravity remains SKIPPED_DUE_TO_QUOTA unless quota status proves available."
+      - "Do not default to splitting large files; explicitly consider deletion, consolidation, DB invariant hardening, live eval product fixes, and test-topology cleanup."
+      - "Preserve unrelated dirty files and keep the next implementation tranche coherent and commit-sized."
+    expected_output:
+      - "Verdict on next tranche ranking with file:line evidence."
+      - "Allowed files, acceptance criteria, verification commands, and stop_if conditions for the next worker."
+      - "Codex self-review and Claude plan gate result before implementation."
+      - "Updated scorecard showing which dimension the next tranche is intended to move."
     receipt: null
 
 checks:
@@ -2324,18 +2399,16 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T016 implementation validation and Claude post-implementation review are green; Antigravity post-implementation review is missing due quota exit 75; T017 plan gate is done; T018 is active for the approved JSONB metadata implementation; diagnostic/DX follow-ups are queued as T017b/T018b."
-    task: T018
+    result: "T018b implementation validation and Claude post-implementation review are green; Antigravity post-implementation review is missing due quota; T019 is active to re-rank the next score-moving tranche."
+    task: T018b
     commands:
-      - "cd backend && uv run ruff check <T016 backend files>: All checks passed"
-      - "cd backend && uv run ruff format --check <T016 backend files>: 8 files already formatted"
-      - "cd backend && uv run pyright <T016 backend source files>: 0 errors, 0 warnings, 0 informations"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unit/test_ai_builder_openapi_contract.py tests/unittests/flows/ai_builder/test_ai_builder_events.py -q: 14 passed, 15 warnings"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder tests/unit/test_ai_builder_openapi_contract.py tests/unit/test_ai_builder_error_code_discipline.py -q: 2225 passed, 4 skipped, 17 warnings"
-      - "cd frontend && bun --filter @intric/intric-js check: exited 0"
+      - "cd frontend/apps/web && bun run test:unit --run src/lib/features/flows/ai-builder/aiBuilderDiagnosticReport.test.ts src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.test.ts src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts: 44 passed"
+      - "cd frontend/apps/web && bun x eslint <T018b frontend files>: passed"
       - "cd frontend && bun --filter @intric/web check: 0 errors, 1 unrelated warning in ExtendExpirationDialog.svelte"
-      - "cd frontend && bun --filter @intric/web test:unit -- src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts src/lib/features/flows/ai-builder/structuredQuestionAnswer.test.ts: 41 passed"
-      - "Claude T016 post-implementation gate iteration 4: .codex/artifacts/claude-peer-loop-t016-implemented-ai-builder-event-contract-review-iteration-4-20260521T184533Z.md: GREEN_LIGHT yes; MIN_SCORE 9"
-      - "Antigravity T016 post-implementation gate: wrapper exited 75; reset 2026-05-28T08:49:49.406842+02:00; not passed"
+      - "rg -n \"raw_prompt|fullConversation|fullPlan|plan_json|conversation_json|file_contents|llm_payload\" frontend/apps/web/src/lib/features/flows/ai-builder --glob '!*.test.ts': no matches"
+      - "rg -n \"diagnosticReport=\" frontend/apps/web/src/lib/features/flows/ai-builder: no matches"
+      - "Claude T018b commit gate: .codex/artifacts/claude-peer-loop-t018b-frontend-diagnostic-report-commit-gate-20260521T213202Z.md: GREEN_LIGHT yes; MIN_SCORE 8"
+      - "Claude T018b verification gate: .codex/artifacts/claude-peer-loop-t018b-frontend-diagnostic-report-verification-20260521T213736Z.md: GREEN_LIGHT yes; MIN_SCORE 8"
+      - "Antigravity T018b post-implementation gate: SKIPPED_DUE_TO_QUOTA; not passed"
       - "git diff --check: clean"
       - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"': yaml ok"

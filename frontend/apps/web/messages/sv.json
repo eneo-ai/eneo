@@ -130,6 +130,8 @@
   "ai_builder_form_fields_title": "Formulärfält vid körning",
   "ai_builder_generating": "Bygger ditt flöde",
   "ai_builder_hide_details": "Dölj detaljer",
+  "ai_builder_copy_technical_details": "Kopiera tekniska detaljer",
+  "ai_builder_copy_technical_details_failed": "Kunde inte kopiera tekniska detaljer",
   "ai_builder_input_placeholder": "Beskriv ditt flöde...",
   "ai_builder_loading": "Laddar AI-byggaren...",
   "ai_builder_mcp_restricted": "Begränsad verktygspolicy",

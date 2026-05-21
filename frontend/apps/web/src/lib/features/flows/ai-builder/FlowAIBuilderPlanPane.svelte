@@ -5,10 +5,17 @@
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
   import FlowAIBuilderStepCard from "./FlowAIBuilderStepCard.svelte";
   import FlowAIBuilderTokenUsage from "./FlowAIBuilderTokenUsage.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import type { AIBuilderSuggestChangeIntent, EditAdvisory } from "./protocol";
+  import {
+    AIBuilderIssueKind,
+    buildAIBuilderDiagnosticReport,
+    buildAIBuilderDiagnosticReportPlan,
+    buildAIBuilderDiagnosticReportSession
+  } from "./aiBuilderDiagnosticReport";
   import {
     buildAIBuilderMcpResourceLabelMaps,
     type AIBuilderMcpServerLike
@@ -52,6 +59,21 @@
   const isPublishedError = $derived(service.applyError?.code === "flow_is_published");
   const isUnpublishedApplyFailure = $derived(
     service.applyError?.code === "flow_unpublished_apply_failed"
+  );
+  const diagnosticSession = $derived.by(() =>
+    buildAIBuilderDiagnosticReportSession(service.session)
+  );
+  const diagnosticPlan = $derived.by(() => buildAIBuilderDiagnosticReportPlan(service.currentPlan));
+  const applyErrorDiagnosticReport = $derived.by(() =>
+    service.applyError
+      ? buildAIBuilderDiagnosticReport({
+          kind: "error",
+          surface: "plan_apply",
+          error: service.applyError,
+          session: diagnosticSession,
+          plan: diagnosticPlan
+        })
+      : null
   );
   const publishedVersion = $derived(
     service.applyError?.code === "flow_is_published"
@@ -100,6 +122,21 @@
   const stepCount = $derived(service.currentPlan?.envelope.spec.steps.length ?? 0);
   const planAssumptions = $derived(service.currentPlan?.envelope.assumptions ?? []);
   const planLintWarnings = $derived(service.currentPlan?.envelope.lint_warnings ?? []);
+  const planQualityDiagnosticReport = $derived.by(() =>
+    service.currentPlan && planLintWarnings.length > 0
+      ? buildAIBuilderDiagnosticReport({
+          kind: "quality",
+          surface: "plan_quality",
+          issue_kind: AIBuilderIssueKind.BadEditResult,
+          session: diagnosticSession,
+          plan: diagnosticPlan,
+          details: {
+            lint_warning_count: planLintWarnings.length,
+            advisory_count: advisories.length
+          }
+        })
+      : null
+  );
 
   // Reference material drawer — default-open when no plan, closed after plan arrives.
   // Keep an independent user-intent flag so explicit user toggles survive plan refresh.
@@ -207,6 +244,7 @@
               <Button variant="outline" size="sm" onclick={() => service.dismissConflict()}>
                 {m.ai_builder_conflict_cancel()}
               </Button>
+              <FlowAIBuilderDiagnosticCopyButton report={applyErrorDiagnosticReport} size="sm" />
             </div>
           </Alert.Root>
         {/if}
@@ -470,24 +508,32 @@
           <!-- Lint warnings -->
           {#if planLintWarnings.length > 0}
             <section class="border-default border-t px-5 py-4 md:px-6">
-              <h3
-                class="text-warning-stronger mb-2 flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.06em] uppercase"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                  class="size-3.5"
-                  aria-hidden="true"
+              <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <h3
+                  class="text-warning-stronger flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.06em] uppercase"
                 >
-                  <path
-                    fill-rule="evenodd"
-                    d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
-                    clip-rule="evenodd"
-                  />
-                </svg>
-                {m.ai_builder_quality_warnings()}
-              </h3>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                    class="size-3.5"
+                    aria-hidden="true"
+                  >
+                    <path
+                      fill-rule="evenodd"
+                      d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                  {m.ai_builder_quality_warnings()}
+                </h3>
+                <FlowAIBuilderDiagnosticCopyButton
+                  report={planQualityDiagnosticReport}
+                  variant="ghost"
+                  size="xs"
+                  class="text-warning-stronger hover:bg-warning-dimmer/80"
+                />
+              </div>
               <ul class="flex flex-col gap-1.5">
                 {#each planLintWarnings as warning (`${warning.step_ref ?? "flow"}-${warning.code}-${warning.message}`)}
                   <li
@@ -522,6 +568,24 @@
                   isFirst={i === 0}
                   isLast={i === spec.steps.length - 1}
                   planStatus={plan.status}
+                  buildDiagnosticReport={() =>
+                    buildAIBuilderDiagnosticReport({
+                      kind: "quality",
+                      surface: "step_quality",
+                      issue_kind: AIBuilderIssueKind.Other,
+                      session: diagnosticSession,
+                      plan: diagnosticPlan,
+                      step: {
+                        plan_step_ref: step.plan_step_ref,
+                        step_name: step.name,
+                        step_number: i + 1,
+                        input_type: step.input_type,
+                        output_type: step.output_type
+                      },
+                      details: {
+                        actual_output_type: step.output_type
+                      }
+                    })}
                   onsuggestchange={(intent) => onsuggestchange?.(intent)}
                 />
               {/each}
@@ -613,6 +677,7 @@
             <Button variant="outline" size="sm" onclick={() => service.dismissApplyError()}>
               {m.ai_builder_conflict_cancel()}
             </Button>
+            <FlowAIBuilderDiagnosticCopyButton report={applyErrorDiagnosticReport} size="sm" />
           </div>
         </div>
       </Alert.Root>
@@ -634,9 +699,12 @@
             })}
           </Alert.Description>
           <div class="mt-2">
-            <Button variant="outline" size="sm" onclick={() => service.dismissApplyError()}>
-              {m.ai_builder_dismiss()}
-            </Button>
+            <div class="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onclick={() => service.dismissApplyError()}>
+                {m.ai_builder_dismiss()}
+              </Button>
+              <FlowAIBuilderDiagnosticCopyButton report={applyErrorDiagnosticReport} size="sm" />
+            </div>
           </div>
         </div>
       </Alert.Root>
@@ -723,6 +791,7 @@
             <Button variant="outline" size="sm" onclick={() => service.dismissConflict()}>
               {m.ai_builder_conflict_cancel()}
             </Button>
+            <FlowAIBuilderDiagnosticCopyButton report={applyErrorDiagnosticReport} size="sm" />
           </div>
         </Alert.Root>
       </div>

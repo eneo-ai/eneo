@@ -2,6 +2,8 @@
   import { m } from "$lib/paraglide/messages";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
+  import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
+  import type { AIBuilderDiagnosticReport } from "./aiBuilderDiagnosticReport";
   import type { AIBuilderSuggestChangeIntent, StepChangeKind, StepSpec } from "./protocol";
 
   interface Props {
@@ -9,6 +11,7 @@
     stepNumber: number;
     planId?: string | null;
     changeKind?: StepChangeKind;
+    buildDiagnosticReport?: () => AIBuilderDiagnosticReport | null;
     isFirst?: boolean;
     isLast?: boolean;
     planStatus?: string;
@@ -23,6 +26,7 @@
     stepNumber,
     planId = null,
     changeKind = step.existing_step_ref ? "unchanged" : "added",
+    buildDiagnosticReport,
     isFirst = false,
     planStatus = "",
     onsuggestchange,
@@ -89,6 +93,7 @@
   const mcpServerRefs = $derived(step.assistant_spec.mcp_server_refs ?? []);
   const mcpToolRefs = $derived(step.assistant_spec.mcp_tool_refs ?? []);
   const hasMcp = $derived(mcpServerRefs.length > 0 || mcpToolRefs.length > 0);
+  const hasDiagnosticCopy = $derived(planStatus === "proposed" && !!buildDiagnosticReport);
   const hasAnyDetails = $derived(
     hasInstructions ||
       resolvedModel ||
@@ -96,7 +101,8 @@
       hasMcp ||
       hasBindings ||
       hasInputContract ||
-      hasOutputContract
+      hasOutputContract ||
+      hasDiagnosticCopy
   );
 
   function mcpServerLabel(ref: string): string {
@@ -388,30 +394,33 @@
               {/if}
 
               {#if planStatus === "proposed"}
-                <button
-                  type="button"
-                  class="border-default text-secondary hover:border-accent-default/40 hover:text-accent-default focus-visible:ring-accent-default/30 inline-flex min-h-10 w-fit items-center gap-1.5 rounded-md border bg-transparent px-3 py-2 text-[0.8125rem] font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none max-sm:w-full max-sm:justify-center sm:min-h-8 sm:px-2.5 sm:py-1.5 sm:text-xs"
-                  onclick={(e) => {
-                    e.stopPropagation();
-                    requestStepChange();
-                  }}
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 16 16"
-                    fill="currentColor"
-                    class="size-3"
-                    aria-hidden="true"
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    class="border-default text-secondary hover:border-accent-default/40 hover:text-accent-default focus-visible:ring-accent-default/30 inline-flex min-h-10 w-fit items-center gap-1.5 rounded-md border bg-transparent px-3 py-2 text-[0.8125rem] font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none max-sm:w-full max-sm:justify-center sm:min-h-8 sm:px-2.5 sm:py-1.5 sm:text-xs"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      requestStepChange();
+                    }}
                   >
-                    <path
-                      d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L6.75 6.774a2.75 2.75 0 0 0-.596.892l-.848 2.047a.75.75 0 0 0 .98.98l2.047-.848a2.75 2.75 0 0 0 .892-.596l4.261-4.262a1.75 1.75 0 0 0 0-2.474Z"
-                    />
-                    <path
-                      d="M4.75 3.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h6.5c.69 0 1.25-.56 1.25-1.25V9A.75.75 0 0 1 14 9v2.25A2.75 2.75 0 0 1 11.25 14h-6.5A2.75 2.75 0 0 1 2 11.25v-6.5A2.75 2.75 0 0 1 4.75 2H7a.75.75 0 0 1 0 1.5H4.75Z"
-                    />
-                  </svg>
-                  {m.ai_builder_suggest_change()}
-                </button>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 16 16"
+                      fill="currentColor"
+                      class="size-3"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L6.75 6.774a2.75 2.75 0 0 0-.596.892l-.848 2.047a.75.75 0 0 0 .98.98l2.047-.848a2.75 2.75 0 0 0 .892-.596l4.261-4.262a1.75 1.75 0 0 0 0-2.474Z"
+                      />
+                      <path
+                        d="M4.75 3.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h6.5c.69 0 1.25-.56 1.25-1.25V9A.75.75 0 0 1 14 9v2.25A2.75 2.75 0 0 1 11.25 14h-6.5A2.75 2.75 0 0 1 2 11.25v-6.5A2.75 2.75 0 0 1 4.75 2H7a.75.75 0 0 1 0 1.5H4.75Z"
+                      />
+                    </svg>
+                    {m.ai_builder_suggest_change()}
+                  </button>
+                  <FlowAIBuilderDiagnosticCopyButton buildReport={buildDiagnosticReport} />
+                </div>
               {/if}
             </div>
           </div>

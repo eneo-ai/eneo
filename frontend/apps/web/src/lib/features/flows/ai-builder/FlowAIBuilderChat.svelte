@@ -4,11 +4,17 @@
   import { SvelteSet } from "svelte/reactivity";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
   import FlowAIBuilderMessage from "./FlowAIBuilderMessage.svelte";
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";
   import FlowAIBuilderPhaseIndicator from "./FlowAIBuilderPhaseIndicator.svelte";
   import { shouldShowEditStartOver } from "./flowAIBuilderReset";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
+  import {
+    buildAIBuilderDiagnosticReport,
+    buildAIBuilderDiagnosticReportPlan,
+    buildAIBuilderDiagnosticReportSession
+  } from "./aiBuilderDiagnosticReport";
   import type { AIBuilderPlanEditContext, AIBuilderSuggestChangeIntent } from "./protocol";
   import type { StructuredQuestionAnswerPayload } from "./structuredQuestionAnswer";
 
@@ -40,6 +46,17 @@
       !service.currentPlan &&
       !service.isConflict &&
       !service.statusMessage
+  );
+  const streamErrorDiagnosticReport = $derived.by(() =>
+    service.error
+      ? buildAIBuilderDiagnosticReport({
+          kind: "error",
+          surface: "chat_stream",
+          error: service.error,
+          session: buildAIBuilderDiagnosticReportSession(service.session),
+          plan: buildAIBuilderDiagnosticReportPlan(service.currentPlan)
+        })
+      : null
   );
 
   function handleQuestionAnswer(answer: StructuredQuestionAnswerPayload) {
@@ -170,6 +187,12 @@
         <Alert.Description class="min-w-0 flex-1 text-[0.8125rem] leading-relaxed">
           {service.error.message}
         </Alert.Description>
+        <FlowAIBuilderDiagnosticCopyButton
+          report={streamErrorDiagnosticReport}
+          variant="ghost"
+          size="xs"
+          class="text-destructive hover:bg-destructive/10 hover:text-destructive -mt-0.5 shrink-0 self-start"
+        />
         <Button
           variant="ghost"
           size="xs"

@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import FlowAIBuilderStepCard from "./FlowAIBuilderStepCard.svelte";
+import { AIBuilderIssueKind, buildAIBuilderDiagnosticReport } from "./aiBuilderDiagnosticReport";
 import type { StepSpec } from "./protocol";
 
 afterEach(() => {
@@ -30,12 +31,14 @@ describe("FlowAIBuilderStepCard", () => {
 
     expect(screen.getByText("MCP")).toBeTruthy();
 
-    await fireEvent.click(screen.getByRole("button", { name: "Step 1: Fetch time (NEW)" }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: /^(Step|Steg) 1: Fetch time \((NEW|NY)\)$/ })
+    );
 
-    expect(await screen.findByText("MCP tools")).toBeTruthy();
+    expect(await screen.findByText(/MCP( tools|-verktyg)/)).toBeTruthy();
     expect(screen.getByText("Time MCP: get_current_time")).toBeTruthy();
     expect(
-      screen.getByText("Only this step gets these external tools when the flow runs.")
+      screen.getByText(/(Only this step gets these external tools|Endast detta steg får)/)
     ).toBeTruthy();
   });
 
@@ -50,21 +53,94 @@ describe("FlowAIBuilderStepCard", () => {
     });
 
     await fireEvent.click(
-      screen.getByRole("button", { name: "Step 6: Create final result (NEW)" })
+      screen.getByRole("button", {
+        name: /^(Step|Steg) 6: Create final result \((NEW|NY)\)$/
+      })
     );
-    await fireEvent.click(screen.getByRole("button", { name: "Change this step" }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: /^(Change this step|Ändra detta steg)$/ })
+    );
 
-    expect(onsuggestchange).toHaveBeenCalledWith({
-      placeholder: "Describe the change for step 6: Create final result",
-      editContext: {
-        scope: "step",
-        plan_id: "plan-1",
-        target_plan_step_ref: "step_f",
-        target_existing_step_ref: null,
-        target_step_name: "Create final result",
-        target_step_number: 6
-      }
+    const intent = onsuggestchange.mock.calls[0]?.[0];
+    expect(intent?.placeholder).toMatch(
+      /(Describe the change|Beskriv ändringen).*6: Create final result/
+    );
+    expect(intent?.editContext).toEqual({
+      scope: "step",
+      plan_id: "plan-1",
+      target_plan_step_ref: "step_f",
+      target_existing_step_ref: null,
+      target_step_name: "Create final result",
+      target_step_number: 6
     });
+  });
+
+  it("copies a step diagnostic report with the call-site plan_step_ref", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    });
+    const step = makeStep({
+      plan_step_ref: "step_f",
+      name: "Create final result",
+      input_type: "text",
+      output_type: "json"
+    });
+    const buildDiagnosticReport = vi.fn(() =>
+      buildAIBuilderDiagnosticReport({
+        kind: "quality",
+        surface: "step_quality",
+        issue_kind: AIBuilderIssueKind.Other,
+        session: {
+          session_id: "session-1",
+          target_kind: "edit",
+          flow_id: "flow-1",
+          latest_plan_id: "plan-1",
+          telemetry: {
+            last_request_id: "request-1",
+            last_model: "gpt-5.4",
+            last_outcome_kind: "planned"
+          }
+        },
+        plan: { plan_id: "plan-1", status: "proposed" },
+        step: {
+          plan_step_ref: step.plan_step_ref,
+          step_name: step.name,
+          step_number: 6,
+          input_type: step.input_type,
+          output_type: step.output_type
+        }
+      })
+    );
+
+    render(FlowAIBuilderStepCard, {
+      step,
+      stepNumber: 6,
+      planId: "plan-1",
+      planStatus: "proposed",
+      buildDiagnosticReport
+    });
+    expect(buildDiagnosticReport).not.toHaveBeenCalled();
+
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: /^(Step|Steg) 6: Create final result \((NEW|NY)\)$/
+      })
+    );
+    expect(buildDiagnosticReport).not.toHaveBeenCalled();
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: /^(Copy technical details|Kopiera tekniska detaljer)$/
+      })
+    );
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(buildDiagnosticReport).toHaveBeenCalledTimes(1);
+    const copied = writeText.mock.calls[0]?.[0];
+    expect(copied).toContain("- plan_step_ref: step_f");
+    expect(copied).toContain("- request_id_source: session_telemetry_last");
+    expect(copied).not.toContain("Fetch the current time");
   });
 });
 

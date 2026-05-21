@@ -128,6 +128,8 @@
   "ai_builder_form_fields_title": "Runtime form fields",
   "ai_builder_generating": "Building your flow",
   "ai_builder_hide_details": "Hide details",
+  "ai_builder_copy_technical_details": "Copy technical details",
+  "ai_builder_copy_technical_details_failed": "Could not copy technical details",
   "ai_builder_input_placeholder": "Describe your flow...",
   "ai_builder_attachment_only_message": "Use the attached reference material to help build the flow.",
   "ai_builder_attachment_drop_hint": "PDF, DOCX, JSON, text and other supported reference files",
