@@ -254,6 +254,7 @@ describe("FlowAIBuilderDriver", () => {
     const { driver, stream } = makeDriver({
       streamImpl: vi.fn(async (_path, init, handlers) => {
         expect(init.requestBody["application/json"].question_answer).toEqual({
+          kind: "requirements_confirmation",
           requirements_confirmed: true,
           requirements_version: "req-persisted"
         });

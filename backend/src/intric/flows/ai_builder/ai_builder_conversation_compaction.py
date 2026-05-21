@@ -1,7 +1,17 @@
 from __future__ import annotations
 
-from typing import Any, Iterable, cast
+from typing import Iterable
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    metadata_has_requirements_summary,
+    question_answer_from_metadata,
+    question_answer_question_id,
+    requirements_confirmation_from_metadata,
+    requirements_summary_from_metadata,
+    requirements_version_from_metadata,
+    tool_call_ids,
+    tool_calls_from_message,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     canonical_question_id,
@@ -70,10 +80,7 @@ def _latest_requirements_summary_index(
     conversation: list[ConversationMessage],
 ) -> int | None:
     for index in range(len(conversation) - 1, -1, -1):
-        metadata = conversation[index].metadata
-        if isinstance(metadata, dict) and isinstance(
-            metadata.get("requirements_summary"), dict
-        ):
+        if metadata_has_requirements_summary(conversation[index].metadata):
             return index
     return None
 
@@ -82,17 +89,21 @@ def _matching_requirements_confirmation_index(
     conversation: list[ConversationMessage],
     summary_index: int,
 ) -> int | None:
-    summary_metadata = conversation[summary_index].metadata or {}
-    version = summary_metadata.get("requirements_version")
+    summary = requirements_summary_from_metadata(conversation[summary_index].metadata)
+    version = (
+        summary.requirements_version
+        if summary is not None
+        else requirements_version_from_metadata(conversation[summary_index].metadata)
+    )
     for index in range(summary_index + 1, len(conversation)):
         if conversation[index].role != "user":
             continue
-        metadata = conversation[index].metadata
-        if not isinstance(metadata, dict):
+        confirmation = requirements_confirmation_from_metadata(
+            conversation[index].metadata
+        )
+        if confirmation is None:
             continue
-        if metadata.get("requirements_confirmed") is True and (
-            version is None or metadata.get("requirements_version") == version
-        ):
+        if version is None or confirmation.requirements_version == version:
             return index
     return None
 
@@ -103,15 +114,7 @@ def _latest_user_request_before_index(
 ) -> int | None:
     freeform_messages = extract_freeform_user_messages(conversation[:before_index])
     for index, _text in reversed(freeform_messages):
-        metadata = (
-            conversation[index].metadata
-            if isinstance(conversation[index].metadata, dict)
-            else None
-        )
-        if (
-            isinstance(metadata, dict)
-            and metadata.get("requirements_confirmed") is True
-        ):
+        if requirements_confirmation_from_metadata(conversation[index].metadata):
             continue
         return index
     return None
@@ -124,14 +127,11 @@ def _latest_structured_answer_indices(
     for index, message in enumerate(conversation):
         if message.role != "user":
             continue
-        metadata = message.metadata if isinstance(message.metadata, dict) else None
-        if not isinstance(metadata, dict):
+        question_answer = question_answer_from_metadata(message.metadata)
+        if question_answer is None:
             continue
-        question_answer = cast(dict[str, Any] | None, metadata.get("question_answer"))
-        if not isinstance(question_answer, dict):
-            continue
-        question_id = cast(str | None, question_answer.get("question_id"))
-        if isinstance(question_id, str) and question_id:
+        question_id = question_answer_question_id(question_answer)
+        if question_id is not None:
             latest_by_question[canonical_question_id(question_id)] = index
     return sorted(latest_by_question.values())
 
@@ -140,21 +140,14 @@ def _latest_tool_trace_indices(
     conversation: list[ConversationMessage],
 ) -> Iterable[int]:
     for index in range(len(conversation) - 1, -1, -1):
-        tool_calls = conversation[index].tool_calls
+        tool_calls = tool_calls_from_message(conversation[index])
         if conversation[index].role == "assistant" and tool_calls:
             indices = [index]
-            tool_call_ids = {
-                str(tool_call.get("id"))
-                for tool_call in tool_calls
-                if tool_call.get("id") is not None
-            }
+            ids = tool_call_ids(tool_calls)
             cursor = index + 1
             while cursor < len(conversation):
                 candidate = conversation[cursor]
-                if (
-                    candidate.role != "tool"
-                    or candidate.tool_call_id not in tool_call_ids
-                ):
+                if candidate.role != "tool" or candidate.tool_call_id not in ids:
                     break
                 indices.append(cursor)
                 cursor += 1

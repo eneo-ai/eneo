@@ -1431,10 +1431,11 @@ async def test_persist_tool_turn_refreshes_planning_state_with_requirements_summ
     (`requirements_summary`) lands in one savepoint and the persisted
     `PlanningState` stays coherent with the persisted conversation.
     """
-    from intric.flows.ai_builder.ai_builder_repair_transport import (
-        build_persisted_tool_call_stub,
-        persist_tool_turn,
+    from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+        make_persisted_assistant_tool_call,
+        requirements_summary_to_metadata,
     )
+    from intric.flows.ai_builder.ai_builder_repair_transport import persist_tool_turn
 
     space_id = await _create_space_with_planner_model(
         client=client,
@@ -1458,7 +1459,7 @@ async def test_persist_tool_turn_refreshes_planning_state_with_requirements_summ
                 role="user", content="Jag vill bygga en sammanställning."
             )
         ]
-        tool_call = build_persisted_tool_call_stub(
+        tool_call = make_persisted_assistant_tool_call(
             tool_call_id="call_requirements_1",
             tool_name="confirm_requirements",
         )
@@ -1477,14 +1478,21 @@ async def test_persist_tool_turn_refreshes_planning_state_with_requirements_summ
             tool_call=tool_call,
             arguments={"summary": "Kort sammanfattning"},
             tool_content="Requirements presented to user. Awaiting confirmation.",
-            metadata={
-                "requirements_summary": {
+            metadata=requirements_summary_to_metadata(
+                {
                     "summary": "Kort sammanfattning",
+                    "key_decisions": [
+                        {
+                            "topic": "input",
+                            "decision": "Sammanställning från flera dokument.",
+                        }
+                    ],
+                    "input_description": "Flera uppladdade dokument.",
+                    "output_description": "Kort sammanfattning.",
                     "assumptions": ["sammanställning från flera dokument"],
                     "requirements_version": "req-v1",
-                },
-                "requirements_version": "req-v1",
-            },
+                }
+            ),
         )
 
     async with db_container() as container:

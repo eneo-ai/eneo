@@ -5,6 +5,13 @@ import json
 from dataclasses import dataclass
 from typing import Iterable
 
+from pydantic import ValidationError
+
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    requirements_confirmation_from_metadata,
+    requirements_summary_from_metadata,
+    tool_calls_from_message,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     ConversationMessage,
     RequirementsSummaryPayload,
@@ -113,34 +120,30 @@ def resolve_requirements_state(
     latest_summary_index: int | None = None
 
     for index, message in enumerate(conversation):
-        if message.role == "assistant" and isinstance(message.tool_calls, list):
-            for tool_call in message.tool_calls:
-                if tool_call.get("name") != "confirm_requirements":
+        if message.role == "assistant":
+            for tool_call in tool_calls_from_message(message):
+                if tool_call.name != "confirm_requirements":
                     continue
-                arguments = tool_call.get("arguments")
-                if not isinstance(arguments, dict):
-                    continue
+                arguments = tool_call.arguments
                 try:
                     payload = RequirementsSummaryPayload.model_validate(arguments)
-                except Exception:
+                except ValidationError:
                     continue
                 latest_summary = payload
                 latest_version = build_requirements_version(payload)
                 latest_summary_index = index
 
-        metadata = message.metadata if isinstance(message.metadata, dict) else None
-        if metadata is None or message.role not in ("tool", "assistant"):
+        if message.role not in ("tool", "assistant"):
             continue
-        summary_data = metadata.get("requirements_summary")
-        version = metadata.get("requirements_version")
-        if not isinstance(summary_data, dict):
+        summary_metadata = requirements_summary_from_metadata(message.metadata)
+        if summary_metadata is None:
             continue
-        try:
-            latest_summary = RequirementsSummaryPayload.model_validate(summary_data)
-        except Exception:
-            continue
+        latest_summary = summary_metadata.requirements_summary
         computed_version = build_requirements_version(latest_summary)
-        if isinstance(version, str) and version != computed_version:
+        if (
+            summary_metadata.requirements_version is not None
+            and summary_metadata.requirements_version != computed_version
+        ):
             continue
         latest_version = computed_version
         latest_summary_index = index
@@ -160,15 +163,9 @@ def resolve_requirements_state(
                     has_plan_after_confirmation = True
             continue
 
-        metadata = message.metadata if isinstance(message.metadata, dict) else None
-        if (
-            isinstance(metadata, dict)
-            and metadata.get("requirements_confirmed") is True
-        ):
-            confirmed_metadata_version = metadata.get("requirements_version")
-            # Compatibility bridge for draft sessions persisted before
-            # requirements_version was added. Delete after all pre-2026-05-03
-            # AI Builder draft sessions have expired or been migrated.
+        confirmation = requirements_confirmation_from_metadata(message.metadata)
+        if confirmation is not None:
+            confirmed_metadata_version = confirmation.requirements_version
             if confirmed_metadata_version in (None, latest_version):
                 confirmed_version = latest_version
                 continue

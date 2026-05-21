@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    requirements_confirmation_from_metadata,
+)
 from intric.flows.ai_builder.ai_builder_discovery_families import (
     ALL_DISCOVERY_FAMILIES,
     DiscoveryFamily,
@@ -180,11 +183,9 @@ def build_active_request_window(
 
 
 def _is_requirements_confirmation_turn(message: ConversationMessage) -> bool:
-    metadata = message.metadata if isinstance(message.metadata, dict) else None
     return bool(
         message.role == "user"
-        and metadata is not None
-        and metadata.get("requirements_confirmed") is True
+        and requirements_confirmation_from_metadata(message.metadata) is not None
     )
 
 

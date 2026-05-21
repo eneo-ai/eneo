@@ -9,11 +9,18 @@ to classify free-form answers perfectly.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    assistant_question_id_from_metadata,
+    file_ids_from_metadata,
+    metadata_has_question_answer,
+    requirements_confirmation_from_metadata,
+    structured_question_payload_from_tool_arguments,
+    tool_calls_from_message,
+)
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 
 
@@ -75,13 +82,11 @@ def assistant_question_id(
         if isinstance(message, ConversationMessage)
         else message.get("metadata")
     )
-    if isinstance(metadata, Mapping):
-        metadata_map = cast(Mapping[str, Any], metadata)
-        question_id = metadata_map.get("question_id")
-        if isinstance(question_id, str) and question_id:
-            return question_id
+    question_id = assistant_question_id_from_metadata(metadata)
+    if question_id is not None:
+        return question_id
 
-    return _question_id_from_legacy_tool_calls(_message_tool_calls(message))
+    return _question_id_from_legacy_tool_calls(message)
 
 
 def _is_user_evidence(message: ConversationMessage | Mapping[str, Any]) -> bool:
@@ -98,19 +103,12 @@ def _is_user_evidence(message: ConversationMessage | Mapping[str, Any]) -> bool:
         if isinstance(message, ConversationMessage)
         else message.get("metadata")
     )
-    if isinstance(metadata, Mapping):
-        metadata_map = cast(Mapping[str, Any], metadata)
-        if metadata_map.get("question_answer") or metadata_map.get(
-            "requirements_confirmed"
-        ):
-            return True
-        file_ids = metadata_map.get("file_ids")
-        if (
-            isinstance(file_ids, Sequence)
-            and not isinstance(file_ids, str)
-            and file_ids
-        ):
-            return True
+    if metadata_has_question_answer(metadata):
+        return True
+    if requirements_confirmation_from_metadata(metadata) is not None:
+        return True
+    if file_ids_from_metadata(metadata):
+        return True
 
     content = (
         message.content
@@ -120,39 +118,16 @@ def _is_user_evidence(message: ConversationMessage | Mapping[str, Any]) -> bool:
     return isinstance(content, str) and bool(content.strip())
 
 
-def _message_tool_calls(
-    message: ConversationMessage | Mapping[str, Any],
-) -> Sequence[object] | None:
-    if isinstance(message, ConversationMessage):
-        return message.tool_calls
-    tool_calls = message.get("tool_calls")
-    if not isinstance(tool_calls, Sequence) or isinstance(tool_calls, str):
-        return None
-    return cast(Sequence[object], tool_calls)
-
-
 def _question_id_from_legacy_tool_calls(
-    tool_calls: Sequence[object] | None,
+    message: ConversationMessage | Mapping[str, Any],
 ) -> str | None:
-    if tool_calls is None:
-        return None
-    for tool_call in reversed(tool_calls):
-        if not isinstance(tool_call, Mapping):
+    for tool_call in reversed(tool_calls_from_message(message)):
+        if tool_call.name != "ask_structured_question":
             continue
-        tool_call_map = cast(Mapping[str, Any], tool_call)
-        if tool_call_map.get("name") != "ask_structured_question":
+        payload = structured_question_payload_from_tool_arguments(tool_call.arguments)
+        if payload is None:
             continue
-        arguments = tool_call_map.get("arguments")
-        payload: object = arguments
-        if isinstance(arguments, str):
-            try:
-                payload = json.loads(arguments)
-            except json.JSONDecodeError:
-                payload = None
-        if not isinstance(payload, Mapping):
-            continue
-        payload_map = cast(Mapping[str, Any], payload)
-        question_id = payload_map.get("question_id")
+        question_id = payload.get("question_id")
         if isinstance(question_id, str) and question_id:
             return question_id
     return None

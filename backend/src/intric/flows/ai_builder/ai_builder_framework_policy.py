@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
@@ -16,6 +15,16 @@ from intric.flows.ai_builder.ai_builder_canonicalization import (
 from intric.flows.ai_builder.ai_builder_clause_segmenter import (
     RoleScopedText,
     build_role_scoped_text,
+)
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    StructuredQuestionAnswerMetadata,
+    question_answer_from_metadata,
+    question_answer_has_real_payload,
+    question_answer_question_id,
+    question_answer_text_candidates,
+    question_answer_values,
+    structured_question_payload_from_tool_arguments,
+    tool_calls_from_message,
 )
 from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_discovery_defaults,
@@ -46,7 +55,7 @@ from intric.flows.ai_builder.ai_builder_models import ConversationMessage, Outpu
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     infer_runtime_metadata_slot,
 )
-from intric.flows.domain.flow import Flow, JsonObject
+from intric.flows.domain.flow import Flow
 
 __all__ = [
     "aggregate_freeform_user_text",
@@ -128,34 +137,16 @@ def latest_pending_structured_question(
             if isinstance(message, ConversationMessage)
             else message.get("role")
         )
-        tool_calls = (
-            message.tool_calls
-            if isinstance(message, ConversationMessage)
-            else message.get("tool_calls")
-        )
-        if role != "assistant" or not isinstance(tool_calls, Sequence):
+        if role != "assistant":
             continue
-        for tool_call in reversed(cast(Sequence[object], tool_calls)):
-            if not isinstance(tool_call, Mapping):
+        for tool_call in reversed(tool_calls_from_message(message)):
+            if tool_call.name != "ask_structured_question":
                 continue
-            tool_call_map = cast(Mapping[str, Any], tool_call)
-            if tool_call_map.get("name") != "ask_structured_question":
-                continue
-            arguments = tool_call_map.get("arguments")
-            payload = arguments
-            if isinstance(arguments, str):
-                try:
-                    payload = json.loads(arguments)
-                except json.JSONDecodeError:
-                    payload = None
-            if not isinstance(payload, Mapping):
-                continue
-            normalized = normalize_structured_question_payload(
-                cast(Mapping[str, Any], payload)
+            payload = structured_question_payload_from_tool_arguments(
+                tool_call.arguments
             )
-            question_id = normalized.get("question_id")
-            if isinstance(question_id, str) and question_id:
-                return normalized
+            if payload is not None:
+                return payload
     return None
 
 
@@ -175,14 +166,12 @@ def has_explicit_structured_answer(
             if isinstance(message, ConversationMessage)
             else message.get("metadata")
         )
-        if role != "user" or not isinstance(metadata, Mapping):
+        if role != "user":
             continue
-        metadata_map = cast(Mapping[str, Any], metadata)
-        answer = metadata_map.get("question_answer")
-        if not isinstance(answer, Mapping):
+        answer = question_answer_from_metadata(metadata)
+        if answer is None:
             continue
-        normalized = normalize_question_answer(cast(Mapping[str, Any], answer))
-        answer_question_id = normalized.get("question_id")
+        answer_question_id = question_answer_question_id(answer)
         if (
             isinstance(answer_question_id, str)
             and canonical_question_id(answer_question_id) == canonical_id
@@ -288,16 +277,12 @@ def extract_freeform_user_messages(
         )
         if role != "user" or not isinstance(content, str):
             continue
-        if isinstance(metadata, Mapping):
-            metadata_map = cast(Mapping[str, Any], metadata)
-            question_answer = metadata_map.get("question_answer")
-            if isinstance(
-                question_answer, Mapping
-            ) and _looks_like_structured_answer_echo(
-                content,
-                cast(Mapping[str, Any], question_answer),
-            ):
-                continue
+        question_answer = question_answer_from_metadata(metadata)
+        if question_answer is not None and _looks_like_structured_answer_echo(
+            content,
+            question_answer,
+        ):
+            continue
         messages.append((index, content.casefold()))
     return messages
 
@@ -326,48 +311,29 @@ def _aggregate_user_text(
         )
         if role != "user" or not isinstance(content, str):
             continue
-        if not include_structured_answers and isinstance(metadata, Mapping):
-            metadata_map = cast(Mapping[str, Any], metadata)
-            question_answer = metadata_map.get("question_answer")
-            if isinstance(
-                question_answer, Mapping
-            ) and _looks_like_structured_answer_echo(
-                content,
-                cast(Mapping[str, Any], question_answer),
-            ):
-                continue
+        question_answer = question_answer_from_metadata(metadata)
+        if (
+            not include_structured_answers
+            and question_answer is not None
+            and _looks_like_structured_answer_echo(content, question_answer)
+        ):
+            continue
         parts.append(content.casefold())
     return "\n".join(parts)
 
 
 def _looks_like_structured_answer_echo(
     content: str,
-    question_answer: Mapping[str, Any],
+    question_answer: StructuredQuestionAnswerMetadata | Mapping[str, Any],
 ) -> bool:
     normalized_content = content.casefold().strip()
     if not normalized_content:
         return True
 
-    if not _has_real_structured_answer_payload(question_answer):
+    if not question_answer_has_real_payload(question_answer):
         return False
 
-    candidates: set[str] = set()
-    for key in (
-        "selected_option_id",
-        "selected_value",
-        "answer",
-        "custom_value",
-    ):
-        raw_value = question_answer.get(key)
-        if isinstance(raw_value, str) and raw_value:
-            candidates.add(raw_value.casefold())
-    for key in ("selected_option_ids", "selected_values"):
-        raw_values = question_answer.get(key)
-        if not isinstance(raw_values, Sequence):
-            continue
-        for raw_value in cast(Sequence[object], raw_values):
-            if isinstance(raw_value, str) and raw_value:
-                candidates.add(raw_value.casefold())
+    candidates = question_answer_text_candidates(question_answer)
 
     if normalized_content in candidates:
         return True
@@ -384,34 +350,6 @@ def _looks_like_structured_answer_echo(
         and not any(marker in normalized_content for marker in ("\n",))
         and normalized_content == normalized_without_terminal_punctuation
     )
-
-
-def _has_real_structured_answer_payload(question_answer: Mapping[str, Any]) -> bool:
-    question_id = question_answer.get("question_id")
-    if not isinstance(question_id, str) or not question_id:
-        return False
-
-    for key in (
-        "selected_option_id",
-        "selected_value",
-        "answer",
-        "custom_value",
-    ):
-        raw_value = question_answer.get(key)
-        if isinstance(raw_value, str) and raw_value:
-            return True
-
-    for key in ("selected_option_ids", "selected_values"):
-        raw_values = question_answer.get(key)
-        if not isinstance(raw_values, Sequence):
-            continue
-        if any(
-            isinstance(raw_value, str) and raw_value
-            for raw_value in cast(Sequence[object], raw_values)
-        ):
-            return True
-
-    return False
 
 
 def _score_option_match(message: str, option: Mapping[str, Any]) -> float:
@@ -482,17 +420,9 @@ def extract_answer_signals(
         if role != "user":
             continue
 
-        answer = (
-            cast(JsonObject, metadata).get("question_answer")
-            if isinstance(metadata, dict)
-            else None
-        )
+        answer = question_answer_from_metadata(metadata)
 
-        if (
-            isinstance(content, str)
-            and content.strip()
-            and not isinstance(answer, dict)
-        ):
+        if isinstance(content, str) and content.strip() and answer is None:
             inferred_signals = infer_answer_signals_from_text(content)
             for inferred_question_id, inferred_values in inferred_signals.items():
                 if (
@@ -503,38 +433,13 @@ def extract_answer_signals(
                     continue
                 signals[inferred_question_id] = set(inferred_values)
 
-        if not isinstance(metadata, dict):
+        if answer is None:
+            continue
+        question_id = question_answer_question_id(answer)
+        if question_id is None:
             continue
 
-        if not isinstance(answer, dict):
-            continue
-        answer = normalize_question_answer(cast(Mapping[str, Any], answer))
-        question_id = answer.get("question_id")
-        if not isinstance(question_id, str) or not question_id:
-            continue
-
-        values: set[str] = set()
-        for raw_values in (
-            answer.get("selected_option_ids"),
-            answer.get("selected_values"),
-        ):
-            if not isinstance(raw_values, list):
-                continue
-            for value in cast(list[object], raw_values):
-                if isinstance(value, str) and value:
-                    values.add(value.casefold())
-                elif value is not None:
-                    values.add(str(value).casefold())
-        for raw_value in (
-            answer.get("selected_option_id"),
-            answer.get("selected_value"),
-            answer.get("answer"),
-        ):
-            if isinstance(raw_value, str) and raw_value:
-                values.add(raw_value.casefold())
-        custom_value = answer.get("custom_value")
-        if isinstance(custom_value, str) and custom_value:
-            values.add(custom_value.casefold())
+        values = question_answer_values(answer)
         if isinstance(content, str) and content.strip():
             values.add(content.casefold())
         signals[question_id] = values
@@ -560,7 +465,9 @@ def normalize_requirements_summary_for_flow(
     input_description = normalize_signal_text(
         str(requirements_data.get("input_description") or "")
     )
-    summary_runtime_input = resolve_input_intent(input_description, {}).primary_runtime_input
+    summary_runtime_input = resolve_input_intent(
+        input_description, {}
+    ).primary_runtime_input
     if summary_runtime_input in {"unknown", default_runtime_input}:
         return dict(requirements_data)
 
@@ -748,9 +655,10 @@ def resolve_explicit_output_choice(
 
     if _looks_like_text_analysis_output(normalized_text):
         return "structured_text"
-    if (
-        _infer_output_content_shape(normalized_text) == "structured_report"
-        and not _mentions_supported_document_artifact(normalized_text)
+    if _infer_output_content_shape(
+        normalized_text
+    ) == "structured_report" and not _mentions_supported_document_artifact(
+        normalized_text
     ):
         return "structured_text"
 

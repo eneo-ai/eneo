@@ -23,6 +23,17 @@ from intric.flows.ai_builder.ai_builder_capability_projection import (
     build_llm_prompt_context,
     render_llm_prompt_context,
 )
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    UI_LANGUAGE_METADATA_KEY,
+    AIBuilderQuestionAnswerInput,
+    metadata_for_user_message,
+    metadata_has_question_answer,
+    question_answer_from_metadata,
+    requirements_confirmation_from_question_answer,
+    tool_calls_from_message,
+    ui_language_from_metadata,
+    ui_language_from_question_answer,
+)
 from intric.flows.ai_builder.ai_builder_discovery import (
     build_registry_question_followup,
 )
@@ -52,7 +63,6 @@ from intric.flows.ai_builder.ai_builder_events import (
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     infer_question_answer_from_freeform,
     latest_pending_structured_question,
-    normalize_question_answer,
     normalize_requirements_summary_for_flow,
 )
 from intric.flows.ai_builder.ai_builder_interaction_utils import (
@@ -348,15 +358,16 @@ class AIBuilderPlanner:
     @staticmethod
     def conversation_msg_to_llm_dict(msg: ConversationMessage) -> dict[str, Any]:
         content = msg.content
-        metadata = msg.metadata if isinstance(msg.metadata, dict) else None
-        question_answer = metadata.get("question_answer") if metadata else None
-        if msg.role == "user" and isinstance(question_answer, dict):
-            question_answer = normalize_question_answer(
-                cast(dict[str, Any], question_answer)
+        question_answer = question_answer_from_metadata(msg.metadata)
+        if msg.role == "user" and question_answer is not None:
+            question_answer_payload = question_answer.model_dump(
+                mode="json",
+                exclude_none=True,
+                exclude={"kind", "ui_language"},
             )
             sanitized_answer = {
                 key: value
-                for key, value in question_answer.items()
+                for key, value in question_answer_payload.items()
                 if key
                 in {
                     "question_id",
@@ -378,21 +389,18 @@ class AIBuilderPlanner:
                 )
 
         payload: dict[str, Any] = {"role": msg.role, "content": content}
-        if msg.tool_calls:
+        tool_calls = tool_calls_from_message(msg)
+        if tool_calls:
             payload["tool_calls"] = [
                 {
-                    "id": tool_call["id"],
+                    "id": tool_call.id,
                     "type": "function",
                     "function": {
-                        "name": tool_call["name"],
-                        "arguments": (
-                            json.dumps(tool_call["arguments"])
-                            if isinstance(tool_call["arguments"], dict)
-                            else tool_call["arguments"]
-                        ),
+                        "name": tool_call.name,
+                        "arguments": json.dumps(tool_call.arguments),
                     },
                 }
-                for tool_call in msg.tool_calls
+                for tool_call in tool_calls
             ]
         if msg.tool_call_id:
             payload["tool_call_id"] = msg.tool_call_id
@@ -463,34 +471,26 @@ class AIBuilderPlanner:
         *,
         conversation: list[ConversationMessage],
         message: str,
-        question_answer: dict[str, Any] | None,
+        question_answer: AIBuilderQuestionAnswerInput | None,
         ui_language: str | None = None,
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
     ) -> PlannerMetadataResolution:
         if ui_language is None and question_answer is not None:
-            raw_ui_language = question_answer.get("ui_language")
-            if isinstance(raw_ui_language, str) and raw_ui_language:
-                ui_language = raw_ui_language
+            ui_language = ui_language_from_question_answer(question_answer)
 
         is_requirements_confirmation = (
-            question_answer is not None
-            and question_answer.get("requirements_confirmed") is True
+            requirements_confirmation_from_question_answer(question_answer) is not None
         )
         metadata: dict[str, Any] | None = None
-        if is_requirements_confirmation and question_answer is not None:
-            metadata = {
-                "requirements_confirmed": True,
-                "requirements_version": question_answer.get("requirements_version"),
-            }
-        elif question_answer:
-            metadata = {"question_answer": normalize_question_answer(question_answer)}
+        if question_answer is not None:
+            metadata = metadata_for_user_message(question_answer=question_answer)
 
         used_auxiliary_llm = False
         if metadata is None and not is_requirements_confirmation:
             inferred_answer = infer_question_answer_from_freeform(conversation, message)
             if inferred_answer is not None:
-                metadata = {"question_answer": inferred_answer}
+                metadata = metadata_for_user_message(question_answer=inferred_answer)
             elif latest_pending_structured_question(conversation) is not None:
                 adjudicated_answer = await adjudicate_pending_question_answer(
                     litellm_client=self.litellm_client,
@@ -500,15 +500,15 @@ class AIBuilderPlanner:
                     user_message=message,
                 )
                 if adjudicated_answer is not None:
-                    metadata = {
-                        "question_answer": adjudicated_answer.to_question_answer()
-                    }
+                    metadata = metadata_for_user_message(
+                        question_answer=adjudicated_answer.to_question_answer()
+                    )
                 used_auxiliary_llm = True
 
         if ui_language is not None:
             metadata = {
                 **(metadata or {}),
-                "ui_language": ui_language,
+                UI_LANGUAGE_METADATA_KEY: ui_language,
             }
 
         return PlannerMetadataResolution(
@@ -1027,7 +1027,7 @@ class AIBuilderPlanner:
         session_id: UUID,
         message: str,
         file_ids: list[UUID] | None = None,
-        question_answer: dict[str, Any] | None = None,
+        question_answer: AIBuilderQuestionAnswerInput | None = None,
         edit_context: AIBuilderPlanEditContext | None = None,
         ui_language: str | None = None,
         litellm_model: str,
@@ -1143,7 +1143,7 @@ class AIBuilderPlanner:
             if plan_edit_context is not None:
                 metadata = {
                     **(metadata or {}),
-                    "edit_context": plan_edit_context.to_metadata(),
+                    **(metadata_for_user_message(edit_context=plan_edit_context) or {}),
                 }
             is_requirements_confirmation = (
                 metadata_resolution.is_requirements_confirmation
@@ -1155,11 +1155,7 @@ class AIBuilderPlanner:
                 metadata=(
                     {
                         **(metadata or {}),
-                        **(
-                            {"file_ids": [str(file_id) for file_id in file_ids]}
-                            if file_ids
-                            else {}
-                        ),
+                        **(metadata_for_user_message(file_ids=file_ids) or {}),
                     }
                     if metadata or file_ids
                     else None
@@ -1707,9 +1703,8 @@ def _resolve_ui_language(conversation: list[ConversationMessage]) -> str | None:
     for message in reversed(conversation):
         if message.role != "user":
             continue
-        metadata = message.metadata if isinstance(message.metadata, dict) else None
-        ui_language = metadata.get("ui_language") if metadata else None
-        if ui_language in {"sv", "en"}:
+        ui_language = ui_language_from_metadata(message.metadata)
+        if ui_language is not None:
             return ui_language
     return None
 
@@ -1747,8 +1742,7 @@ def _count_free_discovery_turns(conversation: list[ConversationMessage]) -> int:
         if msg.role == "assistant" and msg.content and not msg.tool_calls:
             count += 1
         elif msg.role == "user":
-            metadata = msg.metadata if isinstance(msg.metadata, dict) else None
-            if metadata and metadata.get("question_answer"):
+            if metadata_has_question_answer(msg.metadata):
                 break  # Found a structured answer — stop counting
     return count
 

@@ -46,6 +46,7 @@ describe("structured question answer helpers", () => {
 
     expect(result.text).toBe("One PDF");
     expect(result.questionAnswer).toEqual({
+      kind: "structured_question_answer",
       question_id: "pdf_count",
       selected_option_ids: ["single"],
       selected_values: ["single"]
@@ -68,6 +69,7 @@ describe("structured question answer helpers", () => {
 
     expect(result.text).toBe("Use the board-report template");
     expect(result.questionAnswer).toEqual({
+      kind: "structured_question_answer",
       question_id: "docx_template",
       custom_value: "Use the board-report template"
     });

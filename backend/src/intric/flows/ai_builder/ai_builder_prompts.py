@@ -14,6 +14,10 @@ from intric.flows.ai_builder.ai_builder_action_policy import (
 from intric.flows.ai_builder.ai_builder_ask_question_contract import (
     render_ask_question_vocabulary_block,
 )
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    question_answer_from_metadata,
+    question_answer_question_id,
+)
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_discovery import (
     build_discovery_guidance,
@@ -594,14 +598,11 @@ def _estimate_message_tokens(message: dict[str, Any]) -> int:
 
 
 def _extract_question_id(message: ConversationMessage) -> str | None:
-    metadata = message.metadata
-    if not isinstance(metadata, dict):
+    question_answer = question_answer_from_metadata(message.metadata)
+    if question_answer is None:
         return None
-    question_answer = metadata.get("question_answer")
-    if not isinstance(question_answer, dict):
-        return None
-    question_id = cast(dict[str, Any], question_answer).get("question_id")
-    return canonical_question_id(question_id) if isinstance(question_id, str) else None
+    question_id = question_answer_question_id(question_answer)
+    return canonical_question_id(question_id) if question_id is not None else None
 
 
 def _needs_pdf_scope_question(text: str, answered_ids: set[str]) -> bool:

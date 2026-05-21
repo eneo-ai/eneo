@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Literal
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    StructuredQuestionAnswerMetadata,
+    question_answer_from_metadata,
+    question_answer_question_id,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     ConversationMessage,
@@ -319,33 +324,35 @@ def _latest_mcp_selection_answer(
         message = conversation[index]
         if message.role != "user":
             continue
-        metadata = (
-            cast(dict[str, object], message.metadata)
-            if isinstance(message.metadata, dict)
-            else None
-        )
-        raw_question_answer = metadata.get("question_answer") if metadata else None
-        if not isinstance(raw_question_answer, dict):
+        question_answer = question_answer_from_metadata(message.metadata)
+        if question_answer is None:
             continue
-        question_answer = cast(dict[str, object], raw_question_answer)
-        if question_answer.get("question_id") != MCP_RESOURCE_SELECTION_QUESTION_ID:
+        if (
+            question_answer_question_id(question_answer)
+            != MCP_RESOURCE_SELECTION_QUESTION_ID
+        ):
             continue
-        values: set[str] = set()
-        selected_values = question_answer.get("selected_values")
-        if isinstance(selected_values, list):
-            values.update(
-                str(value)
-                for value in cast(list[object], selected_values)
-                if value is not None
-            )
-        selected_value = question_answer.get("selected_value")
-        if selected_value is not None:
-            values.add(str(selected_value))
-        custom_value = question_answer.get("custom_value")
-        if isinstance(custom_value, str) and custom_value.strip():
-            values.add(custom_value.strip())
+        values = _mcp_selection_values_from_answer(question_answer)
         return index, frozenset(values)
     return None
+
+
+def _mcp_selection_values_from_answer(
+    question_answer: StructuredQuestionAnswerMetadata,
+) -> set[str]:
+    values: set[str] = set()
+    if question_answer.selected_values is not None:
+        values.update(
+            str(value) for value in question_answer.selected_values if value is not None
+        )
+    if question_answer.selected_value is not None:
+        values.add(str(question_answer.selected_value))
+    if (
+        question_answer.custom_value is not None
+        and question_answer.custom_value.strip()
+    ):
+        values.add(question_answer.custom_value.strip())
+    return values
 
 
 def _has_later_explicit_mcp_request(

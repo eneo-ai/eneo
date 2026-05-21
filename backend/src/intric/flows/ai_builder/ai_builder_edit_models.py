@@ -11,15 +11,13 @@ and executes the *result*.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     field_validator,
-    model_validator,
 )
 
 from intric.flows.ai_builder.ai_builder_new_step_models import (
@@ -254,47 +252,11 @@ class CompiledEditResult(BaseModel):
     confidence: EditConfidence = "ready"
 
 
-_LEGACY_COMPILED_EDIT_RESULT_KEYS = frozenset(CompiledEditResult.model_fields)
-
-
 class BuilderPlanEditResult(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_default=True)
 
     compiled_edit: CompiledEditResult | None = None
     description_override_manual: bool = False
-
-    @model_validator(mode="before")
-    @classmethod
-    def _hydrate_legacy_flat_shape(cls, data: object) -> object:
-        original_data = data
-        if not isinstance(data, Mapping):
-            return original_data
-
-        raw_mapping = cast(Mapping[object, object], data)
-        payload: dict[str, object] = {}
-        for key, value in raw_mapping.items():
-            if not isinstance(key, str):
-                return original_data
-            payload[key] = value
-
-        if "compiled_edit" in payload:
-            return original_data
-
-        description_override_manual = payload.get("description_override_manual", False)
-        compiled_edit_payload: dict[str, object] = {
-            key: value
-            for key, value in payload.items()
-            if key != "description_override_manual"
-        }
-        if any(
-            key not in _LEGACY_COMPILED_EDIT_RESULT_KEYS
-            for key in compiled_edit_payload
-        ):
-            return original_data
-        return {
-            "compiled_edit": compiled_edit_payload or None,
-            "description_override_manual": description_override_manual,
-        }
 
     @field_validator("description_override_manual", mode="before")
     @classmethod

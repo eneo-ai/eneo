@@ -243,13 +243,11 @@ class TestBuilderPlanEditResult:
         assert restored.compiled_edit is None
         assert restored.description_override_manual is True
 
-    def test_legacy_flat_compiled_edit_shape_hydrates_to_compiled_edit(self):
+    def test_flat_compiled_edit_shape_is_rejected_after_migration(self):
         compiled = _make_compiled_edit_result()
 
-        result = BuilderPlanEditResult.model_validate(compiled.model_dump(mode="json"))
-
-        assert result.compiled_edit == compiled
-        assert result.description_override_manual is False
+        with pytest.raises(ValidationError):
+            BuilderPlanEditResult.model_validate(compiled.model_dump(mode="json"))
 
     def test_populated_compiled_edit_result_json_roundtrips(self):
         compiled = _make_compiled_edit_result()

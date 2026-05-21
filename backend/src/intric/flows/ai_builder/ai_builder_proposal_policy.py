@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    ui_language_from_metadata,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     extract_answer_signals,
@@ -79,8 +82,7 @@ def resolve_ui_language(
     for message in reversed(conversation):
         if message.role != "user":
             continue
-        metadata = message.metadata if isinstance(message.metadata, dict) else None
-        ui_language = metadata.get("ui_language") if metadata else None
+        ui_language = ui_language_from_metadata(message.metadata)
         if ui_language in {"sv", "en"}:
             return ui_language
     return None

@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    make_persisted_assistant_tool_call,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     BuilderPlan,
     BuilderPlanEditResult,
@@ -287,18 +290,17 @@ def append_plan_messages(
         "step_names": [s.name for s in spec.steps],
         "plan_rationale": arguments.get("plan_rationale", ""),
     }
+    tool_call = make_persisted_assistant_tool_call(
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+        arguments=compact_arguments,
+    )
     conversation.append(
         ConversationMessage(
             role="assistant",
             content=assistant_content,
             metadata=assistant_metadata,
-            tool_calls=[
-                {
-                    "id": tool_call_id,
-                    "name": tool_name,
-                    "arguments": compact_arguments,
-                }
-            ],
+            tool_calls=[tool_call.model_dump(mode="json")],
         )
     )
     conversation.append(

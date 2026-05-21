@@ -7,6 +7,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from intric.files.file_models import FilePublic
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    AIBuilderQuestionAnswerRequest,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     JsonObject,
@@ -212,6 +215,7 @@ class SendMessageRequest(BaseModel):
                 "model_id": "00000000-0000-0000-0000-000000000010",
                 "file_ids": ["00000000-0000-0000-0000-000000000099"],
                 "question_answer": {
+                    "kind": "structured_question_answer",
                     "question_id": "final_output_mode",
                     "selected_option_ids": ["structured_json"],
                     "selected_values": ["structured_json"],
@@ -231,7 +235,7 @@ class SendMessageRequest(BaseModel):
     message: str = Field(max_length=50_000)
     model_id: UUID | None = None
     file_ids: list[UUID] | None = None
-    question_answer: JsonObject | None = None
+    question_answer: AIBuilderQuestionAnswerRequest | None = None
     edit_context: AIBuilderPlanEditContext | None = None
     ui_language: str | None = None
 

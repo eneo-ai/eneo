@@ -1,6 +1,7 @@
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
 import type {
+  PersistedStructuredQuestionAnswerMetadata,
   StructuredQuestion,
   StructuredQuestionAnswerMetadata
 } from "./structuredQuestionAnswer";
@@ -87,7 +88,7 @@ type FlowAIBuilderListener = (state: Readonly<FlowAIBuilderState>) => void;
 
 function extractQuestionAnswer(
   metadata: ChatMessage["metadata"] | undefined
-): StructuredQuestionAnswerMetadata | null {
+): PersistedStructuredQuestionAnswerMetadata | null {
   if (!metadata || typeof metadata !== "object" || !("question_answer" in metadata)) {
     return null;
   }
@@ -95,7 +96,29 @@ function extractQuestionAnswer(
   if (!questionAnswer || typeof questionAnswer !== "object") {
     return null;
   }
-  return questionAnswer as StructuredQuestionAnswerMetadata;
+  return questionAnswer as PersistedStructuredQuestionAnswerMetadata;
+}
+
+function toPersistedQuestionAnswerMetadata(
+  questionAnswer: StructuredQuestionAnswerMetadata
+): PersistedStructuredQuestionAnswerMetadata | null {
+  if (questionAnswer.kind !== "structured_question_answer") {
+    return null;
+  }
+  const metadata: PersistedStructuredQuestionAnswerMetadata = {};
+  if (questionAnswer.question_id !== undefined) {
+    metadata.question_id = questionAnswer.question_id;
+  }
+  if (questionAnswer.selected_option_ids !== undefined) {
+    metadata.selected_option_ids = questionAnswer.selected_option_ids;
+  }
+  if (questionAnswer.selected_values !== undefined) {
+    metadata.selected_values = questionAnswer.selected_values;
+  }
+  if (questionAnswer.custom_value !== undefined) {
+    metadata.custom_value = questionAnswer.custom_value;
+  }
+  return metadata;
 }
 
 function assertNever(value: never): never {
@@ -337,13 +360,13 @@ export class FlowAIBuilderDriver {
     };
     if (questionAnswer) {
       userMsg.metadata =
-        "requirements_confirmed" in questionAnswer
+        questionAnswer.kind === "requirements_confirmation"
           ? {
               requirements_confirmed: true,
               requirements_version: questionAnswer.requirements_version
             }
           : {
-              question_answer: questionAnswer
+              question_answer: toPersistedQuestionAnswerMetadata(questionAnswer)
             };
     }
     if (editContext) {
@@ -688,10 +711,11 @@ export class FlowAIBuilderDriver {
       m.ai_builder_requirements_confirm_message(),
       latestSummary.requirements_version
         ? {
+            kind: "requirements_confirmation",
             requirements_confirmed: true,
             requirements_version: latestSummary.requirements_version
           }
-        : { requirements_confirmed: true }
+        : { kind: "requirements_confirmation", requirements_confirmed: true }
     );
   }
 

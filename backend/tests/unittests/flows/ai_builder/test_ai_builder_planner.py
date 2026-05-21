@@ -123,6 +123,7 @@ async def test_resolve_message_metadata_preserves_requirements_confirmation_and_
         conversation=[],
         message="Yes",
         question_answer={
+            "kind": "requirements_confirmation",
             "requirements_confirmed": True,
             "requirements_version": "req-v2",
             "ui_language": "en",

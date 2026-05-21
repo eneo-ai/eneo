@@ -6,10 +6,12 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    make_persisted_assistant_tool_call,
+)
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_repair_transport import (
-    build_persisted_tool_call_stub,
     build_tool_retry_messages,
     persist_tool_turn,
 )
@@ -44,14 +46,17 @@ def test_build_tool_retry_messages_appends_tool_call_and_feedback() -> None:
     }
 
 
-def test_build_persisted_tool_call_stub_returns_minimal_tool_shape() -> None:
-    stub = build_persisted_tool_call_stub(
+def test_make_persisted_assistant_tool_call_returns_canonical_tool_shape() -> None:
+    tool_call = make_persisted_assistant_tool_call(
         tool_call_id="call_2",
         tool_name="confirm_requirements",
     )
 
-    assert stub.id == "call_2"
-    assert stub.function.name == "confirm_requirements"
+    assert tool_call.model_dump(mode="json") == {
+        "id": "call_2",
+        "name": "confirm_requirements",
+        "arguments": {},
+    }
 
 
 @pytest.mark.asyncio

@@ -26,6 +26,9 @@ from intric.flows.ai_builder.ai_builder_context import (
     AIBuilderPlannerContext,
     build_planner_context,
 )
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    AIBuilderQuestionAnswerInput,
+)
 from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_DONE as _SSE_EVENT_DONE,
@@ -472,7 +475,7 @@ class AIBuilderService:
         session_id: UUID,
         message: str,
         file_ids: list[UUID] | None = None,
-        question_answer: dict[str, Any] | None = None,
+        question_answer: AIBuilderQuestionAnswerInput | None = None,
         edit_context: AIBuilderPlanEditContext | None = None,
         ui_language: str | None = None,
         litellm_model: str,

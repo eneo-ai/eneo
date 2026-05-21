@@ -20470,6 +20470,24 @@ export interface components {
        */
       session_id: string;
     };
+    /** RequirementsConfirmationMetadata */
+    RequirementsConfirmationMetadata: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "requirements_confirmation";
+      /**
+       * Requirements Confirmed
+       * @default true
+       * @constant
+       */
+      requirements_confirmed?: true;
+      /** Requirements Version */
+      requirements_version?: string | null;
+      /** Ui Language */
+      ui_language?: string | null;
+    };
     /**
      * RerunDependencyKind
      * @enum {string}
@@ -20870,6 +20888,7 @@ export interface components {
      *       "message": "Build a flow that extracts key dates from uploaded contracts and returns structured JSON.",
      *       "model_id": "00000000-0000-0000-0000-000000000010",
      *       "question_answer": {
+     *         "kind": "structured_question_answer",
      *         "question_id": "final_output_mode",
      *         "selected_option_ids": [
      *           "structured_json"
@@ -20889,9 +20908,12 @@ export interface components {
       /** File Ids */
       file_ids?: string[] | null;
       /** Question Answer */
-      question_answer?: {
-        [key: string]: unknown;
-      } | null;
+      question_answer?:
+        | (
+            | components["schemas"]["StructuredQuestionAnswerMetadata"]
+            | components["schemas"]["RequirementsConfirmationMetadata"]
+          )
+        | null;
       edit_context?: components["schemas"]["AIBuilderPlanEditContext"] | null;
       /** Ui Language */
       ui_language?: string | null;
@@ -22073,6 +22095,30 @@ export interface components {
       fields?: components["schemas"]["StructuredFieldDraft"][] | null;
       /** Item Fields */
       item_fields?: components["schemas"]["StructuredFieldDraft"][] | null;
+    };
+    /** StructuredQuestionAnswerMetadata */
+    StructuredQuestionAnswerMetadata: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "structured_question_answer";
+      /** Question Id */
+      question_id?: string | null;
+      /** Selected Option Ids */
+      selected_option_ids?: string[] | null;
+      /** Selected Values */
+      selected_values?: (string | number | boolean | null)[] | null;
+      /** Selected Option Id */
+      selected_option_id?: string | null;
+      /** Selected Value */
+      selected_value?: string | number | boolean | null;
+      /** Answer */
+      answer?: string | number | boolean | null;
+      /** Custom Value */
+      custom_value?: string | null;
+      /** Ui Language */
+      ui_language?: string | null;
     };
     /**
      * SubscriptionRenewalResult

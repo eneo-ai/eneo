@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    ui_language_from_metadata,
+)
 from intric.flows.ai_builder.ai_builder_discovery_decision_engine import (
     implies_single_case,
     implies_single_primary_document,
@@ -321,7 +324,10 @@ def default_discovery_assumptions(
     )
     document_scope_answer_is_user_or_model_owned = (
         "document_material_scope" in profile.answers
-        and (document_scope_slot is None or document_scope_slot.source != "policy_default")
+        and (
+            document_scope_slot is None
+            or document_scope_slot.source != "policy_default"
+        )
     )
     if (
         "processing_scope" not in profile.answers
@@ -457,8 +463,7 @@ def resolve_discovery_language(
     for message in reversed(conversation):
         if message.role != "user":
             continue
-        metadata = message.metadata if isinstance(message.metadata, dict) else None
-        ui_language = metadata.get("ui_language") if metadata else None
+        ui_language = ui_language_from_metadata(message.metadata)
         if ui_language in {"sv", "en"}:
             return ui_language
     return infer_discovery_language(text)

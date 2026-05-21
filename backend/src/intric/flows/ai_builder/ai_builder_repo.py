@@ -23,6 +23,9 @@ from intric.database.tables.tenant_table import Tenants
 from intric.flows.ai_builder.ai_builder_conversation_compaction import (
     compact_ai_builder_conversation,
 )
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    file_ids_from_metadata,
+)
 from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from intric.flows.ai_builder.ai_builder_models import (
     BuilderPlan,
@@ -500,25 +503,7 @@ class AIBuilderRepository:
             for message in conversation:
                 if message.role != "user":
                     continue
-                metadata = (
-                    message.metadata if isinstance(message.metadata, dict) else None
-                )
-                raw_file_ids = (
-                    cast(list[Any] | None, metadata.get("file_ids"))
-                    if metadata
-                    else None
-                )
-                if not isinstance(raw_file_ids, list):
-                    continue
-                for raw_file_id in raw_file_ids:
-                    try:
-                        committed_file_ids.append(
-                            raw_file_id
-                            if isinstance(raw_file_id, UUID)
-                            else UUID(str(cast(object, raw_file_id)))
-                        )
-                    except (TypeError, ValueError):
-                        continue
+                committed_file_ids.extend(file_ids_from_metadata(message.metadata))
 
             stmt = select(BuilderSessions).where(
                 BuilderSessions.id == session_id,

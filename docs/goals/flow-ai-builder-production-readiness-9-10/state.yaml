@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T017
+active_task: T017b
 
 scoring_target:
   dimensions:
@@ -43,35 +43,36 @@ scoring_target:
     - Data Model / Schema Quality
     - API Contract Quality
     - Test Coverage Quality
+    - Developer Diagnostic Experience
     - AI Slop / Comment / Naming Quality
     - Normal-User Output Quality
   target_minimum_score: 9
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T016 implementation/post-review: AI Builder message SSE now has a generated-client friendly discriminated event union, but the broader score floor is still blocked by conversation metadata JSONB, DB lock invariant, readability/test topology, and normal-user output quality."
-  Maintainability: 7
+  source: "After T018 implementation/post-review: conversation metadata, persisted assistant tool calls, question_answer request shape, and legacy BuilderPlanEditResult JSON now have typed canonical ownership. The broader score floor remains blocked by diagnostic/error DX gaps, DB lock invariant, readability/test topology, AI slop cleanup, and normal-user output quality."
+  Maintainability: 8
   Code_Quality: 8
   Clean_Architecture: 8
-  Separation_of_Concerns: 7
-  Single_Source_of_Truth: 8
+  Separation_of_Concerns: 8
+  Single_Source_of_Truth: 9
   Human_Readability: 7
   Human_Reviewability: 8
   Runtime_Reliability: 8
-  Data_Model_Schema_Quality: 7
-  API_Contract_Quality: 7
+  Data_Model_Schema_Quality: 8
+  API_Contract_Quality: 8
   Test_Coverage_Quality: 8
+  Developer_Diagnostic_Experience: 6
   AI_Slop_Comment_Naming_Quality: 6
   Normal_User_Output_Quality: 6
   Overall: 6
   blockers:
-    - "Conversation metadata/tool-call JSONB remains a raw hidden schema."
-    - "AI Builder message SSE has a generated-client friendly discriminated event union after T016, but broader API contract quality remains below 9 because request metadata/question_answer remains raw JSON and API/runtime error-code omissions are not fully disciplined."
-    - "Public/lifecycle/CAS error-code discipline improved, but calls that omit code= entirely can still silently use generic codes; T016/T017 must decide whether to broaden the AST guard or migrate remaining omissions."
+    - "Public AI Builder errors still use one overloaded context bag for both diagnostic correlation and per-error details; this slows support/debugging and keeps API contract/DX below 9."
+    - "Public/lifecycle/CAS error-code discipline improved, but calls that omit code= entirely can still silently use generic codes; T017b/T018b must continue error-contract discipline without creating a third public context carrier."
     - "builder_sessions can still persist a corrupt lock_token with NULL lock_expires_at; runtime fails safe, but schema-level lock invariants need a migration or explicit corruption policy."
     - "Live eval still shows runtime-input/form-field prompts can produce no form fields."
     - "ai_builder_proposal_processor.py is materially smaller after T011 but still oversized at 1830 LOC; structured-question recovery, confirm requirements, and retry orchestration remain in one processor."
-    - "Normal-user output quality, test topology, and readability/module topology remain below 9 until live eval and consolidation tranches force product and code fixes."
+    - "Normal-user output quality, test topology, readability/module topology, and AI slop cleanup remain below 9 until live eval and consolidation tranches force product and code fixes."
 
 score_floor_completion_gates:
   source: "2026-05-21 user review: the board must prevent 'plan executed' from being confused with '9/10 achieved'."
@@ -89,9 +90,16 @@ score_floor_completion_gates:
     T017:
       - "Must give conversation metadata/tool-call JSONB one typed owner, parser, writer, corruption behavior, and migration/backfill stance."
       - "Must avoid permanent transitional hydrators without a deletion trigger."
+      - "Must classify conversation/tool-call metadata into diagnostic identifiers versus planner business state so T017b does not create a parallel diagnostic shape."
     T018:
-      - "Must enforce builder session lock invariants at the database/schema boundary, not only in Python runtime checks."
-      - "Must make corrupt lock_token/lock_expires_at combinations fail loudly or recover explicitly."
+      - "Current active T018 implements the approved T017 JSONB worker. It must stay scoped to metadata/tool-call/edit-result ownership and must not absorb public diagnostic-error contract work."
+    T017b:
+      - "Must implement the backend AIBuilderDiagnosticContext plus details split from .codex/artifacts/flow-ai-builder-diagnostic-dx-plan-v4-final-synthesis.md."
+      - "Must not leave context as a third permanent public carrier unless an explicit temporary compatibility path and deletion trigger are recorded."
+      - "Must preserve existing detail fields under details and route correlation identifiers through diagnostic_context."
+    T018b:
+      - "Must implement the frontend diagnostic report builder/copy affordance after backend diagnostic_context/details types are generated."
+      - "Must use typed allow-list inputs and issue_kind for non-error quality reports; no raw prompt/conversation/plan/file blobs or runtime redactor over arbitrary objects."
     T019:
       - "Must be a real deletion/consolidation tranche: inventory shallow files, stale bridges, compatibility paths, confusing names, and module entry points."
       - "Must include concrete acceptance criteria for fewer or clearer review entry points; splitting large files into more shallow files does not count."
@@ -140,6 +148,7 @@ artifacts:
     - ".codex/artifacts/flow-ai-builder-production-readiness-9-10-plan.md"
     - ".codex/artifacts/flow-ai-builder-production-readiness-9-10-peer-synthesis.md"
     - ".codex/artifacts/flow-ai-builder-production-readiness-9-10-live-eval.md"
+    - ".codex/artifacts/flow-ai-builder-diagnostic-dx-plan-v4-final-synthesis.md"
 
 tasks:
   - id: T000
@@ -1925,7 +1934,7 @@ tasks:
   - id: T017
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Plan-gate the next highest score-moving tranche: typed ownership for AI Builder conversation metadata/tool-call JSONB and deletion or migration of remaining legacy edit-result hydration paths."
     inputs:
@@ -1939,11 +1948,313 @@ tasks:
       - "Do not touch DB lock migration, broad proposal-processor topology, live eval product fixes, or frontend StepCard/AppContext baseline failures unless peer review proves they are required for the JSONB ownership slice."
       - "Preserve unrelated dirty files and keep T016 commit scoped."
       - "Prefer typed canonical owner/parser/writer/corruption behavior over transitional hydrators; any compatibility path needs a deletion trigger."
+      - "T017 must reduce the number of production modules that interpret the same metadata keys; a typed model beside existing raw readers does not satisfy the tranche."
+      - "Remaining legacy edit-result JSON hydration should be deleted in T017 by adding a migration/backfill for flat persisted rows; preserve canonical flag-only description_override_manual rows."
+      - "SendMessageRequest.question_answer must become a generated-client friendly discriminated union, not a smart-union or raw JsonObject bag."
+      - "build_persisted_tool_call_stub and repo: Any in the persisted tool-turn path are in scope; no duck-typed production stub should remain if T017 completes."
+      - "T017 is expected to improve data/schema and single-source-of-truth, but it must not inflate the overall score above 6 if AI slop/readability and normal-user output quality remain at 6."
+      - "After T017 verification, re-rank by the weakest score dimension. If readability/module topology or normal-user output quality remains the largest blocker, move T019 or T021 earlier instead of mechanically following the old order."
     expected_output:
       - "Inventory of AI Builder conversation metadata, tool-call metadata, question_answer, and legacy edit-result JSON shapes with file:line evidence."
       - "Canonical owner decision for each JSON shape and merge/delete plan for parallel readers."
       - "Implementation-ready plan with allowed files, acceptance criteria, migration/backfill stance, and tests."
+      - "Static guard or equivalent evidence proving behavior-critical metadata keys are not interpreted through scattered raw metadata.get calls after the tranche."
+      - "OpenAPI/generated-client evidence that question_answer is typed as a discriminated union."
+      - "Migration/backfill or deletion evidence for legacy flat BuilderPlanEditResult hydration."
+      - "Classification of conversation/tool-call metadata fields into diagnostic identifiers versus planner business state, so the queued diagnostic_context/details tranche has one public diagnostic contract instead of another hidden metadata shape."
+      - "Post-T017 tranche re-rank recommendation: DB lock invariant, readability/module topology simplification, or normal-user live eval/product fixes."
       - "Codex self-review, Claude green artifact, and Antigravity pass artifact or exact Antigravity quota/tooling failure."
+    receipt:
+      result: done
+      summary: "T017 plan gate passed Codex self-review and Claude iteration 2. Antigravity could not run because the canonical wrapper exited 75 with quota exhaustion; reset 2026-05-28T08:49:49.406842+02:00."
+      artifacts:
+        plan: ".codex/artifacts/flow-ai-builder-t017-jsonb-metadata-plan.md"
+        claude_round_1: ".codex/artifacts/claude-peer-loop-t017-ai-builder-conversation-metadata-jsonb-plan-gate-20260521T190332Z.md"
+        claude_round_2: ".codex/artifacts/claude-peer-loop-t017-ai-builder-conversation-metadata-revised-plan-gate-20260521T190912Z.md"
+      codex_self_review: "pass; T017 is the correct next schema/SSOT tranche but will not raise the overall score floor above 6 while AI slop/readability and normal-user output quality remain at 6."
+      claude_gate:
+        round_1: "GREEN_LIGHT no; MIN_SCORE 7; blockers accepted and plan revised."
+        round_2: "GREEN_LIGHT yes; MIN_SCORE 8."
+      antigravity_gate:
+        status: "missing_due_quota_not_passed"
+        exact_failure: "Antigravity quota appears exhausted according to the automated usage probe. Reset: 2026-05-28T08:49:49.406842+02:00; skipping this pass."
+      diagnostic_dx_followup:
+        artifact: ".codex/artifacts/flow-ai-builder-diagnostic-dx-plan-v4-final-synthesis.md"
+        decision: "Do not broaden the active JSONB implementation worker with public diagnostic-error contract and frontend diagnostic-report work. Split it into queued T017b/T018b follow-ups so T018 stays reviewable."
+        claude_gate: "V1 and V2 rejected; V3 passed with GREEN_LIGHT yes / MIN_SCORE 8."
+        antigravity_gate: "Attempted twice; wrapper exited 75 because quota is exhausted until 2026-05-28T08:49:49.406842+02:00. Missing coverage, not a pass."
+      selected_implementation_task: T018
+
+  - id: T018
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Implement the approved T017 conversation metadata/tool-call JSONB ownership tranche: canonical owner/parser/writer, typed request question_answer, typed persisted tool-call path, and legacy edit-result backfill/deletion."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t017-jsonb-metadata-plan.md"
+      - ".codex/artifacts/claude-peer-loop-t017-ai-builder-conversation-metadata-revised-plan-gate-20260521T190912Z.md"
+      - ".codex/artifacts/flow-ai-builder-diagnostic-dx-plan-v4-final-synthesis.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    constraints:
+      - "Implement only the approved T017 tranche. Do not broaden into DB lock invariants, broad processor topology splitting, or live-eval product fixes."
+      - "Do not broaden into public AIBuilderDiagnosticContext/details error-contract work or frontend diagnostic-report UX; T017b/T018b own those follow-up slices."
+      - "Classify metadata fields touched by this worker as diagnostic identifiers versus planner business state in the receipt, but only implement the metadata owner/parser/writer boundary approved by T017."
+      - "Preserve unrelated dirty files and do not stage/push unrelated workspace changes."
+      - "Question-answer request typing must use a generated-client friendly discriminator, not a loose dict bag."
+      - "Persisted conversation readers should be permissive for existing rows, but new request input should be strict."
+      - "Remove build_persisted_tool_call_stub and repo: Any from the persisted tool-turn path."
+      - "Delete legacy flat BuilderPlanEditResult hydration after adding migration/backfill; preserve canonical flag-only description_override_manual rows."
+      - "If implementation needs files outside allowed_files or materially changes the plan, stop and re-run Claude."
+      - "If tests reveal stale frontend deployments or rollout compatibility needs around the new question_answer discriminator, stop and re-plan instead of adding a silent fallback."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_conversation_metadata.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_api_models.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_canonicalization.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_conversation_compaction.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_discovery_followup.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_discovery_profile_builder.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_domain_models.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_models.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_scope.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_interaction_utils.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_mcp_intent.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_store.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_prompts.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_policy.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_question_state.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_repair_transport.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_repo.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_requirements_state.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_service.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_signal_confidence.py"
+      - "backend/src/intric/flows/ai_builder/planning_state_builder.py"
+      - "backend/alembic/versions/20260521_plan_edit_json.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_conversation_compaction.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_discovery_followup.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_models.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_question_state.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_signal_confidence.py"
+      - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+      - "backend/tests/unit/test_ai_builder_openapi_contract.py"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "frontend/packages/intric-js/index.d.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/structuredQuestionAnswer.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/structuredQuestionAnswer.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderDriver.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts"
+    verify:
+      - "cd backend && uv run ruff check <changed backend files>"
+      - "cd backend && uv run pyright <changed backend source files>"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider backend/tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py backend/tests/unittests/flows/ai_builder/test_ai_builder_conversation_compaction.py backend/tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py backend/tests/unittests/flows/ai_builder/test_ai_builder_question_state.py backend/tests/unittests/flows/ai_builder/test_ai_builder_signal_confidence.py backend/tests/unit/test_ai_builder_openapi_contract.py -q"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider backend/tests/unittests/flows/ai_builder -q"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider backend/tests/integration/flows/test_ai_builder_session_api_regressions.py::test_persist_tool_turn_refreshes_planning_state_with_requirements_summary -q"
+      - "cd backend && uv run alembic heads"
+      - "cd frontend && bun --filter @intric/intric-js check"
+      - "cd frontend && bun --filter @intric/web check"
+      - "cd frontend && bun --filter @intric/web test:unit -- src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts src/lib/features/flows/ai-builder/structuredQuestionAnswer.test.ts"
+      - "rg 'metadata\\.get\\(\"(question_answer|requirements_confirmed|requirements_summary|requirements_version|ui_language|file_ids|edit_context)\"' backend/src/intric/flows/ai_builder"
+      - "rg 'question_answer: JsonObject|question_answer: dict\\[str, Any\\]|repo: Any|build_persisted_tool_call_stub' backend/src/intric/flows/ai_builder"
+      - "git diff --check"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "The diagnostic_context/details error-contract change appears necessary to finish this JSONB metadata worker; stop and re-plan instead of mixing tranches."
+      - "The typed question_answer discriminator requires stale-client compatibility behavior not covered by the approved plan."
+      - "Migration SQL cannot safely distinguish flat compiled-edit rows from canonical flag-only rows."
+      - "Static guard cannot be made to pass without broad unrelated refactors."
+      - "Verification fails twice for the same root cause."
+    receipt:
+      result: done
+      summary: "Implemented the typed conversation metadata/tool-call/edit-result ownership tranche. Added canonical ai_builder_conversation_metadata.py, made SendMessageRequest.question_answer a discriminated generated-client union, removed raw behavior-critical metadata readers, removed build_persisted_tool_call_stub/repo Any from persisted tool turns, deleted legacy flat BuilderPlanEditResult hydration after adding a defensive migration, and updated frontend request builders/generated types."
+      implementation:
+        canonical_owner: "backend/src/intric/flows/ai_builder/ai_builder_conversation_metadata.py"
+        migration: "backend/alembic/versions/20260521_plan_edit_json.py"
+        generated_client: "frontend/packages/intric-js/src/types/schema.d.ts"
+        scope_expansion_reviewed_by_claude:
+          - "backend/src/intric/flows/ai_builder/ai_builder_plan_store.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_service.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py"
+          - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+      metadata_classification:
+        planner_business_state:
+          - "question_answer"
+          - "requirements_confirmed"
+          - "requirements_summary"
+          - "requirements_version"
+          - "edit_context"
+        user_or_request_context:
+          - "ui_language"
+          - "file_ids"
+        diagnostic_identifiers_or_transcript_correlation:
+          - "assistant question_id"
+          - "persisted assistant tool_call id/name/arguments"
+      verification:
+        - command: "cd backend && uv run ruff check <changed backend files> && uv run ruff format --check <changed backend files>"
+          result: "passed"
+        - command: "cd backend && uv run pyright --pythonpath .venv/bin/python <changed backend source files>"
+          result: "passed; 0 errors, 0 warnings, 0 informations"
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_ai_builder_conversation_compaction.py tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_question_state.py tests/unittests/flows/ai_builder/test_ai_builder_signal_confidence.py tests/unittests/flows/ai_builder/test_ai_builder_edit_models.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py::test_resolve_message_metadata_preserves_requirements_confirmation_and_ui_language tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py tests/unit/test_ai_builder_openapi_contract.py -q"
+          result: "passed; 165 passed, 15 warnings"
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder -q"
+          result: "passed; 2220 passed, 4 skipped, 11 warnings"
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::test_persist_tool_turn_refreshes_planning_state_with_requirements_summary -q"
+          result: "passed; 10 passed, 16 warnings"
+        - command: "cd backend && uv run alembic heads"
+          result: "passed; 20260521_plan_edit_json (head)"
+        - command: "cd frontend/packages/intric-js && bun x openapi-typescript /tmp/eneo-openapi-t018.json -o src/types/schema.d.ts --default-non-nullable=false"
+          result: "passed; generated StructuredQuestionAnswerMetadata and RequirementsConfirmationMetadata union for SendMessageRequest.question_answer"
+        - command: "cd frontend && bun --filter @intric/intric-js check"
+          result: "passed"
+        - command: "cd frontend && bun --filter @intric/web test:unit -- src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts src/lib/features/flows/ai-builder/structuredQuestionAnswer.test.ts"
+          result: "passed; 41 passed"
+        - command: "cd frontend && bun --filter @intric/web check"
+          result: "passed with existing warning in ExtendExpirationDialog.svelte"
+        - command: "rg/static ownership guards for metadata.get, deleted persisted-tool stub, and loose question_answer/repo Any patterns"
+          result: "passed; no hits in backend source/tests except allowed telemetry tool-name read"
+        - command: "git diff --check"
+          result: "passed"
+      post_implementation_review:
+        codex_self_review: "pass; this is production-ready for T018 but not for the broader 9/10 goal. It reduces future technical debt by replacing scattered raw JSONB readers with one typed owner and deleting a legacy hydration path instead of adding another compatibility layer."
+        claude_round_1: ".codex/artifacts/claude-peer-loop-t018-ai-builder-conversation-metadata-implementation-review-20260521T201157Z.md; GREEN_LIGHT no / MIN_SCORE 5; blockers fixed."
+        claude_round_2: ".codex/artifacts/claude-peer-loop-t018-ai-builder-conversation-metadata-implementation-review-iteration-2-20260521T202252Z.md; GREEN_LIGHT yes / MIN_SCORE 8."
+        antigravity: "SKIPPED_DUE_TO_QUOTA; known exhausted until 2026-05-28T08:49:49.406842+02:00. Missing coverage, not a pass."
+      live_eval: "Not run for T018; this tranche changes schema/metadata ownership, not prompt/output behavior. Normal-user output remains a score-floor blocker."
+      scorecard_update:
+        Maintainability: 8
+        Single_Source_of_Truth: 9
+        Data_Model_Schema_Quality: 8
+        API_Contract_Quality: 8
+        Developer_Diagnostic_Experience: 6
+        AI_Slop_Comment_Naming_Quality: 6
+        Normal_User_Output_Quality: 6
+        Overall: 6
+      residual_risks:
+        - "Developer diagnostic/error contract is still overloaded until T017b/T018b."
+        - "DB lock invariant remains Python/runtime-only until the lock-schema tranche."
+        - "Normal-user live eval still needs to drive product fixes for vague prompts and form-field/runtime-input behavior."
+        - "Large orchestration files and test topology still block week-one readability/reviewability from reaching 9."
+      next_recommendation: "Activate T017b because Developer Diagnostic Experience is now an explicit 6/10 floor and the diagnostic_context/details public-error split is already queued and Claude-reviewed. Re-rank again after T017b; if output quality remains the lowest floor, move live eval/product fixes earlier than cleanup."
+
+  - id: T017b
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Implement the AI Builder diagnostic public-error contract: backend AIBuilderDiagnosticContext, separate details, required frontend parser migration, generated types, and log-field alignment."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-diagnostic-dx-plan-v4-final-synthesis.md"
+      - "T018 receipt after the conversation metadata JSONB worker completes"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    constraints:
+      - "Do not build an issue tracker, observability platform, persisted report endpoint, Sentry/Datadog integration, broad redactor, or runtime arbitrary-blob sanitizer."
+      - "Do not replace existing per-error context fields with only AIBuilderDiagnosticContext. Preserve scalar detail fields under details."
+      - "Do not leave context as a third permanent public carrier unless a temporary compatibility path has an explicit deletion trigger."
+      - "Use the reviewed diagnostic_context/details split: diagnostic_context is correlation; details is bounded per-error structured fields."
+      - "Antigravity is missing coverage due quota until 2026-05-28T08:49:49.406842+02:00; do not record it as passed unless a later run actually succeeds."
+      - "If T018 changes the error contract, frontend parser surface, or diagnostic naming materially, re-run Claude before implementing this worker."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_error_contract.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_router.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_edit_context.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_error_contract.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py"
+      - "backend/tests/unit/test_ai_builder_openapi_contract.py"
+      - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "frontend/packages/intric-js/index.d.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/protocol.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/aiBuilderError.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/aiBuilderError.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderDriver.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderService.test.ts"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    acceptance_criteria:
+      - "AIBuilderDiagnosticContext is defined in ai_builder_error_contract.py and rejects extra or nested fields."
+      - "AIBuilderPublicError exposes diagnostic_context: AIBuilderDiagnosticContext | None and details: dict[str, JsonScalar] | None."
+      - "build_ai_builder_error, build_ai_builder_error_event, ai_builder_error_example, _ai_builder_error_response, and _ai_builder_json_error_response use diagnostic_context/details."
+      - "Every backend AI Builder context={...} public-error writer is classified and migrated: correlation identifiers go to diagnostic_context; auth_layer, published_version, slot_ref, slot_kind, local_kind, target_step_ref, and bounded scalar code-specific values go to details."
+      - "Existing scalar/key/string/JSON-size validators apply to details."
+      - "Stream rejection/exception logs use request_id, session_id, space_id, and error_code names that match diagnostic_context."
+      - "Generated OpenAPI/TypeScript exposes AIBuilderDiagnosticContext, diagnostic_context, and details."
+      - "aiBuilderError.ts parses diagnostic_context and details separately; client-synthesized status/stage/original_code values go under details."
+      - "FlowAIBuilderPlanPane.svelte reads published_version from details.published_version."
+      - "FlowAIBuilderDriver.ts prefers applyError.diagnostic_context?.flow_id, with details.flow_id only as fallback if still needed."
+    verify:
+      - "rg -n \"context=\\\\{\" backend/src/intric/flows/ai_builder -g '*.py'"
+      - "cd backend && uv run ruff check <changed backend files>"
+      - "cd backend && uv run pyright <changed backend source files>"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider backend/tests/unittests/flows/ai_builder/test_ai_builder_error_contract.py backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py backend/tests/unit/test_ai_builder_openapi_contract.py backend/tests/integration/flows/test_ai_builder_session_api_regressions.py -q"
+      - "cd frontend && bun --filter @intric/intric-js check"
+      - "cd frontend && bun --filter @intric/web check"
+      - "cd frontend && bun --filter @intric/web test:unit -- src/lib/features/flows/ai-builder/aiBuilderError.test.ts src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts src/lib/features/flows/ai-builder/FlowAIBuilderService.test.ts"
+      - "git diff --check"
+    stop_if:
+      - "Need to persist diagnostic reports or introduce a support-ticket/observability subsystem."
+      - "Existing detail fields cannot be preserved without a breaking public migration plan."
+      - "Generated-client shape would require a third permanent context carrier."
+      - "Review shows this should be merged with a broader API versioning decision."
+    receipt: null
+
+  - id: T018b
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Add the frontend AI Builder diagnostic report builder and one reusable copy-technical-details affordance for stream errors, apply errors, and non-error plan/step quality reports."
+    inputs:
+      - "T017b receipt and generated diagnostic_context/details types"
+      - ".codex/artifacts/flow-ai-builder-diagnostic-dx-plan-v4-final-synthesis.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    constraints:
+      - "Use typed allow-list inputs only. Do not accept arbitrary objects and redact them."
+      - "Do not include raw prompt text, full conversation, full plan JSON, file contents, LLM payloads, or secrets."
+      - "For non-error quality reports use issue_kind, not fake errors."
+      - "For step-level reports, pass step.plan_step_ref explicitly from the StepCard call site; do not infer it from session state."
+      - "Do not add a persisted report endpoint or external observability integration."
+    allowed_files:
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/aiBuilderDiagnosticReport.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/aiBuilderDiagnosticReport.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderChat.svelte"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.svelte"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderDriver.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/protocol.ts"
+      - "frontend/apps/web/src/paraglide/messages/en.json"
+      - "frontend/apps/web/src/paraglide/messages/sv.json"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    acceptance_criteria:
+      - "aiBuilderDiagnosticReport.ts defines AIBuilderIssueKind: wrong_step, missing_form_fields, wrong_output_type, unclear_question, bad_edit_result, other."
+      - "buildAIBuilderDiagnosticReport(input) accepts typed allow-list inputs for errors and non-error quality reports."
+      - "formatAIBuilderDiagnosticReport(report) produces a copyable support/developer bundle with safe IDs and no raw prompt/conversation/plan/file payload."
+      - "One reusable copy affordance is available for chat stream errors, plan apply errors, and plan/step quality reports."
+      - "TypeScript negative tests use @ts-expect-error to prove raw prompt/full conversation/full plan inputs are not accepted."
+      - "Non-error step reports include step.plan_step_ref provided by the StepCard call site."
+    verify:
+      - "cd frontend && bun --filter @intric/web check"
+      - "cd frontend && bun --filter @intric/web test:unit -- src/lib/features/flows/ai-builder/aiBuilderDiagnosticReport.test.ts src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.test.ts src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts"
+      - "rg -n \"raw_prompt|fullConversation|fullPlan|plan_json|conversation_json|file_contents|llm_payload\" frontend/apps/web/src/lib/features/flows/ai-builder"
+      - "git diff --check"
+    stop_if:
+      - "The report builder needs arbitrary blob redaction to work."
+      - "The UI scope expands into a support-ticket workflow or persisted report system."
+      - "Non-error quality reports cannot identify plan_id/plan_step_ref without ambiguous session inference."
     receipt: null
 
 checks:
@@ -1952,8 +2263,8 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T016 implementation validation and Claude post-implementation review are green; Antigravity post-implementation review is missing due quota exit 75; T017 is active for the next plan-gated tranche."
-    task: T016
+    result: "T016 implementation validation and Claude post-implementation review are green; Antigravity post-implementation review is missing due quota exit 75; T017 plan gate is done; T018 is active for the approved JSONB metadata implementation; diagnostic/DX follow-ups are queued as T017b/T018b."
+    task: T018
     commands:
       - "cd backend && uv run ruff check <T016 backend files>: All checks passed"
       - "cd backend && uv run ruff format --check <T016 backend files>: 8 files already formatted"

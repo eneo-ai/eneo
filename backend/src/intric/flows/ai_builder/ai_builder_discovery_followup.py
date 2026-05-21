@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    make_persisted_assistant_tool_call,
+    metadata_for_assistant_question,
+)
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
     build_discovery_followup_runtime,
 )
@@ -45,19 +49,23 @@ async def persist_backend_question(
     conversation.
     """
     tool_call_id = f"discovery_{uuid4().hex[:12]}"
+    question_metadata = metadata_for_assistant_question(question_data)
+    metadata = {
+        **(assistant_metadata or {}),
+        **(question_metadata or {}),
+    } or None
+    tool_call = make_persisted_assistant_tool_call(
+        tool_call_id=tool_call_id,
+        tool_name=ASK_STRUCTURED_QUESTION_TOOL_NAME,
+        arguments=question_data,
+    )
 
     conversation.append(
         ConversationMessage(
             role="assistant",
             content=assistant_text,
-            metadata=assistant_metadata,
-            tool_calls=[
-                {
-                    "id": tool_call_id,
-                    "name": ASK_STRUCTURED_QUESTION_TOOL_NAME,
-                    "arguments": question_data,
-                }
-            ],
+            metadata=metadata,
+            tool_calls=[tool_call.model_dump(mode="json")],
         )
     )
     conversation.append(

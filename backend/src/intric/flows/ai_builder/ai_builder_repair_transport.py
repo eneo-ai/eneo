@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    PersistedAssistantToolCall,
+    RuntimeToolCall,
+    persisted_assistant_tool_call_from_runtime,
+)
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     append_retry_feedback_turn,
@@ -9,6 +14,7 @@ from intric.flows.ai_builder.ai_builder_proposal_repair import (
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     build_tool_retry_messages as build_proposal_tool_retry_messages,
 )
+from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 
 if TYPE_CHECKING:
@@ -47,11 +53,11 @@ def append_tool_retry_feedback_turn(
 
 async def persist_tool_turn(
     *,
-    repo: Any,
+    repo: AIBuilderRepository,
     turn: SessionSendTurn,
     conversation: list[ConversationMessage],
     new_messages_start: int,
-    tool_call: Any,
+    tool_call: RuntimeToolCall | PersistedAssistantToolCall,
     arguments: dict[str, Any],
     tool_content: str,
     metadata: dict[str, Any] | None = None,
@@ -67,17 +73,17 @@ async def persist_tool_turn(
     planning-state refresh would leave the persisted state stale relative
     to the persisted conversation.
     """
+    persisted_tool_call = persisted_assistant_tool_call_from_runtime(
+        tool_call,
+        arguments=arguments,
+    )
     conversation.append(
         ConversationMessage(
             role="assistant",
             content=assistant_content,
             metadata=assistant_metadata,
             tool_calls=[
-                {
-                    "id": tool_call.id,
-                    "name": tool_call.function.name,
-                    "arguments": arguments,
-                }
+                persisted_tool_call.model_dump(mode="json"),
             ],
         )
     )
@@ -85,7 +91,7 @@ async def persist_tool_turn(
         ConversationMessage(
             role="tool",
             content=tool_content,
-            tool_call_id=tool_call.id,
+            tool_call_id=persisted_tool_call.id,
             metadata=metadata,
         )
     )
@@ -94,18 +100,3 @@ async def persist_tool_turn(
         new_messages=conversation[new_messages_start:],
         flow=flow,
     )
-
-
-def build_persisted_tool_call_stub(*, tool_call_id: str, tool_name: str) -> Any:
-    return type(
-        "ToolCallStub",
-        (),
-        {
-            "id": tool_call_id,
-            "function": type(
-                "FunctionStub",
-                (),
-                {"name": tool_name},
-            )(),
-        },
-    )()

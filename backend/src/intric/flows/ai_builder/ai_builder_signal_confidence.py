@@ -9,8 +9,13 @@ already implied) while catching genuine ambiguity.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Literal
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    StructuredQuestionAnswerMetadata,
+    question_answer_from_metadata,
+    question_answer_question_id,
+)
 from intric.flows.ai_builder.ai_builder_discovery_signal_inference import (
     infer_answer_signals_from_text,
 )
@@ -45,30 +50,22 @@ def score_conversation_signals(
     for message in conversation:
         if message.role != "user":
             continue
-        metadata = message.metadata if isinstance(message.metadata, dict) else None
-        if metadata is None:
+        answer = question_answer_from_metadata(message.metadata)
+        if answer is None:
             continue
-        qa = metadata.get("question_answer")
-        if not isinstance(qa, dict):
-            continue
-        qa_dict = cast(dict[str, Any], qa)
-        question_id = qa_dict.get("question_id")
-        if not isinstance(question_id, str):
+        question_id = question_answer_question_id(answer)
+        if question_id is None:
             continue
         structured_ids.add(question_id)
-        for key in ("selected_values", "selected_option_ids"):
-            raw = qa_dict.get(key)
-            if isinstance(raw, list):
-                for v in cast(list[object], raw):
-                    if isinstance(v, str) and v.strip():
-                        scored.append(
-                            ScoredSignal(
-                                question_id=question_id,
-                                value=v,
-                                confidence="high",
-                                source="structured_answer",
-                            )
-                        )
+        for value in _structured_answer_values(answer):
+            scored.append(
+                ScoredSignal(
+                    question_id=question_id,
+                    value=value,
+                    confidence="high",
+                    source="structured_answer",
+                )
+            )
 
     # 2. Freeform text inference — medium/low depending on specificity
     if freeform_text:
@@ -95,6 +92,17 @@ def score_conversation_signals(
     priority = {"high": 0, "medium": 1, "low": 2}
     scored.sort(key=lambda s: priority[s.confidence])
     return scored
+
+
+def _structured_answer_values(
+    answer: StructuredQuestionAnswerMetadata,
+) -> tuple[str, ...]:
+    values: list[str] = []
+    for raw_values in (answer.selected_values, answer.selected_option_ids):
+        if raw_values is None:
+            continue
+        values.extend(str(value) for value in raw_values if value is not None)
+    return tuple(value for value in values if value.strip())
 
 
 def has_low_confidence_signals(signals: list[ScoredSignal]) -> bool:

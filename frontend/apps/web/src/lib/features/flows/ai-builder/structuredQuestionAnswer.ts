@@ -6,14 +6,22 @@ export type StructuredQuestion = components["schemas"]["StructuredQuestionPayloa
 
 type StructuredQuestionOptionValue = Exclude<StructuredQuestionOption["value"], undefined>;
 
-export interface StructuredQuestionAnswerMetadata {
+export interface PersistedStructuredQuestionAnswerMetadata {
   question_id?: string | null;
   selected_option_ids?: string[];
   selected_values?: StructuredQuestionOptionValue[];
   custom_value?: string;
-  requirements_confirmed?: boolean;
-  requirements_version?: string;
 }
+
+export type StructuredQuestionAnswerMetadata =
+  | ({
+      kind: "structured_question_answer";
+    } & PersistedStructuredQuestionAnswerMetadata)
+  | {
+      kind: "requirements_confirmation";
+      requirements_confirmed: true;
+      requirements_version?: string | null;
+    };
 
 export interface StructuredQuestionAnswerPayload {
   text: string;
@@ -31,6 +39,7 @@ export function buildStructuredQuestionSelection(
   return {
     text: selectedOptions.map((option) => option.label).join(", "),
     questionAnswer: {
+      kind: "structured_question_answer",
       question_id: question.question_id,
       selected_option_ids: selectedOptions
         .map((option) => option.id)
@@ -49,6 +58,7 @@ export function buildStructuredQuestionCustomAnswer(
   return {
     text: customValue,
     questionAnswer: {
+      kind: "structured_question_answer",
       question_id: question.question_id,
       custom_value: customValue
     }

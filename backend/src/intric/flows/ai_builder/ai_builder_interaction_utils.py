@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    question_answer_from_metadata,
+    question_answer_question_id,
+)
 from intric.flows.ai_builder.ai_builder_discovery import build_discovery_block_message
 
 if TYPE_CHECKING:
@@ -30,15 +34,12 @@ def _count_structured_answers(conversation: list["ConversationMessage"]) -> int:
     for msg in conversation:
         if msg.role != "user":
             continue
-        metadata = msg.metadata if isinstance(msg.metadata, dict) else None
-        if metadata is None:
+        answer = question_answer_from_metadata(msg.metadata)
+        if answer is None:
             continue
-        qa = metadata.get("question_answer")
-        if not isinstance(qa, dict):
-            continue
-        qid = cast(dict[str, Any], qa).get("question_id")
-        if isinstance(qid, str):
-            answered_ids.add(qid)
+        question_id = question_answer_question_id(answer)
+        if question_id is not None:
+            answered_ids.add(question_id)
     return len(answered_ids)
 
 

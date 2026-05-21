@@ -14,6 +14,10 @@ from uuid import UUID
 from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    make_persisted_assistant_tool_call,
+    requirements_summary_to_metadata,
+)
 from intric.flows.ai_builder.ai_builder_create_proposal import (
     outline_flow_retry_config,
     process_outline_arguments,
@@ -103,7 +107,6 @@ from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 )
 from intric.flows.ai_builder.ai_builder_repair_transport import (
     append_tool_retry_feedback_turn,
-    build_persisted_tool_call_stub,
     build_tool_retry_messages,
     persist_tool_turn,
 )
@@ -1540,9 +1543,10 @@ class AIBuilderProposalProcessor:
             "requirements_version": requirements_version,
         }
 
-        tool_call = build_persisted_tool_call_stub(
+        tool_call = make_persisted_assistant_tool_call(
             tool_call_id=tool_call_id,
             tool_name=CONFIRM_REQUIREMENTS_TOOL_NAME,
+            arguments=arguments,
         )
         new_version = await persist_tool_turn(
             repo=self.repo,
@@ -1552,10 +1556,7 @@ class AIBuilderProposalProcessor:
             tool_call=tool_call,
             arguments=arguments,
             tool_content="Requirements presented to user. Awaiting confirmation.",
-            metadata={
-                "requirements_summary": requirements_payload,
-                "requirements_version": requirements_version,
-            },
+            metadata=requirements_summary_to_metadata(requirements_payload),
             assistant_metadata=assistant_metadata,
             flow=flow,
         )
