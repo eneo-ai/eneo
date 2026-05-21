@@ -482,7 +482,6 @@ def edit_flow_retry_config(
     litellm_model: str,
     litellm_kwargs: dict[str, Any],
     max_output_tokens: int,
-    resource_catalog: AIBuilderResourceCatalog | None,
     plan_edit_context: AIBuilderPlanEditContext | None,
     prior_plan_for_revision: BuilderPlan | None,
 ) -> ToolRetryConfig:

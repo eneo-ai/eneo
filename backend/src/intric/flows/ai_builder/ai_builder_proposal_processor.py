@@ -812,7 +812,6 @@ class AIBuilderProposalProcessor:
                 litellm_kwargs=ctx.litellm_kwargs,
                 max_output_tokens=ctx.max_output_tokens,
                 assistant_snapshots=ctx.assistant_snapshots,
-                resource_catalog=ctx.resource_catalog,
                 planning_state=ctx.planning_state,
                 plan_edit_context=ctx.plan_edit_context,
                 prior_plan_for_revision=ctx.prior_plan_for_revision,
@@ -1089,7 +1088,6 @@ class AIBuilderProposalProcessor:
             litellm_kwargs=litellm_kwargs,
             max_output_tokens=max_output_tokens,
             assistant_snapshots=assistant_snapshots,
-            resource_catalog=resource_catalog,
         )
         async for event in self._request_tool_self_correction(
             ctx=ctx,
@@ -1278,7 +1276,6 @@ class AIBuilderProposalProcessor:
             litellm_kwargs=litellm_kwargs,
             max_output_tokens=max_output_tokens,
             assistant_snapshots=assistant_snapshots,
-            resource_catalog=resource_catalog,
             planning_state=planning_state,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
@@ -1310,7 +1307,6 @@ class AIBuilderProposalProcessor:
                 )
             ),
         )
-        # Feedback is consumed only by the self-correction boundary; legacy callers get events.
         return outcome.events
 
     async def request_non_question_continuation(
@@ -1801,7 +1797,6 @@ class AIBuilderProposalProcessor:
                     litellm_model=ctx.litellm_model,
                     litellm_kwargs=ctx.litellm_kwargs,
                     max_output_tokens=ctx.max_output_tokens,
-                    resource_catalog=ctx.resource_catalog,
                     plan_edit_context=ctx.plan_edit_context,
                     prior_plan_for_revision=ctx.prior_plan_for_revision,
                 ),
@@ -1874,7 +1869,6 @@ class AIBuilderProposalProcessor:
                     litellm_model=ctx.litellm_model,
                     litellm_kwargs=ctx.litellm_kwargs,
                     max_output_tokens=ctx.max_output_tokens,
-                    resource_catalog=ctx.resource_catalog,
                     plan_edit_context=ctx.plan_edit_context,
                     prior_plan_for_revision=ctx.prior_plan_for_revision,
                 ),
@@ -1918,7 +1912,6 @@ class AIBuilderProposalProcessor:
         litellm_kwargs: dict[str, Any],
         max_output_tokens: int,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
-        resource_catalog: AIBuilderResourceCatalog | None = None,
         planning_state: PlanningState | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
@@ -1937,7 +1930,6 @@ class AIBuilderProposalProcessor:
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
             max_output_tokens=max_output_tokens,
-            resource_catalog=resource_catalog,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
         )

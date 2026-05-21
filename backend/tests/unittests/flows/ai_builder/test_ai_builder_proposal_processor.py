@@ -2805,14 +2805,18 @@ async def test_submission_retry_config_returns_typed_edit_retry_config() -> None
     processor = _make_processor()
     assistant_snapshots = {uuid4(): {"name": "Analys"}}
     resource_catalog = MagicMock()
+    flow = MagicMock()
+    plan_edit_context = MagicMock()
+    prior_plan_for_revision = MagicMock()
 
     config = processor._submission_retry_config(
-        flow=MagicMock(),
+        flow=flow,
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={"timeout": 30},
         max_output_tokens=2048,
         assistant_snapshots=assistant_snapshots,
-        resource_catalog=resource_catalog,
+        plan_edit_context=plan_edit_context,
+        prior_plan_for_revision=prior_plan_for_revision,
     )
 
     assert isinstance(config, ToolRetryConfig)
@@ -2825,6 +2829,79 @@ async def test_submission_retry_config_returns_typed_edit_retry_config() -> None
         "process_tool_invocation",
     }
     assert "valid edit_flow tool call" in config.forced_tool_prompt
+
+    process_edit = AsyncMock(
+        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+    )
+    invocation = _make_retry_invocation(
+        flow=flow,
+        resource_catalog=resource_catalog,
+        assistant_metadata={"planner_telemetry": {"request_id": "req"}},
+        arguments={"plan_rationale": "Edit", "operations": []},
+    )
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_edit_proposal.process_edit_arguments",
+        new=process_edit,
+    ):
+        result = await config.process_tool_invocation(invocation)
+
+    assert result.event == {"event": "plan", "data": "{}"}
+    process_edit.assert_awaited_once()
+    assert process_edit.await_args.kwargs["turn"] is invocation.turn
+    assert process_edit.await_args.kwargs["conversation"] is invocation.conversation
+    assert process_edit.await_args.kwargs["flow"] is flow
+    assert process_edit.await_args.kwargs["assistant_snapshots"] is assistant_snapshots
+    assert process_edit.await_args.kwargs["litellm_model"] == "openai/gpt-5.4"
+    assert process_edit.await_args.kwargs["litellm_kwargs"] == {"timeout": 30}
+    assert process_edit.await_args.kwargs["max_output_tokens"] == 2048
+    assert process_edit.await_args.kwargs["resource_catalog"] is resource_catalog
+    assert process_edit.await_args.kwargs["assistant_metadata"] == {
+        "planner_telemetry": {"request_id": "req"}
+    }
+    assert process_edit.await_args.kwargs["plan_edit_context"] is plan_edit_context
+    assert (
+        process_edit.await_args.kwargs["prior_plan_for_revision"]
+        is prior_plan_for_revision
+    )
+
+
+@pytest.mark.asyncio
+async def test_confirm_requirements_retry_config_carries_litellm_context() -> None:
+    processor = _make_processor()
+    flow = MagicMock()
+    ctx = _make_context(
+        flow=flow,
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={"timeout": 30},
+    )
+    config = processor._confirm_requirements_retry_config(ctx)
+    invocation = _make_retry_invocation(
+        flow=flow,
+        assistant_metadata={"planner_telemetry": {"request_id": "req"}},
+        arguments={"confirmed": True, "summary": "Ready"},
+    )
+
+    process_confirm = AsyncMock(
+        return_value=ToolProcessingResult(event={"event": "requirements", "data": "{}"})
+    )
+    with patch.object(
+        processor,
+        "_process_confirm_requirements_arguments",
+        new=process_confirm,
+    ):
+        result = await config.process_tool_invocation(invocation)
+
+    assert result.event == {"event": "requirements", "data": "{}"}
+    process_confirm.assert_awaited_once()
+    assert process_confirm.await_args.kwargs["turn"] is invocation.turn
+    assert process_confirm.await_args.kwargs["conversation"] is invocation.conversation
+    assert process_confirm.await_args.kwargs["flow"] is flow
+    assert process_confirm.await_args.kwargs["litellm_model"] == "openai/gpt-5.4"
+    assert process_confirm.await_args.kwargs["litellm_kwargs"] == {"timeout": 30}
+    assert process_confirm.await_args.kwargs["assistant_metadata"] == {
+        "planner_telemetry": {"request_id": "req"}
+    }
 
 
 @pytest.mark.asyncio
