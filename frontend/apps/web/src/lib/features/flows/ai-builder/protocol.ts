@@ -141,19 +141,24 @@ export type AIBuilderErrorPhase =
   | "router"
   | "self_correction";
 
-export type AIBuilderErrorContextValue = string | number | boolean | null;
+export type AIBuilderDiagnosticContext = components["schemas"]["AIBuilderDiagnosticContext"];
 
-export type AIBuilderErrorContext = Record<string, AIBuilderErrorContextValue>;
+export type AIBuilderErrorDetailValue = string | number | boolean | null;
 
+export type AIBuilderErrorDetails = Record<string, AIBuilderErrorDetailValue>;
+
+// Parsed UI error is a superset of generated AIBuilderPublicError: the client
+// synthesizes the "client" phase and "network" category for local failures.
 export interface AIBuilderError {
-  schema_version: 1;
+  schema_version: 2;
   code: string;
   category: AIBuilderErrorCategory;
   message: string;
   phase: AIBuilderErrorPhase;
   request_id: string | null;
   intric_error_code?: number | null;
-  context: AIBuilderErrorContext;
+  diagnostic_context: AIBuilderDiagnosticContext | null;
+  details: AIBuilderErrorDetails;
 }
 
 export type ApplyError = AIBuilderError;

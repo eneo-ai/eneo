@@ -67,9 +67,9 @@ def test_ai_builder_openapi_errors_reference_public_error_contract() -> None:
 
     openapi = app.openapi()
     assert "AIBuilderPublicError" in openapi["components"]["schemas"]
-    apply_responses = openapi["paths"]["/ai-builder/plans/{plan_id}/apply"][
-        "post"
-    ]["responses"]
+    apply_responses = openapi["paths"]["/ai-builder/plans/{plan_id}/apply"]["post"][
+        "responses"
+    ]
     assert apply_responses["409"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AIBuilderPublicError"
     }
@@ -113,52 +113,77 @@ def test_ai_builder_route_class_translates_http_errors_to_public_contract() -> N
 
     assert response.status_code == 409
     assert response.json() == {
-        "schema_version": 1,
+        "schema_version": 2,
         "code": "session_message_in_progress",
         "category": "conflict",
         "message": "Another AI Builder message is already being processed.",
         "phase": "router",
         "intric_error_code": int(ErrorCodes.BAD_REQUEST),
         "request_id": "req-route",
+        "diagnostic_context": {
+            "request_id": "req-route",
+            "error_code": "session_message_in_progress",
+            "error_category": "conflict",
+            "error_phase": "router",
+        },
     }
 
     response = client.get("/planner-budget", headers={"x-request-id": "req-planner"})
     assert response.status_code == 400
     assert response.json() == {
-        "schema_version": 1,
+        "schema_version": 2,
         "code": "planner_budget_missing",
         "category": "bad_request",
         "message": "No planner output budget is configured.",
         "phase": "planner",
         "intric_error_code": int(ErrorCodes.BAD_REQUEST),
         "request_id": "req-planner",
-        "context": {"budget_owner": "space"},
+        "diagnostic_context": {
+            "request_id": "req-planner",
+            "error_code": "planner_budget_missing",
+            "error_category": "bad_request",
+            "error_phase": "planner",
+        },
+        "details": {"budget_owner": "space"},
     }
 
     response = client.get("/forbidden", headers={"x-request-id": "req-forbidden"})
     assert response.status_code == 403
     assert response.json() == {
-        "schema_version": 1,
+        "schema_version": 2,
         "code": "insufficient_space_permission",
         "category": "unauthorized",
         "message": "You do not have permission to use the AI builder in this space.",
         "phase": "router",
         "intric_error_code": int(ErrorCodes.UNAUTHORIZED),
         "request_id": "req-forbidden",
-        "context": {"auth_layer": "space_membership"},
+        "diagnostic_context": {
+            "request_id": "req-forbidden",
+            "error_code": "insufficient_space_permission",
+            "error_category": "unauthorized",
+            "error_phase": "router",
+        },
+        "details": {"auth_layer": "space_membership"},
     }
 
     response = client.get("/missing", headers={"x-request-id": "req-missing"})
     assert response.status_code == 404
     assert response.json() == {
-        "schema_version": 1,
+        "schema_version": 2,
         "code": "not_found",
         "category": "not_found",
         "message": "AI Builder resource not found.",
         "phase": "router",
         "intric_error_code": int(ErrorCodes.NOT_FOUND),
         "request_id": "req-missing",
+        "diagnostic_context": {
+            "request_id": "req-missing",
+            "error_code": "not_found",
+            "error_category": "not_found",
+            "error_phase": "router",
+        },
     }
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1633,7 +1658,7 @@ class TestSendMessageEndpoint:
         events = await _read_sse_events(result)
         assert [event["event"] for event in events] == ["status", "error", "done"]
         error_payload = events[1]["data"]
-        assert error_payload["schema_version"] == 1
+        assert error_payload["schema_version"] == 2
         assert error_payload["code"] == "planner_stream_failed"
         assert error_payload["category"] == "internal"
         assert error_payload["phase"] == "planner"
@@ -1641,6 +1666,14 @@ class TestSendMessageEndpoint:
             ErrorCodes.INTERNAL_SERVER_ERROR
         )
         assert error_payload["request_id"] == "req-stream-1"
+        assert error_payload["diagnostic_context"] == {
+            "session_id": str(session.id),
+            "request_id": "req-stream-1",
+            "space_id": str(session.space_id),
+            "error_code": "planner_stream_failed",
+            "error_category": "internal",
+            "error_phase": "planner",
+        }
 
     @pytest.mark.anyio
     async def test_streams_bad_request_code_when_session_message_in_progress(self):
@@ -1672,13 +1705,21 @@ class TestSendMessageEndpoint:
         events = await _read_sse_events(result)
         assert [event["event"] for event in events] == ["error", "done"]
         error_payload = events[0]["data"]
-        assert error_payload["schema_version"] == 1
+        assert error_payload["schema_version"] == 2
         assert error_payload["code"] == "session_message_in_progress"
         assert error_payload["category"] == "conflict"
         assert error_payload["phase"] == "router"
         assert error_payload["intric_error_code"] == int(ErrorCodes.BAD_REQUEST)
         assert "already being processed" in error_payload["message"]
         assert error_payload["request_id"] == "req-stream-busy"
+        assert error_payload["diagnostic_context"] == {
+            "session_id": str(session.id),
+            "request_id": "req-stream-busy",
+            "space_id": str(session.space_id),
+            "error_code": "session_message_in_progress",
+            "error_category": "conflict",
+            "error_phase": "router",
+        }
 
     @pytest.mark.anyio
     async def test_streams_registry_phase_for_planner_budget_errors(self):
@@ -1711,13 +1752,21 @@ class TestSendMessageEndpoint:
         events = await _read_sse_events(result)
         assert [event["event"] for event in events] == ["error", "done"]
         error_payload = events[0]["data"]
-        assert error_payload["schema_version"] == 1
+        assert error_payload["schema_version"] == 2
         assert error_payload["code"] == "planner_budget_missing"
         assert error_payload["category"] == "bad_request"
         assert error_payload["phase"] == "planner"
         assert error_payload["intric_error_code"] == int(ErrorCodes.BAD_REQUEST)
-        assert error_payload["context"] == {"budget_owner": "space"}
+        assert error_payload["details"] == {"budget_owner": "space"}
         assert error_payload["request_id"] == "req-stream-budget"
+        assert error_payload["diagnostic_context"] == {
+            "session_id": str(session.id),
+            "request_id": "req-stream-budget",
+            "space_id": str(session.space_id),
+            "error_code": "planner_budget_missing",
+            "error_category": "bad_request",
+            "error_phase": "planner",
+        }
 
 
 class TestApprovePlanEndpoint:
@@ -1952,12 +2001,45 @@ class TestApplyPlanEndpoint:
 
         payload = __import__("json").loads(response.body)
         assert response.status_code == 409
-        assert payload["schema_version"] == 1
+        assert payload["schema_version"] == 2
         assert payload["message"] == "Flow draft revision is stale."
         assert payload["code"] == "stale_revision"
         assert payload["category"] == "conflict"
         assert payload["phase"] == "router"
         assert payload["intric_error_code"] == ErrorCodes.BAD_REQUEST
+
+    @pytest.mark.anyio
+    async def test_published_flow_apply_error_preserves_diagnostic_flow_and_details(
+        self,
+    ):
+        container = _make_container()
+        plan = _make_plan_domain()
+        session = _make_session_domain()
+        service = container.ai_builder_service.return_value
+        service.get_plan.return_value = plan
+        service.get_session.return_value = session
+        service.apply_plan.side_effect = BadRequestException(
+            "Flow is currently published. Unpublish the flow before applying changes.",
+            code="flow_is_published",
+            context={"flow_id": "flow-1", "published_version": 3},
+        )
+        request = _make_request()
+        request.headers = {"x-request-id": "req-published"}
+
+        response = await apply_plan(
+            request=request,
+            plan_id=plan.id,
+            body=ApplyPlanRequest(expected_revision=3),
+            container=container,
+        )
+
+        payload = json.loads(response.body)
+        assert response.status_code == 400
+        assert payload["schema_version"] == 2
+        assert payload["code"] == "flow_is_published"
+        assert payload["diagnostic_context"]["flow_id"] == "flow-1"
+        assert payload["diagnostic_context"]["request_id"] == "req-published"
+        assert payload["details"] == {"published_version": 3}
 
 
 class TestRevisePlanEndpoint:

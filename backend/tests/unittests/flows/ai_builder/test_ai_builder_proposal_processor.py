@@ -2708,7 +2708,7 @@ async def test_outline_self_correction_returns_typed_error_when_completion_raise
 
     assert [event["event"] for event in events] == ["status", "error"]
     error_payload = json.loads(events[1]["data"])
-    assert error_payload["schema_version"] == 1
+    assert error_payload["schema_version"] == 2
     assert error_payload["code"] == "planner_upstream_error"
     assert error_payload["category"] == "upstream"
     assert error_payload["phase"] == "self_correction"

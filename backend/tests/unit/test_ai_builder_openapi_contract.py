@@ -26,6 +26,7 @@ REQUIRED_PATHS: dict[str, set[str]] = {
 
 REQUIRED_SCHEMAS = {
     "AIBuilderDoneEvent",
+    "AIBuilderDiagnosticContext",
     "AIBuilderErrorEvent",
     "AIBuilderPlanEventData",
     "AIBuilderPlanEvent",
@@ -193,6 +194,19 @@ def test_openapi_ai_builder_sse_plan_event_payload_is_typed(openapi_spec: dict) 
     schema = openapi_spec["components"]["schemas"]["AIBuilderPlanEvent"]
 
     assert "#/components/schemas/AIBuilderPlanEventData" in _schema_refs(schema)
+
+
+def test_openapi_ai_builder_error_exposes_diagnostic_context_and_details(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    public_error = schemas["AIBuilderPublicError"]
+
+    assert "#/components/schemas/AIBuilderDiagnosticContext" in _schema_refs(
+        public_error["properties"]["diagnostic_context"]
+    )
+    assert "details" in public_error["properties"]
+    assert "context" not in public_error["properties"]
 
 
 def test_openapi_ai_builder_sse_event_stream_is_discriminated(

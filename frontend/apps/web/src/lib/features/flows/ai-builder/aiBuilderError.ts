@@ -1,8 +1,9 @@
 import type {
   AIBuilderError,
   AIBuilderErrorCategory,
-  AIBuilderErrorContext,
-  AIBuilderErrorContextValue,
+  AIBuilderDiagnosticContext,
+  AIBuilderErrorDetails,
+  AIBuilderErrorDetailValue,
   AIBuilderErrorPhase
 } from "./protocol";
 
@@ -32,6 +33,21 @@ const VALID_PHASES = new Set<AIBuilderErrorPhase>([
   "requirements",
   "router",
   "self_correction"
+]);
+
+const DIAGNOSTIC_CONTEXT_FIELDS = new Set<keyof AIBuilderDiagnosticContext>([
+  "session_id",
+  "plan_id",
+  "request_id",
+  "flow_id",
+  "space_id",
+  "target_kind",
+  "plan_step_ref",
+  "error_code",
+  "error_category",
+  "error_phase",
+  "model",
+  "outcome_kind"
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -80,18 +96,30 @@ function errorMessage(
   return fallbackMessage;
 }
 
-function normalizeContext(value: unknown): AIBuilderErrorContext {
+function normalizeDetails(value: unknown): AIBuilderErrorDetails {
   if (!isRecord(value)) return {};
-  const context: AIBuilderErrorContext = {};
+  const details: AIBuilderErrorDetails = {};
+  for (const [key, detailValue] of Object.entries(value)) {
+    if (isDetailValue(detailValue)) {
+      details[key] = detailValue;
+    }
+  }
+  return details;
+}
+
+function normalizeDiagnosticContext(value: unknown): AIBuilderDiagnosticContext | null {
+  if (!isRecord(value)) return null;
+  const context: Record<string, string> = {};
   for (const [key, contextValue] of Object.entries(value)) {
-    if (isContextValue(contextValue)) {
+    if (!DIAGNOSTIC_CONTEXT_FIELDS.has(key as keyof AIBuilderDiagnosticContext)) continue;
+    if (typeof contextValue === "string" && contextValue.length > 0) {
       context[key] = contextValue;
     }
   }
-  return context;
+  return Object.keys(context).length > 0 ? (context as AIBuilderDiagnosticContext) : null;
 }
 
-function isContextValue(value: unknown): value is AIBuilderErrorContextValue {
+function isDetailValue(value: unknown): value is AIBuilderErrorDetailValue {
   return (
     value === null ||
     typeof value === "string" ||
@@ -101,7 +129,7 @@ function isContextValue(value: unknown): value is AIBuilderErrorContextValue {
 }
 
 function publicErrorFromRecord(record: Record<string, unknown>): AIBuilderError | null {
-  if (record.schema_version !== 1) return null;
+  if (record.schema_version !== 2) return null;
   const code = stringField(record, "code");
   const category = stringField(record, "category");
   const message = stringField(record, "message");
@@ -118,14 +146,15 @@ function publicErrorFromRecord(record: Record<string, unknown>): AIBuilderError 
   }
 
   return {
-    schema_version: 1,
+    schema_version: 2,
     code,
     category: category as AIBuilderErrorCategory,
     message,
     phase: phase as AIBuilderErrorPhase,
     request_id: stringField(record, "request_id"),
     intric_error_code: numberField(record, "intric_error_code") ?? null,
-    context: normalizeContext(record.context)
+    diagnostic_context: normalizeDiagnosticContext(record.diagnostic_context),
+    details: normalizeDetails(record.details)
   };
 }
 
@@ -133,22 +162,23 @@ function clientError({
   code,
   category,
   message,
-  context = {}
+  details = {}
 }: {
   code: string;
   category: AIBuilderErrorCategory;
   message: string;
-  context?: AIBuilderErrorContext;
+  details?: AIBuilderErrorDetails;
 }): AIBuilderError {
   return {
-    schema_version: 1,
+    schema_version: 2,
     code,
     category,
     message,
     phase: "client",
     request_id: null,
     intric_error_code: null,
-    context
+    diagnostic_context: null,
+    details
   };
 }
 
@@ -166,7 +196,7 @@ function parseSsePayload(payload: unknown, fallbackMessage: string): AIBuilderEr
     code: "unknown",
     category: "internal",
     message: fallbackMessage,
-    context: record
+    details: record
       ? {
           ...(stringField(record, "code") ? { original_code: stringField(record, "code") } : {})
         }
@@ -182,7 +212,7 @@ function parseApplyPayload(payload: unknown, fallbackMessage: string): AIBuilder
   const status = errorStatus(payload);
   const stage = errorStage(payload);
   const message = errorMessage(payload, body, fallbackMessage);
-  const context = normalizeContext(body?.context);
+  const details = normalizeDetails(body?.details);
   const rawCode = body ? stringField(body, "code") : null;
 
   if (status === 409) {
@@ -190,7 +220,7 @@ function parseApplyPayload(payload: unknown, fallbackMessage: string): AIBuilder
       code: "stale_revision",
       category: "conflict",
       message,
-      context
+      details
     });
   }
 
@@ -199,7 +229,7 @@ function parseApplyPayload(payload: unknown, fallbackMessage: string): AIBuilder
       code: "network",
       category: "network",
       message,
-      context: { status: 0, ...(stage ? { stage } : {}) }
+      details: { status: 0, ...(stage ? { stage } : {}) }
     });
   }
 
@@ -207,8 +237,8 @@ function parseApplyPayload(payload: unknown, fallbackMessage: string): AIBuilder
     code: "unknown",
     category: "internal",
     message,
-    context: {
-      ...context,
+    details: {
+      ...details,
       ...(status !== undefined ? { status } : {}),
       ...(rawCode !== null ? { original_code: rawCode } : {}),
       ...(stage ? { stage } : {})
@@ -241,11 +271,11 @@ export function buildClientAIBuilderError(
   options: {
     code?: string;
     category?: AIBuilderErrorCategory;
-    context?: AIBuilderErrorContext;
+    details?: AIBuilderErrorDetails;
   } = {}
 ): AIBuilderError {
-  const { code = "unknown", category = "internal", context = {} } = options;
-  return clientError({ code, category, message, context });
+  const { code = "unknown", category = "internal", details = {} } = options;
+  return clientError({ code, category, message, details });
 }
 
 export function buildUnpublishedApplyFailureError({
@@ -259,10 +289,10 @@ export function buildUnpublishedApplyFailureError({
     code: "flow_unpublished_apply_failed",
     category: "conflict",
     message: originalError.message,
-    context: {
+    details: {
       flow_id: flowId,
       original_code: originalError.code,
-      ...prefixOriginalContext(originalError.context)
+      ...prefixOriginalDetails(originalError.details)
     }
   });
 }
@@ -275,8 +305,8 @@ export function isSoftBlockAIBuilderError(error: AIBuilderError): boolean {
   return error.category === "soft_block";
 }
 
-function prefixOriginalContext(context: AIBuilderErrorContext): AIBuilderErrorContext {
+function prefixOriginalDetails(details: AIBuilderErrorDetails): AIBuilderErrorDetails {
   return Object.fromEntries(
-    Object.entries(context).map(([key, value]) => [`original_context_${key}`, value])
+    Object.entries(details).map(([key, value]) => [`original_details_${key}`, value])
   );
 }

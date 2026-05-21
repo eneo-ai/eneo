@@ -8031,6 +8031,30 @@ export interface components {
       /** Unknown Model Context Window Tokens */
       unknown_model_context_window_tokens?: number | null;
     };
+    /** AIBuilderDiagnosticContext */
+    AIBuilderDiagnosticContext: {
+      /** Session Id */
+      session_id?: string | null;
+      /** Plan Id */
+      plan_id?: string | null;
+      /** Request Id */
+      request_id?: string | null;
+      /** Flow Id */
+      flow_id?: string | null;
+      /** Space Id */
+      space_id?: string | null;
+      /** Target Kind */
+      target_kind?: string | null;
+      /** Plan Step Ref */
+      plan_step_ref?: string | null;
+      error_code?: components["schemas"]["AIBuilderErrorCode"] | null;
+      error_category?: components["schemas"]["AIBuilderErrorCategory"] | null;
+      error_phase?: components["schemas"]["AIBuilderErrorPhase"] | null;
+      /** Model */
+      model?: string | null;
+      /** Outcome Kind */
+      outcome_kind?: string | null;
+    };
     /**
      * AIBuilderErrorCategory
      * @enum {string}
@@ -8170,10 +8194,10 @@ export interface components {
       /**
        * Schema Version
        * @description Schema version for the AI Builder error contract.
-       * @default 1
+       * @default 2
        * @constant
        */
-      schema_version?: 1;
+      schema_version?: 2;
       /** @description Stable machine-readable AI Builder error code. */
       code: components["schemas"]["AIBuilderErrorCode"];
       /** @description Stable UI and control-flow category for the error. */
@@ -8192,11 +8216,13 @@ export interface components {
        * @description Request or correlation id that produced the error.
        */
       request_id: string;
+      /** @description Small correlation bundle for finding the session, plan, request, phase, model or step involved in the error. */
+      diagnostic_context?: components["schemas"]["AIBuilderDiagnosticContext"] | null;
       /**
-       * Context
-       * @description Small bounded scalar diagnostics safe for API clients.
+       * Details
+       * @description Small bounded scalar per-error details safe for API clients.
        */
-      context?: {
+      details?: {
         [key: string]: string | number | boolean | null;
       } | null;
     };
@@ -40295,14 +40321,20 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "insufficient_space_permission",
            *       "category": "unauthorized",
            *       "message": "You do not have permission to use the AI builder in this space.",
            *       "phase": "router",
            *       "intric_error_code": 9001,
            *       "request_id": "req_01HZYXEXAMPLE",
-           *       "context": {
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "insufficient_space_permission",
+           *         "error_category": "unauthorized",
+           *         "error_phase": "router"
+           *       },
+           *       "details": {
            *         "auth_layer": "space_membership"
            *       }
            *     }
@@ -40342,13 +40374,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "bad_request",
            *       "category": "bad_request",
            *       "message": "A planner model is required to start an AI Builder session.",
            *       "phase": "router",
            *       "intric_error_code": 9007,
-           *       "request_id": "req_01HZYXEXAMPLE"
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "bad_request",
+           *         "error_category": "bad_request",
+           *         "error_phase": "router"
+           *       }
            *     }
            */
           "application/json": components["schemas"]["AIBuilderPublicError"];
@@ -40362,14 +40400,20 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "insufficient_scope",
            *       "category": "unauthorized",
            *       "message": "API key space scope does not match requested AI builder resource.",
            *       "phase": "router",
            *       "intric_error_code": 9001,
            *       "request_id": "req_01HZYXEXAMPLE",
-           *       "context": {
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "insufficient_scope",
+           *         "error_category": "unauthorized",
+           *         "error_phase": "router"
+           *       },
+           *       "details": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
@@ -40439,13 +40483,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "bad_request",
            *       "category": "bad_request",
            *       "message": "Cannot send messages in this AI Builder session right now.",
            *       "phase": "router",
            *       "intric_error_code": 9007,
-           *       "request_id": "req_01HZYXEXAMPLE"
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "bad_request",
+           *         "error_category": "bad_request",
+           *         "error_phase": "router"
+           *       }
            *     }
            */
           "application/json": components["schemas"]["AIBuilderPublicError"];
@@ -40459,14 +40509,20 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "insufficient_scope",
            *       "category": "unauthorized",
            *       "message": "API key space scope does not match requested AI builder resource.",
            *       "phase": "router",
            *       "intric_error_code": 9001,
            *       "request_id": "req_01HZYXEXAMPLE",
-           *       "context": {
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "insufficient_scope",
+           *         "error_category": "unauthorized",
+           *         "error_phase": "router"
+           *       },
+           *       "details": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
@@ -40482,13 +40538,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "not_found",
            *       "category": "not_found",
            *       "message": "AI Builder session not found.",
            *       "phase": "router",
            *       "intric_error_code": 9000,
-           *       "request_id": "req_01HZYXEXAMPLE"
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "not_found",
+           *         "error_category": "not_found",
+           *         "error_phase": "router"
+           *       }
            *     }
            */
           "application/json": components["schemas"]["AIBuilderPublicError"];
@@ -40534,14 +40596,20 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "insufficient_scope",
            *       "category": "unauthorized",
            *       "message": "API key space scope does not match requested AI builder resource.",
            *       "phase": "router",
            *       "intric_error_code": 9001,
            *       "request_id": "req_01HZYXEXAMPLE",
-           *       "context": {
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "insufficient_scope",
+           *         "error_category": "unauthorized",
+           *         "error_phase": "router"
+           *       },
+           *       "details": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
@@ -40557,13 +40625,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "not_found",
            *       "category": "not_found",
            *       "message": "AI Builder session not found.",
            *       "phase": "router",
            *       "intric_error_code": 9000,
-           *       "request_id": "req_01HZYXEXAMPLE"
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "not_found",
+           *         "error_category": "not_found",
+           *         "error_phase": "router"
+           *       }
            *     }
            */
           "application/json": components["schemas"]["AIBuilderPublicError"];
@@ -40639,14 +40713,20 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "insufficient_scope",
            *       "category": "unauthorized",
            *       "message": "API key space scope does not match requested AI builder resource.",
            *       "phase": "router",
            *       "intric_error_code": 9001,
            *       "request_id": "req_01HZYXEXAMPLE",
-           *       "context": {
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "insufficient_scope",
+           *         "error_category": "unauthorized",
+           *         "error_phase": "router"
+           *       },
+           *       "details": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
@@ -40662,13 +40742,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "not_found",
            *       "category": "not_found",
            *       "message": "AI Builder session not found.",
            *       "phase": "router",
            *       "intric_error_code": 9000,
-           *       "request_id": "req_01HZYXEXAMPLE"
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "not_found",
+           *         "error_category": "not_found",
+           *         "error_phase": "router"
+           *       }
            *     }
            */
           "application/json": components["schemas"]["AIBuilderPublicError"];
@@ -40714,14 +40800,20 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "insufficient_scope",
            *       "category": "unauthorized",
            *       "message": "API key space scope does not match requested AI builder resource.",
            *       "phase": "router",
            *       "intric_error_code": 9001,
            *       "request_id": "req_01HZYXEXAMPLE",
-           *       "context": {
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "insufficient_scope",
+           *         "error_category": "unauthorized",
+           *         "error_phase": "router"
+           *       },
+           *       "details": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
@@ -40737,13 +40829,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "not_found",
            *       "category": "not_found",
            *       "message": "AI Builder plan not found.",
            *       "phase": "router",
            *       "intric_error_code": 9000,
-           *       "request_id": "req_01HZYXEXAMPLE"
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "not_found",
+           *         "error_category": "not_found",
+           *         "error_phase": "router"
+           *       }
            *     }
            */
           "application/json": components["schemas"]["AIBuilderPublicError"];
@@ -40789,14 +40887,20 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "insufficient_scope",
            *       "category": "unauthorized",
            *       "message": "API key space scope does not match requested AI builder resource.",
            *       "phase": "router",
            *       "intric_error_code": 9001,
            *       "request_id": "req_01HZYXEXAMPLE",
-           *       "context": {
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "insufficient_scope",
+           *         "error_category": "unauthorized",
+           *         "error_phase": "router"
+           *       },
+           *       "details": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
@@ -40812,13 +40916,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "not_found",
            *       "category": "not_found",
            *       "message": "AI Builder session not found.",
            *       "phase": "router",
            *       "intric_error_code": 9000,
-           *       "request_id": "req_01HZYXEXAMPLE"
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "not_found",
+           *         "error_category": "not_found",
+           *         "error_phase": "router"
+           *       }
            *     }
            */
           "application/json": components["schemas"]["AIBuilderPublicError"];
@@ -40864,14 +40974,20 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "insufficient_scope",
            *       "category": "unauthorized",
            *       "message": "API key space scope does not match requested AI builder resource.",
            *       "phase": "router",
            *       "intric_error_code": 9001,
            *       "request_id": "req_01HZYXEXAMPLE",
-           *       "context": {
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "insufficient_scope",
+           *         "error_category": "unauthorized",
+           *         "error_phase": "router"
+           *       },
+           *       "details": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
@@ -40887,13 +41003,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "not_found",
            *       "category": "not_found",
            *       "message": "AI Builder session not found.",
            *       "phase": "router",
            *       "intric_error_code": 9000,
-           *       "request_id": "req_01HZYXEXAMPLE"
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "not_found",
+           *         "error_category": "not_found",
+           *         "error_phase": "router"
+           *       }
            *     }
            */
           "application/json": components["schemas"]["AIBuilderPublicError"];
@@ -40939,14 +41061,20 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "insufficient_scope",
            *       "category": "unauthorized",
            *       "message": "API key space scope does not match requested AI builder resource.",
            *       "phase": "router",
            *       "intric_error_code": 9001,
            *       "request_id": "req_01HZYXEXAMPLE",
-           *       "context": {
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "insufficient_scope",
+           *         "error_category": "unauthorized",
+           *         "error_phase": "router"
+           *       },
+           *       "details": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
@@ -40962,13 +41090,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "not_found",
            *       "category": "not_found",
            *       "message": "AI Builder plan not found.",
            *       "phase": "router",
            *       "intric_error_code": 9000,
-           *       "request_id": "req_01HZYXEXAMPLE"
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "not_found",
+           *         "error_category": "not_found",
+           *         "error_phase": "router"
+           *       }
            *     }
            */
           "application/json": components["schemas"]["AIBuilderPublicError"];
@@ -41018,13 +41152,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "transcription_model_required",
            *       "category": "bad_request",
            *       "message": "A transcription model must be selected when using audio input steps.",
            *       "phase": "router",
            *       "intric_error_code": 9007,
-           *       "request_id": "req_01HZYXEXAMPLE"
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "transcription_model_required",
+           *         "error_category": "bad_request",
+           *         "error_phase": "router"
+           *       }
            *     }
            */
           "application/json": components["schemas"]["AIBuilderPublicError"];
@@ -41038,14 +41178,20 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "insufficient_scope",
            *       "category": "unauthorized",
            *       "message": "API key space scope does not match requested AI builder resource.",
            *       "phase": "router",
            *       "intric_error_code": 9001,
            *       "request_id": "req_01HZYXEXAMPLE",
-           *       "context": {
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "insufficient_scope",
+           *         "error_category": "unauthorized",
+           *         "error_phase": "router"
+           *       },
+           *       "details": {
            *         "auth_layer": "api_key_scope"
            *       }
            *     }
@@ -41061,13 +41207,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "not_found",
            *       "category": "not_found",
            *       "message": "AI Builder plan not found.",
            *       "phase": "router",
            *       "intric_error_code": 9000,
-           *       "request_id": "req_01HZYXEXAMPLE"
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "not_found",
+           *         "error_category": "not_found",
+           *         "error_phase": "router"
+           *       }
            *     }
            */
           "application/json": components["schemas"]["AIBuilderPublicError"];
@@ -41081,13 +41233,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "stale_revision",
            *       "category": "conflict",
            *       "message": "Flow revision changed while applying the plan.",
            *       "phase": "router",
            *       "intric_error_code": 9007,
-           *       "request_id": "req_01HZYXEXAMPLE"
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "stale_revision",
+           *         "error_category": "conflict",
+           *         "error_phase": "router"
+           *       }
            *     }
            */
           "application/json": components["schemas"]["AIBuilderPublicError"];
@@ -41137,13 +41295,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "plan_not_proposed",
            *       "category": "bad_request",
            *       "message": "Can only revise proposed plans.",
            *       "phase": "router",
            *       "intric_error_code": 9007,
-           *       "request_id": "req_01HZYXEXAMPLE"
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "plan_not_proposed",
+           *         "error_category": "bad_request",
+           *         "error_phase": "router"
+           *       }
            *     }
            */
           "application/json": components["schemas"]["AIBuilderPublicError"];
@@ -41157,13 +41321,19 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "schema_version": 1,
+           *       "schema_version": 2,
            *       "code": "session_creator_required",
            *       "category": "unauthorized",
            *       "message": "Only the session creator can revise plans.",
            *       "phase": "router",
            *       "intric_error_code": 9001,
-           *       "request_id": "req_01HZYXEXAMPLE"
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "diagnostic_context": {
+           *         "request_id": "req_01HZYXEXAMPLE",
+           *         "error_code": "session_creator_required",
+           *         "error_category": "unauthorized",
+           *         "error_phase": "router"
+           *       }
            *     }
            */
           "application/json": components["schemas"]["AIBuilderPublicError"];

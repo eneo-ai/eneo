@@ -14,10 +14,12 @@ from intric.main.exceptions import ErrorCodes
 
 JsonScalar: TypeAlias = str | int | float | bool | None
 
-_MAX_CONTEXT_KEYS = 10
-_MAX_CONTEXT_STRING_LENGTH = 256
-_MAX_CONTEXT_JSON_BYTES = 1024
+_MAX_DETAILS_KEYS = 10
+_MAX_DETAILS_STRING_LENGTH = 256
+_MAX_DETAILS_JSON_BYTES = 1024
 _MAX_MESSAGE_LENGTH = 4096
+_MAX_REQUEST_ID_LENGTH = 128
+_DIAGNOSTIC_CONTEXT_STRING_LENGTH = 256
 
 
 class AIBuilderErrorCode(StrEnum):
@@ -90,6 +92,27 @@ class AIBuilderErrorPhase(StrEnum):
     REQUIREMENTS = "requirements"
     ROUTER = "router"
     SELF_CORRECTION = "self_correction"
+
+
+_DIAGNOSTIC_STRING_KEYS = frozenset(
+    {
+        "session_id",
+        "plan_id",
+        "flow_id",
+        "space_id",
+        "target_kind",
+        "plan_step_ref",
+        "model",
+        "outcome_kind",
+    }
+)
+_DIAGNOSTIC_ENUM_FIELDS = MappingProxyType(
+    {
+        "error_code": AIBuilderErrorCode,
+        "error_category": AIBuilderErrorCategory,
+        "error_phase": AIBuilderErrorPhase,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -372,6 +395,42 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
 )
 
 
+class AIBuilderDiagnosticContext(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    session_id: str | None = Field(
+        default=None, max_length=_DIAGNOSTIC_CONTEXT_STRING_LENGTH
+    )
+    plan_id: str | None = Field(
+        default=None, max_length=_DIAGNOSTIC_CONTEXT_STRING_LENGTH
+    )
+    request_id: str | None = Field(default=None, max_length=_MAX_REQUEST_ID_LENGTH)
+    flow_id: str | None = Field(
+        default=None, max_length=_DIAGNOSTIC_CONTEXT_STRING_LENGTH
+    )
+    space_id: str | None = Field(
+        default=None, max_length=_DIAGNOSTIC_CONTEXT_STRING_LENGTH
+    )
+    target_kind: str | None = Field(
+        default=None, max_length=_DIAGNOSTIC_CONTEXT_STRING_LENGTH
+    )
+    plan_step_ref: str | None = Field(
+        default=None, max_length=_DIAGNOSTIC_CONTEXT_STRING_LENGTH
+    )
+    error_code: AIBuilderErrorCode | None = None
+    error_category: AIBuilderErrorCategory | None = None
+    error_phase: AIBuilderErrorPhase | None = None
+    model: str | None = Field(
+        default=None, max_length=_DIAGNOSTIC_CONTEXT_STRING_LENGTH
+    )
+    outcome_kind: str | None = Field(
+        default=None, max_length=_DIAGNOSTIC_CONTEXT_STRING_LENGTH
+    )
+
+
+_DIAGNOSTIC_CONTEXT_KEYS = frozenset(AIBuilderDiagnosticContext.model_fields)
+
+
 class AIBuilderPublicError(BaseModel):
     model_config = ConfigDict(
         frozen=True,
@@ -384,8 +443,8 @@ class AIBuilderPublicError(BaseModel):
         },
     )
 
-    schema_version: Literal[1] = Field(
-        default=1,
+    schema_version: Literal[2] = Field(
+        default=2,
         description="Schema version for the AI Builder error contract.",
     )
     code: AIBuilderErrorCode = Field(
@@ -410,36 +469,43 @@ class AIBuilderPublicError(BaseModel):
     )
     request_id: str = Field(
         min_length=1,
-        max_length=128,
+        max_length=_MAX_REQUEST_ID_LENGTH,
         description="Request or correlation id that produced the error.",
     )
-    context: dict[str, JsonScalar] | None = Field(
+    diagnostic_context: AIBuilderDiagnosticContext | None = Field(
         default=None,
-        description="Small bounded scalar diagnostics safe for API clients.",
+        description=(
+            "Small correlation bundle for finding the session, plan, request, "
+            "phase, model or step involved in the error."
+        ),
+    )
+    details: dict[str, JsonScalar] | None = Field(
+        default=None,
+        description="Small bounded scalar per-error details safe for API clients.",
     )
 
-    @field_validator("context")
+    @field_validator("details")
     @classmethod
-    def validate_context(
+    def validate_details(
         cls, value: dict[str, JsonScalar] | None
     ) -> dict[str, JsonScalar] | None:
         if value is None:
             return None
-        if len(value) > _MAX_CONTEXT_KEYS:
-            raise ValueError(f"context must have at most {_MAX_CONTEXT_KEYS} keys")
-        for context_value in value.values():
-            if isinstance(context_value, str):
-                if len(context_value) > _MAX_CONTEXT_STRING_LENGTH:
+        if len(value) > _MAX_DETAILS_KEYS:
+            raise ValueError(f"details must have at most {_MAX_DETAILS_KEYS} keys")
+        for details_value in value.values():
+            if isinstance(details_value, str):
+                if len(details_value) > _MAX_DETAILS_STRING_LENGTH:
                     raise ValueError(
-                        "context string values must have at most "
-                        f"{_MAX_CONTEXT_STRING_LENGTH} characters"
+                        "details string values must have at most "
+                        f"{_MAX_DETAILS_STRING_LENGTH} characters"
                     )
-            elif not _is_json_scalar(context_value):
-                raise ValueError("context values must be scalar JSON values")
+            elif not _is_json_scalar(details_value):
+                raise ValueError("details values must be scalar JSON values")
         payload_size = len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
-        if payload_size > _MAX_CONTEXT_JSON_BYTES:
+        if payload_size > _MAX_DETAILS_JSON_BYTES:
             raise ValueError(
-                f"context JSON must be at most {_MAX_CONTEXT_JSON_BYTES} bytes"
+                f"details JSON must be at most {_MAX_DETAILS_JSON_BYTES} bytes"
             )
         return value
 
@@ -466,22 +532,22 @@ def coerce_ai_builder_error_code(
         return default
 
 
-def normalize_ai_builder_error_context(
-    context: Mapping[str, object] | None,
+def normalize_ai_builder_error_details(
+    details: Mapping[str, object] | None,
 ) -> dict[str, JsonScalar] | None:
-    if context is None:
+    if details is None:
         return None
 
     normalized: dict[str, JsonScalar] = {}
-    for key, value in context.items():
-        if len(normalized) >= _MAX_CONTEXT_KEYS:
+    for key, value in details.items():
+        if len(normalized) >= _MAX_DETAILS_KEYS:
             break
         if not key:
             continue
         if not _is_json_scalar(value):
             continue
         if isinstance(value, str):
-            normalized[key] = value[:_MAX_CONTEXT_STRING_LENGTH]
+            normalized[key] = value[:_MAX_DETAILS_STRING_LENGTH]
         else:
             normalized[key] = value
 
@@ -490,11 +556,71 @@ def normalize_ai_builder_error_context(
 
     while normalized:
         payload_size = len(json.dumps(normalized, ensure_ascii=False).encode("utf-8"))
-        if payload_size <= _MAX_CONTEXT_JSON_BYTES:
+        if payload_size <= _MAX_DETAILS_JSON_BYTES:
             return normalized
         normalized.pop(next(reversed(normalized)))
 
     return None
+
+
+def normalize_ai_builder_diagnostic_context(
+    diagnostic_context: Mapping[str, object] | AIBuilderDiagnosticContext | None,
+) -> AIBuilderDiagnosticContext | None:
+    if diagnostic_context is None:
+        return None
+    if isinstance(diagnostic_context, AIBuilderDiagnosticContext):
+        data = diagnostic_context.model_dump(exclude_none=True)
+    else:
+        data = {
+            key: value
+            for key, value in diagnostic_context.items()
+            if key in _DIAGNOSTIC_CONTEXT_KEYS and value is not None
+        }
+    normalized: dict[str, object] = {}
+    for key, value in data.items():
+        if key == "request_id":
+            if isinstance(value, str) and value:
+                normalized[key] = value[:_MAX_REQUEST_ID_LENGTH]
+            continue
+        if key in _DIAGNOSTIC_STRING_KEYS:
+            if isinstance(value, str) and value:
+                normalized[key] = value[:_DIAGNOSTIC_CONTEXT_STRING_LENGTH]
+            continue
+        expected_enum = _DIAGNOSTIC_ENUM_FIELDS.get(key)
+        if expected_enum is None:
+            continue
+        if isinstance(value, expected_enum):
+            normalized[key] = value
+            continue
+        if isinstance(value, str):
+            try:
+                normalized[key] = expected_enum(value)
+            except ValueError:
+                continue
+
+    if not normalized:
+        return None
+    context = AIBuilderDiagnosticContext.model_validate(normalized)
+    if not context.model_dump(exclude_none=True):
+        return None
+    return context
+
+
+def split_ai_builder_error_context(
+    context: Mapping[str, object] | None,
+) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    if context is None:
+        return None, None
+
+    diagnostic_context = {
+        key: value for key, value in context.items() if key in _DIAGNOSTIC_CONTEXT_KEYS
+    }
+    details = {
+        key: value
+        for key, value in context.items()
+        if key not in _DIAGNOSTIC_CONTEXT_KEYS
+    }
+    return diagnostic_context or None, details or None
 
 
 def build_ai_builder_error(
@@ -503,17 +629,37 @@ def build_ai_builder_error(
     code: AIBuilderErrorCode,
     phase: AIBuilderErrorPhase | None = None,
     request_id: str | None = None,
-    context: Mapping[str, object] | None = None,
+    diagnostic_context: Mapping[str, object] | AIBuilderDiagnosticContext | None = None,
+    details: Mapping[str, object] | None = None,
 ) -> AIBuilderPublicError:
+    """Build the public error and own canonical diagnostic error fields."""
+
     registry_entry = AI_BUILDER_ERROR_REGISTRY[code]
+    resolved_phase = phase or registry_entry.default_phase
+    resolved_request_id = request_id or str(uuid4())
+    diagnostic_data: dict[str, object] = {}
+    if diagnostic_context is not None:
+        if isinstance(diagnostic_context, AIBuilderDiagnosticContext):
+            diagnostic_data.update(diagnostic_context.model_dump(exclude_none=True))
+        else:
+            diagnostic_data.update(diagnostic_context)
+    diagnostic_data.update(
+        {
+            "request_id": resolved_request_id,
+            "error_code": code.value,
+            "error_category": registry_entry.category.value,
+            "error_phase": resolved_phase.value,
+        }
+    )
     return AIBuilderPublicError(
         code=code,
         category=registry_entry.category,
         message=message,
-        phase=phase or registry_entry.default_phase,
+        phase=resolved_phase,
         intric_error_code=registry_entry.intric_error_code,
-        request_id=request_id or str(uuid4()),
-        context=normalize_ai_builder_error_context(context),
+        request_id=resolved_request_id,
+        diagnostic_context=normalize_ai_builder_diagnostic_context(diagnostic_data),
+        details=normalize_ai_builder_error_details(details),
     )
 
 
@@ -523,14 +669,16 @@ def build_ai_builder_error_event(
     code: AIBuilderErrorCode,
     phase: AIBuilderErrorPhase | None = None,
     request_id: str | None = None,
-    context: Mapping[str, object] | None = None,
+    diagnostic_context: Mapping[str, object] | AIBuilderDiagnosticContext | None = None,
+    details: Mapping[str, object] | None = None,
 ) -> dict[str, str]:
     payload = build_ai_builder_error(
         message=message,
         code=code,
         phase=phase,
         request_id=request_id,
-        context=context,
+        diagnostic_context=diagnostic_context,
+        details=details,
     )
     event = AIBuilderErrorEvent(data=payload)
     return {
@@ -544,7 +692,8 @@ def ai_builder_error_example(
     message: str,
     code: AIBuilderErrorCode,
     request_id: str = "req_01HZYXEXAMPLE",
-    context: Mapping[str, object] | None = None,
+    diagnostic_context: Mapping[str, object] | AIBuilderDiagnosticContext | None = None,
+    details: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     return cast(
         dict[str, object],
@@ -552,7 +701,8 @@ def ai_builder_error_example(
             message=message,
             code=code,
             request_id=request_id,
-            context=context,
+            diagnostic_context=diagnostic_context,
+            details=details,
         ).model_dump(mode="json", exclude_none=True),
     )
 
@@ -563,6 +713,7 @@ def _is_json_scalar(value: object) -> TypeGuard[JsonScalar]:
 
 __all__ = [
     "AI_BUILDER_ERROR_REGISTRY",
+    "AIBuilderDiagnosticContext",
     "AIBuilderErrorCategory",
     "AIBuilderErrorCode",
     "AIBuilderErrorEvent",
@@ -574,5 +725,7 @@ __all__ = [
     "build_ai_builder_error",
     "build_ai_builder_error_event",
     "coerce_ai_builder_error_code",
-    "normalize_ai_builder_error_context",
+    "normalize_ai_builder_diagnostic_context",
+    "normalize_ai_builder_error_details",
+    "split_ai_builder_error_context",
 ]

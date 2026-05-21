@@ -659,7 +659,7 @@ export class FlowAIBuilderDriver {
     const contextFlowId =
       applyError?.code === "flow_is_published" ||
       applyError?.code === "flow_unpublished_apply_failed"
-        ? applyError.context.flow_id
+        ? (applyError.diagnostic_context?.flow_id ?? applyError.details.flow_id)
         : null;
     if (typeof contextFlowId === "string" && contextFlowId.length > 0) {
       return contextFlowId;

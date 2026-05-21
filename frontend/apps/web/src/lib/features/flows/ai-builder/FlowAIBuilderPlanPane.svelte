@@ -55,8 +55,8 @@
   );
   const publishedVersion = $derived(
     service.applyError?.code === "flow_is_published"
-      ? typeof service.applyError.context.published_version === "number"
-        ? service.applyError.context.published_version
+      ? typeof service.applyError.details.published_version === "number"
+        ? service.applyError.details.published_version
         : null
       : null
   );

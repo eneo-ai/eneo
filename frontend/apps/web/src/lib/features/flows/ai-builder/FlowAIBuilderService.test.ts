@@ -60,14 +60,15 @@ function makePlan(overrides: Partial<ProposedPlan> = {}): ProposedPlan {
 
 function makeAIBuilderError(overrides: Partial<AIBuilderError> = {}): AIBuilderError {
   return {
-    schema_version: 1,
+    schema_version: 2,
     code: "invalid_existing_step_ref",
     category: "bad_request",
     message: "Plan changed",
     phase: "router",
     request_id: "req-test",
     intric_error_code: 9007,
-    context: {},
+    diagnostic_context: null,
+    details: {},
     ...overrides
   };
 }

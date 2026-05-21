@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T017b
+active_task: T018b
 
 scoring_target:
   dimensions:
@@ -50,7 +50,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T018 implementation/post-review: conversation metadata, persisted assistant tool calls, question_answer request shape, and legacy BuilderPlanEditResult JSON now have typed canonical ownership. The broader score floor remains blocked by diagnostic/error DX gaps, DB lock invariant, readability/test topology, AI slop cleanup, and normal-user output quality."
+  source: "After T017b implementation/post-review: conversation metadata/tool-call JSONB and AI Builder public errors now have typed canonical ownership. Public AI Builder errors use diagnostic_context for correlation and details for bounded scalar per-error facts, with generated-client proof. The broader score floor remains blocked by frontend copyable diagnostic reports, DB lock invariant, readability/test topology, AI slop cleanup, and normal-user output quality."
   Maintainability: 8
   Code_Quality: 8
   Clean_Architecture: 8
@@ -62,12 +62,12 @@ current_scorecard:
   Data_Model_Schema_Quality: 8
   API_Contract_Quality: 8
   Test_Coverage_Quality: 8
-  Developer_Diagnostic_Experience: 6
+  Developer_Diagnostic_Experience: 8
   AI_Slop_Comment_Naming_Quality: 6
   Normal_User_Output_Quality: 6
   Overall: 6
   blockers:
-    - "Public AI Builder errors still use one overloaded context bag for both diagnostic correlation and per-error details; this slows support/debugging and keeps API contract/DX below 9."
+    - "Copyable frontend diagnostic reports for stream/apply/quality reports are still queued; backend public errors are typed, but support handoff is not yet 9/10 until T018b."
     - "Public/lifecycle/CAS error-code discipline improved, but calls that omit code= entirely can still silently use generic codes; T017b/T018b must continue error-contract discipline without creating a third public context carrier."
     - "builder_sessions can still persist a corrupt lock_token with NULL lock_expires_at; runtime fails safe, but schema-level lock invariants need a migration or explicit corruption policy."
     - "Live eval still shows runtime-input/form-field prompts can produce no form fields."
@@ -2147,7 +2147,7 @@ tasks:
   - id: T017b
     type: worker
     assignee: Worker
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Implement the AI Builder diagnostic public-error contract: backend AIBuilderDiagnosticContext, separate details, required frontend parser migration, generated types, and log-field alignment."
     inputs:
@@ -2171,6 +2171,8 @@ tasks:
       - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_error_contract.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_service.py"
       - "backend/tests/unit/test_ai_builder_openapi_contract.py"
       - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
       - "frontend/packages/intric-js/src/types/schema.d.ts"
@@ -2208,12 +2210,71 @@ tasks:
       - "Existing detail fields cannot be preserved without a breaking public migration plan."
       - "Generated-client shape would require a third permanent context carrier."
       - "Review shows this should be merged with a broader API versioning decision."
-    receipt: null
+    receipt:
+      completed_at: "2026-05-21T23:01:00+02:00"
+      result: done
+      summary:
+        - "Added AIBuilderDiagnosticContext and changed AIBuilderPublicError to schema_version 2 with diagnostic_context/details instead of a single public context bag."
+        - "Kept shared BadRequestException.context internal; AI Builder router now translates exception_context through _merged_ai_builder_error_fields before public JSON/SSE output."
+        - "Migrated frontend AI Builder parsed errors to diagnostic_context/details, with client-synthesized status/stage/original_code under details."
+        - "Updated published-flow UI behavior: PlanPane reads details.published_version, Driver prefers diagnostic_context.flow_id with details.flow_id fallback."
+        - "Regenerated frontend/packages/intric-js/src/types/schema.d.ts from local backend OpenAPI."
+        - "Updated two broader AI Builder unit tests that still asserted public error schema_version 1."
+      peer_review:
+        claude:
+          iteration_1:
+            artifact: ".codex/artifacts/claude-peer-loop-t017b-diagnostic-public-error-contract-review-20260521T204957Z.md"
+            verdict: "changes_required"
+            green_light: false
+            min_score: 7
+            blockers:
+              - "Diagnostic context normalizer could raise ValidationError inside error handling."
+              - "Canonical request_id/error_code/error_category/error_phase override invariant was untested."
+          iteration_2:
+            artifact: ".codex/artifacts/claude-peer-loop-t017b-diagnostic-public-error-contract-review-iteration-2-20260521T205849Z.md"
+            verdict: "green"
+            green_light: true
+            min_score: 8
+            residual_followups:
+              - "Derive or assert _DIAGNOSTIC_STRING_KEYS/_DIAGNOSTIC_ENUM_FIELDS coverage against AIBuilderDiagnosticContext.model_fields to prevent drift."
+              - "Add a direct _merged_ai_builder_error_fields precedence test."
+              - "Make build_ai_builder_error docstring enumerate the canonical builder-owned diagnostic keys."
+        antigravity:
+          status: "SKIPPED_DUE_TO_QUOTA"
+          reason: "Antigravity quota unavailable until 2026-05-28T08:49:49.406842+02:00; missing coverage recorded, not a pass."
+      verification:
+        - command: "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_error_contract.py tests/unittests/flows/ai_builder/test_ai_builder_router.py tests/unit/test_ai_builder_openapi_contract.py -q"
+          result: "passed: 89 passed, 15 pre-existing warnings"
+        - command: "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+          result: "passed: 2226 passed, 4 skipped, 11 pre-existing warnings"
+        - command: "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_error_contract.py src/intric/flows/ai_builder/ai_builder_router.py tests/unit/test_ai_builder_openapi_contract.py tests/unittests/flows/ai_builder/test_ai_builder_error_contract.py tests/unittests/flows/ai_builder/test_ai_builder_router.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_service.py"
+          result: "passed"
+        - command: "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_error_contract.py src/intric/flows/ai_builder/ai_builder_router.py tests/unittests/flows/ai_builder/test_ai_builder_error_contract.py tests/unittests/flows/ai_builder/test_ai_builder_router.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_service.py tests/unit/test_ai_builder_openapi_contract.py"
+          result: "passed: 0 errors, 0 warnings, 0 informations"
+        - command: "cd frontend/packages/intric-js && bun run check"
+          result: "passed"
+        - command: "cd frontend/apps/web && bun run test:unit --run src/lib/features/flows/ai-builder/aiBuilderError.test.ts src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts src/lib/features/flows/ai-builder/FlowAIBuilderService.test.ts"
+          result: "passed: 48 tests"
+        - command: "cd frontend/apps/web && bun x eslint src/lib/features/flows/ai-builder/protocol.ts src/lib/features/flows/ai-builder/aiBuilderError.ts src/lib/features/flows/ai-builder/aiBuilderError.test.ts src/lib/features/flows/ai-builder/FlowAIBuilderDriver.ts src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts src/lib/features/flows/ai-builder/FlowAIBuilderPlanPane.svelte src/lib/features/flows/ai-builder/FlowAIBuilderService.test.ts"
+          result: "passed"
+        - command: "cd frontend/apps/web && bun run check"
+          result: "passed with 0 errors and 1 unrelated existing warning in src/lib/features/api-keys/ExtendExpirationDialog.svelte"
+        - command: "rg -n 'response\\.context|body\\.context|error\\.context' frontend/"
+          result: "no AI Builder hits; one Flow runtime error mapping hit outside this tranche"
+        - command: "rg -n '\"context\"\\s*:' frontend/apps/web/src/lib/features/flows/ai-builder/"
+          result: "no matches"
+        - command: "git diff --check"
+          result: "passed"
+      residual_risks:
+        - "Frontend copyable diagnostic reports are not implemented until T018b."
+        - "Antigravity implementation review coverage is missing due quota."
+        - "Diagnostic context field-kind sets are hand-maintained; add assertion or derivation in a follow-up."
+        - "Broader 9/10 still blocked by DB lock invariant, module/test topology, AI slop cleanup, and normal-user output quality."
 
   - id: T018b
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Add the frontend AI Builder diagnostic report builder and one reusable copy-technical-details affordance for stream errors, apply errors, and non-error plan/step quality reports."
     inputs:
