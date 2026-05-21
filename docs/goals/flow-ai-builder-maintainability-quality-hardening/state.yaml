@@ -1,0 +1,383 @@
+version: 2
+
+goal:
+  title: "Flow AI Builder maintainability and quality hardening"
+  slug: "flow-ai-builder-maintainability-quality-hardening"
+  kind: open_ended
+  tranche: "Discover, peer-review, implement the first safe high-impact Flow AI Builder hardening slice, verify it, and audit whether the slice moves the codebase closer to a 9/10 maintainability bar."
+  status: active
+
+rules:
+  pm_owns_state: true
+  one_write_capable_task: true
+  parallel_read_only_scouts_allowed: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  preserve_unrelated_dirty_files: true
+  no_commit_without_owner_request: true
+  no_push_without_owner_request: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+  claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
+  antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
+  complexity_optimizer: "/Users/ccimen/.codex/skills/complexity-optimizer/SKILL.md"
+
+active_task: null
+
+scoring_target:
+  dimensions:
+    - Maintainability
+    - Code Quality
+    - Clean Architecture
+    - Separation of Concerns
+    - Single Source of Truth
+    - Human Readability
+    - Human Reviewability
+  target_minimum_score: 9
+  overall_score_rule: "minimum dimension score"
+
+dirty_worktree_baseline:
+  branch: "feature/refactor-flows-flowai"
+  preserve_unrelated:
+    - ".devcontainer/docker-compose.yml"
+    - ".devcontainer/devcontainer-lock.json"
+    - ".gitignore"
+    - "AGENTS.md"
+    - "PRODUCT.md"
+    - "utvecklingssamtal.mp3"
+  latest_commits_observed:
+    - "3133e1ebf Improve flow package transfer errors"
+    - "134b9d923 Route package knowledge bindings by local kind"
+    - "4fd8ee3ab Fix flow package API examples and MCP errors"
+    - "4e8a4b067 Clean up Flow branch hygiene noise"
+    - "45b8220f4 Allow flow package draft import without knowledge bindings"
+    - "e35c144e6 Remove low-value AI Builder eval tests"
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: xhigh
+    objective: "Run the required parallel read-only Scout wave and produce evidence-backed findings for architecture, AI Builder output quality, runtime reliability, typed contracts/data model/API, tests/evals, comments/slop, and complexity."
+    inputs:
+      - "backend/src/intric/flows/ai_builder/**"
+      - "Flow AI Builder API routes and schemas"
+      - "backend/tests/**/*ai_builder*"
+      - "docs/engineering/*.md"
+      - "latest commits on feature/refactor-flows-flowai"
+    constraints:
+      - "Read-only."
+      - "Do not edit implementation files."
+      - "Use file:line evidence for concrete claims."
+      - "Store large findings under .codex/artifacts/."
+      - "Include current owner, proposed canonical home, delete/merge/rename/move path, tests required, risk/trade-off, and confidence."
+    expected_output:
+      - ".codex/artifacts/flow-ai-builder-maintainability-discovery.md"
+      - ".codex/artifacts/flow-ai-builder-live-eval.md"
+      - "Scout receipts summarized in this board"
+      - "Candidate first implementation slices with allowed files and verification commands"
+    scout_tracks:
+      - "Architecture and canonical ownership"
+      - "AI Builder output quality and LLM usage"
+      - "Runtime reliability and Celery/worker boundaries"
+      - "Typed contracts, API shape, and data model"
+      - "Tests, evals, and regression coverage"
+      - "Comments, naming, and AI slop"
+      - "Time/space complexity and repeated-scan opportunities"
+    receipt:
+      completed_at: "2026-05-20"
+      summary: "Completed parallel Scout wave across architecture, output quality, runtime reliability, API contracts, data model, tests, readability, and complexity. Discovery and live-eval artifacts created."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-maintainability-discovery.md"
+        - ".codex/artifacts/flow-ai-builder-live-eval.md"
+      scout_agent_ids:
+        architecture: "019e4758-e65a-7860-997e-4939bd50ff75"
+        output_quality: "019e4758-e737-7cc3-a7ea-69675893eecc"
+        runtime_reliability: "019e4758-e92b-7801-8c1e-1ac173e06f27"
+        data_model: "019e4758-eb51-7d50-b9e9-bf8b772d54c3"
+        api_contract: "019e4758-edb4-77d2-b551-2f91058e6806"
+        tests: "019e4758-f068-7f33-bba8-c266e1576809"
+        readability: "019e4758-f232-7592-a474-b519befd7481"
+        complexity: "019e4758-f547-7941-bccc-18a0339ec1c4"
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: xhigh
+    objective: "Choose the first safe high-ROI implementation slice from Scout evidence and prepare the Claude plan gate brief."
+    inputs:
+      - "T001 receipt"
+      - ".codex/artifacts/flow-ai-builder-maintainability-discovery.md"
+      - ".codex/artifacts/flow-ai-builder-live-eval.md"
+    constraints:
+      - "Do not implement."
+      - "Pick a small reviewable slice."
+      - "Prefer one canonical ownership boundary or one clearly failing behavior over broad rewrites."
+      - "Allowed files must be explicit."
+      - "Verification must include narrow tests and any required type checks."
+    expected_output:
+      - ".codex/artifacts/flow-ai-builder-maintainability-plan.md"
+      - "Decision"
+      - "Exact Worker objective"
+      - "allowed_files"
+      - "verify"
+      - "stop_if"
+      - "Deferred tasks"
+    receipt:
+      completed_at: "2026-05-20"
+      summary: "Created initial Judge plan with provisional first slice and explicit peer-review challenge questions. Final selection is intentionally deferred until required Claude and Antigravity loops complete."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-maintainability-plan.md"
+      provisional_first_slice: "Fix output-intent polarity for explicit structured JSON requests that mention source documents and negate document artifacts."
+      alternatives_requiring_peer_challenge:
+        - "Verify/fix planning-state CAS asymmetry."
+        - "Introduce typed SessionSendLease."
+        - "PlanningState enum parity."
+        - "Typed conversation metadata owner A.1."
+
+  - id: T003
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: xhigh
+    objective: "Run Claude plan gate and Antigravity synthesis, verify peer claims locally, and finalize the Worker slice."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-maintainability-discovery.md"
+      - ".codex/artifacts/flow-ai-builder-maintainability-plan.md"
+      - "Claude peer-loop artifact"
+      - "Antigravity peer-loop artifact or exact quota/failure note"
+    constraints:
+      - "Use canonical Claude peer-loop script with --model claude-opus-4-7 --effort xhigh --timeout-seconds 1200."
+      - "Use Antigravity after Claude has reviewed the concrete discovery/plan."
+      - "Verify concrete peer claims with local file:line evidence."
+      - "Do not blindly follow peer reviewers."
+    expected_output:
+      - ".codex/artifacts/flow-ai-builder-peer-synthesis.md"
+      - "Accepted/rejected peer findings with evidence"
+      - "Final Worker task fields"
+    receipt:
+      started_at: "2026-05-20"
+      summary: "Peer-review loops active. Claude rounds 1 and 2 returned changes_required; Codex revised the current tranche to output-intent red test/fix plus required critic regression, followed by PlanningState enum parity through canonical AIBuilderInputType reuse. Broader CAS/lease/metadata/SSE slices remain deferred."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-peer-synthesis.md"
+        - ".codex/artifacts/claude-peer-loop-flow-ai-builder-maintainability-diagnosis-challenge-20260520T221735Z.md"
+        - ".codex/artifacts/claude-peer-loop-flow-ai-builder-revised-tranche-plan-challenge-20260520T222330Z.md"
+        - ".codex/artifacts/claude-peer-loop-flow-ai-builder-final-revised-tranche-plan-gate-20260520T223233Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-final-plan-architecture-gate-20260520T223549Z.md"
+        - ".codex/artifacts/claude-peer-loop-flow-ai-builder-final-plan-after-antigravity-refinements-20260520T223957Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-final-refined-tranche-gate-20260520T224253Z.md"
+        - ".codex/artifacts/claude-peer-loop-flow-ai-builder-final-criteria-confirmation-20260520T224546Z.md"
+      claude_rounds:
+        - round: 1
+          verdict: "GREEN_LIGHT: no"
+          action: "Accepted ranking/TDD/scope blockers; revised plan."
+        - round: 2
+          verdict: "GREEN_LIGHT: no"
+          action: "Accepted negation matrix, required critic regression, enum-source-of-truth direction, grep evidence, no speculative current-tranche modules, and live-eval scope corrections."
+        - round: 3
+          verdict: "GREEN_LIGHT: yes"
+          action: "Plan accepted with non-blocking implementation cautions: define negation window, include one trailing Swedish negation case, use enum reuse, and keep deterministic tests as the hard gate."
+        - round: 4
+          verdict: "GREEN_LIGHT: yes"
+          action: "Accepted Antigravity-refined plan; confirmed positive JSON phrase expansion is required and StepOutputMode replacement remains out of current scope because http_post is a deliberate broader planning-envelope value."
+        - round: 5
+          verdict: "GREEN_LIGHT: yes"
+          action: "Confirmed final criteria after Antigravity round 2; implementation cleared."
+      codex_self_review:
+        status: "candidate_pass_for_final_peer_review"
+        verdict: "The revised current tranche is correctly sized and uses the existing canonical owners; implementation remains blocked until Claude and Antigravity review this same plan without blockers."
+      antigravity_rounds:
+        - round: 1
+          verdict: "GREEN_LIGHT: yes"
+          action: "Accepted positive JSON phrase expansion and trailing Swedish negation. Narrowed output-mode enum suggestion to follow-up because http_post is a documented broader planning-envelope value."
+        - round: 2
+          verdict: "GREEN_LIGHT: yes"
+          action: "Accepted mandatory implementation corrections: punctuation-normalized negation tokens and multiple-occurrence marker scan."
+      completed_at: "2026-05-20"
+      final_worker_slice: "Task 1 output-intent polarity with positive JSON phrase expansion, punctuation-normalized negation, multiple-occurrence marker scanning, and required critic regression; Task 2 PlanningState StepInputType parity via AIBuilderInputType."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Execute the first safe implementation task selected by Judge and peer review."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "backend/src/intric/flows/ai_builder/planning_state.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_architecture_derivation.py"
+      - "backend/tests/unittests/flows/ai_builder/test_planning_state.py"
+      - ".codex/artifacts/flow-ai-builder-maintainability-plan.md"
+      - ".codex/artifacts/flow-ai-builder-peer-synthesis.md"
+      - ".codex/artifacts/flow-ai-builder-live-eval.md"
+      - "docs/goals/flow-ai-builder-maintainability-quality-hardening/state.yaml"
+    verify:
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py -k 'output_intent or final_json or docx or pdf'"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -k 'terminal_output or docx or json'"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_planning_state.py tests/unittests/flows/test_flow_enums.py -k 'input_type or PlanningState or enum'"
+      - "Run relevant broader AI Builder policy/planning tests and strict type check on changed consumer surface."
+      - "Rerun offline output-intent probe and live JSON-with-document-words eval when local service is available."
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Behavior is ambiguous after source inspection."
+      - "Implementation would preserve speculative compatibility or create parallel ownership."
+      - "Verification fails twice for the same reason."
+      - "Local dirty worktree makes reviewability unsafe."
+    implementation_note: "Allowed file set expanded to include ai_builder_architecture_derivation.py after Pyright caught the StepTriple.input_type consumer that needed explicit AIBuilderInputType construction. This stays inside Task 2's typed-boundary scope."
+    receipt:
+      completed_at: "2026-05-20"
+      summary: "Implemented output-intent polarity hardening and PlanningState input enum parity. Added red tests for English/Swedish negated artifact prompts, Swedish trailing negation, mixed marker polarity, cross-artifact polarity, critic terminal-alignment regression, and JSONB image rejection."
+      changed_files:
+        - "backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py"
+        - "backend/src/intric/flows/ai_builder/planning_state.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_architecture_derivation.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+        - "backend/tests/unittests/flows/ai_builder/test_planning_state.py"
+        - ".codex/artifacts/flow-ai-builder-live-eval.md"
+      verification:
+        - command: "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py tests/unittests/flows/ai_builder/test_planning_state.py tests/unittests/flows/test_flow_enums.py tests/unittests/flows/ai_builder/test_ai_builder_architecture_derivation.py tests/unittests/flows/ai_builder/test_ai_builder_input_architecture_policy.py"
+          result: "pass: 305 passed, 10 existing warnings"
+        - command: "PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/planning_state.py src/intric/flows/ai_builder/ai_builder_architecture_derivation.py"
+          result: "pass: 0 errors"
+        - command: "uv run ruff check changed Python files"
+          result: "pass"
+        - command: "docker exec offline output-intent probe for reproduced JSON/document prompt"
+          result: "pass: terminal_output='structured_json', docx_output_mode=None, pdf_generation_mode=None"
+        - command: "bash backend/scripts/run_pyright_in_devcontainer.sh"
+          result: "fail: full-repo Pyright has pre-existing unrelated errors; current-slice errors were fixed and targeted changed-source Pyright passes"
+      live_eval:
+        result: "Full API live eval blocked because ENEO_API_KEY and API_KEY were unset; unauthenticated container curl returned 401. Offline container probe passed."
+
+  - id: T005
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: xhigh
+    objective: "Run Claude implementation gate on the implemented diff and decide whether the tranche is acceptable."
+    inputs:
+      - "T004 receipt"
+      - "current diff"
+      - "test output"
+      - ".codex/artifacts/flow-ai-builder-peer-synthesis.md"
+    constraints:
+      - "Reuse the same Claude peer-loop session."
+      - "Require explicit green light or document evidence-backed disagreement."
+      - "Do not implement unless returning to T004 with revised allowed files."
+    expected_output:
+      - "Claude implementation artifact"
+      - "Accepted/rejected implementation feedback"
+      - "Remaining blockers"
+    codex_self_review:
+      status: "pass_for_approved_tranche"
+      verdict: "Production-ready for the approved tranche with deterministic tests, changed-source Pyright, Ruff, and offline container probe passing. Full authenticated live API eval remains blocked by missing API key."
+    antigravity_rounds:
+      - round: 3
+        verdict: "GREEN_LIGHT: yes"
+        artifact: ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-implementation-gate-20260520T230511Z.md"
+        action: "Accepted implemented diff. Recommended read-only dev DB check for historical image planning-state rows."
+    receipt:
+      completed_at: "2026-05-20"
+      summary: "Claude and Antigravity implementation gates passed. Codex ran additional read-only checks: no remaining StepInputType references, _first_phrase_index only called in updated resolver paths, local DB contains zero planning_state_jsonb rows with input_type=image."
+      post_review_verification:
+        - command: "rg -n 'StepInputType' backend/src backend/tests"
+          result: "no hits"
+        - command: "rg -n '_first_phrase_index\\(' backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder"
+          result: "only updated resolver call sites and helper definition"
+        - command: "docker exec postgres query count planning_state_jsonb rows containing input_type=image"
+          result: "0 rows"
+        - command: "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows -x"
+          result: "blocked by host WeasyPrint native dependency libgobject-2.0-0"
+        - command: "docker exec ... uv run pytest -p no:cacheprovider tests/unittests/flows -x"
+          result: "751 passed before stopping on unrelated test_flow_repo assertion"
+    claude_rounds:
+      - round: 6
+        verdict: "GREEN_LIGHT: yes"
+        artifact: ".codex/artifacts/claude-peer-loop-flow-ai-builder-implementation-review-20260520T230206Z.md"
+        action: "Accepted implemented diff; no blockers. Suggested cheap verification greps/full Flow tests and authenticated live eval later when an API key is available."
+
+  - id: T999
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether the first tranche satisfies the original outcome and update the board with final receipt, scorecard, verification, live eval status, and next tasks."
+    inputs:
+      - "All done task receipts"
+      - "Last verification"
+      - "Current dirty diff"
+      - ".codex/artifacts/flow-ai-builder-maintainability-discovery.md"
+      - ".codex/artifacts/flow-ai-builder-maintainability-plan.md"
+      - ".codex/artifacts/flow-ai-builder-peer-synthesis.md"
+      - ".codex/artifacts/flow-ai-builder-live-eval.md"
+    constraints:
+      - "Reject completion if required Worker work is still queued or active."
+      - "Do not claim production readiness unless the evidence supports it."
+    expected_output:
+      - "complete | not_complete"
+      - "scorecard"
+      - "verification commands and results"
+      - "live eval results"
+      - "remaining highest-ROI follow-up tasks"
+    receipt:
+      completed_at: "2026-05-20"
+      verdict: "complete_for_approved_tranche"
+      ship_readiness: "ready_to_ship_for_approved_scope"
+      broader_system_readiness: "not_9_of_10"
+      summary: "The implemented tranche materially improves AI Builder output-intent behavior for vague/negated document prompts and removes one persisted planning-state source-of-truth drift. It does not resolve runtime lease/CAS, raw JSON contracts, SSE typing, authenticated live eval, or broader test baseline failures."
+      scorecard:
+        Maintainability: 7
+        Code_Quality: 8
+        Clean_Architecture: 7
+        Separation_of_Concerns: 8
+        Single_Source_of_Truth: 7
+        Human_Readability: 7
+        Human_Reviewability: 8
+        Runtime_Reliability: 6
+        Data_Model_Schema_Quality: 6
+        Test_Coverage_Quality: 7
+        Overall: 6
+      approved_tranche_scorecard:
+        Maintainability: 9
+        Code_Quality: 9
+        Clean_Architecture: 9
+        Separation_of_Concerns: 9
+        Single_Source_of_Truth: 9
+        Human_Readability: 8
+        Human_Reviewability: 9
+        Runtime_Reliability: 7
+        Data_Model_Schema_Quality: 8
+        Test_Coverage_Quality: 8
+        Overall: 7
+      blockers_to_true_9:
+        - "Runtime lease/CAS ownership and retry/crash recovery are still below the target bar."
+        - "Conversation metadata and edit-result JSON remain raw contracts."
+        - "SSE/public API contracts are still under-typed for generated clients."
+        - "Authenticated live eval did not run because no API key was present."
+        - "Full Flow unit sweeps still hit unrelated baseline/environment failures."
+      next_tasks:
+        - "Verify/fix planning-state CAS asymmetry with a failing concurrent integration test."
+        - "Introduce typed SessionSendLease and lost-lease tests."
+        - "Stage typed conversation metadata and edit-result JSON ownership."
+        - "Type SSE/public event contracts with OpenAPI/generated-client tests."
+        - "Run authenticated five-case live AI Builder eval when an API key is available."
+
+checks:
+  dirty_fingerprint:
+    branch_checked: true
+    status_checked: true
+    result: "dirty with unrelated files preserved"
+  last_verification:
+    result: "305 approved-scope tests passed; Ruff passed; changed-source Pyright passed; offline container probe passed; Claude and Antigravity implementation gates green; authenticated live eval blocked by missing API key."
+    task: null
+    commands: []

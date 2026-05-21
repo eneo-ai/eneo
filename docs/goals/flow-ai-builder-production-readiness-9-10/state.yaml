@@ -1,0 +1,584 @@
+version: 2
+
+goal:
+  title: "Flow AI Builder production readiness 9/10"
+  slug: "flow-ai-builder-production-readiness-9-10"
+  kind: open_ended
+  tranche: "Reconcile current dirty repo state, pass a next-tranche plan through Codex/Claude/Antigravity, implement the approved slice, verify it, update scorecard, and continue until 9/10 or real blocker."
+  status: active
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  preserve_unrelated_dirty_files: true
+  no_commit_without_owner_request: true
+  no_push_without_owner_request: true
+  peer_gate_before_implementation: true
+  post_implementation_review_required_for_non_trivial_changes: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+  claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
+  antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
+
+active_task: T005
+
+scoring_target:
+  dimensions:
+    - Maintainability
+    - Code Quality
+    - Clean Architecture
+    - Separation of Concerns
+    - Single Source of Truth
+    - Human Readability
+    - Human Reviewability
+    - Runtime Reliability
+    - Data Model / Schema Quality
+    - Test Coverage Quality
+  target_minimum_score: 9
+  overall_score_rule: "minimum dimension score"
+
+current_scorecard:
+  source: "T002 post-implementation PM audit plus Claude and Antigravity green implementation reviews."
+  Maintainability: 8
+  Code_Quality: 8
+  Clean_Architecture: 8
+  Separation_of_Concerns: 8
+  Single_Source_of_Truth: 8
+  Human_Readability: 8
+  Human_Reviewability: 8
+  Runtime_Reliability: 7
+  Data_Model_Schema_Quality: 6
+  Test_Coverage_Quality: 8
+  Overall: 6
+  blockers:
+    - "Send-turn lease is still optional in mutable repo writes and is dropped in some proposal/retry paths."
+    - "Conversation metadata and edit-result JSON remain raw hidden schemas."
+    - "SSE/public API contracts remain generated-client weak."
+    - "Live eval still shows runtime-input/form-field prompts can produce no form fields."
+    - "Retry self-correction still crosses an untyped process_tool_kwargs dict-bag boundary."
+    - "Full Flow unit sweeps still hit unrelated baseline/environment failures."
+
+dirty_worktree_baseline:
+  observed_at: "2026-05-21T08:28:38+02:00"
+  branch: "feature/refactor-flows-flowai...origin/feature/refactor-flows-flowai"
+  head: "3133e1ebf Improve flow package transfer errors"
+  previous_tranche_dirty_files:
+    - "backend/src/intric/flows/ai_builder/ai_builder_architecture_derivation.py"
+    - "backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py"
+    - "backend/src/intric/flows/ai_builder/planning_state.py"
+    - "backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py"
+    - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+    - "backend/tests/unittests/flows/ai_builder/test_planning_state.py"
+    - "docs/goals/flow-ai-builder-maintainability-quality-hardening/goal.md"
+    - "docs/goals/flow-ai-builder-maintainability-quality-hardening/state.yaml"
+  preserve_unrelated:
+    - ".devcontainer/docker-compose.yml"
+    - ".devcontainer/devcontainer-lock.json"
+    - ".gitignore"
+    - "AGENTS.md"
+    - "PRODUCT.md"
+    - "utvecklingssamtal.mp3"
+  commands:
+    - command: "git status --short --branch"
+      result: "dirty; previous tranche source/tests plus unrelated files and untracked prior goal board"
+    - command: "git log --oneline --decorate -5"
+      result: "HEAD is 3133e1ebf Improve flow package transfer errors"
+    - command: "git diff --stat"
+      result: "Previous tranche is uncommitted; no commit/stage/push authorized."
+
+artifacts:
+  prior_inputs:
+    - ".codex/artifacts/flow-ai-builder-maintainability-discovery.md"
+    - ".codex/artifacts/flow-ai-builder-maintainability-plan.md"
+    - ".codex/artifacts/flow-ai-builder-peer-synthesis.md"
+    - ".codex/artifacts/flow-ai-builder-live-eval.md"
+  current:
+    - ".codex/artifacts/flow-ai-builder-production-readiness-9-10-plan.md"
+    - ".codex/artifacts/flow-ai-builder-production-readiness-9-10-peer-synthesis.md"
+    - ".codex/artifacts/flow-ai-builder-production-readiness-9-10-live-eval.md"
+
+tasks:
+  - id: T000
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Reconcile actual current repo state and previous tranche reality before selecting more work."
+    receipt:
+      completed_at: "2026-05-21T08:30:22+02:00"
+      summary: "Confirmed the previous tranche is not committed. HEAD remains 3133e1ebf. The previous tranche is dirty and should be treated as current working state. The broader Flow AI Builder subsystem remains 6/10 overall, not complete."
+      evidence:
+        - "git status --short --branch"
+        - "git log --oneline --decorate -5"
+        - "docs/goals/flow-ai-builder-maintainability-quality-hardening/state.yaml"
+        - ".codex/artifacts/flow-ai-builder-peer-synthesis.md"
+      live_probe:
+        - command: "Authenticated GET /api/v1/flows/ai-builder/sessions with env-only API key"
+          result: "200; 20 sessions visible"
+        - command: "Authenticated GET /api/v1/flows/?space_id=$ENEO_FLOW_TEST_SPACE_ID"
+          result: "200; 0 flows in the provided test space"
+        - command: "Authenticated four-case create live eval, no approve/apply"
+          result: "JSON/document case planned json; true DOCX case planned docx; vague action-items planned text; runtime-input/form-field case planned text with zero form_fields"
+      raw_live_eval_dir: "/tmp/flow-ai-builder-9-10-live-eval-20260521T063022Z"
+
+  - id: T001
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: xhigh
+    objective: "Re-rank the next tranche from current evidence, run the required Codex/Claude/Antigravity plan gate, and finalize the Worker slice."
+    inputs:
+      - "T000 receipt"
+      - ".codex/artifacts/flow-ai-builder-maintainability-discovery.md"
+      - ".codex/artifacts/flow-ai-builder-peer-synthesis.md"
+      - ".codex/artifacts/flow-ai-builder-production-readiness-9-10-plan.md"
+      - "Current source evidence around ai_builder_plan_store.py, ai_builder_repo.py, ai_builder_planner.py, and ai_builder_proposal_processor.py"
+    constraints:
+      - "Read-only except board/artifact updates."
+      - "Use Claude first, then Antigravity."
+      - "If the plan changes materially, rerun the relevant peer gate."
+      - "Do not implement until Codex self-review, Claude, and Antigravity pass the same revised plan."
+    expected_output:
+      - "Final implementation-ready plan"
+      - "Codex self-review pass or blocker"
+      - "Claude GREEN_LIGHT yes artifact"
+      - "Antigravity pass artifact or exact failure"
+      - "Allowed files for T002"
+      - "Acceptance criteria and verification commands"
+    provisional_decision:
+      selected_tranche: "Active send-turn planning-state CAS coherence."
+      rationale: "Claude and local grep showed proposal-only CAS was too narrow. The revised tranche covers plan proposal storage, edit proposal storage, backend-owned questions, and persisted tool turns through the existing repo CAS primitives while staying narrower than the typed SessionSendLease tranche."
+      rejected_for_now:
+        - "Proposal-only CAS: rejected after Claude found edit proposal plus backend question/tool-turn writers with the same active-turn invariant."
+        - "Typed SessionSendLease: higher runtime ROI but broader lease semantics and signature churn; next tranche unless peer review says it must merge with CAS."
+        - "Conversation metadata/edit-result JSON: important but staged schema ownership is broader than CAS."
+        - "Typed SSE/public event contract: API DX critical but does not fix persisted-state correctness."
+        - "Runtime-input/form-field live-eval bug: user-visible and queued, but runtime/data correctness blocks 9/10 more directly."
+      claude_round_1:
+        artifact: ".codex/artifacts/claude-peer-loop-flow-ai-builder-9-10-next-tranche-plan-gate-20260521T064157Z.md"
+        verdict: "changes_required; GREEN_LIGHT no; MIN_SCORE 7"
+        response: "Accepted and revised the tranche to cover active send-turn CAS coherence across proposal, edit, backend question, and tool-turn helper writes."
+      claude_round_2:
+        artifact: ".codex/artifacts/claude-peer-loop-flow-ai-builder-9-10-active-turn-cas-revised-plan-gate-20260521T064905Z.md"
+        verdict: "green; GREEN_LIGHT yes; MIN_SCORE 8"
+        response: "Claude confirmed the revised active-turn CAS plan is implementation-ready, with P2 checks for helper forwarding tests, call-site grep, short comments, and turn-start retry invariant."
+      antigravity_round_1:
+        artifact: ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-9-10-active-turn-cas-plan-gate-20260521T065522Z.md"
+        verdict: "conditional only; runner exit code 2; not a pass"
+        response: "Accepted. Plan now rejects nullable helper contracts and requires base_planning_state_version:int on active-turn helpers/dataclasses. Claude and Antigravity must re-review this strict-contract revision before implementation."
+      claude_round_3:
+        artifact: ".codex/artifacts/claude-peer-loop-flow-ai-builder-9-10-strict-active-turn-cas-plan-gate-20260521T065958Z.md"
+        verdict: "green; GREEN_LIGHT yes; MIN_SCORE 8"
+        response: "Claude confirmed the strict-contract plan is implementation-ready and safer than nullable helper seams."
+      antigravity_round_2:
+        artifact: ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-9-10-strict-active-turn-cas-plan-gate-20260521T070344Z.md"
+        verdict: "substantive green, but runner exit code 2 parser did not detect exact GREEN_LIGHT token; not accepted as formal pass"
+        response: "Will rerun a narrow exact-format Antigravity gate before implementation."
+      antigravity_round_3:
+        artifact: ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-9-10-strict-active-turn-cas-exact-gate-20260521T070910Z.md"
+        verdict: "substantive green; no blockers; runner exit code 2 parser still did not detect formatted GREEN_LIGHT token"
+        response: "Recorded as Antigravity review coverage with parser/tooling failure. Proceeding is justified by two green Antigravity review contents, Claude round 3 green, and Codex self-review pass."
+    receipt:
+      completed_at: "2026-05-21T09:10:00+02:00"
+      summary: "Final implementation-ready plan selected strict active send-turn planning-state CAS coherence. The plan covers plan proposals, edit proposals, backend-owned questions, and persisted tool turns through existing repo CAS primitives with required base_planning_state_version:int at active-turn helper/carrier boundaries."
+      codex_self_review: "pass"
+      claude_gate:
+        artifact: ".codex/artifacts/claude-peer-loop-flow-ai-builder-9-10-strict-active-turn-cas-plan-gate-20260521T065958Z.md"
+        verdict: "GREEN_LIGHT yes; VERDICT green; MIN_SCORE 8"
+      antigravity_gate:
+        artifact: ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-9-10-strict-active-turn-cas-exact-gate-20260521T070910Z.md"
+        verdict: "Review content says GREEN_LIGHT yes / VERDICT green / no blockers, but runner exited code 2 because the strict parser did not detect the formatted token. This parser/tooling failure is documented; Antigravity review coverage exists."
+      selected_worker_slice: "Strict active send-turn planning-state CAS coherence."
+      allowed_files:
+        - "backend/src/intric/flows/ai_builder/ai_builder_plan_store.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_planner.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_discovery_followup.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_repair_transport.py"
+        - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_discovery_followup.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py"
+        - ".codex/artifacts/flow-ai-builder-production-readiness-9-10-plan.md"
+        - ".codex/artifacts/flow-ai-builder-production-readiness-9-10-peer-synthesis.md"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+
+  - id: T002
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Implement strict active send-turn planning-state CAS coherence after the Codex/Claude/Antigravity plan gates."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_store.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_discovery_followup.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_repair_transport.py"
+      - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_discovery_followup.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py"
+      - ".codex/artifacts/flow-ai-builder-production-readiness-9-10-peer-synthesis.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    implementation_requirements:
+      - "Add required base_planning_state_version:int to PlannerPreparedRequest and ProposalContext before defaulted fields."
+      - "Add required base_planning_state_version:int to store_plan_and_update_conversation, persist_backend_question, emit_discovery_followup_if_needed, and persist_tool_turn."
+      - "Forward the captured turn-start session.planning_state_version through create proposals, edit proposals, backend discovery followups, MCP clarification paths, invalid-question fallback persistence, requirements-summary persistence, and self-correction retry process kwargs."
+      - "Do not edit ai_builder_proposal_repair.py unless a verified blocker appears; inject base version into retry process kwargs from ai_builder_proposal_processor.py."
+      - "No nullable helper seam, no type ignores, no broad Any, no new persistence abstraction."
+      - "Add behavior-focused stale-version integration rollback test with six post-conditions."
+      - "Update helper unit tests to assert repo commit/save calls receive base_version."
+    verify:
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_rejects_stale_planning_state_version_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_accepts_matching_planning_state_version tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_saves_planning_state tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_state_matches_compacted_conversation"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_discovery_followup.py tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py"
+      - "uv run ruff check src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/ai_builder_edit_proposal.py src/intric/flows/ai_builder/ai_builder_discovery_followup.py src/intric/flows/ai_builder/ai_builder_repair_transport.py tests/integration/flows/test_ai_builder_session_api_regressions.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_discovery_followup.py tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py"
+      - "uv run ruff format --check src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/ai_builder_edit_proposal.py src/intric/flows/ai_builder/ai_builder_discovery_followup.py src/intric/flows/ai_builder/ai_builder_repair_transport.py tests/integration/flows/test_ai_builder_session_api_regressions.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_discovery_followup.py tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_proposal_processor.py src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/ai_builder_edit_proposal.py src/intric/flows/ai_builder/ai_builder_discovery_followup.py src/intric/flows/ai_builder/ai_builder_repair_transport.py"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Need to weaken base_planning_state_version to optional at the helper layer."
+      - "Behavior is ambiguous after source inspection."
+      - "The diff would mix unrelated dirty files or previous-tranche cleanup."
+      - "Verification fails twice for the same reason."
+    receipt:
+      completed_at: "2026-05-21T09:48:30+02:00"
+      summary: "Implemented strict active send-turn planning-state CAS coherence. The turn-start planning_state_version is now required on PlannerPreparedRequest and ProposalContext, forwarded through plan proposals, edit proposals, backend questions, persisted tool turns, MCP clarification, requirements summary persistence, invalid-question fallback persistence, and self-correction retry process kwargs. Active-turn helper writes now call repo CAS with base_version instead of last-writer-wins."
+      changed_files:
+        - "backend/src/intric/flows/ai_builder/ai_builder_plan_store.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_discovery_followup.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_repair_transport.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_planner.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py"
+        - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_discovery_followup.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py"
+      acceptance_criteria:
+        - "Stale plan proposal save raises planning_state_version_mismatch and leaves plan, latest_plan_id, status, conversation, version, and concurrent planning state untouched."
+        - "Matching base version proposal save succeeds and advances planning_state_version."
+        - "Helper unit tests prove save_planning_state/commit_turn receive base_version."
+        - "AST call-site audit shows zero active-turn helper calls missing base_planning_state_version."
+        - "No nullable helper seam, type ignore, broad Any, or new persistence abstraction was added."
+      verification:
+        - command: "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_discovery_followup.py tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py"
+          result: "100 passed"
+        - command: "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::test_persist_tool_turn_refreshes_planning_state_with_requirements_summary tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_rejects_stale_planning_state_version_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_accepts_matching_planning_state_version tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_preserves_persisted_architecture_commit tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_rolls_back_when_append_fails tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_saves_planning_state tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_stamps_plan_identity_on_state tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_state_matches_compacted_conversation"
+          result: "8 passed"
+        - command: "uv run ruff check <T002 touched source/test files>"
+          result: "All checks passed"
+        - command: "uv run ruff format --check <T002 touched source/test files>"
+          result: "13 files already formatted"
+        - command: "uv run pyright <T002 touched source/test files>"
+          result: "0 errors, 0 warnings, 0 informations"
+        - command: "AST call-site audit for active-turn helper calls missing base_planning_state_version"
+          result: "missing=0"
+        - command: "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\")'"
+          result: "yaml ok"
+      live_eval:
+        result: "Not rerun for T002 because this tranche changed persistence concurrency semantics, not planner prompt/output behavior. T000 authenticated live probe remains the current live eval evidence."
+
+  - id: T003
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: xhigh
+    objective: "Run post-implementation Codex self-review, Claude implementation review, Antigravity implementation review, and decide if the tranche is ready to ship."
+    inputs:
+      - "T002 receipt"
+      - "Implemented diff"
+      - "Verification output"
+      - ".codex/artifacts/flow-ai-builder-production-readiness-9-10-peer-synthesis.md"
+    constraints:
+      - "Do not declare done if the implementation added another weak layer."
+      - "Fix in-scope review findings immediately; record out-of-scope follow-ups with evidence."
+    expected_output:
+      - "Post-implementation Codex production-readiness review"
+      - "Claude GREEN_LIGHT yes or blocker"
+      - "Antigravity pass or exact failure"
+      - "Updated scorecard"
+    receipt:
+      completed_at: "2026-05-21T09:48:45+02:00"
+      codex_self_review:
+        verdict: "pass for T002"
+        production_ready_for_tranche: true
+        notes:
+          - "This is production-ready for the approved CAS tranche: strict typed base-version contracts, no optional helper seam, no new abstraction, and behavior-focused stale rollback coverage."
+          - "The implementation reduces runtime/data consistency debt for active send-turn planning-state writes; it does not solve typed leases, raw JSONB contracts, SSE/API typing, or form-field/live-eval quality debt."
+          - "The diff remains human-reviewable because behavior changes are scoped to active-turn CAS propagation plus focused tests."
+      claude_post_implementation:
+        artifact_iteration_1: ".codex/artifacts/claude-peer-loop-flow-ai-builder-9-10-active-turn-cas-implementation-review-20260521T073555Z.md"
+        artifact_iteration_2: ".codex/artifacts/claude-peer-loop-flow-ai-builder-9-10-active-turn-cas-implementation-review-iteration-2-20260521T074421Z.md"
+        iteration_1_verdict: "GREEN_LIGHT no; MIN_SCORE 6; blocked on formatting slop and missing ruff format --check in T002.verify."
+        fixes_applied:
+          - "Ran ruff format on the touched set."
+          - "Added uv run ruff format --check to T002.verify."
+        iteration_2_verdict: "GREEN_LIGHT yes; VERDICT green; MIN_SCORE 8; no blockers."
+      antigravity_post_implementation:
+        artifact: ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-9-10-active-turn-cas-implementation-review-20260521T074801Z.md"
+        verdict: "GREEN_LIGHT yes; VERDICT green; MIN_SCORE 8; no blockers."
+        findings:
+          - "P2: six planner tests now patch build_server_planner_output; acceptable for T002 but suggests a future prompt-rendering/serialization separation cleanup."
+          - "P3: base-version injection through process_tool_kwargs remains a dict-bag boundary; acceptable for T002 and mitigated by tests, but a future RetryContext could be cleaner."
+      ready_to_ship_for_tranche: true
+
+  - id: T999
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Audit the tranche against the broader 9/10 goal, update receipts and scorecard, and select the next safe tranche if progress can continue."
+    inputs:
+      - "All task receipts"
+      - "Current dirty diff"
+      - "Verification commands"
+      - "Live eval status"
+    constraints:
+      - "Do not mark the broader goal complete unless strict minimum score is at least 9/10 or a real blocker is documented."
+    expected_output:
+      - "tranche_complete | blocked | continue"
+      - "Scorecard"
+      - "Remaining blockers to 9/10"
+      - "Next task activation if safe"
+    receipt:
+      completed_at: "2026-05-21T09:49:00+02:00"
+      decision: "tranche_complete_continue_goal"
+      summary: "T002 is complete and peer-approved, but the broader Flow AI Builder 9/10 objective is not complete. Overall score remains 6/10 because raw JSONB contracts, optional/dropped leases, SSE/API typing, live eval form-field behavior, and broader test baseline issues still block a strict 9/10."
+      scorecard_after_t002:
+        Maintainability: 8
+        Code_Quality: 8
+        Clean_Architecture: 8
+        Separation_of_Concerns: 8
+        Single_Source_of_Truth: 8
+        Human_Readability: 8
+        Human_Reviewability: 8
+        Runtime_Reliability: 7
+        Data_Model_Schema_Quality: 6
+        Test_Coverage_Quality: 8
+        Overall: 6
+      remaining_blockers_to_9_10:
+        - problem: "Send-turn lease remains optional/dropped in mutable write paths."
+          why_it_matters: "CAS now prevents stale planning-state overwrites, but mutable send-turn writes can still proceed without an enforced lease when request_id/lock_token propagation is lost."
+          proposed_canonical_owner: "SessionSendLease value object/carrier at the planner/proposal active-turn boundary, enforced by repo writes."
+          acceptance_criteria: "No active mutable send-turn write accepts loose optional request_id/lock_token pairs; tests prove lease loss fails and retries preserve the same lease."
+          risk_if_deferred: "Duplicate active sends can still mutate a session after lock loss."
+          confidence: high
+        - problem: "Conversation metadata and edit-result JSON remain raw hidden schemas."
+          why_it_matters: "JSONB fields can drift into multi-schema contracts without typed readers/writers, migrations, or corruption behavior."
+          proposed_canonical_owner: "Typed AI Builder metadata/edit-result boundary module with permissive readers first, strict writers second."
+          acceptance_criteria: "Inventory raw shapes, add typed parsers/writers, preserve legacy reads only with explicit migration/deletion path, and cover corruption behavior."
+          risk_if_deferred: "Persistence schema debt accumulates under opaque JSON."
+          confidence: high
+        - problem: "SSE/public API event contracts are not generated-client friendly."
+          why_it_matters: "Frontend/API consumers must maintain parallel event unions without a single typed OpenAPI-compatible contract."
+          proposed_canonical_owner: "AI Builder event schema module/API presentation boundary."
+          acceptance_criteria: "Typed event union, generated-client-friendly schema, and consumer contract tests."
+          risk_if_deferred: "Consumer drift and hard-to-review API behavior."
+          confidence: high
+        - problem: "Authenticated live eval still shows runtime-input/form-field prompts can produce zero form_fields."
+          why_it_matters: "Normal vague users can get valid-looking but less useful flows that fail to distinguish flow-scope inputs from step outputs."
+          proposed_canonical_owner: "Planner output quality policy plus form-field/runtime metadata derivation."
+          acceptance_criteria: "Five-case authenticated live eval passes: vague action items, JSON with document words, DOCX output, runtime-input/form-field, revise/edit."
+          risk_if_deferred: "AI Builder may build logically weak flows for ordinary prompts."
+          confidence: medium
+      next_selected_tranche: "Typed SessionSendLease active-turn lease contract."
+      reason_for_stop: "The next tranche requires a fresh architecture diagnosis and Codex/Claude/Antigravity plan gate because it changes the runtime write contract beyond the approved T002 scope."
+
+  - id: T004
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: xhigh
+    objective: "Plan and peer-gate the next tranche: typed SessionSendLease active-turn lease contract, unless source evidence proves another blocker now outranks it."
+    inputs:
+      - "T002 receipt"
+      - "T003 receipt"
+      - "T999 receipt"
+      - "Current source evidence around lease_request_id/lease_lock_token propagation and repo lease enforcement"
+      - ".codex/artifacts/flow-ai-builder-production-readiness-9-10-peer-synthesis.md"
+      - ".codex/artifacts/flow-ai-builder-production-readiness-9-10-live-eval.md"
+    constraints:
+      - "Do not implement before Codex self-review, Claude green, and Antigravity pass or exact tooling failure."
+      - "Do not broaden into JSONB/SSE/API/live-eval fixes unless source evidence proves lease is no longer the highest-ROI next tranche."
+      - "Preserve all unrelated dirty files and the completed-but-uncommitted T002/T000 prior work."
+    expected_output:
+      - "Architecture diagnosis for lease ownership"
+      - "Canonical SessionSendLease owner decision or rejected alternative"
+      - "Allowed files"
+      - "Acceptance criteria"
+      - "Verification and live-eval relevance"
+      - "Peer synthesis with Codex/Claude/Antigravity verdicts"
+    provisional_decision:
+      updated_at: "2026-05-21T10:25:00+02:00"
+      trigger: "User challenged whether ai_builder_proposal_processor.py should be broken down before adding more lease plumbing."
+      revised_plan: "/tmp/flow-ai-builder-t004-session-send-turn-revised-plan.md"
+      selected_direction: "Lease plus narrow active-turn boundary: introduce SessionSendTurn and make ProposalContext carry it; do not deep-split handlers in T004."
+      rationale:
+        - "Lease-only propagation would fix runtime correctness but worsen parameter sprawl in a 2655 LOC proposal orchestrator."
+        - "Deep handler/module extraction is real maintainability work but too broad to mix with a runtime write-contract repair."
+        - "A SessionSendTurn active-turn contract ties the send lease and turn-start planning-state CAS token together, reducing primitive threading and making omissions fail at call/type-check time."
+      reviewer_inputs:
+        claude_typed_lease_gate:
+          artifact: ".codex/artifacts/claude-peer-loop-t004-typed-sessionsendlease-plan-gate-20260521T080510Z.md"
+          verdict: "GREEN_LIGHT no; VERDICT changes_required; MIN_SCORE 5"
+        claude_lease_vs_extraction:
+          artifact: ".codex/artifacts/claude-peer-loop-t004-lease-vs-proposal-processor-extraction-20260521T081311Z.md"
+          verdict: "GREEN_LIGHT no; VERDICT changes_required; MIN_SCORE 5"
+        antigravity_lease_vs_extraction:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t004-lease-vs-proposal-processor-extraction-20260521T081312Z.md"
+          verdict: "GREEN_LIGHT no; VERDICT changes_required; MIN_SCORE 6"
+        parallel_reviewer:
+          agent_id: "019e4992-f414-7a11-9a15-c298f4ff728f"
+          verdict: "Do not deep-split ai_builder_proposal_processor.py in T004; fix typed lease first and extract handlers after the boundary is stable."
+      required_next_gates:
+        - "Claude iteration 3 reviewed the revised SessionSendTurn plan and returned GREEN_LIGHT yes / VERDICT green / MIN_SCORE 8. Artifact: .codex/artifacts/claude-peer-loop-t004-sessionsendturn-revised-plan-gate-20260521T083126Z.md."
+        - "Antigravity iteration 2 reviewed the same revised plan and produced a final GREEN_LIGHT yes / VERDICT green / MIN_SCORE 8. Artifact: .codex/artifacts/antigravity-peer-loop-t004-sessionsendturn-revised-plan-gate-20260521T083758Z.md. The artifact metadata also captured an earlier quoted MIN_SCORE 6, so Codex will run one final exact-format gate after incorporating the findings."
+        - "Codex self-review must pass after the exact final reviewer gate before implementation."
+      claude_iteration_3_followups_added_to_plan:
+        - "Convert _dispatch_chained_server_action_after_commit() with same lease and refreshed base version."
+        - "Keep ai_builder_session_turn.py as a leaf module."
+        - "Use frozen replacement for per-write base-version drift."
+        - "Scrub stale dual-mode repo comments."
+        - "Inspect and record lifecycle write call-site count before choosing method separation vs typed reason."
+        - "Prove static guard fails on a deliberately broken active helper."
+      antigravity_iteration_2_followups_added_to_plan:
+        - "Active-turn persistence helpers return the newly bumped planning_state_version."
+        - "Orchestrators refresh the frozen SessionSendTurn between multiple writes."
+        - "ai_builder_plan_lifecycle.py uses explicit no-send-lease lifecycle status updates."
+        - "ai_builder_planner.py uses the active lease for the in-lock status transition."
+        - "ai_builder_session_turn.py leaf-module restriction is verified."
+    receipt:
+      completed_at: "2026-05-21T10:46:00+02:00"
+      summary: "Final T004 plan selected a narrow SessionSendTurn active-turn runtime contract. The plan explicitly rejects lease-only plumbing, extraction-first refactors, and deep handler splits in ai_builder_proposal_processor.py. It introduces a typed active-turn boundary to improve runtime correctness and reduce parameter sprawl before later handler extraction."
+      architecture_diagnosis:
+        - "The real defect is primitive active-turn state: lease_request_id, lease_lock_token, request_id, session_id, tenant_id, and base_planning_state_version are threaded separately across planner, dispatcher, proposal processor, plan store, edit proposal, discovery follow-up, repair transport, and repo."
+        - "Repo mutable writes currently enforce lease filters only when both lease UUIDs are present; missing values become unguarded writes."
+        - "ai_builder_proposal_processor.py is oversized, but a deep split before the runtime boundary would mix file moves with a concurrency fix and reduce reviewability."
+      selected_direction: "Lease plus narrow active-turn boundary: SessionSendLease + SessionSendTurn in a leaf module, ProposalContext.turn, active helpers take ctx/turn, lifecycle writes use explicit no-send-lease repo method."
+      canonical_owners:
+        SessionSendLease: "ai_builder_session_turn.py leaf module"
+        SessionSendTurn: "ai_builder_session_turn.py leaf module"
+        lease_lifetime: "AIBuilderPlanner.send_message()"
+        lease_enforcement: "AIBuilderRepository"
+        proposal_active_turn_carrier: "ProposalContext.turn"
+        lifecycle_status_writes: "Explicit update_session_status_without_send_lease() call sites in ai_builder_plan_lifecycle.py"
+      rejected_alternatives:
+        - "Lease-only propagation: rejected because it would add more plumbing to a 2655 LOC processor."
+        - "Deep handler split in T004: rejected because it would mix a runtime correctness repair with broad file moves."
+        - "Extraction-first: rejected because it delays a source-proven lost-lease bug before the stable boundary exists."
+        - "SessionSendLease | None on active helpers: rejected because it preserves the bypass shape."
+        - "Putting runtime turn objects in ai_builder_domain_models.py: rejected because the contract is runtime write authority, not a persisted record."
+      codex_self_review:
+        verdict: "pass"
+        answers:
+          - "Cleanest direction, not first plausible: yes; the first plausible lease-only patch was rejected."
+          - "Reduces debt rather than moving it: yes for runtime lease/CAS ownership; retry kwargs and handler extraction remain explicit follow-ups."
+          - "Canonical owners identified: yes; planner lifetime, repo enforcement, active-turn leaf module, ProposalContext carrier."
+          - "Avoids parallel implementations: yes; no lease manager, service, port, compatibility shim, or second repo path."
+          - "Simplifies where useful: yes; one turn object replaces repeated primitive threading."
+          - "Enough work for cleaner architecture: yes; includes helper return-version propagation and lifecycle split, but excludes broader JSONB/API/live-eval work."
+          - "Week-one senior engineer readability: yes if implementation preserves explicit names and avoids AI-slop comments."
+          - "Human reviewer safety: yes with no handler moves, DB-backed tests, static guard, and separate commits."
+          - "Scope size: correctly sized; bigger than local patch, smaller than broad refactor/data/API tranche."
+      claude_gate:
+        artifact: ".codex/artifacts/claude-peer-loop-t004-final-sessionsendturn-plan-exact-gate-20260521T084159Z.md"
+        verdict: "GREEN_LIGHT yes; VERDICT green; MIN_SCORE 8"
+      antigravity_gate:
+        artifact_iteration_2: ".codex/artifacts/antigravity-peer-loop-t004-sessionsendturn-revised-plan-gate-20260521T083758Z.md"
+        artifact_final_exact: ".codex/artifacts/antigravity-peer-loop-t004-final-sessionsendturn-exact-gate-20260521T084520Z.md"
+        verdict: "Final review content says VERDICT green, GREEN_LIGHT yes, score 9/10, no blockers. The runner exited 2 on the final exact pass because Antigravity formatted the initial verdict as bold Markdown rather than exact parser tokens. This is documented as a parser/tooling failure, not a quota failure or blocking finding."
+      implementation_ready: true
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Implement the approved SessionSendTurn active-turn runtime contract and verify lost-lease rollback behavior."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_session_turn.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_repo.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner_turn.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_dispatcher.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_store.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_discovery_followup.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_repair_transport.py"
+      - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_dispatcher.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_discovery_followup.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_proposal.py"
+      - "scripts/gate-local/check_ai_builder_session_turn_contract.sh"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    implementation_requirements:
+      - "Add leaf module ai_builder_session_turn.py with frozen slotted SessionSendLease and SessionSendTurn; only dataclasses and uuid imports."
+      - "Replace loose active-turn lease_request_id / lease_lock_token / base-version threading with turn or ctx.turn."
+      - "Active repo writes require SessionSendLease or SessionSendTurn; legitimate lifecycle status writes use update_session_status_without_send_lease()."
+      - "Active-turn persistence helpers return the bumped planning_state_version and callers refresh turn via dataclasses.replace()."
+      - "Convert _dispatch_chained_server_action_after_commit() to same lease plus refreshed base version."
+      - "Planner AWAITING_APPROVAL -> CHATTING status write must use the active lease."
+      - "Scrub stale dual-mode repo comments; do not add tutorial comments."
+      - "Net LOC delta in ai_builder_proposal_processor.py should be <= 0 unless the receipt explains a test-driven exception."
+      - "Static guard must fail on a deliberately broken temporary active-helper fixture before it is trusted."
+    verify:
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::test_ai_builder_repo_commit_turn_rejects_write_when_lease_is_lost tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_rejects_lost_session_send_lease_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_confirm_requirements_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_edit_flow_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_structured_question_recovery_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_send_message_status_jump_under_lock_uses_lease"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_dispatcher.py tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_discovery_followup.py tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py"
+      - "uv run ruff check <T005 touched source/test files>"
+      - "uv run ruff format --check <T005 touched source/test files>"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pyright <T005 touched source files>"
+      - "scripts/gate-local/check_ai_builder_session_turn_contract.sh"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Need to preserve active helper Optional[SessionSendLease] or loose lease_request_id / lease_lock_token."
+      - "Need to deep-split proposal handlers or move broad behavior."
+      - "Lost-lease behavior cannot be covered by a DB-backed boundary."
+      - "Verification fails twice for the same reason."
+      - "Implementation would require staging unrelated dirty files."
+    receipt: null
+
+checks:
+  dirty_fingerprint:
+    branch_checked: true
+    status_checked: true
+    result: "dirty; previous tranche uncommitted and unrelated files preserved"
+  last_verification:
+    result: "T002 active send-turn planning-state CAS implementation verified; authenticated API read probe and four-case create live eval remain the latest live-eval evidence."
+    task: T002
+    commands:
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_discovery_followup.py tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::test_persist_tool_turn_refreshes_planning_state_with_requirements_summary tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_rejects_stale_planning_state_version_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_accepts_matching_planning_state_version tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_preserves_persisted_architecture_commit tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_rolls_back_when_append_fails tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_saves_planning_state tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_stamps_plan_identity_on_state tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_state_matches_compacted_conversation"
+      - "uv run ruff check <T002 touched source/test files>"
+      - "uv run ruff format --check <T002 touched source/test files>"
+      - "uv run pyright <T002 touched source/test files>"
+      - "AST call-site audit for active-turn helper calls missing base_planning_state_version"
