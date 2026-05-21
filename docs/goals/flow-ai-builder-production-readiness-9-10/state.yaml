@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T010
+active_task: T011
 
 scoring_target:
   dimensions:
@@ -976,7 +976,7 @@ tasks:
   - id: T009
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Implement the approved typed ToolRetryInvocation retry boundary without broad processor dependency or submission-handler refactors."
     allowed_files:
@@ -1086,7 +1086,7 @@ tasks:
   - id: T010
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: xhigh
     objective: "Re-rank the next Flow AI Builder production-readiness tranche after T009 and produce an implementation-ready plan with Codex, Claude, and Antigravity gates."
     inputs:
@@ -1112,6 +1112,102 @@ tasks:
       - "Codex self-review pass or blocker."
       - "Claude GREEN_LIGHT yes artifact."
       - "Antigravity pass artifact or exact tooling failure."
+    receipt:
+      completed_at: "2026-05-21T12:48:00+02:00"
+      result: done
+      summary: "Selected a score-neutral but high-ROI maintainability tranche: delete fake/dead proposal processor seams before the next score-moving JSONB/API tranche. The plan deliberately avoids a broad file split and instead removes unearned indirection inside the oversized processor."
+      architecture_diagnosis:
+        - "ai_builder_proposal_processor.py remains oversized at 1997 LOC after T009, but the immediate debt is fake generic submission plumbing rather than a safe broad split."
+        - "SubmissionToolHandlerConfig/_handle_submission_tool_call generalize only the outline path in production; edit uses _handle_edit_flow directly."
+        - "AIBuilderProposalProcessor.request_self_correction is a dead public wrapper outside tests; lower-level ai_builder_proposal_repair.request_self_correction remains the real self-correction owner."
+        - "_submission_retry_config becomes a one-caller dispatch helper after fake seam deletion and should be inlined."
+        - "Data_Model_Schema_Quality remains 6 because raw conversation metadata/edit-result JSONB and public SSE/API contracts are untouched in this tranche."
+      selected_worker_slice:
+        objective: "Delete fake/dead proposal processor seams and make outline/edit retry prompt ownership explicit without broad file moves or behavior changes."
+        plan_artifact: ".codex/artifacts/flow-ai-builder-t010-next-tranche-plan-v5.md"
+        allowed_files:
+          - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_create_proposal.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+          - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+        acceptance_criteria:
+          - "No SubmissionToolHandlerConfig, _handle_submission_tool_call, process_submission_arguments, Callable[..., Awaitable[ToolProcessingResult]], def request_self_correction(, _build_submission_processing_kwargs, or _submission_retry_config remains in ai_builder_proposal_processor.py."
+          - "No SubmissionToolHandlerConfig, _handle_submission_tool_call, process_submission_arguments, _submission_retry_config, or _build_submission_processing_kwargs remains in test_ai_builder_proposal_processor.py."
+          - "_dispatch_known_tool_call still routes outline to _handle_outline_flow_tool_call, edit to _handle_edit_flow, and confirm to _handle_confirm_requirements."
+          - "Outline parse/validation repair, telemetry, assistant metadata, and architecture-error behavior remain covered through _handle_outline_flow_tool_call."
+          - "Edit parse/validation repair uses one edit_flow_retry_config object per _handle_edit_flow call."
+          - "Receipt states Data Model / Schema Quality remains 6 and JSONB is the next score-moving tranche."
+        verify:
+          - "RED first: PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py::test_proposal_processor_has_no_generic_submission_tool_config -q"
+          - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q"
+          - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_rejects_lost_session_send_lease_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_edit_flow_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_confirm_requirements_with_lost_lease_rolls_back -q"
+          - "scripts/gate-local/check_ai_builder_session_turn_contract.sh"
+          - "uv run ruff check <T011 touched source/test files>"
+          - "uv run ruff format --check <T011 touched source/test files>"
+          - "PYTHONDONTWRITEBYTECODE=1 uv run pyright <T011 touched source files>"
+          - "static rg gates from acceptance criteria"
+          - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+      codex_self_review:
+        verdict: "pass"
+        summary: "This is the cleanest local direction for the oversized processor because it deletes fake seams instead of wrapping them, keeps create/edit retry ownership in their canonical modules, and avoids a broad mechanical split before a stable boundary exists."
+      claude_gate:
+        artifact: ".codex/artifacts/claude-peer-loop-t010-next-tranche-plan-gate-v5-20260521T124231Z.md"
+        verdict: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
+      antigravity_gate:
+        status: "missing_due_tooling_failure_not_passed"
+        prior_artifact_with_stale_blocker: ".codex/artifacts/antigravity-peer-loop-t010-next-tranche-plan-final-arbitration-v5-20260521T124501Z.md"
+        exact_final_gate_empty_output: ".codex/artifacts/antigravity-peer-loop-t010-next-tranche-plan-v5-exact-final-gate-20260521T124556Z.md"
+        verdict_only_auth_failure: ".codex/artifacts/antigravity-peer-loop-t010-v5-verdict-only-gate-20260521T124718Z.md"
+        exact_failure: "The first v5 Antigravity run parsed green tokens but repeated stale v3 blocker text about _submission_retry_config tests that v5 already resolved, so it was not accepted. A clean exact-final run exited 0 but produced an empty Antigravity Output and parsed no verdict. A narrow verdict-only retry required Google OAuth and timed out after 30 seconds. This is documented as missing Antigravity final pass, not a pass."
+        codex_decision_after_missing_antigravity: "Proceed because Claude v5 returned green, Codex self-review passed, the stale Antigravity blocker is explicitly resolved in the final v5 plan, and the remaining Antigravity failures are tooling/auth failures rather than unresolved source blockers."
+      rejected_alternatives:
+        - "Broad split of ai_builder_proposal_processor.py: rejected for this tranche because it would mix mechanical movement with seam deletion and make review harder."
+        - "JSONB metadata/edit-result typing immediately: still the next score-moving tranche, but this cleanup reduces local processor friction first after the user's maintainability challenge."
+        - "Rename _handle_submission_tool_call instead of deleting it: rejected because one production caller does not justify keeping a generic handler."
+        - "Add new processor helper for edit retry config: rejected because building retry_config once in _handle_edit_flow is clearer and avoids another shallow helper."
+      residual_risks:
+        - "Overall remains 6 because Data Model / Schema Quality stays 6 until raw JSONB/public contract work is addressed."
+        - "process_outline_arguments still depends on processor; broader dependency cleanup remains a later tranche."
+        - "ai_builder_proposal_processor.py remains large after this tranche, though fake/dead seams should be reduced."
+
+  - id: T011
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Implement the approved fake/dead proposal processor seam deletion tranche without broad file moves or behavior changes."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_proposal.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    implementation_requirements:
+      - "RED first: add and run test_proposal_processor_has_no_generic_submission_tool_config before implementation and record the failing assertion."
+      - "Remove SubmissionToolHandlerConfig, _handle_submission_tool_call, _build_submission_processing_kwargs, AIBuilderProposalProcessor.request_self_correction, and _submission_retry_config."
+      - "Inline outline submission behavior in _handle_outline_flow_tool_call with explicit keyword arguments to process_outline_arguments."
+      - "Add OUTLINE_FLOW_FORCED_TOOL_PROMPT in ai_builder_create_proposal.py and EDIT_FLOW_FORCED_TOOL_PROMPT in ai_builder_edit_proposal.py; no docstrings."
+      - "Build edit_flow_retry_config once per _handle_edit_flow call and reuse it for parse and validation repair."
+      - "Delete obsolete _submission_retry_config tests and migrate the named behavior tests through live outline handling."
+      - "No broad split, no JSONB/SSE/live-eval work, no new helpers/services, no type ignores, no section-header comments in the inlined handler."
+    verify:
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py::test_proposal_processor_has_no_generic_submission_tool_config -q"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_rejects_lost_session_send_lease_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_edit_flow_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_confirm_requirements_with_lost_lease_rolls_back -q"
+      - "scripts/gate-local/check_ai_builder_session_turn_contract.sh"
+      - "uv run ruff check <T011 touched source/test files>"
+      - "uv run ruff format --check <T011 touched source/test files>"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pyright <T011 touched source files>"
+      - "rg -n \"SubmissionToolHandlerConfig|_handle_submission_tool_call|process_submission_arguments|Callable\\[\\.\\.\\.,\\s*Awaitable\\[ToolProcessingResult\\]\\]|def request_self_correction\\(|_build_submission_processing_kwargs|_submission_retry_config\" backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "rg -n \"SubmissionToolHandlerConfig|_handle_submission_tool_call|process_submission_arguments|_submission_retry_config|_build_submission_processing_kwargs\" backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Need behavior changes beyond deleting fake/dead seams."
+      - "Need to reintroduce a generic submission handler, new helper/service, type ignore, or loose Callable[..., Awaitable[ToolProcessingResult]] boundary."
+      - "The inlined outline handler exceeds roughly 140 LOC or becomes less readable than the deleted seam."
+      - "Verification fails twice for the same reason."
     receipt: null
 
 checks:
