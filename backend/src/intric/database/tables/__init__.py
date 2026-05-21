@@ -19,6 +19,7 @@ _TABLE_MODULES = (
     "intric.database.tables.files_table",
     "intric.database.tables.group_chats_table",
     "intric.database.tables.groups_spaces_table",
+    "intric.database.tables.help_assistant_assignment_history_table",
     "intric.database.tables.icons_table",
     "intric.database.tables.info_blob_chunk_table",
     "intric.database.tables.info_blobs_table",
