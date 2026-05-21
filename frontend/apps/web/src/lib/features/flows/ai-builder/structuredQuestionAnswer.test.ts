@@ -32,12 +32,12 @@ describe("structured question answer helpers", () => {
         {
           id: "single",
           label: "One PDF",
-          value: { mode: "single" }
+          value: "single"
         },
         {
           id: "multi",
           label: "Multiple PDFs",
-          value: { mode: "multi" }
+          value: "multi"
         }
       ]
     };
@@ -48,7 +48,7 @@ describe("structured question answer helpers", () => {
     expect(result.questionAnswer).toEqual({
       question_id: "pdf_count",
       selected_option_ids: ["single"],
-      selected_values: [{ mode: "single" }]
+      selected_values: ["single"]
     });
   });
 

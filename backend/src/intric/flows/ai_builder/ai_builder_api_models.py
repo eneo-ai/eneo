@@ -19,6 +19,9 @@ from intric.flows.ai_builder.ai_builder_edit_models import BuilderPlanEditResult
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
+from intric.flows.ai_builder.ai_builder_telemetry_models import (
+    SessionTelemetrySummary,
+)
 
 AI_BUILDER_SESSION_RESPONSE_EXAMPLE: JsonObject = {
     "session_id": "00000000-0000-0000-0000-000000000701",
@@ -279,28 +282,6 @@ class SessionListItemResponse(BaseModel):
     draft_title: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
-
-
-class SessionTelemetrySummary(BaseModel):
-    planner_request_count: int = 0
-    clarification_question_count: int = 0
-    prompt_tokens_total: int = 0
-    completion_tokens_total: int = 0
-    total_tokens_total: int = 0
-    tool_call_count_total: int = 0
-    auxiliary_llm_call_count: int = 0
-    architecture_commit_count: int = 0
-    repair_attempts_total: int = 0
-    parse_repair_attempts_total: int = 0
-    wall_clock_ms_total: int = 0
-    llm_calls_made_total: int = 0
-    token_usage_estimated: bool = False
-    last_request_id: str | None = None
-    last_model: str | None = None
-    last_finish_reason: str | None = None
-    last_outcome_kind: str | None = None
-    last_token_usage_source: str | None = None
-    last_token_usage_estimated: bool = False
 
 
 class SessionListResponse(BaseModel):

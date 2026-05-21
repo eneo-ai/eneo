@@ -48,12 +48,15 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
     build_ai_builder_error_event,
     coerce_ai_builder_error_code,
 )
-from intric.flows.ai_builder.ai_builder_event_models import AI_BUILDER_SSE_MODELS
+from intric.flows.ai_builder.ai_builder_event_models import (
+    ai_builder_stream_event_schema,
+)
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_DONE,
     SSE_EVENT_ERROR,
     SSE_EVENT_STATUS,
     SSE_EVENT_USAGE,
+    build_done_event,
     build_usage_event,
 )
 from intric.flows.ai_builder.ai_builder_models import (
@@ -93,15 +96,6 @@ if TYPE_CHECKING:
     from intric.tenants.tenant_repo import TenantRepository
 
 logger = logging.getLogger(__name__)
-
-AI_BUILDER_EVENT_STREAM_PAYLOAD_SCHEMA: dict[str, Any] = {
-    # Full payload discrimination is queued for the event-union tranche; SSE
-    # consumers should branch on the event name until that contract lands.
-    "oneOf": [
-        {"$ref": f"#/components/schemas/{model.__name__}"}
-        for model in (*AI_BUILDER_SSE_MODELS, AIBuilderPublicError)
-    ]
-}
 
 
 class AIBuilderPublicErrorRoute(APIRoute):
@@ -177,9 +171,7 @@ async def _current_usage_event(
     telemetry = summarize_session_telemetry(session.conversation)
     if telemetry is None:
         return None
-    return build_usage_event(
-        SessionTelemetrySummary.model_validate(telemetry).model_dump(mode="json")
-    )
+    return build_usage_event(SessionTelemetrySummary.model_validate(telemetry))
 
 
 async def _resolve_litellm_params(
@@ -504,6 +496,7 @@ async def list_sessions(
 @router.post(
     "/sessions/{session_id}/messages",
     operation_id="send_ai_builder_message",
+    response_class=EventSourceResponse,
     summary="Send AI Builder Message",
     description=(
         "Send a user message to an AI Builder session and receive planner events as "
@@ -514,7 +507,7 @@ async def list_sessions(
             "description": "Server-sent event stream with planner status, text, question, plan, error, and done events.",
             "content": {
                 "text/event-stream": {
-                    "schema": AI_BUILDER_EVENT_STREAM_PAYLOAD_SCHEMA,
+                    "schema": ai_builder_stream_event_schema(),
                     "example": (
                         "event: status\n"
                         'data: {"status":"thinking"}\n\n'
@@ -669,7 +662,8 @@ async def send_message(
                 request_id=extract_request_id(request),
             )
             yield ServerSentEvent(data=error_event["data"], event=error_event["event"])
-            yield ServerSentEvent(data="", event=SSE_EVENT_DONE)
+            done_event = build_done_event()
+            yield ServerSentEvent(data=done_event["data"], event=done_event["event"])
         except Exception as error:
             logger.error(
                 "AI Builder event stream failed.",
@@ -685,7 +679,8 @@ async def send_message(
                 request_id=extract_request_id(request),
             )
             yield ServerSentEvent(data=error_event["data"], event=error_event["event"])
-            yield ServerSentEvent(data="", event=SSE_EVENT_DONE)
+            done_event = build_done_event()
+            yield ServerSentEvent(data=done_event["data"], event=done_event["event"])
 
     return EventSourceResponse(event_stream(), ping=15)
 

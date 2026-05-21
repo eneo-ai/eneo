@@ -10,7 +10,6 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from intric.flows.ai_builder.ai_builder_events import SSE_EVENT_ERROR
 from intric.main.exceptions import ErrorCodes
 
 JsonScalar: TypeAlias = str | int | float | bool | None
@@ -445,6 +444,13 @@ class AIBuilderPublicError(BaseModel):
         return value
 
 
+class AIBuilderErrorEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event: Literal["error"] = "error"
+    data: AIBuilderPublicError
+
+
 def coerce_ai_builder_error_code(
     value: str | AIBuilderErrorCode | None,
     *,
@@ -526,9 +532,10 @@ def build_ai_builder_error_event(
         request_id=request_id,
         context=context,
     )
+    event = AIBuilderErrorEvent(data=payload)
     return {
-        "event": SSE_EVENT_ERROR,
-        "data": payload.model_dump_json(exclude_none=True),
+        "event": event.event,
+        "data": event.data.model_dump_json(exclude_none=True),
     }
 
 
@@ -558,6 +565,7 @@ __all__ = [
     "AI_BUILDER_ERROR_REGISTRY",
     "AIBuilderErrorCategory",
     "AIBuilderErrorCode",
+    "AIBuilderErrorEvent",
     "AIBuilderErrorPhase",
     "AIBuilderErrorRegistryEntry",
     "AIBuilderPublicError",

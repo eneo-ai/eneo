@@ -11,22 +11,24 @@ import type {
   AIBuilderSessionResponse as GeneratedAIBuilderSessionResponse,
   AIBuilderSessionTelemetrySummary as GeneratedAIBuilderSessionTelemetrySummary,
   AIBuilderStepSpec as GeneratedAIBuilderStepSpec,
-  components
+  components,
+  operations
 } from "@intric/intric-js";
 import type { StructuredQuestion } from "./structuredQuestionAnswer";
 
-export type AIBuilderEventType =
-  | "text"
-  | "plan"
-  | "question"
-  | "requirements_summary"
-  | "usage"
-  | "error"
-  | "status"
-  | "done";
+type SendAIBuilderMessageOperation = operations["send_ai_builder_message"];
+type GeneratedAIBuilderParsedStreamEvent =
+  SendAIBuilderMessageOperation["responses"][200]["content"]["text/event-stream"];
+// Required<> removes undefined from backend-defaulted counters; nullable last_* fields remain null-safe.
+export type AIBuilderTelemetrySummary = Required<GeneratedAIBuilderSessionTelemetrySummary>;
+export type AIBuilderUsageEventData = AIBuilderTelemetrySummary;
+export type AIBuilderParsedStreamEvent =
+  | Exclude<GeneratedAIBuilderParsedStreamEvent, { event: "usage" }>
+  | { event: "usage"; data: AIBuilderUsageEventData };
+export type AIBuilderEventType = AIBuilderParsedStreamEvent["event"];
 
 export interface AIBuilderStreamEvent {
-  event: AIBuilderEventType;
+  event: AIBuilderEventType | string;
   data: string;
 }
 
@@ -160,20 +162,10 @@ export type PlanRevisionType = components["schemas"]["RevisePlanRequest"]["type"
 
 export type ApplyResult = GeneratedAIBuilderApplyResult;
 
-export interface KeyDecision {
-  topic: string;
-  decision: string;
-}
-
-export interface RequirementsSummary {
-  requirements_version?: string | null;
-  summary: string;
-  key_decisions: KeyDecision[];
-  input_description: string;
-  output_description: string;
-  assumptions?: string[];
-  manual_setup_notes?: string[];
-}
+export type RequirementsSummary = Extract<
+  AIBuilderParsedStreamEvent,
+  { event: "requirements_summary" }
+>["data"];
 
 export type AIBuilderPhase = "discovering" | "confirming" | "building" | "reviewing";
 
@@ -189,17 +181,81 @@ export interface ChatMessage {
 
 export type AIBuilderModel = GeneratedAIBuilderModel;
 
-export interface AIBuilderTextEventData {
-  text: string;
+export type AIBuilderTextEventData = Extract<AIBuilderParsedStreamEvent, { event: "text" }>["data"];
+
+export type AIBuilderStatusEventData = Extract<
+  AIBuilderParsedStreamEvent,
+  { event: "status" }
+>["data"];
+
+export type AIBuilderQuestionEventData = Extract<
+  AIBuilderParsedStreamEvent,
+  { event: "question" }
+>["data"];
+
+type AIBuilderPlanStreamEventData = Extract<AIBuilderParsedStreamEvent, { event: "plan" }>["data"];
+
+type AIBuilderErrorEventData = Extract<AIBuilderParsedStreamEvent, { event: "error" }>["data"];
+
+export function parseAIBuilderStreamEvent(
+  rawEvent: AIBuilderStreamEvent
+): AIBuilderParsedStreamEvent {
+  switch (rawEvent.event) {
+    case "text":
+      return { event: "text", data: parseEventData<AIBuilderTextEventData>(rawEvent.data) };
+    case "status":
+      return { event: "status", data: parseEventData<AIBuilderStatusEventData>(rawEvent.data) };
+    case "question":
+      return { event: "question", data: parseEventData<AIBuilderQuestionEventData>(rawEvent.data) };
+    case "requirements_summary":
+      return {
+        event: "requirements_summary",
+        data: parseEventData<RequirementsSummary>(rawEvent.data)
+      };
+    case "plan":
+      return { event: "plan", data: parseEventData<AIBuilderPlanStreamEventData>(rawEvent.data) };
+    case "usage":
+      return {
+        event: "usage",
+        data: parseTelemetryEventData(rawEvent.data)
+      };
+    case "error":
+      return { event: "error", data: parseEventData<AIBuilderErrorEventData>(rawEvent.data) };
+    case "done":
+      if (rawEvent.data !== "") {
+        throw new Error("AI Builder done event must have an empty data frame.");
+      }
+      return { event: "done", data: "" };
+    default:
+      throw new Error(`Unknown AI Builder stream event: ${rawEvent.event}`);
+  }
 }
 
-export interface AIBuilderStatusEventData {
-  status: string;
+function parseEventData<T>(data: string): T {
+  return JSON.parse(data) as T;
 }
 
-export type AIBuilderQuestionEventData = StructuredQuestion;
-
-// Required<> removes undefined from backend-defaulted counters; nullable last_* fields remain null-safe.
-export type AIBuilderTelemetrySummary = Required<GeneratedAIBuilderSessionTelemetrySummary>;
-
-export type AIBuilderUsageEventData = AIBuilderTelemetrySummary;
+function parseTelemetryEventData(data: string): AIBuilderUsageEventData {
+  const parsed = parseEventData<GeneratedAIBuilderSessionTelemetrySummary>(data);
+  return {
+    planner_request_count: parsed.planner_request_count ?? 0,
+    clarification_question_count: parsed.clarification_question_count ?? 0,
+    prompt_tokens_total: parsed.prompt_tokens_total ?? 0,
+    completion_tokens_total: parsed.completion_tokens_total ?? 0,
+    total_tokens_total: parsed.total_tokens_total ?? 0,
+    tool_call_count_total: parsed.tool_call_count_total ?? 0,
+    auxiliary_llm_call_count: parsed.auxiliary_llm_call_count ?? 0,
+    architecture_commit_count: parsed.architecture_commit_count ?? 0,
+    repair_attempts_total: parsed.repair_attempts_total ?? 0,
+    parse_repair_attempts_total: parsed.parse_repair_attempts_total ?? 0,
+    wall_clock_ms_total: parsed.wall_clock_ms_total ?? 0,
+    llm_calls_made_total: parsed.llm_calls_made_total ?? 0,
+    token_usage_estimated: parsed.token_usage_estimated ?? false,
+    last_request_id: parsed.last_request_id ?? null,
+    last_model: parsed.last_model ?? null,
+    last_finish_reason: parsed.last_finish_reason ?? null,
+    last_outcome_kind: parsed.last_outcome_kind ?? null,
+    last_token_usage_source: parsed.last_token_usage_source ?? null,
+    last_token_usage_estimated: parsed.last_token_usage_estimated ?? false
+  };
+}

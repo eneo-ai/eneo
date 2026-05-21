@@ -25,7 +25,15 @@ REQUIRED_PATHS: dict[str, set[str]] = {
 }
 
 REQUIRED_SCHEMAS = {
+    "AIBuilderDoneEvent",
+    "AIBuilderErrorEvent",
     "AIBuilderPlanEventData",
+    "AIBuilderPlanEvent",
+    "AIBuilderQuestionEvent",
+    "AIBuilderRequirementsSummaryEvent",
+    "AIBuilderStatusEvent",
+    "AIBuilderTextEvent",
+    "AIBuilderUsageEvent",
     "BuilderPlanEditResult",
     "CompiledEditResult",
     "ApplyPlanRequest",
@@ -43,6 +51,17 @@ REQUIRED_SCHEMAS = {
     "SessionTelemetrySummary",
 }
 
+AI_BUILDER_STREAM_EVENT_REFS = {
+    "text": "#/components/schemas/AIBuilderTextEvent",
+    "status": "#/components/schemas/AIBuilderStatusEvent",
+    "question": "#/components/schemas/AIBuilderQuestionEvent",
+    "requirements_summary": "#/components/schemas/AIBuilderRequirementsSummaryEvent",
+    "plan": "#/components/schemas/AIBuilderPlanEvent",
+    "usage": "#/components/schemas/AIBuilderUsageEvent",
+    "error": "#/components/schemas/AIBuilderErrorEvent",
+    "done": "#/components/schemas/AIBuilderDoneEvent",
+}
+
 
 def _schema_refs(schema: object) -> set[str]:
     refs: set[str] = set()
@@ -56,6 +75,26 @@ def _schema_refs(schema: object) -> set[str]:
         for value in schema:
             refs.update(_schema_refs(value))
     return refs
+
+
+def _direct_one_of_refs(schema: object) -> set[str]:
+    if not isinstance(schema, dict):
+        return set()
+    one_of = schema.get("oneOf")
+    if not isinstance(one_of, list):
+        return set()
+    refs: set[str] = set()
+    for item in one_of:
+        if isinstance(item, dict) and isinstance(item.get("$ref"), str):
+            refs.add(item["$ref"])
+    return refs
+
+
+def _send_message_stream_content(openapi_spec: dict) -> dict:
+    operation = openapi_spec["paths"][
+        "/api/v1/flows/ai-builder/sessions/{session_id}/messages"
+    ]["post"]
+    return operation["responses"]["200"]["content"]
 
 
 REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
@@ -151,12 +190,39 @@ def test_openapi_plan_response_and_plan_event_share_edit_result_schema(
 
 
 def test_openapi_ai_builder_sse_plan_event_payload_is_typed(openapi_spec: dict) -> None:
-    operation = openapi_spec["paths"][
-        "/api/v1/flows/ai-builder/sessions/{session_id}/messages"
-    ]["post"]
-    schema = operation["responses"]["200"]["content"]["text/event-stream"]["schema"]
+    schema = openapi_spec["components"]["schemas"]["AIBuilderPlanEvent"]
 
     assert "#/components/schemas/AIBuilderPlanEventData" in _schema_refs(schema)
+
+
+def test_openapi_ai_builder_sse_event_stream_is_discriminated(
+    openapi_spec: dict,
+) -> None:
+    schema = _send_message_stream_content(openapi_spec)["text/event-stream"]["schema"]
+
+    assert schema["discriminator"]["propertyName"] == "event"
+    assert schema["discriminator"]["mapping"] == AI_BUILDER_STREAM_EVENT_REFS
+    assert _direct_one_of_refs(schema) == set(AI_BUILDER_STREAM_EVENT_REFS.values())
+
+
+def test_openapi_ai_builder_sse_stream_uses_only_event_wrappers(
+    openapi_spec: dict,
+) -> None:
+    schema = _send_message_stream_content(openapi_spec)["text/event-stream"]["schema"]
+
+    assert _direct_one_of_refs(schema) == set(AI_BUILDER_STREAM_EVENT_REFS.values())
+    assert not {
+        "#/components/schemas/StructuredQuestionOptionPayload",
+        "#/components/schemas/KeyDecisionPayload",
+        "#/components/schemas/RequirementsSummaryPayload",
+        "#/components/schemas/AIBuilderPublicError",
+    }.intersection(_direct_one_of_refs(schema))
+
+
+def test_openapi_ai_builder_stream_response_does_not_advertise_json(
+    openapi_spec: dict,
+) -> None:
+    assert set(_send_message_stream_content(openapi_spec)) == {"text/event-stream"}
 
 
 def test_openapi_session_response_includes_telemetry_field(openapi_spec: dict) -> None:

@@ -1,23 +1,15 @@
-export interface StructuredQuestionOption {
-  id?: string | null;
-  label: string;
-  value?: unknown;
-  description?: string | null;
-}
+import type { components } from "@intric/intric-js";
 
-export interface StructuredQuestion {
-  question_id: string;
-  question: string;
-  options: StructuredQuestionOption[];
-  selection_mode: "single" | "multi";
-  allow_custom: boolean;
-  requires_confirm?: boolean;
-}
+export type StructuredQuestionOption = components["schemas"]["StructuredQuestionOptionPayload"];
+
+export type StructuredQuestion = components["schemas"]["StructuredQuestionPayload"];
+
+type StructuredQuestionOptionValue = Exclude<StructuredQuestionOption["value"], undefined>;
 
 export interface StructuredQuestionAnswerMetadata {
   question_id?: string | null;
   selected_option_ids?: string[];
-  selected_values?: unknown[];
+  selected_values?: StructuredQuestionOptionValue[];
   custom_value?: string;
   requirements_confirmed?: boolean;
   requirements_version?: string;
@@ -43,9 +35,9 @@ export function buildStructuredQuestionSelection(
       selected_option_ids: selectedOptions
         .map((option) => option.id)
         .filter((id): id is string => Boolean(id)),
-      selected_values: selectedOptions
-        .filter((option) => option.value !== undefined)
-        .map((option) => option.value)
+      selected_values: selectedOptions.flatMap((option) =>
+        option.value === undefined ? [] : [option.value]
+      )
     }
   };
 }

@@ -24786,6 +24786,83 @@ export interface components {
       /** @default null */
       edit_result_json?: components["schemas"]["BuilderPlanEditResult"] | null;
     };
+    /** AIBuilderTextEvent */
+    AIBuilderTextEvent: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      event: "text";
+      data: components["schemas"]["AIBuilderTextEventData"];
+    };
+    /** AIBuilderStatusEvent */
+    AIBuilderStatusEvent: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      event: "status";
+      data: components["schemas"]["AIBuilderStatusEventData"];
+    };
+    /** AIBuilderQuestionEvent */
+    AIBuilderQuestionEvent: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      event: "question";
+      data: components["schemas"]["StructuredQuestionPayload"];
+    };
+    /** AIBuilderRequirementsSummaryEvent */
+    AIBuilderRequirementsSummaryEvent: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      event: "requirements_summary";
+      data: components["schemas"]["RequirementsSummaryPayload"];
+    };
+    /** AIBuilderPlanEvent */
+    AIBuilderPlanEvent: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      event: "plan";
+      data: components["schemas"]["AIBuilderPlanEventData"];
+    };
+    /** AIBuilderUsageEvent */
+    AIBuilderUsageEvent: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      event: "usage";
+      data: components["schemas"]["SessionTelemetrySummary"];
+    };
+    /** AIBuilderErrorEvent */
+    AIBuilderErrorEvent: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      event: "error";
+      data: components["schemas"]["AIBuilderPublicError"];
+    };
+    /** AIBuilderDoneEvent */
+    AIBuilderDoneEvent: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      event: "done";
+      /**
+       * Data
+       * @default
+       * @constant
+       */
+      data?: "";
+    };
   };
   responses: never;
   parameters: never;
@@ -40287,7 +40364,6 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
           /**
            * @example event: status
            *     data: {"status":"thinking"}
@@ -40299,14 +40375,14 @@ export interface operations {
            *     data:
            */
           "text/event-stream":
-            | components["schemas"]["AIBuilderTextEventData"]
-            | components["schemas"]["AIBuilderStatusEventData"]
-            | components["schemas"]["StructuredQuestionOptionPayload"]
-            | components["schemas"]["StructuredQuestionPayload"]
-            | components["schemas"]["KeyDecisionPayload"]
-            | components["schemas"]["RequirementsSummaryPayload"]
-            | components["schemas"]["AIBuilderPlanEventData"]
-            | components["schemas"]["AIBuilderPublicError"];
+            | components["schemas"]["AIBuilderTextEvent"]
+            | components["schemas"]["AIBuilderStatusEvent"]
+            | components["schemas"]["AIBuilderQuestionEvent"]
+            | components["schemas"]["AIBuilderRequirementsSummaryEvent"]
+            | components["schemas"]["AIBuilderPlanEvent"]
+            | components["schemas"]["AIBuilderUsageEvent"]
+            | components["schemas"]["AIBuilderErrorEvent"]
+            | components["schemas"]["AIBuilderDoneEvent"];
         };
       };
       /** @description The AI Builder session cannot accept a new message in its current state. */

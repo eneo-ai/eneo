@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { FlowAIBuilderDriver } from "./FlowAIBuilderDriver";
+import { parseAIBuilderStreamEvent } from "./protocol";
 import type {
   AIBuilderDraftSession,
   AIBuilderError,
@@ -121,6 +124,36 @@ function makeDriver(
 }
 
 describe("FlowAIBuilderDriver", () => {
+  it("keeps stream event contracts derived from generated types", () => {
+    const source = readFileSync(new URL("./protocol.ts", import.meta.url), "utf8");
+
+    expect(source).toContain('operations["send_ai_builder_message"]');
+    expect(source).toContain("parseAIBuilderStreamEvent");
+    expect(source).toContain('AIBuilderEventType = AIBuilderParsedStreamEvent["event"]');
+    expect(source).toMatch(/AIBuilderTextEventData = Extract<\s*AIBuilderParsedStreamEvent/s);
+    expect(source).not.toMatch(/export type AIBuilderEventType\s*=\s*\|/);
+    expect(source).not.toContain("export interface AIBuilderTextEventData");
+    expect(source).not.toContain("export interface AIBuilderStatusEventData");
+    expect(source).not.toContain("export interface KeyDecision");
+    expect(source).not.toContain("export interface RequirementsSummary");
+  });
+
+  it("rejects unknown raw stream event names", () => {
+    expect(() => parseAIBuilderStreamEvent({ event: "garbage", data: "{}" })).toThrow(
+      /Unknown AI Builder stream event/
+    );
+  });
+
+  it("rejects malformed stream event JSON", () => {
+    expect(() => parseAIBuilderStreamEvent({ event: "text", data: "{not json" })).toThrow();
+  });
+
+  it("rejects non-empty done event data frames", () => {
+    expect(() => parseAIBuilderStreamEvent({ event: "done", data: "{}" })).toThrow(
+      /empty data frame/
+    );
+  });
+
   it("resets confirmation phase when the user changes requirements after confirming", async () => {
     const { driver } = makeDriver();
     driver.seedState({

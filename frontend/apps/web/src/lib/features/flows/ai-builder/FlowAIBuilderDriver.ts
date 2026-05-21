@@ -11,6 +11,7 @@ import {
   isStaleApplyError,
   parseAIBuilderError
 } from "./aiBuilderError";
+import { parseAIBuilderStreamEvent } from "./protocol";
 import type {
   AIBuilderConversationMessage,
   AIBuilderDraftSession,
@@ -18,11 +19,8 @@ import type {
   AIBuilderModel,
   AIBuilderPhase,
   AIBuilderPlanEditContext,
-  AIBuilderQuestionEventData,
   AIBuilderSession,
-  AIBuilderStatusEventData,
   AIBuilderStreamEvent,
-  AIBuilderTextEventData,
   AIBuilderUsageEventData,
   ApplyError,
   ApplyResult,
@@ -98,6 +96,10 @@ function extractQuestionAnswer(
     return null;
   }
   return questionAnswer as StructuredQuestionAnswerMetadata;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled AI Builder stream event: ${JSON.stringify(value)}`);
 }
 
 export class FlowAIBuilderDriver {
@@ -395,16 +397,16 @@ export class FlowAIBuilderDriver {
           }
         },
         {
-          onMessage: (ev: AIBuilderStreamEvent) => {
-            switch (ev.event) {
+          onMessage: (rawEvent: AIBuilderStreamEvent) => {
+            const event = parseAIBuilderStreamEvent(rawEvent);
+            switch (event.event) {
               case "text": {
-                const data = JSON.parse(ev.data) as AIBuilderTextEventData;
-                assistantText += data.text;
+                assistantText += event.data.text;
                 this.#updateOrAddAssistantMessage(assistantText);
-                break;
+                return;
               }
               case "plan": {
-                const data = this.#normalizePlan(JSON.parse(ev.data) as IncomingProposedPlan);
+                const data = this.#normalizePlan(event.data);
                 this.#state.currentPlan = data;
                 this.#state.statusMessage = null;
                 this.#updateOrAddAssistantMessage(assistantText, data);
@@ -416,47 +418,45 @@ export class FlowAIBuilderDriver {
                   };
                 }
                 this.#notify();
-                break;
+                return;
               }
               case "question": {
-                const data = JSON.parse(ev.data) as AIBuilderQuestionEventData;
-                this.#updateOrAddAssistantMessage(assistantText, undefined, data);
-                break;
+                this.#updateOrAddAssistantMessage(assistantText, undefined, event.data);
+                return;
               }
               case "requirements_summary": {
-                const data = JSON.parse(ev.data) as RequirementsSummary;
-                this.#updateOrAddAssistantMessage(assistantText, undefined, undefined, data);
-                break;
+                this.#updateOrAddAssistantMessage(assistantText, undefined, undefined, event.data);
+                return;
               }
               case "usage": {
                 receivedUsageEvent = true;
-                this.#updateSessionTelemetry(JSON.parse(ev.data) as AIBuilderUsageEventData);
-                break;
+                this.#updateSessionTelemetry(event.data);
+                return;
               }
               case "status": {
-                const data = JSON.parse(ev.data) as AIBuilderStatusEventData;
-                this.#state.statusMessage = data.status;
+                this.#state.statusMessage = event.data.status;
                 this.#notify();
-                break;
+                return;
               }
               case "error": {
                 const data = parseAIBuilderError({
                   transport: "sse",
-                  payload: ev.data,
+                  payload: event.data,
                   fallbackMessage: "The AI Builder stream failed. Please try again."
                 });
                 this.#state.error = isSoftBlockAIBuilderError(data) ? null : data;
                 this.#state.statusMessage = null;
                 this.#notify();
-                break;
+                return;
               }
               case "done": {
                 this.#state.isStreaming = false;
                 this.#state.statusMessage = null;
                 this.#notify();
-                break;
+                return;
               }
             }
+            assertNever(event);
           },
           onClose: () => {
             this.#state.isStreaming = false;
