@@ -216,8 +216,15 @@ async def get_assistant(
 
     assistant, permissions = await service.get_assistant(assistant_id=id)
 
+    effective_config = None
+    if assistant.is_default:
+        effective_config_service = container.effective_config_service()
+        effective_config = await effective_config_service.resolve_for(assistant)
+
     return assembler.from_assistant_to_model(
-        assistant=assistant, permissions=permissions
+        assistant=assistant,
+        permissions=permissions,
+        effective_config=effective_config,
     )
 
 

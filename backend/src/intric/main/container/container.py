@@ -253,6 +253,9 @@ from intric.mcp_servers.presentation.assemblers.mcp_server_tool_assembler import
     MCPServerToolAssembler,
 )
 from intric.modules.module_repo import ModuleRepository
+from intric.personal_chat_policy.application.effective_config_service import (
+    EffectiveConfigService,
+)
 from intric.personal_chat_policy.application.personal_chat_policy_service import (
     PersonalChatPolicyService,
 )
@@ -1189,6 +1192,14 @@ class Container(containers.DeclarativeContainer):
         completion_model_crud_service=completion_model_crud_service,
         mcp_server_settings_service=mcp_server_settings_service,
         prompt_library_service=prompt_library_service,
+    )
+    effective_config_service = providers.Factory(
+        EffectiveConfigService,
+        user=user,
+        policy_repo=personal_chat_policy_repo,
+        prompt_library_repo=prompt_library_repo,
+        completion_model_crud_service=completion_model_crud_service,
+        mcp_server_settings_service=mcp_server_settings_service,
     )
     tenant_integration_service = providers.Factory(
         TenantIntegrationService,

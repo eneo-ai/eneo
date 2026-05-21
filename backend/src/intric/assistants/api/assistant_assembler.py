@@ -4,6 +4,7 @@ from intric.assistants.api.assistant_models import (
     AssistantPublic,
     AssistantType,
     DefaultAssistant,
+    EffectiveConfigPublic,
     MCPServerPublicDict,
     ModelInfo,
 )
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
     )
     from intric.completion_models.domain.completion_model import CompletionModel
     from intric.main.models import ResourcePermission
+    from intric.personal_chat_policy.domain.policy_resolver import EffectiveConfig
 
 
 class AssistantAssembler:
@@ -81,10 +83,40 @@ class AssistantAssembler:
             limit=Limit(max_files=3, max_size=26214400),
         )
 
+    def _build_effective_config_public(
+        self, effective_config: "EffectiveConfig"
+    ) -> EffectiveConfigPublic:
+        return EffectiveConfigPublic(
+            models_enforced=effective_config.models_enforced,
+            available_models=[
+                CompletionModelAssembler.from_completion_model_to_sparse(
+                    completion_model=m
+                )
+                for m in effective_config.available_models
+            ],
+            locked_model=(
+                CompletionModelAssembler.from_completion_model_to_sparse(
+                    completion_model=effective_config.locked_model
+                )
+                if effective_config.locked_model is not None
+                else None
+            ),
+            mcp_enforced=effective_config.mcp_enforced,
+            available_mcp_servers=[
+                cast(
+                    MCPServerPublicDict,
+                    MCPServerAssembler.to_dict_with_tools(server),
+                )
+                for server in effective_config.available_mcp_servers
+            ],
+            prompt_locked=effective_config.prompt_enforced,
+        )
+
     def from_assistant_to_model(
         self,
         assistant: Assistant,
         permissions: list["ResourcePermission"] | None = None,
+        effective_config: "EffectiveConfig | None" = None,
     ) -> AssistantPublic:
         permissions = permissions or []
 
@@ -143,6 +175,12 @@ class AssistantAssembler:
 
         assert assistant.user is not None
 
+        effective_config_public = (
+            self._build_effective_config_public(effective_config)
+            if effective_config is not None
+            else None
+        )
+
         return AssistantPublic(
             created_at=assistant.created_at,
             updated_at=assistant.updated_at,
@@ -173,15 +211,19 @@ class AssistantAssembler:
             metadata_json=assistant.metadata_json,
             model_info=model_info,
             icon_id=assistant.icon_id,
+            effective_config=effective_config_public,
         )
 
     def from_assistant_to_default_assistant_model(
         self,
         assistant: Assistant,
         permissions: list["ResourcePermission"],
+        effective_config: "EffectiveConfig | None" = None,
     ):
         assistant_public = self.from_assistant_to_model(
-            assistant=assistant, permissions=permissions
+            assistant=assistant,
+            permissions=permissions,
+            effective_config=effective_config,
         )
 
         # We need to check if the assistant is a default assistant
