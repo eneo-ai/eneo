@@ -8,9 +8,6 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_architecture_commit import (
-    finalize_architecture_commit,
-)
 from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
@@ -25,7 +22,6 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
 )
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
-    BuilderPlan,
     ConversationMessage,
     FlowDraftSpecCore,
     InputSource,
@@ -33,27 +29,23 @@ from intric.flows.ai_builder.ai_builder_models import (
     MCPPolicy,
     OutputMode,
     OutputType,
-    PlannerPlanEnvelope,
-    PlanStatus,
     StepSpec,
-)
-from intric.flows.ai_builder.ai_builder_plan_edit_context import (
-    AIBuilderPlanEditContext,
 )
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
     ProposalContext,
     SubmissionToolHandlerConfig,
-    ToolProcessingResult,
-    ToolRetryConfig,
     _active_submission_tool_schemas,
-    terminal_output_type_for_conversation,
 )
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     ForcedToolRetryOutcome,
 )
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
+)
+from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ToolProcessingResult,
+    ToolRetryConfig,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AssistantSnapshotResourceUnavailableError,
@@ -68,11 +60,6 @@ from intric.flows.ai_builder.ai_builder_tools import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
-from intric.flows.ai_builder.planning_state import (
-    ArchitectureCommitDraft,
-    PlanningState,
-    StepTriple,
-)
 from intric.flows.domain.flow import FlowStep
 
 
@@ -293,173 +280,8 @@ def _make_flow_spec(
     )
 
 
-def _structured_fan_in_spec() -> FlowDraftSpecCore:
-    return FlowDraftSpecCore(
-        flow_name="Structured report",
-        steps=[
-            StepSpec(
-                plan_step_ref="step_a",
-                name="Extract A",
-                assistant_spec=AssistantSpec(instructions="Extract A."),
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.TEXT,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.JSON,
-                output_contract={
-                    "type": "object",
-                    "properties": {"summary": {"type": "string"}},
-                },
-            ),
-            StepSpec(
-                plan_step_ref="step_b",
-                name="Extract B",
-                assistant_spec=AssistantSpec(instructions="Extract B."),
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.JSON,
-                output_contract={
-                    "type": "object",
-                    "properties": {"detail": {"type": "string"}},
-                },
-            ),
-            StepSpec(
-                plan_step_ref="step_c",
-                name="Write report",
-                assistant_spec=AssistantSpec(instructions="Write report."),
-                input_source=InputSource.ALL_PREVIOUS_STEPS,
-                input_type=InputType.TEXT,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.TEXT,
-            ),
-        ],
-    )
-
-
-def _json_all_previous_architecture_spec() -> FlowDraftSpecCore:
-    spec = _structured_fan_in_spec()
-    return spec.model_copy(
-        update={
-            "steps": [
-                *spec.steps[:2],
-                spec.steps[2].model_copy(update={"input_type": InputType.JSON}),
-            ]
-        }
-    )
-
-
-def _make_plan(spec: FlowDraftSpecCore) -> BuilderPlan:
-    return BuilderPlan(
-        id=uuid4(),
-        session_id=uuid4(),
-        tenant_id=uuid4(),
-        status=PlanStatus.PROPOSED,
-        spec=spec,
-        spec_hash=spec.spec_hash(),
-        envelope=PlannerPlanEnvelope(spec=spec),
-    )
-
-
 async def _single_plan_event(**_kwargs):
     yield {"event": "plan", "data": "{}"}
-
-
-def test_plan_edit_output_intent_preserves_prior_document_terminal_type() -> None:
-    spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
-    spec = spec.model_copy(
-        update={
-            "steps": [spec.steps[0].model_copy(update={"output_type": OutputType.PDF})]
-        }
-    )
-    plan = _make_plan(spec)
-    context = AIBuilderPlanEditContext(
-        scope="step",
-        plan_id=plan.id,
-        target_plan_step_ref="step_a",
-    )
-
-    output_type = terminal_output_type_for_conversation(
-        [
-            ConversationMessage(
-                role="user",
-                content="Gör språket mer formellt i den här delen.",
-            )
-        ],
-        plan_edit_context=context,
-        prior_plan=plan,
-    )
-
-    assert output_type == OutputType.PDF
-
-
-def test_create_contextual_quality_feedback_uses_semantic_remediation() -> None:
-    processor = _make_processor()
-
-    feedback = processor._format_create_contextual_quality_feedback(
-        conversation=[],
-        spec=_structured_fan_in_spec(),
-        aggregation_intent="linear",
-        resource_catalog=None,
-    )
-
-    assert feedback is not None
-    assert "Quality issues" in feedback
-    assert "strukturerade" in feedback.casefold()
-    for token in (
-        "input_source",
-        "uses_previous_fields",
-        "input_bindings",
-        "{{ step_",
-    ):
-        assert token not in feedback
-
-
-def test_edit_contextual_quality_feedback_keeps_mechanics_remediation() -> None:
-    processor = _make_processor()
-
-    feedback = processor.format_contextual_quality_feedback(
-        conversation=[],
-        spec=_structured_fan_in_spec(),
-    )
-
-    assert feedback is not None
-    assert "input_source" in feedback
-    assert "uses_previous_fields" in feedback
-
-
-def test_create_contextual_quality_feedback_still_enforces_architecture() -> None:
-    processor = _make_processor()
-
-    with pytest.raises(AIBuilderArchitectureError):
-        processor._format_create_contextual_quality_feedback(
-            conversation=[],
-            spec=_json_all_previous_architecture_spec(),
-            aggregation_intent="linear",
-            resource_catalog=None,
-        )
-
-
-def test_plan_edit_output_intent_uses_latest_explicit_document_change() -> None:
-    spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
-    plan = _make_plan(spec)
-    context = AIBuilderPlanEditContext(
-        scope="step",
-        plan_id=plan.id,
-        target_plan_step_ref="step_a",
-    )
-
-    output_type = terminal_output_type_for_conversation(
-        [
-            ConversationMessage(
-                role="user",
-                content="Ändra slutresultatet så att jag får en PDF-fil.",
-            )
-        ],
-        plan_edit_context=context,
-        prior_plan=plan,
-    )
-
-    assert output_type == OutputType.PDF
 
 
 def test_create_submission_schema_keeps_mcp_refs_free_form() -> None:
@@ -1143,94 +965,6 @@ async def test_propose_plan_reasks_when_user_requests_mcp_after_declining() -> N
 
 
 @pytest.mark.asyncio
-async def test_outline_processing_enforces_without_mcp_selection() -> None:
-    processor = _make_processor()
-    catalog = build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=[
-            {
-                "id": "time-server",
-                "name": "Time MCP",
-                "tools": [{"id": "current-time", "name": "get_current_time"}],
-            }
-        ],
-    )
-    conversation = [
-        ConversationMessage(
-            role="user",
-            content="Använd Time MCP för att hämta aktuell tid.",
-        ),
-        ConversationMessage(
-            role="user",
-            content="Fortsätt utan MCP",
-            metadata={
-                "question_answer": {
-                    "question_id": MCP_RESOURCE_SELECTION_QUESTION_ID,
-                    "selected_values": ["without_mcp"],
-                }
-            },
-        ),
-    ]
-
-    result = await processor._process_outline_arguments(
-        turn=_make_turn(),
-        conversation=conversation,
-        new_messages_start=0,
-        arguments={
-            "flow_name": "Time flow",
-            "plan_rationale": "Use MCP despite the user's decline.",
-            "steps": [
-                {
-                    "name": "Hämta tid",
-                    "task": "Hämta aktuell tid via Time MCP.",
-                    "mcp_tool_refs": ["mcp_tool.time-mcp-get-current-time"],
-                }
-            ],
-        },
-        assistant_content="",
-        tool_call_id="call-time",
-        available_model_refs=None,
-        available_kb_refs=None,
-        resource_catalog=catalog,
-    )
-
-    assert result.failure_kind == "quality"
-    assert result.feedback is not None
-    assert "continue without MCP" in result.feedback
-    processor.repo.commit_turn.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_outline_validation_failure_preserves_duplicate_step_name_code() -> None:
-    processor = _make_processor()
-
-    result = await processor._process_outline_arguments(
-        turn=_make_turn(),
-        conversation=[ConversationMessage(role="user", content="Bygg ett textflöde.")],
-        new_messages_start=0,
-        arguments={
-            "flow_name": "Duplicate names",
-            "plan_rationale": "Two semantic steps accidentally share a name.",
-            "steps": [
-                {"name": "Förbered PDF-innehåll", "task": "Sammanfatta texten."},
-                {"name": "Förbered PDF-innehåll", "task": "Skriv slutrapport."},
-            ],
-        },
-        assistant_content="",
-        tool_call_id="call-duplicate-name",
-        available_model_refs=None,
-        available_kb_refs=None,
-    )
-
-    assert result.failure_kind == "validation"
-    assert "duplicate_step_name" in result.failure_codes
-    assert result.feedback is not None
-    assert "Duplicate step name" in result.feedback
-    processor.repo.commit_turn.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_outline_quality_failure_records_failed_first_attempt() -> None:
     processor = _make_processor()
     tracker = ProposalTurnTelemetry(
@@ -1569,82 +1303,6 @@ async def test_forced_tool_architecture_error_uses_sanitized_event() -> None:
 
 
 @pytest.mark.asyncio
-async def test_outline_audio_to_docx_returns_plan_without_self_correction() -> None:
-    processor = _make_processor()
-    state = PlanningState.empty()
-    state.architecture_commit = finalize_architecture_commit(
-        ArchitectureCommitDraft(
-            tuples_chain=[
-                StepTriple(
-                    input_type="audio",
-                    output_type="docx",
-                    output_mode="pass_through",
-                )
-            ],
-            chosen_patterns=["audio_to_artifact_report"],
-            required_capabilities=["input_audio", "output_mode_pass_through"],
-        )
-    )
-    tool_call = _make_tool_call(
-        OUTLINE_FLOW_TOOL_NAME,
-        {
-            "flow_name": "Ljudrapport",
-            "plan_rationale": "Skapa en DOCX-rapport från uppladdat ljud.",
-            "steps": [
-                {
-                    "name": "Sammanfatta inspelningen",
-                    "task": "Sammanfatta den transkriberade inspelningen.",
-                }
-            ],
-        },
-        tool_call_id="call-audio-docx",
-    )
-    ctx = _make_context(
-        conversation=[
-            ConversationMessage(
-                role="user",
-                content="Bygg ett flöde som transkriberar ljud och skapar DOCX.",
-            )
-        ],
-        request_id="req-audio-docx",
-        planning_state=state,
-        text_content="",
-    )
-
-    async def _store_plan(**kwargs):
-        spec = kwargs["spec"]
-        return _stored_plan_result(
-            plan=_make_plan(spec),
-            envelope=PlannerPlanEnvelope(spec=spec),
-        )
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
-            return_value=SimpleNamespace(confirmed=True),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
-            new=AsyncMock(side_effect=_store_plan),
-        ),
-        patch.object(processor, "_request_tool_self_correction") as repair,
-    ):
-        events = [
-            event
-            async for event in processor._handle_outline_flow_tool_call(
-                ctx=ctx,
-                tool_call=tool_call,
-            )
-        ]
-
-    repair.assert_not_called()
-    assert [event["event"] for event in events] == ["plan"]
-    payload = json.loads(events[0]["data"])
-    assert payload["envelope"]["spec"]["steps"][0]["input_type"] == "audio"
-    assert payload["envelope"]["spec"]["steps"][-1]["output_type"] == "docx"
-
-
-@pytest.mark.asyncio
 async def test_edit_flow_parse_failure_records_proposal_repair_reason() -> None:
     processor = _make_processor()
     tracker = ProposalTurnTelemetry(
@@ -1717,10 +1375,14 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
             "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
             return_value=SimpleNamespace(confirmed=True),
         ),
-        patch.object(
-            processor,
-            "_process_outline_arguments",
-            new=process_outline,
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.outline_flow_retry_config",
+            return_value=ToolRetryConfig(
+                target_tool_name=OUTLINE_FLOW_TOOL_NAME,
+                forced_tool_prompt="Now call outline_flow.",
+                process_tool_arguments=process_outline,
+                process_tool_kwargs={},
+            ),
         ),
     ):
         events = [
@@ -1814,10 +1476,14 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
             "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
             return_value=SimpleNamespace(confirmed=True),
         ),
-        patch.object(
-            processor,
-            "_process_outline_arguments",
-            new=process_outline,
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.outline_flow_retry_config",
+            return_value=ToolRetryConfig(
+                target_tool_name=OUTLINE_FLOW_TOOL_NAME,
+                forced_tool_prompt="Now call outline_flow.",
+                process_tool_arguments=process_outline,
+                process_tool_kwargs={},
+            ),
         ),
     ):
         events = [
@@ -1899,10 +1565,14 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
             "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
             return_value=SimpleNamespace(confirmed=True),
         ),
-        patch.object(
-            processor,
-            "_process_outline_arguments",
-            new=process_outline,
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.outline_flow_retry_config",
+            return_value=ToolRetryConfig(
+                target_tool_name=OUTLINE_FLOW_TOOL_NAME,
+                forced_tool_prompt="Now call outline_flow.",
+                process_tool_arguments=process_outline,
+                process_tool_kwargs={},
+            ),
         ),
     ):
         events = [
@@ -2151,9 +1821,8 @@ async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> Non
             "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
             return_value=SpecValidationResult(),
         ),
-        patch.object(
-            processor,
-            "format_contextual_quality_feedback",
+        patch(
+            "intric.flows.ai_builder.ai_builder_edit_proposal.format_contextual_quality_feedback",
             return_value="Quality issues:\nStop after compile for this test.",
         ),
         patch(
@@ -2238,9 +1907,8 @@ async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
             "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
             return_value=SpecValidationResult(),
         ),
-        patch.object(
-            processor,
-            "format_contextual_quality_feedback",
+        patch(
+            "intric.flows.ai_builder.ai_builder_edit_proposal.format_contextual_quality_feedback",
             return_value=(
                 "Quality issues:\n"
                 "Konversationen efterfrågar genererad DOCX utan mall, men planen använder fortfarande "
@@ -2529,9 +2197,8 @@ async def test_edit_proposal_passes_metadata_to_edit_validator() -> None:
             "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
             return_value=SpecValidationResult(),
         ) as validate_edit,
-        patch.object(
-            processor,
-            "format_contextual_quality_feedback",
+        patch(
+            "intric.flows.ai_builder.ai_builder_edit_proposal.format_contextual_quality_feedback",
             return_value=None,
         ),
         patch(
@@ -2630,10 +2297,12 @@ async def test_edit_proposal_canonicalizes_duplicate_modify_ops_before_validatio
             "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
             return_value=edit_result,
         ) as compile_edit,
-        patch.object(processor, "format_quality_feedback", return_value=None),
-        patch.object(
-            processor,
-            "format_contextual_quality_feedback",
+        patch(
+            "intric.flows.ai_builder.ai_builder_edit_proposal.format_quality_feedback",
+            return_value=None,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_edit_proposal.format_contextual_quality_feedback",
             return_value=None,
         ),
         patch(
@@ -2801,9 +2470,8 @@ async def test_edit_proposal_normalizes_mechanical_refs_before_validation() -> N
             "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
             return_value=SpecValidationResult(),
         ) as validate_edit,
-        patch.object(
-            processor,
-            "format_contextual_quality_feedback",
+        patch(
+            "intric.flows.ai_builder.ai_builder_edit_proposal.format_contextual_quality_feedback",
             return_value=None,
         ),
         patch(
@@ -3104,7 +2772,9 @@ async def test_submission_retry_config_returns_typed_create_retry_config() -> No
 
     assert isinstance(config, ToolRetryConfig)
     assert config.target_tool_name == OUTLINE_FLOW_TOOL_NAME
-    assert config.process_tool_arguments == processor._process_outline_arguments
+    process_signature = signature(config.process_tool_arguments)
+    assert "processor" not in process_signature.parameters
+    assert "turn" in process_signature.parameters
     assert config.process_tool_kwargs == {}
     assert "Now call outline_flow" in config.forced_tool_prompt
 
@@ -3174,7 +2844,9 @@ async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mod
     assert result == ({"event": "plan", "data": "{}"},)
     kwargs = retry_forced_tool.await_args.kwargs
     assert kwargs["target_tool_name"] == OUTLINE_FLOW_TOOL_NAME
-    assert kwargs["process_tool_arguments"] == processor._process_outline_arguments
+    process_signature = signature(kwargs["process_tool_arguments"])
+    assert "processor" not in process_signature.parameters
+    assert "turn" in process_signature.parameters
     assert isinstance(kwargs["process_tool_kwargs"]["turn"], SessionSendTurn)
     assert "Now call outline_flow" in kwargs["forced_tool_prompt"]
 

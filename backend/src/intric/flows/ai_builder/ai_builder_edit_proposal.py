@@ -41,6 +41,15 @@ from intric.flows.ai_builder.ai_builder_plan_edit_context import (
 from intric.flows.ai_builder.ai_builder_plan_store import (
     store_plan_and_update_conversation,
 )
+from intric.flows.ai_builder.ai_builder_proposal_policy import (
+    format_contextual_quality_feedback,
+    format_quality_feedback,
+    terminal_output_type_for_conversation,
+)
+from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ToolProcessingResult,
+    ToolRetryConfig,
+)
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     AssistantSnapshotResourceUnavailableError,
@@ -55,8 +64,6 @@ from intric.main.logging import get_logger
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_proposal_processor import (
         AIBuilderProposalProcessor,
-        ToolProcessingResult,
-        ToolRetryConfig,
     )
     from intric.flows.domain.flow import Flow
 
@@ -86,11 +93,6 @@ async def process_edit_arguments(
     plan_edit_context: AIBuilderPlanEditContext | None = None,
     prior_plan_for_revision: BuilderPlan | None = None,
 ) -> ToolProcessingResult:
-    from intric.flows.ai_builder.ai_builder_proposal_processor import (
-        ToolProcessingResult,
-        terminal_output_type_for_conversation,
-    )
-
     metadata_built = False
 
     def _accepted_proposal_metadata() -> dict[str, Any] | None:
@@ -316,8 +318,11 @@ async def process_edit_arguments(
                 }
             )
 
-    quality_feedback = processor.format_quality_feedback(validation)
-    contextual_quality_feedback = processor.format_contextual_quality_feedback(
+    quality_feedback = format_quality_feedback(
+        validation,
+        quality_retry_warning_codes=processor.quality_retry_warning_codes,
+    )
+    contextual_quality_feedback = format_contextual_quality_feedback(
         conversation=conversation,
         spec=compiled_spec,
         flow=flow,
@@ -490,8 +495,6 @@ def edit_flow_retry_config(
     plan_edit_context: AIBuilderPlanEditContext | None,
     prior_plan_for_revision: BuilderPlan | None,
 ) -> ToolRetryConfig:
-    from intric.flows.ai_builder.ai_builder_proposal_processor import ToolRetryConfig
-
     process_tool_arguments = _bind_process_edit_arguments(processor)
     process_tool_kwargs: dict[str, Any] = {
         "assistant_snapshots": assistant_snapshots,
