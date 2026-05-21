@@ -100,6 +100,12 @@ class ActionType(str, Enum):
     MCP_SERVER_TOOL_ENABLED = "mcp_server_tool_enabled"
     MCP_SERVER_TOOL_DISABLED = "mcp_server_tool_disabled"
 
+    # Help Assistant Actions
+    HELP_ASSISTANT_ROLE_ASSIGNED = "help_assistant_role_assigned"
+    HELP_ASSISTANT_ROLE_UNASSIGNED = "help_assistant_role_unassigned"
+    HELP_ASSISTANT_ROLE_TOGGLED_ENABLED = "help_assistant_role_toggled_enabled"
+    HELP_ASSISTANT_ROLE_TOGGLED_VISIBLE = "help_assistant_role_toggled_visible"
+
     # System Actions
     RETENTION_POLICY_APPLIED = "retention_policy_applied"
     ENCRYPTION_KEY_ROTATED = "encryption_key_rotated"

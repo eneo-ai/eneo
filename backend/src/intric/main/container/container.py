@@ -100,6 +100,9 @@ from intric.group_chat.presentation.assemblers.group_chat_assembler import (
 )
 from intric.groups_legacy.group_repo import GroupRepository
 from intric.groups_legacy.group_service import GroupService
+from intric.help_assistants.application.org_space_assistant_role_service import (
+    OrgSpaceAssistantRoleService,
+)
 from intric.help_assistants.domain.factory import HelperAssistantsFactory
 from intric.help_assistants.infrastructure.help_assistant_assignment_history_repo import (
     HelpAssistantAssignmentHistoryRepo,
@@ -1086,6 +1089,16 @@ class Container(containers.DeclarativeContainer):
         references_service=references_service,
         icon_repo=icon_repo,
         api_key_scope_revoker=api_key_scope_revoker,
+    )
+    org_space_assistant_role_service = providers.Factory(
+        OrgSpaceAssistantRoleService,
+        user=user,
+        role_repo=org_space_assistant_role_repo,
+        history_repo=help_assistant_assignment_history_repo,
+        assistant_service=assistant_service,
+        space_service=space_service,
+        audit_service=audit_service,
+        factory=helper_assistants_factory,
     )
     group_chat_service = providers.Factory(
         GroupChatService,

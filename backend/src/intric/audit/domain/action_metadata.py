@@ -363,6 +363,32 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "MCP-verktyg inaktiverat",
         "description_sv": "Loggar när ett MCP-verktyg inaktiveras",
     },
+    # Help Assistant Actions (4)
+    ActionType.HELP_ASSISTANT_ROLE_ASSIGNED.value: {
+        "name_sv": "Hjälpassistent tilldelad",
+        "description_sv": (
+            "Loggar när en assistent tilldelas en hjälpassistentroll i "
+            "organisationen"
+        ),
+    },
+    ActionType.HELP_ASSISTANT_ROLE_UNASSIGNED.value: {
+        "name_sv": "Hjälpassistent borttagen",
+        "description_sv": (
+            "Loggar när en hjälpassistentroll tas bort från organisationen"
+        ),
+    },
+    ActionType.HELP_ASSISTANT_ROLE_TOGGLED_ENABLED.value: {
+        "name_sv": "Hjälpassistent aktiveringsstatus ändrad",
+        "description_sv": (
+            "Loggar när en hjälpassistentroll aktiveras eller inaktiveras"
+        ),
+    },
+    ActionType.HELP_ASSISTANT_ROLE_TOGGLED_VISIBLE.value: {
+        "name_sv": "Hjälpassistent synlighet ändrad",
+        "description_sv": (
+            "Loggar när synligheten för en hjälpassistentroll ändras"
+        ),
+    },
     # System Actions (3)
     ActionType.RETENTION_POLICY_APPLIED.value: {
         "name_sv": "Retentionspolicy tillämpades",
