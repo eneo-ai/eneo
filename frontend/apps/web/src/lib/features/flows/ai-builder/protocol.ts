@@ -87,30 +87,21 @@ export type LintWarning = GeneratedAIBuilderLintWarning;
 
 export type PlannerPlanEnvelope = GeneratedAIBuilderPlannerPlanEnvelope;
 
-export type StepChangeKind = "added" | "modified" | "removed" | "unchanged";
+export type BuilderPlanEditResult = components["schemas"]["BuilderPlanEditResult"];
 
-export interface StepChange {
-  kind: StepChangeKind;
-  step_name: string;
-  step_ref: string | null;
-  details: string | null;
-}
+export type CompiledEditResult = components["schemas"]["CompiledEditResult"];
 
-export interface FlowEditDiff {
-  step_changes: StepChange[];
-  net_steps_added: number;
-  net_steps_removed: number;
-  flow_property_changes: Record<string, [unknown, unknown]>;
-}
+export type StepChange = components["schemas"]["StepChange"];
 
-export type EditConfidence = "ready" | "needs_review" | "low_confidence";
+export type StepChangeKind = StepChange["kind"];
 
-export interface EditAdvisory {
-  code: string;
-  message: string;
-  severity: "info" | "warning" | "error";
-  field: string | null;
-}
+export type FlowEditDiff = components["schemas"]["FlowEditDiff"];
+
+export type EditConfidence = NonNullable<CompiledEditResult["confidence"]>;
+
+export type EditAdvisory = components["schemas"]["EditAdvisory"];
+
+export type AIBuilderPlanEventData = components["schemas"]["AIBuilderPlanEventData"];
 
 type GeneratedPlanHttpFields = Pick<
   GeneratedAIBuilderPlanResponse,

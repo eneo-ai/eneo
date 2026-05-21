@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T014
+active_task: T016
 
 scoring_target:
   dimensions:
@@ -41,31 +41,66 @@ scoring_target:
     - Human Reviewability
     - Runtime Reliability
     - Data Model / Schema Quality
+    - API Contract Quality
     - Test Coverage Quality
+    - AI Slop / Comment / Naming Quality
+    - Normal-User Output Quality
   target_minimum_score: 9
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "T013 post-implementation PM audit plus Claude GREEN_LIGHT yes and Antigravity GREEN_LIGHT yes implementation gates."
-  Maintainability: 8
+  source: "After T015 implementation/post-review: canonical plan edit-result ownership and public error-code discipline improved, but the broader score floor is still blocked by SSE union, conversation metadata JSONB, DB lock invariant, readability/test topology, and normal-user output quality."
+  Maintainability: 7
   Code_Quality: 8
   Clean_Architecture: 8
-  Separation_of_Concerns: 8
-  Single_Source_of_Truth: 8
-  Human_Readability: 8
+  Separation_of_Concerns: 7
+  Single_Source_of_Truth: 7
+  Human_Readability: 7
   Human_Reviewability: 8
   Runtime_Reliability: 8
-  Data_Model_Schema_Quality: 6
+  Data_Model_Schema_Quality: 7
+  API_Contract_Quality: 6
   Test_Coverage_Quality: 8
+  AI_Slop_Comment_Naming_Quality: 6
+  Normal_User_Output_Quality: 6
   Overall: 6
   blockers:
-    - "Conversation metadata and edit-result JSON remain raw hidden schemas."
-    - "SSE/public API contracts remain generated-client weak."
-    - "Revise-plan active-send conflict still surfaces as generic public bad_request until the API-contract tranche adds typed lifecycle conflict codes."
+    - "Conversation metadata/tool-call JSONB remains a raw hidden schema."
+    - "SSE/public API contracts still lack a full generated-client friendly discriminated event union; T015 only typed the plan event edit-result payload and hoisted AI Builder SSE schemas."
+    - "Public/lifecycle/CAS error-code discipline improved, but calls that omit code= entirely can still silently use generic codes; T016/T017 must decide whether to broaden the AST guard or migrate remaining omissions."
     - "builder_sessions can still persist a corrupt lock_token with NULL lock_expires_at; runtime fails safe, but schema-level lock invariants need a migration or explicit corruption policy."
     - "Live eval still shows runtime-input/form-field prompts can produce no form fields."
     - "ai_builder_proposal_processor.py is materially smaller after T011 but still oversized at 1830 LOC; structured-question recovery, confirm requirements, and retry orchestration remain in one processor."
-    - "Full Flow unit sweeps still hit unrelated baseline/environment failures."
+    - "Normal-user output quality, test topology, and readability/module topology remain below 9 until live eval and consolidation tranches force product and code fixes."
+
+score_floor_completion_gates:
+  source: "2026-05-21 user review: the board must prevent 'plan executed' from being confused with '9/10 achieved'."
+  completion_rule:
+    - "The broader goal remains incomplete until every scorecard dimension is at least 9, or until a real blocker documents exactly why a strict 9 is not currently honest."
+    - "Completing the listed tranches is insufficient if the weakest score remains below 9."
+    - "Normal-user output quality, readability/module topology, and test quality are blocker dimensions, not optional polish."
+  tranche_gates:
+    T015:
+      - "Cannot close until the dirty diff is reconciled against declared allowed files and out-of-scope dirty files are preserved outside the commit."
+      - "Cannot close until post-implementation Claude and Antigravity review the implemented diff, not only the plan."
+    T016:
+      - "Must prove generated clients expose useful typed AI Builder event payloads, not merely that OpenAPI compiles."
+      - "Must remove the need for frontend/API consumers to maintain a parallel event union by hand."
+    T017:
+      - "Must give conversation metadata/tool-call JSONB one typed owner, parser, writer, corruption behavior, and migration/backfill stance."
+      - "Must avoid permanent transitional hydrators without a deletion trigger."
+    T018:
+      - "Must enforce builder session lock invariants at the database/schema boundary, not only in Python runtime checks."
+      - "Must make corrupt lock_token/lock_expires_at combinations fail loudly or recover explicitly."
+    T019:
+      - "Must be a real deletion/consolidation tranche: inventory shallow files, stale bridges, compatibility paths, confusing names, and module entry points."
+      - "Must include concrete acceptance criteria for fewer or clearer review entry points; splitting large files into more shallow files does not count."
+    T020:
+      - "Must reduce tests that assert internals or private-helper choreography and add behavior/contract coverage for real user journeys."
+      - "Must document remaining baseline failures instead of inflating test-quality score."
+    T021:
+      - "Must run earlier and/or repeat after major tranches so normal-user output quality influences architecture decisions."
+      - "Must require product fixes when vague normal-user prompts fail to produce correct flows or useful clarification questions."
 
 dirty_worktree_baseline:
   observed_at: "2026-05-21T08:28:38+02:00"
@@ -1478,7 +1513,7 @@ tasks:
   - id: T014
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: xhigh
     objective: "Re-rank the next Flow AI Builder production-readiness tranche after T013 and peer-gate an implementation-ready plan."
     inputs:
@@ -1504,21 +1539,318 @@ tasks:
       - "Codex self-review pass or blocker."
       - "Claude GREEN_LIGHT yes artifact."
       - "Antigravity pass artifact or exact tooling/quota failure."
+    receipt:
+      result: done
+      verdict: "PASS_WITH_MAJOR_REORDERING"
+      summary: "The previous rolling plan could not honestly reach a strict subsystem-wide 9/10 as written. T014 replaced it with a stricter 13-dimension scorecard and a reordered implementation sequence that starts with canonical plan edit-result ownership before the full SSE event-union tranche."
+      artifacts:
+        codex_audit_v1: ".codex/artifacts/flow-ai-builder-9-10-architecture-goal-audit-v1.md"
+        synthesis_v2: ".codex/artifacts/flow-ai-builder-9-10-architecture-goal-synthesis-v2.md"
+        synthesis_v3: ".codex/artifacts/flow-ai-builder-9-10-architecture-goal-synthesis-v3.md"
+        synthesis_v4: ".codex/artifacts/flow-ai-builder-9-10-architecture-goal-synthesis-v4.md"
+        synthesis_v5: ".codex/artifacts/flow-ai-builder-9-10-architecture-goal-synthesis-v5.md"
+      reviewer_gates:
+        claude_round_1:
+          artifact: ".codex/artifacts/claude-peer-loop-flow-ai-builder-9-10-architecture-goal-plan-audit-20260521T154954Z.md"
+          verdict: "GREEN_LIGHT no; VERDICT changes_required; MIN_SCORE 6"
+          accepted_findings:
+            - "Do not split edit_result_json across separate API and data migrations."
+            - "Pin the event contract to a real OpenAPI/codegen mechanism."
+            - "Draft lock-row constraint shape before implementation."
+            - "Make live eval falsifiable and enumerate public conflict codes."
+        antigravity_round_1:
+          artifact: ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-9-10-architecture-plan-critique-20260521T160526Z.md"
+          verdict: "No substantive pass; wrapper used canonical command with --spend-mode auto but agy --print timed out after 1200s with exit 124. This was recorded as missing Antigravity review coverage, not a pass."
+        claude_round_2:
+          artifact: ".codex/artifacts/claude-peer-loop-flow-ai-builder-9-10-revised-architecture-goal-plan-gate-20260521T161644Z.md"
+          verdict: "GREEN_LIGHT yes; VERDICT green; MIN_SCORE 8"
+          accepted_tightenings:
+            - "Add static error-code owner discipline."
+            - "Pin frontend event-contract deletion scope."
+            - "Pre-decide OpenAPI exposure strategy and JSON-scalar question values."
+        antigravity_round_2:
+          artifact: ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-9-10-final-revised-plan-gate-20260521T161953Z.md"
+          verdict: "GREEN_LIGHT no; VERDICT changes_required; MIN_SCORE 5"
+          accepted_findings:
+            - "T015 cannot type events while leaving plan edit result duplicated across SSE, REST/JSONB, and frontend."
+            - "Public/lifecycle error strings silently coerce to bad_request when missing from AIBuilderErrorCode."
+        claude_round_3:
+          artifact: ".codex/artifacts/claude-peer-loop-flow-ai-builder-9-10-v4-reordered-plan-gate-20260521T162901Z.md"
+          verdict: "GREEN_LIGHT yes; VERDICT green; MIN_SCORE 8"
+          accepted_tightenings:
+            - "FlowAIBuilderDriver.#normalizePlan() must become the only frontend wire-shape adapter and revisePlan() must use it."
+            - "Existing bare error-code call sites must migrate, not only future drift."
+            - "Flag-only manual override edit-result shape needs explicit round-trip coverage."
+        antigravity_round_3_resume:
+          artifact: ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-9-10-v5-final-plan-gate-20260521T163242Z.md"
+          verdict: "Substantive output included GREEN_LIGHT yes / MIN_SCORE 8, but wrapper parsing was polluted by older embedded MIN_SCORE 5 from the resumed conversation."
+        antigravity_round_3_clean:
+          artifact: ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-9-10-v5-clean-final-plan-gate-20260521T163511Z.md"
+          verdict: "GREEN_LIGHT yes; VERDICT green; MIN_SCORE 9"
+      codex_self_review:
+        verdict: "pass"
+        notes:
+          - "The cleanest direction is not a broad processor split and not event-union-first. It is one canonical BuilderPlanEditResult owner across JSONB, REST, plan SSE payload, generated TS, and frontend normalization."
+          - "The plan reduces future debt instead of moving it because it deletes parallel edit-result shapes before building the full event union."
+          - "The first implementation scope is sizable but coherent: one public/persisted plan-edit contract family plus public error-code discipline."
+      selected_next_tranche: T015
+      scorecard_after_plan_gate:
+        Maintainability: 7
+        Code_Quality: 7
+        Clean_Architecture: 8
+        Separation_of_Concerns: 7
+        Single_Source_of_Truth: 6
+        Human_Readability: 7
+        Human_Reviewability: 7
+        Runtime_Reliability: 8
+        Data_Model_Schema_Quality: 6
+        API_Contract_Quality: 5
+        Test_Coverage_Quality: 7
+        AI_Slop_Comment_Naming_Quality: 6
+        Normal_User_Output_Quality: 6
+        Overall: 5
+      residual_risks:
+        - "The codebase remains a strict 5/10 floor until T015 and later tranches are implemented; the plan passing does not change code quality by itself."
+        - "Full discriminated AI Builder event union, conversation metadata JSONB, lock-row DB invariant, live eval runner, and proposal-processor decomposition remain queued."
+
+  - id: T015
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Implement the canonical plan edit-result and public error-code contract tranche approved by Codex, Claude, and Antigravity."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-9-10-architecture-goal-synthesis-v5.md"
+      - ".codex/artifacts/claude-peer-loop-flow-ai-builder-9-10-v4-reordered-plan-gate-20260521T162901Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-9-10-v5-clean-final-plan-gate-20260521T163511Z.md"
+      - ".codex/artifacts/flow-ai-builder-t014-jsonb-plan-v3.md"
+    constraints:
+      - "Do not start implementation until the user resumes after the planning pause."
+      - "Preserve unrelated dirty files and do not stage/commit/push unrelated changes."
+      - "Keep the tranche scoped to plan edit-result ownership, public/lifecycle/CAS error-code discipline, JSON-scalar question option value, and one frontend normalization adapter."
+      - "Do not implement full AI Builder event union, conversation metadata JSONB, lock-row migration, live eval runner, or broad proposal processor split in this tranche."
+      - "T015 cannot close until the actual dirty diff is reconciled against the declared allowed files; any scope expansion must be documented with why it was required for T015 acceptance."
+      - "T015 cannot close until post-implementation Claude and Antigravity review the implemented diff; a plan-only review is insufficient."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_models.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_domain_models.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_repo.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_store.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_api_models.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_router.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_event_models.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_events.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_error_contract.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_session_transitions.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_context.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_edit_context.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_service.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_materialization_bridge.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_new_step_models.py"
+      - "backend/src/intric/server/main.py"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/protocol.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderDriver.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/ai-builder/flowAIBuilderPlanDiff.ts"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_models.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_service.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py"
+      - "backend/tests/unittests/flows/ai_builder/test_plan_envelope_storage.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_materialization_bridge.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_materializer.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_discovery_flow.py"
+      - "backend/tests/unit/test_ai_builder_error_code_discipline.py"
+      - "backend/tests/unit/test_ai_builder_openapi_contract.py"
+      - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    scope_reconciliation:
+      owned_scope_expansions:
+        - path: "backend/src/intric/server/main.py"
+          reason: "Needed to hoist AI Builder SSE schemas into OpenAPI components so generated clients can reference plan event/edit-result payloads."
+        - path: "backend/src/intric/flows/ai_builder/ai_builder_new_step_models.py"
+          reason: "Needed to break the import cycle exposed by making BuilderPlanEditResult the canonical edit-result owner."
+        - path: "backend/src/intric/flows/ai_builder/ai_builder_context.py"
+          reason: "Existing public planner-model error codes had to migrate to AIBuilderErrorCode for the T015 bare-string discipline gate."
+        - path: "backend/src/intric/flows/ai_builder/ai_builder_plan_edit_context.py"
+          reason: "Existing stale/edit-context public error codes had to migrate to AIBuilderErrorCode for the T015 bare-string discipline gate."
+        - path: "backend/src/intric/flows/ai_builder/ai_builder_planner.py"
+          reason: "Existing planner-budget/session-message public error codes had to migrate to AIBuilderErrorCode for the T015 bare-string discipline gate."
+        - path: "backend/src/intric/flows/ai_builder/ai_builder_service.py"
+          reason: "Existing attachment/flow-space public error codes had to migrate to AIBuilderErrorCode for the T015 bare-string discipline gate."
+        - path: "backend/src/intric/flows/ai_builder/ai_builder_materialization_bridge.py"
+          reason: "Terminology cleanup from edit_result_json to edit_result after the domain model stopped carrying the raw JSONB field name."
+        - path: "frontend/apps/web/src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts"
+          reason: "Needed to prove revisePlan uses the single #normalizePlan adapter and derives UI fields from generated edit_result_json.compiled_edit."
+        - path: "backend/tests/unit/test_ai_builder_error_code_discipline.py"
+          reason: "New static guard for T015 error-code owner discipline."
+        - path: "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+          reason: "Antigravity full-sweep review exposed stale MagicMock edit-result tests; T015 requires real CompiledEditResult test fixtures so the canonical edit-result model is actually exercised."
+        - path: "backend/tests/unittests/flows/ai_builder/test_discovery_flow.py"
+          reason: "Antigravity full-sweep review exposed obsolete handle_tool_call session_id calls and a stale patch target; T015 preserves the typed SessionSendTurn boundary from the active send-turn tranche."
+        - path: "backend/tests/unittests/flows/ai_builder/test_ai_builder_materializer.py"
+          reason: "Antigravity full-sweep review exposed a stale website-knowledge expectation; updating it prevents the scorecard from counting dead behavior tests as quality coverage."
+      explicitly_out_of_scope_dirty_files:
+        - ".devcontainer/docker-compose.yml"
+        - ".devcontainer/devcontainer-lock.json"
+        - ".gitignore"
+        - "AGENTS.md"
+        - "PRODUCT.md"
+        - "frontend/packages/ui/src/icons/types.d.ts"
+        - "utvecklingssamtal.mp3"
+    acceptance:
+      - "BuilderPlanEditResult is the typed owner for edit_result_json persistence, PlanResponse.edit_result_json, AIBuilderPlanEventData.edit_result_json, generated TS, and frontend normalization."
+      - "BuilderPlan domain uses edit_result, not edit_result_json."
+      - "AIBuilderPlanEventData no longer exposes flattened edit_diff/edit_confidence/edit_warnings/edit_advisories/edit_risk_flags fields."
+      - "FlowAIBuilderDriver.#normalizePlan() is the only frontend adapter from wire edit-result shape to UI convenience fields, and revisePlan() uses it."
+      - "Existing bare public/lifecycle/CAS error-code call sites migrate to AIBuilderErrorCode and a static guard prevents new bare-string drift."
+      - "StructuredQuestionOptionPayload.value is JSON scalar, not Any."
+      - "OpenAPI proves PlanResponse and AIBuilderPlanEventData reference the same BuilderPlanEditResult schema."
+      - "Generated TypeScript can replace frontend edit-result interfaces; stop and replan if codegen cannot preserve useful named types."
+      - "Scope reconciliation explains every T015-owned dirty file outside the original plan gate and excludes unrelated dirty files from commit/stage."
+    verify:
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_edit_models.py tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py::TestAIBuilderPlanLifecycle tests/unittests/flows/ai_builder/test_ai_builder_service.py::TestRevisePlan tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_plan_envelope_storage.py -q"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unit/test_ai_builder_openapi_contract.py -q"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder -q"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::test_revise_plan_api_creates_replacement_without_active_send tests/integration/flows/test_ai_builder_session_api_regressions.py::test_revise_plan_api_recovers_expired_send_lock_and_fences_old_lease -q"
+      - "cd backend && uv run ruff check <T015 touched backend files>"
+      - "cd backend && uv run ruff format --check <T015 touched backend files>"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright <T015 touched backend source files>"
+      - "cd frontend && bun run --filter @intric/web check"
+      - "cd frontend && bun run --filter @intric/intric-js check"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+    stop_if:
+      - "Codegen cannot expose useful generated BuilderPlanEditResult/EditDiff/EditAdvisory types for frontend deletion."
+      - "Implementation requires DB migration, full event-union work, conversation metadata typing, lock schema migration, live eval runner, or broad UI rewrite."
+      - "Allowed files are insufficient for a necessary behavior change."
+      - "Peer-review disagreement reappears after implementation."
+      - "Antigravity finds a blocking implemented-diff issue, or Antigravity cannot run and Claude/Codex evidence is not strong enough to justify proceeding."
+    receipt:
+      result: done
+      verdict: "T015 ready to commit; broader 9/10 goal remains incomplete."
+      summary: "Implemented BuilderPlanEditResult as the canonical plan edit-result contract across JSONB hydration, domain BuilderPlan, REST PlanResponse, SSE plan payloads, generated TypeScript, and the frontend FlowAIBuilderDriver normalization adapter. Migrated existing T015-owned public/lifecycle/CAS error-code strings to AIBuilderErrorCode and added a static guard for new bare code= strings. Fixed Antigravity's full-unit-sweep blocker by replacing stale/over-mocked tests with real CompiledEditResult and SessionSendTurn fixtures and by updating a stale website-knowledge materializer expectation."
+      artifacts:
+        implementation_summary: ".codex/artifacts/flow-ai-builder-t015-implemented-diff-summary.md"
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t015-implemented-edit-result-contract-review-20260521T171853Z.md"
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t015-implemented-edit-result-contract-review-iteration-2-20260521T172711Z.md"
+        claude_iteration_3_failed_resume: ".codex/artifacts/claude-peer-loop-t015-revised-implemented-edit-result-contract-review-20260521T174446Z.md"
+        claude_iteration_3_green: ".codex/artifacts/claude-peer-loop-t015-revised-implemented-edit-result-contract-review-20260521T174844Z.md"
+        antigravity_iteration_1_blocker: ".codex/artifacts/antigravity-peer-loop-t015-implemented-edit-result-contract-antigravity-review-20260521T173348Z.md"
+        antigravity_iteration_2_green: ".codex/artifacts/antigravity-peer-loop-t015-revised-implemented-edit-result-contract-antigravity-review-20260521T175111Z.md"
+      peer_gates:
+        codex_self_review:
+          verdict: "pass"
+          notes:
+            - "This is the cleanest current T015 direction because it deletes parallel edit-result ownership before the full event-union tranche."
+            - "The tranche reduces future debt; the remaining transitional hydrator is explicitly queued for T017 migration/deletion work instead of hidden as permanent compatibility."
+            - "The first implementation scope was large but correctly sized for one coherent contract family; a smaller slice would have left JSONB, REST, SSE, and frontend shapes duplicated."
+            - "The broader goal remains open because API/SSE, JSONB metadata, lock schema, proposal-processor topology, live eval, and test-quality floors are still below 9."
+        claude:
+          verdict: "GREEN_LIGHT yes; VERDICT green; MIN_SCORE 9"
+          artifact: ".codex/artifacts/claude-peer-loop-t015-revised-implemented-edit-result-contract-review-20260521T174844Z.md"
+          accepted_non_gating_followups:
+            - "Schedule a migration/backfill to nest legacy edit_result_json rows and delete the legacy hydrator."
+            - "Carry scope reconciliation into the commit body."
+            - "Unify duplicated JsonScalar aliases."
+            - "Comment or delete the temporary frontend flat-field fallback when the event migration completes."
+        antigravity:
+          verdict: "GREEN_LIGHT yes; VERDICT green; MIN_SCORE 9"
+          artifact: ".codex/artifacts/antigravity-peer-loop-t015-revised-implemented-edit-result-contract-antigravity-review-20260521T175111Z.md"
+          accepted_non_gating_followups:
+            - "The AST guard only catches explicit code= bare strings; remaining exception calls without code= can still default to generic public error codes."
+            - "T017 should include a one-time Alembic migration to delete the transitional edit-result hydrator."
+            - "JsonScalar should have one canonical owner."
+      verification:
+        - command: "cd backend && uv run ruff check <29 T015 touched backend files>"
+          result: "All checks passed"
+        - command: "cd backend && uv run ruff format --check <29 T015 touched backend files>"
+          result: "29 files already formatted"
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright <19 T015 touched backend source files>"
+          result: "0 errors, 0 warnings, 0 informations"
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder -q"
+          result: "2210 passed, 4 skipped, 11 warnings"
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider <T015 targeted backend tests>"
+          result: "153 passed, 16 warnings"
+        - command: "cd frontend && bun run --filter @intric/web test:unit FlowAIBuilderDriver.test.ts"
+          result: "34 passed"
+        - command: "cd frontend && bun run --filter @intric/intric-js check"
+          result: "exited 0"
+        - command: "cd frontend && bun run --filter @intric/web check"
+          result: "0 errors, 1 unrelated warning in ExtendExpirationDialog.svelte"
+        - command: "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+          result: "yaml ok"
+      scorecard_after_t015:
+        Maintainability: 7
+        Code_Quality: 8
+        Clean_Architecture: 8
+        Separation_of_Concerns: 7
+        Single_Source_of_Truth: 7
+        Human_Readability: 7
+        Human_Reviewability: 8
+        Runtime_Reliability: 8
+        Data_Model_Schema_Quality: 7
+        API_Contract_Quality: 6
+        Test_Coverage_Quality: 8
+        AI_Slop_Comment_Naming_Quality: 6
+        Normal_User_Output_Quality: 6
+        Overall: 6
+      followups_added:
+        - "T016: typed/generated-client-friendly AI Builder SSE event union, including deletion scheduling for temporary frontend flat-field fallbacks."
+        - "T017: typed conversation metadata/tool-call JSONB plus edit-result migration/backfill to delete _hydrate_legacy_flat_shape."
+        - "T017/T018: decide whether remaining AI Builder public exceptions without code= should be migrated and covered by a stricter AST guard."
+        - "T019: real proposal-processor topology/deletion/consolidation work; no shallow split counted as maintainability progress."
+        - "T021: repeat authenticated normal-user live eval and require product fixes for vague-prompt failures."
+
+  - id: T016
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Plan-gate the generated-client friendly AI Builder SSE/public event contract tranche, then implement only after Codex, Claude, and Antigravity pass the same bounded plan."
+    inputs:
+      - "T015 receipt"
+      - ".codex/artifacts/flow-ai-builder-t015-implemented-diff-summary.md"
+      - ".codex/artifacts/claude-peer-loop-t015-revised-implemented-edit-result-contract-review-20260521T174844Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t015-revised-implemented-edit-result-contract-antigravity-review-20260521T175111Z.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    constraints:
+      - "Read-only except board/artifact updates until the T016 implementation-ready plan passes Codex self-review, Claude, and Antigravity."
+      - "Do not start broad proposal-processor splitting, conversation metadata JSONB, lock schema migration, or live eval product fixes inside T016 unless peer review proves they are required for the event-contract slice."
+      - "Preserve unrelated dirty files and keep T015 commit scoped."
+      - "Generated clients must expose useful AI Builder event payload types; OpenAPI compilation alone is not enough."
+      - "Frontend/API consumers must not need to maintain a parallel handwritten event union after T016."
+    expected_output:
+      - "Architecture diagnosis for current AI Builder SSE/public event contract ownership."
+      - "Rejected alternatives and simplification/deletion decisions."
+      - "Bounded allowed files and stop conditions for implementation."
+      - "Acceptance criteria that prove generated-client ergonomics, not just backend schema validity."
+      - "Codex self-review, Claude green artifact, and Antigravity pass artifact or exact Antigravity failure."
     receipt: null
 
 checks:
   dirty_fingerprint:
     branch_checked: true
     status_checked: true
-    result: "dirty; previous tranche uncommitted and unrelated files preserved"
+    result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T013 revise-plan runtime boundary verified and peer-gated; authenticated API read probe and four-case create live eval from T000 remain the latest live-eval evidence."
-    task: T013
+    result: "T015 implementation validation, Codex self-review, Claude post-implementation review, and Antigravity post-implementation review are green; T016 is active for the next plan-gated tranche."
+    task: T015
     commands:
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_service.py::TestRevisePlan tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py::TestAIBuilderPlanLifecycle tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py -q: 21 passed, 1 warning"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::test_revise_plan_api_creates_replacement_without_active_send tests/integration/flows/test_ai_builder_session_api_regressions.py::test_revise_plan_api_rejects_active_send_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_revise_plan_api_recovers_expired_send_lock_and_fences_old_lease -q: 3 passed, 16 warnings"
-      - "cd backend && uv run ruff check <T013 touched files>: All checks passed"
-      - "cd backend && uv run ruff format --check <T013 touched files>: 8 files already formatted"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder/ai_builder_service.py src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py src/intric/flows/ai_builder/ai_builder_plan_store.py src/intric/flows/ai_builder/ai_builder_repo.py: 0 errors, 0 warnings, 0 informations"
-      - "rg -n \"\\bpersist_plan\\b\" backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder backend/tests/integration/flows/test_ai_builder_session_api_regressions.py: no active source/test hits"
+      - "cd backend && uv run ruff check <29 T015 touched backend files>: All checks passed"
+      - "cd backend && uv run ruff format --check <29 T015 touched backend files>: 29 files already formatted"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright <19 T015 touched backend source files>: 0 errors, 0 warnings, 0 informations"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder -q: 2210 passed, 4 skipped, 11 warnings"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider <T015 targeted backend tests>: 153 passed, 16 warnings"
+      - "cd frontend && bun run --filter @intric/web test:unit FlowAIBuilderDriver.test.ts: 34 passed"
+      - "cd frontend && bun run --filter @intric/intric-js check: exited 0"
+      - "cd frontend && bun run --filter @intric/web check: 0 errors, 1 unrelated warning in ExtendExpirationDialog.svelte"
+      - "Claude post-implementation gate: .codex/artifacts/claude-peer-loop-t015-revised-implemented-edit-result-contract-review-20260521T174844Z.md: GREEN_LIGHT yes; MIN_SCORE 9"
+      - "Antigravity post-implementation gate: .codex/artifacts/antigravity-peer-loop-t015-revised-implemented-edit-result-contract-antigravity-review-20260521T175111Z.md: GREEN_LIGHT yes; MIN_SCORE 9"
+      - "git diff --cached --check: clean"
+      - "post-stage cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder -q: 2210 passed, 4 skipped, 11 warnings"
       - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"': yaml ok"

@@ -25,9 +25,13 @@ REQUIRED_PATHS: dict[str, set[str]] = {
 }
 
 REQUIRED_SCHEMAS = {
+    "AIBuilderPlanEventData",
+    "BuilderPlanEditResult",
+    "CompiledEditResult",
     "ApplyPlanRequest",
     "ApplyResultResponse",
     "CreateSessionRequest",
+    "FlowEditDiff",
     "PlanApprovalResponse",
     "PlanResponse",
     "RevisePlanRequest",
@@ -38,6 +42,21 @@ REQUIRED_SCHEMAS = {
     "SessionResponse",
     "SessionTelemetrySummary",
 }
+
+
+def _schema_refs(schema: object) -> set[str]:
+    refs: set[str] = set()
+    if isinstance(schema, dict):
+        ref = schema.get("$ref")
+        if isinstance(ref, str):
+            refs.add(ref)
+        for value in schema.values():
+            refs.update(_schema_refs(value))
+    elif isinstance(schema, list):
+        for value in schema:
+            refs.update(_schema_refs(value))
+    return refs
+
 
 REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
     ("/api/v1/flows/ai-builder/sessions", "get"): "list_ai_builder_sessions",
@@ -107,6 +126,37 @@ def test_openapi_ai_builder_required_schemas_present(openapi_spec: dict) -> None
     schemas = openapi_spec.get("components", {}).get("schemas", {})
     missing = REQUIRED_SCHEMAS - set(schemas)
     assert not missing, f"Missing AI Builder schemas: {sorted(missing)}"
+
+
+def test_openapi_plan_response_and_plan_event_share_edit_result_schema(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    plan_response = schemas["PlanResponse"]
+    plan_event = schemas["AIBuilderPlanEventData"]
+
+    assert "#/components/schemas/BuilderPlanEditResult" in _schema_refs(
+        plan_response["properties"]["edit_result_json"]
+    )
+    assert "#/components/schemas/BuilderPlanEditResult" in _schema_refs(
+        plan_event["properties"]["edit_result_json"]
+    )
+    assert not {
+        "edit_diff",
+        "edit_confidence",
+        "edit_warnings",
+        "edit_advisories",
+        "edit_risk_flags",
+    }.intersection(plan_event["properties"])
+
+
+def test_openapi_ai_builder_sse_plan_event_payload_is_typed(openapi_spec: dict) -> None:
+    operation = openapi_spec["paths"][
+        "/api/v1/flows/ai-builder/sessions/{session_id}/messages"
+    ]["post"]
+    schema = operation["responses"]["200"]["content"]["text/event-stream"]["schema"]
+
+    assert "#/components/schemas/AIBuilderPlanEventData" in _schema_refs(schema)
 
 
 def test_openapi_session_response_includes_telemetry_field(openapi_spec: dict) -> None:

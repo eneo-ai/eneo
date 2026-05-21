@@ -23,8 +23,10 @@ from intric.database.tables.tenant_table import Tenants
 from intric.flows.ai_builder.ai_builder_conversation_compaction import (
     compact_ai_builder_conversation,
 )
+from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from intric.flows.ai_builder.ai_builder_models import (
     BuilderPlan,
+    BuilderPlanEditResult,
     BuilderSession,
     ConversationMessage,
     FlowDraftSpecCore,
@@ -439,7 +441,7 @@ class AIBuilderRepository:
             if updated_session_id is None:
                 raise BadRequestException(
                     "The AI Builder session lease was lost while updating session status.",
-                    code="session_send_lease_lost",
+                    code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST.value,
                 )
 
     async def update_session_conversation(
@@ -471,7 +473,7 @@ class AIBuilderRepository:
             if updated_session_id is None:
                 raise BadRequestException(
                     "The AI Builder session lease was lost while updating conversation state.",
-                    code="session_send_lease_lost",
+                    code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST.value,
                 )
 
     async def append_session_messages(
@@ -527,7 +529,7 @@ class AIBuilderRepository:
             if row is None:
                 raise BadRequestException(
                     "The AI Builder session lease was lost while appending conversation messages.",
-                    code="session_send_lease_lost",
+                    code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST.value,
                 )
 
             existing = _session_from_row(row).conversation
@@ -551,7 +553,7 @@ class AIBuilderRepository:
             if updated_session_id is None:
                 raise BadRequestException(
                     "The AI Builder session lease was lost while saving conversation messages.",
-                    code="session_send_lease_lost",
+                    code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST.value,
                 )
             if committed_file_ids:
                 rows = [
@@ -649,14 +651,14 @@ class AIBuilderRepository:
                 if current_status != SessionStatus.AWAITING_APPROVAL:
                     raise BadRequestException(
                         "Can only revise plans when the session is awaiting approval.",
-                        code="invalid_session_transition",
+                        code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION.value,
                     )
                 lock_is_set = active_request_id is not None or lock_token is not None
                 lock_is_expired = lock_expires_at is not None and lock_expires_at <= now
                 if lock_is_set and not lock_is_expired:
                     raise BadRequestException(
                         "An active send is currently in progress for this session.",
-                        code="session_send_in_progress",
+                        code=AIBuilderErrorCode.SESSION_SEND_IN_PROGRESS.value,
                     )
                 expired_lock_is_available = sa.and_(
                     BuilderSessions.lock_expires_at.is_not(None),
@@ -694,11 +696,11 @@ class AIBuilderRepository:
                 if lease is not None:
                     raise BadRequestException(
                         "The AI Builder session lease was lost while recording the latest plan.",
-                        code="session_send_lease_lost",
+                        code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST.value,
                     )
                 raise BadRequestException(
                     "The latest plan could not be updated due to a concurrent session change.",
-                    code="session_latest_plan_update_conflict",
+                    code=AIBuilderErrorCode.SESSION_LATEST_PLAN_UPDATE_CONFLICT.value,
                 )
 
     async def update_session_flow_id(
@@ -824,7 +826,7 @@ class AIBuilderRepository:
         spec: FlowDraftSpecCore,
         envelope: PlannerPlanEnvelope,
         resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
-        edit_result_json: dict[str, object] | None = None,
+        edit_result: BuilderPlanEditResult | None = None,
     ) -> BuilderPlan:
         async with self._transaction():
             spec_hash = spec.spec_hash()
@@ -839,8 +841,10 @@ class AIBuilderRepository:
                     resource_bindings
                 ),
             }
-            if edit_result_json is not None:
-                values["edit_result_json"] = edit_result_json
+            if edit_result is not None:
+                values["edit_result_json"] = edit_result.model_dump(
+                    mode="json", exclude_none=True
+                )
             stmt = insert(BuilderPlans).values(**values).returning(BuilderPlans)
             row = (await self.session.execute(stmt)).scalar_one()
             return _plan_from_row(row)
@@ -947,7 +951,7 @@ class AIBuilderRepository:
         requires the row's current `planning_state_version` to equal
         it. If the row moved on (concurrent writer committed in
         between), the UPDATE matches zero rows and this raises
-        `BadRequestException(code="planning_state_version_mismatch")`.
+        `BadRequestException(code=AIBuilderErrorCode.PLANNING_STATE_VERSION_MISMATCH)`.
         Callers should reload the state and retry with the fresh
         version. When `base_version` is `None` the save is
         unconditional (last-writer-wins).
@@ -1004,7 +1008,7 @@ class AIBuilderRepository:
                     f"Planning state version mismatch: expected base_version="
                     f"{base_version}, found {current_version}."
                 ),
-                code="planning_state_version_mismatch",
+                code=AIBuilderErrorCode.PLANNING_STATE_VERSION_MISMATCH.value,
             )
 
     async def load_planning_state(
@@ -1147,7 +1151,7 @@ class _PlanRowData(TypedDict):
     spec_hash: str
     envelope_json: dict[str, object]
     resource_bindings_json: list[dict[str, object]]
-    edit_result_json: dict[str, object] | None
+    edit_result_json: object | None
     created_at: datetime | None
     updated_at: datetime | None
 
@@ -1207,9 +1211,7 @@ def _plan_row_data(row: Any) -> _PlanRowData:
             "resource_bindings_json": cast(
                 list[dict[str, object]], mapping["resource_bindings_json"]
             ),
-            "edit_result_json": cast(
-                dict[str, object] | None, mapping.get("edit_result_json")
-            ),
+            "edit_result_json": mapping.get("edit_result_json"),
             "created_at": cast(datetime | None, mapping.get("created_at")),
             "updated_at": cast(datetime | None, mapping.get("updated_at")),
         }
@@ -1225,9 +1227,7 @@ def _plan_row_data(row: Any) -> _PlanRowData:
         "resource_bindings_json": cast(
             list[dict[str, object]], row.resource_bindings_json
         ),
-        "edit_result_json": cast(
-            dict[str, object] | None, getattr(row, "edit_result_json", None)
-        ),
+        "edit_result_json": getattr(row, "edit_result_json", None),
         "created_at": cast(datetime | None, row.created_at),
         "updated_at": cast(datetime | None, row.updated_at),
     }
@@ -1296,6 +1296,11 @@ def _plan_from_row(row: Any) -> BuilderPlan:
     envelope_data = {k: v for k, v in data["envelope_json"].items() if k != "spec"}
     envelope_data["spec"] = data["spec_json"]
     envelope = PlannerPlanEnvelope.model_validate(envelope_data)
+    edit_result = (
+        BuilderPlanEditResult.model_validate(data["edit_result_json"])
+        if data["edit_result_json"] is not None
+        else None
+    )
 
     return BuilderPlan(
         id=data["id"],
@@ -1306,7 +1311,7 @@ def _plan_from_row(row: Any) -> BuilderPlan:
         spec_hash=data["spec_hash"],
         envelope=envelope,
         resource_bindings=_resource_bindings_from_json(data["resource_bindings_json"]),
-        edit_result_json=data["edit_result_json"],
+        edit_result=edit_result,
         created_at=data["created_at"],
         updated_at=data["updated_at"],
     )

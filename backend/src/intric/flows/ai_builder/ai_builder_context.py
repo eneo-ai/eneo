@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from intric.flows.ai_builder.ai_builder_mcp_resources import (
     AIBuilderMCPServerResource,
     normalize_ai_builder_mcp_resources,
@@ -110,7 +111,7 @@ def resolve_planner_model(space: "Space") -> "CompletionModel":
         return space.completion_models[0]
     raise BadRequestException(
         "No AI builder planner model is available in this space.",
-        code="no_planner_model_available",
+        code=AIBuilderErrorCode.NO_PLANNER_MODEL_AVAILABLE.value,
     )
 
 
@@ -153,7 +154,7 @@ def build_planner_context(
     if max_input_tokens is None:
         raise BadRequestException(
             "Planner model is missing a usable context window. Configure max_input_tokens for the model or set an AI Builder fallback in flow settings.",
-            code="planner_model_missing_context_window",
+            code=AIBuilderErrorCode.PLANNER_MODEL_MISSING_CONTEXT_WINDOW.value,
         )
 
     max_output_tokens = getattr(model, "max_output_tokens", None) or (
@@ -162,7 +163,7 @@ def build_planner_context(
     if max_output_tokens is None:
         raise BadRequestException(
             "Planner model is missing max_output_tokens. Configure the model before using AI Builder.",
-            code="planner_model_missing_output_tokens",
+            code=AIBuilderErrorCode.PLANNER_MODEL_MISSING_OUTPUT_TOKENS.value,
         )
 
     available_models = serialize_space_models(space)

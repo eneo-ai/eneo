@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from intric.flows.ai_builder.ai_builder_models import (
     BuilderPlan,
+    BuilderPlanEditResult,
     ConversationMessage,
     FlowDraftSpecCore,
     LintSeverity,
@@ -166,7 +167,7 @@ async def store_plan_and_update_conversation(
     reasoning: str | None,
     validation: SpecValidationResult,
     resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
-    edit_result_json: dict[str, Any] | None = None,
+    edit_result: BuilderPlanEditResult | None = None,
     flow: "Flow | None" = None,
 ) -> StoredPlanResult:
     envelope = build_plan_envelope(
@@ -196,7 +197,7 @@ async def store_plan_and_update_conversation(
             spec=spec,
             envelope=envelope,
             resource_bindings=resource_bindings,
-            edit_result_json=edit_result_json,
+            edit_result=edit_result,
         )
         persisted = await append_session_messages(
             repo=repo,
@@ -228,7 +229,7 @@ async def _persist_active_send_plan_proposal(
     spec: FlowDraftSpecCore,
     envelope: PlannerPlanEnvelope,
     resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
-    edit_result_json: dict[str, Any] | None = None,
+    edit_result: BuilderPlanEditResult | None = None,
 ) -> BuilderPlan:
     await repo.supersede_existing_plans(
         session_id=turn.session_id,
@@ -240,7 +241,7 @@ async def _persist_active_send_plan_proposal(
         spec=spec,
         envelope=envelope,
         resource_bindings=resource_bindings,
-        edit_result_json=edit_result_json,
+        edit_result=edit_result,
     )
     await repo.update_session_latest_plan(
         session_id=turn.session_id,

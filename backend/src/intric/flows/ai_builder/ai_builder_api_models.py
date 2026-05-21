@@ -15,6 +15,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
     TargetKind,
 )
+from intric.flows.ai_builder.ai_builder_edit_models import BuilderPlanEditResult
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
@@ -335,7 +336,7 @@ class PlanResponse(BaseModel):
     status: PlanStatus
     spec_hash: str
     envelope: PlannerPlanEnvelope
-    edit_result_json: JsonObject | None = None
+    edit_result_json: BuilderPlanEditResult | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import UUID
 
-if TYPE_CHECKING:
-    from intric.flows.ai_builder.ai_builder_edit_models import CompiledEditResult
-
+from intric.flows.ai_builder.ai_builder_domain_models import PlannerPlanEnvelope
+from intric.flows.ai_builder.ai_builder_edit_models import BuilderPlanEditResult
 from intric.flows.ai_builder.ai_builder_event_models import (
     AIBuilderPlanEventData,
     AIBuilderStatusEventData,
@@ -15,7 +14,6 @@ from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
     StructuredQuestionPayload,
 )
-from intric.flows.ai_builder.ai_builder_models import PlannerPlanEnvelope
 
 SSE_EVENT_TEXT = "text"
 SSE_EVENT_PLAN = "plan"
@@ -68,24 +66,13 @@ def build_plan_event(
     *,
     plan_id: UUID,
     envelope: PlannerPlanEnvelope,
-    edit_result: "CompiledEditResult | None" = None,
+    edit_result: BuilderPlanEditResult | None = None,
 ) -> dict[str, str]:
-    edit_kwargs: dict[str, Any] = {}
-    if edit_result is not None:
-        edit_kwargs["edit_diff"] = edit_result.diff.model_dump(mode="json")
-        edit_kwargs["edit_confidence"] = edit_result.confidence
-        edit_kwargs["edit_warnings"] = edit_result.warnings
-        if edit_result.advisories:
-            edit_kwargs["edit_advisories"] = [
-                a.model_dump(mode="json") for a in edit_result.advisories
-            ]
-        edit_kwargs["edit_risk_flags"] = edit_result.risk_flags
-
     return {
         "event": SSE_EVENT_PLAN,
         "data": AIBuilderPlanEventData(
             plan_id=plan_id,
             envelope=envelope.model_copy(update={"reasoning": None}, deep=True),
-            **edit_kwargs,
+            edit_result_json=edit_result,
         ).model_dump_json(exclude_none=True),
     }

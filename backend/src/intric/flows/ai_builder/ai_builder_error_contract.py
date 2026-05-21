@@ -24,6 +24,12 @@ _MAX_MESSAGE_LENGTH = 4096
 class AIBuilderErrorCode(StrEnum):
     ARCHITECTURE_CRITIC_INVARIANT_FAILED = "architecture_critic_invariant_failed"
     ARCHITECTURE_MATERIALIZATION_FAILED = "architecture_materialization_failed"
+    AI_BUILDER_PLAN_RESOURCE_BINDING_UNAVAILABLE = (
+        "ai_builder_plan_resource_binding_unavailable"
+    )
+    AI_BUILDER_PLAN_RESOURCE_BINDINGS_MISSING = (
+        "ai_builder_plan_resource_bindings_missing"
+    )
     BAD_REQUEST = "bad_request"
     BUILDER_ATTACHMENT_UNAVAILABLE = "builder_attachment_unavailable"
     FLOW_IS_PUBLISHED = "flow_is_published"
@@ -31,10 +37,17 @@ class AIBuilderErrorCode(StrEnum):
     INSUFFICIENT_SCOPE = "insufficient_scope"
     INSUFFICIENT_SPACE_PERMISSION = "insufficient_space_permission"
     INVALID_EXISTING_STEP_REF = "invalid_existing_step_ref"
+    INVALID_PLAN_STEP_REF = "invalid_plan_step_ref"
     INVALID_QUESTION_PAYLOAD = "invalid_question_payload"
+    INVALID_SESSION_TRANSITION = "invalid_session_transition"
     NOT_FOUND = "not_found"
+    NO_PLANNER_MODEL_AVAILABLE = "no_planner_model_available"
     PLAN_NOT_PROPOSED = "plan_not_proposed"
+    PLAN_SESSION_MISMATCH = "plan_session_mismatch"
+    PLANNING_STATE_VERSION_MISMATCH = "planning_state_version_mismatch"
     PLANNER_BUDGET_MISSING = "planner_budget_missing"
+    PLANNER_MODEL_MISSING_CONTEXT_WINDOW = "planner_model_missing_context_window"
+    PLANNER_MODEL_MISSING_OUTPUT_TOKENS = "planner_model_missing_output_tokens"
     PLANNER_INVALID_REPAIR_RESPONSE = "planner_invalid_repair_response"
     PLANNER_OUTPUT_TOO_LONG = "planner_output_too_long"
     PLANNER_PARSE_ERROR = "planner_parse_error"
@@ -51,7 +64,10 @@ class AIBuilderErrorCode(StrEnum):
     SELF_CORRECTION_QUALITY_FAILURE = "self_correction_quality_failure"
     SESSION_CREATOR_REQUIRED = "session_creator_required"
     SESSION_MESSAGE_IN_PROGRESS = "session_message_in_progress"
+    SESSION_LATEST_PLAN_UPDATE_CONFLICT = "session_latest_plan_update_conflict"
+    SESSION_SEND_IN_PROGRESS = "session_send_in_progress"
     SESSION_SEND_LEASE_LOST = "session_send_lease_lost"
+    STALE_PLAN_REVISION = "stale_plan_revision"
     STALE_REVISION = "stale_revision"
     TRANSCRIPTION_MODEL_REQUIRED = "transcription_model_required"
     UNSUPPORTED_REVISION_TYPE = "unsupported_revision_type"
@@ -100,9 +116,11 @@ def _entry(
     )
 
 
-AI_BUILDER_ERROR_REGISTRY: Mapping[
+_AIBuilderErrorRegistry: TypeAlias = Mapping[
     AIBuilderErrorCode, AIBuilderErrorRegistryEntry
-] = MappingProxyType(
+]
+
+AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
     {
         AIBuilderErrorCode.ARCHITECTURE_CRITIC_INVARIANT_FAILED: _entry(
             category=AIBuilderErrorCategory.BAD_REQUEST,
@@ -115,6 +133,16 @@ AI_BUILDER_ERROR_REGISTRY: Mapping[
             http_status=400,
             intric_error_code=ErrorCodes.BAD_REQUEST,
             default_phase=AIBuilderErrorPhase.PROPOSAL,
+        ),
+        AIBuilderErrorCode.AI_BUILDER_PLAN_RESOURCE_BINDING_UNAVAILABLE: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+        ),
+        AIBuilderErrorCode.AI_BUILDER_PLAN_RESOURCE_BINDINGS_MISSING: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            intric_error_code=ErrorCodes.BAD_REQUEST,
         ),
         AIBuilderErrorCode.BAD_REQUEST: _entry(
             category=AIBuilderErrorCategory.BAD_REQUEST,
@@ -151,18 +179,38 @@ AI_BUILDER_ERROR_REGISTRY: Mapping[
             http_status=400,
             intric_error_code=ErrorCodes.BAD_REQUEST,
         ),
+        AIBuilderErrorCode.INVALID_PLAN_STEP_REF: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+        ),
         AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD: _entry(
             category=AIBuilderErrorCategory.BAD_REQUEST,
             http_status=400,
             intric_error_code=ErrorCodes.BAD_REQUEST,
             default_phase=AIBuilderErrorPhase.QUESTION,
         ),
+        AIBuilderErrorCode.INVALID_SESSION_TRANSITION: _entry(
+            category=AIBuilderErrorCategory.CONFLICT,
+            http_status=409,
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+        ),
         AIBuilderErrorCode.NOT_FOUND: _entry(
             category=AIBuilderErrorCategory.NOT_FOUND,
             http_status=404,
             intric_error_code=ErrorCodes.NOT_FOUND,
         ),
+        AIBuilderErrorCode.NO_PLANNER_MODEL_AVAILABLE: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+        ),
         AIBuilderErrorCode.PLAN_NOT_PROPOSED: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+        ),
+        AIBuilderErrorCode.PLAN_SESSION_MISMATCH: _entry(
             category=AIBuilderErrorCategory.BAD_REQUEST,
             http_status=400,
             intric_error_code=ErrorCodes.BAD_REQUEST,
@@ -170,6 +218,24 @@ AI_BUILDER_ERROR_REGISTRY: Mapping[
         AIBuilderErrorCode.PLANNER_BUDGET_MISSING: _entry(
             category=AIBuilderErrorCategory.BAD_REQUEST,
             http_status=400,
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            default_phase=AIBuilderErrorPhase.PLANNER,
+        ),
+        AIBuilderErrorCode.PLANNER_MODEL_MISSING_CONTEXT_WINDOW: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            default_phase=AIBuilderErrorPhase.PLANNER,
+        ),
+        AIBuilderErrorCode.PLANNER_MODEL_MISSING_OUTPUT_TOKENS: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+            default_phase=AIBuilderErrorPhase.PLANNER,
+        ),
+        AIBuilderErrorCode.PLANNING_STATE_VERSION_MISMATCH: _entry(
+            category=AIBuilderErrorCategory.CONFLICT,
+            http_status=409,
             intric_error_code=ErrorCodes.BAD_REQUEST,
             default_phase=AIBuilderErrorPhase.PLANNER,
         ),
@@ -267,11 +333,26 @@ AI_BUILDER_ERROR_REGISTRY: Mapping[
             http_status=409,
             intric_error_code=ErrorCodes.BAD_REQUEST,
         ),
+        AIBuilderErrorCode.SESSION_LATEST_PLAN_UPDATE_CONFLICT: _entry(
+            category=AIBuilderErrorCategory.CONFLICT,
+            http_status=409,
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+        ),
+        AIBuilderErrorCode.SESSION_SEND_IN_PROGRESS: _entry(
+            category=AIBuilderErrorCategory.CONFLICT,
+            http_status=409,
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+        ),
         AIBuilderErrorCode.SESSION_SEND_LEASE_LOST: _entry(
             category=AIBuilderErrorCategory.CONFLICT,
             http_status=409,
             intric_error_code=ErrorCodes.BAD_REQUEST,
             default_phase=AIBuilderErrorPhase.PLANNER,
+        ),
+        AIBuilderErrorCode.STALE_PLAN_REVISION: _entry(
+            category=AIBuilderErrorCategory.CONFLICT,
+            http_status=409,
+            intric_error_code=ErrorCodes.BAD_REQUEST,
         ),
         AIBuilderErrorCode.STALE_REVISION: _entry(
             category=AIBuilderErrorCategory.CONFLICT,
@@ -402,9 +483,7 @@ def normalize_ai_builder_error_context(
         return None
 
     while normalized:
-        payload_size = len(
-            json.dumps(normalized, ensure_ascii=False).encode("utf-8")
-        )
+        payload_size = len(json.dumps(normalized, ensure_ascii=False).encode("utf-8"))
         if payload_size <= _MAX_CONTEXT_JSON_BYTES:
             return normalized
         normalized.pop(next(reversed(normalized)))

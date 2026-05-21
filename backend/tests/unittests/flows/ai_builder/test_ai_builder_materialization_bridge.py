@@ -675,8 +675,8 @@ class TestApplyToDraft:
         assert envelope.risk_acknowledgments == ["initial-risk"]
 
     @pytest.mark.asyncio
-    async def test_does_not_forward_edit_result_json(self) -> None:
-        """``apply_to_draft`` is create-scope. ``edit_result_json`` is
+    async def test_does_not_forward_edit_result(self) -> None:
+        """``apply_to_draft`` is create-scope. ``edit_result`` is
         an edit-mode parameter on ``create_plan`` and must not leak from
         the bridge until edit-path materialization exists.
         """
@@ -691,7 +691,7 @@ class TestApplyToDraft:
         )
 
         kwargs = repo.create_plan.call_args.kwargs
-        assert "edit_result_json" not in kwargs
+        assert "edit_result" not in kwargs
 
     def test_materialize_stamps_plan_rationale_on_draft(self) -> None:
         """The rationale passed to ``materialize`` must ride back on the

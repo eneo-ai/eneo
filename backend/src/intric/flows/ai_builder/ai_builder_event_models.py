@@ -1,20 +1,22 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal, TypeAlias
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 from intric.flows.ai_builder.ai_builder_domain_models import (
-    JsonObject,
     PlannerPlanEnvelope,
 )
+from intric.flows.ai_builder.ai_builder_edit_models import BuilderPlanEditResult
+
+JsonScalar: TypeAlias = str | int | float | bool | None
 
 
 class StructuredQuestionOptionPayload(BaseModel):
     id: str | None = None
     label: str
-    value: Any | None = None
+    value: JsonScalar = None
     description: str | None = None
 
 
@@ -53,14 +55,22 @@ class RequirementsSummaryPayload(BaseModel):
 class AIBuilderPlanEventData(BaseModel):
     plan_id: UUID
     envelope: PlannerPlanEnvelope
-    edit_diff: JsonObject | None = None
-    edit_confidence: str | None = None
-    edit_warnings: list[str] | None = None
-    edit_advisories: list[JsonObject] | None = None
-    edit_risk_flags: list[str] | None = None
+    edit_result_json: BuilderPlanEditResult | None = None
+
+
+AI_BUILDER_SSE_MODELS: tuple[type[BaseModel], ...] = (
+    AIBuilderTextEventData,
+    AIBuilderStatusEventData,
+    StructuredQuestionOptionPayload,
+    StructuredQuestionPayload,
+    KeyDecisionPayload,
+    RequirementsSummaryPayload,
+    AIBuilderPlanEventData,
+)
 
 
 __all__ = [
+    "AI_BUILDER_SSE_MODELS",
     "AIBuilderPlanEventData",
     "AIBuilderStatusEventData",
     "AIBuilderTextEventData",

@@ -33,6 +33,10 @@ from intric.flows.ai_builder.ai_builder_proposal_processor import (
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
 )
+from intric.flows.ai_builder.ai_builder_session_turn import (
+    SessionSendLease,
+    SessionSendTurn,
+)
 from intric.flows.ai_builder.ai_builder_tools import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
     OUTLINE_FLOW_TOOL_NAME,
@@ -68,6 +72,20 @@ def _make_tool_call(
     return tc
 
 
+def _make_turn(
+    *,
+    session_id=None,
+    tenant_id=None,
+    base_planning_state_version: int = 0,
+) -> SessionSendTurn:
+    return SessionSendTurn(
+        session_id=session_id or uuid4(),
+        tenant_id=tenant_id or uuid4(),
+        lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+        base_planning_state_version=base_planning_state_version,
+    )
+
+
 # ---------------------------------------------------------------------------
 # confirm_requirements handling in proposal processor
 # ---------------------------------------------------------------------------
@@ -100,7 +118,7 @@ class TestHandleConfirmRequirements:
 
         events: list[dict[str, str]] = []
         async for event in processor.handle_tool_call(
-            session_id=uuid4(),
+            turn=_make_turn(),
             conversation=conversation,
             new_messages_start=len(conversation),
             tool_calls=[tool_call],
@@ -143,7 +161,7 @@ class TestHandleConfirmRequirements:
 
         events: list[dict[str, str]] = []
         async for event in processor.handle_tool_call(
-            session_id=uuid4(),
+            turn=_make_turn(),
             conversation=[],
             new_messages_start=0,
             tool_calls=[tool_call],
@@ -184,7 +202,7 @@ class TestHandleConfirmRequirements:
 
         events = []
         async for event in processor.handle_tool_call(
-            session_id=uuid4(),
+            turn=_make_turn(),
             conversation=conversation,
             new_messages_start=0,
             tool_calls=[tool_call],
@@ -217,7 +235,7 @@ class TestHandleConfirmRequirements:
 
         events = []
         async for event in processor.handle_tool_call(
-            session_id=uuid4(),
+            turn=_make_turn(),
             conversation=[],
             new_messages_start=0,
             tool_calls=[tool_call],
@@ -289,12 +307,12 @@ class TestProposalGating:
         )
 
         with patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            "intric.flows.ai_builder.ai_builder_create_proposal.store_plan_and_update_conversation",
             new_callable=AsyncMock,
         ) as store_plan:
             events: list[dict[str, str]] = []
             async for event in processor.handle_tool_call(
-                session_id=uuid4(),
+                turn=_make_turn(),
                 conversation=conversation,
                 new_messages_start=len(conversation),
                 tool_calls=[tool_call],

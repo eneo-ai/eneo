@@ -1860,7 +1860,7 @@ class TestExecuteCreateFlow:
         assert error.value.context["local_kind"] == "transcription_model"
 
     @pytest.mark.asyncio
-    async def test_non_collection_knowledge_slot_local_kind_fails(self) -> None:
+    async def test_website_knowledge_slot_local_kind_configures_websites(self) -> None:
         flow_id = uuid4()
         space_id = uuid4()
         assistant_id = uuid4()
@@ -1888,17 +1888,20 @@ class TestExecuteCreateFlow:
             local_id=website_id,
         )
 
-        with pytest.raises(BadRequestException) as error:
-            await execute_changeset(
-                changeset=changeset,
-                flow_service=mock_flow_service,
-                space_id=space_id,
-                flow_id=None,
-                resource_bindings=(binding,),
-            )
+        await execute_changeset(
+            changeset=changeset,
+            flow_service=mock_flow_service,
+            space_id=space_id,
+            flow_id=None,
+            resource_bindings=(binding,),
+        )
 
-        assert error.value.code == "disallowed_local_kind"
-        assert error.value.context["local_kind"] == "website"
+        update = _update_command_from_call(
+            mock_flow_service.update_flow_assistant.call_args
+        )
+        assert update.groups == []
+        assert update.websites == [website_id]
+        assert update.integration_knowledge_ids == []
 
     @pytest.mark.asyncio
     async def test_invalid_ref_error_codes_stay_unchanged(self) -> None:
@@ -1982,7 +1985,9 @@ class TestExecuteCreateFlow:
         mock_flow_service.delete_flow.assert_awaited_once_with(flow_id)
 
     @pytest.mark.asyncio
-    async def test_create_mode_cleans_up_temp_flow_when_binding_write_fails(self) -> None:
+    async def test_create_mode_cleans_up_temp_flow_when_binding_write_fails(
+        self,
+    ) -> None:
         flow_id = uuid4()
         space_id = uuid4()
         assistant_id = uuid4()
@@ -2456,9 +2461,7 @@ class TestExecuteEditFlow:
             mock_flow_service.update_flow_assistant.call_args
         )
         assert update.prompt is not None
-        assert update.prompt.text == (
-            "Hämta och sammanfatta aktuellt kundärende."
-        )
+        assert update.prompt.text == ("Hämta och sammanfatta aktuellt kundärende.")
         assert update.mcp_server_ids == [mcp_server_id]
         assert update.mcp_tools == [(mcp_tool_id, True)]
         assert update.groups == []

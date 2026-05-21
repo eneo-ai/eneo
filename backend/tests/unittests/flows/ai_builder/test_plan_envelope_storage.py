@@ -13,6 +13,13 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from intric.flows.ai_builder.ai_builder_api_models import PlanResponse
+from intric.flows.ai_builder.ai_builder_edit_models import (
+    BuilderPlanEditResult,
+    CompiledEditResult,
+    FlowEditDiff,
+    FlowEditDraft,
+    StepChange,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -62,6 +69,7 @@ def _row(
     spec: FlowDraftSpecCore,
     envelope_json: dict[str, object],
     resource_bindings_json: list[dict[str, object]] | None = None,
+    edit_result_json: dict[str, object] | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid4(),
@@ -72,7 +80,7 @@ def _row(
         spec_hash=spec.spec_hash(),
         envelope_json=envelope_json,
         resource_bindings_json=resource_bindings_json or [],
-        edit_result_json=None,
+        edit_result_json=edit_result_json,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
@@ -87,6 +95,17 @@ def _binding() -> LocalResourceBinding:
         ),
         local_kind=LocalResourceKind.COMPLETION_MODEL,
         local_id=uuid4(),
+    )
+
+
+def _compiled_edit_result(spec: FlowDraftSpecCore) -> CompiledEditResult:
+    return CompiledEditResult(
+        compiled_spec=spec,
+        diff=FlowEditDiff(
+            step_changes=[StepChange(kind="unchanged", step_name="Step A")]
+        ),
+        original_draft=FlowEditDraft(operations=[]),
+        base_flow_revision=1,
     )
 
 
@@ -140,6 +159,31 @@ def test_plan_from_row_rehydrates_resource_bindings() -> None:
 
     assert plan.resource_bindings == (binding,)
     assert plan.resource_bindings[0].slot_ref.label == "Fast model"
+
+
+def test_plan_from_row_rehydrates_populated_edit_result() -> None:
+    spec = _make_spec("Edit result roundtrip")
+    compiled = _compiled_edit_result(spec)
+    stored_edit_result = BuilderPlanEditResult(compiled_edit=compiled).model_dump(
+        mode="json",
+        exclude_none=True,
+    )
+
+    plan = _plan_from_row(
+        _row(
+            spec=spec,
+            envelope_json={
+                "assumptions": [],
+                "lint_warnings": [],
+                "risk_acknowledgments": [],
+                "reasoning": None,
+                "plan_rationale": None,
+            },
+            edit_result_json=stored_edit_result,
+        )
+    )
+
+    assert plan.edit_result == BuilderPlanEditResult(compiled_edit=compiled)
 
 
 def test_plan_from_row_ignores_legacy_envelope_spec_copy() -> None:

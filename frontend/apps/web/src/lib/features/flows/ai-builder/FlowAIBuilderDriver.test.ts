@@ -39,6 +39,42 @@ function makePlan(overrides: Partial<ProposedPlan> = {}): ProposedPlan {
   };
 }
 
+function makeEditResult(): NonNullable<ProposedPlan["edit_result_json"]> {
+  const spec = makePlan().envelope.spec;
+  return {
+    compiled_edit: {
+      compiled_spec: spec,
+      diff: {
+        step_changes: [
+          {
+            kind: "modified",
+            step_name: "Step A",
+            step_ref: "existing_step_1",
+            details: "output_type -> pdf"
+          }
+        ],
+        net_steps_added: 0,
+        net_steps_removed: 0,
+        flow_property_changes: {}
+      },
+      original_draft: { operations: [] },
+      base_flow_revision: 7,
+      warnings: ["Review before applying."],
+      advisories: [
+        {
+          code: "flow_description_update_required",
+          message: "The flow description should be checked.",
+          severity: "warning",
+          field: null
+        }
+      ],
+      risk_flags: ["type_downgrade"],
+      confidence: "needs_review"
+    },
+    description_override_manual: true
+  };
+}
+
 function makeAIBuilderError(overrides: Partial<AIBuilderError> = {}): AIBuilderError {
   return {
     schema_version: 1,
@@ -921,9 +957,12 @@ describe("FlowAIBuilderDriver", () => {
   });
 
   it("revises a plan with keep_current_description and refreshes current plan state", async () => {
+    const editResult = makeEditResult();
     const fetch = vi
       .fn()
-      .mockResolvedValueOnce(makePlan({ plan_id: "plan-2", status: "proposed" }));
+      .mockResolvedValueOnce(
+        makePlan({ plan_id: "plan-2", status: "proposed", edit_result_json: editResult })
+      );
     const { driver } = makeDriver({ fetchImpl: fetch });
     driver.seedState({
       session: makeSession({ latest_plan_id: "plan-1", status: "awaiting_approval" }),
@@ -938,6 +977,12 @@ describe("FlowAIBuilderDriver", () => {
       headers: { "Content-Type": "application/json" }
     });
     expect(driver.state.currentPlan?.plan_id).toBe("plan-2");
+    expect(driver.state.currentPlan?.edit_result_json).toEqual(editResult);
+    expect(driver.state.currentPlan?.edit_diff?.step_changes[0]?.kind).toBe("modified");
+    expect(driver.state.currentPlan?.edit_confidence).toBe("needs_review");
+    expect(driver.state.currentPlan?.edit_advisories?.[0]?.code).toBe(
+      "flow_description_update_required"
+    );
   });
 
   it("starts a fresh edit session when continuing after apply", async () => {

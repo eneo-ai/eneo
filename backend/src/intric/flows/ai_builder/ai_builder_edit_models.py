@@ -11,11 +11,24 @@ and executes the *result*.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from collections.abc import Mapping
+from typing import Any, Literal, cast
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
-from intric.flows.ai_builder.ai_builder_models import (
+from intric.flows.ai_builder.ai_builder_new_step_models import (
+    DocumentDeliveryMode,
+    NewStepDraft,
+    PreviousFieldRef,
+)
+from intric.flows.flow_authoring_name import normalize_optional_flow_name
+from intric.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
@@ -24,12 +37,6 @@ from intric.flows.ai_builder.ai_builder_models import (
     OutputMode,
     OutputType,
 )
-from intric.flows.ai_builder.ai_builder_new_step_models import (
-    DocumentDeliveryMode,
-    NewStepDraft,
-    PreviousFieldRef,
-)
-from intric.flows.flow_authoring_name import normalize_optional_flow_name
 from intric.flows.flow_review_policy import FlowStepReviewMode
 
 # ---------------------------------------------------------------------------
@@ -245,6 +252,56 @@ class CompiledEditResult(BaseModel):
     advisories: list[EditAdvisory] = Field(default_factory=_default_edit_advisories)
     risk_flags: list[str] = Field(default_factory=list)  # "type_downgrade", etc.
     confidence: EditConfidence = "ready"
+
+
+_LEGACY_COMPILED_EDIT_RESULT_KEYS = frozenset(CompiledEditResult.model_fields)
+
+
+class BuilderPlanEditResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", validate_default=True)
+
+    compiled_edit: CompiledEditResult | None = None
+    description_override_manual: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _hydrate_legacy_flat_shape(cls, data: object) -> object:
+        original_data = data
+        if not isinstance(data, Mapping):
+            return original_data
+
+        raw_mapping = cast(Mapping[object, object], data)
+        payload: dict[str, object] = {}
+        for key, value in raw_mapping.items():
+            if not isinstance(key, str):
+                return original_data
+            payload[key] = value
+
+        if "compiled_edit" in payload:
+            return original_data
+
+        description_override_manual = payload.get("description_override_manual", False)
+        compiled_edit_payload: dict[str, object] = {
+            key: value
+            for key, value in payload.items()
+            if key != "description_override_manual"
+        }
+        if any(
+            key not in _LEGACY_COMPILED_EDIT_RESULT_KEYS
+            for key in compiled_edit_payload
+        ):
+            return original_data
+        return {
+            "compiled_edit": compiled_edit_payload or None,
+            "description_override_manual": description_override_manual,
+        }
+
+    @field_validator("description_override_manual", mode="before")
+    @classmethod
+    def _validate_description_override_manual(cls, value: object) -> bool:
+        if not isinstance(value, bool):
+            raise ValueError("description_override_manual must be a boolean")
+        return value
 
 
 AddStepPayload = NewStepDraft

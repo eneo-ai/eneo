@@ -15,7 +15,12 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
-from intric.flows.ai_builder.ai_builder_edit_models import FlowEditDraft
+from intric.flows.ai_builder.ai_builder_edit_models import (
+    CompiledEditResult,
+    FlowEditDiff,
+    FlowEditDraft,
+    StepChange,
+)
 from intric.flows.ai_builder.ai_builder_edit_proposal import (
     edit_flow_retry_config,
     process_edit_arguments,
@@ -322,6 +327,17 @@ def _make_flow_spec(
                 mcp_policy=MCPPolicy.INHERIT,
             )
         ],
+    )
+
+
+def _make_compiled_edit_result(compiled_spec: FlowDraftSpecCore) -> CompiledEditResult:
+    return CompiledEditResult(
+        compiled_spec=compiled_spec,
+        diff=FlowEditDiff(
+            step_changes=[StepChange(kind="unchanged", step_name="Analys")]
+        ),
+        original_draft=FlowEditDraft(operations=[]),
+        base_flow_revision=7,
     )
 
 
@@ -1754,7 +1770,7 @@ async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> Non
         ],
     }
     compiled_spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
-    edit_result = MagicMock(compiled_spec=compiled_spec, advisories=[])
+    edit_result = _make_compiled_edit_result(compiled_spec)
     compiled_validation = MagicMock(valid=True, errors=[])
 
     with (
@@ -1838,16 +1854,15 @@ async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
             ],
         }
     )
-    edit_result = MagicMock(
-        compiled_spec=_make_flow_spec(model_ref=None, knowledge_refs=[])
-    )
+    compiled_spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
+    edit_result = _make_compiled_edit_result(compiled_spec)
     compiled_validation = MagicMock(valid=True, errors=[])
 
     with (
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
             return_value=SimpleNamespace(
-                spec=edit_result.compiled_spec,
+                spec=compiled_spec,
                 validation=compiled_validation,
                 failure_feedback=None,
             ),
@@ -1937,7 +1952,7 @@ async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
         knowledge_refs=[],
         mcp_tool_refs=["mcp_tool.time-mcp-get-current-time"],
     )
-    edit_result = MagicMock(compiled_spec=compiled_spec, advisories=[])
+    edit_result = _make_compiled_edit_result(compiled_spec)
     compiled_validation = MagicMock(valid=True, errors=[])
 
     with (
@@ -2035,7 +2050,7 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
         knowledge_refs=[],
         mcp_tool_refs=["mcp_tool.time-mcp-get-current-time"],
     )
-    edit_result = MagicMock(compiled_spec=compiled_spec, advisories=[])
+    edit_result = _make_compiled_edit_result(compiled_spec)
     compiled_validation = MagicMock(valid=True, errors=[])
     proposal_success_recorder = MagicMock()
     assistant_metadata_builder = MagicMock(return_value={"planner_telemetry": {}})
@@ -2128,16 +2143,15 @@ async def test_edit_proposal_passes_metadata_to_edit_validator() -> None:
             ],
         }
     )
-    edit_result = MagicMock(
-        compiled_spec=_make_flow_spec(model_ref=None, knowledge_refs=[])
-    )
+    compiled_spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
+    edit_result = _make_compiled_edit_result(compiled_spec)
     compiled_validation = MagicMock(valid=True, errors=[])
 
     with (
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
             return_value=SimpleNamespace(
-                spec=edit_result.compiled_spec,
+                spec=compiled_spec,
                 validation=compiled_validation,
                 failure_feedback=None,
             ),
@@ -2231,17 +2245,15 @@ async def test_edit_proposal_canonicalizes_duplicate_modify_ops_before_validatio
             },
         ],
     }
-    edit_result = MagicMock(
-        compiled_spec=_make_flow_spec(model_ref=None, knowledge_refs=[]),
-        advisories=[],
-    )
+    compiled_spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
+    edit_result = _make_compiled_edit_result(compiled_spec)
     compiled_validation = MagicMock(valid=True, errors=[])
 
     with (
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
             return_value=SimpleNamespace(
-                spec=edit_result.compiled_spec,
+                spec=compiled_spec,
                 validation=compiled_validation,
                 failure_feedback=None,
             ),
@@ -2401,16 +2413,15 @@ async def test_edit_proposal_normalizes_mechanical_refs_before_validation() -> N
             }
         ],
     }
-    edit_result = MagicMock(
-        compiled_spec=_make_flow_spec(model_ref=None, knowledge_refs=[])
-    )
+    compiled_spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
+    edit_result = _make_compiled_edit_result(compiled_spec)
     compiled_validation = MagicMock(valid=True, errors=[])
 
     with (
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
             return_value=SimpleNamespace(
-                spec=edit_result.compiled_spec,
+                spec=compiled_spec,
                 validation=compiled_validation,
                 failure_feedback=None,
             ),

@@ -47,6 +47,7 @@ from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     BuilderPlan,
+    BuilderPlanEditResult,
     BuilderSession,
     ConversationMessage,
     FlowDraftSpecCore,
@@ -74,6 +75,7 @@ from intric.flows.ai_builder.ai_builder_service import (
     AIBuilderService,
     PreparedMessageContext,
 )
+from intric.flows.ai_builder.ai_builder_session_turn import SessionSendLease
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
@@ -158,7 +160,7 @@ def _make_plan(
     status: PlanStatus = PlanStatus.PROPOSED,
     spec: FlowDraftSpecCore | None = None,
     resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
-    edit_result_json: dict[str, object] | None = None,
+    edit_result: BuilderPlanEditResult | None = None,
 ) -> BuilderPlan:
     if spec is None:
         spec = FlowDraftSpecCore(
@@ -182,7 +184,7 @@ def _make_plan(
         spec_hash=spec.spec_hash(),
         envelope=envelope,
         resource_bindings=resource_bindings,
-        edit_result_json=edit_result_json,
+        edit_result=edit_result,
     )
 
 
@@ -1282,10 +1284,20 @@ class TestSendMessage:
                 )
             )
 
-        repo.update_session_status.assert_called_once_with(
+        repo.update_session_status.assert_awaited_once()
+        status_call = repo.update_session_status.call_args
+        assert status_call.kwargs["session_id"] == session.id
+        assert status_call.kwargs["tenant_id"] == user.tenant_id
+        assert status_call.kwargs["status"] == SessionStatus.CHATTING
+        assert isinstance(status_call.kwargs["lease"], SessionSendLease)
+        assert isinstance(status_call.kwargs["lease"].request_id, UUID)
+        assert isinstance(status_call.kwargs["lease"].lock_token, UUID)
+
+        repo.update_session_status.assert_awaited_once_with(
             session_id=session.id,
             tenant_id=user.tenant_id,
             status=SessionStatus.CHATTING,
+            lease=status_call.kwargs["lease"],
         )
 
     @pytest.mark.anyio
@@ -1694,9 +1706,7 @@ class TestRevisePlan:
         repo = AsyncMock()
         revised_plan = _make_plan(
             tenant_id=user.tenant_id,
-            edit_result_json={
-                "description_override_manual": True,
-            },
+            edit_result=BuilderPlanEditResult(description_override_manual=True),
         )
 
         service = _make_service(user=user, repo=repo)
@@ -1939,8 +1949,9 @@ class TestApplyPlan:
         assert apply_result.flow_id == flow_id
         assert apply_result.steps_created == 2
 
-        # Check status transitions
-        status_calls = repo.update_session_status.call_args_list
+        # Apply lifecycle writes are out-of-band and must not use an active send lease.
+        repo.update_session_status.assert_not_awaited()
+        status_calls = repo.update_session_status_without_send_lease.call_args_list
         assert status_calls[0].kwargs["status"] == SessionStatus.APPLYING
         assert status_calls[1].kwargs["status"] == SessionStatus.APPLIED
 
@@ -2011,6 +2022,7 @@ class TestApplyPlan:
             await lifecycle.apply_plan(plan_id=plan.id)
 
         repo.update_session_status.assert_not_awaited()
+        repo.update_session_status_without_send_lease.assert_not_awaited()
         mock_compile.assert_not_called()
         mock_execute.assert_not_awaited()
 
@@ -2094,8 +2106,9 @@ class TestApplyPlan:
         with pytest.raises(RuntimeError, match="DB explosion"):
             await service.apply_plan(plan_id=plan.id)
 
-        # Should have set APPLYING, then rolled back to AWAITING_APPROVAL
-        status_calls = repo.update_session_status.call_args_list
+        # Apply lifecycle writes are out-of-band and must not use an active send lease.
+        repo.update_session_status.assert_not_awaited()
+        status_calls = repo.update_session_status_without_send_lease.call_args_list
         assert status_calls[0].kwargs["status"] == SessionStatus.APPLYING
         assert status_calls[1].kwargs["status"] == SessionStatus.AWAITING_APPROVAL
 
@@ -2164,7 +2177,7 @@ class TestApplyPlan:
         plan = _make_plan(
             status=PlanStatus.APPROVED,
             tenant_id=user.tenant_id,
-            edit_result_json={"description_override_manual": True},
+            edit_result=BuilderPlanEditResult(description_override_manual=True),
         )
         session = _make_session(
             session_id=plan.session_id,

@@ -9,6 +9,7 @@ from intric.flows.ai_builder.ai_builder_context import (
     serialize_space_mcps,
     serialize_space_models,
 )
+from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from intric.flows.ai_builder.ai_builder_materializer import (
     compile_changeset,
     execute_changeset,
@@ -16,6 +17,7 @@ from intric.flows.ai_builder.ai_builder_materializer import (
 from intric.flows.ai_builder.ai_builder_models import (
     ApplyResultResponse,
     BuilderPlan,
+    BuilderPlanEditResult,
     BuilderSession,
     FlowChangeSet,
     FlowDraftSpecCore,
@@ -141,27 +143,26 @@ class AIBuilderPlanLifecycle:
         if revision_type != "keep_current_description":
             raise BadRequestException(
                 f"Unsupported revision type: {revision_type}",
-                code="unsupported_revision_type",
+                code=AIBuilderErrorCode.UNSUPPORTED_REVISION_TYPE.value,
             )
 
         plan = await self._get_plan(plan_id)
         if plan.status != PlanStatus.PROPOSED:
             raise BadRequestException(
                 "Can only revise proposed plans.",
-                code="plan_not_proposed",
+                code=AIBuilderErrorCode.PLAN_NOT_PROPOSED.value,
             )
 
         session = await self._require_session_creator(plan.session_id)
         if session.status != SessionStatus.AWAITING_APPROVAL:
             raise BadRequestException(
                 "Can only revise plans when the session is awaiting approval.",
-                code="invalid_session_transition",
+                code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION.value,
             )
 
-        revised_edit_result = (
-            dict(plan.edit_result_json) if plan.edit_result_json is not None else {}
+        revised_edit_result = (plan.edit_result or BuilderPlanEditResult()).model_copy(
+            update={"description_override_manual": True}
         )
-        revised_edit_result["description_override_manual"] = True
         envelope = plan.envelope.model_copy(update={"reasoning": None})
 
         async with self.repo.savepoint():
@@ -175,7 +176,7 @@ class AIBuilderPlanLifecycle:
                 spec=plan.spec,
                 envelope=envelope,
                 resource_bindings=plan.resource_bindings,
-                edit_result_json=revised_edit_result,
+                edit_result=revised_edit_result,
             )
             await self.repo.update_session_latest_plan_without_send_lease(
                 session_id=plan.session_id,
@@ -231,7 +232,7 @@ class AIBuilderPlanLifecycle:
         if current_flow is not None and current_flow.published_version is not None:
             raise BadRequestException(
                 "Flow is currently published. Unpublish the flow before applying changes.",
-                code="flow_is_published",
+                code=AIBuilderErrorCode.FLOW_IS_PUBLISHED.value,
                 context={
                     "flow_id": str(current_flow.id),
                     "published_version": current_flow.published_version,
@@ -243,9 +244,10 @@ class AIBuilderPlanLifecycle:
             tenant_id=self.user.tenant_id,
             status=SessionStatus.APPLYING,
         )
-        description_override_manual = bool(
-            isinstance(plan.edit_result_json, dict)
-            and plan.edit_result_json.get("description_override_manual")
+        description_override_manual = (
+            plan.edit_result.description_override_manual
+            if plan.edit_result is not None
+            else False
         )
         try:
             changeset = compile_changeset(
@@ -347,7 +349,7 @@ class AIBuilderPlanLifecycle:
         if not plan.resource_bindings:
             raise BadRequestException(
                 "The plan is missing resource bindings. Generate a new proposal and try again.",
-                code="ai_builder_plan_resource_bindings_missing",
+                code=AIBuilderErrorCode.AI_BUILDER_PLAN_RESOURCE_BINDINGS_MISSING.value,
                 context={
                     "plan_id": str(plan.id),
                     "session_id": str(session.id),
@@ -367,7 +369,7 @@ class AIBuilderPlanLifecycle:
             raise BadRequestException(
                 "A resource used by the plan is no longer available in this space. "
                 "Generate a new proposal and choose available resources.",
-                code="ai_builder_plan_resource_binding_unavailable",
+                code=AIBuilderErrorCode.AI_BUILDER_PLAN_RESOURCE_BINDING_UNAVAILABLE.value,
                 context={
                     "plan_id": str(plan.id),
                     "session_id": str(session.id),
@@ -392,7 +394,7 @@ class AIBuilderPlanLifecycle:
         if session.actor_user_id != self.user.id:
             raise UnauthorizedException(
                 "Only the session creator can manage plans.",
-                code="session_creator_required",
+                code=AIBuilderErrorCode.SESSION_CREATOR_REQUIRED.value,
                 context={"auth_layer": "session_creator"},
             )
         return session
@@ -412,7 +414,7 @@ class AIBuilderPlanLifecycle:
         if current_flow.space_id != session.space_id:
             raise BadRequestException(
                 "Flow space does not match the AI builder session space.",
-                code="flow_space_mismatch",
+                code=AIBuilderErrorCode.FLOW_SPACE_MISMATCH.value,
             )
         if (
             expected_revision is not None
@@ -421,7 +423,7 @@ class AIBuilderPlanLifecycle:
             raise BadRequestException(
                 "Flödet ändrades av en annan användare. "
                 "Dina ändringar beräknas mot den nya versionen.",
-                code="stale_revision",
+                code=AIBuilderErrorCode.STALE_REVISION.value,
             )
         return current_flow
 
@@ -448,7 +450,7 @@ class AIBuilderPlanLifecycle:
         first_error = validation.errors[0]
         raise BadRequestException(
             first_error.message,
-            code="invalid_existing_step_ref",
+            code=AIBuilderErrorCode.INVALID_EXISTING_STEP_REF.value,
             context={
                 "step_ref": first_error.step_ref,
                 "valid_refs": valid_existing_step_refs,
@@ -502,5 +504,5 @@ class AIBuilderPlanLifecycle:
             return
         raise BadRequestException(
             "A transcription model must be selected when using audio input steps.",
-            code="transcription_model_required",
+            code=AIBuilderErrorCode.TRANSCRIPTION_MODEL_REQUIRED.value,
         )

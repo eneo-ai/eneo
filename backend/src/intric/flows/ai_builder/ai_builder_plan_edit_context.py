@@ -11,6 +11,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     FlowDraftSpecCore,
     StepSpec,
 )
+from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from intric.main.exceptions import BadRequestException
 
 if TYPE_CHECKING:
@@ -106,7 +107,7 @@ async def resolve_plan_edit_context(
     if session.latest_plan_id != context.plan_id:
         raise BadRequestException(
             "The AI Builder plan has changed. Refresh the plan and try the edit again.",
-            code="stale_plan_revision",
+            code=AIBuilderErrorCode.STALE_PLAN_REVISION.value,
             context={
                 "latest_plan_id": str(session.latest_plan_id)
                 if session.latest_plan_id
@@ -119,13 +120,13 @@ async def resolve_plan_edit_context(
     if plan.session_id != session.id:
         raise BadRequestException(
             "The edit context points to a plan outside this AI Builder session.",
-            code="plan_session_mismatch",
+            code=AIBuilderErrorCode.PLAN_SESSION_MISMATCH.value,
         )
 
     if context.scope == "step" and _find_target_step(plan.spec, context) is None:
         raise BadRequestException(
             "The selected step no longer exists in the current AI Builder plan.",
-            code="invalid_plan_step_ref",
+            code=AIBuilderErrorCode.INVALID_PLAN_STEP_REF.value,
             context={"target_step_ref": step_ref_for_context(context)},
         )
 

@@ -26,6 +26,7 @@ from intric.flows.ai_builder.ai_builder_context import (
     AIBuilderPlannerContext,
     build_planner_context,
 )
+from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_DONE as _SSE_EVENT_DONE,
 )
@@ -423,7 +424,7 @@ class AIBuilderService:
             if len({file.id for file in validated_files}) != len(set(message_file_ids)):
                 raise BadRequestException(
                     "One or more referenced files are unavailable for this AI Builder session.",
-                    code="builder_attachment_unavailable",
+                    code=AIBuilderErrorCode.BUILDER_ATTACHMENT_UNAVAILABLE.value,
                 )
 
         session_file_ids = await self.repo.list_session_file_ids(
@@ -462,7 +463,7 @@ class AIBuilderService:
         if getattr(flow, "space_id", None) != space_id:
             raise BadRequestException(
                 "Flow space does not match the AI builder session space.",
-                code="flow_space_mismatch",
+                code=AIBuilderErrorCode.FLOW_SPACE_MISMATCH.value,
             )
 
     async def send_message(

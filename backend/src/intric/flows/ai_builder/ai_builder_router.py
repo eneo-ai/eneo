@@ -48,6 +48,7 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
     build_ai_builder_error_event,
     coerce_ai_builder_error_code,
 )
+from intric.flows.ai_builder.ai_builder_event_models import AI_BUILDER_SSE_MODELS
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_DONE,
     SSE_EVENT_ERROR,
@@ -92,6 +93,15 @@ if TYPE_CHECKING:
     from intric.tenants.tenant_repo import TenantRepository
 
 logger = logging.getLogger(__name__)
+
+AI_BUILDER_EVENT_STREAM_PAYLOAD_SCHEMA: dict[str, Any] = {
+    # Full payload discrimination is queued for the event-union tranche; SSE
+    # consumers should branch on the event name until that contract lands.
+    "oneOf": [
+        {"$ref": f"#/components/schemas/{model.__name__}"}
+        for model in (*AI_BUILDER_SSE_MODELS, AIBuilderPublicError)
+    ]
+}
 
 
 class AIBuilderPublicErrorRoute(APIRoute):
@@ -189,7 +199,7 @@ def _ensure_space_flow_edit_permission(container: Container, space: "Space") -> 
     if not actor.can_edit_flows():
         raise UnauthorizedException(
             "You do not have permission to use the AI builder in this space.",
-            code="insufficient_space_permission",
+            code=AIBuilderErrorCode.INSUFFICIENT_SPACE_PERMISSION.value,
             context={"auth_layer": "space_membership"},
         )
 
@@ -242,7 +252,7 @@ def _ensure_session_creator(
     if session.actor_user_id != container.user().id:
         raise UnauthorizedException(
             "Only the session creator can access this AI builder session.",
-            code="session_creator_required",
+            code=AIBuilderErrorCode.SESSION_CREATOR_REQUIRED.value,
             context={"auth_layer": "session_creator"},
         )
 
@@ -250,7 +260,7 @@ def _ensure_session_creator(
 def _raise_scope_mismatch() -> NoReturn:
     raise UnauthorizedException(
         "API key space scope does not match requested AI builder resource.",
-        code="insufficient_scope",
+        code=AIBuilderErrorCode.INSUFFICIENT_SCOPE.value,
         context={"auth_layer": "api_key_scope"},
     )
 
@@ -275,7 +285,7 @@ def _to_plan_response(plan: BuilderPlan) -> PlanResponse:
         status=plan.status,
         spec_hash=plan.spec_hash,
         envelope=public_envelope,
-        edit_result_json=plan.edit_result_json,
+        edit_result_json=plan.edit_result,
         created_at=plan.created_at,
         updated_at=plan.updated_at,
     )
@@ -504,7 +514,7 @@ async def list_sessions(
             "description": "Server-sent event stream with planner status, text, question, plan, error, and done events.",
             "content": {
                 "text/event-stream": {
-                    "schema": {"type": "string"},
+                    "schema": AI_BUILDER_EVENT_STREAM_PAYLOAD_SCHEMA,
                     "example": (
                         "event: status\n"
                         'data: {"status":"thinking"}\n\n'
@@ -813,6 +823,7 @@ async def get_session_models(
 @router.get(
     "/plans/{plan_id}",
     response_model=PlanResponse,
+    response_model_exclude_none=True,
     operation_id="get_ai_builder_plan",
     summary="Get AI Builder Plan",
     description="Fetch a stored AI Builder plan proposal for review or approval.",
@@ -856,6 +867,7 @@ async def get_plan(
 @router.get(
     "/sessions/{session_id}/plans",
     response_model=SessionPlansResponse,
+    response_model_exclude_none=True,
     operation_id="list_ai_builder_session_plans",
     summary="List Session Plans",
     description="List all plan revisions generated within a specific AI Builder session.",
@@ -1124,6 +1136,7 @@ async def apply_plan(
 @router.post(
     "/plans/{plan_id}/revise",
     response_model=PlanResponse,
+    response_model_exclude_none=True,
     operation_id="revise_ai_builder_plan",
     summary="Revise AI Builder Plan",
     description=(

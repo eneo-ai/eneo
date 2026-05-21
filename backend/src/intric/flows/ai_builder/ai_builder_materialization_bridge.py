@@ -414,7 +414,7 @@ async def apply_to_draft(
     assumptions / risk buffer across turns must not retroactively
     mutate what was persisted.
 
-    Edit-mode materialization (``edit_result_json``) is intentionally
+    Edit-mode materialization (``edit_result``) is intentionally
     not forwarded: this translator is create-only, and ``create_plan``'s
     edit parameter is for the proposal-processor's edit adapter.
     """

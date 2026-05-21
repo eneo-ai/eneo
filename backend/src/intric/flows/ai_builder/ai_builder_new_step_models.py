@@ -4,8 +4,12 @@ from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from intric.flows.ai_builder.ai_builder_domain_models import AssistantSpec
-from intric.flows.ai_builder.ai_builder_models import InputSource, InputType, OutputType
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    InputSource,
+    InputType,
+    OutputType,
+)
 from intric.flows.flow_review_policy import FlowStepReviewMode
 
 DocumentDeliveryMode = Literal["not_applicable", "generated", "template_fill"]

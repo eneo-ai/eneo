@@ -8050,6 +8050,8 @@ export interface components {
     AIBuilderErrorCode:
       | "architecture_critic_invariant_failed"
       | "architecture_materialization_failed"
+      | "ai_builder_plan_resource_binding_unavailable"
+      | "ai_builder_plan_resource_bindings_missing"
       | "bad_request"
       | "builder_attachment_unavailable"
       | "flow_is_published"
@@ -8057,10 +8059,17 @@ export interface components {
       | "insufficient_scope"
       | "insufficient_space_permission"
       | "invalid_existing_step_ref"
+      | "invalid_plan_step_ref"
       | "invalid_question_payload"
+      | "invalid_session_transition"
       | "not_found"
+      | "no_planner_model_available"
       | "plan_not_proposed"
+      | "plan_session_mismatch"
+      | "planning_state_version_mismatch"
       | "planner_budget_missing"
+      | "planner_model_missing_context_window"
+      | "planner_model_missing_output_tokens"
       | "planner_invalid_repair_response"
       | "planner_output_too_long"
       | "planner_parse_error"
@@ -8077,7 +8086,10 @@ export interface components {
       | "self_correction_quality_failure"
       | "session_creator_required"
       | "session_message_in_progress"
+      | "session_latest_plan_update_conflict"
+      | "session_send_in_progress"
       | "session_send_lease_lost"
+      | "stale_plan_revision"
       | "stale_revision"
       | "transcription_model_required"
       | "unsupported_revision_type";
@@ -10327,6 +10339,15 @@ export interface components {
        */
       package_file: string;
     };
+    /** BuilderPlanEditResult */
+    BuilderPlanEditResult: {
+      compiled_edit?: components["schemas"]["CompiledEditResult"] | null;
+      /**
+       * Description Override Manual
+       * @default false
+       */
+      description_override_manual?: boolean;
+    };
     /**
      * BulkCrawlRequest
      * @description Request model for triggering crawls on multiple websites.
@@ -10468,6 +10489,29 @@ export interface components {
     CollectionUpdate: {
       /** Name */
       name: string;
+    };
+    /**
+     * CompiledEditResult
+     * @description Backend-compiled concrete result. This is what the user approves.
+     */
+    CompiledEditResult: {
+      compiled_spec: components["schemas"]["FlowDraftSpecCore"];
+      diff: components["schemas"]["FlowEditDiff"];
+      original_draft: components["schemas"]["FlowEditDraft"];
+      /** Base Flow Revision */
+      base_flow_revision: number;
+      /** Warnings */
+      warnings?: string[];
+      /** Advisories */
+      advisories?: components["schemas"]["EditAdvisory"][];
+      /** Risk Flags */
+      risk_flags?: string[];
+      /**
+       * Confidence
+       * @default ready
+       * @enum {string}
+       */
+      confidence?: "ready" | "needs_review" | "low_confidence";
     };
     /** CompletionModel */
     CompletionModel: {
@@ -11645,6 +11689,23 @@ export interface components {
        */
       deleted_keys: string[];
     };
+    /**
+     * EditAdvisory
+     * @description Structured advisory for the user about an edit result.
+     */
+    EditAdvisory: {
+      /** Code */
+      code: string;
+      /** Message */
+      message: string;
+      /**
+       * Severity
+       * @enum {string}
+       */
+      severity: "info" | "warning" | "error";
+      /** Field */
+      field?: string | null;
+    };
     /** EmbeddingModelCreate */
     EmbeddingModelCreate: {
       /** Name */
@@ -12736,7 +12797,57 @@ export interface components {
       /** Steps */
       steps: components["schemas"]["StepSpec"][];
       /** Form Fields */
-      form_fields?: components["schemas"]["FormFieldSpec"][] | null;
+      form_fields?:
+        | components["schemas"]["intric__flows__flow_authoring_spec__FormFieldSpec"][]
+        | null;
+    };
+    /**
+     * FlowEditDiff
+     * @description Complete diff between original flow and proposed changes.
+     */
+    FlowEditDiff: {
+      /** Step Changes */
+      step_changes: components["schemas"]["StepChange"][];
+      /** Form Changes */
+      form_changes?: components["schemas"]["FormFieldChange"][];
+      /** Metadata Changes */
+      metadata_changes?: components["schemas"]["MetadataChange"][];
+      /** Flow Property Changes */
+      flow_property_changes?: {
+        [key: string]: [unknown, unknown];
+      };
+      /**
+       * Net Steps Added
+       * @default 0
+       */
+      net_steps_added?: number;
+      /**
+       * Net Steps Removed
+       * @default 0
+       */
+      net_steps_removed?: number;
+    };
+    /**
+     * FlowEditDraft
+     * @description Edit-mode planner output. Compiled by backend into concrete preview.
+     */
+    FlowEditDraft: {
+      /** Flow Name */
+      flow_name?: string | null;
+      /** Flow Description */
+      flow_description?: string | null;
+      /** Operations */
+      operations: components["schemas"]["StepEditOperation"][];
+      /** Form Operations */
+      form_operations?: components["schemas"]["FormFieldOperation"][];
+      metadata_patch?: components["schemas"]["FlowMetadataPatch"] | null;
+      /** Assumptions */
+      assumptions?: string[];
+      /**
+       * Plan Rationale
+       * @default
+       */
+      plan_rationale?: string;
     };
     /**
      * FlowEvidencePolicyPublic
@@ -12947,6 +13058,11 @@ export interface components {
      * @enum {string}
      */
     FlowMcpPolicy: "inherit" | "restricted";
+    /** FlowMetadataPatch */
+    FlowMetadataPatch: {
+      transcription?: components["schemas"]["TranscriptionPatch"] | null;
+      runtime_input?: components["schemas"]["RuntimeInputPatch"] | null;
+    };
     /**
      * FlowOutputDelivery
      * @enum {string}
@@ -12988,9 +13104,7 @@ export interface components {
      *       "description": "Creates a structured case report from approved local material.",
      *       "name": "Case Report",
      *       "package_id": "se.demo.case-report",
-     *       "package_kind": "flow",
-     *       "package_version": "1.0.0",
-     *       "payload_schema": "eneo.flow_package.v1"
+     *       "package_version": "1.0.0"
      *     }
      */
     FlowPackageExportRequest: {
@@ -13150,7 +13264,7 @@ export interface components {
       package_base64: string;
       /**
        * Selected Bindings
-       * @description Local target resources selected for package dependency slots.
+       * @description Local target resources selected for package dependency slots. Knowledge slots may target `collection`, `website`, or `integration_knowledge` resources.
        */
       selected_bindings?: components["schemas"]["FlowPackageImportResourceBindingRequest"][];
     };
@@ -13472,7 +13586,9 @@ export interface components {
      *       "description": "Creates a structured case report from approved local material.",
      *       "name": "Case Report",
      *       "package_id": "se.demo.case-report",
+     *       "package_kind": "flow",
      *       "package_version": "1.0.0",
+     *       "payload_schema": "eneo.flow_package.v1",
      *       "requirements_by_kind": {
      *         "knowledge": 1,
      *         "model": 1
@@ -13495,7 +13611,7 @@ export interface components {
       package_version: string;
       /**
        * Package Kind
-       * @description Generic package kind. Flow package V1 currently imports only `flow`.
+       * @description Generic package kind. Flow package import accepts only `flow` payloads.
        */
       package_kind: string;
       /**
@@ -17122,6 +17238,34 @@ export interface components {
       /** Message Code */
       message_code?: string | null;
     };
+    /** FormFieldChange */
+    FormFieldChange: {
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "added" | "modified" | "removed";
+      /** Field Name */
+      field_name: string;
+      /** Details */
+      details?: string | null;
+    };
+    /**
+     * FormFieldOperation
+     * @description Operation on a form field.
+     */
+    FormFieldOperation: {
+      /**
+       * Op
+       * @enum {string}
+       */
+      op: "add" | "modify" | "remove";
+      /** Field Name */
+      field_name: string;
+      field_payload?:
+        | components["schemas"]["intric__flows__ai_builder__ai_builder_edit_models__FormFieldSpec"]
+        | null;
+    };
     /** FormFieldPublic */
     FormFieldPublic: {
       /**
@@ -17155,22 +17299,6 @@ export interface components {
        * @description Display order for generated run forms.
        */
       order?: number | null;
-    };
-    /** FormFieldSpec */
-    FormFieldSpec: {
-      /** Name */
-      name: string;
-      /** Type */
-      type: string;
-      /** Label */
-      label: string;
-      /**
-       * Required
-       * @default false
-       */
-      required?: boolean;
-      /** Options */
-      options?: string[] | null;
     };
     /** FormatLimit */
     FormatLimit: {
@@ -18405,6 +18533,20 @@ export interface components {
       tool_calls?: components["schemas"]["ToolCallInfo"][];
       logging_details: components["schemas"]["LoggingDetailsPublic"];
     };
+    /** MetadataChange */
+    MetadataChange: {
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "added" | "modified" | "removed";
+      /** Path */
+      path: string;
+      /** Old Value */
+      old_value?: unknown;
+      /** New Value */
+      new_value?: unknown;
+    };
     /** MetadataCount */
     MetadataCount: {
       /**
@@ -18873,6 +19015,62 @@ export interface components {
      * @enum {string}
      */
     Modules: "intric-applications";
+    /**
+     * NewStepDraft
+     * @description Shared authoring contract for a brand-new step.
+     */
+    NewStepDraft: {
+      /** Name */
+      name: string;
+      /** Instructions */
+      instructions?: string | null;
+      assistant_spec?: components["schemas"]["AssistantSpec"] | null;
+      input_source: components["schemas"]["AIBuilderInputSource"];
+      /** @default text */
+      input_type?: components["schemas"]["AIBuilderInputType"];
+      /** @default text */
+      output_type?: components["schemas"]["FlowOutputType"];
+      /** Model Ref */
+      model_ref?: string | null;
+      /** Knowledge Refs */
+      knowledge_refs?: string[];
+      /** Mcp Server Refs */
+      mcp_server_refs?: string[];
+      /** Mcp Tool Refs */
+      mcp_tool_refs?: string[];
+      /**
+       * Runtime Upload
+       * @default false
+       */
+      runtime_upload?: boolean;
+      /**
+       * Runtime Required
+       * @default false
+       */
+      runtime_required?: boolean;
+      /** Runtime Max Files */
+      runtime_max_files?: number | null;
+      /** Uses Form Fields */
+      uses_form_fields?: string[];
+      /** Uses Previous Fields */
+      uses_previous_fields?: components["schemas"]["PreviousFieldRef"][];
+      /** Uses Previous Outputs */
+      uses_previous_outputs?: components["schemas"]["PreviousOutputRef"][];
+      /**
+       * Document Delivery Mode
+       * @default not_applicable
+       * @enum {string}
+       */
+      document_delivery_mode?: "not_applicable" | "generated" | "template_fill";
+      /**
+       * Citations Requested
+       * @default false
+       */
+      citations_requested?: boolean;
+      review_mode?: components["schemas"]["FlowStepReviewMode"] | null;
+      /** Output Fields */
+      output_fields?: components["schemas"]["StructuredFieldDraft"][] | null;
+    };
     /** OIDCDebugToggleRequest */
     OIDCDebugToggleRequest: {
       /**
@@ -20113,10 +20311,7 @@ export interface components {
       /** Spec Hash */
       spec_hash: string;
       envelope: components["schemas"]["PlannerPlanEnvelope"];
-      /** Edit Result Json */
-      edit_result_json?: {
-        [key: string]: unknown;
-      } | null;
+      edit_result_json?: components["schemas"]["BuilderPlanEditResult"] | null;
       /** Created At */
       created_at?: string | null;
       /** Updated At */
@@ -20150,6 +20345,22 @@ export interface components {
       reasoning?: string | null;
       /** Plan Rationale */
       plan_rationale?: string | null;
+    };
+    /** PreviousFieldRef */
+    PreviousFieldRef: {
+      /** From Step */
+      from_step: number;
+      /** Field Path */
+      field_path: string;
+      /** Label */
+      label?: string | null;
+    };
+    /** PreviousOutputRef */
+    PreviousOutputRef: {
+      /** From Step */
+      from_step: number;
+      /** Label */
+      label?: string | null;
     };
     /**
      * PrincipalType
@@ -20485,6 +20696,17 @@ export interface components {
        * @default []
        */
       files?: components["schemas"]["ModelId"][];
+    };
+    /** RuntimeInputPatch */
+    RuntimeInputPatch: {
+      /** Enabled */
+      enabled?: boolean | null;
+      /** Required */
+      required?: boolean | null;
+      /** Max Files */
+      max_files?: number | null;
+      /** Input Format */
+      input_format?: string | null;
     };
     /**
      * SecurityClassificationCreatePublic
@@ -21629,6 +21851,93 @@ export interface components {
      * @enum {string}
      */
     Status: "in progress" | "queued" | "complete" | "failed" | "not found";
+    /**
+     * StepChange
+     * @description One entry in the step diff.
+     */
+    StepChange: {
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "added" | "modified" | "removed" | "unchanged";
+      /** Step Name */
+      step_name: string;
+      /** Step Ref */
+      step_ref?: string | null;
+      /** Details */
+      details?: string | null;
+    };
+    /**
+     * StepEditOperation
+     * @description A single edit operation on a step.
+     */
+    StepEditOperation: {
+      /**
+       * Op
+       * @enum {string}
+       */
+      op: "add" | "modify" | "remove";
+      /** Target Ref */
+      target_ref?: string | null;
+      placement?: components["schemas"]["StepPlacement"] | null;
+      add_payload?: components["schemas"]["NewStepDraft"] | null;
+      patch?: components["schemas"]["StepPatch"] | null;
+    };
+    /**
+     * StepPatch
+     * @description Partial update for existing steps. Only include fields being changed.
+     */
+    StepPatch: {
+      /** Name */
+      name?: string | null;
+      assistant_spec?: components["schemas"]["AssistantSpec"] | null;
+      input_source?: components["schemas"]["AIBuilderInputSource"] | null;
+      input_type?: components["schemas"]["AIBuilderInputType"] | null;
+      output_mode?: components["schemas"]["AIBuilderOutputMode"] | null;
+      output_type?: components["schemas"]["FlowOutputType"] | null;
+      /** Document Delivery Mode */
+      document_delivery_mode?: ("not_applicable" | "generated" | "template_fill") | null;
+      mcp_policy?: components["schemas"]["FlowMcpPolicy"] | null;
+      /** Uses Form Fields */
+      uses_form_fields?: string[] | null;
+      /** Uses Previous Fields */
+      uses_previous_fields?: components["schemas"]["PreviousFieldRef"][] | null;
+      /** Input Bindings */
+      input_bindings?: {
+        [key: string]: unknown;
+      } | null;
+      /** Input Contract */
+      input_contract?: {
+        [key: string]: unknown;
+      } | null;
+      /** Output Contract */
+      output_contract?: {
+        [key: string]: unknown;
+      } | null;
+      /** Input Config */
+      input_config?: {
+        [key: string]: unknown;
+      } | null;
+      /** Output Config */
+      output_config?: {
+        [key: string]: unknown;
+      } | null;
+      review_mode?: components["schemas"]["FlowStepReviewMode"] | null;
+    };
+    /**
+     * StepPlacement
+     * @description Where to insert a new step relative to existing steps.
+     */
+    StepPlacement: {
+      /**
+       * Position
+       * @enum {string}
+       */
+      position: "before" | "after" | "append";
+      /** Anchor Ref */
+      anchor_ref?: string | null;
+    };
     /** StepRunInput */
     StepRunInput: {
       /**
@@ -21743,6 +22052,27 @@ export interface components {
       email: string;
       /** Role */
       role: string;
+    };
+    /** StructuredFieldDraft */
+    StructuredFieldDraft: {
+      /** Name */
+      name: string;
+      /**
+       * Field Type
+       * @enum {string}
+       */
+      field_type: "string" | "number" | "boolean" | "object" | "array";
+      /** Description */
+      description: string;
+      /**
+       * Required
+       * @default true
+       */
+      required?: boolean;
+      /** Fields */
+      fields?: components["schemas"]["StructuredFieldDraft"][] | null;
+      /** Item Fields */
+      item_fields?: components["schemas"]["StructuredFieldDraft"][] | null;
     };
     /**
      * SubscriptionRenewalResult
@@ -22874,6 +23204,15 @@ export interface components {
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
+    /** TranscriptionPatch */
+    TranscriptionPatch: {
+      /** Enabled */
+      enabled?: boolean | null;
+      /** Model Id */
+      model_id?: string | null;
+      /** Language */
+      language?: string | null;
+    };
     /** TransferApplicationRequest */
     TransferApplicationRequest: {
       /**
@@ -23870,6 +24209,38 @@ export interface components {
      */
     WizardType: "attachments" | "groups";
     /**
+     * FormFieldSpec
+     * @description Spec for a form field (add or modify).
+     */
+    intric__flows__ai_builder__ai_builder_edit_models__FormFieldSpec: {
+      /** Label */
+      label?: string | null;
+      /** Field Type */
+      field_type?: string | null;
+      /** Required */
+      required?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /** Options */
+      options?: string[] | null;
+    };
+    /** FormFieldSpec */
+    intric__flows__flow_authoring_spec__FormFieldSpec: {
+      /** Name */
+      name: string;
+      /** Type */
+      type: string;
+      /** Label */
+      label: string;
+      /**
+       * Required
+       * @default false
+       */
+      required?: boolean;
+      /** Options */
+      options?: string[] | null;
+    };
+    /**
      * CredentialInfo
      * @description Information about a configured credential.
      *
@@ -24325,6 +24696,95 @@ export interface components {
        * @default null
        */
       error_code?: number | null;
+    };
+    /** AIBuilderTextEventData */
+    AIBuilderTextEventData: {
+      /** Text */
+      text: string;
+    };
+    /** AIBuilderStatusEventData */
+    AIBuilderStatusEventData: {
+      /** Status */
+      status: string;
+    };
+    /** StructuredQuestionOptionPayload */
+    StructuredQuestionOptionPayload: {
+      /**
+       * Id
+       * @default null
+       */
+      id?: string | null;
+      /** Label */
+      label: string;
+      /**
+       * Value
+       * @default null
+       */
+      value?: string | number | boolean | null;
+      /**
+       * Description
+       * @default null
+       */
+      description?: string | null;
+    };
+    /** StructuredQuestionPayload */
+    StructuredQuestionPayload: {
+      /** Question Id */
+      question_id: string;
+      /** Question */
+      question: string;
+      /** Options */
+      options: components["schemas"]["StructuredQuestionOptionPayload"][];
+      /**
+       * Selection Mode
+       * @enum {string}
+       */
+      selection_mode: "single" | "multi";
+      /** Allow Custom */
+      allow_custom: boolean;
+      /**
+       * Requires Confirm
+       * @default false
+       */
+      requires_confirm?: boolean;
+    };
+    /** KeyDecisionPayload */
+    KeyDecisionPayload: {
+      /** Topic */
+      topic: string;
+      /** Decision */
+      decision: string;
+    };
+    /** RequirementsSummaryPayload */
+    RequirementsSummaryPayload: {
+      /**
+       * Requirements Version
+       * @default null
+       */
+      requirements_version?: string | null;
+      /** Summary */
+      summary: string;
+      /** Key Decisions */
+      key_decisions: components["schemas"]["KeyDecisionPayload"][];
+      /** Input Description */
+      input_description: string;
+      /** Output Description */
+      output_description: string;
+      /** Assumptions */
+      assumptions?: string[];
+      /** Manual Setup Notes */
+      manual_setup_notes?: string[];
+    };
+    /** AIBuilderPlanEventData */
+    AIBuilderPlanEventData: {
+      /**
+       * Plan Id
+       * Format: uuid
+       */
+      plan_id: string;
+      envelope: components["schemas"]["PlannerPlanEnvelope"];
+      /** @default null */
+      edit_result_json?: components["schemas"]["BuilderPlanEditResult"] | null;
     };
   };
   responses: never;
@@ -39838,7 +40298,15 @@ export interface operations {
            *     event: done
            *     data:
            */
-          "text/event-stream": string;
+          "text/event-stream":
+            | components["schemas"]["AIBuilderTextEventData"]
+            | components["schemas"]["AIBuilderStatusEventData"]
+            | components["schemas"]["StructuredQuestionOptionPayload"]
+            | components["schemas"]["StructuredQuestionPayload"]
+            | components["schemas"]["KeyDecisionPayload"]
+            | components["schemas"]["RequirementsSummaryPayload"]
+            | components["schemas"]["AIBuilderPlanEventData"]
+            | components["schemas"]["AIBuilderPublicError"];
         };
       };
       /** @description The AI Builder session cannot accept a new message in its current state. */

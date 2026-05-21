@@ -380,6 +380,9 @@ def get_application():
         schemas = _json_obj(components.setdefault("schemas", {}))
 
         # Import SSE models and enums
+        from intric.flows.ai_builder.ai_builder_event_models import (
+            AI_BUILDER_SSE_MODELS,
+        )
         from intric.sessions.session import SSE_MODELS, IntricEventType
 
         # Add IntricEventType enum if not already there
@@ -391,7 +394,7 @@ def get_application():
 
         # Add SSE model schemas, hoisting nested $defs to top-level component schemas
         # so that openapi-typescript can resolve all $ref pointers.
-        for model in SSE_MODELS:
+        for model in (*SSE_MODELS, *AI_BUILDER_SSE_MODELS):
             model_name = model.__name__
             if model_name not in schemas:
                 schema = model.model_json_schema(

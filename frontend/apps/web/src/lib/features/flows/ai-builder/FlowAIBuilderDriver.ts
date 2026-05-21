@@ -661,18 +661,9 @@ export class FlowAIBuilderDriver {
           body: JSON.stringify({ type }),
           headers: { "Content-Type": "application/json" }
         }
-      )) as ProposedPlan;
+      )) as IncomingProposedPlan;
 
-      this.#state.currentPlan = {
-        plan_id: result.plan_id,
-        status: result.status,
-        envelope: result.envelope,
-        edit_diff: result.edit_diff,
-        edit_confidence: result.edit_confidence,
-        edit_warnings: result.edit_warnings,
-        edit_advisories: result.edit_advisories,
-        edit_risk_flags: result.edit_risk_flags
-      };
+      this.#state.currentPlan = this.#normalizePlan(result);
       this.#notify();
     } catch (e) {
       this.#state.error = parseAIBuilderError({
@@ -1036,9 +1027,15 @@ export class FlowAIBuilderDriver {
   }
 
   #normalizePlan(plan: IncomingProposedPlan): ProposedPlan {
+    const compiledEdit = plan.edit_result_json?.compiled_edit ?? null;
     return {
       ...plan,
-      status: plan.status ?? "proposed"
+      status: plan.status ?? "proposed",
+      edit_diff: plan.edit_diff ?? compiledEdit?.diff ?? null,
+      edit_confidence: plan.edit_confidence ?? compiledEdit?.confidence ?? null,
+      edit_warnings: plan.edit_warnings ?? compiledEdit?.warnings ?? null,
+      edit_advisories: plan.edit_advisories ?? compiledEdit?.advisories ?? null,
+      edit_risk_flags: plan.edit_risk_flags ?? compiledEdit?.risk_flags ?? null
     };
   }
 

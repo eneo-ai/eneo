@@ -15,6 +15,7 @@ from uuid import UUID
 import uuid_utils
 from pydantic import BaseModel, ConfigDict, Field
 
+from intric.flows.ai_builder.ai_builder_edit_models import BuilderPlanEditResult
 from intric.flows.application.flow_draft_materialization import (
     FlowDraftAssistantToCreate as AssistantToCreate,
 )
@@ -201,7 +202,7 @@ class BuilderPlan(BaseModel):
     spec_hash: str
     envelope: PlannerPlanEnvelope
     resource_bindings: tuple[LocalResourceBinding, ...] = Field(default_factory=tuple)
-    edit_result_json: JsonObject | None = None
+    edit_result: BuilderPlanEditResult | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -213,6 +214,7 @@ __all__ = [
     "AssistantToDelete",
     "AssistantToUpdate",
     "BuilderPlan",
+    "BuilderPlanEditResult",
     "BuilderSession",
     "CompiledStep",
     "ConversationMessage",

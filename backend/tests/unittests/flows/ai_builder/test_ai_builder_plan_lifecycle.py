@@ -8,9 +8,16 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_edit_models import (
+    CompiledEditResult,
+    FlowEditDiff,
+    FlowEditDraft,
+    StepChange,
+)
 from intric.flows.ai_builder.ai_builder_models import (
     AssistantSpec,
     BuilderPlan,
+    BuilderPlanEditResult,
     BuilderSession,
     FlowChangeSet,
     FlowDraftSpecCore,
@@ -107,7 +114,7 @@ def _make_plan(
     session_id,
     tenant_id,
     status: PlanStatus = PlanStatus.APPROVED,
-    edit_result_json: dict[str, object] | None = None,
+    edit_result: BuilderPlanEditResult | None = None,
     spec: FlowDraftSpecCore | None = None,
     resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
     envelope: PlannerPlanEnvelope | None = None,
@@ -122,7 +129,18 @@ def _make_plan(
         spec_hash=used_spec.spec_hash(),
         envelope=envelope or PlannerPlanEnvelope(spec=used_spec),
         resource_bindings=resource_bindings,
-        edit_result_json=edit_result_json,
+        edit_result=edit_result,
+    )
+
+
+def _make_compiled_edit_result(spec: FlowDraftSpecCore) -> CompiledEditResult:
+    return CompiledEditResult(
+        compiled_spec=spec,
+        diff=FlowEditDiff(
+            step_changes=[StepChange(kind="unchanged", step_name="Step A")]
+        ),
+        original_draft=FlowEditDraft(operations=[]),
+        base_flow_revision=1,
     )
 
 
@@ -174,13 +192,14 @@ class TestAIBuilderPlanLifecycle:
             local_id=uuid4(),
         )
         plan_spec = _make_spec()
+        compiled_edit_result = _make_compiled_edit_result(plan_spec)
         plan = _make_plan(
             session_id=uuid4(),
             tenant_id=user.tenant_id,
             status=PlanStatus.PROPOSED,
             spec=plan_spec,
             resource_bindings=(binding,),
-            edit_result_json={"other_key": "value"},
+            edit_result=BuilderPlanEditResult(compiled_edit=compiled_edit_result),
             envelope=PlannerPlanEnvelope(
                 spec=plan_spec,
                 lint_warnings=[
@@ -205,10 +224,10 @@ class TestAIBuilderPlanLifecycle:
             tenant_id=user.tenant_id,
             status=PlanStatus.PROPOSED,
             resource_bindings=(binding,),
-            edit_result_json={
-                "other_key": "value",
-                "description_override_manual": True,
-            },
+            edit_result=BuilderPlanEditResult(
+                compiled_edit=compiled_edit_result,
+                description_override_manual=True,
+            ),
         )
         repo.get_plan.return_value = plan
         repo.get_session.return_value = session
@@ -239,10 +258,9 @@ class TestAIBuilderPlanLifecycle:
         assert create_kwargs["envelope"].lint_warnings == plan.envelope.lint_warnings
         assert create_kwargs["envelope"].reasoning is None
         assert create_kwargs["resource_bindings"] == (binding,)
-        assert create_kwargs["edit_result_json"] == {
-            "other_key": "value",
-            "description_override_manual": True,
-        }
+        assert create_kwargs["edit_result"] == BuilderPlanEditResult(
+            compiled_edit=compiled_edit_result, description_override_manual=True
+        )
         repo.update_session_latest_plan_without_send_lease.assert_awaited_once_with(
             session_id=plan.session_id,
             tenant_id=user.tenant_id,
@@ -291,7 +309,7 @@ class TestAIBuilderPlanLifecycle:
         plan = _make_plan(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            edit_result_json={"description_override_manual": True},
+            edit_result=BuilderPlanEditResult(description_override_manual=True),
         )
         flow_service.get_flow.return_value = SimpleNamespace(
             id=flow_id,

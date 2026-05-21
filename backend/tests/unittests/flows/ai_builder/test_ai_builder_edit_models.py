@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
+import pytest
+from pydantic import ValidationError
+
 from intric.flows.ai_builder.ai_builder_edit_models import (
     AddStepPayload,
+    BuilderPlanEditResult,
     CompiledEditResult,
     FlowEditDiff,
     FlowEditDraft,
@@ -38,6 +44,45 @@ def _make_add_payload(
         instructions=instructions,
         input_source=input_source,
         input_type=input_type,
+    )
+
+
+def _make_compiled_edit_result() -> CompiledEditResult:
+    spec = FlowDraftSpecCore(
+        flow_name="Test",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Step A",
+                assistant_spec=AssistantSpec(instructions="Do."),
+                input_source=InputSource.FLOW_INPUT,
+            )
+        ],
+    )
+    draft = FlowEditDraft(
+        operations=[
+            StepEditOperation(
+                op="add",
+                placement=StepPlacement(position="append"),
+                add_payload=_make_add_payload(
+                    name="Step A",
+                    instructions="Do.",
+                ),
+            ),
+        ],
+    )
+    diff = FlowEditDiff(
+        step_changes=[StepChange(kind="added", step_name="Step A")],
+        net_steps_added=1,
+    )
+    return CompiledEditResult(
+        compiled_spec=spec,
+        diff=diff,
+        original_draft=draft,
+        base_flow_revision=3,
+        warnings=["New step uses default model"],
+        risk_flags=[],
+        confidence="ready",
     )
 
 
@@ -176,42 +221,7 @@ class TestFlowEditDiff:
 
 class TestCompiledEditResult:
     def test_compiled_result_roundtrip(self):
-        spec = FlowDraftSpecCore(
-            flow_name="Test",
-            steps=[
-                StepSpec(
-                    plan_step_ref="step_a",
-                    name="Step A",
-                    assistant_spec=AssistantSpec(instructions="Do."),
-                    input_source=InputSource.FLOW_INPUT,
-                )
-            ],
-        )
-        draft = FlowEditDraft(
-            operations=[
-                StepEditOperation(
-                    op="add",
-                    placement=StepPlacement(position="append"),
-                    add_payload=_make_add_payload(
-                        name="Step A",
-                        instructions="Do.",
-                    ),
-                ),
-            ],
-        )
-        diff = FlowEditDiff(
-            step_changes=[StepChange(kind="added", step_name="Step A")],
-            net_steps_added=1,
-        )
-        result = CompiledEditResult(
-            compiled_spec=spec,
-            diff=diff,
-            original_draft=draft,
-            base_flow_revision=3,
-            warnings=["New step uses default model"],
-            risk_flags=[],
-            confidence="ready",
-        )
+        result = _make_compiled_edit_result()
         assert result.base_flow_revision == 3
         assert result.confidence == "ready"
         assert len(result.warnings) == 1
@@ -221,3 +231,39 @@ class TestCompiledEditResult:
         restored = CompiledEditResult.model_validate_json(serialized)
         assert restored.base_flow_revision == 3
         assert restored.diff.net_steps_added == 1
+
+
+class TestBuilderPlanEditResult:
+    def test_flag_only_manual_description_override_roundtrips(self):
+        result = BuilderPlanEditResult(description_override_manual=True)
+
+        serialized = result.model_dump(mode="json", exclude_none=True)
+        assert serialized == {"description_override_manual": True}
+        restored = BuilderPlanEditResult.model_validate(serialized)
+        assert restored.compiled_edit is None
+        assert restored.description_override_manual is True
+
+    def test_legacy_flat_compiled_edit_shape_hydrates_to_compiled_edit(self):
+        compiled = _make_compiled_edit_result()
+
+        result = BuilderPlanEditResult.model_validate(compiled.model_dump(mode="json"))
+
+        assert result.compiled_edit == compiled
+        assert result.description_override_manual is False
+
+    def test_populated_compiled_edit_result_json_roundtrips(self):
+        compiled = _make_compiled_edit_result()
+        result = BuilderPlanEditResult(compiled_edit=compiled)
+
+        serialized = result.model_dump(mode="json", exclude_none=True)
+        json.dumps(serialized)
+        restored = BuilderPlanEditResult.model_validate(serialized)
+
+        assert restored.compiled_edit == compiled
+        assert restored.description_override_manual is False
+
+    def test_rejects_string_manual_description_override_flag(self):
+        with pytest.raises(ValidationError):
+            BuilderPlanEditResult.model_validate(
+                {"description_override_manual": "true"}
+            )

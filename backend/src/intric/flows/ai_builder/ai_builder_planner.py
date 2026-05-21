@@ -1059,7 +1059,7 @@ class AIBuilderPlanner:
         if max_input_tokens is None or max_output_tokens is None:
             raise BadRequestException(
                 "AI Builder planner budget settings are missing.",
-                code="planner_budget_missing",
+                code=AIBuilderErrorCode.PLANNER_BUDGET_MISSING.value,
             )
 
         response_format_selection = build_planner_request_response_format(
@@ -1097,7 +1097,7 @@ class AIBuilderPlanner:
         if not claimed:
             raise BadRequestException(
                 "Another AI Builder message is already being processed for this session.",
-                code="session_message_in_progress",
+                code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS.value,
             )
         lease_task = asyncio.create_task(
             self._maintain_send_lock_lease(
