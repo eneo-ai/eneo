@@ -4,6 +4,7 @@ import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -22,22 +23,12 @@ from intric.database.tables.spaces_table import (
 )
 from intric.database.tables.tenant_table import Tenants
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
-from intric.flows.ai_builder.ai_builder_domain_models import SessionStatus
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
-    PlanStatus,
     PlannerPlanEnvelope,
+    PlanStatus,
+    SessionStatus,
     TargetKind,
-)
-from intric.flows.flow_authoring_spec import (
-    AssistantSpec,
-    FlowDraftSpecCore,
-    InputSource,
-    InputType,
-    MCPPolicy,
-    OutputMode,
-    OutputType,
-    StepSpec,
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_session_turn import (
@@ -56,6 +47,16 @@ from intric.flows.ai_builder.planning_state import (
 )
 from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
 from intric.flows.flow import FlowStep
+from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    MCPPolicy,
+    OutputMode,
+    OutputType,
+    StepSpec,
+)
 from intric.main.exceptions import BadRequestException, NotFoundException
 from intric.main.models import ModelId
 from intric.prompts.api.prompt_models import PromptCreate
@@ -189,6 +190,33 @@ async def _claim_session_send_turn(
     )
     assert claimed is True
     return turn
+
+
+async def _load_session_send_lock(
+    repo: AIBuilderRepository,
+    *,
+    session_id: UUID,
+    tenant_id: UUID,
+) -> tuple[UUID | None, UUID | None, datetime | None, datetime | None]:
+    row = (
+        await repo.session.execute(
+            select(
+                BuilderSessions.active_request_id,
+                BuilderSessions.lock_token,
+                BuilderSessions.locked_at,
+                BuilderSessions.lock_expires_at,
+            ).where(
+                BuilderSessions.id == session_id,
+                BuilderSessions.tenant_id == tenant_id,
+            )
+        )
+    ).one()
+    return (
+        cast(UUID | None, row[0]),
+        cast(UUID | None, row[1]),
+        cast(datetime | None, row[2]),
+        cast(datetime | None, row[3]),
+    )
 
 
 async def _create_ai_builder_session(
@@ -551,8 +579,8 @@ async def test_revise_plan_api_rejects_active_send_and_rolls_back(
         headers={"Authorization": f"Bearer {bearer_token}"},
     )
 
-    assert response.status_code == 400, response.text
-    assert response.json()["code"] == "bad_request"
+    assert response.status_code == 409, response.text
+    assert response.json()["code"] == "session_send_in_progress"
     assert (
         response.json()["message"]
         == "An active send is currently in progress for this session."
@@ -752,6 +780,116 @@ async def test_ai_builder_repo_claim_session_send_can_reclaim_expired_lease(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_ai_builder_repo_rejects_partial_send_lock_row(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Partial Send Lock",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+
+        with pytest.raises(IntegrityError):
+            await repo.session.execute(
+                update(BuilderSessions)
+                .where(
+                    BuilderSessions.id == session.id,
+                    BuilderSessions.tenant_id == user.tenant_id,
+                )
+                .values(active_request_id=uuid4(), lock_token=uuid4())
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ai_builder_repo_send_lock_claim_refresh_release_preserves_invariant(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Send Lock Refresh",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
+
+        claimed = await repo.claim_session_send(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lease=lease,
+            lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
+        )
+        assert claimed is True
+        claimed_lock = await _load_session_send_lock(
+            repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+        assert claimed_lock[0] == lease.request_id
+        assert claimed_lock[1] == lease.lock_token
+        assert claimed_lock[2] is not None
+        assert claimed_lock[3] is not None
+
+        refreshed = await repo.refresh_session_send_lease(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lease=lease,
+            lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=60),
+        )
+        assert refreshed is True
+        refreshed_lock = await _load_session_send_lock(
+            repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+        assert refreshed_lock[0] == lease.request_id
+        assert refreshed_lock[1] == lease.lock_token
+        assert refreshed_lock[2] is not None
+        assert refreshed_lock[3] is not None
+
+        await repo.release_session_send(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lease=lease,
+        )
+        assert await _load_session_send_lock(
+            repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        ) == (None, None, None, None)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_ai_builder_repo_release_session_send_requires_matching_lock_token(
     client,
     bearer_token,
@@ -817,6 +955,46 @@ async def test_ai_builder_repo_release_session_send_requires_matching_lock_token
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_ai_builder_repo_cancel_session_clears_send_lock_fields(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Send Lock Cancel",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+
+        await repo.cancel_session(session_id=session.id, tenant_id=user.tenant_id)
+
+        assert await _load_session_send_lock(
+            repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        ) == (None, None, None, None)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_send_message_status_jump_under_lock_uses_lease(
     client,
     bearer_token,
@@ -852,13 +1030,19 @@ async def test_send_message_status_jump_under_lock_uses_lease(
         original_update = repo.update_session_status
 
         async def lose_lease_before_status_update(**kwargs):
+            now = datetime.now(timezone.utc)
             await repo.session.execute(
                 update(BuilderSessions)
                 .where(
                     BuilderSessions.id == kwargs["session_id"],
                     BuilderSessions.tenant_id == kwargs["tenant_id"],
                 )
-                .values(active_request_id=uuid4(), lock_token=uuid4())
+                .values(
+                    active_request_id=uuid4(),
+                    lock_token=uuid4(),
+                    locked_at=now,
+                    lock_expires_at=now + timedelta(seconds=30),
+                )
             )
             await original_update(**kwargs)
 

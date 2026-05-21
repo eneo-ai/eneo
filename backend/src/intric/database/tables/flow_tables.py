@@ -110,8 +110,12 @@ FLOW_RESOURCE_LOCAL_RESOURCE_KIND_VALUES = tuple(
     item.value for item in LocalResourceKind
 )
 FLOW_RESOURCE_SLOT_LOCAL_KIND_PAIR_VALUES = RESOURCE_SLOT_LOCAL_KIND_PAIRS
-FLOW_PACKAGE_IMPORT_SOURCE_VALUES = tuple(item.value for item in FlowPackageImportSource)
-FLOW_PACKAGE_IMPORT_STATUS_VALUES = tuple(item.value for item in FlowPackageImportStatus)
+FLOW_PACKAGE_IMPORT_SOURCE_VALUES = tuple(
+    item.value for item in FlowPackageImportSource
+)
+FLOW_PACKAGE_IMPORT_STATUS_VALUES = tuple(
+    item.value for item in FlowPackageImportStatus
+)
 
 
 def _check_values(values: tuple[str, ...]) -> str:
@@ -1745,6 +1749,20 @@ class BuilderSessions(BasePublic):
         CheckConstraint(
             f"status IN ({','.join(repr(v) for v in BUILDER_SESSION_STATUS_VALUES)})",
             name="ck_builder_sessions_status",
+        ),
+        CheckConstraint(
+            "("
+            "active_request_id IS NULL "
+            "AND lock_token IS NULL "
+            "AND locked_at IS NULL "
+            "AND lock_expires_at IS NULL"
+            ") OR ("
+            "active_request_id IS NOT NULL "
+            "AND lock_token IS NOT NULL "
+            "AND locked_at IS NOT NULL "
+            "AND lock_expires_at IS NOT NULL"
+            ")",
+            name="ck_builder_sessions_send_lock_all_or_none",
         ),
     )
 

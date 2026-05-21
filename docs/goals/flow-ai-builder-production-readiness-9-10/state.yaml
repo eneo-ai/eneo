@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T023
+active_task: T025
 
 scoring_target:
   dimensions:
@@ -50,7 +50,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T022 implementation/post-review: conversation metadata/tool-call JSONB, public error diagnostics, frontend diagnostic reports, targeted runtime-field intent, and AI Builder model import ownership now have typed/canonical ownership or behavior coverage. The fake ai_builder_models.py aggregation layer is deleted, ai_builder_domain_models.py no longer re-exports portable/materialization aliases, and an AST guard prevents the fake-owner pattern from returning. The broader score floor is still below 9 because DB lock invariants, full-source Pyright baseline failures, broader live eval/output coverage, test topology, large orchestration files, and remaining AI-slop/readability cleanup still block production-readiness."
+  source: "After T024 implementation/post-review: conversation metadata/tool-call JSONB, public error diagnostics, frontend diagnostic reports, targeted runtime-field intent, AI Builder model import ownership, and builder session send-lock persistence now have typed/canonical ownership or DB-backed invariants. The broader score floor is still below 9 because broad live eval/output coverage, full-source Pyright/test baseline, API/error-code discipline, large orchestration files, and remaining AI-slop/readability cleanup still block production-readiness."
   Maintainability: 8
   Code_Quality: 8
   Clean_Architecture: 8
@@ -58,8 +58,8 @@ current_scorecard:
   Single_Source_of_Truth: 9
   Human_Readability: 8
   Human_Reviewability: 8
-  Runtime_Reliability: 8
-  Data_Model_Schema_Quality: 8
+  Runtime_Reliability: 9
+  Data_Model_Schema_Quality: 9
   API_Contract_Quality: 8
   Test_Coverage_Quality: 8
   Developer_Diagnostic_Experience: 9
@@ -68,11 +68,10 @@ current_scorecard:
   Overall: 8
   blockers:
     - "Public/lifecycle/CAS error-code discipline improved, but calls that omit code= entirely can still silently use generic codes; future error-contract work must continue without creating a third public context carrier."
-    - "builder_sessions can still persist a corrupt lock_token with NULL lock_expires_at; runtime fails safe, but schema-level lock invariants need a migration or explicit corruption policy."
     - "The targeted runtime-field prompt now produces form fields, but the broader five-case live eval gate is still incomplete and other vague/edit/document-output cases remain unproven."
     - "ai_builder_proposal_processor.py is materially smaller after T011 but still oversized at 1830 LOC; structured-question recovery, confirm requirements, and retry orchestration remain in one processor."
     - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, and full-source Pyright baseline failures outside AI Builder."
-    - "Overall remains 8 until DB lock invariant, broad live eval/output quality, full-source typing/test baseline, and consolidation/readability tranches prove every dimension is honestly at least 9."
+    - "Overall remains 8 until broad live eval/output quality, full-source typing/test baseline, API/error-code discipline, and consolidation/readability tranches prove every dimension is honestly at least 9."
 
 score_floor_completion_gates:
   source: "2026-05-21 user review: the board must prevent 'plan executed' from being confused with '9/10 achieved'."
@@ -2718,7 +2717,7 @@ tasks:
   - id: T023
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: xhigh
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T022, with special pressure on the remaining 8/10 floor: DB lock invariants, broad live eval/output quality, full-source typing/test baseline, and readability/consolidation work."
     inputs:
@@ -2749,6 +2748,180 @@ tasks:
       - "The next slice requires a broader product decision or new architecture direction not covered by existing goal artifacts."
       - "Reviewer gates disagree on blockers after two rounds."
       - "Antigravity or Claude tooling failure removes required review coverage and the remaining evidence is not strong enough to proceed."
+    receipt:
+      result: done
+      completed_at: "2026-05-22T01:00:13+02:00"
+      artifact: ".codex/artifacts/flow-ai-builder-t023-next-tranche-ranking.md"
+      summary: "Selected T024 as the next score-moving tranche: enforce the AI Builder send-lock all-or-none invariant at the BuilderSessions DB schema boundary, with a migration, DB-backed negative test, coherent lost-lease fixture rewrite, and claim/refresh/release/cancel lifecycle coverage."
+      selected_next_task: T024
+      selected_reason: "Runtime code treats active_request_id, lock_token, locked_at, and lock_expires_at as one lease, but the schema still permits partial rows that can become unrecoverable. This has a clearer canonical owner and stronger production reliability impact than readability-only cleanup or broad live eval as the immediate next slice."
+      rejected:
+        - candidate: "Broad five-case live eval first"
+          reason: "Still required soon, but it may uncover product fixes across multiple planning modules. The DB lock invariant is narrower, already evidenced, and protects persisted runtime state."
+        - candidate: "Split ai_builder_proposal_processor.py"
+          reason: "Rejected again because line-count splitting without a stable responsibility/deletion target risks shallow modules and worse traceability."
+        - candidate: "Full-source Pyright baseline cleanup"
+          reason: "The current 112 errors are mostly outside Flow AI Builder; treat as a repo-quality blocker, not the highest-leverage AI Builder runtime slice."
+        - candidate: "Separate builder_session_send_locks child table"
+          reason: "Cleaner long-term, but too broad for the current safety tranche. A check constraint makes the current shipped four-column shape production-defensible now."
+      evidence:
+        - "backend/src/intric/database/tables/flow_tables.py:1691-1701 defines four nullable send-lock fields and :1726-1749 has no all-or-none check constraint."
+        - "backend/src/intric/flows/ai_builder/ai_builder_repo.py:716-804 claims, refreshes, and releases leases as a coherent lifecycle."
+        - "backend/src/intric/flows/ai_builder/ai_builder_repo.py:207-219 and :278-284 cancel paths clear all four fields atomically."
+        - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py:854-862 currently simulates lost lease by writing only active_request_id and lock_token; T024 must rewrite it to a coherent competing lease."
+        - "backend/alembic/versions/20260419_builder_send_leases.py:32-37 only backfilled one narrow partial-lock shape; T024 migration must clear every partial shape."
+      peer_review:
+        claude:
+          - artifact: ".codex/artifacts/claude-peer-loop-t023-next-tranche-ranking-after-import-ownership-20260521T225729Z.md"
+            result: "VERDICT changes_required; GREEN_LIGHT no; MIN_SCORE 7"
+            codex_response: "Accepted blockers: explicit fixture rewrite, exact backfill predicate, claim-refresh-release test, cancel test, honest score-impact wording, and child-table alternative."
+          - artifact: ".codex/artifacts/claude-peer-loop-t023-revised-send-lock-invariant-plan-20260521T225952Z.md"
+            result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
+            codex_response: "Proceed to T024 with P3 refinements: specify cancel_session as the cancel smoke path, include changed test file in Pyright command, define rg as a partial-writer audit, and clarify fixture rewrite scope."
+        antigravity:
+          status: "SKIPPED_DUE_TO_QUOTA"
+          evidence: "Quota status on 2026-05-22T00:52:15+02:00 recommended skipping Antigravity; current Gemini model remaining percent was 0. Missing coverage, not a pass."
+      codex_self_review: "pass; this is not the easiest slice, but it is the cleanest narrow runtime/data-model safety tranche because it makes invalid persisted lock state unrepresentable without adding new runtime abstraction."
+      scorecard_impact:
+        Runtime_Reliability: "Moves from 8 toward 9 if migration and lifecycle tests pass; do not mark 9 without post-implementation review."
+        Data_Model_Schema_Quality: "Moves from 8 toward 9 if SQLAlchemy and Alembic constraints are aligned and DB-backed tests pass."
+        Overall: "Expected to remain 8 until broad live eval/output quality, full-source baseline, and readability/test topology are also improved."
+
+  - id: T024
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Enforce a schema-level all-or-none invariant for AI Builder send-lock fields on builder_sessions, with migration backfill and DB-backed lifecycle tests."
+    inputs:
+      - "T023 receipt and artifact"
+      - "Claude T023 revised green artifact"
+      - "Current dirty worktree after T022 commit"
+    constraints:
+      - "Keep the source diff scoped to DB schema/migration/tests/board; do not redesign runtime leases or APIs."
+      - "Do not add a compatibility shim or Python-only guard instead of the DB constraint."
+      - "The lock invariant is: active_request_id, lock_token, locked_at, and lock_expires_at are either all NULL or all NOT NULL."
+      - "The migration must clear every partial shape using the explicit NOT (all-NULL OR all-NOT-NULL) predicate before adding the constraint."
+      - "Rewrite the existing lost-lease fixture into a coherent competing lock by setting all four lock fields to non-matching values."
+      - "Preserve unrelated dirty files and do not push."
+    allowed_files:
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/alembic/versions/20260522_builder_send_lock_invariant.py"
+      - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    acceptance_criteria:
+      - "BuilderSessions has a named CheckConstraint, ck_builder_sessions_send_lock_all_or_none, enforcing the all-or-none lock invariant."
+      - "Alembic migration 20260522_builder_send_lock_invariant clears partial lock rows with the explicit all-or-none negation predicate, adds the constraint on upgrade, and drops it on downgrade."
+      - "alembic heads remains a single head based on 20260521_plan_edit_json."
+      - "A DB-backed test proves a partial lock row raises IntegrityError."
+      - "Claim -> refresh -> release lifecycle test proves all-or-none lock state at each transition."
+      - "cancel_session on a claimed session clears all four lock fields."
+      - "The existing lost-lease test still proves session_send_lease_lost using a coherent competing lease, not a partial invalid row."
+      - "No new broad runtime, router, API, frontend, or lease abstraction changes."
+      - "Scorecard is updated honestly after implementation; broader goal remains active unless all dimensions reach 9."
+    verify:
+      - "cd backend && uv run alembic heads"
+      - "rg -n \"active_request_id|lock_token|locked_at|lock_expires_at\" backend/src/intric backend/tests/integration/flows/test_ai_builder_session_api_regressions.py and verify no partial-row writers except the negative constraint test"
+      - "cd backend && uv run ruff check src/intric/database/tables/flow_tables.py tests/integration/flows/test_ai_builder_session_api_regressions.py alembic/versions/20260522_builder_send_lock_invariant.py"
+      - "cd backend && uv run ruff format --check src/intric/database/tables/flow_tables.py tests/integration/flows/test_ai_builder_session_api_regressions.py alembic/versions/20260522_builder_send_lock_invariant.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/database/tables/flow_tables.py src/intric/flows/ai_builder/ai_builder_repo.py tests/integration/flows/test_ai_builder_session_api_regressions.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py -k 'send_lock or claim_session_send or release_session_send or revise_plan' -q"
+      - "git diff --check"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+    stop_if:
+      - "Alembic reports multiple heads or the migration cannot attach cleanly to 20260521_plan_edit_json."
+      - "Existing valid repo paths produce partial lock rows."
+      - "The fix requires queue/runtime/worker semantics beyond the DB invariant."
+      - "Integration tests require broad fixture rewrites beyond the explicitly in-scope lost-lease fixture at test_ai_builder_session_api_regressions.py:854-862."
+      - "A reviewer identifies that all-or-none is the wrong persisted invariant."
+    receipt:
+      result: done
+      completed_at: "2026-05-22T01:09:30+02:00"
+      implementation_artifact: ".codex/artifacts/flow-ai-builder-t024-implementation-review.md"
+      summary: "Enforced the AI Builder send-lock all-or-none invariant at the BuilderSessions DB boundary. Added a SQLAlchemy CheckConstraint, Alembic backfill/constraint migration with downgrade support, DB-backed partial-row rejection and lifecycle tests, and rewrote the lost-lease fixture to use a coherent competing lock. Also realigned the adjacent revise-plan active-send test to the current 409/session_send_in_progress public error contract."
+      changed_files:
+        - "backend/src/intric/database/tables/flow_tables.py"
+        - "backend/alembic/versions/20260522_builder_send_lock_invariant.py"
+        - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      validation:
+        passed:
+          - "cd backend && uv run alembic heads: 20260522_builder_lock (head)"
+          - "cd backend && uv run alembic upgrade head: applied 20260521_plan_edit_json -> 20260522_builder_lock"
+          - "cd backend && uv run alembic downgrade 20260521_plan_edit_json && uv run alembic upgrade head && uv run alembic current: downgrade/upgrade symmetry passed; current 20260522_builder_lock (head)"
+          - "cd backend && uv run ruff check src/intric/database/tables/flow_tables.py tests/integration/flows/test_ai_builder_session_api_regressions.py alembic/versions/20260522_builder_send_lock_invariant.py: All checks passed"
+          - "cd backend && uv run ruff format --check src/intric/database/tables/flow_tables.py tests/integration/flows/test_ai_builder_session_api_regressions.py alembic/versions/20260522_builder_send_lock_invariant.py: 3 files already formatted"
+          - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/database/tables/flow_tables.py src/intric/flows/ai_builder/ai_builder_repo.py tests/integration/flows/test_ai_builder_session_api_regressions.py: 0 errors, 0 warnings, 0 informations"
+          - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py -k 'send_lock or claim_session_send or release_session_send or revise_plan' -q: 8 passed, 41 deselected"
+          - "rg -n \"active_request_id|lock_token|locked_at|lock_expires_at\" backend/src/intric backend/tests/integration/flows/test_ai_builder_session_api_regressions.py: only expected runtime writers plus the deliberate negative constraint test; lost-lease fixture now sets all four fields"
+          - "git diff --check: clean"
+          - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"': yaml ok"
+      peer_review:
+        claude:
+          artifact: ".codex/artifacts/claude-peer-loop-t024-send-lock-invariant-implementation-20260521T230916Z.md"
+          result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
+          codex_response: "Accepted non-blocking notes: receipt and commit message explicitly call out the adjacent 409/session_send_in_progress assertion realignment and Ruff reflow in touched files."
+        antigravity:
+          status: "SKIPPED_DUE_TO_QUOTA"
+          evidence: "Antigravity quota status before T024 recommended skipping; this remains missing coverage, not a pass."
+      codex_self_review:
+        production_ready_for_tranche: true
+        answer: "This tranche is production-ready for the approved scope: it makes the invalid persisted send-lock state unrepresentable at the DB boundary, keeps the canonical owner in BuilderSessions, adds DB-backed behavior tests, and does not add a new abstraction or broaden runtime behavior."
+      scorecard_after_t024:
+        Maintainability: 8
+        Code_Quality: 8
+        Clean_Architecture: 8
+        Separation_of_Concerns: 8
+        Single_Source_of_Truth: 9
+        Human_Readability: 8
+        Human_Reviewability: 8
+        Runtime_Reliability: 9
+        Data_Model_Schema_Quality: 9
+        API_Contract_Quality: 8
+        Test_Coverage_Quality: 8
+        Developer_Diagnostic_Experience: 9
+        AI_Slop_Comment_Naming_Quality: 8
+        Normal_User_Output_Quality: 8
+        Overall: 8
+      residual_risks:
+        - "Broad five-case authenticated live eval still has not proven vague/edit/document-output normal-user behavior."
+        - "Full-source Pyright still has baseline failures outside this tranche."
+        - "API/error-code discipline is not yet a strict 9; some future error-contract cleanup remains."
+        - "Large orchestration files and test topology still block week-one readability from reaching 9."
+        - "T024 did not address ai_builder_proposal_processor.py or ai_builder_planner.py topology."
+
+  - id: T025
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: xhigh
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T024, now that runtime/data lock invariants are DB-backed and the remaining floor is broad live eval/output quality, API/error discipline, full-source baseline, and readability/test topology."
+    inputs:
+      - "T024 receipt and Claude post-implementation artifact"
+      - "Current scorecard after T024"
+      - "Remaining blockers in current_scorecard"
+    constraints:
+      - "Do not implement until the next tranche plan is evidence-backed and peer-gated."
+      - "Prioritize the weakest remaining score dimensions; do not choose cosmetic cleanup if live-eval/product behavior or API/test baseline outranks it."
+      - "If choosing readability/module topology, require deletion/consolidation or clearer entry points; splitting large files into shallow modules does not count."
+      - "If choosing live eval/output quality, failures must drive product fixes, not only measurement."
+      - "Preserve unrelated dirty files and do not push."
+    allowed_files:
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/**"
+    acceptance_criteria:
+      - "Current worktree and T024 commit state are reconciled."
+      - "The next tranche is selected with file:line evidence, rejected alternatives, allowed files, acceptance criteria, and verification commands."
+      - "Claude plan gate returns GREEN_LIGHT yes / MIN_SCORE >= 8, or Codex records verified disagreement with evidence."
+      - "Antigravity is either run if quota is available or recorded as SKIPPED_DUE_TO_QUOTA."
+    verify:
+      - "git status --short --branch"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+      - "Claude peer-loop plan gate for selected next tranche"
+    stop_if:
+      - "The next slice requires product direction beyond the current goal artifacts."
+      - "Reviewer gates disagree on blockers after two rounds."
+      - "Required review tooling failure removes enough coverage that proceeding would be speculative."
     receipt: null
 
 checks:
@@ -2757,20 +2930,17 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T022 implementation validation and Claude post-implementation review are green; AI Builder model aggregation layers are deleted/trimmed and import ownership is guarded. Antigravity review is missing due quota; T023 is active to re-rank the next score-moving tranche. Broader goal remains incomplete with overall strict floor 8/10."
-    task: T022
+    result: "T024 implementation validation and Claude post-implementation review are green; BuilderSessions send-lock all-or-none invariant is enforced by SQLAlchemy/Alembic and DB-backed lifecycle tests. Antigravity review is missing due quota; T025 is active to re-rank the next score-moving tranche. Broader goal remains incomplete with overall strict floor 8/10."
+    task: T024
     commands:
-      - "rg -n \"intric\\.flows\\.ai_builder\\.ai_builder_models|from intric\\.flows\\.ai_builder\\.ai_builder_models import\" backend/src backend/tests: no matches"
-      - "rg -n \"from intric\\.flows\\.ai_builder\\.ai_builder_domain_models import .*(AssistantSpec|AssistantSpecLocalRefNotPortableError|FlowDraftSpecCore|FormFieldSpec|InputSource|InputType|JsonObject|MCPPolicy|OutputMode|OutputType|StepSpec|AssistantToCreate|AssistantToDelete|AssistantToUpdate|CompiledStep|StepChangeKind)\" backend/src backend/tests: no matches"
-      - "rg -n \"from intric\\.flows\\.ai_builder\\.ai_builder_domain_models import \\*\" backend/src backend/tests: no matches"
-      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder tests/unittests/flows/ai_builder tests/unit/test_server_startup_imports.py tests/unit/test_ai_builder_openapi_contract.py: 261 files already formatted"
-      - "cd backend && uv run ruff check src/intric/flows/ai_builder tests/unittests/flows/ai_builder tests/unit/test_server_startup_imports.py tests/unit/test_ai_builder_openapi_contract.py: All checks passed"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q: 1 passed"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder: 0 errors, 0 warnings, 0 informations"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src: failed with 112 existing errors outside touched AI Builder source; recorded as baseline blocker"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider --collect-only tests/unittests/flows/ai_builder tests/integration/flows/ai_builder tests/integration/flows/test_ai_builder_session_api_regressions.py tests/integration/flows/test_ai_builder_edit_apply_regressions.py -q: 2292/2312 tests collected, 20 deselected"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unit/test_server_startup_imports.py tests/unit/test_ai_builder_openapi_contract.py tests/unittests/flows/ai_builder/test_ai_builder_models.py tests/unittests/flows/ai_builder/test_ai_builder_service.py tests/unittests/flows/ai_builder/test_ai_builder_router.py -q: 180 passed"
-      - "Claude T022 commit gate: .codex/artifacts/claude-peer-loop-t022-ai-builder-import-ownership-implementation-20260521T224753Z.md: GREEN_LIGHT yes; MIN_SCORE 8"
-      - "Antigravity T022 post-implementation gate: SKIPPED_DUE_TO_QUOTA; not passed"
+      - "cd backend && uv run alembic heads: 20260522_builder_lock (head)"
+      - "cd backend && uv run alembic upgrade head: applied 20260521_plan_edit_json -> 20260522_builder_lock"
+      - "cd backend && uv run alembic downgrade 20260521_plan_edit_json && uv run alembic upgrade head && uv run alembic current: current 20260522_builder_lock (head)"
+      - "cd backend && uv run ruff check src/intric/database/tables/flow_tables.py tests/integration/flows/test_ai_builder_session_api_regressions.py alembic/versions/20260522_builder_send_lock_invariant.py: All checks passed"
+      - "cd backend && uv run ruff format --check src/intric/database/tables/flow_tables.py tests/integration/flows/test_ai_builder_session_api_regressions.py alembic/versions/20260522_builder_send_lock_invariant.py: 3 files already formatted"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/database/tables/flow_tables.py src/intric/flows/ai_builder/ai_builder_repo.py tests/integration/flows/test_ai_builder_session_api_regressions.py: 0 errors, 0 warnings, 0 informations"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py -k 'send_lock or claim_session_send or release_session_send or revise_plan' -q: 8 passed, 41 deselected"
+      - "Claude T024 commit gate: .codex/artifacts/claude-peer-loop-t024-send-lock-invariant-implementation-20260521T230916Z.md: GREEN_LIGHT yes; MIN_SCORE 8"
+      - "Antigravity T024 post-implementation gate: SKIPPED_DUE_TO_QUOTA; not passed"
       - "git diff --check: clean"
       - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"': yaml ok"
