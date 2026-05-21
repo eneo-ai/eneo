@@ -10,6 +10,7 @@ from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
 from intric.database.tables.api_keys_v2_table import ApiKeysV2
 from intric.database.tables.assistant_table import Assistants
+from intric.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.database.tables.questions_table import (
     InfoBlobReferences,
@@ -80,6 +81,28 @@ class SessionRepository:
             .where(sa.func.coalesce(Users.tenant_id, ApiKeysV2.tenant_id) == tenant_id)
         )
 
+    # IMPORTANT: every method in this repo that returns session or question
+    # rows must apply this filter. If you add a new such method, either call
+    # this helper or document the explicit exception in a comment on the new
+    # method. See PRD §4.
+    @staticmethod
+    def _exclude_helper_run_sessions(query: sa.Select[Any]) -> sa.Select[Any]:
+        """Exclude sessions referenced by a help_assistant_runs row.
+
+        Helper conversations live in the regular sessions/questions tables so
+        streaming, RAG, model selection, and tool calling all work — but they
+        must never appear in normal session / conversation / insights / export
+        endpoints. This is the single rule, one place. Every method in this
+        repo that returns session rows must apply it. See PRD §4.
+        """
+        return query.where(
+            ~sa.exists(
+                sa.select(HelpAssistantRuns.id).where(
+                    HelpAssistantRuns.session_id == Sessions.id
+                )
+            )
+        )
+
     async def add(self, session: SessionAdd) -> SessionInDB:
         return await self.delegate.add(session)
 
@@ -100,7 +123,10 @@ class SessionRepository:
         return SessionInDB.model_validate(session)
 
     async def get(self, id: UUID) -> SessionInDB | None:
-        return await self.delegate.get(id)
+        query = self._exclude_helper_run_sessions(
+            sa.select(Sessions).where(Sessions.id == id)
+        )
+        return await self.delegate.get_model_from_query(query)
 
     async def _get_total_count(
         self,
@@ -117,6 +143,7 @@ class SessionRepository:
 
         if tenant_id is not None:
             query = self._filter_by_tenant(query, tenant_id)
+        query = self._exclude_helper_run_sessions(query)
 
         if assistant_id is not None:
             query = query.where(Sessions.assistant_id == assistant_id)
@@ -160,6 +187,7 @@ class SessionRepository:
 
         if tenant_id is not None:
             query = self._filter_by_tenant(query, tenant_id)
+        query = self._exclude_helper_run_sessions(query)
 
         if user_id is not None:
             query = query.where(Sessions.user_id == user_id)
@@ -244,6 +272,7 @@ class SessionRepository:
 
         if tenant_id is not None:
             query = self._filter_by_tenant(query, tenant_id)
+        query = self._exclude_helper_run_sessions(query)
 
         if user_id is not None:
             query = query.where(Sessions.user_id == user_id)
@@ -314,6 +343,7 @@ class SessionRepository:
 
         if tenant_id is not None:
             query = self._filter_by_tenant(query, tenant_id)
+        query = self._exclude_helper_run_sessions(query)
 
         if user_id is not None:
             query = query.where(Sessions.user_id == user_id)
@@ -384,6 +414,7 @@ class SessionRepository:
 
         if tenant_id is not None:
             query = self._filter_by_tenant(query, tenant_id)
+        query = self._exclude_helper_run_sessions(query)
 
         if user_id is not None:
             query = query.where(Sessions.user_id == user_id)
@@ -443,6 +474,7 @@ class SessionRepository:
         end_date: datetime | None = None,
     ) -> list[SessionInDB]:
         query = self._filter_by_tenant(sa.select(Sessions), tenant_id)
+        query = self._exclude_helper_run_sessions(query)
 
         if start_date is not None:
             query = query.filter(Sessions.created_at >= start_date)
