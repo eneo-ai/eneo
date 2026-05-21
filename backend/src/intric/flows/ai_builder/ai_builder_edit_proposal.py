@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, cast
-from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
@@ -49,6 +48,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     collect_flow_spec_resource_bindings,
     format_resource_resolution_feedback,
 )
+from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.main.logging import get_logger
 
@@ -66,10 +66,9 @@ logger = get_logger(__name__)
 async def process_edit_arguments(
     *,
     processor: AIBuilderProposalProcessor,
-    session_id: UUID,
+    turn: SessionSendTurn,
     conversation: list[ConversationMessage],
     new_messages_start: int,
-    base_planning_state_version: int,
     arguments: dict[str, Any],
     assistant_content: str,
     tool_call_id: str,
@@ -84,8 +83,6 @@ async def process_edit_arguments(
     assistant_metadata_builder: Callable[[], dict[str, Any] | None] | None = None,
     proposal_success_recorder: Callable[[], None] | None = None,
     resource_catalog: AIBuilderResourceCatalog | None = None,
-    lease_request_id: UUID | None = None,
-    lease_lock_token: UUID | None = None,
     plan_edit_context: AIBuilderPlanEditContext | None = None,
     prior_plan_for_revision: BuilderPlan | None = None,
 ) -> ToolProcessingResult:
@@ -248,7 +245,7 @@ async def process_edit_arguments(
         )
         logger.info(
             "ai_builder_scoped_plan_edit_rejected session_id=%s target_step_ref=%s",
-            session_id,
+            turn.session_id,
             target_step_ref,
         )
         return ToolProcessingResult(
@@ -257,21 +254,21 @@ async def process_edit_arguments(
         )
 
     mcp_clarification_events = await processor.mcp_clarification_events_if_needed(
-        session_id=session_id,
+        turn=turn,
         conversation=conversation,
         new_messages_start=new_messages_start,
-        base_planning_state_version=base_planning_state_version,
         spec=compiled_spec,
         resource_catalog=resource_catalog,
         flow=flow,
         assistant_metadata_builder=_accepted_proposal_metadata,
-        lease_request_id=lease_request_id,
-        lease_lock_token=lease_lock_token,
     )
     if mcp_clarification_events:
         return ToolProcessingResult(
-            event=mcp_clarification_events[0],
-            events=tuple(mcp_clarification_events[1:]),
+            event=mcp_clarification_events.events[0],
+            events=tuple(mcp_clarification_events.events[1:]),
+            new_planning_state_version=(
+                mcp_clarification_events.new_planning_state_version
+            ),
         )
     mcp_policy_feedback = (
         mcp_selection_policy_feedback(
@@ -286,7 +283,7 @@ async def process_edit_arguments(
         logger.info(
             "ai_builder_edit_mcp_selection_policy_violation "
             "session_id=%s tool_call_id=%s",
-            session_id,
+            turn.session_id,
             tool_call_id,
         )
 
@@ -339,7 +336,7 @@ async def process_edit_arguments(
         logger.info(
             "ai_builder_edit_quality_feedback "
             "session_id=%s warning_codes=%s feedback=%s",
-            session_id,
+            turn.session_id,
             ",".join(warning.code for warning in validation.warnings) or "-",
             combined_quality_feedback[:1200],
         )
@@ -350,13 +347,11 @@ async def process_edit_arguments(
 
     assumptions = list(draft.assumptions) if draft.assumptions else []
     serialized_edit_result = edit_result.model_dump(mode="json")
-    plan, envelope = await store_plan_and_update_conversation(
+    stored_plan = await store_plan_and_update_conversation(
         repo=processor.repo,
-        tenant_id=processor.user.tenant_id,
-        session_id=session_id,
+        turn=turn,
         conversation=conversation,
         new_messages_start=new_messages_start,
-        base_planning_state_version=base_planning_state_version,
         assistant_content=assistant_content,
         assistant_metadata=_accepted_proposal_metadata(),
         tool_call_id=tool_call_id,
@@ -373,16 +368,15 @@ async def process_edit_arguments(
             else tuple()
         ),
         edit_result_json=serialized_edit_result,
-        lease_request_id=lease_request_id,
-        lease_lock_token=lease_lock_token,
         flow=flow,
     )
     return ToolProcessingResult(
         event=build_plan_event(
-            plan_id=plan.id,
-            envelope=envelope,
+            plan_id=stored_plan.plan.id,
+            envelope=stored_plan.envelope,
             edit_result=edit_result,
-        )
+        ),
+        new_planning_state_version=stored_plan.new_planning_state_version,
     )
 
 
@@ -443,10 +437,9 @@ def _bind_process_edit_arguments(
 ) -> Callable[..., Awaitable[ToolProcessingResult]]:
     async def _bound_process_edit_arguments(
         *,
-        session_id: UUID,
+        turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
-        base_planning_state_version: int,
         arguments: dict[str, Any],
         assistant_content: str,
         tool_call_id: str,
@@ -459,17 +452,14 @@ def _bind_process_edit_arguments(
         max_output_tokens: int,
         assistant_metadata: dict[str, Any] | None = None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
-        lease_request_id: UUID | None = None,
-        lease_lock_token: UUID | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
     ) -> ToolProcessingResult:
         return await process_edit_arguments(
             processor=processor,
-            session_id=session_id,
+            turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
-            base_planning_state_version=base_planning_state_version,
             arguments=arguments,
             assistant_content=assistant_content,
             tool_call_id=tool_call_id,
@@ -482,8 +472,6 @@ def _bind_process_edit_arguments(
             max_output_tokens=max_output_tokens,
             assistant_metadata=assistant_metadata,
             resource_catalog=resource_catalog,
-            lease_request_id=lease_request_id,
-            lease_lock_token=lease_lock_token,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
         )

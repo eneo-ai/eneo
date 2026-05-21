@@ -27,7 +27,6 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Literal
-from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_dispatcher import (
     PlannerDispatchResult,
@@ -45,6 +44,7 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     evaluate_planner_output,
 )
 from intric.flows.ai_builder.ai_builder_repair import CompletionMetadata
+from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
@@ -137,8 +137,7 @@ async def run_planner_turn(
     litellm_client: Any,
     litellm_model: str,
     litellm_kwargs: dict[str, Any],
-    session_id: UUID,
-    tenant_id: UUID,
+    turn: SessionSendTurn,
     flow: "Flow | None",
     base_messages: list[dict[str, Any]],
     orchestration_context: OrchestrationContext,
@@ -146,8 +145,6 @@ async def run_planner_turn(
         [PlannerOutput, TurnTelemetry], "list[ConversationMessage]"
     ],
     precomputed_output: PlannerOutput | None = None,
-    request_id: UUID | None = None,
-    lock_token: UUID | None = None,
     telemetry_now_ms: Callable[[], int] | None = None,
 ) -> PlannerTurnResult:
     """Run one planner turn end-to-end and persist the result.
@@ -205,7 +202,7 @@ async def run_planner_turn(
         completion = pipeline_outcome.final_completion
         cumulative_usage = pipeline_outcome.cumulative_token_usage
         return TurnTelemetry(
-            request_id=str(request_id) if request_id is not None else None,
+            request_id=str(turn.lease.request_id),
             model=litellm_model,
             outcome_kind=outcome_kind,
             wall_clock_ms=max(0, now_ms() - turn_started_ms),
@@ -289,14 +286,10 @@ async def run_planner_turn(
     new_messages = build_new_messages(accepted, dispatched_telemetry)
     dispatch_result = await dispatch_planner_action(
         repo=repo,
-        session_id=session_id,
-        tenant_id=tenant_id,
+        turn=turn,
         output=accepted,
         new_messages=new_messages,
         flow=flow,
-        request_id=request_id,
-        lock_token=lock_token,
-        base_version=orchestration_context.current_version,
     )
 
     return PlannerTurnResult(

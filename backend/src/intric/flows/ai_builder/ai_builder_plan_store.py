@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_models import (
     BuilderPlan,
@@ -13,6 +13,7 @@ from intric.flows.ai_builder.ai_builder_models import (
 )
 from intric.flows.ai_builder.ai_builder_prompts import build_plan_summary
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationError,
     SpecValidationResult,
@@ -25,6 +26,13 @@ from intric.flows.flow_resource_bindings import LocalResourceBinding
 
 if TYPE_CHECKING:
     from intric.flows.flow import Flow
+
+
+@dataclass(frozen=True, slots=True)
+class StoredPlanResult:
+    plan: BuilderPlan
+    envelope: PlannerPlanEnvelope
+    new_planning_state_version: int
 
 
 def build_lint_warnings(validation: SpecValidationResult) -> list[LintWarning]:
@@ -144,11 +152,9 @@ def _requires_reference_guidance(error: SpecValidationError) -> bool:
 async def store_plan_and_update_conversation(
     *,
     repo: AIBuilderRepository,
-    tenant_id: UUID,
-    session_id: UUID,
+    turn: SessionSendTurn,
     conversation: list[ConversationMessage],
     new_messages_start: int,
-    base_planning_state_version: int,
     assistant_content: str,
     assistant_metadata: dict[str, Any] | None = None,
     tool_call_id: str,
@@ -161,10 +167,8 @@ async def store_plan_and_update_conversation(
     validation: SpecValidationResult,
     resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
     edit_result_json: dict[str, Any] | None = None,
-    lease_request_id: UUID | None = None,
-    lease_lock_token: UUID | None = None,
     flow: "Flow | None" = None,
-) -> tuple[BuilderPlan, PlannerPlanEnvelope]:
+) -> StoredPlanResult:
     envelope = build_plan_envelope(
         spec=spec,
         assumptions=assumptions,
@@ -184,71 +188,65 @@ async def store_plan_and_update_conversation(
     )
     async with repo.savepoint():
         prior_state = await repo.load_planning_state(
-            session_id=session_id, tenant_id=tenant_id
+            session_id=turn.session_id, tenant_id=turn.tenant_id
         )
         plan = await persist_plan(
             repo=repo,
-            tenant_id=tenant_id,
-            session_id=session_id,
+            turn=turn,
             spec=spec,
             envelope=envelope,
             resource_bindings=resource_bindings,
             edit_result_json=edit_result_json,
-            lease_request_id=lease_request_id,
-            lease_lock_token=lease_lock_token,
         )
         persisted = await append_session_messages(
             repo=repo,
-            tenant_id=tenant_id,
-            session_id=session_id,
+            turn=turn,
             conversation=conversation,
             start_index=new_messages_start,
-            lease_request_id=lease_request_id,
-            lease_lock_token=lease_lock_token,
         )
         planning_state = build_planning_state_from_conversation(persisted, flow=flow)
         planning_state.draft_plan_id = plan.id
         planning_state.phase = "plan_proposed"
         carry_forward_persisted_planner_state(planning_state, prior_state)
-        await repo.save_planning_state(
-            session_id=session_id,
-            tenant_id=tenant_id,
+        new_version = await repo.save_planning_state(
+            session_id=turn.session_id,
+            tenant_id=turn.tenant_id,
             state=planning_state,
-            base_version=base_planning_state_version,
+            base_version=turn.base_planning_state_version,
         )
-    return plan, envelope
+    return StoredPlanResult(
+        plan=plan,
+        envelope=envelope,
+        new_planning_state_version=new_version,
+    )
 
 
 async def persist_plan(
     *,
     repo: AIBuilderRepository,
-    tenant_id: UUID,
-    session_id: UUID,
+    turn: SessionSendTurn,
     spec: FlowDraftSpecCore,
     envelope: PlannerPlanEnvelope,
     resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
     edit_result_json: dict[str, Any] | None = None,
-    lease_request_id: UUID | None = None,
-    lease_lock_token: UUID | None = None,
 ) -> BuilderPlan:
     await repo.supersede_existing_plans(
-        session_id=session_id,
-        tenant_id=tenant_id,
+        session_id=turn.session_id,
+        tenant_id=turn.tenant_id,
     )
     plan = await repo.create_plan(
-        session_id=session_id,
-        tenant_id=tenant_id,
+        session_id=turn.session_id,
+        tenant_id=turn.tenant_id,
         spec=spec,
         envelope=envelope,
         resource_bindings=resource_bindings,
         edit_result_json=edit_result_json,
     )
     await repo.update_session_latest_plan(
-        session_id=session_id,
-        tenant_id=tenant_id,
+        session_id=turn.session_id,
+        tenant_id=turn.tenant_id,
         plan_id=plan.id,
-        request_id=lease_request_id,
-        lock_token=lease_lock_token,
+        lease=turn.lease,
     )
     return plan
 
@@ -256,19 +254,15 @@ async def persist_plan(
 async def append_session_messages(
     *,
     repo: AIBuilderRepository,
-    tenant_id: UUID,
-    session_id: UUID,
+    turn: SessionSendTurn,
     conversation: list[ConversationMessage],
     start_index: int,
-    lease_request_id: UUID | None = None,
-    lease_lock_token: UUID | None = None,
 ) -> list[ConversationMessage]:
     return await repo.append_session_messages(
-        session_id=session_id,
-        tenant_id=tenant_id,
+        session_id=turn.session_id,
+        tenant_id=turn.tenant_id,
         conversation=conversation[start_index:],
-        request_id=lease_request_id,
-        lock_token=lease_lock_token,
+        lease=turn.lease,
     )
 
 

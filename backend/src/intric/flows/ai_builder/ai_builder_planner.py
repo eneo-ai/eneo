@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, AsyncGenerator, cast
 from uuid import UUID, uuid4
@@ -122,6 +122,10 @@ from intric.flows.ai_builder.ai_builder_semantic_adjudication import (
 )
 from intric.flows.ai_builder.ai_builder_server_actions import (
     build_server_planner_output,
+)
+from intric.flows.ai_builder.ai_builder_session_turn import (
+    SessionSendLease,
+    SessionSendTurn,
 )
 from intric.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
@@ -412,8 +416,7 @@ class AIBuilderPlanner:
         self,
         *,
         session_id: UUID,
-        request_id: UUID,
-        lock_token: UUID,
+        lease: SessionSendLease,
         stop_event: asyncio.Event,
         lease_lost_event: asyncio.Event,
     ) -> None:
@@ -429,8 +432,7 @@ class AIBuilderPlanner:
                     refreshed = await self.repo.refresh_session_send_lease(
                         session_id=session_id,
                         tenant_id=self.user.tenant_id,
-                        request_id=request_id,
-                        lock_token=lock_token,
+                        lease=lease,
                         lock_expires_at=self._next_send_lock_expiry(),
                     )
                 except Exception as error:
@@ -439,7 +441,7 @@ class AIBuilderPlanner:
                         exc_info=error,
                         extra={
                             "session_id": str(session_id),
-                            "request_id": str(request_id),
+                            "request_id": str(lease.request_id),
                         },
                     )
                     lease_lost_event.set()
@@ -450,7 +452,7 @@ class AIBuilderPlanner:
                         "AI Builder send lease lost while processing.",
                         extra={
                             "session_id": str(session_id),
-                            "request_id": str(request_id),
+                            "request_id": str(lease.request_id),
                         },
                     )
                     lease_lost_event.set()
@@ -863,18 +865,14 @@ class AIBuilderPlanner:
     async def _dispatch_chained_server_action_after_commit(
         self,
         *,
-        session_id: UUID,
+        turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
         response_format_selection: PlannerResponseFormatSelection,
         flow: "Flow | None",
-        base_planning_state_version: int,
         requirements_confirmed: bool,
         ui_language: str | None,
-        request_id: str,
-        request_uuid: UUID,
-        lock_token: UUID,
     ) -> PlannerTurnResult | None:
         """Advance one deterministic post-commit server action.
 
@@ -886,8 +884,8 @@ class AIBuilderPlanner:
         """
 
         persisted_state = await self.repo.load_planning_state(
-            session_id=session_id,
-            tenant_id=self.user.tenant_id,
+            session_id=turn.session_id,
+            tenant_id=turn.tenant_id,
         )
         session_state = persisted_state or PlanningState.empty()
         unresolved_core_slots = _compute_unresolved_core_slots(session_state)
@@ -900,7 +898,7 @@ class AIBuilderPlanner:
         server_output = build_server_planner_output(
             action_policy=action_policy,
             session_state=session_state,
-            base_planning_state_version=base_planning_state_version,
+            base_planning_state_version=turn.base_planning_state_version,
             ui_language=ui_language,
         )
         if server_output is None or not isinstance(
@@ -916,7 +914,7 @@ class AIBuilderPlanner:
         )
         asked_question_state = derive_asked_question_state(conversation)
         orchestration_context = OrchestrationContext(
-            current_version=base_planning_state_version,
+            current_version=turn.base_planning_state_version,
             session_state=session_state,
             unresolved_architectural_choices=unresolved_core_slots,
             required_slot_names=required_slot_names,
@@ -973,28 +971,22 @@ class AIBuilderPlanner:
                 temperature=self.planner_temperature,
                 response_format_selection=response_format_selection,
             ),
-            session_id=session_id,
-            tenant_id=self.user.tenant_id,
+            turn=turn,
             flow=flow,
             base_messages=[],
             orchestration_context=orchestration_context,
             build_new_messages=_build_chained_messages,
             precomputed_output=server_output,
-            request_id=request_uuid,
-            lock_token=lock_token,
         )
 
     async def _dispatch_server_question(
         self,
         *,
         action: AskQuestionAction,
-        session_id: UUID,
+        turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
-        base_planning_state_version: int,
         flow: "Flow | None",
-        request_uuid: UUID,
-        lock_token: UUID,
     ) -> list[dict[str, str]]:
         """Persist deterministic questions through the structured-question path.
 
@@ -1014,13 +1006,11 @@ class AIBuilderPlanner:
             return [build_text_event(action.payload.prompt)]
 
         question_data, assistant_text = followup
-        return await persist_backend_question(
+        persisted = await persist_backend_question(
             repo=self.repo,
-            tenant_id=self.user.tenant_id,
-            session_id=session_id,
+            turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
-            base_planning_state_version=base_planning_state_version,
             question_data=question_data,
             assistant_text=assistant_text,
             flow=flow,
@@ -1028,9 +1018,8 @@ class AIBuilderPlanner:
                 conversation,
                 tool_calls=[{"name": "ask_structured_question"}],
             ),
-            lease_request_id=request_uuid,
-            lease_lock_token=lock_token,
         )
+        return persisted.events
 
     async def send_message(
         self,
@@ -1090,13 +1079,19 @@ class AIBuilderPlanner:
         request_id = str(uuid4())
         request_uuid = UUID(request_id)
         lock_token = uuid4()
+        lease = SessionSendLease(request_id=request_uuid, lock_token=lock_token)
+        turn = SessionSendTurn(
+            session_id=session_id,
+            tenant_id=self.user.tenant_id,
+            lease=lease,
+            base_planning_state_version=session.planning_state_version,
+        )
         lease_stop_event = asyncio.Event()
         lease_lost_event = asyncio.Event()
         claimed = await self.repo.claim_session_send(
             session_id=session_id,
             tenant_id=self.user.tenant_id,
-            request_id=request_uuid,
-            lock_token=lock_token,
+            lease=lease,
             lock_expires_at=self._next_send_lock_expiry(),
         )
         if not claimed:
@@ -1107,8 +1102,7 @@ class AIBuilderPlanner:
         lease_task = asyncio.create_task(
             self._maintain_send_lock_lease(
                 session_id=session_id,
-                request_id=request_uuid,
-                lock_token=lock_token,
+                lease=lease,
                 stop_event=lease_stop_event,
                 lease_lost_event=lease_lost_event,
             )
@@ -1120,6 +1114,7 @@ class AIBuilderPlanner:
                     session_id=session_id,
                     tenant_id=self.user.tenant_id,
                     status=SessionStatus.CHATTING,
+                    lease=lease,
                 )
 
             conversation = list(session.conversation)
@@ -1201,25 +1196,24 @@ class AIBuilderPlanner:
                 and not prepared_request.llm_messages
                 and prepared_request.discovery_block_message is not None
             ):
-                for (
-                    event
-                ) in await self.proposal_processor.emit_discovery_followup_if_needed(
-                    session_id=session_id,
-                    conversation=conversation,
-                    new_messages_start=new_messages_start,
-                    base_planning_state_version=prepared_request.base_planning_state_version,
-                    flow=flow,
-                    litellm_model=litellm_model,
-                    litellm_kwargs=litellm_kwargs,
-                    ui_language=ui_language,
-                    assistant_metadata=build_assistant_message_metadata(
-                        conversation,
-                        tool_calls=[{"name": "ask_structured_question"}],
-                    ),
-                    lease_request_id=request_uuid,
-                    lease_lock_token=lock_token,
-                ):
-                    yield event
+                followup_result = (
+                    await self.proposal_processor.emit_discovery_followup_if_needed(
+                        turn=turn,
+                        conversation=conversation,
+                        new_messages_start=new_messages_start,
+                        flow=flow,
+                        litellm_model=litellm_model,
+                        litellm_kwargs=litellm_kwargs,
+                        ui_language=ui_language,
+                        assistant_metadata=build_assistant_message_metadata(
+                            conversation,
+                            tool_calls=[{"name": "ask_structured_question"}],
+                        ),
+                    )
+                )
+                if followup_result is not None:
+                    for event in followup_result.events:
+                        yield event
                 yield {"event": SSE_EVENT_DONE, "data": ""}
                 return
 
@@ -1227,22 +1221,21 @@ class AIBuilderPlanner:
                 prepared_request.server_output is None
                 and prepared_request.should_emit_forced_followup
             ):
-                for (
-                    event
-                ) in await self.proposal_processor.emit_discovery_followup_if_needed(
-                    session_id=session_id,
-                    conversation=conversation,
-                    new_messages_start=new_messages_start,
-                    base_planning_state_version=prepared_request.base_planning_state_version,
-                    flow=flow,
-                    assistant_metadata=build_assistant_message_metadata(
-                        conversation,
-                        tool_calls=[{"name": "ask_structured_question"}],
-                    ),
-                    lease_request_id=request_uuid,
-                    lease_lock_token=lock_token,
-                ):
-                    yield event
+                followup_result = (
+                    await self.proposal_processor.emit_discovery_followup_if_needed(
+                        turn=turn,
+                        conversation=conversation,
+                        new_messages_start=new_messages_start,
+                        flow=flow,
+                        assistant_metadata=build_assistant_message_metadata(
+                            conversation,
+                            tool_calls=[{"name": "ask_structured_question"}],
+                        ),
+                    )
+                )
+                if followup_result is not None:
+                    for event in followup_result.events:
+                        yield event
                 yield {"event": SSE_EVENT_DONE, "data": ""}
                 return
 
@@ -1278,7 +1271,7 @@ class AIBuilderPlanner:
             )
             asked_question_state = derive_asked_question_state(conversation)
             orchestration_context = OrchestrationContext(
-                current_version=session.planning_state_version,
+                current_version=turn.base_planning_state_version,
                 session_state=session_state,
                 unresolved_architectural_choices=unresolved_core_slots,
                 required_slot_names=required_slot_names,
@@ -1296,13 +1289,10 @@ class AIBuilderPlanner:
             ):
                 events = await self._dispatch_server_question(
                     action=prepared_request.server_output.planner_action,
-                    session_id=session_id,
+                    turn=turn,
                     conversation=conversation,
                     new_messages_start=new_messages_start,
-                    base_planning_state_version=prepared_request.base_planning_state_version,
                     flow=flow,
-                    request_uuid=request_uuid,
-                    lock_token=lock_token,
                 )
                 for event in events:
                     yield event
@@ -1319,10 +1309,9 @@ class AIBuilderPlanner:
                     )
                 )
                 async for event in self.proposal_processor.propose_plan(
-                    session_id=session_id,
+                    turn=turn,
                     conversation=conversation,
                     new_messages_start=new_messages_start,
-                    base_planning_state_version=prepared_request.base_planning_state_version,
                     llm_messages=prepared_request.llm_messages,
                     litellm_model=litellm_model,
                     litellm_kwargs=litellm_kwargs,
@@ -1341,8 +1330,6 @@ class AIBuilderPlanner:
                     planning_state=session_state,
                     plan_edit_context=prepared_request.plan_edit_context,
                     prior_plan_for_revision=prepared_request.prior_plan_for_revision,
-                    lease_request_id=request_uuid,
-                    lease_lock_token=lock_token,
                 ):
                     yield event
                 yield {"event": SSE_EVENT_DONE, "data": ""}
@@ -1411,15 +1398,12 @@ class AIBuilderPlanner:
                         ),
                         response_format_selection=response_format_selection,
                     ),
-                    session_id=session_id,
-                    tenant_id=self.user.tenant_id,
+                    turn=turn,
                     flow=flow,
                     base_messages=prepared_request.llm_messages,
                     orchestration_context=orchestration_context,
                     build_new_messages=_build_new_messages,
                     precomputed_output=precomputed_output,
-                    request_id=request_uuid,
-                    lock_token=lock_token,
                 )
             except BadRequestException as error:
                 if error.code == "session_send_lease_lost":
@@ -1563,21 +1547,23 @@ class AIBuilderPlanner:
                 elif isinstance(action, CommitArchitectureAction):
                     yield build_status_event("architecture_committed")
                     if turn_result.dispatch_result is not None:
-                        chained_result = await self._dispatch_chained_server_action_after_commit(
-                            session_id=session_id,
-                            conversation=conversation,
-                            litellm_model=litellm_model,
-                            litellm_kwargs=litellm_kwargs,
-                            response_format_selection=response_format_selection,
-                            flow=flow,
+                        chained_turn = replace(
+                            turn,
                             base_planning_state_version=(
                                 turn_result.dispatch_result.new_planning_state_version
                             ),
-                            requirements_confirmed=requirements_state.confirmed,
-                            ui_language=ui_language,
-                            request_id=request_id,
-                            request_uuid=request_uuid,
-                            lock_token=lock_token,
+                        )
+                        chained_result = (
+                            await self._dispatch_chained_server_action_after_commit(
+                                turn=chained_turn,
+                                conversation=conversation,
+                                litellm_model=litellm_model,
+                                litellm_kwargs=litellm_kwargs,
+                                response_format_selection=response_format_selection,
+                                flow=flow,
+                                requirements_confirmed=requirements_state.confirmed,
+                                ui_language=ui_language,
+                            )
                         )
                         if (
                             chained_result is not None
@@ -1623,8 +1609,7 @@ class AIBuilderPlanner:
             await self.repo.release_session_send(
                 session_id=session_id,
                 tenant_id=self.user.tenant_id,
-                request_id=request_uuid,
-                lock_token=lock_token,
+                lease=lease,
             )
 
 

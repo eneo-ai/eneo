@@ -59,6 +59,10 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AssistantSnapshotResourceUnavailableError,
     build_ai_builder_resource_catalog,
 )
+from intric.flows.ai_builder.ai_builder_session_turn import (
+    SessionSendLease,
+    SessionSendTurn,
+)
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
@@ -86,9 +90,27 @@ def _make_processor(**overrides) -> AIBuilderProposalProcessor:
     return AIBuilderProposalProcessor(**defaults)
 
 
+def _make_turn(
+    *,
+    session_id=None,
+    tenant_id=None,
+    base_planning_state_version: int = 0,
+) -> SessionSendTurn:
+    return SessionSendTurn(
+        session_id=session_id or uuid4(),
+        tenant_id=tenant_id or uuid4(),
+        lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+        base_planning_state_version=base_planning_state_version,
+    )
+
+
 def _make_context(**overrides) -> ProposalContext:
+    turn = overrides.pop("turn", None) or _make_turn(
+        session_id=overrides.pop("session_id", None),
+        base_planning_state_version=overrides.pop("base_planning_state_version", 0),
+    )
     defaults = {
-        "session_id": uuid4(),
+        "turn": turn,
         "conversation": [],
         "new_messages_start": 0,
         "llm_messages": [],
@@ -100,13 +122,20 @@ def _make_context(**overrides) -> ProposalContext:
         "resource_catalog": None,
         "max_output_tokens": 4096,
         "request_id": "req-1",
-        "base_planning_state_version": 0,
         "flow": None,
         "assistant_snapshots": None,
         "text_content": None,
     }
     defaults.update(overrides)
     return ProposalContext(**defaults)
+
+
+def _stored_plan_result(*, plan=None, envelope=None):
+    return SimpleNamespace(
+        plan=plan or MagicMock(id=uuid4()),
+        envelope=envelope or MagicMock(),
+        new_planning_state_version=1,
+    )
 
 
 def _make_response_with_tool_calls(
@@ -529,7 +558,7 @@ async def test_request_non_question_continuation_uses_backend_followup_when_only
         patch.object(
             processor,
             "emit_discovery_followup_if_needed",
-            new=AsyncMock(return_value=followup_events),
+            new=AsyncMock(return_value=SimpleNamespace(events=followup_events)),
         ) as emit_followup,
         patch.object(
             processor,
@@ -540,7 +569,7 @@ async def test_request_non_question_continuation_uses_backend_followup_when_only
         events = [
             event
             async for event in processor.request_non_question_continuation(
-                session_id=uuid4(),
+                turn=_make_turn(),
                 conversation=[
                     ConversationMessage(role="user", content="Skapa ett flöde"),
                     ConversationMessage(
@@ -556,7 +585,6 @@ async def test_request_non_question_continuation_uses_backend_followup_when_only
                     ),
                 ],
                 new_messages_start=2,
-                base_planning_state_version=0,
                 llm_messages=[],
                 tool_call=repeated_question,
                 tool_schemas=[
@@ -616,7 +644,7 @@ async def test_request_non_question_continuation_recovers_with_requirements_summ
         patch.object(
             processor,
             "emit_discovery_followup_if_needed",
-            new=AsyncMock(return_value=[]),
+            new=AsyncMock(return_value=None),
         ) as emit_followup,
         patch.object(
             processor,
@@ -632,7 +660,7 @@ async def test_request_non_question_continuation_recovers_with_requirements_summ
         events = [
             event
             async for event in processor.request_non_question_continuation(
-                session_id=uuid4(),
+                turn=_make_turn(),
                 conversation=[
                     ConversationMessage(
                         role="user",
@@ -653,7 +681,6 @@ async def test_request_non_question_continuation_recovers_with_requirements_summ
                     ),
                 ],
                 new_messages_start=2,
-                base_planning_state_version=0,
                 llm_messages=[],
                 tool_call=repeated_question,
                 tool_schemas=[
@@ -707,7 +734,7 @@ async def test_request_non_question_continuation_returns_typed_error_when_no_fol
         patch.object(
             processor,
             "emit_discovery_followup_if_needed",
-            new=AsyncMock(return_value=[]),
+            new=AsyncMock(return_value=None),
         ) as emit_followup,
         patch(
             "intric.flows.ai_builder.ai_builder_proposal_processor.analyze_discovery_ready",
@@ -722,12 +749,11 @@ async def test_request_non_question_continuation_returns_typed_error_when_no_fol
         events = [
             event
             async for event in processor.request_non_question_continuation(
-                session_id=uuid4(),
+                turn=_make_turn(),
                 conversation=[
                     ConversationMessage(role="user", content="Bygg ett flöde")
                 ],
                 new_messages_start=1,
-                base_planning_state_version=0,
                 llm_messages=[],
                 tool_call=repeated_question,
                 tool_schemas=[
@@ -829,10 +855,9 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
         events = [
             event
             async for event in processor.propose_plan(
-                session_id=uuid4(),
+                turn=_make_turn(),
                 conversation=[ConversationMessage(role="user", content="Build a flow")],
                 new_messages_start=1,
-                base_planning_state_version=0,
                 llm_messages=[{"role": "system", "content": "Prompt"}],
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
@@ -893,10 +918,9 @@ async def test_propose_plan_asks_before_planning_when_named_mcp_is_unavailable()
     events = [
         event
         async for event in processor.propose_plan(
-            session_id=session_id,
+            turn=_make_turn(session_id=session_id),
             conversation=conversation,
             new_messages_start=0,
-            base_planning_state_version=0,
             llm_messages=[{"role": "system", "content": "Prompt"}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
@@ -909,8 +933,6 @@ async def test_propose_plan_asks_before_planning_when_named_mcp_is_unavailable()
             proposal_temperature=0.2,
             request_id="req-propose",
             flow=None,
-            lease_request_id=uuid4(),
-            lease_lock_token=uuid4(),
         )
     ]
 
@@ -952,10 +974,9 @@ async def test_propose_plan_asks_before_planning_when_named_mcp_is_enabled() -> 
     events = [
         event
         async for event in processor.propose_plan(
-            session_id=uuid4(),
+            turn=_make_turn(),
             conversation=conversation,
             new_messages_start=0,
-            base_planning_state_version=0,
             llm_messages=[{"role": "system", "content": "Prompt"}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
@@ -1026,10 +1047,9 @@ async def test_propose_plan_continues_after_user_declines_mcp_usage() -> None:
         events = [
             event
             async for event in processor.propose_plan(
-                session_id=uuid4(),
+                turn=_make_turn(),
                 conversation=conversation,
                 new_messages_start=2,
-                base_planning_state_version=0,
                 llm_messages=[{"role": "system", "content": "Prompt"}],
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
@@ -1094,10 +1114,9 @@ async def test_propose_plan_reasks_when_user_requests_mcp_after_declining() -> N
     events = [
         event
         async for event in processor.propose_plan(
-            session_id=uuid4(),
+            turn=_make_turn(),
             conversation=conversation,
             new_messages_start=2,
-            base_planning_state_version=0,
             llm_messages=[{"role": "system", "content": "Prompt"}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
@@ -1155,10 +1174,9 @@ async def test_outline_processing_enforces_without_mcp_selection() -> None:
     ]
 
     result = await processor._process_outline_arguments(
-        session_id=uuid4(),
+        turn=_make_turn(),
         conversation=conversation,
         new_messages_start=0,
-        base_planning_state_version=0,
         arguments={
             "flow_name": "Time flow",
             "plan_rationale": "Use MCP despite the user's decline.",
@@ -1188,10 +1206,9 @@ async def test_outline_validation_failure_preserves_duplicate_step_name_code() -
     processor = _make_processor()
 
     result = await processor._process_outline_arguments(
-        session_id=uuid4(),
+        turn=_make_turn(),
         conversation=[ConversationMessage(role="user", content="Bygg ett textflöde.")],
         new_messages_start=0,
-        base_planning_state_version=0,
         arguments={
             "flow_name": "Duplicate names",
             "plan_rationale": "Two semantic steps accidentally share a name.",
@@ -1596,7 +1613,10 @@ async def test_outline_audio_to_docx_returns_plan_without_self_correction() -> N
 
     async def _store_plan(**kwargs):
         spec = kwargs["spec"]
-        return _make_plan(spec), PlannerPlanEnvelope(spec=spec)
+        return _stored_plan_result(
+            plan=_make_plan(spec),
+            envelope=PlannerPlanEnvelope(spec=spec),
+        )
 
     with (
         patch(
@@ -1706,12 +1726,11 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
         events = [
             event
             async for event in processor.propose_plan(
-                session_id=uuid4(),
+                turn=_make_turn(),
                 conversation=[
                     ConversationMessage(role="user", content="Bygg ett flöde")
                 ],
                 new_messages_start=1,
-                base_planning_state_version=0,
                 llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
                 litellm_model="openai/gpt-5.4-nano",
                 litellm_kwargs={},
@@ -1804,12 +1823,11 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
         events = [
             event
             async for event in processor.propose_plan(
-                session_id=uuid4(),
+                turn=_make_turn(),
                 conversation=[
                     ConversationMessage(role="user", content="Bygg ett flöde")
                 ],
                 new_messages_start=1,
-                base_planning_state_version=0,
                 llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
                 litellm_model="openai/gpt-5.4-nano",
                 litellm_kwargs={},
@@ -1890,12 +1908,11 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
         events = [
             event
             async for event in processor.propose_plan(
-                session_id=uuid4(),
+                turn=_make_turn(),
                 conversation=[
                     ConversationMessage(role="user", content="Bygg ett flöde")
                 ],
                 new_messages_start=1,
-                base_planning_state_version=0,
                 llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
                 litellm_model="openai/gpt-5.4-nano",
                 litellm_kwargs={},
@@ -2046,10 +2063,9 @@ async def test_edit_proposal_returns_validation_when_snapshot_resource_is_unavai
     ):
         result = await process_edit_arguments(
             processor=processor,
-            session_id=uuid4(),
+            turn=_make_turn(base_planning_state_version=7),
             conversation=[],
             new_messages_start=0,
-            base_planning_state_version=7,
             arguments=arguments,
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2143,15 +2159,14 @@ async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> Non
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
             new_callable=AsyncMock,
-            return_value=(MagicMock(), MagicMock()),
+            return_value=_stored_plan_result(),
         ),
     ):
         result = await process_edit_arguments(
             processor=processor,
-            session_id=uuid4(),
+            turn=_make_turn(),
             conversation=[],
             new_messages_start=0,
-            base_planning_state_version=0,
             arguments=arguments,
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2235,15 +2250,14 @@ async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
             new_callable=AsyncMock,
-            return_value=(MagicMock(), MagicMock()),
+            return_value=_stored_plan_result(),
         ) as store_plan,
     ):
         result = await process_edit_arguments(
             processor=processor,
-            session_id=uuid4(),
+            turn=_make_turn(base_planning_state_version=7),
             conversation=[],
             new_messages_start=0,
-            base_planning_state_version=7,
             arguments=draft.model_dump(mode="json"),
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2329,7 +2343,7 @@ async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
     ):
         result = await process_edit_arguments(
             processor=processor,
-            session_id=uuid4(),
+            turn=_make_turn(),
             conversation=[
                 ConversationMessage(
                     role="user",
@@ -2338,7 +2352,6 @@ async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
                 )
             ],
             new_messages_start=0,
-            base_planning_state_version=0,
             arguments=draft.model_dump(mode="json"),
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2430,7 +2443,7 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
     ):
         result = await process_edit_arguments(
             processor=processor,
-            session_id=uuid4(),
+            turn=_make_turn(),
             conversation=[
                 ConversationMessage(
                     role="user",
@@ -2444,7 +2457,6 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
                 )
             ],
             new_messages_start=0,
-            base_planning_state_version=0,
             arguments=draft.model_dump(mode="json"),
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2529,15 +2541,15 @@ async def test_edit_proposal_passes_metadata_to_edit_validator() -> None:
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
             new_callable=AsyncMock,
-            return_value=(MagicMock(), MagicMock()),
+            return_value=_stored_plan_result(),
         ) as store_plan,
     ):
+        turn = _make_turn(base_planning_state_version=7)
         await process_edit_arguments(
             processor=processor,
-            session_id=uuid4(),
+            turn=turn,
             conversation=[],
             new_messages_start=0,
-            base_planning_state_version=7,
             arguments=draft.model_dump(mode="json"),
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2556,7 +2568,7 @@ async def test_edit_proposal_passes_metadata_to_edit_validator() -> None:
     store_plan.assert_awaited_once()
     assert store_plan.await_args is not None
     assert store_plan.await_args.kwargs["flow"] is flow
-    assert store_plan.await_args.kwargs["base_planning_state_version"] == 7
+    assert store_plan.await_args.kwargs["turn"] == turn
 
 
 @pytest.mark.asyncio
@@ -2631,15 +2643,14 @@ async def test_edit_proposal_canonicalizes_duplicate_modify_ops_before_validatio
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
             new_callable=AsyncMock,
-            return_value=(MagicMock(), MagicMock()),
+            return_value=_stored_plan_result(),
         ),
     ):
         result = await process_edit_arguments(
             processor=processor,
-            session_id=uuid4(),
+            turn=_make_turn(),
             conversation=[],
             new_messages_start=0,
-            base_planning_state_version=0,
             arguments=arguments,
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2708,10 +2719,9 @@ async def test_edit_proposal_returns_specific_feedback_for_conflicting_duplicate
     ) as compile_edit:
         result = await process_edit_arguments(
             processor=processor,
-            session_id=uuid4(),
+            turn=_make_turn(),
             conversation=[],
             new_messages_start=0,
-            base_planning_state_version=0,
             arguments=arguments,
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2803,15 +2813,14 @@ async def test_edit_proposal_normalizes_mechanical_refs_before_validation() -> N
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
             new_callable=AsyncMock,
-            return_value=(MagicMock(), MagicMock()),
+            return_value=_stored_plan_result(),
         ),
     ):
         await process_edit_arguments(
             processor=processor,
-            session_id=uuid4(),
+            turn=_make_turn(),
             conversation=[],
             new_messages_start=0,
-            base_planning_state_version=0,
             arguments=arguments,
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2887,10 +2896,9 @@ async def test_edit_proposal_returns_validation_feedback_for_explicit_mechanics_
     ):
         result = await process_edit_arguments(
             processor=processor,
-            session_id=uuid4(),
+            turn=_make_turn(),
             conversation=[],
             new_messages_start=0,
-            base_planning_state_version=0,
             arguments=arguments,
             assistant_content="Här är mitt förslag:",
             tool_call_id="call_edit",
@@ -2943,10 +2951,9 @@ async def test_handle_tool_call_builds_proposal_context_for_edit_handler() -> No
         events = [
             event
             async for event in processor.handle_tool_call(
-                session_id=uuid4(),
+                turn=_make_turn(),
                 conversation=[],
                 new_messages_start=0,
-                base_planning_state_version=0,
                 tool_calls=[tool_call],
                 text_content="draft",
                 llm_messages=[{"role": "system", "content": "Prompt"}],
@@ -3005,10 +3012,9 @@ async def test_handle_tool_call_preserves_text_when_tool_is_clarification_only()
         events = [
             event
             async for event in processor.handle_tool_call(
-                session_id=uuid4(),
+                turn=_make_turn(),
                 conversation=[],
                 new_messages_start=0,
-                base_planning_state_version=0,
                 tool_calls=[tool_call],
                 text_content="Jag behöver en detalj till.",
                 llm_messages=[{"role": "system", "content": "Prompt"}],
@@ -3056,13 +3062,12 @@ async def test_request_self_correction_returns_typed_error_when_proposal_complet
         events = [
             event
             async for event in processor.request_self_correction(
-                session_id=uuid4(),
+                turn=_make_turn(),
                 request_id="req-self-correction",
                 conversation=[
                     ConversationMessage(role="user", content="Bygg ett flöde")
                 ],
                 new_messages_start=1,
-                base_planning_state_version=0,
                 error_message="Invalid flow specification: missing steps",
                 llm_messages=[{"role": "system", "content": "Prompt"}],
                 tool_call=tool_call,
@@ -3156,10 +3161,9 @@ async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mod
             tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
-            session_id=uuid4(),
+            turn=_make_turn(),
             conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
             new_messages_start=1,
-            base_planning_state_version=0,
             available_model_refs=None,
             available_kb_refs=None,
             resource_catalog=None,
@@ -3171,7 +3175,7 @@ async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mod
     kwargs = retry_forced_tool.await_args.kwargs
     assert kwargs["target_tool_name"] == OUTLINE_FLOW_TOOL_NAME
     assert kwargs["process_tool_arguments"] == processor._process_outline_arguments
-    assert kwargs["process_tool_kwargs"]["base_planning_state_version"] == 0
+    assert isinstance(kwargs["process_tool_kwargs"]["turn"], SessionSendTurn)
     assert "Now call outline_flow" in kwargs["forced_tool_prompt"]
 
 

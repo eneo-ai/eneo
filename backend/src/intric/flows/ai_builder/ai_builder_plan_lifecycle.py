@@ -185,7 +185,7 @@ class AIBuilderPlanLifecycle:
                 },
             )
 
-        await self.repo.update_session_status(
+        await self.repo.update_session_status_without_send_lease(
             session_id=session.id,
             tenant_id=self.user.tenant_id,
             status=SessionStatus.APPLYING,
@@ -258,7 +258,7 @@ class AIBuilderPlanLifecycle:
             tenant_id=self.user.tenant_id,
             status=PlanStatus.APPLIED,
         )
-        await self.repo.update_session_status(
+        await self.repo.update_session_status_without_send_lease(
             session_id=session.id,
             tenant_id=self.user.tenant_id,
             status=SessionStatus.APPLIED,
@@ -405,7 +405,7 @@ class AIBuilderPlanLifecycle:
 
     async def _rollback_session_status(self, session_id: UUID) -> None:
         try:
-            await self.repo.update_session_status(
+            await self.repo.update_session_status_without_send_lease(
                 session_id=session_id,
                 tenant_id=self.user.tenant_id,
                 status=SessionStatus.AWAITING_APPROVAL,

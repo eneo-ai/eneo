@@ -66,6 +66,10 @@ from intric.flows.ai_builder.ai_builder_response_format import (
 from intric.flows.ai_builder.ai_builder_server_actions import (
     build_server_planner_output,
 )
+from intric.flows.ai_builder.ai_builder_session_turn import (
+    SessionSendLease,
+    SessionSendTurn,
+)
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from intric.flows.ai_builder.planning_state import PlanningState
 
@@ -107,6 +111,15 @@ def _make_prepared_request(
         llm_messages=[{"role": "system", "content": "system"}],
         should_emit_forced_followup=should_emit_forced_followup,
         base_planning_state_version=0,
+    )
+
+
+def _make_turn(*, base_version: int = 0) -> SessionSendTurn:
+    return SessionSendTurn(
+        session_id=uuid4(),
+        tenant_id=uuid4(),
+        lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+        base_planning_state_version=base_version,
     )
 
 
@@ -514,18 +527,14 @@ async def test_chained_server_action_uses_planner_response_format_selection() ->
         ) as run_turn,
     ):
         result = await planner._dispatch_chained_server_action_after_commit(
-            session_id=uuid4(),
+            turn=_make_turn(base_version=1),
             conversation=[],
             litellm_model="openai/gpt-4o-mini",
             litellm_kwargs={"api_key": "sk-test"},
             response_format_selection=response_format_selection,
             flow=None,
-            base_planning_state_version=1,
             requirements_confirmed=False,
             ui_language="en",
-            request_id="request-id",
-            request_uuid=uuid4(),
-            lock_token=uuid4(),
         )
 
     assert result is turn_result

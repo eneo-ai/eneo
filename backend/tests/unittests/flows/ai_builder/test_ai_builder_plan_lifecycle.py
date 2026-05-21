@@ -318,7 +318,7 @@ class TestAIBuilderPlanLifecycle:
         with pytest.raises(RuntimeError, match="apply failed"):
             await lifecycle.apply_plan(plan_id=plan.id)
 
-        repo.update_session_status.assert_any_await(
+        repo.update_session_status_without_send_lease.assert_any_await(
             session_id=session.id,
             tenant_id=user.tenant_id,
             status=SessionStatus.AWAITING_APPROVAL,
@@ -378,7 +378,7 @@ class TestAIBuilderPlanLifecycle:
         )
         assert mock_log_apply_failed.call_args.kwargs["changeset_counts"] is None
         assert mock_log_apply_failed.call_args.kwargs["materializer_progress"] is None
-        repo.update_session_status.assert_any_await(
+        repo.update_session_status_without_send_lease.assert_any_await(
             session_id=session.id,
             tenant_id=user.tenant_id,
             status=SessionStatus.AWAITING_APPROVAL,
@@ -498,7 +498,7 @@ class TestAIBuilderPlanLifecycle:
         assert (
             mock_log_apply_failed.call_args.kwargs["materializer_progress"] == progress
         )
-        repo.update_session_status.assert_any_await(
+        repo.update_session_status_without_send_lease.assert_any_await(
             session_id=session.id,
             tenant_id=user.tenant_id,
             status=SessionStatus.AWAITING_APPROVAL,
@@ -688,7 +688,7 @@ class TestAIBuilderPlanLifecycle:
         assert exc_info.value.code == "ai_builder_plan_resource_bindings_missing"
         mock_compile.assert_not_called()
         mock_execute.assert_not_called()
-        repo.update_session_status.assert_not_awaited()
+        repo.update_session_status_without_send_lease.assert_not_awaited()
 
     @pytest.mark.anyio
     @patch("intric.flows.ai_builder.ai_builder_plan_lifecycle.execute_changeset")
@@ -752,4 +752,4 @@ class TestAIBuilderPlanLifecycle:
         assert exc_info.value.context["local_kind"] == "completion_model"
         mock_compile.assert_not_called()
         mock_execute.assert_not_called()
-        repo.update_session_status.assert_not_awaited()
+        repo.update_session_status_without_send_lease.assert_not_awaited()

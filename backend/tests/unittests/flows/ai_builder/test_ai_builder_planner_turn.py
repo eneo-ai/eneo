@@ -39,6 +39,10 @@ from intric.flows.ai_builder.ai_builder_planner_turn import (
     run_planner_turn,
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from intric.flows.ai_builder.ai_builder_session_turn import (
+    SessionSendLease,
+    SessionSendTurn,
+)
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
@@ -169,6 +173,24 @@ def _autospec_repo() -> AIBuilderRepository:
     return create_autospec(AIBuilderRepository, instance=True)
 
 
+def _make_turn(
+    *,
+    session_id: Any | None = None,
+    tenant_id: Any | None = None,
+    request_id: Any | None = None,
+    base_version: int = 0,
+) -> SessionSendTurn:
+    return SessionSendTurn(
+        session_id=session_id or uuid4(),
+        tenant_id=tenant_id or uuid4(),
+        lease=SessionSendLease(
+            request_id=request_id or uuid4(),
+            lock_token=uuid4(),
+        ),
+        base_planning_state_version=base_version,
+    )
+
+
 @pytest.mark.asyncio
 class TestDispatchedHappyPaths:
     async def test_precomputed_output_dispatches_without_llm_call(self) -> None:
@@ -182,8 +204,7 @@ class TestDispatchedHappyPaths:
             litellm_client=llm,
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(),
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(
@@ -219,13 +240,14 @@ class TestDispatchedHappyPaths:
         def _builder(_accepted: Any, _telemetry: Any) -> list[ConversationMessage]:
             return [user_message, assistant_message]
 
+        turn = _make_turn(session_id=session_id, tenant_id=tenant_id)
+
         result = await run_planner_turn(
             repo=repo,
             litellm_client=llm,
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
-            session_id=session_id,
-            tenant_id=tenant_id,
+            turn=turn,
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(
@@ -245,8 +267,7 @@ class TestDispatchedHappyPaths:
         assert result.llm_calls_made == 1
         repo.commit_turn.assert_awaited_once()
         commit_kwargs = repo.commit_turn.await_args.kwargs
-        assert commit_kwargs["session_id"] == session_id
-        assert commit_kwargs["tenant_id"] == tenant_id
+        assert commit_kwargs["turn"] == turn
         assert commit_kwargs["architecture_commit"] is None
         assert commit_kwargs["new_messages"] == [user_message, assistant_message]
 
@@ -264,8 +285,7 @@ class TestDispatchedHappyPaths:
             litellm_client=llm,
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(),
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(),
@@ -300,8 +320,7 @@ class TestDispatchedHappyPaths:
             litellm_client=llm,
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(),
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(state=state),
@@ -334,7 +353,7 @@ class TestDispatchedHappyPaths:
         )
         flow_stub = object()
         request_id = uuid4()
-        lock_token = uuid4()
+        turn = _make_turn(request_id=request_id)
         captured_outputs: list[PlannerOutput] = []
 
         def _builder(
@@ -354,14 +373,11 @@ class TestDispatchedHappyPaths:
             litellm_client=llm,
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=turn,
             flow=flow_stub,  # type: ignore[arg-type]
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(),
             build_new_messages=_builder,
-            request_id=request_id,
-            lock_token=lock_token,
         )
 
         assert result.kind == "dispatched"
@@ -369,8 +385,7 @@ class TestDispatchedHappyPaths:
         assert captured_outputs[0].planner_action.kind == "commit_architecture"
         commit_kwargs = repo.commit_turn.await_args.kwargs
         assert commit_kwargs["flow"] is flow_stub
-        assert commit_kwargs["request_id"] == request_id
-        assert commit_kwargs["lock_token"] == lock_token
+        assert commit_kwargs["turn"] == turn
         assert len(commit_kwargs["new_messages"]) == 2
         assert commit_kwargs["new_messages"][1].content == "note=''"
 
@@ -399,8 +414,7 @@ class TestDispatchedHappyPaths:
             litellm_client=llm,
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(base_version=4),
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(current_version=4),
@@ -412,7 +426,7 @@ class TestDispatchedHappyPaths:
 
         assert result.kind == "dispatched"
         commit_kwargs = repo.commit_turn.await_args.kwargs
-        assert commit_kwargs["base_version"] == 4
+        assert commit_kwargs["turn"].base_planning_state_version == 4
 
 
 @pytest.mark.asyncio
@@ -434,8 +448,7 @@ class TestPipelineRejections:
             litellm_client=llm,
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(base_version=3),
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(current_version=3),
@@ -472,8 +485,7 @@ class TestPipelineParseFailed:
             litellm_client=llm,
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(),
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(),
@@ -514,21 +526,20 @@ class TestTurnTelemetry:
             total_tokens=408,
         )
         request_id = uuid4()
+        turn = _make_turn(request_id=request_id)
 
         result = await run_planner_turn(
             repo=repo,
             litellm_client=llm,
             litellm_model="openai/gpt-5.5",
             litellm_kwargs={},
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=turn,
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(),
             build_new_messages=lambda _a, _t: [
                 ConversationMessage(role="user", content="Commit")
             ],
-            request_id=request_id,
         )
 
         assert result.kind == "dispatched"
@@ -559,8 +570,7 @@ class TestTurnTelemetry:
             litellm_client=llm,
             litellm_model="openai/gpt-5.5",
             litellm_kwargs={},
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(),
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(
@@ -596,8 +606,7 @@ class TestTurnTelemetry:
             litellm_client=llm,
             litellm_model="openai/gpt-5.5",
             litellm_kwargs={},
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(base_version=3),
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(current_version=3),
@@ -629,8 +638,7 @@ class TestTurnTelemetry:
             litellm_client=llm,
             litellm_model="openai/gpt-5.5",
             litellm_kwargs={},
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(),
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(),
@@ -664,8 +672,7 @@ class TestTurnTelemetry:
             litellm_client=llm,
             litellm_model="openai/gpt-5.5",
             litellm_kwargs={},
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(),
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(
@@ -696,8 +703,7 @@ class TestTurnTelemetry:
             litellm_client=llm,
             litellm_model="openai/gpt-5.5",
             litellm_kwargs={},
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(),
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_ctx(

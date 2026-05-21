@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T005
+active_task: T006
 
 scoring_target:
   dimensions:
@@ -46,7 +46,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "T002 post-implementation PM audit plus Claude and Antigravity green implementation reviews."
+  source: "T005 post-implementation PM audit plus Claude green implementation review; Antigravity ran twice but produced no usable verdict body, recorded as tooling failure."
   Maintainability: 8
   Code_Quality: 8
   Clean_Architecture: 8
@@ -54,16 +54,17 @@ current_scorecard:
   Single_Source_of_Truth: 8
   Human_Readability: 8
   Human_Reviewability: 8
-  Runtime_Reliability: 7
+  Runtime_Reliability: 8
   Data_Model_Schema_Quality: 6
   Test_Coverage_Quality: 8
   Overall: 6
   blockers:
-    - "Send-turn lease is still optional in mutable repo writes and is dropped in some proposal/retry paths."
     - "Conversation metadata and edit-result JSON remain raw hidden schemas."
     - "SSE/public API contracts remain generated-client weak."
     - "Live eval still shows runtime-input/form-field prompts can produce no form fields."
     - "Retry self-correction still crosses an untyped process_tool_kwargs dict-bag boundary."
+    - "ai_builder_proposal_processor.py remains oversized; handler extraction is recorded as T006 after the SessionSendTurn boundary."
+    - "Antigravity T005 post-implementation runner attempts did not return a usable Antigravity verdict body, so the final Antigravity gate is explicitly missing rather than passed."
     - "Full Flow unit sweeps still hit unrelated baseline/environment failures."
 
 dirty_worktree_baseline:
@@ -512,7 +513,7 @@ tasks:
   - id: T005
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Implement the approved SessionSendTurn active-turn runtime contract and verify lost-lease rollback behavior."
     allowed_files:
@@ -565,6 +566,135 @@ tasks:
       - "Lost-lease behavior cannot be covered by a DB-backed boundary."
       - "Verification fails twice for the same reason."
       - "Implementation would require staging unrelated dirty files."
+    follow_up_candidates_after_completion:
+      - id: "T006-candidate"
+        title: "Extract proposal tool handlers after SessionSendTurn lands."
+        problem: "ai_builder_proposal_processor.py remains oversized and carries proposal completion, submission handlers, retry routing, structured-question recovery, MCP clarification, and edit dispatch in one review-heavy file."
+        why_after_t005: "Claude, Antigravity, and the parallel reviewer rejected a broad split inside T005 because it would mix mechanical file moves with the runtime lease/CAS correctness repair. After SessionSendTurn is stable, handler extraction has a cleaner boundary and a smaller review risk."
+        proposed_canonical_owner: "Keep ProposalContext.turn as the active-turn carrier; extract create/edit/requirements/question-recovery handler responsibilities around that stable context rather than threading primitives or adding pass-through services."
+        acceptance_criteria:
+          - "No active send-turn path reintroduces loose lease_request_id / lease_lock_token or standalone base-version kwargs."
+          - "The processor file loses real responsibility, not only lines; extracted modules have domain-specific names and deep interfaces."
+          - "Behavior-focused proposal/retry tests remain green and are adjusted only for public behavior."
+          - "Diff separates pure moves from behavior changes where practical."
+        peer_gate_required: true
+    receipt:
+      completed_at: "2026-05-21T12:10:00+02:00"
+      result: done
+      summary: "Implemented the approved SessionSendTurn active-turn runtime contract. Active send-turn writes now require a typed SessionSendLease/SessionSendTurn; lifecycle status writes use the explicit no-send-lease method. The proposal processor stayed net-negative in LOC and broad handler extraction remains deferred to T006."
+      changed_files:
+        source:
+          - "backend/src/intric/flows/ai_builder/ai_builder_session_turn.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_repo.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_planner.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_planner_turn.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_dispatcher.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_plan_store.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_discovery_followup.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_repair_transport.py"
+        tests:
+          - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_dispatcher.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_discovery_followup.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py"
+        guard_and_board:
+          - "scripts/gate-local/check_ai_builder_session_turn_contract.sh"
+          - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      implementation_evidence:
+        - "SessionSendLease and SessionSendTurn live in ai_builder_session_turn.py, a leaf module with dataclasses and uuid imports only."
+        - "repo.commit_turn(), run_planner_turn(), dispatch_planner_action(), plan-store/edit/discovery/repair persistence helpers now take SessionSendTurn."
+        - "update_session_status_without_send_lease() is the explicit lifecycle bypass; active update_session_status() requires SessionSendLease."
+        - "Static guard rejects loose lease_request_id / lease_lock_token and optional SessionSendLease/SessionSendTurn outside the one private repo lifecycle helper."
+        - "ai_builder_proposal_processor.py changed by 100 insertions and 184 deletions, net -84 lines; current length 2571 lines."
+      codex_post_implementation_self_review:
+        verdict: "pass_for_T005_not_broader_goal"
+        answers:
+          - "Production-ready for T005: yes; active send-turn writes are typed and DB-backed lost-lease paths are covered."
+          - "Ready for a human developer to maintain: yes for the lease/CAS boundary; proposal handler extraction remains next."
+          - "Ready for a human reviewer to approve: yes; broad but coherent runtime-boundary diff with behavior tests and guard."
+          - "Architecture improved, not another layer: yes; one typed active-turn owner replaced scattered primitives."
+          - "Future debt reduced: runtime lease/CAS debt reduced; JSONB/API/SSE/live-eval debt remains."
+          - "Deleted/simplified weak code: loose primitive threading removed, dead ProposalContext.with_planning_state_version removed, stale docstring/no-op refresh fixed."
+          - "Tests meaningful: yes; lost-lease tests assert stable error code and rollback post-conditions."
+      peer_reviews:
+        claude_iteration_1:
+          artifact: ".codex/artifacts/claude-peer-loop-t005-sessionsendturn-implementation-review-20260521T095531Z.md"
+          verdict: "GREEN_LIGHT no; VERDICT changes_required; MIN_SCORE 6"
+          blockers_fixed:
+            - "Stale commit_turn docstring referenced removed base_version parameter."
+            - "Dead ProposalContext.with_planning_state_version helper."
+            - "No-op turn refresh in send_message."
+            - "Static guard did not scan AI Builder tests."
+        claude_iteration_2:
+          artifact: ".codex/artifacts/claude-peer-loop-t005-sessionsendturn-implementation-review-iteration-2-20260521T100244Z.md"
+          verdict: "GREEN_LIGHT yes; VERDICT green; MIN_SCORE 8"
+        antigravity_iteration_1:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t005-sessionsendturn-implementation-final-review-20260521T100611Z.md"
+          result: "tooling_failure_missing_verdict"
+          exact_failure: "Runner exited 0 and provider usage was not exhausted, but artifact metadata parsed GREEN_LIGHT false / VERDICT false / MIN_SCORE none and the artifact contained Antigravity action logs plus embedded Claude text, not a usable Antigravity verdict body."
+        antigravity_iteration_2:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t005-sessionsendturn-verdict-only-followup-20260521T100649Z.md"
+          result: "tooling_failure_missing_verdict"
+          exact_failure: "Verdict-only follow-up again exited 0 without provider exhaustion, but produced only action logs and embedded Claude prompt/artifact text; parsed GREEN_LIGHT false / VERDICT false / MIN_SCORE none."
+        antigravity_gate_status: "missing_due_tooling_failure_not_passed"
+        codex_decision_after_missing_antigravity: "Continue to commit T005 because Claude is green, Codex self-review passes, runtime behavior is covered by DB-backed tests, static guard passes, and the Antigravity failure is a tooling/output failure rather than a blocking finding."
+      verification:
+        - command: "scripts/gate-local/check_ai_builder_session_turn_contract.sh on deliberately broken temp fixture"
+          result: "Rejected fixture containing lease_request_id."
+        - command: "scripts/gate-local/check_ai_builder_session_turn_contract.sh"
+          result: "clean"
+        - command: "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_dispatcher.py tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_discovery_followup.py tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py -q"
+          result: "140 passed, 1 warning"
+        - command: "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::test_ai_builder_repo_commit_turn_rejects_write_when_lease_is_lost tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_rejects_lost_session_send_lease_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_confirm_requirements_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_edit_flow_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_structured_question_recovery_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_send_message_status_jump_under_lock_uses_lease -q"
+          result: "6 passed, 16 warnings"
+        - command: "uv run ruff check <T005 source/test files>"
+          result: "All checks passed"
+        - command: "uv run ruff format --check <T005 source/test files>"
+          result: "21 files already formatted"
+        - command: "PYTHONDONTWRITEBYTECODE=1 uv run pyright <T005 source files>"
+          result: "0 errors, 0 warnings, 0 informations"
+        - command: "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+          result: "yaml ok"
+      live_eval:
+        result: "not_run_for_T005"
+        reason: "T005 is a runtime lease/CAS persistence tranche; authenticated live AI Builder output quality eval remains a separate broader-goal blocker and next-tranche candidate."
+      residual_risks:
+        - "Broader subsystem remains 6/10 overall because Data Model / Schema Quality is still 6 due raw JSONB and edit-result metadata contracts."
+        - "Public SSE/API contracts remain generated-client weak."
+        - "Authenticated live eval still needs five realistic cases including runtime-input/form-field prompts."
+        - "process_tool_kwargs remains a typed weak spot to address with T006 proposal handler extraction."
+        - "Antigravity did not provide a usable post-implementation verdict despite two runs; this is explicitly missing review coverage."
+
+  - id: T006
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: xhigh
+    objective: "Plan and peer-gate the proposal tool handler extraction now that SessionSendTurn is stable, unless current evidence proves a higher-ROI blocker outranks it."
+    inputs:
+      - "T005 receipt"
+      - "T005 follow_up_candidates_after_completion.T006-candidate"
+      - "Current source evidence in ai_builder_proposal_processor.py and proposal retry transport"
+    constraints:
+      - "Do not implement before a fresh Codex self-review and Claude gate; use Antigravity if tooling returns a usable verdict, otherwise document exact failure."
+      - "Do not reintroduce loose active-turn lease primitives or standalone base-version kwargs."
+      - "Prefer deep domain-specific handler modules over shallow pass-through services."
+    expected_output:
+      - "Architecture diagnosis for proposal handler ownership."
+      - "Allowed files and bounded write areas."
+      - "Rejected alternatives."
+      - "Acceptance criteria."
+      - "Verification plan."
+      - "Peer gate verdicts or exact Antigravity tooling failure."
     receipt: null
 
 checks:
@@ -573,12 +703,14 @@ checks:
     status_checked: true
     result: "dirty; previous tranche uncommitted and unrelated files preserved"
   last_verification:
-    result: "T002 active send-turn planning-state CAS implementation verified; authenticated API read probe and four-case create live eval remain the latest live-eval evidence."
-    task: T002
+    result: "T005 SessionSendTurn active-turn runtime contract verified; authenticated API read probe and four-case create live eval remain the latest live-eval evidence."
+    task: T005
     commands:
-      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_discovery_followup.py tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py"
-      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::test_persist_tool_turn_refreshes_planning_state_with_requirements_summary tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_rejects_stale_planning_state_version_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_accepts_matching_planning_state_version tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_preserves_persisted_architecture_commit tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_rolls_back_when_append_fails tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_saves_planning_state tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_stamps_plan_identity_on_state tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_state_matches_compacted_conversation"
-      - "uv run ruff check <T002 touched source/test files>"
-      - "uv run ruff format --check <T002 touched source/test files>"
-      - "uv run pyright <T002 touched source/test files>"
-      - "AST call-site audit for active-turn helper calls missing base_planning_state_version"
+      - "scripts/gate-local/check_ai_builder_session_turn_contract.sh on deliberately broken temp fixture: rejected fixture containing lease_request_id"
+      - "scripts/gate-local/check_ai_builder_session_turn_contract.sh: clean"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_dispatcher.py tests/unittests/flows/ai_builder/test_ai_builder_plan_lifecycle.py tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_discovery_followup.py tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py -q: 140 passed, 1 warning"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/integration/flows/test_ai_builder_session_api_regressions.py::test_ai_builder_repo_commit_turn_rejects_write_when_lease_is_lost tests/integration/flows/test_ai_builder_session_api_regressions.py::test_store_plan_and_update_conversation_rejects_lost_session_send_lease_and_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_confirm_requirements_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_edit_flow_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_structured_question_recovery_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_send_message_status_jump_under_lock_uses_lease -q: 6 passed, 16 warnings"
+      - "uv run ruff check <T005 source/test files>: All checks passed"
+      - "uv run ruff format --check <T005 source/test files>: 21 files already formatted"
+      - "PYTHONDONTWRITEBYTECODE=1 uv run pyright <T005 source files>: 0 errors, 0 warnings, 0 informations"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"': yaml ok"

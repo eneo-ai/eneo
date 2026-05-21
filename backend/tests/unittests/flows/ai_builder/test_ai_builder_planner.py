@@ -1061,6 +1061,7 @@ async def test_send_message_rejects_when_another_send_is_already_in_progress() -
     planner.repo.claim_session_send.return_value = False
     planner.repo.get_session.return_value = SimpleNamespace(
         conversation=[],
+        planning_state_version=0,
         status="chatting",
     )
 

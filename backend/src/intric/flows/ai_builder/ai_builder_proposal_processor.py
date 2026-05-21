@@ -47,6 +47,7 @@ from intric.flows.ai_builder.ai_builder_discovery import (
     build_registry_question_followup,
 )
 from intric.flows.ai_builder.ai_builder_discovery_followup import (
+    BackendQuestionPersistenceResult,
     emit_discovery_followup_if_needed,
     persist_backend_question,
 )
@@ -157,6 +158,7 @@ from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     extract_runtime_input_field_hints,
     runtime_metadata_allows_input_fields,
 )
+from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
 )
@@ -419,6 +421,7 @@ class ToolProcessingResult:
     feedback: str | None = None
     failure_kind: ToolProcessingFailureKind | None = None
     failure_codes: frozenset[str] = frozenset()
+    new_planning_state_version: int | None = None
 
     @property
     def has_events(self) -> bool:
@@ -432,7 +435,7 @@ class ToolProcessingResult:
 
 @dataclass(frozen=True)
 class ProposalContext:
-    session_id: UUID
+    turn: SessionSendTurn
     conversation: list[ConversationMessage]
     new_messages_start: int
     llm_messages: list[dict[str, Any]]
@@ -444,9 +447,6 @@ class ProposalContext:
     resource_catalog: AIBuilderResourceCatalog | None
     max_output_tokens: int
     request_id: str
-    base_planning_state_version: int
-    lease_request_id: UUID | None = None
-    lease_lock_token: UUID | None = None
     flow: "Flow | None" = None
     assistant_snapshots: AssistantAuthoringSnapshots | None = None
     text_content: str | None = None
@@ -455,6 +455,14 @@ class ProposalContext:
     usage_tracker: ProposalTurnTelemetry | None = None
     plan_edit_context: AIBuilderPlanEditContext | None = None
     prior_plan_for_revision: BuilderPlan | None = None
+
+    @property
+    def session_id(self) -> UUID:
+        return self.turn.session_id
+
+    @property
+    def base_planning_state_version(self) -> int:
+        return self.turn.base_planning_state_version
 
 
 @dataclass(frozen=True)
@@ -546,10 +554,9 @@ class AIBuilderProposalProcessor:
     async def _process_outline_arguments(
         self,
         *,
-        session_id: UUID,
+        turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
-        base_planning_state_version: int,
         arguments: dict[str, Any],
         assistant_content: str,
         tool_call_id: str,
@@ -558,8 +565,6 @@ class AIBuilderProposalProcessor:
         assistant_metadata: dict[str, Any] | None = None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         flow: "Flow | None" = None,
-        lease_request_id: UUID | None = None,
-        lease_lock_token: UUID | None = None,
         planning_state: PlanningState | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
@@ -598,7 +603,7 @@ class AIBuilderProposalProcessor:
         except OutlineFlowArgumentError as error:
             logger.info(
                 "ai_builder_outline_parse_failed session_id=%s tool_call_id=%s issues=%s",
-                session_id,
+                turn.session_id,
                 tool_call_id,
                 list(error.issues),
             )
@@ -616,7 +621,7 @@ class AIBuilderProposalProcessor:
             )
             logger.info(
                 "ai_builder_outline_compile_failed session_id=%s tool_call_id=%s error_type=%s issues=%s",
-                session_id,
+                turn.session_id,
                 tool_call_id,
                 type(error).__name__,
                 issues,
@@ -628,10 +633,9 @@ class AIBuilderProposalProcessor:
             )
 
         return await self._process_create_draft(
-            session_id=session_id,
+            turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
-            base_planning_state_version=base_planning_state_version,
             draft=draft,
             arguments=arguments,
             assistant_content=assistant_content,
@@ -642,8 +646,6 @@ class AIBuilderProposalProcessor:
             available_kb_refs=available_kb_refs,
             resource_catalog=resource_catalog,
             flow=flow,
-            lease_request_id=lease_request_id,
-            lease_lock_token=lease_lock_token,
             aggregation_intent=(
                 compile_context.aggregation_intent
                 if compile_context is not None
@@ -658,10 +660,9 @@ class AIBuilderProposalProcessor:
     async def _process_create_draft(
         self,
         *,
-        session_id: UUID,
+        turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
-        base_planning_state_version: int,
         draft: FlowCreateDraft,
         arguments: dict[str, Any],
         assistant_content: str,
@@ -672,8 +673,6 @@ class AIBuilderProposalProcessor:
         available_kb_refs: set[str] | None,
         resource_catalog: AIBuilderResourceCatalog | None,
         flow: "Flow | None",
-        lease_request_id: UUID | None,
-        lease_lock_token: UUID | None,
         aggregation_intent: AggregationIntent = "linear",
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
@@ -781,7 +780,7 @@ class AIBuilderProposalProcessor:
             logger.info(
                 "ai_builder_scoped_plan_revision_rejected "
                 "session_id=%s target_step_ref=%s",
-                session_id,
+                turn.session_id,
                 target_step_ref,
             )
             return ToolProcessingResult(
@@ -792,21 +791,21 @@ class AIBuilderProposalProcessor:
             )
 
         mcp_clarification_events = await self.mcp_clarification_events_if_needed(
-            session_id=session_id,
+            turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
-            base_planning_state_version=base_planning_state_version,
             spec=spec,
             resource_catalog=resource_catalog,
             flow=flow,
             assistant_metadata_builder=_accepted_proposal_metadata,
-            lease_request_id=lease_request_id,
-            lease_lock_token=lease_lock_token,
         )
         if mcp_clarification_events:
             return ToolProcessingResult(
-                event=mcp_clarification_events[0],
-                events=tuple(mcp_clarification_events[1:]),
+                event=mcp_clarification_events.events[0],
+                events=tuple(mcp_clarification_events.events[1:]),
+                new_planning_state_version=(
+                    mcp_clarification_events.new_planning_state_version
+                ),
             )
         mcp_policy_feedback = (
             mcp_selection_policy_feedback(
@@ -821,7 +820,7 @@ class AIBuilderProposalProcessor:
             logger.info(
                 "ai_builder_mcp_selection_policy_violation "
                 "session_id=%s tool_call_id=%s",
-                session_id,
+                turn.session_id,
                 tool_call_id,
             )
 
@@ -888,13 +887,11 @@ class AIBuilderProposalProcessor:
                 failure_kind="quality",
             )
 
-        plan, envelope = await store_plan_and_update_conversation(
+        stored_plan = await store_plan_and_update_conversation(
             repo=self.repo,
-            tenant_id=self.user.tenant_id,
-            session_id=session_id,
+            turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
-            base_planning_state_version=base_planning_state_version,
             assistant_content=assistant_content,
             assistant_metadata=_accepted_proposal_metadata(),
             tool_call_id=tool_call_id,
@@ -910,33 +907,32 @@ class AIBuilderProposalProcessor:
                 if resource_catalog is not None
                 else tuple()
             ),
-            lease_request_id=lease_request_id,
-            lease_lock_token=lease_lock_token,
             flow=flow,
         )
         return ToolProcessingResult(
-            event=build_plan_event(plan_id=plan.id, envelope=envelope)
+            event=build_plan_event(
+                plan_id=stored_plan.plan.id,
+                envelope=stored_plan.envelope,
+            ),
+            new_planning_state_version=stored_plan.new_planning_state_version,
         )
 
     async def mcp_clarification_events_if_needed(
         self,
         *,
-        session_id: UUID,
+        turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
-        base_planning_state_version: int,
         spec: FlowDraftSpecCore,
         resource_catalog: AIBuilderResourceCatalog | None,
         flow: "Flow | None",
-        lease_request_id: UUID | None,
-        lease_lock_token: UUID | None,
         assistant_metadata: dict[str, Any] | None = None,
         assistant_metadata_builder: Callable[[], dict[str, Any] | None] | None = None,
-    ) -> list[dict[str, str]]:
+    ) -> BackendQuestionPersistenceResult | None:
         if resource_catalog is None or mcp_selection_answer_allows_planning(
             conversation
         ):
-            return []
+            return None
 
         issue = find_named_mcp_reference_issue(
             spec=spec,
@@ -949,7 +945,7 @@ class AIBuilderProposalProcessor:
                 catalog=resource_catalog,
             )
         if issue is None:
-            return []
+            return None
 
         metadata = (
             assistant_metadata_builder()
@@ -964,7 +960,7 @@ class AIBuilderProposalProcessor:
         logger.info(
             "ai_builder_mcp_selection_requires_clarification "
             "session_id=%s step_ref=%s requested_mcp=%s reason=%s selected_server_refs=%s",
-            session_id,
+            turn.session_id,
             issue.step_ref,
             issue.requested_name,
             issue.reason,
@@ -972,11 +968,9 @@ class AIBuilderProposalProcessor:
         )
         return await persist_backend_question(
             repo=self.repo,
-            tenant_id=self.user.tenant_id,
-            session_id=session_id,
+            turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
-            base_planning_state_version=base_planning_state_version,
             question_data=question_data,
             assistant_text=assistant_text,
             assistant_metadata=metadata,
@@ -985,8 +979,6 @@ class AIBuilderProposalProcessor:
                 "user selection from enabled space resources."
             ),
             flow=flow,
-            lease_request_id=lease_request_id,
-            lease_lock_token=lease_lock_token,
         )
 
     @staticmethod
@@ -1016,7 +1008,7 @@ class AIBuilderProposalProcessor:
     async def handle_tool_call(
         self,
         *,
-        session_id: UUID,
+        turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
         tool_calls: list[Any],
@@ -1029,10 +1021,7 @@ class AIBuilderProposalProcessor:
         available_kb_refs: set[str] | None,
         max_output_tokens: int,
         request_id: str,
-        base_planning_state_version: int,
         assistant_metadata: dict[str, Any] | None = None,
-        lease_request_id: UUID | None = None,
-        lease_lock_token: UUID | None = None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
@@ -1042,7 +1031,7 @@ class AIBuilderProposalProcessor:
         prior_plan_for_revision: BuilderPlan | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         ctx = ProposalContext(
-            session_id=session_id,
+            turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
             llm_messages=llm_messages,
@@ -1054,9 +1043,6 @@ class AIBuilderProposalProcessor:
             resource_catalog=resource_catalog,
             max_output_tokens=max_output_tokens,
             request_id=request_id,
-            base_planning_state_version=base_planning_state_version,
-            lease_request_id=lease_request_id,
-            lease_lock_token=lease_lock_token,
             flow=flow,
             assistant_snapshots=assistant_snapshots,
             text_content=text_content,
@@ -1079,7 +1065,7 @@ class AIBuilderProposalProcessor:
     async def propose_plan(
         self,
         *,
-        session_id: UUID,
+        turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
         llm_messages: list[dict[str, Any]],
@@ -1093,15 +1079,12 @@ class AIBuilderProposalProcessor:
         max_output_tokens: int,
         proposal_temperature: float,
         request_id: str,
-        base_planning_state_version: int,
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         assistant_metadata: dict[str, Any] | None = None,
         planning_state: PlanningState | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
-        lease_request_id: UUID | None = None,
-        lease_lock_token: UUID | None = None,
         available_mcps: AIBuilderMCPResourceInput = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         """Run the server-selected plan proposal task.
@@ -1112,19 +1095,16 @@ class AIBuilderProposalProcessor:
         """
 
         submission_tool_name = _active_submission_tool_name(flow)
-        preflight_events = await self._mcp_preflight_events_if_needed(
-            session_id=session_id,
+        preflight_result = await self._mcp_preflight_events_if_needed(
+            turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
             resource_catalog=resource_catalog,
             flow=flow,
             assistant_metadata=assistant_metadata,
-            base_planning_state_version=base_planning_state_version,
-            lease_request_id=lease_request_id,
-            lease_lock_token=lease_lock_token,
         )
-        if preflight_events:
-            for event in preflight_events:
+        if preflight_result is not None:
+            for event in preflight_result.events:
                 yield event
             return
 
@@ -1168,7 +1148,7 @@ class AIBuilderProposalProcessor:
         if tool_calls:
             yielded = False
             async for event in self.handle_tool_call(
-                session_id=session_id,
+                turn=turn,
                 conversation=conversation,
                 new_messages_start=new_messages_start,
                 tool_calls=tool_calls,
@@ -1182,10 +1162,7 @@ class AIBuilderProposalProcessor:
                 resource_catalog=resource_catalog,
                 max_output_tokens=max_output_tokens,
                 request_id=request_id,
-                base_planning_state_version=base_planning_state_version,
                 assistant_metadata=assistant_metadata,
-                lease_request_id=lease_request_id,
-                lease_lock_token=lease_lock_token,
                 flow=flow,
                 assistant_snapshots=assistant_snapshots,
                 planning_state=planning_state,
@@ -1217,7 +1194,7 @@ class AIBuilderProposalProcessor:
             tool_schemas=tool_schemas,
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
-            session_id=session_id,
+            turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
             available_model_refs=available_model_refs,
@@ -1227,11 +1204,8 @@ class AIBuilderProposalProcessor:
             flow=flow,
             assistant_snapshots=assistant_snapshots,
             planning_state=planning_state,
-            base_planning_state_version=base_planning_state_version,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
-            lease_request_id=lease_request_id,
-            lease_lock_token=lease_lock_token,
             usage_tracker=usage_tracker,
             assistant_metadata=assistant_metadata,
         )
@@ -1282,27 +1256,24 @@ class AIBuilderProposalProcessor:
     async def _mcp_preflight_events_if_needed(
         self,
         *,
-        session_id: UUID,
+        turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
         resource_catalog: AIBuilderResourceCatalog | None,
         flow: "Flow | None",
         assistant_metadata: dict[str, Any] | None,
-        base_planning_state_version: int,
-        lease_request_id: UUID | None,
-        lease_lock_token: UUID | None,
-    ) -> list[dict[str, str]]:
+    ) -> BackendQuestionPersistenceResult | None:
         if resource_catalog is None or mcp_selection_answer_allows_planning(
             conversation
         ):
-            return []
+            return None
 
         issue = find_named_mcp_request_issue(
             catalog=resource_catalog,
             signal_text=_conversation_user_text(conversation),
         )
         if issue is None:
-            return []
+            return None
 
         question_data, assistant_text = build_mcp_resource_selection_question(
             issue=issue,
@@ -1312,16 +1283,14 @@ class AIBuilderProposalProcessor:
         logger.info(
             "ai_builder_mcp_preflight_requires_clarification "
             "session_id=%s requested_mcp=%s",
-            session_id,
+            turn.session_id,
             issue.requested_name,
         )
         return await persist_backend_question(
             repo=self.repo,
-            tenant_id=self.user.tenant_id,
-            session_id=session_id,
+            turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
-            base_planning_state_version=base_planning_state_version,
             question_data=question_data,
             assistant_text=assistant_text,
             assistant_metadata=assistant_metadata,
@@ -1330,8 +1299,6 @@ class AIBuilderProposalProcessor:
                 "requested an MCP by name and must choose from enabled space MCP resources."
             ),
             flow=flow,
-            lease_request_id=lease_request_id,
-            lease_lock_token=lease_lock_token,
         )
 
     async def _resolve_submission_prerequisite_events(
@@ -1344,11 +1311,10 @@ class AIBuilderProposalProcessor:
         if requirements_state.confirmed:
             return False, []
 
-        followup_events = await self.emit_discovery_followup_if_needed(
-            session_id=ctx.session_id,
+        followup_result = await self.emit_discovery_followup_if_needed(
+            turn=ctx.turn,
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,
-            base_planning_state_version=ctx.base_planning_state_version,
             flow=ctx.flow,
             litellm_model=ctx.litellm_model,
             litellm_kwargs=ctx.litellm_kwargs,
@@ -1358,11 +1324,9 @@ class AIBuilderProposalProcessor:
                 usage_tracker=ctx.usage_tracker,
                 tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
             ),
-            lease_request_id=ctx.lease_request_id,
-            lease_lock_token=ctx.lease_lock_token,
         )
-        if followup_events:
-            return True, followup_events
+        if followup_result is not None:
+            return True, followup_result.events
         if not analyze_discovery_ready(ctx.conversation, flow=ctx.flow):
             return True, []
         return True, [
@@ -1455,10 +1419,9 @@ class AIBuilderProposalProcessor:
             )
 
         submission_kwargs = self._build_submission_processing_kwargs(
-            session_id=ctx.session_id,
+            turn=ctx.turn,
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,
-            base_planning_state_version=ctx.base_planning_state_version,
             arguments=arguments,
             assistant_content="Här är mitt förslag:",
             assistant_metadata=None,
@@ -1470,8 +1433,6 @@ class AIBuilderProposalProcessor:
             resource_catalog=ctx.resource_catalog,
             flow=ctx.flow,
             include_flow_context=config.include_flow_context,
-            lease_request_id=ctx.lease_request_id,
-            lease_lock_token=ctx.lease_lock_token,
         )
         if config.target_tool_name == OUTLINE_FLOW_TOOL_NAME:
             submission_kwargs["planning_state"] = ctx.planning_state
@@ -1530,10 +1491,9 @@ class AIBuilderProposalProcessor:
     @staticmethod
     def _build_submission_processing_kwargs(
         *,
-        session_id: UUID,
+        turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
-        base_planning_state_version: int,
         arguments: dict[str, Any],
         assistant_content: str,
         assistant_metadata: dict[str, Any] | None = None,
@@ -1545,14 +1505,11 @@ class AIBuilderProposalProcessor:
         resource_catalog: AIBuilderResourceCatalog | None,
         flow: "Flow | None",
         include_flow_context: bool,
-        lease_request_id: UUID | None,
-        lease_lock_token: UUID | None,
     ) -> dict[str, Any]:
         processing_kwargs: dict[str, Any] = {
-            "session_id": session_id,
+            "turn": turn,
             "conversation": conversation,
             "new_messages_start": new_messages_start,
-            "base_planning_state_version": base_planning_state_version,
             "arguments": arguments,
             "assistant_content": assistant_content,
             "assistant_metadata": assistant_metadata,
@@ -1562,8 +1519,6 @@ class AIBuilderProposalProcessor:
             "available_model_refs": available_model_refs,
             "available_kb_refs": available_kb_refs,
             "resource_catalog": resource_catalog,
-            "lease_request_id": lease_request_id,
-            "lease_lock_token": lease_lock_token,
         }
         if include_flow_context:
             processing_kwargs["flow"] = flow
@@ -1655,7 +1610,7 @@ class AIBuilderProposalProcessor:
     async def request_self_correction(
         self,
         *,
-        session_id: UUID,
+        turn: SessionSendTurn,
         request_id: str,
         conversation: list[ConversationMessage],
         new_messages_start: int,
@@ -1668,13 +1623,12 @@ class AIBuilderProposalProcessor:
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
         max_output_tokens: int,
-        base_planning_state_version: int,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         ctx = ProposalContext(
-            session_id=session_id,
+            turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
             llm_messages=llm_messages,
@@ -1686,7 +1640,6 @@ class AIBuilderProposalProcessor:
             resource_catalog=resource_catalog,
             max_output_tokens=max_output_tokens,
             request_id=request_id,
-            base_planning_state_version=base_planning_state_version,
             flow=flow,
         )
         retry_config = self._submission_retry_config(
@@ -1714,9 +1667,7 @@ class AIBuilderProposalProcessor:
         retry_config: ToolRetryConfig,
     ) -> AsyncGenerator[dict[str, str], None]:
         merged_process_kwargs = dict(retry_config.process_tool_kwargs)
-        merged_process_kwargs["base_planning_state_version"] = (
-            ctx.base_planning_state_version
-        )
+        merged_process_kwargs["turn"] = ctx.turn
         merged_process_kwargs.setdefault("resource_catalog", ctx.resource_catalog)
 
         def _build_assistant_metadata() -> dict[str, Any] | None:
@@ -1872,21 +1823,18 @@ class AIBuilderProposalProcessor:
         tool_schemas: list[dict[str, Any]],
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
-        session_id: UUID,
+        turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
-        resource_catalog: AIBuilderResourceCatalog | None = None,
         max_output_tokens: int,
-        base_planning_state_version: int,
+        resource_catalog: AIBuilderResourceCatalog | None = None,
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         planning_state: PlanningState | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
-        lease_request_id: UUID | None = None,
-        lease_lock_token: UUID | None = None,
         usage_tracker: ProposalTurnTelemetry | None = None,
         assistant_metadata: dict[str, Any] | None = None,
     ) -> EventBatch | None:
@@ -1902,14 +1850,14 @@ class AIBuilderProposalProcessor:
             prior_plan_for_revision=prior_plan_for_revision,
         )
         process_tool_kwargs = dict(retry_config.process_tool_kwargs)
-        process_tool_kwargs["base_planning_state_version"] = base_planning_state_version
+        process_tool_kwargs["turn"] = turn
         outcome = await self.retry_forced_tool_after_text(
             correction_messages=correction_messages,
             assistant_text=assistant_text,
             tool_schemas=tool_schemas,
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
-            session_id=session_id,
+            session_id=turn.session_id,
             conversation=conversation,
             new_messages_start=new_messages_start,
             available_model_refs=available_model_refs,
@@ -1937,7 +1885,7 @@ class AIBuilderProposalProcessor:
     async def request_non_question_continuation(
         self,
         *,
-        session_id: UUID,
+        turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
         llm_messages: list[dict[str, Any]],
@@ -1948,7 +1896,6 @@ class AIBuilderProposalProcessor:
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
         max_output_tokens: int,
-        base_planning_state_version: int,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         flow: "Flow | None" = None,
         original_question_id: str | None = None,
@@ -1964,11 +1911,10 @@ class AIBuilderProposalProcessor:
         ]
         discovery_ready = analyze_discovery_ready(conversation, flow=flow)
         if not filtered_tool_schemas:
-            followup_events = await self.emit_discovery_followup_if_needed(
-                session_id=session_id,
+            followup_result = await self.emit_discovery_followup_if_needed(
+                turn=turn,
                 conversation=conversation,
                 new_messages_start=new_messages_start,
-                base_planning_state_version=base_planning_state_version,
                 flow=flow,
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs,
@@ -1978,11 +1924,9 @@ class AIBuilderProposalProcessor:
                     usage_tracker=usage_tracker,
                     tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
                 ),
-                lease_request_id=None,
-                lease_lock_token=None,
             )
-            if followup_events:
-                for event in followup_events:
+            if followup_result is not None:
+                for event in followup_result.events:
                     yield event
                 return
 
@@ -2083,7 +2027,7 @@ class AIBuilderProposalProcessor:
                     continue
 
                 async for event in self.handle_tool_call(
-                    session_id=session_id,
+                    turn=turn,
                     conversation=conversation,
                     new_messages_start=new_messages_start,
                     tool_calls=tool_calls,
@@ -2097,7 +2041,6 @@ class AIBuilderProposalProcessor:
                     resource_catalog=resource_catalog,
                     max_output_tokens=max_output_tokens,
                     request_id="question-recovery",
-                    base_planning_state_version=base_planning_state_version,
                     flow=flow,
                     assistant_snapshots=assistant_snapshots,
                     usage_tracker=usage_tracker,
@@ -2115,11 +2058,10 @@ class AIBuilderProposalProcessor:
         ctx: ProposalContext,
         tool_call: Any,
     ) -> AsyncGenerator[dict[str, str], None]:
-        followup_events = await self.emit_discovery_followup_if_needed(
-            session_id=ctx.session_id,
+        followup_result = await self.emit_discovery_followup_if_needed(
+            turn=ctx.turn,
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,
-            base_planning_state_version=ctx.base_planning_state_version,
             flow=ctx.flow,
             litellm_model=ctx.litellm_model,
             litellm_kwargs=ctx.litellm_kwargs,
@@ -2129,11 +2071,9 @@ class AIBuilderProposalProcessor:
                 usage_tracker=ctx.usage_tracker,
                 tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
             ),
-            lease_request_id=ctx.lease_request_id,
-            lease_lock_token=ctx.lease_lock_token,
         )
-        if followup_events:
-            for event in followup_events:
+        if followup_result is not None:
+            for event in followup_result.events:
                 yield event
             return
 
@@ -2161,11 +2101,9 @@ class AIBuilderProposalProcessor:
 
             await persist_tool_turn(
                 repo=self.repo,
-                tenant_id=self.user.tenant_id,
-                session_id=ctx.session_id,
+                turn=ctx.turn,
                 conversation=ctx.conversation,
                 new_messages_start=ctx.new_messages_start,
-                base_planning_state_version=ctx.base_planning_state_version,
                 tool_call=tool_call,
                 arguments=arguments,
                 tool_content=(
@@ -2178,8 +2116,6 @@ class AIBuilderProposalProcessor:
                     tool_calls=[tool_call],
                 ),
                 flow=ctx.flow,
-                lease_request_id=ctx.lease_request_id,
-                lease_lock_token=ctx.lease_lock_token,
             )
             yield build_text_event(fallback_text)
             return
@@ -2197,13 +2133,11 @@ class AIBuilderProposalProcessor:
         )
         if registry_followup is not None:
             backend_question_data, assistant_text = registry_followup
-            for event in await persist_backend_question(
+            persisted_question = await persist_backend_question(
                 repo=self.repo,
-                tenant_id=self.user.tenant_id,
-                session_id=ctx.session_id,
+                turn=ctx.turn,
                 conversation=ctx.conversation,
                 new_messages_start=ctx.new_messages_start,
-                base_planning_state_version=ctx.base_planning_state_version,
                 question_data=backend_question_data,
                 assistant_text=assistant_text,
                 assistant_metadata=_assistant_metadata_with_usage(
@@ -2216,14 +2150,13 @@ class AIBuilderProposalProcessor:
                     "Backend-owned discovery question presented to user after model signal."
                 ),
                 flow=ctx.flow,
-                lease_request_id=ctx.lease_request_id,
-                lease_lock_token=ctx.lease_lock_token,
-            ):
+            )
+            for event in persisted_question.events:
                 yield event
             return
 
         async for event in self.request_non_question_continuation(
-            session_id=ctx.session_id,
+            turn=ctx.turn,
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,
             llm_messages=ctx.llm_messages,
@@ -2235,7 +2168,6 @@ class AIBuilderProposalProcessor:
             available_kb_refs=ctx.available_kb_refs,
             resource_catalog=ctx.resource_catalog,
             max_output_tokens=ctx.max_output_tokens,
-            base_planning_state_version=ctx.base_planning_state_version,
             flow=ctx.flow,
             original_question_id=question_id,
             assistant_snapshots=ctx.assistant_snapshots,
@@ -2246,10 +2178,9 @@ class AIBuilderProposalProcessor:
     async def _process_confirm_requirements_arguments(
         self,
         *,
-        session_id: UUID,
+        turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
-        base_planning_state_version: int,
         arguments: dict[str, Any],
         assistant_content: str,
         tool_call_id: str,
@@ -2259,8 +2190,6 @@ class AIBuilderProposalProcessor:
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
         assistant_metadata: dict[str, Any] | None = None,
-        lease_request_id: UUID | None = None,
-        lease_lock_token: UUID | None = None,
     ) -> ToolProcessingResult:
         del assistant_content, available_model_refs, available_kb_refs
 
@@ -2319,13 +2248,11 @@ class AIBuilderProposalProcessor:
             tool_call_id=tool_call_id,
             tool_name=CONFIRM_REQUIREMENTS_TOOL_NAME,
         )
-        await persist_tool_turn(
+        new_version = await persist_tool_turn(
             repo=self.repo,
-            tenant_id=self.user.tenant_id,
-            session_id=session_id,
+            turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
-            base_planning_state_version=base_planning_state_version,
             tool_call=tool_call,
             arguments=arguments,
             tool_content="Requirements presented to user. Awaiting confirmation.",
@@ -2335,11 +2262,10 @@ class AIBuilderProposalProcessor:
             },
             assistant_metadata=assistant_metadata,
             flow=flow,
-            lease_request_id=lease_request_id,
-            lease_lock_token=lease_lock_token,
         )
         return ToolProcessingResult(
-            event=build_requirements_summary_event(requirements_payload)
+            event=build_requirements_summary_event(requirements_payload),
+            new_planning_state_version=new_version,
         )
 
     async def _handle_confirm_requirements(
@@ -2361,10 +2287,9 @@ class AIBuilderProposalProcessor:
             return
 
         confirm_result = await self._process_confirm_requirements_arguments(
-            session_id=ctx.session_id,
+            turn=ctx.turn,
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,
-            base_planning_state_version=ctx.base_planning_state_version,
             arguments=arguments,
             assistant_content=ctx.text_content or "",
             assistant_metadata=_assistant_metadata_with_usage(
@@ -2382,11 +2307,10 @@ class AIBuilderProposalProcessor:
         )
         if confirm_result.event is None:
             if confirm_result.failure_kind == "validation":
-                for event in await self.emit_discovery_followup_if_needed(
-                    session_id=ctx.session_id,
+                followup_result = await self.emit_discovery_followup_if_needed(
+                    turn=ctx.turn,
                     conversation=ctx.conversation,
                     new_messages_start=ctx.new_messages_start,
-                    base_planning_state_version=ctx.base_planning_state_version,
                     flow=ctx.flow,
                     litellm_model=ctx.litellm_model,
                     litellm_kwargs=ctx.litellm_kwargs,
@@ -2396,11 +2320,11 @@ class AIBuilderProposalProcessor:
                         usage_tracker=ctx.usage_tracker,
                         tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
                     ),
-                    lease_request_id=ctx.lease_request_id,
-                    lease_lock_token=ctx.lease_lock_token,
-                ):
-                    yield event
-                return
+                )
+                if followup_result is not None:
+                    for event in followup_result.events:
+                        yield event
+                    return
 
             async for event in self._request_tool_self_correction(
                 ctx=ctx,
@@ -2472,10 +2396,9 @@ class AIBuilderProposalProcessor:
 
         edit_result = await process_edit_arguments(
             processor=self,
-            session_id=ctx.session_id,
+            turn=ctx.turn,
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,
-            base_planning_state_version=ctx.base_planning_state_version,
             arguments=raw_args,
             assistant_content=ctx.text_content or "",
             tool_call_id=tool_call.id,
@@ -2534,33 +2457,26 @@ class AIBuilderProposalProcessor:
     async def emit_discovery_followup_if_needed(
         self,
         *,
-        session_id: UUID,
+        turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
-        base_planning_state_version: int,
         litellm_model: str | None = None,
         litellm_kwargs: dict[str, Any] | None = None,
         ui_language: str | None = None,
         flow: "Flow | None" = None,
         assistant_metadata: dict[str, Any] | None = None,
-        lease_request_id: UUID | None = None,
-        lease_lock_token: UUID | None = None,
-    ) -> list[dict[str, str]]:
+    ) -> BackendQuestionPersistenceResult | None:
         return await emit_discovery_followup_if_needed(
             repo=self.repo,
-            tenant_id=self.user.tenant_id,
-            session_id=session_id,
+            turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
-            base_planning_state_version=base_planning_state_version,
             flow=flow,
             litellm_client=self.litellm_client,
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
             ui_language=ui_language,
             assistant_metadata=assistant_metadata,
-            lease_request_id=lease_request_id,
-            lease_lock_token=lease_lock_token,
         )
 
     def _submission_retry_config(

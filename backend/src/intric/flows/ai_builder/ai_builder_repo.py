@@ -36,6 +36,10 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_session_transitions import (
     ensure_valid_session_status_transition,
 )
+from intric.flows.ai_builder.ai_builder_session_turn import (
+    SessionSendLease,
+    SessionSendTurn,
+)
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
@@ -368,8 +372,36 @@ class AIBuilderRepository:
         session_id: UUID,
         tenant_id: UUID,
         status: SessionStatus,
-        request_id: UUID | None = None,
-        lock_token: UUID | None = None,
+        lease: SessionSendLease,
+    ) -> None:
+        await self._update_session_status(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            status=status,
+            lease=lease,
+        )
+
+    async def update_session_status_without_send_lease(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        status: SessionStatus,
+    ) -> None:
+        await self._update_session_status(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            status=status,
+            lease=None,
+        )
+
+    async def _update_session_status(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        status: SessionStatus,
+        lease: SessionSendLease | None,
     ) -> None:
         async with self._transaction():
             current_stmt = select(BuilderSessions.status).where(
@@ -390,21 +422,14 @@ class AIBuilderRepository:
                 .where(
                     BuilderSessions.id == session_id,
                     BuilderSessions.tenant_id == tenant_id,
-                    *(
-                        (
-                            BuilderSessions.active_request_id == request_id,
-                            BuilderSessions.lock_token == lock_token,
-                        )
-                        if request_id is not None and lock_token is not None
-                        else ()
-                    ),
+                    *(_lease_filters(lease) if lease is not None else ()),
                 )
                 .values(
                     status=status.value,
                     updated_at=datetime.now(timezone.utc),
                 )
             )
-            if request_id is not None and lock_token is not None:
+            if lease is not None:
                 updated_session_id = await self.session.scalar(
                     stmt.returning(BuilderSessions.id)
                 )
@@ -423,8 +448,7 @@ class AIBuilderRepository:
         session_id: UUID,
         tenant_id: UUID,
         conversation: list[ConversationMessage],
-        request_id: UUID | None = None,
-        lock_token: UUID | None = None,
+        lease: SessionSendLease,
     ) -> None:
         async with self._transaction():
             compacted = compact_ai_builder_conversation(conversation)
@@ -434,27 +458,16 @@ class AIBuilderRepository:
                 .where(
                     BuilderSessions.id == session_id,
                     BuilderSessions.tenant_id == tenant_id,
-                    *(
-                        (
-                            BuilderSessions.active_request_id == request_id,
-                            BuilderSessions.lock_token == lock_token,
-                        )
-                        if request_id is not None and lock_token is not None
-                        else ()
-                    ),
+                    *_lease_filters(lease),
                 )
                 .values(
                     conversation=serialized,
                     updated_at=datetime.now(timezone.utc),
                 )
             )
-            if request_id is not None and lock_token is not None:
-                updated_session_id = await self.session.scalar(
-                    stmt.returning(BuilderSessions.id)
-                )
-            else:
-                await self.session.execute(stmt)
-                updated_session_id = session_id
+            updated_session_id = await self.session.scalar(
+                stmt.returning(BuilderSessions.id)
+            )
             if updated_session_id is None:
                 raise BadRequestException(
                     "The AI Builder session lease was lost while updating conversation state.",
@@ -467,8 +480,7 @@ class AIBuilderRepository:
         session_id: UUID,
         tenant_id: UUID,
         conversation: list[ConversationMessage],
-        request_id: UUID | None = None,
-        lock_token: UUID | None = None,
+        lease: SessionSendLease,
     ) -> list[ConversationMessage]:
         """Persist `conversation` messages and return the compacted list that was stored.
 
@@ -509,23 +521,14 @@ class AIBuilderRepository:
             stmt = select(BuilderSessions).where(
                 BuilderSessions.id == session_id,
                 BuilderSessions.tenant_id == tenant_id,
-                *(
-                    (
-                        BuilderSessions.active_request_id == request_id,
-                        BuilderSessions.lock_token == lock_token,
-                    )
-                    if request_id is not None and lock_token is not None
-                    else ()
-                ),
+                *_lease_filters(lease),
             )
             row = (await self.session.execute(stmt)).scalar_one_or_none()
             if row is None:
-                if request_id is not None and lock_token is not None:
-                    raise BadRequestException(
-                        "The AI Builder session lease was lost while appending conversation messages.",
-                        code="session_send_lease_lost",
-                    )
-                raise NotFoundException("Builder session not found.")
+                raise BadRequestException(
+                    "The AI Builder session lease was lost while appending conversation messages.",
+                    code="session_send_lease_lost",
+                )
 
             existing = _session_from_row(row).conversation
             compacted = compact_ai_builder_conversation([*existing, *conversation])
@@ -535,27 +538,16 @@ class AIBuilderRepository:
                 .where(
                     BuilderSessions.id == session_id,
                     BuilderSessions.tenant_id == tenant_id,
-                    *(
-                        (
-                            BuilderSessions.active_request_id == request_id,
-                            BuilderSessions.lock_token == lock_token,
-                        )
-                        if request_id is not None and lock_token is not None
-                        else ()
-                    ),
+                    *_lease_filters(lease),
                 )
                 .values(
                     conversation=serialized,
                     updated_at=datetime.now(timezone.utc),
                 )
             )
-            if request_id is not None and lock_token is not None:
-                updated_session_id = await self.session.scalar(
-                    update_stmt.returning(BuilderSessions.id)
-                )
-            else:
-                await self.session.execute(update_stmt)
-                updated_session_id = session_id
+            updated_session_id = await self.session.scalar(
+                update_stmt.returning(BuilderSessions.id)
+            )
             if updated_session_id is None:
                 raise BadRequestException(
                     "The AI Builder session lease was lost while saving conversation messages.",
@@ -584,8 +576,7 @@ class AIBuilderRepository:
         session_id: UUID,
         tenant_id: UUID,
         plan_id: UUID,
-        request_id: UUID | None = None,
-        lock_token: UUID | None = None,
+        lease: SessionSendLease,
     ) -> None:
         async with self._transaction():
             current_stmt = select(BuilderSessions.status).where(
@@ -606,14 +597,7 @@ class AIBuilderRepository:
                 .where(
                     BuilderSessions.id == session_id,
                     BuilderSessions.tenant_id == tenant_id,
-                    *(
-                        (
-                            BuilderSessions.active_request_id == request_id,
-                            BuilderSessions.lock_token == lock_token,
-                        )
-                        if request_id is not None and lock_token is not None
-                        else ()
-                    ),
+                    *_lease_filters(lease),
                 )
                 .values(
                     latest_plan_id=plan_id,
@@ -621,13 +605,9 @@ class AIBuilderRepository:
                     updated_at=datetime.now(timezone.utc),
                 )
             )
-            if request_id is not None and lock_token is not None:
-                updated_session_id = await self.session.scalar(
-                    stmt.returning(BuilderSessions.id)
-                )
-            else:
-                await self.session.execute(stmt)
-                updated_session_id = session_id
+            updated_session_id = await self.session.scalar(
+                stmt.returning(BuilderSessions.id)
+            )
             if updated_session_id is None:
                 raise BadRequestException(
                     "The AI Builder session lease was lost while recording the latest plan.",
@@ -660,8 +640,7 @@ class AIBuilderRepository:
         *,
         session_id: UUID,
         tenant_id: UUID,
-        request_id: UUID,
-        lock_token: UUID,
+        lease: SessionSendLease,
         lock_expires_at: datetime,
     ) -> bool:
         async with self._transaction():
@@ -683,8 +662,8 @@ class AIBuilderRepository:
                     ),
                 )
                 .values(
-                    active_request_id=request_id,
-                    lock_token=lock_token,
+                    active_request_id=lease.request_id,
+                    lock_token=lease.lock_token,
                     locked_at=now,
                     lock_expires_at=lock_expires_at,
                     updated_at=now,
@@ -699,8 +678,7 @@ class AIBuilderRepository:
         *,
         session_id: UUID,
         tenant_id: UUID,
-        request_id: UUID,
-        lock_token: UUID,
+        lease: SessionSendLease,
         lock_expires_at: datetime,
     ) -> bool:
         async with self._transaction():
@@ -710,8 +688,7 @@ class AIBuilderRepository:
                 .where(
                     BuilderSessions.id == session_id,
                     BuilderSessions.tenant_id == tenant_id,
-                    BuilderSessions.active_request_id == request_id,
-                    BuilderSessions.lock_token == lock_token,
+                    *_lease_filters(lease),
                 )
                 .values(
                     locked_at=now,
@@ -728,8 +705,7 @@ class AIBuilderRepository:
         *,
         session_id: UUID,
         tenant_id: UUID,
-        request_id: UUID,
-        lock_token: UUID,
+        lease: SessionSendLease,
     ) -> None:
         async with self._transaction():
             stmt = (
@@ -737,8 +713,7 @@ class AIBuilderRepository:
                 .where(
                     BuilderSessions.id == session_id,
                     BuilderSessions.tenant_id == tenant_id,
-                    BuilderSessions.active_request_id == request_id,
-                    BuilderSessions.lock_token == lock_token,
+                    *_lease_filters(lease),
                 )
                 .values(
                     active_request_id=None,
@@ -989,14 +964,10 @@ class AIBuilderRepository:
     async def commit_turn(
         self,
         *,
-        session_id: UUID,
-        tenant_id: UUID,
+        turn: SessionSendTurn,
         new_messages: list[ConversationMessage],
         flow: "Flow | None" = None,
-        request_id: UUID | None = None,
-        lock_token: UUID | None = None,
         architecture_commit: ArchitectureCommit | None = None,
-        base_version: int | None = None,
     ) -> int:
         """Append new conversation messages and save `PlanningState` atomically.
 
@@ -1013,14 +984,11 @@ class AIBuilderRepository:
         which the planner's `commit_architecture` action persists to
         `PlanningState.architecture_commit`.
 
-        When `base_version` is provided, it is forwarded to
-        `save_planning_state` so the UPDATE applies a CAS filter on
-        `planning_state_version == base_version`. The dispatcher passes
-        the `OrchestrationContext.current_version` the orchestrator
-        validated against, closing the read-modify-write window between
-        pipeline validation and the atomic write. A concurrent writer
-        that moved the row between the guardrail's Python-side check
-        and this UPDATE raises `planning_state_version_mismatch`
+        `turn.base_planning_state_version` is forwarded to
+        `save_planning_state`, so every active turn uses the same CAS
+        version that the orchestrator validated against. A concurrent
+        writer that moves the row between the guardrail's Python-side
+        check and this UPDATE raises `planning_state_version_mismatch`
         instead of silently overwriting committed state.
 
         Returns the new `planning_state_version` (monotonically bumped
@@ -1035,30 +1003,36 @@ class AIBuilderRepository:
         """
         async with self.savepoint():
             prior_state = await self.load_planning_state(
-                session_id=session_id, tenant_id=tenant_id
+                session_id=turn.session_id, tenant_id=turn.tenant_id
             )
             persisted = await self.append_session_messages(
-                session_id=session_id,
-                tenant_id=tenant_id,
+                session_id=turn.session_id,
+                tenant_id=turn.tenant_id,
                 conversation=new_messages,
-                request_id=request_id,
-                lock_token=lock_token,
+                lease=turn.lease,
             )
             state = build_planning_state_from_conversation(persisted, flow=flow)
             if architecture_commit is not None:
                 state.architecture_commit = architecture_commit
             carry_forward_persisted_planner_state(state, prior_state)
             return await self.save_planning_state(
-                session_id=session_id,
-                tenant_id=tenant_id,
+                session_id=turn.session_id,
+                tenant_id=turn.tenant_id,
                 state=state,
-                base_version=base_version,
+                base_version=turn.base_planning_state_version,
             )
 
 
 # ---------------------------------------------------------------------------
 # Row → domain model converters
 # ---------------------------------------------------------------------------
+
+
+def _lease_filters(lease: SessionSendLease) -> tuple[Any, Any]:
+    return (
+        BuilderSessions.active_request_id == lease.request_id,
+        BuilderSessions.lock_token == lease.lock_token,
+    )
 
 
 class _SessionRowData(TypedDict):
@@ -1244,9 +1218,7 @@ def _plan_from_row(row: Any) -> BuilderPlan:
         spec=spec,
         spec_hash=data["spec_hash"],
         envelope=envelope,
-        resource_bindings=_resource_bindings_from_json(
-            data["resource_bindings_json"]
-        ),
+        resource_bindings=_resource_bindings_from_json(data["resource_bindings_json"]),
         edit_result_json=data["edit_result_json"],
         created_at=data["created_at"],
         updated_at=data["updated_at"],

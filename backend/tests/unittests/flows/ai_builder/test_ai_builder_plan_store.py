@@ -29,6 +29,10 @@ from intric.flows.ai_builder.ai_builder_plan_store import (
     persist_plan,
     store_plan_and_update_conversation,
 )
+from intric.flows.ai_builder.ai_builder_session_turn import (
+    SessionSendLease,
+    SessionSendTurn,
+)
 from intric.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationError,
     SpecValidationResult,
@@ -214,6 +218,20 @@ def _make_binding() -> LocalResourceBinding:
     )
 
 
+def _make_turn(
+    *,
+    tenant_id=None,
+    session_id=None,
+    base_version: int = 0,
+) -> SessionSendTurn:
+    return SessionSendTurn(
+        session_id=session_id or uuid4(),
+        tenant_id=tenant_id or uuid4(),
+        lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+        base_planning_state_version=base_version,
+    )
+
+
 @pytest.mark.asyncio
 async def test_store_plan_and_update_conversation_saves_planning_state_inside_savepoint() -> (
     None
@@ -223,11 +241,9 @@ async def test_store_plan_and_update_conversation_saves_planning_state_inside_sa
 
     await store_plan_and_update_conversation(
         repo=repo,
-        tenant_id=uuid4(),
-        session_id=uuid4(),
+        turn=_make_turn(base_version=7),
         conversation=[],
         new_messages_start=0,
-        base_planning_state_version=7,
         assistant_content="plan ready",
         tool_call_id="call-unit-1",
         tool_name=OUTLINE_FLOW_TOOL_NAME,
@@ -257,11 +273,9 @@ async def test_store_plan_and_update_conversation_passes_resource_bindings_to_re
 
     await store_plan_and_update_conversation(
         repo=repo,
-        tenant_id=uuid4(),
-        session_id=uuid4(),
+        turn=_make_turn(),
         conversation=[],
         new_messages_start=0,
-        base_planning_state_version=0,
         assistant_content="plan ready",
         tool_call_id="call-unit-1",
         tool_name=OUTLINE_FLOW_TOOL_NAME,
@@ -289,16 +303,14 @@ async def test_persist_plan_uses_only_bindings_for_current_plan() -> None:
 
     await persist_plan(
         repo=repo,
-        tenant_id=tenant_id,
-        session_id=session_id,
+        turn=_make_turn(tenant_id=tenant_id, session_id=session_id),
         spec=spec,
         envelope=PlannerPlanEnvelope(spec=spec),
         resource_bindings=(first_binding,),
     )
     await persist_plan(
         repo=repo,
-        tenant_id=tenant_id,
-        session_id=session_id,
+        turn=_make_turn(tenant_id=tenant_id, session_id=session_id),
         spec=spec,
         envelope=PlannerPlanEnvelope(spec=spec),
         resource_bindings=(second_binding,),

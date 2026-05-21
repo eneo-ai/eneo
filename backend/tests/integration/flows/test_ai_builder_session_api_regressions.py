@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -8,7 +9,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from intric.database.tables.ai_models_table import TranscriptionModels
@@ -37,6 +38,10 @@ from intric.flows.ai_builder.ai_builder_models import (
     TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from intric.flows.ai_builder.ai_builder_session_turn import (
+    SessionSendLease,
+    SessionSendTurn,
+)
 from intric.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
@@ -122,6 +127,42 @@ def _parse_sse_payload(body: str) -> list[dict[str, object]]:
         events.append({"event": current_event, "data": parsed})
 
     return events
+
+
+def _make_session_send_turn(
+    *,
+    session_id: UUID,
+    tenant_id: UUID,
+    base_planning_state_version: int = 0,
+) -> SessionSendTurn:
+    return SessionSendTurn(
+        session_id=session_id,
+        tenant_id=tenant_id,
+        lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+        base_planning_state_version=base_planning_state_version,
+    )
+
+
+async def _claim_session_send_turn(
+    *,
+    repo: AIBuilderRepository,
+    session_id: UUID,
+    tenant_id: UUID,
+    base_planning_state_version: int = 0,
+) -> SessionSendTurn:
+    turn = _make_session_send_turn(
+        session_id=session_id,
+        tenant_id=tenant_id,
+        base_planning_state_version=base_planning_state_version,
+    )
+    claimed = await repo.claim_session_send(
+        session_id=session_id,
+        tenant_id=tenant_id,
+        lease=turn.lease,
+        lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
+    )
+    assert claimed is True
+    return turn
 
 
 async def _create_ai_builder_session(
@@ -435,20 +476,20 @@ async def test_ai_builder_repo_claim_session_send_can_reclaim_expired_lease(
             flow_id=None,
         )
 
+        first_lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
         first_claim = await repo.claim_session_send(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            request_id=uuid4(),
-            lock_token=uuid4(),
+            lease=first_lease,
             lock_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
         )
         assert first_claim is True
 
+        reclaimed_lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
         reclaimed = await repo.claim_session_send(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            request_id=uuid4(),
-            lock_token=uuid4(),
+            lease=reclaimed_lease,
             lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
         )
         assert reclaimed is True
@@ -479,13 +520,11 @@ async def test_ai_builder_repo_release_session_send_requires_matching_lock_token
             target_kind=TargetKind.CREATE,
             flow_id=None,
         )
-        request_id = uuid4()
-        lock_token = uuid4()
+        lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
         claimed = await repo.claim_session_send(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            request_id=request_id,
-            lock_token=lock_token,
+            lease=lease,
             lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
         )
         assert claimed is True
@@ -493,15 +532,14 @@ async def test_ai_builder_repo_release_session_send_requires_matching_lock_token
         await repo.release_session_send(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            request_id=request_id,
-            lock_token=uuid4(),
+            lease=SessionSendLease(request_id=lease.request_id, lock_token=uuid4()),
         )
 
+        next_lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
         still_locked = await repo.claim_session_send(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            request_id=uuid4(),
-            lock_token=uuid4(),
+            lease=next_lease,
             lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
         )
         assert still_locked is False
@@ -509,18 +547,106 @@ async def test_ai_builder_repo_release_session_send_requires_matching_lock_token
         await repo.release_session_send(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            request_id=request_id,
-            lock_token=lock_token,
+            lease=lease,
         )
 
+        released_lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
         released = await repo.claim_session_send(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            request_id=uuid4(),
-            lock_token=uuid4(),
+            lease=released_lease,
             lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
         )
         assert released is True
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_send_message_status_jump_under_lock_uses_lease(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """The AWAITING_APPROVAL -> CHATTING send-message transition must be lease-guarded."""
+    from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
+    from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Send Status Lease",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        await repo.update_session_status_without_send_lease(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            status=SessionStatus.AWAITING_APPROVAL,
+        )
+        original_update = repo.update_session_status
+
+        async def lose_lease_before_status_update(**kwargs):
+            await repo.session.execute(
+                update(BuilderSessions)
+                .where(
+                    BuilderSessions.id == kwargs["session_id"],
+                    BuilderSessions.tenant_id == kwargs["tenant_id"],
+                )
+                .values(active_request_id=uuid4(), lock_token=uuid4())
+            )
+            await original_update(**kwargs)
+
+        repo.update_session_status = lose_lease_before_status_update  # type: ignore[method-assign]
+        planner = AIBuilderPlanner(
+            user=user,
+            repo=repo,
+            litellm_client=AsyncMock(),
+            quality_retry_warning_codes=set(),
+        )
+
+        with pytest.raises(BadRequestException) as exc:
+            async for _ in planner.send_message(
+                session_id=session.id,
+                message="Bygg vidare.",
+                litellm_model="openai/gpt-4o-mini",
+                litellm_kwargs={"api_key": "sk-test"},
+                available_models=[],
+                available_kbs=[],
+                flow=None,
+                assistant_snapshots=None,
+                attachment_files=[],
+                max_input_tokens=4096,
+                max_output_tokens=512,
+                budget_policy=AIBuilderBudgetPolicy(
+                    conversation_safety_buffer_tokens=128,
+                    minimum_conversation_budget_tokens=256,
+                    unknown_model_context_window_tokens=8192,
+                ),
+            ):
+                pass
+
+    assert exc.value.code == "session_send_lease_lost"
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        fetched = await repo.get_session(
+            session_id=session.id, tenant_id=user.tenant_id
+        )
+
+    assert fetched.status == SessionStatus.AWAITING_APPROVAL
+    assert fetched.conversation == []
 
 
 @pytest.mark.integration
@@ -1009,10 +1135,14 @@ async def test_ai_builder_repo_commit_turn_persists_conversation_and_planning_st
             flow_id=None,
         )
         assistant_msg = ConversationMessage(role="assistant", content="Hej")
-
-        await repo.commit_turn(
+        turn = await _claim_session_send_turn(
+            repo=repo,
             session_id=session.id,
             tenant_id=user.tenant_id,
+        )
+
+        await repo.commit_turn(
+            turn=turn,
             new_messages=[assistant_msg],
         )
 
@@ -1079,14 +1209,18 @@ async def test_persist_tool_turn_refreshes_planning_state_with_requirements_summ
             tool_call_id="call_requirements_1",
             tool_name="confirm_requirements",
         )
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            base_planning_state_version=session.planning_state_version,
+        )
 
         await persist_tool_turn(
             repo=repo,
-            tenant_id=user.tenant_id,
-            session_id=session.id,
+            turn=turn,
             conversation=conversation,
             new_messages_start=0,
-            base_planning_state_version=session.planning_state_version,
             tool_call=tool_call,
             arguments={"summary": "Kort sammanfattning"},
             tool_content="Requirements presented to user. Awaiting confirmation.",
@@ -1160,6 +1294,11 @@ async def test_ai_builder_repo_commit_turn_rolls_back_when_planning_state_drifts
         # container-level drift. validated_snapshot() inside commit_turn
         # must catch this and roll back the conversation append.
         drifted.signals.append("not a signal")  # type: ignore[arg-type]
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
 
         with patch(
             "intric.flows.ai_builder.ai_builder_repo.build_planning_state_from_conversation",
@@ -1167,8 +1306,7 @@ async def test_ai_builder_repo_commit_turn_rolls_back_when_planning_state_drifts
         ):
             with pytest.raises(Exception):
                 await repo.commit_turn(
-                    session_id=session.id,
-                    tenant_id=user.tenant_id,
+                    turn=turn,
                     new_messages=[assistant_msg],
                 )
 
@@ -1212,24 +1350,24 @@ async def test_ai_builder_repo_commit_turn_rejects_write_when_lease_is_lost(
             target_kind=TargetKind.CREATE,
             flow_id=None,
         )
+        active_lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
         await repo.claim_session_send(
             session_id=session.id,
             tenant_id=user.tenant_id,
-            request_id=uuid4(),
-            lock_token=uuid4(),
+            lease=active_lease,
             lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
         )
-        stale_request_id = uuid4()
-        stale_lock_token = uuid4()
+        stale_turn = _make_session_send_turn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            base_planning_state_version=0,
+        )
         assistant_msg = ConversationMessage(role="assistant", content="Stale lease")
 
         with pytest.raises(BadRequestException):
             await repo.commit_turn(
-                session_id=session.id,
-                tenant_id=user.tenant_id,
+                turn=stale_turn,
                 new_messages=[assistant_msg],
-                request_id=stale_request_id,
-                lock_token=stale_lock_token,
             )
 
     async with db_container() as container:
@@ -1296,10 +1434,14 @@ async def test_ai_builder_repo_commit_turn_persists_architecture_commit_atomical
         assistant_msg = ConversationMessage(
             role="assistant", content="Commit the architecture"
         )
-
-        await repo.commit_turn(
+        turn = await _claim_session_send_turn(
+            repo=repo,
             session_id=session.id,
             tenant_id=user.tenant_id,
+        )
+
+        await repo.commit_turn(
+            turn=turn,
             new_messages=[assistant_msg],
             architecture_commit=commit,
         )
@@ -1359,6 +1501,11 @@ async def test_ai_builder_repo_commit_turn_rolls_back_architecture_commit_on_dri
         )
         drifted = _planning_state_fixture()
         drifted.signals.append("not a signal")  # type: ignore[arg-type]
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
 
         with patch(
             "intric.flows.ai_builder.ai_builder_repo.build_planning_state_from_conversation",
@@ -1366,8 +1513,7 @@ async def test_ai_builder_repo_commit_turn_rolls_back_architecture_commit_on_dri
         ):
             with pytest.raises(ValidationError):
                 await repo.commit_turn(
-                    session_id=session.id,
-                    tenant_id=user.tenant_id,
+                    turn=turn,
                     new_messages=[assistant_msg],
                     architecture_commit=commit,
                 )
@@ -1418,17 +1564,20 @@ async def test_ai_builder_repo_commit_turn_preserves_previously_persisted_archit
             target_kind=TargetKind.CREATE,
             flow_id=None,
         )
-        await repo.commit_turn(
+        turn = await _claim_session_send_turn(
+            repo=repo,
             session_id=session.id,
             tenant_id=user.tenant_id,
+        )
+        next_version = await repo.commit_turn(
+            turn=turn,
             new_messages=[
                 ConversationMessage(role="assistant", content="commit turn 1")
             ],
             architecture_commit=commit,
         )
         await repo.commit_turn(
-            session_id=session.id,
-            tenant_id=user.tenant_id,
+            turn=replace(turn, base_planning_state_version=next_version),
             new_messages=[
                 ConversationMessage(role="assistant", content="commit turn 2")
             ],
@@ -1494,17 +1643,20 @@ async def test_ai_builder_repo_commit_turn_replaces_persisted_commit_when_kwarg_
             target_kind=TargetKind.CREATE,
             flow_id=None,
         )
-        await repo.commit_turn(
+        turn = await _claim_session_send_turn(
+            repo=repo,
             session_id=session.id,
             tenant_id=user.tenant_id,
+        )
+        next_version = await repo.commit_turn(
+            turn=turn,
             new_messages=[
                 ConversationMessage(role="assistant", content="first commit")
             ],
             architecture_commit=first,
         )
         await repo.commit_turn(
-            session_id=session.id,
-            tenant_id=user.tenant_id,
+            turn=replace(turn, base_planning_state_version=next_version),
             new_messages=[
                 ConversationMessage(role="assistant", content="second commit")
             ],
@@ -1572,14 +1724,18 @@ async def test_store_plan_and_update_conversation_rejects_stale_planning_state_v
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            base_planning_state_version=0,
+        )
         with pytest.raises(BadRequestException) as exc:
             await store_plan_and_update_conversation(
                 repo=repo,
-                tenant_id=tenant_id,
-                session_id=session_id,
+                turn=turn,
                 conversation=[],
                 new_messages_start=0,
-                base_planning_state_version=0,
                 assistant_content="stale plan ready",
                 tool_call_id="call-stale-1",
                 tool_name=OUTLINE_FLOW_TOOL_NAME,
@@ -1623,6 +1779,405 @@ async def test_store_plan_and_update_conversation_rejects_stale_planning_state_v
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_store_plan_and_update_conversation_rejects_lost_session_send_lease_and_rolls_back(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """Proposal storage must not create a plan if the active send lease is lost."""
+    from intric.flows.ai_builder.ai_builder_plan_store import (
+        store_plan_and_update_conversation,
+    )
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Plan Proposal Lost Lease",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        session_id = session.id
+        tenant_id = user.tenant_id
+        await _claim_session_send_turn(
+            repo=repo,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        stale_turn = _make_session_send_turn(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            base_planning_state_version=0,
+        )
+        with pytest.raises(BadRequestException) as exc:
+            await store_plan_and_update_conversation(
+                repo=repo,
+                turn=stale_turn,
+                conversation=[],
+                new_messages_start=0,
+                assistant_content="lost lease plan",
+                tool_call_id="call-lost-lease-1",
+                tool_name=OUTLINE_FLOW_TOOL_NAME,
+                arguments={},
+                spec=_make_builder_plan_spec(existing_step_ref=None),
+                assumptions=[],
+                plan_rationale=None,
+                reasoning=None,
+                validation=MagicMock(warnings=[]),
+                flow=None,
+            )
+
+    assert exc.value.code == "session_send_lease_lost"
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        plans = await repo.list_session_plans(
+            session_id=session_id, tenant_id=tenant_id
+        )
+        fetched = await repo.get_session(session_id=session_id, tenant_id=tenant_id)
+        loaded_state = await repo.load_planning_state(
+            session_id=session_id, tenant_id=tenant_id
+        )
+
+    assert plans == []
+    assert fetched.latest_plan_id is None
+    assert fetched.conversation == []
+    assert loaded_state is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_handle_confirm_requirements_with_lost_lease_rolls_back(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """Confirm-requirements persistence must reject a stale active-turn lease."""
+    from intric.flows.ai_builder.ai_builder_proposal_processor import (
+        AIBuilderProposalProcessor,
+    )
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Confirm Requirements Lost Lease",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        session_id = session.id
+        tenant_id = user.tenant_id
+        await _claim_session_send_turn(
+            repo=repo,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        processor = AIBuilderProposalProcessor(
+            user=user,
+            repo=repo,
+            litellm_client=AsyncMock(),
+            self_correction_temperature=0.2,
+            self_correction_bumped_temperature=0.5,
+            forced_proposal_temperature=0.3,
+            quality_retry_warning_codes=set(),
+        )
+        stale_turn = _make_session_send_turn(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            base_planning_state_version=0,
+        )
+        with patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.build_discovery_block_message_runtime",
+            new=AsyncMock(
+                return_value=(
+                    None,
+                    SimpleNamespace(assumptions=[]),
+                    PlanningState.empty(),
+                )
+            ),
+        ):
+            with pytest.raises(BadRequestException) as exc:
+                await processor._process_confirm_requirements_arguments(
+                    turn=stale_turn,
+                    conversation=[],
+                    new_messages_start=0,
+                    arguments={
+                        "summary": "Bygg ett textflöde.",
+                        "key_decisions": [
+                            {"topic": "Input", "decision": "Text"},
+                            {"topic": "Output", "decision": "Text"},
+                        ],
+                        "input_description": "Användaren skriver text.",
+                        "output_description": "Flödet svarar med text.",
+                    },
+                    assistant_content="requirements",
+                    tool_call_id="call-requirements-lost-lease",
+                    available_model_refs=None,
+                    available_kb_refs=None,
+                    flow=None,
+                    litellm_model="openai/gpt-4o-mini",
+                    litellm_kwargs={"api_key": "sk-test"},
+                )
+
+    assert exc.value.code == "session_send_lease_lost"
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        fetched = await repo.get_session(session_id=session_id, tenant_id=tenant_id)
+        loaded_state = await repo.load_planning_state(
+            session_id=session_id, tenant_id=tenant_id
+        )
+
+    assert fetched.conversation == []
+    assert loaded_state is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_handle_structured_question_recovery_with_lost_lease_rolls_back(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """Fallback question recovery must not persist after the send lease is lost."""
+    from intric.flows.ai_builder.ai_builder_proposal_processor import (
+        AIBuilderProposalProcessor,
+    )
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Structured Question Lost Lease",
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        session_id = session.id
+        tenant_id = user.tenant_id
+        await _claim_session_send_turn(
+            repo=repo,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+
+    tool_call = _make_tool_call(
+        name="ask_structured_question",
+        arguments={
+            "question": "Vilket format vill du ha?",
+            "options": [{"label": "PDF"}, {"label": "DOCX"}],
+        },
+    )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        processor = AIBuilderProposalProcessor(
+            user=user,
+            repo=repo,
+            litellm_client=AsyncMock(),
+            self_correction_temperature=0.2,
+            self_correction_bumped_temperature=0.5,
+            forced_proposal_temperature=0.3,
+            quality_retry_warning_codes=set(),
+        )
+        stale_turn = _make_session_send_turn(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            base_planning_state_version=0,
+        )
+        processor.emit_discovery_followup_if_needed = AsyncMock(return_value=None)  # type: ignore[method-assign]
+        with pytest.raises(BadRequestException) as exc:
+            _ = [
+                event
+                async for event in processor.handle_tool_call(
+                    turn=stale_turn,
+                    conversation=[],
+                    new_messages_start=0,
+                    tool_calls=[tool_call],
+                    text_content=None,
+                    llm_messages=[],
+                    tool_schemas=[],
+                    litellm_model="openai/gpt-4o-mini",
+                    litellm_kwargs={"api_key": "sk-test"},
+                    available_model_refs=None,
+                    available_kb_refs=None,
+                    resource_catalog=None,
+                    max_output_tokens=512,
+                    request_id="req-structured-lost-lease",
+                    flow=None,
+                )
+            ]
+
+    assert exc.value.code == "session_send_lease_lost"
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        fetched = await repo.get_session(session_id=session_id, tenant_id=tenant_id)
+        loaded_state = await repo.load_planning_state(
+            session_id=session_id, tenant_id=tenant_id
+        )
+
+    assert fetched.conversation == []
+    assert loaded_state is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_handle_edit_flow_with_lost_lease_rolls_back(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+    space_factory,
+    admin_user,
+):
+    """Edit proposal storage must roll back if the active send lease is stale."""
+    from intric.flows.ai_builder.ai_builder_edit_proposal import (
+        process_edit_arguments,
+    )
+    from intric.flows.ai_builder.ai_builder_proposal_processor import (
+        AIBuilderProposalProcessor,
+    )
+
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(
+            session,
+            "AI Builder edit_flow lost lease",
+            [model.id],
+            user_id=admin_user.id,
+        )
+        flow_service = container.flow_service()
+        flow = await flow_service.create_flow(
+            space_id=space.id,
+            name="Beslutsunderlag",
+            description="Skapar ett kort beslutsunderlag.",
+            steps=[],
+        )
+        repo = AIBuilderRepository(session)
+        builder_session = await repo.create_session(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            actor_user_id=admin_user.id,
+            target_kind=TargetKind.EDIT,
+            flow_id=flow.id,
+        )
+        session_id = builder_session.id
+        tenant_id = admin_user.tenant_id
+        await _claim_session_send_turn(
+            repo=repo,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        processor = AIBuilderProposalProcessor(
+            user=user,
+            repo=repo,
+            litellm_client=AsyncMock(),
+            self_correction_temperature=0.2,
+            self_correction_bumped_temperature=0.5,
+            forced_proposal_temperature=0.3,
+            quality_retry_warning_codes=set(),
+        )
+        stale_turn = _make_session_send_turn(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            base_planning_state_version=0,
+        )
+        with pytest.raises(BadRequestException) as exc:
+            await process_edit_arguments(
+                processor=processor,
+                turn=stale_turn,
+                conversation=[],
+                new_messages_start=0,
+                arguments={
+                    "plan_rationale": "Lägg till ett textsammanfattningssteg.",
+                    "operations": [
+                        {
+                            "op": "add",
+                            "placement": {"position": "append"},
+                            "add_payload": {
+                                "name": "Sammanfatta text",
+                                "instructions": "Sammanfatta användarens text.",
+                                "input_source": "flow_input",
+                                "input_type": "text",
+                                "output_type": "text",
+                            },
+                        }
+                    ],
+                },
+                assistant_content="edit plan",
+                tool_call_id="call-edit-lost-lease",
+                available_model_refs=None,
+                available_kb_refs=None,
+                flow=flow,
+                assistant_snapshots=None,
+                litellm_model="openai/gpt-4o-mini",
+                litellm_kwargs={"api_key": "sk-test"},
+                max_output_tokens=512,
+            )
+
+    assert exc.value.code == "session_send_lease_lost"
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        plans = await repo.list_session_plans(
+            session_id=session_id, tenant_id=tenant_id
+        )
+        fetched = await repo.get_session(session_id=session_id, tenant_id=tenant_id)
+        loaded_state = await repo.load_planning_state(
+            session_id=session_id, tenant_id=tenant_id
+        )
+
+    assert plans == []
+    assert fetched.latest_plan_id is None
+    assert fetched.conversation == []
+    assert loaded_state is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_store_plan_and_update_conversation_accepts_matching_planning_state_version(
     client,
     bearer_token,
@@ -1655,13 +2210,16 @@ async def test_store_plan_and_update_conversation_accepts_matching_planning_stat
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
-        plan, _envelope = await store_plan_and_update_conversation(
+        turn = await _claim_session_send_turn(
             repo=repo,
-            tenant_id=tenant_id,
             session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        stored_plan = await store_plan_and_update_conversation(
+            repo=repo,
+            turn=turn,
             conversation=[],
             new_messages_start=0,
-            base_planning_state_version=0,
             assistant_content="plan ready",
             tool_call_id="call-match-1",
             tool_name=OUTLINE_FLOW_TOOL_NAME,
@@ -1688,9 +2246,9 @@ async def test_store_plan_and_update_conversation_accepts_matching_planning_stat
             )
         ).scalar_one()
 
-    assert fetched.latest_plan_id == plan.id
+    assert fetched.latest_plan_id == stored_plan.plan.id
     assert loaded_state is not None
-    assert loaded_state.draft_plan_id == plan.id
+    assert loaded_state.draft_plan_id == stored_plan.plan.id
     assert loaded_state.phase == "plan_proposed"
     assert version == 1
 
@@ -1730,9 +2288,13 @@ async def test_store_plan_and_update_conversation_preserves_persisted_architectu
             target_kind=TargetKind.CREATE,
             flow_id=None,
         )
-        await repo.commit_turn(
+        turn = await _claim_session_send_turn(
+            repo=repo,
             session_id=session.id,
             tenant_id=user.tenant_id,
+        )
+        await repo.commit_turn(
+            turn=turn,
             new_messages=[
                 ConversationMessage(role="user", content="user prompt"),
                 ConversationMessage(role="assistant", content="architecture committed"),
@@ -1764,11 +2326,12 @@ async def test_store_plan_and_update_conversation_preserves_persisted_architectu
         )
         await store_plan_and_update_conversation(
             repo=repo,
-            tenant_id=user.tenant_id,
-            session_id=session.id,
+            turn=replace(
+                turn,
+                base_planning_state_version=fetched.planning_state_version,
+            ),
             conversation=working_conversation,
             new_messages_start=len(working_conversation),
-            base_planning_state_version=fetched.planning_state_version,
             assistant_content="Here is the plan",
             assistant_metadata=None,
             tool_call_id="call_plan",
@@ -1836,6 +2399,11 @@ async def test_store_plan_and_update_conversation_rolls_back_when_append_fails(
         repo = AIBuilderRepository(container.session())
         spec = _make_builder_plan_spec(existing_step_ref=None)
         original_append = repo.append_session_messages
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
 
         async def raising_append(*args: object, **kwargs: object) -> None:
             raise RuntimeError("simulated append failure")
@@ -1845,11 +2413,9 @@ async def test_store_plan_and_update_conversation_rolls_back_when_append_fails(
             with pytest.raises(RuntimeError):
                 await store_plan_and_update_conversation(
                     repo=repo,
-                    tenant_id=tenant_id,
-                    session_id=session_id,
+                    turn=turn,
                     conversation=[],
                     new_messages_start=0,
-                    base_planning_state_version=0,
                     assistant_content="simulated",
                     tool_call_id="call-1",
                     tool_name=OUTLINE_FLOW_TOOL_NAME,
@@ -1917,13 +2483,16 @@ async def test_store_plan_and_update_conversation_saves_planning_state(
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
         spec = _make_builder_plan_spec(existing_step_ref=None)
-        plan, _envelope = await store_plan_and_update_conversation(
+        turn = await _claim_session_send_turn(
             repo=repo,
-            tenant_id=tenant_id,
             session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        stored_plan = await store_plan_and_update_conversation(
+            repo=repo,
+            turn=turn,
             conversation=[],
             new_messages_start=0,
-            base_planning_state_version=0,
             assistant_content="plan ready",
             tool_call_id="call-ps-1",
             tool_name=OUTLINE_FLOW_TOOL_NAME,
@@ -1947,7 +2516,7 @@ async def test_store_plan_and_update_conversation_saves_planning_state(
         )
 
     assert len(plans) == 1
-    assert fetched.latest_plan_id == plan.id
+    assert fetched.latest_plan_id == stored_plan.plan.id
     assert loaded_state is not None
     assert loaded_state.planner_contract_version == PLANNER_CONTRACT_VERSION
     # evidence.conversation_message_ids is built from the compacted list
@@ -2004,13 +2573,16 @@ async def test_store_plan_and_update_conversation_stamps_plan_identity_on_state(
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
         spec = _make_builder_plan_spec(existing_step_ref=None)
-        plan, _envelope = await store_plan_and_update_conversation(
+        turn = await _claim_session_send_turn(
             repo=repo,
-            tenant_id=tenant_id,
             session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        stored_plan = await store_plan_and_update_conversation(
+            repo=repo,
+            turn=turn,
             conversation=[],
             new_messages_start=0,
-            base_planning_state_version=0,
             assistant_content="plan ready",
             tool_call_id="call-identity-1",
             tool_name=OUTLINE_FLOW_TOOL_NAME,
@@ -2030,7 +2602,7 @@ async def test_store_plan_and_update_conversation_stamps_plan_identity_on_state(
         )
 
     assert loaded_state is not None
-    assert loaded_state.draft_plan_id == plan.id
+    assert loaded_state.draft_plan_id == stored_plan.plan.id
     assert loaded_state.phase == "plan_proposed"
 
 
@@ -2082,13 +2654,16 @@ async def test_store_plan_and_update_conversation_state_matches_compacted_conver
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
         spec = _make_builder_plan_spec(existing_step_ref=None)
+        turn = await _claim_session_send_turn(
+            repo=repo,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
         await store_plan_and_update_conversation(
             repo=repo,
-            tenant_id=tenant_id,
-            session_id=session_id,
+            turn=turn,
             conversation=list(pre_compaction_conversation),
             new_messages_start=0,
-            base_planning_state_version=0,
             assistant_content="plan ready",
             tool_call_id="call-cmp-1",
             tool_name=OUTLINE_FLOW_TOOL_NAME,

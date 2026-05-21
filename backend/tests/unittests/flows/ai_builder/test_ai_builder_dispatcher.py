@@ -36,6 +36,10 @@ from intric.flows.ai_builder.ai_builder_dispatcher import (
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_orchestrator import parse_planner_output
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from intric.flows.ai_builder.ai_builder_session_turn import (
+    SessionSendLease,
+    SessionSendTurn,
+)
 from intric.flows.ai_builder.planning_state import ArchitectureCommit
 from intric.flows.flow import Flow
 
@@ -108,14 +112,10 @@ def _confirm_requirements_output_dict() -> dict:
 
 _ALLOWED_COMMIT_TURN_KWARGS: frozenset[str] = frozenset(
     {
-        "session_id",
-        "tenant_id",
         "new_messages",
         "flow",
-        "request_id",
-        "lock_token",
         "architecture_commit",
-        "base_version",
+        "turn",
     }
 )
 
@@ -150,6 +150,20 @@ def _assistant_msg(content: str = "dummy") -> ConversationMessage:
     return ConversationMessage(role="assistant", content=content)
 
 
+def _make_turn(
+    *,
+    session_id: UUID | None = None,
+    tenant_id: UUID | None = None,
+    base_version: int = 0,
+) -> SessionSendTurn:
+    return SessionSendTurn(
+        session_id=session_id or uuid4(),
+        tenant_id=tenant_id or uuid4(),
+        lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+        base_planning_state_version=base_version,
+    )
+
+
 # ---------------------------------------------------------------------------
 # commit_architecture — the motivating path
 # ---------------------------------------------------------------------------
@@ -165,8 +179,7 @@ class TestCommitArchitectureDispatch:
 
         await dispatch_planner_action(
             repo=repo,
-            session_id=session_id,
-            tenant_id=tenant_id,
+            turn=_make_turn(session_id=session_id, tenant_id=tenant_id),
             output=output,
             new_messages=[_assistant_msg("committing")],
         )
@@ -178,8 +191,8 @@ class TestCommitArchitectureDispatch:
         assert commit.architecture_hash == architecture_commit_hash(commit)
         assert commit.committed_at.tzinfo is not None
         assert commit.chosen_patterns == ["summarize_text"]
-        assert kwargs["session_id"] == session_id
-        assert kwargs["tenant_id"] == tenant_id
+        assert kwargs["turn"].session_id == session_id
+        assert kwargs["turn"].tenant_id == tenant_id
 
     @pytest.mark.asyncio
     async def test_returns_result_with_new_version(self) -> None:
@@ -188,8 +201,7 @@ class TestCommitArchitectureDispatch:
 
         result = await dispatch_planner_action(
             repo=repo,
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(),
             output=output,
             new_messages=[_assistant_msg()],
         )
@@ -201,36 +213,31 @@ class TestCommitArchitectureDispatch:
 
     @pytest.mark.asyncio
     async def test_forwards_optional_params(self) -> None:
-        """`flow`, `request_id`, and `lock_token` must flow through unchanged.
+        """`flow` and active-turn authority must flow through unchanged.
 
-        Dropping any of these from the pass-through silently breaks
+        Dropping either from the pass-through silently breaks
         optimistic concurrency and flow-scoped planning-state rebuilds.
         """
         repo = _mock_repo()
         output = parse_planner_output(_commit_architecture_output_dict())
         flow_stub = MagicMock(spec=Flow)
-        request_id = uuid4()
-        lock_token = uuid4()
+        turn = _make_turn()
 
         await dispatch_planner_action(
             repo=repo,
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=turn,
             output=output,
             new_messages=[_assistant_msg()],
             flow=flow_stub,
-            request_id=request_id,
-            lock_token=lock_token,
         )
 
         kwargs = repo.commit_turn.call_args.kwargs
         assert kwargs["flow"] is flow_stub
-        assert kwargs["request_id"] == request_id
-        assert kwargs["lock_token"] == lock_token
+        assert kwargs["turn"] == turn
 
     @pytest.mark.asyncio
     async def test_forwards_base_version_to_commit_turn(self) -> None:
-        """`base_version` must thread through to `commit_turn` so the repo
+        """`base_version` must thread through on `turn` so the repo
         enforces optimistic concurrency at the DB layer.
 
         The Python-side `_check_version` rejects a stale `PlannerOutput`
@@ -248,15 +255,13 @@ class TestCommitArchitectureDispatch:
 
         await dispatch_planner_action(
             repo=repo,
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(base_version=7),
             output=output,
             new_messages=[_assistant_msg()],
-            base_version=7,
         )
 
         kwargs = repo.commit_turn.call_args.kwargs
-        assert kwargs["base_version"] == 7
+        assert kwargs["turn"].base_planning_state_version == 7
         _assert_commit_turn_kwargs_bounded(repo.commit_turn)
 
     @pytest.mark.asyncio
@@ -278,8 +283,7 @@ class TestCommitArchitectureDispatch:
         with pytest.raises(ValueError, match="architecture_commit=None"):
             await dispatch_planner_action(
                 repo=repo,
-                session_id=uuid4(),
-                tenant_id=uuid4(),
+                turn=_make_turn(),
                 output=output,
                 new_messages=[_assistant_msg()],
             )
@@ -300,8 +304,7 @@ class TestAskQuestionDispatch:
 
         await dispatch_planner_action(
             repo=repo,
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(),
             output=output,
             new_messages=[_assistant_msg("what?")],
         )
@@ -316,8 +319,7 @@ class TestAskQuestionDispatch:
 
         result = await dispatch_planner_action(
             repo=repo,
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(),
             output=output,
             new_messages=[_assistant_msg()],
         )
@@ -334,8 +336,7 @@ class TestConfirmRequirementsDispatch:
 
         await dispatch_planner_action(
             repo=repo,
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(),
             output=output,
             new_messages=[_assistant_msg("summary")],
         )
@@ -350,8 +351,7 @@ class TestConfirmRequirementsDispatch:
 
         result = await dispatch_planner_action(
             repo=repo,
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(),
             output=output,
             new_messages=[_assistant_msg()],
         )
@@ -422,8 +422,7 @@ class TestDeltaIsolation:
 
         await dispatch_planner_action(
             repo=repo,
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(),
             output=output,
             new_messages=[_assistant_msg()],
         )
@@ -449,8 +448,7 @@ class TestDeltaIsolation:
 
         await dispatch_planner_action(
             repo=repo,
-            session_id=uuid4(),
-            tenant_id=uuid4(),
+            turn=_make_turn(),
             output=output,
             new_messages=[_assistant_msg()],
         )
@@ -464,17 +462,15 @@ class TestDeltaIsolation:
 
 
 class TestTypeContracts:
-    def test_session_id_and_tenant_id_are_keyword_only(self) -> None:
-        """`session_id` and `tenant_id` must be keyword-only so callers
-        can never swap their positions at a call site."""
+    def test_turn_is_keyword_only(self) -> None:
+        """`turn` must be keyword-only so callers cannot bypass names."""
         repo = _mock_repo()
         output = parse_planner_output(_ask_question_output_dict())
 
         with pytest.raises(TypeError):
             dispatch_planner_action(  # type: ignore[call-arg]
                 repo,
-                UUID(int=0),
-                UUID(int=1),
+                _make_turn(),
                 output,
                 [_assistant_msg()],
             )

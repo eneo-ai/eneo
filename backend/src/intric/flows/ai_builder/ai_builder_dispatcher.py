@@ -27,7 +27,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, assert_never
-from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
@@ -39,6 +38,7 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     ConfirmRequirementsAction,
     PlannerOutput,
 )
+from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.planning_state import ArchitectureCommit
 
 if TYPE_CHECKING:
@@ -71,14 +71,10 @@ class PlannerDispatchResult:
 async def dispatch_planner_action(
     *,
     repo: "AIBuilderRepository",
-    session_id: UUID,
-    tenant_id: UUID,
+    turn: SessionSendTurn,
     output: PlannerOutput,
     new_messages: list[ConversationMessage],
     flow: "Flow | None" = None,
-    request_id: UUID | None = None,
-    lock_token: UUID | None = None,
-    base_version: int | None = None,
 ) -> PlannerDispatchResult:
     """Atomically persist the planner's turn.
 
@@ -119,14 +115,10 @@ async def dispatch_planner_action(
             assert_never(unhandled)
 
     new_version = await repo.commit_turn(
-        session_id=session_id,
-        tenant_id=tenant_id,
+        turn=turn,
         new_messages=new_messages,
         flow=flow,
-        request_id=request_id,
-        lock_token=lock_token,
         architecture_commit=architecture_commit,
-        base_version=base_version,
     )
 
     return PlannerDispatchResult(

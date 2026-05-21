@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
@@ -10,6 +9,7 @@ from intric.flows.ai_builder.ai_builder_proposal_repair import (
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     build_tool_retry_messages as build_proposal_tool_retry_messages,
 )
+from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 
 if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
@@ -48,11 +48,9 @@ def append_tool_retry_feedback_turn(
 async def persist_tool_turn(
     *,
     repo: Any,
-    tenant_id: UUID,
-    session_id: UUID,
+    turn: SessionSendTurn,
     conversation: list[ConversationMessage],
     new_messages_start: int,
-    base_planning_state_version: int,
     tool_call: Any,
     arguments: dict[str, Any],
     tool_content: str,
@@ -60,9 +58,7 @@ async def persist_tool_turn(
     assistant_content: str | None = None,
     assistant_metadata: dict[str, Any] | None = None,
     flow: "Flow | None" = None,
-    lease_request_id: UUID | None = None,
-    lease_lock_token: UUID | None = None,
-) -> None:
+) -> int:
     """Append an assistant tool call + tool response turn and refresh `PlanningState` atomically.
 
     Routes through `repo.commit_turn` so the conversation append and the
@@ -93,14 +89,10 @@ async def persist_tool_turn(
             metadata=metadata,
         )
     )
-    await repo.commit_turn(
-        session_id=session_id,
-        tenant_id=tenant_id,
+    return await repo.commit_turn(
+        turn=turn,
         new_messages=conversation[new_messages_start:],
         flow=flow,
-        request_id=lease_request_id,
-        lock_token=lease_lock_token,
-        base_version=base_planning_state_version,
     )
 
 

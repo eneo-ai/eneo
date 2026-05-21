@@ -13,6 +13,10 @@ from intric.flows.ai_builder.ai_builder_repair_transport import (
     build_tool_retry_messages,
     persist_tool_turn,
 )
+from intric.flows.ai_builder.ai_builder_session_turn import (
+    SessionSendLease,
+    SessionSendTurn,
+)
 
 
 def test_build_tool_retry_messages_appends_tool_call_and_feedback() -> None:
@@ -62,23 +66,25 @@ async def test_persist_tool_turn_commits_turn_with_flow_and_lease() -> None:
     tenant_id = uuid4()
     request_id = uuid4()
     lock_token = uuid4()
+    turn = SessionSendTurn(
+        session_id=session_id,
+        tenant_id=tenant_id,
+        lease=SessionSendLease(request_id=request_id, lock_token=lock_token),
+        base_planning_state_version=6,
+    )
     flow = SimpleNamespace(id=uuid4())
 
     await persist_tool_turn(
         repo=repo,
-        tenant_id=tenant_id,
-        session_id=session_id,
+        turn=turn,
         conversation=conversation,
         new_messages_start=1,
-        base_planning_state_version=6,
         tool_call=tool_call,
         arguments={"summary": "Kort sammanfattning"},
         tool_content="saved",
         assistant_content="Här är sammanfattningen.",
         metadata={"requirements_version": "req-v1"},
         flow=flow,  # type: ignore[arg-type]
-        lease_request_id=request_id,
-        lease_lock_token=lock_token,
     )
 
     assert len(conversation) == 3
@@ -97,12 +103,8 @@ async def test_persist_tool_turn_commits_turn_with_flow_and_lease() -> None:
     assert tool_message.metadata == {"requirements_version": "req-v1"}
     repo.commit_turn.assert_awaited_once()
     kwargs = repo.commit_turn.await_args.kwargs
-    assert kwargs["session_id"] == session_id
-    assert kwargs["tenant_id"] == tenant_id
+    assert kwargs["turn"] == turn
     assert kwargs["flow"] is flow
-    assert kwargs["request_id"] == request_id
-    assert kwargs["lock_token"] == lock_token
-    assert kwargs["base_version"] == 6
     new_messages = kwargs["new_messages"]
     assert [message.role for message in new_messages] == ["assistant", "tool"]
     assert new_messages[1].metadata == {"requirements_version": "req-v1"}

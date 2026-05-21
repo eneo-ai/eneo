@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
     build_discovery_followup_runtime,
@@ -12,26 +13,29 @@ from intric.flows.ai_builder.ai_builder_events import (
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_tools import ASK_STRUCTURED_QUESTION_TOOL_NAME
 from intric.flows.domain.flow import Flow
+
+
+@dataclass(frozen=True, slots=True)
+class BackendQuestionPersistenceResult:
+    events: list[dict[str, str]]
+    new_planning_state_version: int
 
 
 async def persist_backend_question(
     *,
     repo: AIBuilderRepository,
-    tenant_id: UUID,
-    session_id: UUID,
+    turn: SessionSendTurn,
     conversation: list[ConversationMessage],
     new_messages_start: int,
-    base_planning_state_version: int,
     question_data: dict[str, object],
     assistant_text: str,
     assistant_metadata: dict[str, Any] | None = None,
     tool_content: str = "Question presented to user. Awaiting their selection.",
     flow: Flow | None = None,
-    lease_request_id: UUID | None = None,
-    lease_lock_token: UUID | None = None,
-) -> list[dict[str, str]]:
+) -> BackendQuestionPersistenceResult:
     """Append a backend-owned discovery question turn and refresh `PlanningState` atomically.
 
     Routes through `repo.commit_turn` so the conversation append and the
@@ -64,39 +68,34 @@ async def persist_backend_question(
         )
     )
 
-    await repo.commit_turn(
-        session_id=session_id,
-        tenant_id=tenant_id,
+    new_version = await repo.commit_turn(
+        turn=turn,
         new_messages=conversation[new_messages_start:],
         flow=flow,
-        request_id=lease_request_id,
-        lock_token=lease_lock_token,
-        base_version=base_planning_state_version,
     )
 
-    return [
-        build_text_event(assistant_text),
-        build_question_event(question_data),
-    ]
+    return BackendQuestionPersistenceResult(
+        events=[
+            build_text_event(assistant_text),
+            build_question_event(question_data),
+        ],
+        new_planning_state_version=new_version,
+    )
 
 
 async def emit_discovery_followup_if_needed(
     *,
     repo: AIBuilderRepository,
-    tenant_id: UUID,
-    session_id: UUID,
+    turn: SessionSendTurn,
     conversation: list[ConversationMessage],
     new_messages_start: int,
-    base_planning_state_version: int,
     flow: Flow | None = None,
     litellm_client: Any | None = None,
     litellm_model: str | None = None,
     litellm_kwargs: dict[str, Any] | None = None,
     ui_language: str | None = None,
     assistant_metadata: dict[str, Any] | None = None,
-    lease_request_id: UUID | None = None,
-    lease_lock_token: UUID | None = None,
-) -> list[dict[str, str]]:
+) -> BackendQuestionPersistenceResult | None:
     """Persist and return the next backend-generated discovery follow-up, if any."""
     followup, _analysis, _planning_state = await build_discovery_followup_runtime(
         conversation,
@@ -105,23 +104,19 @@ async def emit_discovery_followup_if_needed(
         litellm_model=litellm_model,
         litellm_kwargs=litellm_kwargs,
         ui_language=ui_language,
-        tenant_id=tenant_id,
+        tenant_id=turn.tenant_id,
     )
     if followup is None:
-        return []
+        return None
 
     _issue, question_data, assistant_text = followup
     return await persist_backend_question(
         repo=repo,
-        tenant_id=tenant_id,
-        session_id=session_id,
+        turn=turn,
         conversation=conversation,
         new_messages_start=new_messages_start,
-        base_planning_state_version=base_planning_state_version,
         question_data=question_data,
         assistant_text=assistant_text,
         flow=flow,
         assistant_metadata=assistant_metadata,
-        lease_request_id=lease_request_id,
-        lease_lock_token=lease_lock_token,
     )

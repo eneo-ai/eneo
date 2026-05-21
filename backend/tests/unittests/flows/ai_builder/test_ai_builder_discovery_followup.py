@@ -10,6 +10,10 @@ from intric.flows.ai_builder.ai_builder_discovery_followup import (
     persist_backend_question,
 )
 from intric.flows.ai_builder.ai_builder_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_session_turn import (
+    SessionSendLease,
+    SessionSendTurn,
+)
 
 
 @pytest.mark.asyncio
@@ -22,15 +26,19 @@ async def test_persist_backend_question_commits_turn_with_flow_and_lease() -> No
     tenant_id = uuid4()
     request_id = uuid4()
     lock_token = uuid4()
+    turn = SessionSendTurn(
+        session_id=session_id,
+        tenant_id=tenant_id,
+        lease=SessionSendLease(request_id=request_id, lock_token=lock_token),
+        base_planning_state_version=5,
+    )
     flow = SimpleNamespace(id=uuid4())
 
-    events = await persist_backend_question(
+    result = await persist_backend_question(
         repo=repo,
-        tenant_id=tenant_id,
-        session_id=session_id,
+        turn=turn,
         conversation=conversation,
         new_messages_start=1,
-        base_planning_state_version=5,
         question_data={
             "question_id": "runtime_metadata_fields",
             "question": "Vilka fält behöver vi?",
@@ -43,8 +51,6 @@ async def test_persist_backend_question_commits_turn_with_flow_and_lease() -> No
         },
         assistant_text="Vilka fält behöver vi?",
         flow=flow,  # type: ignore[arg-type]
-        lease_request_id=request_id,
-        lease_lock_token=lock_token,
     )
 
     assert len(conversation) == 3
@@ -58,12 +64,8 @@ async def test_persist_backend_question_commits_turn_with_flow_and_lease() -> No
     assert tool_msg.tool_call_id == assistant_msg.tool_calls[0]["id"]
     repo.commit_turn.assert_awaited_once()
     kwargs = repo.commit_turn.await_args.kwargs
-    assert kwargs["session_id"] == session_id
-    assert kwargs["tenant_id"] == tenant_id
+    assert kwargs["turn"] == turn
     assert kwargs["flow"] is flow
-    assert kwargs["request_id"] == request_id
-    assert kwargs["lock_token"] == lock_token
-    assert kwargs["base_version"] == 5
     new_messages = kwargs["new_messages"]
     assert [message.role for message in new_messages] == ["assistant", "tool"]
-    assert len(events) == 2
+    assert len(result.events) == 2
