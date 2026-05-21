@@ -198,6 +198,64 @@ def test_runtime_input_field_extraction_understands_english_user_metadata() -> N
 
 
 @pytest.mark.parametrize(
+    ("text", "expected_fields"),
+    [
+        (
+            (
+                "Create a flow where the user supplies customer name, "
+                "analysis request, and optional uploaded files, then the flow "
+                "produces a structured answer."
+            ),
+            [
+                ("customer_name", "customer name"),
+                ("analysis_request", "analysis request"),
+            ],
+        ),
+        (
+            "The user provided case id and business unit before analysis.",
+            [("case_id", "case id"), ("business_unit", "business unit")],
+        ),
+        (
+            "Users are providing supplier name and renewal date at runtime.",
+            [("supplier_name", "supplier name"), ("renewal_date", "renewal date")],
+        ),
+        (
+            "The user specifies priority and due date.",
+            [("priority", "priority"), ("due_date", "due date")],
+        ),
+        (
+            "The user filled in region and channel before approval.",
+            [("region", "region"), ("channel", "channel")],
+        ),
+    ],
+)
+def test_runtime_input_field_extraction_understands_english_action_inflections(
+    text: str,
+    expected_fields: list[tuple[str, str]],
+) -> None:
+    hints = extract_runtime_input_field_hints(text)
+
+    observed = [(hint.variable_name, hint.label) for hint in hints]
+    for expected in expected_fields:
+        assert expected in observed
+    assert infer_runtime_metadata_slot(text) == DETAILED_CASE_METADATA
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The user reviews customer name and analysis request before approval.",
+        "The user reads customer name from the document before approval.",
+    ],
+)
+def test_runtime_input_field_extraction_ignores_user_actor_non_input_actions(
+    text: str,
+) -> None:
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) is None
+
+
+@pytest.mark.parametrize(
     "text",
     [
         "Användaren ska ange intern referens, prioritet och ansvarig avdelning.",

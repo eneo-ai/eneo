@@ -381,6 +381,26 @@ class TestPolicyDefaults:
         assert slot.value == "detailed_case_metadata"
         assert slot.source == "heuristic"
 
+    def test_user_supplies_prompt_resolves_detailed_runtime_metadata(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Create a flow where the user supplies customer name, "
+                        "analysis request, and optional uploaded files, then "
+                        "the flow produces a structured answer."
+                    ),
+                )
+            ]
+        )
+
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "detailed_case_metadata"
+        assert slot.source == "heuristic"
+
     def test_swedish_audio_prompt_with_terminal_word_file_resolves_core_slots(
         self,
     ) -> None:
@@ -554,9 +574,7 @@ class TestModelSlotMerge:
 
         apply_policy_defaults_from_resolved_slots(
             state,
-            freeform_text=(
-                "Slutlig DOCX-rapport skapas efter mänsklig granskning."
-            ),
+            freeform_text=("Slutlig DOCX-rapport skapas efter mänsklig granskning."),
         )
 
         slot = state.resolved_slots["docx_output_mode"]

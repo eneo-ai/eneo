@@ -79,7 +79,31 @@ _RUNTIME_METADATA_INTENT_TRIGGERS = (
     *_RUNTIME_FIELD_DECLARATION_TRIGGERS,
     *_RUNTIME_METADATA_CONCEPT_TRIGGERS,
 )
-_USER_FIELD_ACTION_PHRASES: tuple[str, ...] = (
+
+
+def _english_action_phrase_forms(phrase: str) -> tuple[str, ...]:
+    verb, sep, rest = phrase.partition(" ")
+    return tuple(
+        dict.fromkeys(
+            f"{form}{sep}{rest}" if rest else form for form in _english_verb_forms(verb)
+        )
+    )
+
+
+def _english_verb_forms(lemma: str) -> tuple[str, ...]:
+    if lemma.endswith("y") and len(lemma) > 1 and lemma[-2] not in "aeiou":
+        stem = lemma[:-1]
+        return (lemma, f"{stem}ies", f"{stem}ied", f"{lemma}ing")
+    if lemma.endswith("e") and not lemma.endswith(("ee", "ye", "oe")):
+        stem = lemma[:-1]
+        return (lemma, f"{lemma}s", f"{lemma}d", f"{stem}ing")
+    third_person = (
+        f"{lemma}es" if lemma.endswith(("s", "x", "z", "ch", "sh")) else f"{lemma}s"
+    )
+    return (lemma, third_person, f"{lemma}ed", f"{lemma}ing")
+
+
+_SWEDISH_USER_FIELD_ACTION_PHRASES: tuple[str, ...] = (
     "ange",
     "fylla i",
     "fyller i",
@@ -91,6 +115,8 @@ _USER_FIELD_ACTION_PHRASES: tuple[str, ...] = (
     "valja",
     "specificera",
     "skriva in",
+)
+_ENGLISH_USER_FIELD_ACTION_LEMMAS: tuple[str, ...] = (
     "enter",
     "provide",
     "fill in",
@@ -98,6 +124,14 @@ _USER_FIELD_ACTION_PHRASES: tuple[str, ...] = (
     "specify",
     "supply",
     "type in",
+)
+_USER_FIELD_ACTION_PHRASES: tuple[str, ...] = (
+    *_SWEDISH_USER_FIELD_ACTION_PHRASES,
+    *(
+        form
+        for phrase in _ENGLISH_USER_FIELD_ACTION_LEMMAS
+        for form in _english_action_phrase_forms(phrase)
+    ),
 )
 _USER_FIELD_ACTOR_TOKENS = frozenset(
     {

@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T019
+active_task: T021
 
 scoring_target:
   dimensions:
@@ -50,7 +50,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T018b implementation/post-review: conversation metadata/tool-call JSONB, AI Builder public errors, and frontend diagnostic reports now have typed canonical ownership. Public AI Builder errors use diagnostic_context for correlation and details for bounded scalar per-error facts, and the frontend has a copyable allow-listed diagnostic bundle for stream/apply/quality reports. The broader score floor remains blocked by DB lock invariant, readability/test topology, AI slop cleanup, and normal-user output quality."
+  source: "After T020 implementation/post-review: conversation metadata/tool-call JSONB, public error diagnostics, frontend diagnostic reports, and the targeted runtime-field intent gap now have typed canonical ownership or behavior coverage. The prompt 'the user supplies customer name, analysis request...' now produces concrete flow-scope form fields in an authenticated local API eval. The broader score floor remains blocked by DB lock invariant, readability/test topology, AI slop cleanup, and broader normal-user output quality."
   Maintainability: 8
   Code_Quality: 8
   Clean_Architecture: 8
@@ -64,12 +64,12 @@ current_scorecard:
   Test_Coverage_Quality: 8
   Developer_Diagnostic_Experience: 9
   AI_Slop_Comment_Naming_Quality: 6
-  Normal_User_Output_Quality: 6
+  Normal_User_Output_Quality: 8
   Overall: 6
   blockers:
     - "Public/lifecycle/CAS error-code discipline improved, but calls that omit code= entirely can still silently use generic codes; future error-contract work must continue without creating a third public context carrier."
     - "builder_sessions can still persist a corrupt lock_token with NULL lock_expires_at; runtime fails safe, but schema-level lock invariants need a migration or explicit corruption policy."
-    - "Live eval still shows runtime-input/form-field prompts can produce no form fields."
+    - "The targeted runtime-field prompt now produces form fields, but the broader five-case live eval gate is still incomplete and other vague/edit/document-output cases remain unproven."
     - "ai_builder_proposal_processor.py is materially smaller after T011 but still oversized at 1830 LOC; structured-question recovery, confirm requirements, and retry orchestration remain in one processor."
     - "Normal-user output quality, test topology, readability/module topology, and AI slop cleanup remain below 9 until live eval and consolidation tranches force product and code fixes."
 
@@ -2273,7 +2273,7 @@ tasks:
   - id: T018b
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Add the frontend AI Builder diagnostic report builder and one reusable copy-technical-details affordance for stream errors, apply errors, and non-error plan/step quality reports."
     inputs:
@@ -2373,7 +2373,7 @@ tasks:
   - id: T019
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: xhigh
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T018b, with special pressure on DB lock invariants, readability/module topology, AI slop cleanup, tests, and normal-user output quality."
     inputs:
@@ -2391,6 +2391,171 @@ tasks:
       - "Allowed files, acceptance criteria, verification commands, and stop_if conditions for the next worker."
       - "Codex self-review and Claude plan gate result before implementation."
       - "Updated scorecard showing which dimension the next tranche is intended to move."
+    receipt:
+      result: done
+      completed_at: "2026-05-22T00:00:00+02:00"
+      artifact: ".codex/artifacts/flow-ai-builder-t019-next-tranche-ranking.md"
+      summary: "Re-ranked the next tranche after T018b. Selected a focused normal-user output-quality worker before DB lock migration or broad module cleanup because the current strict score floor is pinned by Normal-User Output Quality and AI Slop / Comment / Naming Quality at 6. The selected worker fixes a deterministic runtime-field intent gap for realistic prompts such as 'the user supplies customer name, analysis request...' through the existing ai_builder_runtime_input_fields.py owner."
+      decision:
+        selected_next_task: T020
+        selected_reason: "The failure has a deterministic reproduction, a known canonical owner, and direct normal-user output-quality impact. DB lock hardening remains important but starts from Runtime/Data scores of 8 and would not address a current 6/10 dimension."
+        rejected:
+          - candidate: "DB lock invariant migration"
+            reason: "Important runtime/data tranche, but does not move the current 6/10 floor. Keep queued after one floor-moving output/slop slice."
+          - candidate: "ai_builder_models.py compatibility aggregation deletion"
+            reason: "Real AI-slop/readability work, but it touches 119 importing files and needs its own deletion/consolidation worker."
+          - candidate: "Broad ai_builder_proposal_processor.py split"
+            reason: "Rejected because previous peer review warned that splitting without a stable responsibility target creates more shallow files to open."
+          - candidate: "New critic invariant"
+            reason: "Rejected because downstream critic invariants already enforce form-field behavior when metadata intent is present; the failure is upstream intent detection."
+      evidence:
+        - "backend/src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py:82-101 owns user-field action phrases and currently has base English verbs without inflected forms."
+        - "backend/src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py:267-293 makes runtime-field hints depend on runtime_input_fields_requested()."
+        - "backend/src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py:404-424 gates user-field clauses on a user actor before an action."
+        - "backend/src/intric/flows/ai_builder/ai_builder_critic_invariants.py:321-340 and :1267-1305 already enforce requested metadata/form-field rules downstream."
+        - "backend/src/intric/database/tables/flow_tables.py:1691-1749 shows the DB lock fields and existing constraints but no lock-field consistency check."
+        - "backend/src/intric/flows/ai_builder/ai_builder_models.py:1-5 is a compatibility aggregation layer; 119 files import it today."
+      peer_review:
+        claude:
+          - artifact: ".codex/artifacts/claude-peer-loop-t019-next-tranche-ranking-after-diagnostic-dx-20260521T215436Z.md"
+            result: "VERDICT changes_required; GREEN_LIGHT no; MIN_SCORE 6"
+            codex_response: "Accepted blockers: named the fix mechanism, strengthened negative tests, corrected score-floor framing, and clarified T019 judge versus queued deletion/consolidation work."
+          - artifact: ".codex/artifacts/claude-peer-loop-t019-next-tranche-ranking-after-diagnostic-dx-iteration-2-20260521T215841Z.md"
+            result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
+            codex_response: "Proceed to T020 inside approved files."
+        antigravity:
+          status: "SKIPPED_DUE_TO_QUOTA"
+          evidence: "Quota status recommends skipping Antigravity until reset_at_local=2026-05-28T08:49:49.406842+02:00. Missing coverage, not a pass."
+      scorecard_impact:
+        Normal_User_Output_Quality: "T020 can raise this from 6 to 7 with deterministic tests only, or to 8 if targeted authenticated live eval passes. It cannot reach 9 alone."
+        Overall: "Remains 6 until AI Slop / Comment / Naming Quality also moves above 6."
+
+  - id: T020
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Fix the normal-user runtime-field intent gap for prompts where the run user supplies/provides/provided/providing named values, using the existing runtime-field owner and behavior tests."
+    inputs:
+      - "T019 receipt and artifact"
+      - ".codex/artifacts/flow-ai-builder-live-eval.md"
+      - "Current dirty worktree after the T018b commit"
+    constraints:
+      - "Stay inside the existing runtime-field intent owner; do not add another phrase-list owner, prompt layer, discovery owner, or critic-only workaround."
+      - "Implement a small English action-verb inflection helper that derives forms from base English action lemmas. Do not append inflected one-off strings directly to _USER_FIELD_ACTION_PHRASES."
+      - "Preserve Swedish action phrase behavior unless a failing test proves a Swedish gap."
+      - "Preserve unrelated dirty files."
+      - "Antigravity remains SKIPPED_DUE_TO_QUOTA unless quota status proves available."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py"
+      - "backend/tests/unittests/flows/ai_builder/test_planning_state_builder.py"
+      - ".codex/artifacts/flow-ai-builder-live-eval.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    acceptance_criteria:
+      - "The prompt 'Create a flow where the user supplies customer name, analysis request, and optional uploaded files, then the flow produces a structured answer.' resolves to DETAILED_CASE_METADATA."
+      - "The same prompt extracts at least customer_name and analysis_request as runtime input field hints."
+      - "The implementation derives English forms such as supplies/supplied/supplying and provides/provided/providing from base lemmas instead of appending inflected one-off strings to the action list."
+      - "Positive tests cover at least present-third-person and past/progressive English forms."
+      - "Negative tests cover user-actor phrases that mention fields but are not runtime input actions, such as 'the user reviews customer name and analysis request before approval' or 'the user reads customer name from the document'."
+      - "Existing output/source negatives still pass."
+      - "Planning-state tests prove the conversation-level runtime_metadata_fields slot becomes detailed_case_metadata for the realistic prompt."
+      - "A targeted live eval is attempted if the local service and API key are available. If unavailable, record the exact blocker and do not count it as a pass."
+    verify:
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_planning_state_builder.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_planning_state_builder.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_planning_state_builder.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run python - <<'PY'\nfrom intric.flows.ai_builder.ai_builder_runtime_input_fields import extract_runtime_input_field_hints, infer_runtime_metadata_slot\nprompt = 'Create a flow where the user supplies customer name, analysis request, and optional uploaded files, then the flow produces a structured answer.'\nprint(infer_runtime_metadata_slot(prompt))\nprint([(hint.variable_name, hint.label) for hint in extract_runtime_input_field_hints(prompt)])\nPY"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+    stop_if:
+      - "The fix requires changing planner prompts, LLM orchestration, or discovery question lifecycle."
+      - "The solution creates a second runtime-field detection owner outside ai_builder_runtime_input_fields.py."
+      - "The implementation appends inflected one-off strings directly to _USER_FIELD_ACTION_PHRASES instead of deriving them from base English action lemmas."
+      - "Behavior needs files outside the allowed scope."
+    receipt:
+      result: done
+      completed_at: "2026-05-22T00:14:31+02:00"
+      summary: "Fixed the targeted normal-user runtime-field intent gap in the existing ai_builder_runtime_input_fields.py owner. English user-action forms are now derived from base lemmas, so prompts such as 'the user supplies customer name, analysis request...' resolve to detailed runtime metadata and extract concrete runtime field hints without adding another detector, prompt workaround, or critic-only rule."
+      implementation:
+        source:
+          - "Split Swedish action phrases from English action lemmas."
+          - "Added a small module-local English inflection helper for third-person, past, and progressive action forms, including multi-token phrases such as 'fill in'."
+          - "Kept public runtime-field APIs unchanged: extract_runtime_input_field_hints(), infer_runtime_metadata_slot(), and runtime_input_fields_requested()."
+        tests:
+          - "Added positive behavior coverage for supplies, provided, providing, specifies, and filled in."
+          - "Added negative coverage for user-actor non-input verbs such as reviews and reads."
+          - "Added planning-state coverage proving the realistic prompt resolves runtime_metadata_fields to detailed_case_metadata."
+      verification:
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_planning_state_builder.py -q"
+          result: "74 passed in 0.19s"
+        - command: "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_planning_state_builder.py"
+          result: "All checks passed"
+        - command: "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_planning_state_builder.py"
+          result: "3 files already formatted"
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py"
+          result: "0 errors, 0 warnings, 0 informations"
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run python - <<'PY'\nfrom intric.flows.ai_builder.ai_builder_runtime_input_fields import extract_runtime_input_field_hints, infer_runtime_metadata_slot\nprompt = 'Create a flow where the user supplies customer name, analysis request, and optional uploaded files, then the flow produces a structured answer.'\nprint(infer_runtime_metadata_slot(prompt))\nprint([(hint.variable_name, hint.label) for hint in extract_runtime_input_field_hints(prompt)])\nPY"
+          result: "detailed_case_metadata; extracted customer_name, analysis_request, optional_uploaded_files"
+        - command: "rg -n '\"(supplies|supplied|supplying|provides|provided|providing|filled|filling|fills)\"' backend/src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py"
+          result: "no matches; source does not append inflected one-off string literals"
+        - command: "targeted authenticated local API eval"
+          result: "Session a7a0a8ea-0967-48bc-a658-3eeb98b08fb1 produced plan d330f443-5646-48d5-a1cd-8efd9d47adff; plan spec declares form_fields customer_name and analysis_request; raw local artifacts under /tmp/flow-ai-builder-t020-live-eval/20260521T220808Z; local summary recorded in .codex/artifacts/flow-ai-builder-live-eval.md and this receipt"
+        - command: "git diff --check"
+          result: "clean"
+        - command: "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+          result: "yaml ok"
+      peer_review:
+        claude:
+          - artifact: ".codex/artifacts/claude-peer-loop-t020-runtime-field-intent-implementation-review-20260521T221359Z.md"
+            result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
+            codex_response: "Accepted the evidence-hygiene findings: persisted the T020 live-eval summary in .codex/artifacts/flow-ai-builder-live-eval.md and verified the saved plan declares form_fields for customer_name and analysis_request, not just matching text."
+        antigravity:
+          status: "SKIPPED_DUE_TO_QUOTA"
+          evidence: "Quota status recommends skipping Antigravity until reset_at_local=2026-05-28T08:49:49.406842+02:00. Missing coverage, not a pass."
+      scorecard_after_t020:
+        Maintainability: 8
+        Code_Quality: 8
+        Clean_Architecture: 8
+        Separation_of_Concerns: 8
+        Single_Source_of_Truth: 9
+        Human_Readability: 7
+        Human_Reviewability: 8
+        Runtime_Reliability: 8
+        Data_Model_Schema_Quality: 8
+        API_Contract_Quality: 8
+        Test_Coverage_Quality: 8
+        Developer_Diagnostic_Experience: 9
+        AI_Slop_Comment_Naming_Quality: 6
+        Normal_User_Output_Quality: 8
+        Overall: 6
+      residual_risks:
+        - "Normal-User Output Quality is improved for the targeted runtime-field path but still below 9 until the broader five-case live eval gate repeatedly passes or drives product fixes."
+        - "AI Slop / Comment / Naming Quality remains 6 until stale compatibility layers, shallow modules, confusing names, and test clutter are deleted or consolidated."
+        - "Runtime Reliability remains 8 until builder session lock invariants are enforced in the DB schema or explicitly corruption-handled."
+        - "Human Readability remains 7 until the large orchestration/readability topology is simplified around clearer entry points."
+
+  - id: T021
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: xhigh
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T020, with special pressure on the remaining 6/10 AI-slop/readability floor, DB lock invariants, broader live eval coverage, and test topology."
+    inputs:
+      - "T020 receipt and current scorecard"
+      - ".codex/artifacts/flow-ai-builder-live-eval.md"
+      - ".codex/artifacts/flow-ai-builder-9-10-architecture-goal-synthesis-v4.md"
+      - "Current dirty worktree after the T020 commit"
+    constraints:
+      - "Read-only except board/artifact updates until the next implementation plan passes Codex and Claude."
+      - "Antigravity remains SKIPPED_DUE_TO_QUOTA unless quota status proves available."
+      - "Do not default to splitting large files; explicitly consider deletion, consolidation, DB invariant hardening, live eval product fixes, and behavior/test-topology cleanup."
+      - "Preserve unrelated dirty files and keep the next implementation tranche coherent and commit-sized."
+    expected_output:
+      - "Verdict on next tranche ranking with file:line evidence."
+      - "Allowed files, acceptance criteria, verification commands, and stop_if conditions for the next worker."
+      - "Codex self-review and Claude plan gate result before implementation."
+      - "Updated scorecard showing which dimension the next tranche is intended to move."
     receipt: null
 
 checks:
@@ -2399,16 +2564,16 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T018b implementation validation and Claude post-implementation review are green; Antigravity post-implementation review is missing due quota; T019 is active to re-rank the next score-moving tranche."
-    task: T018b
+    result: "T020 implementation validation and Claude post-implementation review are green; targeted authenticated local API eval passed for the runtime-field prompt; Antigravity post-implementation review is missing due quota; T021 is active to re-rank the next score-moving tranche."
+    task: T020
     commands:
-      - "cd frontend/apps/web && bun run test:unit --run src/lib/features/flows/ai-builder/aiBuilderDiagnosticReport.test.ts src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.test.ts src/lib/features/flows/ai-builder/FlowAIBuilderDriver.test.ts: 44 passed"
-      - "cd frontend/apps/web && bun x eslint <T018b frontend files>: passed"
-      - "cd frontend && bun --filter @intric/web check: 0 errors, 1 unrelated warning in ExtendExpirationDialog.svelte"
-      - "rg -n \"raw_prompt|fullConversation|fullPlan|plan_json|conversation_json|file_contents|llm_payload\" frontend/apps/web/src/lib/features/flows/ai-builder --glob '!*.test.ts': no matches"
-      - "rg -n \"diagnosticReport=\" frontend/apps/web/src/lib/features/flows/ai-builder: no matches"
-      - "Claude T018b commit gate: .codex/artifacts/claude-peer-loop-t018b-frontend-diagnostic-report-commit-gate-20260521T213202Z.md: GREEN_LIGHT yes; MIN_SCORE 8"
-      - "Claude T018b verification gate: .codex/artifacts/claude-peer-loop-t018b-frontend-diagnostic-report-verification-20260521T213736Z.md: GREEN_LIGHT yes; MIN_SCORE 8"
-      - "Antigravity T018b post-implementation gate: SKIPPED_DUE_TO_QUOTA; not passed"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_planning_state_builder.py -q: 74 passed"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_planning_state_builder.py: All checks passed"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py tests/unittests/flows/ai_builder/test_planning_state_builder.py: 3 files already formatted"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py: 0 errors, 0 warnings, 0 informations"
+      - "T020 deterministic probe: detailed_case_metadata; extracted customer_name, analysis_request, optional_uploaded_files"
+      - "T020 authenticated local API eval: session a7a0a8ea-0967-48bc-a658-3eeb98b08fb1 produced plan d330f443-5646-48d5-a1cd-8efd9d47adff with form_fields customer_name and analysis_request"
+      - "Claude T020 commit gate: .codex/artifacts/claude-peer-loop-t020-runtime-field-intent-implementation-review-20260521T221359Z.md: GREEN_LIGHT yes; MIN_SCORE 8"
+      - "Antigravity T020 post-implementation gate: SKIPPED_DUE_TO_QUOTA; not passed"
       - "git diff --check: clean"
       - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"': yaml ok"
