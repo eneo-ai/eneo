@@ -13,6 +13,8 @@
   let { children } = $props();
 
   const currentPath = $derived($page.url.pathname);
+  const configurationPath = $derived(resolve("/admin/personal-chat/configuration"));
+  const promptsPath = $derived(resolve("/admin/personal-chat/prompts"));
 
   function isActive(prefix: string) {
     return currentPath.startsWith(prefix);
@@ -22,14 +24,14 @@
 <div class="flex h-full flex-col">
   <div class="border-default flex items-center gap-1 border-b px-6 pt-4">
     <Button
-      variant={isActive("/admin/personal-chat/configuration") ? "default" : "ghost"}
+      variant={isActive(configurationPath) ? "default" : "ghost"}
       size="sm"
       onclick={() => goto(resolve("/admin/personal-chat/configuration"))}
     >
       Konfiguration
     </Button>
     <Button
-      variant={isActive("/admin/personal-chat/prompts") ? "default" : "ghost"}
+      variant={isActive(promptsPath) ? "default" : "ghost"}
       size="sm"
       onclick={() => goto(resolve("/admin/personal-chat/prompts"))}
     >

@@ -235,6 +235,11 @@
             {#if selectedModels.length === 0}
               <p class="text-destructive text-sm">Minst en modell måste vara vald.</p>
             {/if}
+          {:else}
+            <p class="text-muted text-sm">
+              Ingen modellbegränsning är aktiv. Personlig chatt kan använda tenantens tillgängliga
+              completion-modeller.
+            </p>
           {/if}
         </Card.Content>
       </Card.Root>
@@ -268,6 +273,11 @@
                 {/each}
               </div>
             {/if}
+          {:else}
+            <p class="text-muted text-sm">
+              Ingen MCP-begränsning är aktiv. Personlig chatt följer användarens och tenantens
+              vanliga MCP-tillgänglighet.
+            </p>
           {/if}
         </Card.Content>
       </Card.Root>
@@ -315,6 +325,11 @@
             {#if !selectedPromptId}
               <p class="text-destructive text-sm">En prompt måste väljas.</p>
             {/if}
+          {:else}
+            <p class="text-muted text-sm">
+              Ingen gemensam prompt tvingas. Användarnas egna personliga chatprompts är synliga och
+              används som vanligt.
+            </p>
           {/if}
         </Card.Content>
       </Card.Root>

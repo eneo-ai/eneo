@@ -5,7 +5,8 @@
 */
 
 import { redirect } from "@sveltejs/kit";
+import { resolve } from "$app/paths";
 
 export const load = async () => {
-  redirect(302, "/admin/personal-chat/configuration");
+  redirect(302, resolve("/admin/personal-chat/configuration"));
 };

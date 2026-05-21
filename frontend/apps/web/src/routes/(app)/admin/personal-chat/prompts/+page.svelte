@@ -98,9 +98,7 @@
                       <Button
                         variant="ghost"
                         size="sm"
-                        onclick={() =>
-                          // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic id in path
-                          goto(`/admin/personal-chat/prompts/${entry.id}`)}
+                        onclick={() => goto(resolve(`/admin/personal-chat/prompts/${entry.id}`))}
                       >
                         <Pencil class="h-4 w-4" />
                       </Button>
