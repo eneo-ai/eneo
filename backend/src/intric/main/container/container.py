@@ -1074,6 +1074,31 @@ class Container(containers.DeclarativeContainer):
         actor_manager=actor_manager,
         group_service=group_service,
     )
+    # Personal-chat policy services are declared before assistant_service
+    # because runtime enforcement injects effective_config_service into
+    # AssistantService — the DI chain has to be top-to-bottom resolvable.
+    mcp_server_settings_service = providers.Factory(
+        MCPServerSettingsService,
+        mcp_server_repo=mcp_server_repo,
+        user=user,
+        encryption_service=encryption_service,
+    )
+    personal_chat_policy_service = providers.Factory(
+        PersonalChatPolicyService,
+        user=user,
+        repo=personal_chat_policy_repo,
+        completion_model_crud_service=completion_model_crud_service,
+        mcp_server_settings_service=mcp_server_settings_service,
+        prompt_library_service=prompt_library_service,
+    )
+    effective_config_service = providers.Factory(
+        EffectiveConfigService,
+        user=user,
+        policy_repo=personal_chat_policy_repo,
+        prompt_library_repo=prompt_library_repo,
+        completion_model_crud_service=completion_model_crud_service,
+        mcp_server_settings_service=mcp_server_settings_service,
+    )
     assistant_service = providers.Factory(
         AssistantService,
         user=user,
@@ -1095,6 +1120,7 @@ class Container(containers.DeclarativeContainer):
         references_service=references_service,
         icon_repo=icon_repo,
         api_key_scope_revoker=api_key_scope_revoker,
+        effective_config_service=effective_config_service,
     )
     group_chat_service = providers.Factory(
         GroupChatService,
@@ -1178,28 +1204,6 @@ class Container(containers.DeclarativeContainer):
         mcp_server_tool_repo=mcp_server_tool_repo,
         user=user,
         encryption_service=encryption_service,
-    )
-    mcp_server_settings_service = providers.Factory(
-        MCPServerSettingsService,
-        mcp_server_repo=mcp_server_repo,
-        user=user,
-        encryption_service=encryption_service,
-    )
-    personal_chat_policy_service = providers.Factory(
-        PersonalChatPolicyService,
-        user=user,
-        repo=personal_chat_policy_repo,
-        completion_model_crud_service=completion_model_crud_service,
-        mcp_server_settings_service=mcp_server_settings_service,
-        prompt_library_service=prompt_library_service,
-    )
-    effective_config_service = providers.Factory(
-        EffectiveConfigService,
-        user=user,
-        policy_repo=personal_chat_policy_repo,
-        prompt_library_repo=prompt_library_repo,
-        completion_model_crud_service=completion_model_crud_service,
-        mcp_server_settings_service=mcp_server_settings_service,
     )
     tenant_integration_service = providers.Factory(
         TenantIntegrationService,

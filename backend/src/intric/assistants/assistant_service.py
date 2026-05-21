@@ -68,6 +68,10 @@ if TYPE_CHECKING:
     from intric.integration.domain.repositories.integration_knowledge_repo import (
         IntegrationKnowledgeRepository,
     )
+    from intric.mcp_servers.domain.entities.mcp_server import MCPServer
+    from intric.personal_chat_policy.application.effective_config_service import (
+        EffectiveConfigService,
+    )
     from intric.sessions.session import SessionInDB
     from intric.sessions.session_service import SessionService
     from intric.spaces.api.space_models import TemplateCreate
@@ -138,6 +142,7 @@ class AssistantService:
         references_service: "ReferencesService",
         icon_repo: IconRepository,
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
+        effective_config_service: "EffectiveConfigService | None" = None,
     ):
         super().__init__()
         self.repo = repo
@@ -159,6 +164,7 @@ class AssistantService:
         self.references_service = references_service
         self.icon_repo = icon_repo
         self.api_key_scope_revoker = api_key_scope_revoker
+        self.effective_config_service = effective_config_service
 
     @property
     async def web_search(self):
@@ -1031,6 +1037,50 @@ class AssistantService:
         else:
             web_search_results = []
 
+        # Personal-chat policy runtime enforcement.
+        # If the assistant is a default (personal-chat) one and the tenant
+        # has policy enforcement active, override model / MCP / prompt at
+        # ask-time. UI filtering alone is not enough — stale entity state
+        # or direct API callers could otherwise bypass the policy.
+        completion_model_override: "CompletionModel | None" = None
+        mcp_servers_override: "list[MCPServer] | None" = None
+        prompt_override: str | None = None
+        if assistant_to_ask.is_default and self.effective_config_service is not None:
+            effective_config = await self.effective_config_service.resolve_for(
+                assistant_to_ask
+            )
+
+            if effective_config.models_enforced:
+                current_model = assistant_to_ask.completion_model
+                allowed_ids = {m.id for m in effective_config.available_models}
+                if current_model is None or current_model.id not in allowed_ids:
+                    # Stale assignment — fall back to policy default, then
+                    # first allowed model. Refuse only when the whitelist
+                    # is empty.
+                    fallback = effective_config.policy_default_model or (
+                        effective_config.available_models[0]
+                        if effective_config.available_models
+                        else None
+                    )
+                    if fallback is None:
+                        raise BadRequestException(
+                            "Personal chat policy has no allowed models — "
+                            "contact admin",
+                        )
+                    completion_model_override = fallback  # type: ignore[assignment]
+
+            if effective_config.mcp_enforced:
+                allowed_mcp_ids = {s.id for s in effective_config.available_mcp_servers}
+                mcp_servers_override = [
+                    s for s in assistant_to_ask.mcp_servers if s.id in allowed_mcp_ids
+                ]
+
+            if (
+                effective_config.prompt_enforced
+                and effective_config.enforced_prompt_text
+            ):
+                prompt_override = effective_config.enforced_prompt_text
+
         response, datastore_result = await assistant_to_ask.ask(
             question=cleaned_question,
             completion_service=self.completion_service,
@@ -1041,6 +1091,9 @@ class AssistantService:
             version=version,
             web_search_results=web_search_results,
             require_tool_approval=require_tool_approval,
+            completion_model_override=completion_model_override,
+            mcp_servers_override=mcp_servers_override,
+            prompt_override=prompt_override,
         )
 
         # TODO: Separate the response based on stream true or false

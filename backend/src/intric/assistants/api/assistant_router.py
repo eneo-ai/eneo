@@ -290,6 +290,45 @@ async def update_assistant(
     if assistant.completion_model is not None:
         completion_model_id = assistant.completion_model.id
 
+    # Personal-chat policy guard: if the assistant is a default
+    # (personal-chat) one and the tenant has model-restriction enforced,
+    # the new model_id must be in the whitelist. Otherwise the chat could
+    # silently keep working with a forbidden model via UI bypass.
+    if (
+        old_assistant.is_default
+        and completion_model_id is not None
+        and completion_model_id
+        != (
+            old_assistant.completion_model.id
+            if old_assistant.completion_model is not None
+            else None
+        )
+    ):
+        effective_config_service = container.effective_config_service()
+        effective_config = await effective_config_service.resolve_for(old_assistant)
+        if effective_config.models_enforced:
+            allowed_ids = {m.id for m in effective_config.available_models}
+            if completion_model_id not in allowed_ids:
+                from intric.main.exceptions import BadRequestException
+
+                raise BadRequestException(
+                    "Model not allowed by personal chat policy",
+                )
+
+    # MCP whitelist guard on the bulk-update path.
+    if old_assistant.is_default and mcp_server_ids is not None:
+        effective_config_service = container.effective_config_service()
+        effective_config = await effective_config_service.resolve_for(old_assistant)
+        if effective_config.mcp_enforced:
+            allowed_ids = {s.id for s in effective_config.available_mcp_servers}
+            disallowed = set(mcp_server_ids) - allowed_ids
+            if disallowed:
+                from intric.main.exceptions import BadRequestException
+
+                raise BadRequestException(
+                    "MCP servers not allowed by personal chat policy",
+                )
+
     completion_model_kwargs = None
     if assistant.completion_model_kwargs is not None:
         completion_model_kwargs = assistant.completion_model_kwargs
@@ -1266,6 +1305,24 @@ async def add_mcp_to_assistant(
 ):
     """Add an MCP server to an assistant."""
     service = container.assistant_service()
+
+    # Personal-chat policy guard: if the assistant is a default one and the
+    # tenant enforces an MCP whitelist, refuse servers outside it. Mirrors
+    # the bulk-update guard above so the separate single-add endpoint isn't
+    # a back door.
+    pre_assistant, _ = await service.get_assistant(assistant_id=id)
+    if pre_assistant.is_default:
+        effective_config_service = container.effective_config_service()
+        effective_config = await effective_config_service.resolve_for(pre_assistant)
+        if effective_config.mcp_enforced:
+            allowed_ids = {s.id for s in effective_config.available_mcp_servers}
+            if mcp_server_id not in allowed_ids:
+                from intric.main.exceptions import BadRequestException
+
+                raise BadRequestException(
+                    "MCP server not allowed by personal chat policy",
+                )
+
     assistant, _permissions = await service.add_mcp_to_assistant(
         assistant_id=id,
         mcp_server_id=mcp_server_id,
