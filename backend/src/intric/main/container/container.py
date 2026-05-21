@@ -100,6 +100,10 @@ from intric.group_chat.presentation.assemblers.group_chat_assembler import (
 )
 from intric.groups_legacy.group_repo import GroupRepository
 from intric.groups_legacy.group_service import GroupService
+from intric.help_assistants.domain.factory import HelperAssistantsFactory
+from intric.help_assistants.infrastructure.org_space_assistant_role_repo import (
+    OrgSpaceAssistantRoleRepo,
+)
 from intric.icons.icon_repo import IconRepository
 from intric.icons.icon_service import IconService
 from intric.info_blobs.info_blob_chunk_repo import InfoBlobChunkRepo
@@ -474,6 +478,7 @@ class Container(containers.DeclarativeContainer):
     assistant_template_factory = providers.Factory(AssistantTemplateFactory)
     app_template_factory = providers.Factory(AppTemplateFactory)
     feature_flag_factory = providers.Factory(FeatureFlagFactory)
+    helper_assistants_factory = providers.Factory(HelperAssistantsFactory)
 
     # App factory must be defined before it's used by the space factory
     app_factory = providers.Factory(
@@ -575,6 +580,11 @@ class Container(containers.DeclarativeContainer):
     settings_repo = providers.Factory(SettingsRepository, session=session)
     prompt_repo = providers.Factory(
         PromptRepository, session=session, factory=prompt_factory
+    )
+    org_space_assistant_role_repo = providers.Factory(
+        OrgSpaceAssistantRoleRepo,
+        session=session,
+        factory=helper_assistants_factory,
     )
 
     api_key_repo = providers.Factory(ApiKeysRepository, session=session)
