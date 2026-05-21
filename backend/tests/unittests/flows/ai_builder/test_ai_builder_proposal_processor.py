@@ -8,12 +8,18 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.ai_builder import (
+    ai_builder_proposal_processor as proposal_processor_module,
+)
 from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_edit_models import FlowEditDraft
-from intric.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
+from intric.flows.ai_builder.ai_builder_edit_proposal import (
+    edit_flow_retry_config,
+    process_edit_arguments,
+)
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
@@ -34,7 +40,6 @@ from intric.flows.ai_builder.ai_builder_models import (
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
     ProposalContext,
-    SubmissionToolHandlerConfig,
     _active_submission_tool_schemas,
 )
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
@@ -116,6 +121,27 @@ def _make_context(**overrides) -> ProposalContext:
     }
     defaults.update(overrides)
     return ProposalContext(**defaults)
+
+
+def test_proposal_processor_has_no_generic_submission_tool_config() -> None:
+    deleted_module_names = ("".join(("SubmissionTool", "HandlerConfig")),)
+    deleted_processor_methods = (
+        "".join(("_handle_submission_", "tool_call")),
+        "".join(("_build_submission_", "processing_kwargs")),
+        "".join(("request_self_", "correction")),
+        "".join(("_submission_retry_", "config")),
+    )
+
+    assert not [
+        name
+        for name in deleted_module_names
+        if hasattr(proposal_processor_module, name)
+    ]
+    assert not [
+        name
+        for name in deleted_processor_methods
+        if hasattr(AIBuilderProposalProcessor, name)
+    ]
 
 
 def _make_retry_invocation(**overrides) -> ToolRetryInvocation:
@@ -1068,92 +1094,7 @@ async def test_outline_quality_failure_records_failed_first_attempt() -> None:
 
 
 @pytest.mark.asyncio
-async def test_handle_submission_tool_call_runs_processor_once_with_flow_context() -> (
-    None
-):
-    processor = _make_processor()
-    tool_call = MagicMock()
-    tool_call.id = "call-edit"
-    tool_call.function.arguments = "{}"
-    ctx = _make_context(
-        conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
-        flow=SimpleNamespace(id=uuid4()),
-        text_content="Här är planen.",
-        request_id="req-edit-once",
-    )
-    process_submission_arguments = AsyncMock(
-        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
-    )
-
-    with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
-        return_value=SimpleNamespace(confirmed=True),
-    ):
-        events = [
-            event
-            async for event in processor._handle_submission_tool_call(
-                ctx=ctx,
-                tool_call=tool_call,
-                config=SubmissionToolHandlerConfig(
-                    target_tool_name=EDIT_FLOW_TOOL_NAME,
-                    requirements_not_confirmed_message="Requirements must be confirmed before editing a flow.",
-                    parse_error_prefix="Invalid edit_flow arguments",
-                    invalid_result_message="Invalid edit_flow draft.",
-                    forced_tool_prompt="Now call edit_flow.",
-                    process_submission_arguments=process_submission_arguments,
-                    include_flow_context=True,
-                ),
-            )
-        ]
-
-    assert events == [{"event": "plan", "data": "{}"}]
-    process_submission_arguments.assert_awaited_once()
-    assert process_submission_arguments.await_args.kwargs["flow"] is ctx.flow
-
-
-@pytest.mark.asyncio
-async def test_handle_submission_tool_call_omits_flow_context_by_default() -> None:
-    processor = _make_processor()
-    tool_call = MagicMock()
-    tool_call.id = "call-create"
-    tool_call.function.arguments = "{}"
-    ctx = _make_context(
-        conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
-        flow=SimpleNamespace(id=uuid4()),
-        text_content="Här är planen.",
-        request_id="req-create-once",
-    )
-    process_submission_arguments = AsyncMock(
-        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
-    )
-
-    with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
-        return_value=SimpleNamespace(confirmed=True),
-    ):
-        events = [
-            event
-            async for event in processor._handle_submission_tool_call(
-                ctx=ctx,
-                tool_call=tool_call,
-                config=SubmissionToolHandlerConfig(
-                    target_tool_name=OUTLINE_FLOW_TOOL_NAME,
-                    requirements_not_confirmed_message="Requirements must be confirmed before creating a flow.",
-                    parse_error_prefix="Invalid outline_flow arguments",
-                    invalid_result_message="Invalid outline_flow draft.",
-                    forced_tool_prompt="Now call outline_flow.",
-                    process_submission_arguments=process_submission_arguments,
-                ),
-            )
-        ]
-
-    assert events == [{"event": "plan", "data": "{}"}]
-    process_submission_arguments.assert_awaited_once()
-    assert "flow" not in process_submission_arguments.await_args.kwargs
-
-
-@pytest.mark.asyncio
-async def test_handle_submission_tool_call_returns_architecture_error_without_repair() -> (
+async def test_handle_outline_flow_tool_call_returns_architecture_error_without_repair() -> (
     None
 ):
     processor = _make_processor()
@@ -1176,7 +1117,7 @@ async def test_handle_submission_tool_call_returns_architecture_error_without_re
         request_id="req-architecture",
         text_content="",
     )
-    process_submission_arguments = AsyncMock(
+    process_outline = AsyncMock(
         side_effect=AIBuilderArchitectureError(
             public_code="architecture_materialization_failed",
             detail="invalid skeleton",
@@ -1190,24 +1131,21 @@ async def test_handle_submission_tool_call_returns_architecture_error_without_re
             return_value=SimpleNamespace(confirmed=True),
         ),
         patch.object(processor, "_request_tool_self_correction") as repair,
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.process_outline_arguments",
+            new=process_outline,
+        ),
     ):
         events = [
             event
-            async for event in processor._handle_submission_tool_call(
+            async for event in processor._handle_outline_flow_tool_call(
                 ctx=ctx,
                 tool_call=tool_call,
-                config=SubmissionToolHandlerConfig(
-                    target_tool_name=OUTLINE_FLOW_TOOL_NAME,
-                    requirements_not_confirmed_message="Requirements must be confirmed before creating a flow.",
-                    parse_error_prefix="Invalid outline_flow arguments",
-                    invalid_result_message="Invalid outline_flow draft.",
-                    forced_tool_prompt="Now call outline_flow.",
-                    process_submission_arguments=process_submission_arguments,
-                ),
             )
         ]
 
     repair.assert_not_called()
+    process_outline.assert_awaited_once()
     assert [event["event"] for event in events] == ["error"]
     payload = json.loads(events[0]["data"])
     assert payload["code"] == "architecture_materialization_failed"
@@ -1651,7 +1589,7 @@ async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> No
         conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
         request_id="req-outline-retry",
     )
-    process_submission_arguments = AsyncMock(
+    process_outline = AsyncMock(
         return_value=ToolProcessingResult(
             feedback="Invalid outline_flow arguments: bad shape",
             failure_kind="parse",
@@ -1671,24 +1609,21 @@ async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> No
             "_request_tool_self_correction",
             return_value=_events(),
         ) as repair,
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.process_outline_arguments",
+            new=process_outline,
+        ),
     ):
         events = [
             event
-            async for event in processor._handle_submission_tool_call(
+            async for event in processor._handle_outline_flow_tool_call(
                 ctx=ctx,
                 tool_call=tool_call,
-                config=SubmissionToolHandlerConfig(
-                    target_tool_name=OUTLINE_FLOW_TOOL_NAME,
-                    requirements_not_confirmed_message="Requirements must be confirmed before creating a flow.",
-                    parse_error_prefix="Invalid outline_flow arguments",
-                    invalid_result_message="Invalid outline_flow draft.",
-                    forced_tool_prompt="Now call outline_flow.",
-                    process_submission_arguments=process_submission_arguments,
-                ),
             )
         ]
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
+    process_outline.assert_awaited_once()
     retry_config = repair.call_args.kwargs["retry_config"]
     assert isinstance(retry_config, ToolRetryConfig)
     process_signature = signature(retry_config.process_tool_invocation)
@@ -2726,45 +2661,37 @@ async def test_handle_tool_call_preserves_text_when_tool_is_clarification_only()
 
 
 @pytest.mark.asyncio
-async def test_request_self_correction_returns_typed_error_when_proposal_completion_raises() -> (
+async def test_outline_self_correction_returns_typed_error_when_completion_raises() -> (
     None
 ):
     processor = _make_processor()
-    tool_call = _make_tool_call(
-        OUTLINE_FLOW_TOOL_NAME,
-        {
-            "flow_name": "Utredningsflöde",
-            "plan_rationale": "Kort plan.",
-            "steps": [],
-        },
-        tool_call_id="call_retry",
+    tool_call = MagicMock()
+    tool_call.id = "call_retry"
+    tool_call.function.arguments = "{"
+    ctx = _make_context(
+        conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
+        new_messages_start=1,
+        request_id="req-self-correction",
+        llm_messages=[{"role": "system", "content": "Prompt"}],
+        tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
     )
 
-    with patch.object(
-        processor,
-        "call_proposal_completion",
-        new=AsyncMock(side_effect=RuntimeError("provider unavailable")),
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
+            return_value=SimpleNamespace(confirmed=True),
+        ),
+        patch.object(
+            processor,
+            "call_proposal_completion",
+            new=AsyncMock(side_effect=RuntimeError("provider unavailable")),
+        ),
     ):
         events = [
             event
-            async for event in processor.request_self_correction(
-                turn=_make_turn(),
-                request_id="req-self-correction",
-                conversation=[
-                    ConversationMessage(role="user", content="Bygg ett flöde")
-                ],
-                new_messages_start=1,
-                error_message="Invalid flow specification: missing steps",
-                llm_messages=[{"role": "system", "content": "Prompt"}],
+            async for event in processor._handle_outline_flow_tool_call(
+                ctx=ctx,
                 tool_call=tool_call,
-                tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
-                available_model_refs=None,
-                available_kb_refs=None,
-                resource_catalog=None,
-                max_output_tokens=4096,
-                flow=None,
             )
         ]
 
@@ -2778,30 +2705,7 @@ async def test_request_self_correction_returns_typed_error_when_proposal_complet
 
 
 @pytest.mark.asyncio
-async def test_submission_retry_config_returns_typed_create_retry_config() -> None:
-    processor = _make_processor()
-
-    config = processor._submission_retry_config(
-        flow=None,
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        max_output_tokens=4096,
-    )
-
-    assert isinstance(config, ToolRetryConfig)
-    assert config.target_tool_name == OUTLINE_FLOW_TOOL_NAME
-    process_signature = signature(config.process_tool_invocation)
-    assert list(process_signature.parameters) == ["invocation"]
-    assert set(ToolRetryConfig.__dataclass_fields__) == {
-        "target_tool_name",
-        "forced_tool_prompt",
-        "process_tool_invocation",
-    }
-    assert "Now call outline_flow" in config.forced_tool_prompt
-
-
-@pytest.mark.asyncio
-async def test_submission_retry_config_returns_typed_edit_retry_config() -> None:
+async def test_edit_flow_retry_config_carries_invocation_context() -> None:
     processor = _make_processor()
     assistant_snapshots = {uuid4(): {"name": "Analys"}}
     resource_catalog = MagicMock()
@@ -2809,12 +2713,12 @@ async def test_submission_retry_config_returns_typed_edit_retry_config() -> None
     plan_edit_context = MagicMock()
     prior_plan_for_revision = MagicMock()
 
-    config = processor._submission_retry_config(
-        flow=flow,
+    config = edit_flow_retry_config(
+        processor=processor,
+        assistant_snapshots=assistant_snapshots,
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={"timeout": 30},
         max_output_tokens=2048,
-        assistant_snapshots=assistant_snapshots,
         plan_edit_context=plan_edit_context,
         prior_plan_for_revision=prior_plan_for_revision,
     )

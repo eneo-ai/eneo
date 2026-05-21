@@ -69,6 +69,10 @@ if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
+EDIT_FLOW_FORCED_TOOL_PROMPT = (
+    "Return one valid edit_flow tool call that keeps the flow coherent. "
+    "Do not answer with prose."
+)
 
 
 async def process_edit_arguments(
@@ -487,10 +491,7 @@ def edit_flow_retry_config(
 ) -> ToolRetryConfig:
     return ToolRetryConfig(
         target_tool_name=EDIT_FLOW_TOOL_NAME,
-        forced_tool_prompt=(
-            "Return one valid edit_flow tool call that keeps the flow coherent. "
-            "Do not answer with prose."
-        ),
+        forced_tool_prompt=EDIT_FLOW_FORCED_TOOL_PROMPT,
         process_tool_invocation=_bind_process_edit_arguments(
             processor,
             assistant_snapshots=assistant_snapshots,

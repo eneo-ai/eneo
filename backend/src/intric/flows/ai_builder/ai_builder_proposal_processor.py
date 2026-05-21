@@ -331,20 +331,6 @@ class ProposalContext:
         return self.turn.base_planning_state_version
 
 
-@dataclass(frozen=True)
-class SubmissionToolHandlerConfig:
-    target_tool_name: str
-    requirements_not_confirmed_message: str
-    parse_error_prefix: str
-    invalid_result_message: str
-    forced_tool_prompt: str
-    process_submission_arguments: Callable[
-        ...,
-        Awaitable[ToolProcessingResult],
-    ]
-    include_flow_context: bool = False
-
-
 class AIBuilderProposalProcessor:
     def __init__(
         self,
@@ -786,36 +772,30 @@ class AIBuilderProposalProcessor:
             )
         ]
 
-    async def _handle_submission_tool_call(
+    async def _handle_outline_flow_tool_call(
         self,
         *,
         ctx: ProposalContext,
         tool_call: Any,
-        config: SubmissionToolHandlerConfig,
     ) -> AsyncGenerator[dict[str, str], None]:
         (
             blocked,
             prerequisite_events,
         ) = await self._resolve_submission_prerequisite_events(
             ctx=ctx,
-            requirements_not_confirmed_message=config.requirements_not_confirmed_message,
+            requirements_not_confirmed_message="Requirements must be confirmed before creating a flow.",
         )
         for event in prerequisite_events:
             yield event
         if blocked:
             return
 
-        def _build_retry_config() -> ToolRetryConfig:
-            return self._submission_retry_config(
-                flow=ctx.flow,
-                litellm_model=ctx.litellm_model,
-                litellm_kwargs=ctx.litellm_kwargs,
-                max_output_tokens=ctx.max_output_tokens,
-                assistant_snapshots=ctx.assistant_snapshots,
-                planning_state=ctx.planning_state,
-                plan_edit_context=ctx.plan_edit_context,
-                prior_plan_for_revision=ctx.prior_plan_for_revision,
-            )
+        retry_config = outline_flow_retry_config(
+            processor=self,
+            planning_state=ctx.planning_state,
+            plan_edit_context=ctx.plan_edit_context,
+            prior_plan_for_revision=ctx.prior_plan_for_revision,
+        )
 
         try:
             arguments = json.loads(tool_call.function.arguments)
@@ -823,21 +803,21 @@ class AIBuilderProposalProcessor:
             _record_proposal_first_attempt(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
-                tool_name=config.target_tool_name,
+                tool_name=OUTLINE_FLOW_TOOL_NAME,
                 success=False,
                 failure_kind="parse",
             )
             _record_proposal_repair_invocation(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
-                tool_name=config.target_tool_name,
+                tool_name=OUTLINE_FLOW_TOOL_NAME,
                 reason="parse",
             )
             async for event in self._request_tool_self_correction(
                 ctx=ctx,
-                error_message=f"{config.parse_error_prefix}: {error}",
+                error_message=f"Invalid outline_flow arguments: {error}",
                 tool_call=tool_call,
-                retry_config=_build_retry_config(),
+                retry_config=retry_config,
             ):
                 yield event
             return
@@ -846,7 +826,7 @@ class AIBuilderProposalProcessor:
             _record_proposal_first_attempt(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
-                tool_name=config.target_tool_name,
+                tool_name=OUTLINE_FLOW_TOOL_NAME,
                 success=True,
             )
 
@@ -858,134 +838,65 @@ class AIBuilderProposalProcessor:
                 tool_calls=[tool_call],
             )
 
-        submission_kwargs = self._build_submission_processing_kwargs(
-            turn=ctx.turn,
-            conversation=ctx.conversation,
-            new_messages_start=ctx.new_messages_start,
-            arguments=arguments,
-            assistant_content="Här är mitt förslag:",
-            assistant_metadata=None,
-            assistant_metadata_builder=_build_assistant_metadata,
-            proposal_success_recorder=_record_successful_proposal,
-            tool_call_id=tool_call.id,
-            available_model_refs=ctx.available_model_refs,
-            available_kb_refs=ctx.available_kb_refs,
-            resource_catalog=ctx.resource_catalog,
-            flow=ctx.flow,
-            include_flow_context=config.include_flow_context,
-        )
-        if config.target_tool_name == OUTLINE_FLOW_TOOL_NAME:
-            submission_kwargs["planning_state"] = ctx.planning_state
-            submission_kwargs["plan_edit_context"] = ctx.plan_edit_context
-            submission_kwargs["prior_plan_for_revision"] = ctx.prior_plan_for_revision
         try:
-            submission_result = await config.process_submission_arguments(
-                **submission_kwargs
+            outline_result = await process_outline_arguments(
+                processor=self,
+                turn=ctx.turn,
+                conversation=ctx.conversation,
+                new_messages_start=ctx.new_messages_start,
+                arguments=arguments,
+                assistant_content="Här är mitt förslag:",
+                assistant_metadata=None,
+                assistant_metadata_builder=_build_assistant_metadata,
+                proposal_success_recorder=_record_successful_proposal,
+                tool_call_id=tool_call.id,
+                available_model_refs=ctx.available_model_refs,
+                available_kb_refs=ctx.available_kb_refs,
+                resource_catalog=ctx.resource_catalog,
+                planning_state=ctx.planning_state,
+                plan_edit_context=ctx.plan_edit_context,
+                prior_plan_for_revision=ctx.prior_plan_for_revision,
             )
         except AIBuilderArchitectureError as error:
             _record_proposal_architecture_failure(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
-                tool_name=config.target_tool_name,
+                tool_name=OUTLINE_FLOW_TOOL_NAME,
             )
             yield _build_architecture_error_event(
                 error,
                 request_id=ctx.request_id,
-                tool_name=config.target_tool_name,
+                tool_name=OUTLINE_FLOW_TOOL_NAME,
             )
             return
-        if not submission_result.has_events:
+        if not outline_result.has_events:
             proposal_repair_reason = proposal_repair_reason_from_tool_failure(
-                submission_result.failure_kind
+                outline_result.failure_kind
             )
             _record_proposal_first_attempt(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
-                tool_name=config.target_tool_name,
+                tool_name=OUTLINE_FLOW_TOOL_NAME,
                 success=False,
                 failure_kind=proposal_repair_reason,
             )
             _record_proposal_repair_invocation(
                 ctx.usage_tracker,
                 request_id=ctx.request_id,
-                tool_name=config.target_tool_name,
+                tool_name=OUTLINE_FLOW_TOOL_NAME,
                 reason=proposal_repair_reason,
             )
             async for event in self._request_tool_self_correction(
                 ctx=ctx,
-                error_message=submission_result.feedback
-                or config.invalid_result_message,
+                error_message=outline_result.feedback or "Invalid outline_flow draft.",
                 tool_call=tool_call,
-                retry_config=_build_retry_config(),
+                retry_config=retry_config,
             ):
                 yield event
             return
 
         _record_successful_proposal()
-        for event in submission_result.iter_events():
-            yield event
-
-    @staticmethod
-    def _build_submission_processing_kwargs(
-        *,
-        turn: SessionSendTurn,
-        conversation: list[ConversationMessage],
-        new_messages_start: int,
-        arguments: dict[str, Any],
-        assistant_content: str,
-        assistant_metadata: dict[str, Any] | None = None,
-        assistant_metadata_builder: Callable[[], dict[str, Any] | None] | None = None,
-        proposal_success_recorder: Callable[[], None] | None = None,
-        tool_call_id: str,
-        available_model_refs: set[str] | None,
-        available_kb_refs: set[str] | None,
-        resource_catalog: AIBuilderResourceCatalog | None,
-        flow: "Flow | None",
-        include_flow_context: bool,
-    ) -> dict[str, Any]:
-        processing_kwargs: dict[str, Any] = {
-            "turn": turn,
-            "conversation": conversation,
-            "new_messages_start": new_messages_start,
-            "arguments": arguments,
-            "assistant_content": assistant_content,
-            "assistant_metadata": assistant_metadata,
-            "assistant_metadata_builder": assistant_metadata_builder,
-            "proposal_success_recorder": proposal_success_recorder,
-            "tool_call_id": tool_call_id,
-            "available_model_refs": available_model_refs,
-            "available_kb_refs": available_kb_refs,
-            "resource_catalog": resource_catalog,
-        }
-        if include_flow_context:
-            processing_kwargs["flow"] = flow
-        return processing_kwargs
-
-    async def _handle_outline_flow_tool_call(
-        self,
-        *,
-        ctx: ProposalContext,
-        tool_call: Any,
-    ) -> AsyncGenerator[dict[str, str], None]:
-        retry_config = outline_flow_retry_config(processor=self)
-
-        async def _process_outline_submission(
-            **kwargs: Any,
-        ) -> ToolProcessingResult:
-            return await process_outline_arguments(processor=self, **kwargs)
-
-        async for event in self._handle_submission_tool_call(
-            ctx=ctx,
-            tool_call=tool_call,
-            config=SubmissionToolHandlerConfig(
-                target_tool_name=OUTLINE_FLOW_TOOL_NAME,
-                requirements_not_confirmed_message="Requirements must be confirmed before creating a flow.",
-                parse_error_prefix="Invalid outline_flow arguments",
-                invalid_result_message="Invalid outline_flow draft.",
-                forced_tool_prompt=retry_config.forced_tool_prompt,
-                process_submission_arguments=_process_outline_submission,
-            ),
-        ):
+        for event in outline_result.iter_events():
             yield event
 
     async def call_proposal_completion(
@@ -1046,56 +957,6 @@ class AIBuilderProposalProcessor:
                 counts_as_repair=counts_as_repair,
             )
         return response
-
-    async def request_self_correction(
-        self,
-        *,
-        turn: SessionSendTurn,
-        request_id: str,
-        conversation: list[ConversationMessage],
-        new_messages_start: int,
-        error_message: str,
-        llm_messages: list[dict[str, Any]],
-        tool_call: Any,
-        tool_schemas: list[dict[str, Any]],
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        available_model_refs: set[str] | None,
-        available_kb_refs: set[str] | None,
-        max_output_tokens: int,
-        resource_catalog: AIBuilderResourceCatalog | None = None,
-        flow: "Flow | None" = None,
-        assistant_snapshots: AssistantAuthoringSnapshots | None = None,
-    ) -> AsyncGenerator[dict[str, str], None]:
-        ctx = ProposalContext(
-            turn=turn,
-            conversation=conversation,
-            new_messages_start=new_messages_start,
-            llm_messages=llm_messages,
-            tool_schemas=tool_schemas,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            available_model_refs=available_model_refs,
-            available_kb_refs=available_kb_refs,
-            resource_catalog=resource_catalog,
-            max_output_tokens=max_output_tokens,
-            request_id=request_id,
-            flow=flow,
-        )
-        retry_config = self._submission_retry_config(
-            flow=flow,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            max_output_tokens=max_output_tokens,
-            assistant_snapshots=assistant_snapshots,
-        )
-        async for event in self._request_tool_self_correction(
-            ctx=ctx,
-            error_message=error_message,
-            tool_call=tool_call,
-            retry_config=retry_config,
-        ):
-            yield event
 
     async def _request_tool_self_correction(
         self,
@@ -1270,15 +1131,23 @@ class AIBuilderProposalProcessor:
         usage_tracker: ProposalTurnTelemetry | None = None,
         assistant_metadata: dict[str, Any] | None = None,
     ) -> EventBatch | None:
-        retry_config = self._submission_retry_config(
-            flow=flow,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            max_output_tokens=max_output_tokens,
-            assistant_snapshots=assistant_snapshots,
-            planning_state=planning_state,
-            plan_edit_context=plan_edit_context,
-            prior_plan_for_revision=prior_plan_for_revision,
+        retry_config = (
+            outline_flow_retry_config(
+                processor=self,
+                planning_state=planning_state,
+                plan_edit_context=plan_edit_context,
+                prior_plan_for_revision=prior_plan_for_revision,
+            )
+            if flow is None
+            else edit_flow_retry_config(
+                processor=self,
+                assistant_snapshots=assistant_snapshots,
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                max_output_tokens=max_output_tokens,
+                plan_edit_context=plan_edit_context,
+                prior_plan_for_revision=prior_plan_for_revision,
+            )
         )
         outcome = await self.retry_forced_tool_after_text(
             correction_messages=correction_messages,
@@ -1771,6 +1640,15 @@ class AIBuilderProposalProcessor:
         ctx: ProposalContext,
         tool_call: Any,
     ) -> AsyncGenerator[dict[str, str], None]:
+        retry_config = edit_flow_retry_config(
+            processor=self,
+            assistant_snapshots=ctx.assistant_snapshots,
+            litellm_model=ctx.litellm_model,
+            litellm_kwargs=ctx.litellm_kwargs,
+            max_output_tokens=ctx.max_output_tokens,
+            plan_edit_context=ctx.plan_edit_context,
+            prior_plan_for_revision=ctx.prior_plan_for_revision,
+        )
         try:
             raw_args = json.loads(tool_call.function.arguments)
         except json.JSONDecodeError as error:
@@ -1791,15 +1669,7 @@ class AIBuilderProposalProcessor:
                 ctx=ctx,
                 error_message=f"Invalid edit_flow arguments: {error}",
                 tool_call=tool_call,
-                retry_config=edit_flow_retry_config(
-                    processor=self,
-                    assistant_snapshots=ctx.assistant_snapshots,
-                    litellm_model=ctx.litellm_model,
-                    litellm_kwargs=ctx.litellm_kwargs,
-                    max_output_tokens=ctx.max_output_tokens,
-                    plan_edit_context=ctx.plan_edit_context,
-                    prior_plan_for_revision=ctx.prior_plan_for_revision,
-                ),
+                retry_config=retry_config,
             ):
                 yield event
             return
@@ -1863,15 +1733,7 @@ class AIBuilderProposalProcessor:
                 ctx=ctx,
                 error_message=edit_result.feedback or "Invalid edit_flow arguments.",
                 tool_call=tool_call,
-                retry_config=edit_flow_retry_config(
-                    processor=self,
-                    assistant_snapshots=ctx.assistant_snapshots,
-                    litellm_model=ctx.litellm_model,
-                    litellm_kwargs=ctx.litellm_kwargs,
-                    max_output_tokens=ctx.max_output_tokens,
-                    plan_edit_context=ctx.plan_edit_context,
-                    prior_plan_for_revision=ctx.prior_plan_for_revision,
-                ),
+                retry_config=retry_config,
             ):
                 yield event
             return
@@ -1902,36 +1764,6 @@ class AIBuilderProposalProcessor:
             litellm_kwargs=litellm_kwargs,
             ui_language=ui_language,
             assistant_metadata=assistant_metadata,
-        )
-
-    def _submission_retry_config(
-        self,
-        *,
-        flow: "Flow | None",
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        max_output_tokens: int,
-        assistant_snapshots: AssistantAuthoringSnapshots | None = None,
-        planning_state: PlanningState | None = None,
-        plan_edit_context: AIBuilderPlanEditContext | None = None,
-        prior_plan_for_revision: BuilderPlan | None = None,
-    ) -> ToolRetryConfig:
-        if flow is None:
-            return outline_flow_retry_config(
-                processor=self,
-                planning_state=planning_state,
-                plan_edit_context=plan_edit_context,
-                prior_plan_for_revision=prior_plan_for_revision,
-            )
-
-        return edit_flow_retry_config(
-            processor=self,
-            assistant_snapshots=assistant_snapshots,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            max_output_tokens=max_output_tokens,
-            plan_edit_context=plan_edit_context,
-            prior_plan_for_revision=prior_plan_for_revision,
         )
 
     def _confirm_requirements_retry_config(

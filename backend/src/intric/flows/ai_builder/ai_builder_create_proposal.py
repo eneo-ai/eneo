@@ -95,6 +95,11 @@ if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
+OUTLINE_FLOW_FORCED_TOOL_PROMPT = (
+    "Your previous reply was prose only. "
+    "Now call outline_flow with one complete semantic outline. "
+    "Do not answer with prose."
+)
 
 
 async def process_outline_arguments(
@@ -489,11 +494,7 @@ def outline_flow_retry_config(
 ) -> ToolRetryConfig:
     return ToolRetryConfig(
         target_tool_name=OUTLINE_FLOW_TOOL_NAME,
-        forced_tool_prompt=(
-            "Your previous reply was prose only. "
-            "Now call outline_flow with one complete semantic outline. "
-            "Do not answer with prose."
-        ),
+        forced_tool_prompt=OUTLINE_FLOW_FORCED_TOOL_PROMPT,
         process_tool_invocation=_bind_process_outline_arguments(
             processor=processor,
             planning_state=planning_state,
