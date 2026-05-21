@@ -104,6 +104,7 @@ from intric.help_assistants.domain.factory import HelperAssistantsFactory
 from intric.help_assistants.infrastructure.help_assistant_assignment_history_repo import (
     HelpAssistantAssignmentHistoryRepo,
 )
+from intric.help_assistants.infrastructure.helper_run_repo import HelperRunRepo
 from intric.help_assistants.infrastructure.org_space_assistant_role_repo import (
     OrgSpaceAssistantRoleRepo,
 )
@@ -591,6 +592,11 @@ class Container(containers.DeclarativeContainer):
     )
     help_assistant_assignment_history_repo = providers.Factory(
         HelpAssistantAssignmentHistoryRepo,
+        session=session,
+        factory=helper_assistants_factory,
+    )
+    helper_run_repo = providers.Factory(
+        HelperRunRepo,
         session=session,
         factory=helper_assistants_factory,
     )
