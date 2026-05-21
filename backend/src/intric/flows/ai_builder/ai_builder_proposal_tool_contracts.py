@@ -4,11 +4,17 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ToolProcessingFailureKind,
 )
+from intric.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
+from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+
+if TYPE_CHECKING:
+    from intric.flows.domain.flow import Flow
 
 
 @dataclass(frozen=True)
@@ -31,8 +37,24 @@ class ToolProcessingResult:
 
 
 @dataclass(frozen=True)
+class ToolRetryInvocation:
+    turn: SessionSendTurn
+    conversation: list[ConversationMessage]
+    new_messages_start: int
+    arguments: dict[str, Any]
+    assistant_content: str
+    tool_call_id: str
+    available_model_refs: set[str] | None
+    available_kb_refs: set[str] | None
+    resource_catalog: AIBuilderResourceCatalog | None = None
+    flow: "Flow | None" = None
+    assistant_metadata: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
 class ToolRetryConfig:
     target_tool_name: str
     forced_tool_prompt: str
-    process_tool_arguments: Callable[..., Awaitable[ToolProcessingResult]]
-    process_tool_kwargs: dict[str, Any]
+    process_tool_invocation: Callable[
+        [ToolRetryInvocation], Awaitable[ToolProcessingResult]
+    ]

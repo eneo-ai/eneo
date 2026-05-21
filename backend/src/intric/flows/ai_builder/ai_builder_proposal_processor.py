@@ -16,6 +16,7 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
 )
 from intric.flows.ai_builder.ai_builder_create_proposal import (
     outline_flow_retry_config,
+    process_outline_arguments,
 )
 from intric.flows.ai_builder.ai_builder_discovery import (
     build_registry_question_followup,
@@ -98,6 +99,7 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolProcessingResult,
     ToolRetryConfig,
+    ToolRetryInvocation,
 )
 from intric.flows.ai_builder.ai_builder_repair_transport import (
     append_tool_retry_feedback_turn,
@@ -336,7 +338,10 @@ class SubmissionToolHandlerConfig:
     parse_error_prefix: str
     invalid_result_message: str
     forced_tool_prompt: str
-    process_tool_arguments: Callable[..., Awaitable[ToolProcessingResult]]
+    process_submission_arguments: Callable[
+        ...,
+        Awaitable[ToolProcessingResult],
+    ]
     include_flow_context: bool = False
 
 
@@ -800,6 +805,19 @@ class AIBuilderProposalProcessor:
         if blocked:
             return
 
+        def _build_retry_config() -> ToolRetryConfig:
+            return self._submission_retry_config(
+                flow=ctx.flow,
+                litellm_model=ctx.litellm_model,
+                litellm_kwargs=ctx.litellm_kwargs,
+                max_output_tokens=ctx.max_output_tokens,
+                assistant_snapshots=ctx.assistant_snapshots,
+                resource_catalog=ctx.resource_catalog,
+                planning_state=ctx.planning_state,
+                plan_edit_context=ctx.plan_edit_context,
+                prior_plan_for_revision=ctx.prior_plan_for_revision,
+            )
+
         try:
             arguments = json.loads(tool_call.function.arguments)
         except json.JSONDecodeError as error:
@@ -816,34 +834,14 @@ class AIBuilderProposalProcessor:
                 tool_name=config.target_tool_name,
                 reason="parse",
             )
-            parse_retry_kwargs: dict[str, Any] = {}
-            if config.target_tool_name == OUTLINE_FLOW_TOOL_NAME:
-                parse_retry_kwargs["planning_state"] = ctx.planning_state
-                parse_retry_kwargs["plan_edit_context"] = ctx.plan_edit_context
-                parse_retry_kwargs["prior_plan_for_revision"] = (
-                    ctx.prior_plan_for_revision
-                )
             async for event in self._request_tool_self_correction(
                 ctx=ctx,
                 error_message=f"{config.parse_error_prefix}: {error}",
                 tool_call=tool_call,
-                retry_config=ToolRetryConfig(
-                    target_tool_name=config.target_tool_name,
-                    forced_tool_prompt=config.forced_tool_prompt,
-                    process_tool_arguments=config.process_tool_arguments,
-                    process_tool_kwargs=parse_retry_kwargs,
-                ),
+                retry_config=_build_retry_config(),
             ):
                 yield event
             return
-
-        retry_process_kwargs: dict[str, Any] = {}
-        if config.target_tool_name == OUTLINE_FLOW_TOOL_NAME:
-            retry_process_kwargs["planning_state"] = ctx.planning_state
-            retry_process_kwargs["plan_edit_context"] = ctx.plan_edit_context
-            retry_process_kwargs["prior_plan_for_revision"] = (
-                ctx.prior_plan_for_revision
-            )
 
         def _record_successful_proposal() -> None:
             _record_proposal_first_attempt(
@@ -882,7 +880,9 @@ class AIBuilderProposalProcessor:
             submission_kwargs["plan_edit_context"] = ctx.plan_edit_context
             submission_kwargs["prior_plan_for_revision"] = ctx.prior_plan_for_revision
         try:
-            submission_result = await config.process_tool_arguments(**submission_kwargs)
+            submission_result = await config.process_submission_arguments(
+                **submission_kwargs
+            )
         except AIBuilderArchitectureError as error:
             _record_proposal_architecture_failure(
                 ctx.usage_tracker,
@@ -917,12 +917,7 @@ class AIBuilderProposalProcessor:
                 error_message=submission_result.feedback
                 or config.invalid_result_message,
                 tool_call=tool_call,
-                retry_config=ToolRetryConfig(
-                    target_tool_name=config.target_tool_name,
-                    forced_tool_prompt=config.forced_tool_prompt,
-                    process_tool_arguments=config.process_tool_arguments,
-                    process_tool_kwargs=retry_process_kwargs,
-                ),
+                retry_config=_build_retry_config(),
             ):
                 yield event
             return
@@ -974,6 +969,12 @@ class AIBuilderProposalProcessor:
         tool_call: Any,
     ) -> AsyncGenerator[dict[str, str], None]:
         retry_config = outline_flow_retry_config(processor=self)
+
+        async def _process_outline_submission(
+            **kwargs: Any,
+        ) -> ToolProcessingResult:
+            return await process_outline_arguments(processor=self, **kwargs)
+
         async for event in self._handle_submission_tool_call(
             ctx=ctx,
             tool_call=tool_call,
@@ -983,7 +984,7 @@ class AIBuilderProposalProcessor:
                 parse_error_prefix="Invalid outline_flow arguments",
                 invalid_result_message="Invalid outline_flow draft.",
                 forced_tool_prompt=retry_config.forced_tool_prompt,
-                process_tool_arguments=retry_config.process_tool_arguments,
+                process_submission_arguments=_process_outline_submission,
             ),
         ):
             yield event
@@ -1106,10 +1107,6 @@ class AIBuilderProposalProcessor:
         tool_call: Any,
         retry_config: ToolRetryConfig,
     ) -> AsyncGenerator[dict[str, str], None]:
-        merged_process_kwargs = dict(retry_config.process_tool_kwargs)
-        merged_process_kwargs["turn"] = ctx.turn
-        merged_process_kwargs.setdefault("resource_catalog", ctx.resource_catalog)
-
         def _build_assistant_metadata() -> dict[str, Any] | None:
             return _assistant_metadata_with_usage(
                 conversation=ctx.conversation,
@@ -1135,7 +1132,7 @@ class AIBuilderProposalProcessor:
 
         try:
             async for event in run_request_self_correction(
-                session_id=ctx.session_id,
+                turn=ctx.turn,
                 request_id=ctx.request_id,
                 conversation=ctx.conversation,
                 new_messages_start=ctx.new_messages_start,
@@ -1154,14 +1151,14 @@ class AIBuilderProposalProcessor:
                 ),
                 max_self_correction_retries=MAX_SELF_CORRECTION_RETRIES,
                 call_proposal_completion=_call_proposal_completion,
-                process_tool_arguments=retry_config.process_tool_arguments,
+                process_tool_invocation=retry_config.process_tool_invocation,
                 target_tool_name=retry_config.target_tool_name,
                 forced_tool_prompt=retry_config.forced_tool_prompt,
                 build_self_correction_error_event=(
                     self._build_self_correction_error_event
                 ),
                 retry_forced_tool_after_text=_retry_forced_tool_after_text,
-                process_tool_kwargs=merged_process_kwargs,
+                resource_catalog=ctx.resource_catalog,
                 flow=ctx.flow,
                 build_assistant_metadata=_build_assistant_metadata,
             ):
@@ -1186,7 +1183,7 @@ class AIBuilderProposalProcessor:
         tool_schemas: list[dict[str, Any]],
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
-        session_id: UUID,
+        turn: SessionSendTurn,
         conversation: list[ConversationMessage],
         new_messages_start: int,
         available_model_refs: set[str] | None,
@@ -1194,18 +1191,15 @@ class AIBuilderProposalProcessor:
         max_output_tokens: int,
         target_tool_name: str,
         forced_tool_prompt: str,
-        process_tool_arguments: Any,
-        process_tool_kwargs: dict[str, Any] | None = None,
+        process_tool_invocation: Callable[
+            [ToolRetryInvocation], Awaitable[ToolProcessingResult]
+        ],
         flow: "Flow | None" = None,
         resource_catalog: AIBuilderResourceCatalog | None = None,
         usage_tracker: ProposalTurnTelemetry | None = None,
         request_id: str | None = None,
         build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
     ) -> ForcedToolRetryOutcome:
-        merged_process_kwargs = dict(process_tool_kwargs or {})
-        if resource_catalog is not None:
-            merged_process_kwargs.setdefault("resource_catalog", resource_catalog)
-
         async def _call_proposal_completion(**kwargs: Any) -> Any:
             return await self._call_proposal_completion_with_usage(
                 **kwargs,
@@ -1220,7 +1214,7 @@ class AIBuilderProposalProcessor:
                 tool_schemas=tool_schemas,
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs,
-                session_id=session_id,
+                turn=turn,
                 conversation=conversation,
                 new_messages_start=new_messages_start,
                 available_model_refs=available_model_refs,
@@ -1230,8 +1224,8 @@ class AIBuilderProposalProcessor:
                 forced_tool_prompt=forced_tool_prompt,
                 forced_proposal_temperature=self.forced_proposal_temperature,
                 call_proposal_completion=_call_proposal_completion,
-                process_tool_arguments=process_tool_arguments,
-                process_tool_kwargs=merged_process_kwargs,
+                process_tool_invocation=process_tool_invocation,
+                resource_catalog=resource_catalog,
                 flow=flow,
                 build_assistant_metadata=build_assistant_metadata,
                 request_id=request_id,
@@ -1289,15 +1283,13 @@ class AIBuilderProposalProcessor:
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
         )
-        process_tool_kwargs = dict(retry_config.process_tool_kwargs)
-        process_tool_kwargs["turn"] = turn
         outcome = await self.retry_forced_tool_after_text(
             correction_messages=correction_messages,
             assistant_text=assistant_text,
             tool_schemas=tool_schemas,
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
-            session_id=turn.session_id,
+            turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
             available_model_refs=available_model_refs,
@@ -1305,8 +1297,7 @@ class AIBuilderProposalProcessor:
             max_output_tokens=max_output_tokens,
             target_tool_name=retry_config.target_tool_name,
             forced_tool_prompt=retry_config.forced_tool_prompt,
-            process_tool_arguments=retry_config.process_tool_arguments,
-            process_tool_kwargs=process_tool_kwargs,
+            process_tool_invocation=retry_config.process_tool_invocation,
             resource_catalog=resource_catalog,
             flow=flow,
             usage_tracker=usage_tracker,
@@ -1954,17 +1945,31 @@ class AIBuilderProposalProcessor:
     def _confirm_requirements_retry_config(
         self, ctx: ProposalContext
     ) -> ToolRetryConfig:
+        async def _process_tool_invocation(
+            invocation: ToolRetryInvocation,
+        ) -> ToolProcessingResult:
+            return await self._process_confirm_requirements_arguments(
+                turn=invocation.turn,
+                conversation=invocation.conversation,
+                new_messages_start=invocation.new_messages_start,
+                arguments=invocation.arguments,
+                assistant_content=invocation.assistant_content,
+                assistant_metadata=invocation.assistant_metadata,
+                tool_call_id=invocation.tool_call_id,
+                available_model_refs=invocation.available_model_refs,
+                available_kb_refs=invocation.available_kb_refs,
+                flow=invocation.flow,
+                litellm_model=ctx.litellm_model,
+                litellm_kwargs=ctx.litellm_kwargs,
+            )
+
         return ToolRetryConfig(
             target_tool_name=CONFIRM_REQUIREMENTS_TOOL_NAME,
             forced_tool_prompt=(
                 "Return one valid confirm_requirements tool call. "
                 "Do not answer with prose."
             ),
-            process_tool_arguments=self._process_confirm_requirements_arguments,
-            process_tool_kwargs={
-                "litellm_model": ctx.litellm_model,
-                "litellm_kwargs": ctx.litellm_kwargs,
-            },
+            process_tool_invocation=_process_tool_invocation,
         )
 
 

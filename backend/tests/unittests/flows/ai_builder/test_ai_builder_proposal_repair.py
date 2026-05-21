@@ -20,6 +20,14 @@ from intric.flows.ai_builder.ai_builder_proposal_repair import (
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ToolProcessingFailureKind,
 )
+from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ToolProcessingResult,
+    ToolRetryInvocation,
+)
+from intric.flows.ai_builder.ai_builder_session_turn import (
+    SessionSendLease,
+    SessionSendTurn,
+)
 
 
 def _tool_response(*, tool_name: str, arguments: dict[str, object]) -> SimpleNamespace:
@@ -56,26 +64,27 @@ def _original_tool_call() -> SimpleNamespace:
     )
 
 
-@pytest.mark.asyncio
-async def test_retry_forced_tool_after_text_does_not_inject_flow_into_processors_that_do_not_accept_it() -> (
-    None
-):
-    processed_arguments: dict[str, object] = {}
+def _make_turn() -> SessionSendTurn:
+    return SessionSendTurn(
+        session_id=uuid4(),
+        tenant_id=uuid4(),
+        lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+        base_planning_state_version=3,
+    )
 
-    async def process_create_arguments(
-        *,
-        session_id,
-        conversation,
-        new_messages_start,
-        arguments,
-        assistant_content,
-        tool_call_id,
-        available_model_refs,
-        available_kb_refs,
-    ):
-        processed_arguments.update(arguments)
-        return SimpleNamespace(
-            event={"event": "plan", "data": "{}"}, feedback=None, failure_kind=None
+
+@pytest.mark.asyncio
+async def test_retry_forced_tool_after_text_builds_typed_invocation() -> None:
+    turn = _make_turn()
+    captured_invocation: ToolRetryInvocation | None = None
+
+    async def process_invocation(
+        invocation: ToolRetryInvocation,
+    ) -> ToolProcessingResult:
+        nonlocal captured_invocation
+        captured_invocation = invocation
+        return ToolProcessingResult(
+            event={"event": "plan", "data": "{}"},
         )
 
     result = await retry_forced_tool_after_text(
@@ -84,7 +93,7 @@ async def test_retry_forced_tool_after_text_does_not_inject_flow_into_processors
         tool_schemas=[{"function": {"name": "outline_flow"}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
-        session_id=uuid4(),
+        turn=turn,
         conversation=[],
         new_messages_start=0,
         available_model_refs=None,
@@ -99,13 +108,21 @@ async def test_retry_forced_tool_after_text_does_not_inject_flow_into_processors
                 arguments={"flow_name": "Test", "plan_rationale": "R", "steps": []},
             )
         ),
-        process_tool_arguments=process_create_arguments,
-        process_tool_kwargs=None,
+        process_tool_invocation=process_invocation,
         flow=None,
+        resource_catalog=None,
+        build_assistant_metadata=lambda: {"planner_telemetry": {"request_id": "req"}},
     )
 
     assert result.events == ({"event": "plan", "data": "{}"},)
-    assert processed_arguments["flow_name"] == "Test"
+    assert captured_invocation is not None
+    assert captured_invocation.turn is turn
+    assert captured_invocation.arguments["flow_name"] == "Test"
+    assert captured_invocation.flow is None
+    assert captured_invocation.resource_catalog is None
+    assert captured_invocation.assistant_metadata == {
+        "planner_telemetry": {"request_id": "req"}
+    }
 
 
 @pytest.mark.asyncio
@@ -114,22 +131,13 @@ async def test_retry_forced_tool_after_text_accepts_json_arguments_returned_as_t
 ):
     processed_arguments: dict[str, object] = {}
     call_proposal_completion = AsyncMock()
+    turn = _make_turn()
 
-    async def process_create_arguments(
-        *,
-        session_id,
-        conversation,
-        new_messages_start,
-        arguments,
-        assistant_content,
-        tool_call_id,
-        available_model_refs,
-        available_kb_refs,
-    ):
-        processed_arguments.update(arguments)
-        return SimpleNamespace(
-            event={"event": "plan", "data": "{}"}, feedback=None, failure_kind=None
-        )
+    async def process_invocation(
+        invocation: ToolRetryInvocation,
+    ) -> ToolProcessingResult:
+        processed_arguments.update(invocation.arguments)
+        return ToolProcessingResult(event={"event": "plan", "data": "{}"})
 
     result = await retry_forced_tool_after_text(
         correction_messages=[{"role": "system", "content": "Prompt"}],
@@ -143,7 +151,7 @@ async def test_retry_forced_tool_after_text_accepts_json_arguments_returned_as_t
         tool_schemas=[{"function": {"name": "outline_flow"}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
-        session_id=uuid4(),
+        turn=turn,
         conversation=[],
         new_messages_start=0,
         available_model_refs=None,
@@ -153,8 +161,7 @@ async def test_retry_forced_tool_after_text_accepts_json_arguments_returned_as_t
         forced_tool_prompt="Call outline_flow.",
         forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
-        process_tool_arguments=process_create_arguments,
-        process_tool_kwargs=None,
+        process_tool_invocation=process_invocation,
         flow=None,
     )
 
@@ -168,10 +175,12 @@ async def test_retry_forced_tool_after_text_preserves_json_text_validation_feedb
     None
 ):
     call_proposal_completion = AsyncMock()
+    turn = _make_turn()
 
-    async def process_create_arguments(**_: Any) -> SimpleNamespace:
-        return SimpleNamespace(
-            event=None,
+    async def process_invocation(
+        _: ToolRetryInvocation,
+    ) -> ToolProcessingResult:
+        return ToolProcessingResult(
             feedback="Validation errors:\n1. Missing required field report_period.",
             failure_kind="validation",
         )
@@ -188,7 +197,7 @@ async def test_retry_forced_tool_after_text_preserves_json_text_validation_feedb
         tool_schemas=[{"function": {"name": "outline_flow"}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
-        session_id=uuid4(),
+        turn=turn,
         conversation=[],
         new_messages_start=0,
         available_model_refs=None,
@@ -198,8 +207,7 @@ async def test_retry_forced_tool_after_text_preserves_json_text_validation_feedb
         forced_tool_prompt="Call outline_flow.",
         forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
-        process_tool_arguments=process_create_arguments,
-        process_tool_kwargs=None,
+        process_tool_invocation=process_invocation,
         flow=None,
     )
 
@@ -215,6 +223,7 @@ async def test_retry_forced_tool_after_text_preserves_json_text_validation_feedb
 async def test_retry_forced_tool_after_text_preserves_forced_payload_parse_feedback() -> (
     None
 ):
+    turn = _make_turn()
     tool_call = SimpleNamespace(
         id="call_invalid",
         function=SimpleNamespace(name="outline_flow", arguments="{not json"),
@@ -233,7 +242,7 @@ async def test_retry_forced_tool_after_text_preserves_forced_payload_parse_feedb
         tool_schemas=[{"function": {"name": "outline_flow"}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
-        session_id=uuid4(),
+        turn=turn,
         conversation=[],
         new_messages_start=0,
         available_model_refs=None,
@@ -243,8 +252,7 @@ async def test_retry_forced_tool_after_text_preserves_forced_payload_parse_feedb
         forced_tool_prompt="Call outline_flow.",
         forced_proposal_temperature=0.1,
         call_proposal_completion=AsyncMock(return_value=response),
-        process_tool_arguments=AsyncMock(),
-        process_tool_kwargs=None,
+        process_tool_invocation=AsyncMock(),
         flow=None,
     )
 
@@ -260,6 +268,7 @@ async def test_retry_forced_tool_after_text_preserves_information_request_empty_
     None
 ):
     call_proposal_completion = AsyncMock()
+    turn = _make_turn()
 
     result = await retry_forced_tool_after_text(
         correction_messages=[{"role": "system", "content": "Prompt"}],
@@ -267,7 +276,7 @@ async def test_retry_forced_tool_after_text_preserves_information_request_empty_
         tool_schemas=[{"function": {"name": "outline_flow"}}],
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
-        session_id=uuid4(),
+        turn=turn,
         conversation=[],
         new_messages_start=0,
         available_model_refs=None,
@@ -277,8 +286,7 @@ async def test_retry_forced_tool_after_text_preserves_information_request_empty_
         forced_tool_prompt="Call outline_flow.",
         forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
-        process_tool_arguments=AsyncMock(),
-        process_tool_kwargs=None,
+        process_tool_invocation=AsyncMock(),
         flow=None,
     )
 
@@ -349,20 +357,10 @@ async def _run_repair_capturing(
                 break
         return _bad_tool_response(len(observed_temperatures))
 
-    async def process_tool_arguments(
-        *,
-        session_id,
-        conversation,
-        new_messages_start,
-        arguments,
-        assistant_content,
-        tool_call_id,
-        available_model_refs,
-        available_kb_refs,
-        **_,
-    ) -> SimpleNamespace:
-        return SimpleNamespace(
-            event=None,
+    async def process_invocation(
+        _: ToolRetryInvocation,
+    ) -> ToolProcessingResult:
+        return ToolProcessingResult(
             feedback="still bad",
             failure_kind=failure_kind,
             failure_codes=failure_codes,
@@ -370,7 +368,7 @@ async def _run_repair_capturing(
 
     events: list[dict[str, str]] = []
     async for event in request_self_correction(
-        session_id=uuid4(),
+        turn=_make_turn(),
         conversation=[],
         new_messages_start=0,
         error_message="original invalid",
@@ -386,15 +384,17 @@ async def _run_repair_capturing(
         self_correction_bumped_temperature=bumped_temperature,
         max_self_correction_retries=max_retries,
         call_proposal_completion=call_proposal_completion,
-        process_tool_arguments=process_tool_arguments,
+        process_tool_invocation=process_invocation,
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
-        build_self_correction_error_event=lambda *, feedback, failure_kind, request_id=None: {
+        build_self_correction_error_event=lambda *,
+        feedback,
+        failure_kind,
+        request_id=None: {
             "event": "error",
             "data": feedback or "",
         },
         retry_forced_tool_after_text=AsyncMock(return_value=ForcedToolRetryOutcome()),
-        process_tool_kwargs=None,
         flow=None,
     ):
         events.append(event)
@@ -497,14 +497,14 @@ async def test_request_self_correction_emits_error_event_when_planner_bails_to_c
     async def call_proposal_completion(**_: Any) -> SimpleNamespace:
         return text_response
 
-    async def process_tool_arguments(**_: Any) -> SimpleNamespace:
-        return SimpleNamespace(
-            event=None, feedback="still bad", failure_kind="validation"
-        )
+    async def process_invocation(
+        _: ToolRetryInvocation,
+    ) -> ToolProcessingResult:
+        return ToolProcessingResult(feedback="still bad", failure_kind="validation")
 
     events: list[dict[str, str]] = []
     async for event in request_self_correction(
-        session_id=uuid4(),
+        turn=_make_turn(),
         conversation=[],
         new_messages_start=0,
         error_message="Structured field nesting depth cannot exceed 3.",
@@ -520,15 +520,17 @@ async def test_request_self_correction_emits_error_event_when_planner_bails_to_c
         self_correction_bumped_temperature=0.6,
         max_self_correction_retries=3,
         call_proposal_completion=call_proposal_completion,
-        process_tool_arguments=process_tool_arguments,
+        process_tool_invocation=process_invocation,
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
-        build_self_correction_error_event=lambda *, feedback, failure_kind, request_id=None: {
+        build_self_correction_error_event=lambda *,
+        feedback,
+        failure_kind,
+        request_id=None: {
             "event": "error",
             "data": feedback or "",
         },
         retry_forced_tool_after_text=AsyncMock(return_value=ForcedToolRetryOutcome()),
-        process_tool_kwargs=None,
         flow=None,
     ):
         events.append(event)
@@ -594,7 +596,7 @@ async def test_request_self_correction_includes_forced_retry_validation_feedback
 
     events: list[dict[str, str]] = []
     async for event in request_self_correction(
-        session_id=uuid4(),
+        turn=_make_turn(),
         request_id="req-repair-feedback",
         conversation=[],
         new_messages_start=0,
@@ -611,12 +613,11 @@ async def test_request_self_correction_includes_forced_retry_validation_feedback
         self_correction_bumped_temperature=0.6,
         max_self_correction_retries=0,
         call_proposal_completion=call_proposal_completion,
-        process_tool_arguments=AsyncMock(),
+        process_tool_invocation=AsyncMock(),
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
         build_self_correction_error_event=build_self_correction_error_event,
         retry_forced_tool_after_text=forced_retry,
-        process_tool_kwargs=None,
         flow=None,
     ):
         events.append(event)
@@ -674,16 +675,14 @@ async def test_request_self_correction_retries_forced_retry_validation_feedback(
         )
     )
 
-    async def process_tool_arguments(**_: Any) -> SimpleNamespace:
-        return SimpleNamespace(
-            event={"event": "plan", "data": "{}"},
-            feedback=None,
-            failure_kind=None,
-        )
+    async def process_invocation(
+        _: ToolRetryInvocation,
+    ) -> ToolProcessingResult:
+        return ToolProcessingResult(event={"event": "plan", "data": "{}"})
 
     events: list[dict[str, str]] = []
     async for event in request_self_correction(
-        session_id=uuid4(),
+        turn=_make_turn(),
         conversation=[],
         new_messages_start=0,
         error_message="Invalid edit_flow draft.",
@@ -699,15 +698,17 @@ async def test_request_self_correction_retries_forced_retry_validation_feedback(
         self_correction_bumped_temperature=0.6,
         max_self_correction_retries=3,
         call_proposal_completion=call_proposal_completion,
-        process_tool_arguments=process_tool_arguments,
+        process_tool_invocation=process_invocation,
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
-        build_self_correction_error_event=lambda *, feedback, failure_kind, request_id=None: {
+        build_self_correction_error_event=lambda *,
+        feedback,
+        failure_kind,
+        request_id=None: {
             "event": "error",
             "data": feedback or "",
         },
         retry_forced_tool_after_text=forced_retry,
-        process_tool_kwargs=None,
         flow=None,
     ):
         events.append(event)
@@ -756,7 +757,7 @@ async def test_request_self_correction_limits_text_feedback_retry_budget() -> No
 
     events: list[dict[str, str]] = []
     async for event in request_self_correction(
-        session_id=uuid4(),
+        turn=_make_turn(),
         conversation=[],
         new_messages_start=0,
         error_message="Invalid edit_flow draft.",
@@ -772,15 +773,17 @@ async def test_request_self_correction_limits_text_feedback_retry_budget() -> No
         self_correction_bumped_temperature=0.6,
         max_self_correction_retries=3,
         call_proposal_completion=call_proposal_completion,
-        process_tool_arguments=AsyncMock(),
+        process_tool_invocation=AsyncMock(),
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
-        build_self_correction_error_event=lambda *, feedback, failure_kind, request_id=None: {
+        build_self_correction_error_event=lambda *,
+        feedback,
+        failure_kind,
+        request_id=None: {
             "event": "error",
             "data": feedback or "",
         },
         retry_forced_tool_after_text=forced_retry,
-        process_tool_kwargs=None,
         flow=None,
     ):
         events.append(event)
@@ -815,14 +818,14 @@ async def test_request_self_correction_still_yields_text_for_legitimate_info_req
     async def call_proposal_completion(**_: Any) -> SimpleNamespace:
         return text_response
 
-    async def process_tool_arguments(**_: Any) -> SimpleNamespace:
-        return SimpleNamespace(
-            event=None, feedback="still bad", failure_kind="validation"
-        )
+    async def process_invocation(
+        _: ToolRetryInvocation,
+    ) -> ToolProcessingResult:
+        return ToolProcessingResult(feedback="still bad", failure_kind="validation")
 
     events: list[dict[str, str]] = []
     async for event in request_self_correction(
-        session_id=uuid4(),
+        turn=_make_turn(),
         conversation=[],
         new_messages_start=0,
         error_message="original invalid",
@@ -838,15 +841,17 @@ async def test_request_self_correction_still_yields_text_for_legitimate_info_req
         self_correction_bumped_temperature=0.6,
         max_self_correction_retries=3,
         call_proposal_completion=call_proposal_completion,
-        process_tool_arguments=process_tool_arguments,
+        process_tool_invocation=process_invocation,
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
-        build_self_correction_error_event=lambda *, feedback, failure_kind, request_id=None: {
+        build_self_correction_error_event=lambda *,
+        feedback,
+        failure_kind,
+        request_id=None: {
             "event": "error",
             "data": feedback or "",
         },
         retry_forced_tool_after_text=AsyncMock(return_value=ForcedToolRetryOutcome()),
-        process_tool_kwargs=None,
         flow=None,
     ):
         events.append(event)

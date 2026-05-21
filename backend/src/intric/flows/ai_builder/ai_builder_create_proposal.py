@@ -68,6 +68,7 @@ from intric.flows.ai_builder.ai_builder_proposal_policy import (
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolProcessingResult,
     ToolRetryConfig,
+    ToolRetryInvocation,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -486,13 +487,6 @@ def outline_flow_retry_config(
     plan_edit_context: AIBuilderPlanEditContext | None = None,
     prior_plan_for_revision: BuilderPlan | None = None,
 ) -> ToolRetryConfig:
-    process_kwargs: dict[str, Any] = {}
-    if planning_state is not None:
-        process_kwargs["planning_state"] = planning_state
-    if plan_edit_context is not None:
-        process_kwargs["plan_edit_context"] = plan_edit_context
-    if prior_plan_for_revision is not None:
-        process_kwargs["prior_plan_for_revision"] = prior_plan_for_revision
     return ToolRetryConfig(
         target_tool_name=OUTLINE_FLOW_TOOL_NAME,
         forced_tool_prompt=(
@@ -500,53 +494,41 @@ def outline_flow_retry_config(
             "Now call outline_flow with one complete semantic outline. "
             "Do not answer with prose."
         ),
-        process_tool_arguments=_bind_process_outline_arguments(processor),
-        process_tool_kwargs=process_kwargs,
+        process_tool_invocation=_bind_process_outline_arguments(
+            processor=processor,
+            planning_state=planning_state,
+            plan_edit_context=plan_edit_context,
+            prior_plan_for_revision=prior_plan_for_revision,
+        ),
     )
 
 
 def _bind_process_outline_arguments(
     processor: "AIBuilderProposalProcessor",
-) -> Callable[..., Awaitable[ToolProcessingResult]]:
+    *,
+    planning_state: PlanningState | None,
+    plan_edit_context: AIBuilderPlanEditContext | None,
+    prior_plan_for_revision: BuilderPlan | None,
+) -> Callable[[ToolRetryInvocation], Awaitable[ToolProcessingResult]]:
     async def _bound_process_outline_arguments(
-        *,
-        turn: SessionSendTurn,
-        conversation: list[ConversationMessage],
-        new_messages_start: int,
-        arguments: dict[str, Any],
-        assistant_content: str,
-        tool_call_id: str,
-        available_model_refs: set[str] | None,
-        available_kb_refs: set[str] | None,
-        assistant_metadata: dict[str, Any] | None = None,
-        resource_catalog: AIBuilderResourceCatalog | None = None,
-        flow: "Flow | None" = None,
-        planning_state: PlanningState | None = None,
-        plan_edit_context: AIBuilderPlanEditContext | None = None,
-        prior_plan_for_revision: BuilderPlan | None = None,
-        assistant_metadata_builder: Callable[[], dict[str, Any] | None] | None = None,
-        proposal_success_recorder: Callable[[], None] | None = None,
-        session_id: Any = None,
+        invocation: ToolRetryInvocation,
     ) -> ToolProcessingResult:
-        del session_id
         return await process_outline_arguments(
             processor=processor,
-            turn=turn,
-            conversation=conversation,
-            new_messages_start=new_messages_start,
-            arguments=arguments,
-            assistant_content=assistant_content,
-            tool_call_id=tool_call_id,
-            available_model_refs=available_model_refs,
-            available_kb_refs=available_kb_refs,
-            assistant_metadata=assistant_metadata,
-            resource_catalog=resource_catalog,
-            flow=flow,
+            turn=invocation.turn,
+            conversation=invocation.conversation,
+            new_messages_start=invocation.new_messages_start,
+            arguments=invocation.arguments,
+            assistant_content=invocation.assistant_content,
+            tool_call_id=invocation.tool_call_id,
+            available_model_refs=invocation.available_model_refs,
+            available_kb_refs=invocation.available_kb_refs,
+            assistant_metadata=invocation.assistant_metadata,
+            resource_catalog=invocation.resource_catalog,
+            flow=invocation.flow,
             planning_state=planning_state,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
-            assistant_metadata_builder=assistant_metadata_builder,
-            proposal_success_recorder=proposal_success_recorder,
         )
 
     return _bound_process_outline_arguments

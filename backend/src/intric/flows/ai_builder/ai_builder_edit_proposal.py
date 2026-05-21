@@ -49,6 +49,7 @@ from intric.flows.ai_builder.ai_builder_proposal_policy import (
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolProcessingResult,
     ToolRetryConfig,
+    ToolRetryInvocation,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -439,44 +440,34 @@ async def attempt_description_repair(
 
 def _bind_process_edit_arguments(
     processor: AIBuilderProposalProcessor,
-) -> Callable[..., Awaitable[ToolProcessingResult]]:
+    *,
+    assistant_snapshots: AssistantAuthoringSnapshots | None,
+    litellm_model: str,
+    litellm_kwargs: dict[str, Any],
+    max_output_tokens: int,
+    plan_edit_context: AIBuilderPlanEditContext | None,
+    prior_plan_for_revision: BuilderPlan | None,
+) -> Callable[[ToolRetryInvocation], Awaitable[ToolProcessingResult]]:
     async def _bound_process_edit_arguments(
-        *,
-        turn: SessionSendTurn,
-        conversation: list[ConversationMessage],
-        new_messages_start: int,
-        arguments: dict[str, Any],
-        assistant_content: str,
-        tool_call_id: str,
-        available_model_refs: set[str] | None,
-        available_kb_refs: set[str] | None,
-        flow: Flow | None,
-        assistant_snapshots: AssistantAuthoringSnapshots | None,
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        max_output_tokens: int,
-        assistant_metadata: dict[str, Any] | None = None,
-        resource_catalog: AIBuilderResourceCatalog | None = None,
-        plan_edit_context: AIBuilderPlanEditContext | None = None,
-        prior_plan_for_revision: BuilderPlan | None = None,
+        invocation: ToolRetryInvocation,
     ) -> ToolProcessingResult:
         return await process_edit_arguments(
             processor=processor,
-            turn=turn,
-            conversation=conversation,
-            new_messages_start=new_messages_start,
-            arguments=arguments,
-            assistant_content=assistant_content,
-            tool_call_id=tool_call_id,
-            available_model_refs=available_model_refs,
-            available_kb_refs=available_kb_refs,
-            flow=flow,
+            turn=invocation.turn,
+            conversation=invocation.conversation,
+            new_messages_start=invocation.new_messages_start,
+            arguments=invocation.arguments,
+            assistant_content=invocation.assistant_content,
+            tool_call_id=invocation.tool_call_id,
+            available_model_refs=invocation.available_model_refs,
+            available_kb_refs=invocation.available_kb_refs,
+            flow=invocation.flow,
             assistant_snapshots=assistant_snapshots,
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
             max_output_tokens=max_output_tokens,
-            assistant_metadata=assistant_metadata,
-            resource_catalog=resource_catalog,
+            assistant_metadata=invocation.assistant_metadata,
+            resource_catalog=invocation.resource_catalog,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
         )
@@ -495,25 +486,21 @@ def edit_flow_retry_config(
     plan_edit_context: AIBuilderPlanEditContext | None,
     prior_plan_for_revision: BuilderPlan | None,
 ) -> ToolRetryConfig:
-    process_tool_arguments = _bind_process_edit_arguments(processor)
-    process_tool_kwargs: dict[str, Any] = {
-        "assistant_snapshots": assistant_snapshots,
-        "litellm_model": litellm_model,
-        "litellm_kwargs": litellm_kwargs,
-        "max_output_tokens": max_output_tokens,
-        "resource_catalog": resource_catalog,
-        "plan_edit_context": plan_edit_context,
-        "prior_plan_for_revision": prior_plan_for_revision,
-    }
-
     return ToolRetryConfig(
         target_tool_name=EDIT_FLOW_TOOL_NAME,
         forced_tool_prompt=(
             "Return one valid edit_flow tool call that keeps the flow coherent. "
             "Do not answer with prose."
         ),
-        process_tool_arguments=process_tool_arguments,
-        process_tool_kwargs=process_tool_kwargs,
+        process_tool_invocation=_bind_process_edit_arguments(
+            processor,
+            assistant_snapshots=assistant_snapshots,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            max_output_tokens=max_output_tokens,
+            plan_edit_context=plan_edit_context,
+            prior_plan_for_revision=prior_plan_for_revision,
+        ),
     )
 
 

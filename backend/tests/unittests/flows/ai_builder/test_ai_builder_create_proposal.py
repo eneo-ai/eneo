@@ -40,6 +40,10 @@ from intric.flows.ai_builder.ai_builder_plan_edit_context import (
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
 )
+from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ToolProcessingResult,
+    ToolRetryInvocation,
+)
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
@@ -187,7 +191,8 @@ def test_create_contextual_quality_feedback_still_enforces_architecture() -> Non
         )
 
 
-def test_outline_flow_retry_config_carries_revision_context() -> None:
+@pytest.mark.asyncio
+async def test_outline_flow_retry_config_carries_revision_context() -> None:
     processor = _make_processor()
     planning_state = PlanningState.empty()
     plan = _make_plan(_structured_fan_in_spec())
@@ -204,11 +209,29 @@ def test_outline_flow_retry_config_carries_revision_context() -> None:
         prior_plan_for_revision=plan,
     )
 
-    assert config.process_tool_kwargs == {
-        "planning_state": planning_state,
-        "plan_edit_context": plan_edit_context,
-        "prior_plan_for_revision": plan,
-    }
+    with patch(
+        "intric.flows.ai_builder.ai_builder_create_proposal.process_outline_arguments",
+        new=AsyncMock(
+            return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+        ),
+    ) as process_outline:
+        await config.process_tool_invocation(
+            ToolRetryInvocation(
+                turn=_make_turn(),
+                conversation=[],
+                new_messages_start=0,
+                arguments={"flow_name": "Test", "plan_rationale": "R", "steps": []},
+                assistant_content="Här är mitt korrigerade förslag:",
+                tool_call_id="call_retry",
+                available_model_refs=None,
+                available_kb_refs=None,
+            )
+        )
+
+    process_outline.assert_awaited_once()
+    assert process_outline.await_args.kwargs["planning_state"] is planning_state
+    assert process_outline.await_args.kwargs["plan_edit_context"] is plan_edit_context
+    assert process_outline.await_args.kwargs["prior_plan_for_revision"] is plan
 
 
 @pytest.mark.asyncio

@@ -46,6 +46,7 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolProcessingResult,
     ToolRetryConfig,
+    ToolRetryInvocation,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AssistantSnapshotResourceUnavailableError,
@@ -115,6 +116,24 @@ def _make_context(**overrides) -> ProposalContext:
     }
     defaults.update(overrides)
     return ProposalContext(**defaults)
+
+
+def _make_retry_invocation(**overrides) -> ToolRetryInvocation:
+    defaults = {
+        "turn": _make_turn(),
+        "conversation": [],
+        "new_messages_start": 0,
+        "arguments": {"flow_name": "Test", "plan_rationale": "R", "steps": []},
+        "assistant_content": "Här är mitt korrigerade förslag:",
+        "tool_call_id": "call_retry",
+        "available_model_refs": None,
+        "available_kb_refs": None,
+        "resource_catalog": None,
+        "flow": None,
+        "assistant_metadata": None,
+    }
+    defaults.update(overrides)
+    return ToolRetryInvocation(**defaults)
 
 
 def _stored_plan_result(*, plan=None, envelope=None):
@@ -1062,7 +1081,7 @@ async def test_handle_submission_tool_call_runs_processor_once_with_flow_context
         text_content="Här är planen.",
         request_id="req-edit-once",
     )
-    process_tool_arguments = AsyncMock(
+    process_submission_arguments = AsyncMock(
         return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
     )
 
@@ -1081,15 +1100,15 @@ async def test_handle_submission_tool_call_runs_processor_once_with_flow_context
                     parse_error_prefix="Invalid edit_flow arguments",
                     invalid_result_message="Invalid edit_flow draft.",
                     forced_tool_prompt="Now call edit_flow.",
-                    process_tool_arguments=process_tool_arguments,
+                    process_submission_arguments=process_submission_arguments,
                     include_flow_context=True,
                 ),
             )
         ]
 
     assert events == [{"event": "plan", "data": "{}"}]
-    process_tool_arguments.assert_awaited_once()
-    assert process_tool_arguments.await_args.kwargs["flow"] is ctx.flow
+    process_submission_arguments.assert_awaited_once()
+    assert process_submission_arguments.await_args.kwargs["flow"] is ctx.flow
 
 
 @pytest.mark.asyncio
@@ -1104,7 +1123,7 @@ async def test_handle_submission_tool_call_omits_flow_context_by_default() -> No
         text_content="Här är planen.",
         request_id="req-create-once",
     )
-    process_tool_arguments = AsyncMock(
+    process_submission_arguments = AsyncMock(
         return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
     )
 
@@ -1123,14 +1142,14 @@ async def test_handle_submission_tool_call_omits_flow_context_by_default() -> No
                     parse_error_prefix="Invalid outline_flow arguments",
                     invalid_result_message="Invalid outline_flow draft.",
                     forced_tool_prompt="Now call outline_flow.",
-                    process_tool_arguments=process_tool_arguments,
+                    process_submission_arguments=process_submission_arguments,
                 ),
             )
         ]
 
     assert events == [{"event": "plan", "data": "{}"}]
-    process_tool_arguments.assert_awaited_once()
-    assert "flow" not in process_tool_arguments.await_args.kwargs
+    process_submission_arguments.assert_awaited_once()
+    assert "flow" not in process_submission_arguments.await_args.kwargs
 
 
 @pytest.mark.asyncio
@@ -1157,7 +1176,7 @@ async def test_handle_submission_tool_call_returns_architecture_error_without_re
         request_id="req-architecture",
         text_content="",
     )
-    process_tool_arguments = AsyncMock(
+    process_submission_arguments = AsyncMock(
         side_effect=AIBuilderArchitectureError(
             public_code="architecture_materialization_failed",
             detail="invalid skeleton",
@@ -1183,7 +1202,7 @@ async def test_handle_submission_tool_call_returns_architecture_error_without_re
                     parse_error_prefix="Invalid outline_flow arguments",
                     invalid_result_message="Invalid outline_flow draft.",
                     forced_tool_prompt="Now call outline_flow.",
-                    process_tool_arguments=process_tool_arguments,
+                    process_submission_arguments=process_submission_arguments,
                 ),
             )
         ]
@@ -1243,8 +1262,7 @@ async def test_self_correction_architecture_error_uses_sanitized_event() -> None
                 retry_config=ToolRetryConfig(
                     target_tool_name=OUTLINE_FLOW_TOOL_NAME,
                     forced_tool_prompt="Now call outline_flow.",
-                    process_tool_arguments=AsyncMock(),
-                    process_tool_kwargs={},
+                    process_tool_invocation=AsyncMock(),
                 ),
             )
         ]
@@ -1280,7 +1298,7 @@ async def test_forced_tool_architecture_error_uses_sanitized_event() -> None:
             tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
-            session_id=uuid4(),
+            turn=_make_turn(),
             conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
             new_messages_start=1,
             available_model_refs=None,
@@ -1288,7 +1306,7 @@ async def test_forced_tool_architecture_error_uses_sanitized_event() -> None:
             max_output_tokens=4096,
             target_tool_name=OUTLINE_FLOW_TOOL_NAME,
             forced_tool_prompt="Now call outline_flow.",
-            process_tool_arguments=AsyncMock(),
+            process_tool_invocation=AsyncMock(),
             usage_tracker=tracker,
             request_id="req-forced-architecture",
         )
@@ -1376,13 +1394,12 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
             return_value=SimpleNamespace(confirmed=True),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.outline_flow_retry_config",
-            return_value=ToolRetryConfig(
-                target_tool_name=OUTLINE_FLOW_TOOL_NAME,
-                forced_tool_prompt="Now call outline_flow.",
-                process_tool_arguments=process_outline,
-                process_tool_kwargs={},
-            ),
+            "intric.flows.ai_builder.ai_builder_proposal_processor.process_outline_arguments",
+            new=process_outline,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_create_proposal.process_outline_arguments",
+            new=process_outline,
         ),
     ):
         events = [
@@ -1477,13 +1494,12 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
             return_value=SimpleNamespace(confirmed=True),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.outline_flow_retry_config",
-            return_value=ToolRetryConfig(
-                target_tool_name=OUTLINE_FLOW_TOOL_NAME,
-                forced_tool_prompt="Now call outline_flow.",
-                process_tool_arguments=process_outline,
-                process_tool_kwargs={},
-            ),
+            "intric.flows.ai_builder.ai_builder_proposal_processor.process_outline_arguments",
+            new=process_outline,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_create_proposal.process_outline_arguments",
+            new=process_outline,
         ),
     ):
         events = [
@@ -1566,13 +1582,12 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
             return_value=SimpleNamespace(confirmed=True),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.outline_flow_retry_config",
-            return_value=ToolRetryConfig(
-                target_tool_name=OUTLINE_FLOW_TOOL_NAME,
-                forced_tool_prompt="Now call outline_flow.",
-                process_tool_arguments=process_outline,
-                process_tool_kwargs={},
-            ),
+            "intric.flows.ai_builder.ai_builder_proposal_processor.process_outline_arguments",
+            new=process_outline,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_create_proposal.process_outline_arguments",
+            new=process_outline,
         ),
     ):
         events = [
@@ -1636,7 +1651,7 @@ async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> No
         conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
         request_id="req-outline-retry",
     )
-    process_tool_arguments = AsyncMock(
+    process_submission_arguments = AsyncMock(
         return_value=ToolProcessingResult(
             feedback="Invalid outline_flow arguments: bad shape",
             failure_kind="parse",
@@ -1668,17 +1683,20 @@ async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> No
                     parse_error_prefix="Invalid outline_flow arguments",
                     invalid_result_message="Invalid outline_flow draft.",
                     forced_tool_prompt="Now call outline_flow.",
-                    process_tool_arguments=process_tool_arguments,
+                    process_submission_arguments=process_submission_arguments,
                 ),
             )
         ]
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     retry_config = repair.call_args.kwargs["retry_config"]
-    assert retry_config.process_tool_kwargs == {
-        "planning_state": None,
-        "plan_edit_context": None,
-        "prior_plan_for_revision": None,
+    assert isinstance(retry_config, ToolRetryConfig)
+    process_signature = signature(retry_config.process_tool_invocation)
+    assert list(process_signature.parameters) == ["invocation"]
+    assert set(ToolRetryConfig.__dataclass_fields__) == {
+        "target_tool_name",
+        "forced_tool_prompt",
+        "process_tool_invocation",
     }
 
 
@@ -2772,10 +2790,13 @@ async def test_submission_retry_config_returns_typed_create_retry_config() -> No
 
     assert isinstance(config, ToolRetryConfig)
     assert config.target_tool_name == OUTLINE_FLOW_TOOL_NAME
-    process_signature = signature(config.process_tool_arguments)
-    assert "processor" not in process_signature.parameters
-    assert "turn" in process_signature.parameters
-    assert config.process_tool_kwargs == {}
+    process_signature = signature(config.process_tool_invocation)
+    assert list(process_signature.parameters) == ["invocation"]
+    assert set(ToolRetryConfig.__dataclass_fields__) == {
+        "target_tool_name",
+        "forced_tool_prompt",
+        "process_tool_invocation",
+    }
     assert "Now call outline_flow" in config.forced_tool_prompt
 
 
@@ -2796,17 +2817,12 @@ async def test_submission_retry_config_returns_typed_edit_retry_config() -> None
 
     assert isinstance(config, ToolRetryConfig)
     assert config.target_tool_name == EDIT_FLOW_TOOL_NAME
-    process_signature = signature(config.process_tool_arguments)
-    assert "processor" not in process_signature.parameters
-    assert "flow" in process_signature.parameters
-    assert config.process_tool_kwargs == {
-        "assistant_snapshots": assistant_snapshots,
-        "litellm_model": "openai/gpt-5.4",
-        "litellm_kwargs": {"timeout": 30},
-        "max_output_tokens": 2048,
-        "resource_catalog": resource_catalog,
-        "plan_edit_context": None,
-        "prior_plan_for_revision": None,
+    process_signature = signature(config.process_tool_invocation)
+    assert list(process_signature.parameters) == ["invocation"]
+    assert set(ToolRetryConfig.__dataclass_fields__) == {
+        "target_tool_name",
+        "forced_tool_prompt",
+        "process_tool_invocation",
     }
     assert "valid edit_flow tool call" in config.forced_tool_prompt
 
@@ -2844,10 +2860,9 @@ async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mod
     assert result == ({"event": "plan", "data": "{}"},)
     kwargs = retry_forced_tool.await_args.kwargs
     assert kwargs["target_tool_name"] == OUTLINE_FLOW_TOOL_NAME
-    process_signature = signature(kwargs["process_tool_arguments"])
-    assert "processor" not in process_signature.parameters
-    assert "turn" in process_signature.parameters
-    assert isinstance(kwargs["process_tool_kwargs"]["turn"], SessionSendTurn)
+    process_signature = signature(kwargs["process_tool_invocation"])
+    assert list(process_signature.parameters) == ["invocation"]
+    assert isinstance(kwargs["turn"], SessionSendTurn)
     assert "Now call outline_flow" in kwargs["forced_tool_prompt"]
 
 

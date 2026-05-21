@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import inspect
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, replace
-from typing import Any, Protocol, cast, runtime_checkable
-from uuid import UUID, uuid4
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
+from uuid import uuid4
 
 from intric.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
@@ -19,10 +18,20 @@ from intric.flows.ai_builder.ai_builder_events import (
 from intric.flows.ai_builder.ai_builder_interaction_utils import (
     looks_like_information_request,
 )
+from intric.flows.ai_builder.ai_builder_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ToolProcessingFailureKind,
 )
+from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ToolProcessingResult,
+    ToolRetryInvocation,
+)
+from intric.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
+from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.main.logging import get_logger
+
+if TYPE_CHECKING:
+    from intric.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
 _EXTRA_RETRY_FAILURE_KINDS: frozenset[ToolProcessingFailureKind] = frozenset(
@@ -135,44 +144,35 @@ def _tool_result_failure_codes(tool_result: object) -> frozenset[str]:
     return raw_codes
 
 
-def _build_process_tool_kwargs(
+def _build_tool_retry_invocation(
     *,
-    process_tool_arguments: Callable[..., Awaitable[Any]],
-    process_tool_kwargs: dict[str, Any] | None,
-    flow: Any,
-) -> dict[str, Any]:
-    kwargs = dict(process_tool_kwargs or {})
-    if "flow" in kwargs:
-        return kwargs
-
-    try:
-        signature = inspect.signature(process_tool_arguments)
-    except (TypeError, ValueError):
-        return kwargs
-
-    if "flow" in signature.parameters:
-        kwargs["flow"] = flow
-    return kwargs
-
-
-def _add_assistant_metadata_if_supported(
-    *,
-    process_tool_arguments: Callable[..., Awaitable[Any]],
-    invocation_kwargs: dict[str, Any],
+    turn: SessionSendTurn,
+    conversation: list[ConversationMessage],
+    new_messages_start: int,
+    arguments: dict[str, Any],
+    assistant_content: str,
+    tool_call_id: str,
+    available_model_refs: set[str] | None,
+    available_kb_refs: set[str] | None,
+    resource_catalog: AIBuilderResourceCatalog | None,
+    flow: "Flow | None",
     build_assistant_metadata: Callable[[], dict[str, Any] | None] | None,
-) -> None:
-    if build_assistant_metadata is None:
-        return
-    try:
-        signature = inspect.signature(process_tool_arguments)
-    except (TypeError, ValueError):
-        return
-    accepts_kwargs = any(
-        parameter.kind == inspect.Parameter.VAR_KEYWORD
-        for parameter in signature.parameters.values()
+) -> ToolRetryInvocation:
+    return ToolRetryInvocation(
+        turn=turn,
+        conversation=conversation,
+        new_messages_start=new_messages_start,
+        arguments=arguments,
+        assistant_content=assistant_content,
+        tool_call_id=tool_call_id,
+        available_model_refs=available_model_refs,
+        available_kb_refs=available_kb_refs,
+        resource_catalog=resource_catalog,
+        flow=flow,
+        assistant_metadata=(
+            build_assistant_metadata() if build_assistant_metadata is not None else None
+        ),
     )
-    if "assistant_metadata" in signature.parameters or accepts_kwargs:
-        invocation_kwargs["assistant_metadata"] = build_assistant_metadata()
 
 
 def build_tool_retry_messages(
@@ -274,9 +274,9 @@ def _build_retry_feedback(
 
 async def request_self_correction(
     *,
-    session_id: UUID,
+    turn: SessionSendTurn,
     request_id: str | None = None,
-    conversation: list[Any],
+    conversation: list[ConversationMessage],
     new_messages_start: int,
     error_message: str,
     llm_messages: list[dict[str, Any]],
@@ -291,13 +291,15 @@ async def request_self_correction(
     self_correction_bumped_temperature: float,
     max_self_correction_retries: int,
     call_proposal_completion: Callable[..., Awaitable[Any]],
-    process_tool_arguments: Callable[..., Awaitable[Any]],
+    process_tool_invocation: Callable[
+        [ToolRetryInvocation], Awaitable[ToolProcessingResult]
+    ],
     target_tool_name: str,
     forced_tool_prompt: str,
     build_self_correction_error_event: BuildSelfCorrectionErrorEvent,
     retry_forced_tool_after_text: Callable[..., Awaitable[ForcedToolRetryOutcome]],
-    process_tool_kwargs: dict[str, Any] | None = None,
-    flow: Any = None,
+    resource_catalog: AIBuilderResourceCatalog | None = None,
+    flow: "Flow | None" = None,
     build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
 ) -> AsyncGenerator[dict[str, str], None]:
     yield build_status_event("repairing")
@@ -341,7 +343,9 @@ async def request_self_correction(
         assistant_text = _safe_assistant_text(getattr(message, "content", None))
 
         if hasattr(message, "tool_calls") and message.tool_calls:
-            retry_feedback: tuple[Any, str, ToolProcessingFailureKind | None] | None = None
+            retry_feedback: tuple[Any, str, ToolProcessingFailureKind | None] | None = (
+                None
+            )
             for correction_tool_call in message.tool_calls:
                 if correction_tool_call.function.name != target_tool_name:
                     continue
@@ -368,27 +372,21 @@ async def request_self_correction(
                     )
                     return
 
-                invocation_kwargs = _build_process_tool_kwargs(
-                    process_tool_arguments=process_tool_arguments,
-                    process_tool_kwargs=process_tool_kwargs,
-                    flow=flow,
-                )
-                _add_assistant_metadata_if_supported(
-                    process_tool_arguments=process_tool_arguments,
-                    invocation_kwargs=invocation_kwargs,
-                    build_assistant_metadata=build_assistant_metadata,
-                )
-                tool_result = await process_tool_arguments(
-                    session_id=session_id,
-                    conversation=conversation,
-                    new_messages_start=new_messages_start,
-                    arguments=arguments,
-                    assistant_content=assistant_text
-                    or "Här är mitt korrigerade förslag:",
-                    tool_call_id=correction_tool_call.id,
-                    available_model_refs=available_model_refs,
-                    available_kb_refs=available_kb_refs,
-                    **invocation_kwargs,
+                tool_result = await process_tool_invocation(
+                    _build_tool_retry_invocation(
+                        turn=turn,
+                        conversation=conversation,
+                        new_messages_start=new_messages_start,
+                        arguments=arguments,
+                        assistant_content=assistant_text
+                        or "Här är mitt korrigerade förslag:",
+                        tool_call_id=correction_tool_call.id,
+                        available_model_refs=available_model_refs,
+                        available_kb_refs=available_kb_refs,
+                        resource_catalog=resource_catalog,
+                        flow=flow,
+                        build_assistant_metadata=build_assistant_metadata,
+                    )
                 )
                 if not _tool_result_has_events(tool_result):
                     if retry_state.can_retry(failure_kind=tool_result.failure_kind):
@@ -437,7 +435,7 @@ async def request_self_correction(
                 tool_schemas=tool_schemas,
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs,
-                session_id=session_id,
+                turn=turn,
                 conversation=conversation,
                 new_messages_start=new_messages_start,
                 available_model_refs=available_model_refs,
@@ -445,8 +443,8 @@ async def request_self_correction(
                 max_output_tokens=max_output_tokens,
                 target_tool_name=target_tool_name,
                 forced_tool_prompt=forced_tool_prompt,
-                process_tool_arguments=process_tool_arguments,
-                process_tool_kwargs=process_tool_kwargs,
+                process_tool_invocation=process_tool_invocation,
+                resource_catalog=resource_catalog,
                 flow=flow,
                 build_assistant_metadata=build_assistant_metadata,
                 request_id=request_id,
@@ -506,8 +504,8 @@ async def retry_forced_tool_after_text(
     tool_schemas: list[dict[str, Any]],
     litellm_model: str,
     litellm_kwargs: dict[str, Any],
-    session_id: UUID,
-    conversation: list[Any],
+    turn: SessionSendTurn,
+    conversation: list[ConversationMessage],
     new_messages_start: int,
     available_model_refs: set[str] | None,
     available_kb_refs: set[str] | None,
@@ -516,9 +514,11 @@ async def retry_forced_tool_after_text(
     forced_tool_prompt: str,
     forced_proposal_temperature: float,
     call_proposal_completion: Callable[..., Awaitable[Any]],
-    process_tool_arguments: Callable[..., Awaitable[Any]],
-    process_tool_kwargs: dict[str, Any] | None = None,
-    flow: Any = None,
+    process_tool_invocation: Callable[
+        [ToolRetryInvocation], Awaitable[ToolProcessingResult]
+    ],
+    resource_catalog: AIBuilderResourceCatalog | None = None,
+    flow: "Flow | None" = None,
     build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
     request_id: str | None = None,
 ) -> ForcedToolRetryOutcome:
@@ -527,14 +527,14 @@ async def retry_forced_tool_after_text(
 
     direct_outcome = await _try_process_json_text_as_tool_arguments(
         assistant_text=assistant_text,
-        session_id=session_id,
+        turn=turn,
         conversation=conversation,
         new_messages_start=new_messages_start,
         available_model_refs=available_model_refs,
         available_kb_refs=available_kb_refs,
         target_tool_name=target_tool_name,
-        process_tool_arguments=process_tool_arguments,
-        process_tool_kwargs=process_tool_kwargs,
+        process_tool_invocation=process_tool_invocation,
+        resource_catalog=resource_catalog,
         flow=flow,
         build_assistant_metadata=build_assistant_metadata,
     )
@@ -591,26 +591,20 @@ async def retry_forced_tool_after_text(
                 failure_kind="parse",
             )
 
-        invocation_kwargs = _build_process_tool_kwargs(
-            process_tool_arguments=process_tool_arguments,
-            process_tool_kwargs=process_tool_kwargs,
-            flow=flow,
-        )
-        _add_assistant_metadata_if_supported(
-            process_tool_arguments=process_tool_arguments,
-            invocation_kwargs=invocation_kwargs,
-            build_assistant_metadata=build_assistant_metadata,
-        )
-        tool_result = await process_tool_arguments(
-            session_id=session_id,
-            conversation=conversation,
-            new_messages_start=new_messages_start,
-            arguments=arguments,
-            assistant_content=assistant_text,
-            tool_call_id=tool_call.id,
-            available_model_refs=available_model_refs,
-            available_kb_refs=available_kb_refs,
-            **invocation_kwargs,
+        tool_result = await process_tool_invocation(
+            _build_tool_retry_invocation(
+                turn=turn,
+                conversation=conversation,
+                new_messages_start=new_messages_start,
+                arguments=arguments,
+                assistant_content=assistant_text,
+                tool_call_id=tool_call.id,
+                available_model_refs=available_model_refs,
+                available_kb_refs=available_kb_refs,
+                resource_catalog=resource_catalog,
+                flow=flow,
+                build_assistant_metadata=build_assistant_metadata,
+            )
         )
         if not _tool_result_has_events(tool_result):
             logger.warning(
@@ -631,41 +625,37 @@ async def retry_forced_tool_after_text(
 async def _try_process_json_text_as_tool_arguments(
     *,
     assistant_text: str,
-    session_id: UUID,
-    conversation: list[Any],
+    turn: SessionSendTurn,
+    conversation: list[ConversationMessage],
     new_messages_start: int,
     available_model_refs: set[str] | None,
     available_kb_refs: set[str] | None,
     target_tool_name: str,
-    process_tool_arguments: Callable[..., Awaitable[Any]],
-    process_tool_kwargs: dict[str, Any] | None,
-    flow: Any,
+    process_tool_invocation: Callable[
+        [ToolRetryInvocation], Awaitable[ToolProcessingResult]
+    ],
+    resource_catalog: AIBuilderResourceCatalog | None,
+    flow: "Flow | None",
     build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
 ) -> ForcedToolRetryOutcome:
     arguments = _parse_json_object_text(assistant_text)
     if arguments is None:
         return ForcedToolRetryOutcome()
 
-    invocation_kwargs = _build_process_tool_kwargs(
-        process_tool_arguments=process_tool_arguments,
-        process_tool_kwargs=process_tool_kwargs,
-        flow=flow,
-    )
-    _add_assistant_metadata_if_supported(
-        process_tool_arguments=process_tool_arguments,
-        invocation_kwargs=invocation_kwargs,
-        build_assistant_metadata=build_assistant_metadata,
-    )
-    tool_result = await process_tool_arguments(
-        session_id=session_id,
-        conversation=conversation,
-        new_messages_start=new_messages_start,
-        arguments=arguments,
-        assistant_content="Här är mitt korrigerade förslag:",
-        tool_call_id=f"call_text_{uuid4().hex}",
-        available_model_refs=available_model_refs,
-        available_kb_refs=available_kb_refs,
-        **invocation_kwargs,
+    tool_result = await process_tool_invocation(
+        _build_tool_retry_invocation(
+            turn=turn,
+            conversation=conversation,
+            new_messages_start=new_messages_start,
+            arguments=arguments,
+            assistant_content="Här är mitt korrigerade förslag:",
+            tool_call_id=f"call_text_{uuid4().hex}",
+            available_model_refs=available_model_refs,
+            available_kb_refs=available_kb_refs,
+            resource_catalog=resource_catalog,
+            flow=flow,
+            build_assistant_metadata=build_assistant_metadata,
+        )
     )
     if _tool_result_has_events(tool_result):
         logger.info(
