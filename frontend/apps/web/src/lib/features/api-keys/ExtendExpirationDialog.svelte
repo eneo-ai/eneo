@@ -25,7 +25,7 @@
     onChanged: () => void;
   } = $props();
 
-  let pickerValue = $state<string | null>(apiKey.expires_at ?? null);
+  let pickerValue = $state<string | null>(null);
   let maxDays = $state<number | null>(null);
   let requireExpiration = $state(false);
   let constraintsLoaded = $state(false);

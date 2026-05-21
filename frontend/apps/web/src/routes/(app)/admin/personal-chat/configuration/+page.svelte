@@ -17,28 +17,53 @@
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
-  const { data } = $props();
+  let { data } = $props();
 
   const allModels = $derived(data.models.completionModels);
-  let modelsEnabled = $state(data.policy.models_restriction.enabled);
-  const modelSelections = new SvelteMap<string, { selected: boolean; isDefault: boolean }>(
-    allModels.map((m) => {
+  function getInitialModelSelections() {
+    return data.models.completionModels.map((model) => {
       const existing = data.policy.models_restriction.models.find(
-        (e) => e.completion_model_id === m.id
+        (entry) => entry.completion_model_id === model.id
       );
-      return [m.id, { selected: !!existing, isDefault: existing?.is_default ?? false }];
-    })
+      return [
+        model.id,
+        { selected: !!existing, isDefault: existing?.is_default ?? false }
+      ] as const;
+    });
+  }
+
+  function getInitialModelsEnabled() {
+    return data.policy.models_restriction.enabled;
+  }
+
+  function getInitialMcpEnabled() {
+    return data.policy.mcp_restriction.enabled;
+  }
+
+  function getInitialMcpSelections() {
+    return data.policy.mcp_restriction.server_ids;
+  }
+
+  function getInitialPromptEnabled() {
+    return data.policy.prompt_enforcement.enabled;
+  }
+
+  function getInitialSelectedPromptId() {
+    return data.policy.prompt_enforcement.prompt_library_id ?? null;
+  }
+
+  let modelsEnabled = $state(getInitialModelsEnabled());
+  const modelSelections = new SvelteMap<string, { selected: boolean; isDefault: boolean }>(
+    getInitialModelSelections()
   );
 
   const allMcpServers = $derived((data.mcpSettings?.items ?? []).filter((s) => s.is_available));
-  let mcpEnabled = $state(data.policy.mcp_restriction.enabled);
-  const mcpSelections = new SvelteSet<string>(data.policy.mcp_restriction.server_ids);
+  let mcpEnabled = $state(getInitialMcpEnabled());
+  const mcpSelections = new SvelteSet<string>(getInitialMcpSelections());
 
   const promptOptions = $derived(data.promptLibrary.items);
-  let promptEnabled = $state(data.policy.prompt_enforcement.enabled);
-  let selectedPromptId = $state<string | null>(
-    data.policy.prompt_enforcement.prompt_library_id ?? null
-  );
+  let promptEnabled = $state(getInitialPromptEnabled());
+  let selectedPromptId = $state<string | null>(getInitialSelectedPromptId());
 
   let saving = $state(false);
   let saveError = $state<string | null>(null);
@@ -49,6 +74,23 @@
       .filter(([, v]) => v.selected)
       .map(([id, v]) => ({ completion_model_id: id, is_default: v.isDefault }))
   );
+
+  $effect(() => {
+    modelsEnabled = getInitialModelsEnabled();
+    modelSelections.clear();
+    for (const [modelId, selection] of getInitialModelSelections()) {
+      modelSelections.set(modelId, selection);
+    }
+
+    mcpEnabled = getInitialMcpEnabled();
+    mcpSelections.clear();
+    for (const serverId of getInitialMcpSelections()) {
+      mcpSelections.add(serverId);
+    }
+
+    promptEnabled = getInitialPromptEnabled();
+    selectedPromptId = getInitialSelectedPromptId();
+  });
 
   function setSingleDefault(id: string) {
     for (const [k, v] of modelSelections) {

@@ -1081,6 +1081,10 @@ class AssistantService:
             ):
                 prompt_override = effective_config.enforced_prompt_text
 
+        effective_completion_model = (
+            completion_model_override or assistant_to_ask.completion_model
+        )
+
         response, datastore_result = await assistant_to_ask.ask(
             question=cleaned_question,
             completion_service=self.completion_service,
@@ -1098,13 +1102,13 @@ class AssistantService:
 
         # TODO: Separate the response based on stream true or false
 
-        assert assistant_to_ask.completion_model is not None
+        assert effective_completion_model is not None
         answer = await self._handle_response(
             response=response,
             datastore_result=datastore_result,
             question=question,
             files=files,
-            completion_model=assistant_to_ask.completion_model,
+            completion_model=effective_completion_model,
             session=session,
             stream=stream,
             assistant_id=assistant_to_ask.id,
@@ -1125,7 +1129,7 @@ class AssistantService:
             session=session,
             answer=answer,
             info_blobs=info_blob_references,
-            completion_model=assistant_to_ask.completion_model,
+            completion_model=effective_completion_model,
             tools=UseTools(
                 assistants=[
                     ToolAssistant(id=assistant_to_ask.id, handle=assistant_to_ask.name)

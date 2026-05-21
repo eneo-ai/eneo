@@ -5,7 +5,6 @@
 -->
 
 <script lang="ts">
-  import { onMount } from "svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { Input, Tooltip } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
@@ -35,12 +34,15 @@
     selectedMCPTools?: Array<{ tool_id: string; is_enabled: boolean }>;
     /** Optional: Currently selected completion model to check tool calling support */
     selectedModel?: { supports_tool_calling?: boolean } | null;
+    /** Optional policy-filtered server list for personal chat governance */
+    allowedMCPServers?: { [key: string]: unknown }[] | undefined;
   };
 
   let {
     selectedMCPServers = $bindable([]),
     selectedMCPTools = $bindable([]),
-    selectedModel = null
+    selectedModel = null,
+    allowedMCPServers = undefined
   }: Props = $props();
 
   /** Type-safe view of selectedMCPServers */
@@ -71,16 +73,34 @@
   }
 
   // Load available MCP servers from space
-  async function loadAvailableServers() {
+  function loadAvailableServers() {
     loading = true;
     try {
       // Get servers enabled for this space, and filter to only show enabled tools
-      const spaceServers = ($currentSpace.mcp_servers || []) as unknown as MCPServer[];
+      const spaceServers = (allowedMCPServers ??
+        $currentSpace.mcp_servers ??
+        []) as unknown as MCPServer[];
       availableServers = spaceServers.map((server) => ({
         ...server,
         // Only include tools that are enabled at the space level
         tools: server.tools?.filter((tool) => tool.is_enabled) || []
       }));
+
+      const availableServerIds = new Set(availableServers.map((server) => server.id));
+      const filteredSelectedServers = servers.filter((server) => availableServerIds.has(server.id));
+      if (filteredSelectedServers.length !== servers.length) {
+        selectedMCPServers = filteredSelectedServers;
+      }
+
+      const availableToolIds = new Set(
+        availableServers.flatMap((server) => server.tools?.map((tool) => tool.id) ?? [])
+      );
+      const filteredSelectedTools = selectedMCPTools.filter((tool) =>
+        availableToolIds.has(tool.tool_id)
+      );
+      if (filteredSelectedTools.length !== selectedMCPTools.length) {
+        selectedMCPTools = filteredSelectedTools;
+      }
     } catch (error) {
       console.error("Failed to load MCP servers:", error);
       availableServers = [];
@@ -88,6 +108,10 @@
       loading = false;
     }
   }
+
+  $effect(() => {
+    loadAvailableServers();
+  });
 
   // Ensure all tools from ALL selected servers are tracked in selectedMCPTools
   // This is called when user toggles any tool to ensure complete state is sent to backend
@@ -115,10 +139,6 @@
       selectedMCPTools = [...selectedMCPTools, ...newOverrides];
     }
   }
-
-  onMount(() => {
-    loadAvailableServers();
-  });
 
   // Check if a server is selected
   function isServerSelected(serverId: string): boolean {

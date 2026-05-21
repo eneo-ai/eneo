@@ -6,6 +6,7 @@
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert
 
 from intric.database.database import AsyncSession
 from intric.database.tables.personal_chat_policy_table import (
@@ -62,12 +63,16 @@ class PersonalChatPolicyRepoImpl:
 
     async def create_empty(self, tenant_id: UUID) -> PersonalChatPolicy:
         stmt = (
-            sa.insert(PersonalChatPolicies)
+            insert(PersonalChatPolicies)
             .values(tenant_id=tenant_id)
+            .on_conflict_do_nothing(constraint="uq_personal_chat_policies_tenant_id")
             .returning(PersonalChatPolicies)
         )
         row = await self.session.scalar(stmt)
-        assert row is not None
+        if row is None:
+            existing = await self.get_by_tenant(tenant_id)
+            assert existing is not None
+            return existing
         return await self._load_policy(row)
 
     async def save(

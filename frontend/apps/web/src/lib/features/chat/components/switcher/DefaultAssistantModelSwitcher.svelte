@@ -27,13 +27,21 @@
   const effectiveConfig = $derived(defaultAssistant.effective_config);
   const lockedModel = $derived(
     effectiveConfig?.models_enforced && effectiveConfig.locked_model
-      ? effectiveConfig.locked_model
+      ? ($currentSpace.completion_models.find(
+          (model) => model.id === effectiveConfig.locked_model?.id
+        ) ?? effectiveConfig.locked_model)
       : null
   );
-  const policyAllowedModels = $derived(
-    effectiveConfig?.models_enforced ? effectiveConfig.available_models : null
+  const policyAllowedModelIds = $derived(
+    effectiveConfig?.models_enforced
+      ? new Set(effectiveConfig.available_models.map((model) => model.id))
+      : null
   );
-  const visibleModels = $derived(policyAllowedModels ?? $currentSpace.completion_models);
+  const visibleModels = $derived(
+    policyAllowedModelIds
+      ? $currentSpace.completion_models.filter((model) => policyAllowedModelIds.has(model.id))
+      : $currentSpace.completion_models
+  );
 
   const {
     elements: { trigger, menu, option },

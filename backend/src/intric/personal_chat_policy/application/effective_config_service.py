@@ -78,11 +78,11 @@ class EffectiveConfigService:
             await self.completion_model_crud_service.get_available_completion_models()
         )
 
-        # All tenant MCP servers (enabled and disabled — the resolver
-        # filters down to the policy whitelist).
-        tenant_mcp_servers = (
-            await self.mcp_server_settings_service.get_available_mcp_servers()
-        )
+        tenant_mcp_servers = [
+            server
+            for server in await self.mcp_server_settings_service.get_available_mcp_servers()
+            if server.is_enabled
+        ]
 
         library_prompt_text: str | None = None
         if policy.default_prompt_library_id is not None:

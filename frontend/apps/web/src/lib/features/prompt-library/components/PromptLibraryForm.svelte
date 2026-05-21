@@ -24,13 +24,31 @@
 
   let { initial, submitLabel, onSubmit, onCancel }: Props = $props();
 
-  let name = $state(initial?.name ?? "");
-  let description = $state(initial?.description ?? "");
-  let text = $state(initial?.text ?? "");
+  function getInitialName() {
+    return initial?.name ?? "";
+  }
+
+  function getInitialDescription() {
+    return initial?.description ?? "";
+  }
+
+  function getInitialText() {
+    return initial?.text ?? "";
+  }
+
+  let name = $state(getInitialName());
+  let description = $state(getInitialDescription());
+  let text = $state(getInitialText());
   let saving = $state(false);
   let error = $state<string | null>(null);
 
   const canSubmit = $derived(name.trim().length > 0 && text.trim().length > 0);
+
+  $effect(() => {
+    name = getInitialName();
+    description = getInitialDescription();
+    text = getInitialText();
+  });
 
   async function submit(e: Event) {
     e.preventDefault();
