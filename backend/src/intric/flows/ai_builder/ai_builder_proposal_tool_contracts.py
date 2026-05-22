@@ -5,18 +5,25 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
+from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_domain_models import (
+    BuilderPlan,
     ConversationMessage,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import BuilderPlanEditResult
+from intric.flows.ai_builder.ai_builder_plan_edit_context import (
+    AIBuilderPlanEditContext,
+)
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
+    ProposalTurnTelemetry,
     ToolProcessingFailureKind,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
-from intric.flows.ai_builder.planning_state import AggregationIntent
+from intric.flows.ai_builder.planning_state import AggregationIntent, PlanningState
+from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.flows.flow_resource_bindings import LocalResourceBinding
 
 if TYPE_CHECKING:
@@ -93,3 +100,35 @@ class ToolRetryConfig:
     process_tool_invocation: Callable[
         [ToolRetryInvocation], Awaitable[ToolProcessingResult]
     ]
+
+
+@dataclass(frozen=True)
+class ProposalTurnContext:
+    turn: SessionSendTurn
+    conversation: list[ConversationMessage]
+    new_messages_start: int
+    llm_messages: list[dict[str, Any]]
+    tool_schemas: list[dict[str, Any]]
+    litellm_model: str
+    litellm_kwargs: dict[str, Any]
+    available_model_refs: set[str] | None
+    available_kb_refs: set[str] | None
+    resource_catalog: AIBuilderResourceCatalog | None
+    max_output_tokens: int
+    request_id: str
+    flow: "Flow | None" = None
+    assistant_snapshots: AssistantAuthoringSnapshots | None = None
+    text_content: str | None = None
+    assistant_metadata: dict[str, Any] | None = None
+    planning_state: PlanningState | None = None
+    usage_tracker: ProposalTurnTelemetry | None = None
+    plan_edit_context: AIBuilderPlanEditContext | None = None
+    prior_plan_for_revision: BuilderPlan | None = None
+
+    @property
+    def session_id(self) -> UUID:
+        return self.turn.session_id
+
+    @property
+    def base_planning_state_version(self) -> int:
+        return self.turn.base_planning_state_version

@@ -6,13 +6,10 @@ from typing import TYPE_CHECKING, Any
 
 from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
+    build_proposal_architecture_error_event,
+    record_proposal_architecture_failure,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_error_contract import (
-    AIBuilderErrorPhase,
-    build_ai_builder_error_event,
-    coerce_ai_builder_error_code,
-)
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     ForcedToolRetryOutcome,
     request_self_correction,
@@ -20,20 +17,20 @@ from intric.flows.ai_builder.ai_builder_proposal_repair import (
 )
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
-    record_proposal_first_attempt,
+    assistant_metadata_with_usage,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCompletionFn,
+    ProposalTurnContext,
     ToolRetryConfig,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
-from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
 
-logger = get_logger(__name__)
+MAX_SELF_CORRECTION_RETRIES = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,45 +83,45 @@ class ForcedToolAfterTextRequest:
     usage_tracker: ProposalTurnTelemetry | None = None
 
 
-def record_proposal_architecture_failure(
-    usage_tracker: ProposalTurnTelemetry | None,
+def build_proposal_self_correction_request(
     *,
-    request_id: str | None,
-    tool_name: str,
-) -> None:
-    if usage_tracker is None:
-        return
-    record_proposal_first_attempt(
-        usage_tracker,
-        request_id=request_id or usage_tracker.request_id,
-        tool_name=tool_name,
-        success=False,
-        failure_kind="architecture",
-    )
-
-
-def build_proposal_architecture_error_event(
-    error: AIBuilderArchitectureError,
-    *,
-    request_id: str | None,
-    tool_name: str,
-) -> dict[str, str]:
-    log_extra = error.log_extra()
-    log_extra["tool_name"] = tool_name
-    if request_id is not None:
-        log_extra["request_id"] = request_id
-    logger.error(
-        "ai_builder_architecture_error",
-        extra=log_extra,
-    )
-    return build_ai_builder_error_event(
-        message=(
-            "The AI planner could not build a valid flow from the confirmed "
-            "requirements. Please adjust the requirements and try again."
+    ctx: ProposalTurnContext,
+    error_message: str,
+    tool_call: Any,
+    retry_config: ToolRetryConfig,
+    self_correction_temperature: float,
+    self_correction_bumped_temperature: float,
+    forced_proposal_temperature: float,
+    repair_completion: ProposalCompletionFn,
+) -> ProposalSelfCorrectionRequest:
+    return ProposalSelfCorrectionRequest(
+        turn=ctx.turn,
+        request_id=ctx.request_id,
+        conversation=ctx.conversation,
+        new_messages_start=ctx.new_messages_start,
+        error_message=error_message,
+        llm_messages=ctx.llm_messages,
+        tool_call=tool_call,
+        tool_schemas=ctx.tool_schemas,
+        litellm_model=ctx.litellm_model,
+        litellm_kwargs=ctx.litellm_kwargs,
+        available_model_refs=ctx.available_model_refs,
+        available_kb_refs=ctx.available_kb_refs,
+        max_output_tokens=ctx.max_output_tokens,
+        self_correction_temperature=self_correction_temperature,
+        self_correction_bumped_temperature=self_correction_bumped_temperature,
+        max_self_correction_retries=MAX_SELF_CORRECTION_RETRIES,
+        repair_completion=repair_completion,
+        retry_config=retry_config,
+        forced_proposal_temperature=forced_proposal_temperature,
+        resource_catalog=ctx.resource_catalog,
+        flow=ctx.flow,
+        build_assistant_metadata=lambda: assistant_metadata_with_usage(
+            conversation=ctx.conversation,
+            base_metadata=ctx.assistant_metadata,
+            usage_tracker=ctx.usage_tracker,
         ),
-        code=coerce_ai_builder_error_code(error.public_code),
-        phase=AIBuilderErrorPhase.PROPOSAL,
-        request_id=request_id,
+        usage_tracker=ctx.usage_tracker,
     )
 
 

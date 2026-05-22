@@ -8,14 +8,14 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_proposal_processor import (
-    MAX_SELF_CORRECTION_RETRIES,
-)
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     ForcedToolRetryOutcome,
     _build_retry_feedback,
     request_self_correction,
     retry_forced_tool_after_text,
+)
+from intric.flows.ai_builder.ai_builder_proposal_repair_runtime import (
+    MAX_SELF_CORRECTION_RETRIES,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolProcessingResult,

@@ -35,6 +35,9 @@ PROPOSAL_REPAIR_MODULE = ".".join(
 PROPOSAL_REPAIR_RUNTIME_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_proposal_repair_runtime")
 )
+PROPOSAL_SUBMISSION_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_proposal_submission")
+)
 PROPOSAL_TOOL_CONTRACTS_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_proposal_tool_contracts")
 )
@@ -124,6 +127,45 @@ PROPOSAL_REPAIR_RUNTIME_ALLOWED_ANY_NAMES = frozenset(
         "llm_messages",
         "tool_call",
         "tool_schemas",
+    }
+)
+PROPOSAL_SUBMISSION_METHODS = frozenset(
+    {
+        "_outline_flow_retry_config",
+        "_edit_flow_retry_config",
+        "_handle_outline_flow_tool_call",
+        "_handle_edit_flow",
+        "retry_forced_proposal_after_text",
+        "_active_submission_tool_name",
+        "_active_submission_tool_schemas",
+    }
+)
+PROPOSAL_SUBMISSION_PUBLIC_METHODS = frozenset(
+    {
+        "active_submission_tool_name",
+        "active_submission_tool_schemas",
+        "handle_outline_flow_tool_call",
+        "handle_edit_flow_tool_call",
+        "retry_forced_proposal_after_text",
+    }
+)
+PROPOSAL_SUBMISSION_ALLOWED_ANY_NAMES = frozenset(
+    {
+        "arguments",
+        "assistant_metadata",
+        "available_kbs",
+        "available_models",
+        "correction_messages",
+        "litellm_client",
+        "litellm_kwargs",
+        "tool_call",
+        "tool_schemas",
+    }
+)
+ARCHITECTURE_ERROR_HELPERS = frozenset(
+    {
+        "build_proposal_architecture_error_event",
+        "record_proposal_architecture_failure",
     }
 )
 
@@ -726,6 +768,146 @@ def test_proposal_repair_runtime_has_single_owner_and_typed_boundary() -> None:
 
     if "BuildSelfCorrectionErrorEvent" in runtime_text:
         violations.append(f"{runtime_path}: preserves single-use error-event callback")
+
+    assert violations == []
+
+
+def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    processor_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+    )
+    submission_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
+    )
+    runtime_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_repair_runtime.py"
+    )
+    architecture_errors_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_architecture_errors.py"
+    )
+    assert importlib.util.find_spec(PROPOSAL_SUBMISSION_MODULE) is not None
+
+    processor_text = processor_path.read_text()
+    processor_tree = ast.parse(processor_text, filename=str(processor_path))
+    submission_text = submission_path.read_text()
+    submission_tree = ast.parse(submission_text, filename=str(submission_path))
+    runtime_tree = ast.parse(runtime_path.read_text(), filename=str(runtime_path))
+    architecture_errors_tree = ast.parse(
+        architecture_errors_path.read_text(), filename=str(architecture_errors_path)
+    )
+    violations: list[str] = []
+
+    processor_class = next(
+        node
+        for node in ast.walk(processor_tree)
+        if isinstance(node, ast.ClassDef) and node.name == "AIBuilderProposalProcessor"
+    )
+    for node in processor_class.body:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in PROPOSAL_SUBMISSION_METHODS
+        ):
+            violations.append(f"{processor_path}:{node.lineno} defines {node.name}")
+
+    for banned_import in {
+        "process_outline_arguments",
+        "process_edit_arguments",
+        "repair_compiled_edit_description_if_needed",
+        "build_outline_flow_tool_schema",
+        "build_edit_flow_tool_schema",
+        "OUTLINE_FLOW_FORCED_TOOL_PROMPT",
+        "EDIT_FLOW_FORCED_TOOL_PROMPT",
+    }:
+        if banned_import in processor_text:
+            violations.append(
+                f"{processor_path}: imports or references {banned_import}"
+            )
+
+    submission_classes = [
+        node
+        for node in ast.walk(submission_tree)
+        if isinstance(node, ast.ClassDef) and node.name == "ProposalSubmissionOwner"
+    ]
+    if len(submission_classes) != 1:
+        violations.append(
+            f"{submission_path}: ProposalSubmissionOwner count {len(submission_classes)}"
+        )
+    else:
+        public_methods = {
+            node.name
+            for node in submission_classes[0].body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and not node.name.startswith("_")
+        }
+        if public_methods != PROPOSAL_SUBMISSION_PUBLIC_METHODS:
+            violations.append(
+                f"{submission_path}:{submission_classes[0].lineno} public methods "
+                f"{sorted(public_methods)}"
+            )
+
+    for node in ast.walk(submission_tree):
+        if isinstance(node, ast.ImportFrom) and (
+            node.module in BANNED_PROPOSAL_PROCESSOR_IMPORTS
+        ):
+            violations.append(f"{submission_path}:{node.lineno} imports {node.module}")
+
+        if isinstance(node, ast.ClassDef) and node.name.endswith(
+            ("Processor", "Service", "Manager", "Handler")
+        ):
+            violations.append(f"{submission_path}:{node.lineno} defines {node.name}")
+
+        if isinstance(node, ast.Attribute) and node.attr == "acompletion":
+            violations.append(f"{submission_path}:{node.lineno} calls acompletion")
+
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.args.kwarg is not None:
+                annotation = node.args.kwarg.annotation
+                if annotation is not None and ast.unparse(annotation) == "Any":
+                    violations.append(
+                        f"{submission_path}:{node.lineno} defines **kwargs: Any"
+                    )
+            for arg in [*node.args.args, *node.args.kwonlyargs]:
+                if _annotation_uses_any(arg.annotation) and (
+                    arg.arg not in PROPOSAL_SUBMISSION_ALLOWED_ANY_NAMES
+                ):
+                    violations.append(
+                        f"{submission_path}:{node.lineno} arg {arg.arg} uses Any"
+                    )
+
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if _annotation_uses_any(node.annotation) and (
+                node.target.id not in PROPOSAL_SUBMISSION_ALLOWED_ANY_NAMES
+            ):
+                violations.append(
+                    f"{submission_path}:{node.lineno} field {node.target.id} uses Any"
+                )
+
+    for helper_name in ARCHITECTURE_ERROR_HELPERS:
+        runtime_defs = [
+            node.lineno
+            for node in ast.walk(runtime_tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == helper_name
+        ]
+        if runtime_defs:
+            violations.append(
+                f"{runtime_path}: defines {helper_name} at {runtime_defs}"
+            )
+
+        owner_defs = [
+            node.lineno
+            for node in ast.walk(architecture_errors_tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == helper_name
+        ]
+        if len(owner_defs) != 1:
+            violations.append(
+                f"{architecture_errors_path}: defines {helper_name} {len(owner_defs)} times"
+            )
+
+    if "Callable[..., Any]" in submission_text:
+        violations.append(f"{submission_path}: defines Callable[..., Any]")
 
     assert violations == []
 

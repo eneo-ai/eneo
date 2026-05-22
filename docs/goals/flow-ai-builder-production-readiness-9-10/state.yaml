@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T052
+active_task: T053
 
 interruptions:
   - id: I001
@@ -76,7 +76,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T050 implementation/post-review: proposal self-correction and forced-tool repair runtime ownership moved from AIBuilderProposalProcessor into ai_builder_proposal_repair_runtime.py. Claude post-implementation review returned GREEN_LIGHT yes / MIN_SCORE 8 and accepted the 1430 -> 1197 LOC processor movement as real topology improvement. The broader score floor remains 8 because generated-client determinism, full-source typing/test baseline, remaining processor topology/readability, architecture-error helper placement, and repeated live-eval evidence still block a defensible 9."
+  source: "After T052 implementation/post-review: active create/edit proposal-submission ownership moved from AIBuilderProposalProcessor into ProposalSubmissionOwner. Claude post-implementation review returned GREEN_LIGHT yes / MIN_SCORE 8 and accepted the 1197 -> 560 LOC processor movement as real ownership deletion rather than a facade. The broader score floor remains 8 because generated-client determinism, full-source typing/test baseline, remaining topology/readability/test-fixture coupling, and repeated live-eval evidence still block a defensible 9."
   Maintainability: 8
   Code_Quality: 9
   Clean_Architecture: 8
@@ -95,7 +95,7 @@ current_scorecard:
   blockers:
     - "Public/lifecycle/CAS error-code discipline is now typed and guarded in AI Builder-owned raise sites, but generated-client regeneration determinism is not solved; T028 kept only the intentional enum literals after openapi-typescript produced broad unrelated churn."
     - "The five-case authenticated live eval now proves C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX, C4 runtime form fields, and C5 revise/edit through the public API, but this gate must be repeated after later planner/runtime changes rather than treated as permanent output-quality proof."
-    - "T042/T044/T048/T050 removed proposal completion, structured-question recovery, confirm-requirements ownership, and repair-runtime ownership from ai_builder_proposal_processor.py, but the processor is still 1197 LOC and remains oversized; dispatcher/retry-config selection, create/edit orchestration, and finalization wiring still require broader topology work before maintainability/readability can honestly reach 9."
+    - "T042/T044/T048/T050/T052 removed proposal completion, structured-question recovery, confirm-requirements ownership, repair-runtime ownership, and active create/edit proposal-submission ownership from ai_builder_proposal_processor.py. The processor is now 560 LOC, but maintainability/readability remain 8 because ProposalSubmissionOwner is still a 690 LOC concentrated owner, submission tests import processor test builders, and the next score-moving tranche must prove whether consolidation/test-topology/generator determinism or live-eval proof is now the highest blocker."
     - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, partial processor-bound facades, and full-source Pyright baseline failures outside AI Builder."
     - "Both Claude and Antigravity recommended a small future clarification of counts_as_repair semantics in ai_builder_proposal_telemetry.py; it was not added in T038 because that file was outside the approved write scope."
     - "T046 improved audio/transcript structured-underlag output quality, but source-material labeling differs between source-material normalization and dataflow auto-bind, and the live eval runner still cannot directly assert absence of broad structured JSON bindings."
@@ -5284,7 +5284,7 @@ tasks:
   - id: T052
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Move active create/edit proposal-submission ownership out of AIBuilderProposalProcessor into one concrete ProposalSubmissionOwner, while preserving behavior and reducing processor/test private submission surface."
     inputs:
@@ -5305,6 +5305,7 @@ tasks:
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
       - ".codex/artifacts/flow-ai-builder-t052-implementation-summary.md"
       - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
@@ -5347,6 +5348,72 @@ tasks:
       - "Implementation becomes a mechanical file split where processor still owns submission decisions."
       - "Focused tests cannot preserve direct and forced outline/edit behavior."
       - "Claude post-implementation review finds blocking architecture/test/readability issues."
+    receipt:
+      completed_at: "2026-05-22T15:58:00Z"
+      summary: "Moved active create/edit proposal-submission ownership out of AIBuilderProposalProcessor into a concrete ProposalSubmissionOwner. The processor now delegates submission tool selection, direct outline/edit submission handling, retry-config construction, forced text-to-tool retry dispatch, submission prerequisite checks, and architecture-error event handling to the owner. Processor LOC is 560, processor private method count is 5, and test_ai_builder_proposal_processor.py is 2403 LOC. This is a real topology improvement, not a facade, but the strict score floor remains 8 because remaining blockers include generated-client determinism, full-source typing/test baseline, test-fixture coupling, remaining topology/readability work, and repeated live-eval evidence."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t052-implementation-summary.md"
+        - ".codex/artifacts/claude-peer-loop-t052-proposal-submission-owner-implementation-review-20260522T154116Z.md"
+        - ".codex/artifacts/claude-peer-loop-t052-proposal-submission-owner-implementation-review-20260522T154631Z.md"
+      files_changed:
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair_runtime.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_architecture_errors.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py"
+      scope_note: "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py was added to allowed_files because moving MAX_SELF_CORRECTION_RETRIES to the repair runtime exposed a stale import. Re-exporting from the processor would have preserved the wrong owner."
+      peer_review:
+        claude_resume_failure: "Initial resume against session flow-ai-builder-t051-next-tranche-direction-20260522 failed because host Claude CLI did not recognize the non-UUID session title; recorded as artifact, not counted as review."
+        claude_commit_gate: ".codex/artifacts/claude-peer-loop-t052-proposal-submission-owner-implementation-review-20260522T154631Z.md -> VERDICT green / GREEN_LIGHT yes / MIN_SCORE 8."
+        antigravity: "SKIPPED_DUE_TO_QUOTA per current instruction; not counted as a pass."
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q -> 82 passed"
+        - "cd backend && uv run ruff check touched T052 source/test files -> passed"
+        - "cd backend && uv run ruff format --check touched T052 source/test files -> passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2305 passed, 4 skipped, 11 warnings"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
+        - "git diff --check -> passed"
+        - "Anti-slop grep over T052 diff -> no matches"
+        - "Architecture helper definitions are only in ai_builder_architecture_errors.py"
+      codex_self_review:
+        verdict: "pass for the approved tranche. This is cleaner than leaving the processor as the submission owner because the new owner has one reason to change, no processor import, no callback bag, and an AST-guarded public surface."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "ProposalSubmissionOwner is 690 LOC; further splitting should wait for a new evidence-backed tranche so we do not create shallow files."
+        - "test_ai_builder_proposal_submission.py imports shared fixture builders from test_ai_builder_proposal_processor.py; a future test-topology tranche should decide whether a neutral fixture module reduces coupling."
+        - "Live eval was not required because this was behavior-preserving topology work, but the five-case eval must repeat after future proposal behavior changes."
+      score_impact: "Improves Maintainability, Clean Architecture, Separation of Concerns, Human Readability, and AI Slop evidence, but does not raise the strict overall floor above 8."
+
+  - id: T053
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T052, using current evidence rather than mechanically continuing processor splitting."
+    inputs:
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t052-implementation-summary.md"
+      - ".codex/artifacts/claude-peer-loop-t052-proposal-submission-owner-implementation-review-20260522T154631Z.md"
+      - "backend/src/intric/flows/ai_builder"
+      - "backend/tests/unittests/flows/ai_builder"
+    constraints:
+      - "Read-only judge task; do not implement the next tranche until the revised plan is peer-gated."
+      - "Compare remaining processor/submission topology and test-fixture coupling against generated-client determinism, full-source typing/test baseline, repeated live eval, source-material label cleanup, and any remaining schema/API/runtime blockers."
+      - "Do not select work merely because it reduces LOC; select the tranche that most plausibly moves the strict 8/10 score floor toward 9."
+      - "Do not start broad observability/DX work until the OpenTelemetry branch is reviewed."
+      - "If selecting more topology work, require real ownership deletion/consolidation and reject facade/callback-bag designs."
+    expected_output:
+      - "Current score-floor blockers after T052."
+      - "Ranked options with rejected alternatives."
+      - "Selected next worker objective."
+      - "Allowed files, acceptance criteria, verification commands, stop conditions, and peer-gate requirements."
+      - "Whether the selected tranche can move any 8/10 dimension to 9, or why the floor stays 8."
     receipt: null
 
 checks:
@@ -5355,10 +5422,13 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T051 completed and Claude-approved after revision. Active task is now T052 worker: move active create/edit proposal-submission ownership into a concrete ProposalSubmissionOwner. Broader goal remains active with strict floor 8/10."
-    task: T051
+    result: "T052 completed and Claude-approved after post-implementation review. Active task is now T053 judge: re-rank the next highest-score-moving tranche after the processor dropped to 560 LOC. Broader goal remains active with strict floor 8/10."
+    task: T052
     commands:
-      - "git status --short --branch -> feature/refactor-flows-flowai ahead 2; only unrelated user/workspace dirty files plus T051 artifacts/board changes during this task"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src -> 112 errors, mostly outside AI Builder; confirms full-source baseline remains a separate blocker"
-      - "Claude plan review iteration 1: .codex/artifacts/claude-peer-loop-t051-next-flow-ai-builder-tranche-ranking-20260522T145122Z.md -> GREEN_LIGHT no / MIN_SCORE 6"
-      - "Claude plan review iteration 2: .codex/artifacts/claude-peer-loop-t051-revised-next-flow-ai-builder-tranche-ranking-20260522T145647Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q -> 82 passed"
+      - "cd backend && uv run ruff check touched T052 source/test files -> passed"
+      - "cd backend && uv run ruff format --check touched T052 source/test files -> passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2305 passed, 4 skipped, 11 warnings"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
+      - "git diff --check -> passed"
+      - "Claude commit gate: .codex/artifacts/claude-peer-loop-t052-proposal-submission-owner-implementation-review-20260522T154631Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
