@@ -1,3 +1,4 @@
+import asyncio
 import re
 from collections.abc import AsyncGenerator, Callable, Sequence
 from datetime import datetime
@@ -66,6 +67,7 @@ if TYPE_CHECKING:
         WebSearchResult,
     )
     from intric.files.file_models import File
+    from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
     from intric.integration.domain.repositories.integration_knowledge_repo import (
         IntegrationKnowledgeRepository,
     )
@@ -115,6 +117,40 @@ def get_references(
     blobs = [_get_blob(blob_id) for blob_id in info_blob_ids]
 
     return [blob for blob in blobs if blob is not None]
+
+
+def _log_persist_outcome(
+    *, assistant_id: UUID, session_id: UUID
+) -> Callable[["asyncio.Task[None]"], None]:
+    """Done-callback factory for the detached streaming-turn persistence task.
+
+    The task is fire-and-forget from the request's perspective (it has to
+    survive SSE cancellation), so failures must surface in logs or they
+    vanish silently.
+    """
+
+    def _on_done(task: "asyncio.Task[None]") -> None:
+        if task.cancelled():
+            logger.warning(
+                "Streaming-turn persistence cancelled; question not saved",
+                extra={
+                    "assistant_id": str(assistant_id),
+                    "session_id": str(session_id),
+                },
+            )
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error(
+                "Streaming-turn persistence failed",
+                exc_info=exc,
+                extra={
+                    "assistant_id": str(assistant_id),
+                    "session_id": str(session_id),
+                },
+            )
+
+    return _on_done
 
 
 class AssistantService:
@@ -649,6 +685,58 @@ class AssistantService:
 
         return await self.prompt_service.get_prompts_by_assistant(assistant_id)
 
+    async def _persist_streaming_turn(
+        self,
+        *,
+        question: str,
+        answer: str,
+        num_tokens_question: int,
+        num_tokens_answer: int,
+        session: "SessionInDB",
+        completion_model: "AICompletionModel",
+        info_blob_chunks: list["InfoBlobChunkInDBWithScore"],
+        files: list["File"],
+        generated_files: list["File"],
+        logging_details: LoggingDetails,
+        assistant_id: UUID,
+        web_search_results: list["WebSearchResult"],
+        tool_calls: list[ToolCallInfo] | None,
+        mcp_tool_references: list[McpToolReference] | None,
+    ) -> None:
+        """Persist a just-streamed turn on a session detached from the request.
+
+        See the call site in `_handle_response` for the SSE-cancel rationale.
+        Uses `Container.session_scope()` so the pool checkout's lifetime is
+        independent of the FastAPI dependency that owns the request session.
+        """
+        from intric.main.container.container import Container
+        from intric.questions.questions_repo import QuestionRepository
+        from intric.sessions.session_service import SessionService
+        from intric.sessions.sessions_repo import SessionRepository
+
+        async with Container.session_scope() as fresh_session:
+            session_service = SessionService(
+                session_repo=SessionRepository(fresh_session),
+                question_repo=QuestionRepository(fresh_session),
+                user=self.user,
+            )
+            await session_service.add_question_to_session(
+                question=question,
+                answer=answer,
+                num_tokens_question=num_tokens_question,
+                num_tokens_answer=num_tokens_answer,
+                session=session,
+                completion_model=completion_model,
+                info_blob_chunks=info_blob_chunks,
+                files=files,
+                generated_files=generated_files,
+                logging_details=logging_details,
+                assistant_id=assistant_id,
+                web_search_results=web_search_results,
+                tool_calls=tool_calls,
+                mcp_tool_references=mcp_tool_references,
+            )
+
     async def _handle_response(
         self,
         response: "CompletionModelResponse",
@@ -843,23 +931,47 @@ class AssistantService:
                     f"output={num_tokens_answer} ({output_source})"
                 )
 
-                await self.session_service.add_question_to_session(
-                    question=question,
-                    answer=response_string,
-                    num_tokens_question=num_tokens_question,
-                    num_tokens_answer=num_tokens_answer,
-                    session=session,
-                    completion_model=cast("AICompletionModel", completion_model),
-                    info_blob_chunks=reference_chunks,
-                    files=list(files),
-                    generated_files=generated_files,
-                    logging_details=response.extended_logging
-                    or LoggingDetails(model_kwargs={}),
-                    assistant_id=assistant_id,
-                    web_search_results=list(web_search_results or []),
-                    tool_calls=tool_calls if tool_calls else None,
-                    mcp_tool_references=mcp_tool_references or None,
+                # Persist on a session that is independent of the request's
+                # SSE cancel scope. The request-scoped session lives inside
+                # sse_starlette's task group; the moment the browser closes
+                # the EventSource the scope is cancelled and any in-flight
+                # INSERT here is aborted, dropping the turn (incl. the new
+                # mcp_tool_references rows that widened the write window in
+                # c6ebe474d and made the latent race deterministic).
+                # asyncio.create_task is owned by the event loop, not anyio,
+                # so it survives the disconnect; shield() lets the happy path
+                # still wait for TOKEN_USAGE to follow a committed write.
+                persist_task = asyncio.create_task(
+                    self._persist_streaming_turn(
+                        question=question,
+                        answer=response_string,
+                        num_tokens_question=num_tokens_question,
+                        num_tokens_answer=num_tokens_answer,
+                        session=session,
+                        completion_model=cast("AICompletionModel", completion_model),
+                        info_blob_chunks=reference_chunks,
+                        files=list(files),
+                        generated_files=generated_files,
+                        logging_details=response.extended_logging
+                        or LoggingDetails(model_kwargs={}),
+                        assistant_id=assistant_id,
+                        web_search_results=list(web_search_results or []),
+                        tool_calls=tool_calls if tool_calls else None,
+                        mcp_tool_references=mcp_tool_references or None,
+                    )
                 )
+                persist_task.add_done_callback(
+                    _log_persist_outcome(
+                        assistant_id=assistant_id, session_id=session.id
+                    )
+                )
+                try:
+                    await asyncio.shield(persist_task)
+                except asyncio.CancelledError:
+                    # SSE was cancelled (client disconnect). persist_task
+                    # keeps running on the loop and will commit; let
+                    # cancellation propagate so the generator unwinds.
+                    raise
 
                 # Send token usage event to frontend
                 yield Completion(
