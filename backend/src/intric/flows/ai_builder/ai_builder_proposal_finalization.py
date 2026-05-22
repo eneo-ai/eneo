@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -14,11 +14,6 @@ from intric.flows.ai_builder.ai_builder_discovery_followup import (
     persist_backend_question,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_edit_proposal import attempt_description_repair
-from intric.flows.ai_builder.ai_builder_edit_repair import (
-    extract_description_provenance,
-    should_attempt_description_repair,
-)
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_events import build_plan_event
 from intric.flows.ai_builder.ai_builder_framework_policy import (
@@ -46,7 +41,6 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
-    ProposalCompletionFn,
     ToolProcessingResult,
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
@@ -78,9 +72,6 @@ class CompiledProposalFinalizationRequest:
     compiled: CompiledProposal
     resource_catalog: AIBuilderResourceCatalog | None
     flow: "Flow | None"
-    litellm_model: str
-    litellm_kwargs: dict[str, Any]
-    max_output_tokens: int
     request_id: str
     usage_tracker: ProposalTurnTelemetry | None
 
@@ -95,11 +86,9 @@ class CompiledProposalFinalizer:
         *,
         repo: AIBuilderRepository,
         quality_retry_warning_codes: set[str] | frozenset[str],
-        call_proposal_completion: ProposalCompletionFn,
     ) -> None:
         self.repo = repo
         self._quality_retry_warning_codes = frozenset(quality_retry_warning_codes)
-        self.call_proposal_completion = call_proposal_completion
 
     async def finalize_compiled_proposal(
         self,
@@ -156,10 +145,6 @@ class CompiledProposalFinalizer:
             if create_result is not None:
                 return create_result
         elif request.tool_name == EDIT_FLOW_TOOL_NAME:
-            compiled = await self._repair_edit_description_if_needed(
-                request=request,
-                compiled=compiled,
-            )
             edit_result = self._edit_quality_result(
                 request=request,
                 compiled=compiled,
@@ -346,53 +331,6 @@ class CompiledProposalFinalizer:
         return ToolProcessingResult(
             feedback=combined_quality_feedback,
             failure_kind="quality",
-        )
-
-    async def _repair_edit_description_if_needed(
-        self,
-        *,
-        request: CompiledProposalFinalizationRequest,
-        compiled: CompiledProposal,
-    ) -> CompiledProposal:
-        if request.flow is None or compiled.edit_result is None:
-            return compiled
-        edit_result = compiled.edit_result.compiled_edit
-        if edit_result is None:
-            return compiled
-        current_provenance = extract_description_provenance(request.flow.metadata_json)
-        if not should_attempt_description_repair(
-            advisories=edit_result.advisories,
-            current_description=request.flow.description,
-            current_provenance=current_provenance,
-        ):
-            return compiled
-
-        repaired_spec = await attempt_description_repair(
-            call_proposal_completion=self.call_proposal_completion,
-            compiled_spec=compiled.spec,
-            litellm_model=request.litellm_model,
-            litellm_kwargs=request.litellm_kwargs,
-            max_output_tokens=min(request.max_output_tokens, 256),
-        )
-        if repaired_spec is None:
-            return compiled
-
-        repaired_edit = edit_result.model_copy(
-            update={
-                "compiled_spec": repaired_spec,
-                "advisories": [
-                    advisory
-                    for advisory in edit_result.advisories
-                    if advisory.code != "flow_description_update_required"
-                ],
-            }
-        )
-        return replace(
-            compiled,
-            spec=repaired_spec,
-            edit_result=compiled.edit_result.model_copy(
-                update={"compiled_edit": repaired_edit}
-            ),
         )
 
     def _edit_quality_result(

@@ -41,6 +41,9 @@ from intric.flows.ai_builder.ai_builder_edit_proposal import (
     EDIT_FLOW_FORCED_TOOL_PROMPT,
     process_edit_arguments,
 )
+from intric.flows.ai_builder.ai_builder_edit_repair import (
+    repair_compiled_edit_description_if_needed,
+)
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import (
     EDIT_FLOW_TOOL_NAME,
     build_edit_flow_tool_schema,
@@ -313,15 +316,11 @@ class AIBuilderProposalProcessor:
         self._compiled_proposal_finalizer = CompiledProposalFinalizer(
             repo=repo,
             quality_retry_warning_codes=quality_retry_warning_codes,
-            call_proposal_completion=self.call_proposal_completion,
         )
 
     def _outline_flow_retry_config(
         self,
         *,
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        max_output_tokens: int,
         request_id: str,
         planning_state: PlanningState | None,
         plan_edit_context: AIBuilderPlanEditContext | None,
@@ -359,9 +358,6 @@ class AIBuilderProposalProcessor:
                     compiled=result.compiled_proposal,
                     resource_catalog=invocation.resource_catalog,
                     flow=invocation.flow,
-                    litellm_model=litellm_model,
-                    litellm_kwargs=litellm_kwargs,
-                    max_output_tokens=max_output_tokens,
                     request_id=request_id,
                     usage_tracker=usage_tracker,
                 )
@@ -402,6 +398,14 @@ class AIBuilderProposalProcessor:
             )
             if result.compiled_proposal is None:
                 return result
+            compiled = await repair_compiled_edit_description_if_needed(
+                compiled=result.compiled_proposal,
+                flow=invocation.flow,
+                call_proposal_completion=self.call_proposal_completion,
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                max_output_tokens=max_output_tokens,
+            )
             return await self._compiled_proposal_finalizer.finalize_compiled_proposal(
                 CompiledProposalFinalizationRequest(
                     turn=invocation.turn,
@@ -413,12 +417,9 @@ class AIBuilderProposalProcessor:
                     assistant_metadata=invocation.assistant_metadata,
                     tool_call_id=invocation.tool_call_id,
                     metadata_tool_call=None,
-                    compiled=result.compiled_proposal,
+                    compiled=compiled,
                     resource_catalog=invocation.resource_catalog,
                     flow=invocation.flow,
-                    litellm_model=litellm_model,
-                    litellm_kwargs=litellm_kwargs,
-                    max_output_tokens=max_output_tokens,
                     request_id=request_id,
                     usage_tracker=usage_tracker,
                 )
@@ -806,9 +807,6 @@ class AIBuilderProposalProcessor:
             return
 
         retry_config = self._outline_flow_retry_config(
-            litellm_model=ctx.litellm_model,
-            litellm_kwargs=ctx.litellm_kwargs,
-            max_output_tokens=ctx.max_output_tokens,
             request_id=ctx.request_id,
             planning_state=ctx.planning_state,
             plan_edit_context=ctx.plan_edit_context,
@@ -870,9 +868,6 @@ class AIBuilderProposalProcessor:
                             compiled=outline_result.compiled_proposal,
                             resource_catalog=ctx.resource_catalog,
                             flow=ctx.flow,
-                            litellm_model=ctx.litellm_model,
-                            litellm_kwargs=ctx.litellm_kwargs,
-                            max_output_tokens=ctx.max_output_tokens,
                             request_id=ctx.request_id,
                             usage_tracker=ctx.usage_tracker,
                         )
@@ -1154,9 +1149,6 @@ class AIBuilderProposalProcessor:
         request_id = usage_tracker.request_id if usage_tracker is not None else ""
         retry_config = (
             self._outline_flow_retry_config(
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                max_output_tokens=max_output_tokens,
                 request_id=request_id,
                 planning_state=planning_state,
                 plan_edit_context=plan_edit_context,
@@ -1712,6 +1704,14 @@ class AIBuilderProposalProcessor:
             prior_plan_for_revision=ctx.prior_plan_for_revision,
         )
         if edit_result.compiled_proposal is not None:
+            compiled = await repair_compiled_edit_description_if_needed(
+                compiled=edit_result.compiled_proposal,
+                flow=ctx.flow,
+                call_proposal_completion=self.call_proposal_completion,
+                litellm_model=ctx.litellm_model,
+                litellm_kwargs=ctx.litellm_kwargs,
+                max_output_tokens=ctx.max_output_tokens,
+            )
             edit_result = (
                 await self._compiled_proposal_finalizer.finalize_compiled_proposal(
                     CompiledProposalFinalizationRequest(
@@ -1724,12 +1724,9 @@ class AIBuilderProposalProcessor:
                         assistant_metadata=ctx.assistant_metadata,
                         tool_call_id=tool_call.id,
                         metadata_tool_call=tool_call,
-                        compiled=edit_result.compiled_proposal,
+                        compiled=compiled,
                         resource_catalog=ctx.resource_catalog,
                         flow=ctx.flow,
-                        litellm_model=ctx.litellm_model,
-                        litellm_kwargs=ctx.litellm_kwargs,
-                        max_output_tokens=ctx.max_output_tokens,
                         request_id=ctx.request_id,
                         usage_tracker=ctx.usage_tracker,
                     )

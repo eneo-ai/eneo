@@ -152,7 +152,6 @@ def _make_finalizer(**overrides) -> CompiledProposalFinalizer:
     defaults = {
         "repo": AsyncMock(),
         "quality_retry_warning_codes": set(),
-        "call_proposal_completion": AsyncMock(),
     }
     defaults.update(overrides)
     return CompiledProposalFinalizer(**defaults)
@@ -172,9 +171,6 @@ def _make_request(**overrides) -> CompiledProposalFinalizationRequest:
         "compiled": _compiled_outline_proposal(),
         "resource_catalog": None,
         "flow": None,
-        "litellm_model": "openai/gpt-5.4",
-        "litellm_kwargs": {},
-        "max_output_tokens": 4096,
         "request_id": "req-finalize",
         "usage_tracker": ProposalTurnTelemetry(
             request_id="req-finalize",
@@ -371,38 +367,20 @@ async def test_finalize_compiled_proposal_persists_mcp_clarification_without_pla
 
 
 @pytest.mark.asyncio
-async def test_finalize_compiled_proposal_repairs_edit_description_through_completion_boundary() -> (
+async def test_finalize_compiled_proposal_persists_edit_result_without_description_repair() -> (
     None
 ):
-    call_proposal_completion = AsyncMock()
-    finalizer = _make_finalizer(call_proposal_completion=call_proposal_completion)
+    finalizer = _make_finalizer()
     original_spec = _make_flow_spec()
-    repaired_spec = original_spec.model_copy(
-        update={"flow_description": "Updated generated description."}
-    )
     captured_edit_results: list[BuilderPlanEditResult | None] = []
 
     async def store_plan(**kwargs):
         captured_edit_results.append(kwargs["edit_result"])
         return await _store_compiled_plan(**kwargs)
 
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_finalization.should_attempt_description_repair",
-            return_value=True,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_finalization.extract_description_provenance",
-            return_value=SimpleNamespace(),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_finalization.attempt_description_repair",
-            new=AsyncMock(return_value=repaired_spec),
-        ) as repair,
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
-            new=store_plan,
-        ),
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+        new=store_plan,
     ):
         result = await finalizer.finalize_compiled_proposal(
             _make_request(
@@ -417,12 +395,12 @@ async def test_finalize_compiled_proposal_repairs_edit_description_through_compl
         )
 
     assert result.event is not None
-    repair.assert_awaited_once()
-    assert (
-        repair.await_args.kwargs["call_proposal_completion"] is call_proposal_completion
-    )
     assert captured_edit_results[0] is not None
+    captured_edit = captured_edit_results[0].compiled_edit
+    assert captured_edit is not None
     assert (
-        captured_edit_results[0].compiled_edit.compiled_spec.flow_description
-        == "Updated generated description."
+        captured_edit.compiled_spec.flow_description == original_spec.flow_description
     )
+    assert [advisory.code for advisory in captured_edit.advisories] == [
+        "flow_description_update_required"
+    ]

@@ -20,7 +20,9 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     PlannerPlanEnvelope,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
+    BuilderPlanEditResult,
     CompiledEditResult,
+    EditAdvisory,
     FlowEditDiff,
     FlowEditDraft,
     StepChange,
@@ -202,6 +204,31 @@ def _compiled_outline_proposal_with_validation(
         resource_bindings=compiled.resource_bindings,
         edit_result=compiled.edit_result,
         aggregation_intent=compiled.aggregation_intent,
+    )
+
+
+def _compiled_edit_proposal(
+    *,
+    spec: FlowDraftSpecCore | None = None,
+    advisories: list[EditAdvisory] | None = None,
+) -> CompiledProposal:
+    compiled_spec = spec or _make_flow_spec(model_ref=None, knowledge_refs=[])
+    compiled_edit = CompiledEditResult(
+        compiled_spec=compiled_spec,
+        diff=FlowEditDiff(
+            step_changes=[StepChange(kind="unchanged", step_name="Analys")]
+        ),
+        original_draft=FlowEditDraft(operations=[]),
+        base_flow_revision=7,
+        advisories=advisories or [],
+    )
+    return CompiledProposal(
+        spec=compiled_spec,
+        assumptions=(),
+        plan_rationale="Update the flow.",
+        reasoning=None,
+        validation=SpecValidationResult(),
+        edit_result=BuilderPlanEditResult(compiled_edit=compiled_edit),
     )
 
 
@@ -2652,6 +2679,125 @@ async def test_edit_flow_retry_config_carries_invocation_context() -> None:
         process_edit.await_args.kwargs["prior_plan_for_revision"]
         is prior_plan_for_revision
     )
+
+
+@pytest.mark.asyncio
+async def test_edit_flow_retry_config_repairs_compiled_edit_before_finalization() -> (
+    None
+):
+    processor = _make_processor()
+    flow = MagicMock()
+    original = _compiled_edit_proposal()
+    repaired = _compiled_edit_proposal(
+        spec=original.spec.model_copy(update={"flow_description": "Repaired desc"})
+    )
+    config = processor._edit_flow_retry_config(
+        assistant_snapshots=None,
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={"timeout": 30},
+        max_output_tokens=2048,
+        request_id="req-retry-edit",
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        usage_tracker=None,
+    )
+    invocation = _make_retry_invocation(
+        flow=flow,
+        arguments={"plan_rationale": "Edit", "operations": []},
+    )
+    process_edit = AsyncMock(
+        return_value=ToolProcessingResult(compiled_proposal=original)
+    )
+    repair = AsyncMock(return_value=repaired)
+    finalize = AsyncMock(
+        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.process_edit_arguments",
+            new=process_edit,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.repair_compiled_edit_description_if_needed",
+            new=repair,
+        ),
+        patch.object(
+            processor._compiled_proposal_finalizer,
+            "finalize_compiled_proposal",
+            new=finalize,
+        ),
+    ):
+        result = await config.process_tool_invocation(invocation)
+
+    assert result.event == {"event": "plan", "data": "{}"}
+    repair.assert_awaited_once()
+    assert repair.await_args.kwargs["compiled"] is original
+    assert repair.await_args.kwargs["flow"] is flow
+    completion = repair.await_args.kwargs["call_proposal_completion"]
+    assert completion.__self__ is processor
+    assert completion.__func__ is AIBuilderProposalProcessor.call_proposal_completion
+    finalize.assert_awaited_once()
+    request = finalize.await_args.args[0]
+    assert request.compiled is repaired
+
+
+@pytest.mark.asyncio
+async def test_handle_edit_flow_repairs_compiled_edit_before_finalization() -> None:
+    processor = _make_processor()
+    flow = MagicMock()
+    original = _compiled_edit_proposal()
+    repaired = _compiled_edit_proposal(
+        spec=original.spec.model_copy(update={"flow_description": "Repaired desc"})
+    )
+    ctx = _make_context(
+        flow=flow,
+        text_content="Assistant text",
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={"timeout": 30},
+        max_output_tokens=2048,
+    )
+    tool_call = _make_tool_call(
+        EDIT_FLOW_TOOL_NAME,
+        {"plan_rationale": "Edit", "operations": []},
+        tool_call_id="call-edit-repair",
+    )
+    process_edit = AsyncMock(
+        return_value=ToolProcessingResult(compiled_proposal=original)
+    )
+    repair = AsyncMock(return_value=repaired)
+    finalize = AsyncMock(
+        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.process_edit_arguments",
+            new=process_edit,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.repair_compiled_edit_description_if_needed",
+            new=repair,
+        ),
+        patch.object(
+            processor._compiled_proposal_finalizer,
+            "finalize_compiled_proposal",
+            new=finalize,
+        ),
+    ):
+        events = [
+            event
+            async for event in processor._handle_edit_flow(ctx=ctx, tool_call=tool_call)
+        ]
+
+    assert events == [{"event": "plan", "data": "{}"}]
+    repair.assert_awaited_once()
+    assert repair.await_args.kwargs["compiled"] is original
+    assert repair.await_args.kwargs["flow"] is flow
+    assert repair.await_args.kwargs["litellm_kwargs"] == {"timeout": 30}
+    finalize.assert_awaited_once()
+    request = finalize.await_args.args[0]
+    assert request.compiled is repaired
 
 
 @pytest.mark.asyncio

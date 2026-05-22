@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T035
+active_task: T037
 
 scoring_target:
   dimensions:
@@ -4005,7 +4005,7 @@ tasks:
   - id: T035
     type: pm
     assignee: PM
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T034, explicitly comparing Antigravity's edit-description-repair decoupling recommendation against generated-client determinism, full-source baseline, processor topology, module/test readability, and repeated live-eval proof."
     inputs:
@@ -4028,6 +4028,158 @@ tasks:
       - "git status --short --branch"
       - "Review T034 receipt and current scorecard"
       - "Produce .codex/artifacts/flow-ai-builder-t035-next-tranche-ranking.md"
+    receipt:
+      completed_at: "2026-05-22T05:54:00+02:00"
+      summary: "Re-ranked the next tranche after T034. Selected T036 to decouple edit-description repair from CompiledProposalFinalizer because it directly removes the current finalizer request coupling and gives edit repair one canonical owner in ai_builder_edit_repair.py. Rejected generated-client determinism, full-source Pyright baseline, broad topology cleanup, and repeat live eval for this immediate slice because they are either broader workflow/baseline work or lower leverage than the local architecture coupling."
+      artifact: ".codex/artifacts/flow-ai-builder-t035-next-tranche-ranking.md"
+      peer_review:
+        claude:
+          iteration_1_artifact: ".codex/artifacts/claude-peer-loop-t035-next-flow-ai-builder-tranche-ranking-20260522T054646Z.md"
+          iteration_1_result: "VERDICT changes_required; GREEN_LIGHT no; MIN_SCORE 8"
+          codex_response: "Accepted blockers: explicitly delete obsolete finalizer repair test, require one helper call per edit site, add comment/docstring discipline, record lazy telemetry as residual debt, and require AST import ownership guards."
+          iteration_2_artifact: ".codex/artifacts/claude-peer-loop-t035-next-flow-ai-builder-tranche-ranking-iteration-2-20260522T055035Z.md"
+          iteration_2_result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 9"
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t035-next-flow-ai-builder-tranche-ranking-20260522T055304Z.md"
+          result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 9"
+          required_implementation_notes:
+            - "Add logger = get_logger(__name__) when moving attempt_description_repair into ai_builder_edit_repair.py."
+            - "Move dataclasses.replace into ai_builder_edit_repair.py and remove it from finalization."
+            - "Remove orphaned ProposalCompletionFn import from ai_builder_edit_proposal.py."
+      selected_worker: T036
+
+  - id: T036
+    type: worker
+    assignee: Worker
+    status: completed
+    reasoning_hint: high
+    objective: "Decouple edit-description repair from CompiledProposalFinalizer so edit repair owns constrained LLM description repair and the finalizer owns only proposal finalization."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t035-next-tranche-ranking.md"
+      - ".codex/artifacts/claude-peer-loop-t035-next-flow-ai-builder-tranche-ranking-iteration-2-20260522T055035Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t035-next-flow-ai-builder-tranche-ranking-20260522T055304Z.md"
+    constraints:
+      - "Implement the peer-approved T036 plan exactly; do not broaden into telemetry closure cleanup, generated-client tooling, full-source Pyright, live eval, or broad processor topology."
+      - "Stage the RED import/shape ownership test first and verify it fails before production edits."
+      - "Do not make process_edit_arguments perform LLM repair; it must remain compile-only."
+      - "Processor wiring must be exactly one await repair_compiled_edit_description_if_needed(...) call per edit success call site, with no inline provenance extraction, eligibility checks, LLM calls, or CompiledProposal rebuilding in the processor."
+      - "Do not add new manager/service/common/helper modules."
+      - "No tutorial-prose docstrings or restating comments; ai_builder_edit_repair.py may get one concise module docstring update."
+      - "Preserve unrelated dirty files."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_repair.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_finalization.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_finalization.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t036-implementation-summary.md"
+    acceptance_criteria:
+      - "CompiledProposalFinalizer.__init__ no longer accepts ProposalCompletionFn."
+      - "CompiledProposalFinalizationRequest no longer has litellm_model, litellm_kwargs, or max_output_tokens."
+      - "ai_builder_proposal_finalization.py no longer imports attempt_description_repair, should_attempt_description_repair, extract_description_provenance, ProposalCompletionFn, or dataclasses.replace."
+      - "ai_builder_edit_repair.py owns attempt_description_repair and repair_compiled_edit_description_if_needed, with logger initialized there."
+      - "process_edit_arguments remains compile-only and does not call LLM repair."
+      - "Direct edit and forced-tool retry edit success paths call repair_compiled_edit_description_if_needed once before finalization."
+      - "Repair failure or ineligible repair returns the original CompiledProposal unchanged and does not raise."
+      - "Builder-managed stale descriptions are repaired and the flow_description_update_required advisory is removed; manual/no-provenance cases are unchanged."
+      - "Static AST ownership tests prevent the finalizer from re-owning edit-description repair."
+    verify:
+      - "RED first: cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q must fail before production edits."
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_finalization.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check <T036 changed backend files/tests>"
+      - "cd backend && uv run ruff format --check <T036 changed backend files/tests>"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "rg \"litellm_model|litellm_kwargs|max_output_tokens\" backend/src/intric/flows/ai_builder/ai_builder_proposal_finalization.py"
+      - "rg \"attempt_description_repair|should_attempt_description_repair|extract_description_provenance|ProposalCompletionFn\" backend/src/intric/flows/ai_builder/ai_builder_proposal_finalization.py"
+      - "rg \"from dataclasses import.*replace\" backend/src/intric/flows/ai_builder/ai_builder_proposal_finalization.py"
+      - "rg \"ProposalCompletionFn\" backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py"
+      - "git diff --check"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+    stop_if:
+      - "The helper cannot stay a one-call processor wiring point."
+      - "The repair move requires process_edit_arguments to perform an LLM call."
+      - "The implementation needs API, DB, Celery, generated-client, live-eval, or broad topology changes."
+      - "Processor code grows materially or duplicates repair logic instead of delegating."
+    receipt:
+      completed_at: "2026-05-22T08:16:13+02:00"
+      summary: "Decoupled edit-description repair from CompiledProposalFinalizer. ai_builder_edit_repair.py now owns attempt_description_repair and repair_compiled_edit_description_if_needed; ai_builder_edit_proposal.py is compile-only for edit arguments; CompiledProposalFinalizationRequest no longer carries litellm_model, litellm_kwargs, or max_output_tokens; CompiledProposalFinalizer no longer accepts ProposalCompletionFn or imports edit-repair symbols. The processor has one explicit repair helper call in each edit success path before finalization, and dead outline retry LLM forwarding was deleted."
+      artifact: ".codex/artifacts/flow-ai-builder-t036-implementation-summary.md"
+      red_first:
+        command: "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+        result: "failed before production edits as expected because finalization still imported repair symbols and still exposed finalization request LLM fields."
+      verification:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_finalization.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q: 70 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2267 passed, 4 skipped, 11 warnings"
+        - "cd backend && uv run ruff check <T036 changed backend files/tests>: passed"
+        - "cd backend && uv run ruff format --check <T036 changed backend files/tests>: passed"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder: 0 errors, 0 warnings, 0 informations"
+        - "git diff --check: passed"
+        - "ruby YAML parse of state.yaml: yaml ok"
+        - "static rg ownership checks for finalization LLM fields, edit-repair imports, dataclasses.replace, and ProposalCompletionFn in edit_proposal: passed"
+      peer_review:
+        claude:
+          artifact: ".codex/artifacts/claude-peer-loop-t036-edit-repair-decoupling-post-implementation-review-20260522T061124Z.md"
+          result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
+          codex_response: "Did not extract a private processor wrapper for the duplicate repair invocation because the peer-approved acceptance criteria required one explicit repair helper call per edit success call site. Kept the finding as residual readability debt."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t036-edit-repair-decoupling-post-implementation-review-20260522T061423Z.md"
+          result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 9"
+          codex_response: "Accepted the trivial test cleanup from private _description_hash to public description_hash and reran validation. Recorded Antigravity's telemetry/token tracking concern as follow-up because direct self.call_proposal_completion preserves the pre-existing finalizer repair telemetry behavior required by the T035 plan gate; changing token accounting should be separately ranked and tested."
+      score_after_tranche:
+        Overall: 8
+        Maintainability: 8
+        Code_Quality: 9
+        Clean_Architecture: 9
+        Separation_of_Concerns: 9
+        Single_Source_of_Truth: 9
+        Human_Readability: 8
+        Human_Reviewability: 9
+        Runtime_Reliability: 9
+        Data_Model_Schema_Quality: 9
+        API_Contract_Quality: 9
+        Test_Coverage_Quality: 9
+        Developer_Diagnostic_Experience: 9
+        AI_Slop_Comment_Naming_Quality: 8
+        Normal_User_Output_Quality: 9
+      residual_risks:
+        - "AIBuilderProposalProcessor remains 1857 LOC and still needs broader topology/readability work before the subsystem can honestly be called 9/10 maintainable."
+        - "Description-repair LLM calls intentionally preserve the previous untracked completion behavior; token/telemetry accounting for this rare repair path should be ranked as a future runtime/observability tranche rather than hidden inside T036."
+        - "The lazy _accepted_proposal_metadata closure in ai_builder_proposal_finalization.py still hides telemetry ordering and remains a possible later finalizer cleanup."
+        - "Generated-client determinism, full-source Pyright baseline, broader module/test topology, and repeated live-eval proof still block the broader 9/10 completion gate."
+
+  - id: T037
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T036, comparing processor topology/readability, description-repair telemetry accounting, generated-client determinism, full-source Pyright baseline, repeated live-eval proof, and finalizer telemetry-closure cleanup."
+    inputs:
+      - "T036 receipt and implementation summary"
+      - ".codex/artifacts/claude-peer-loop-t036-edit-repair-decoupling-post-implementation-review-20260522T061124Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t036-edit-repair-decoupling-post-implementation-review-20260522T061423Z.md"
+      - "Current scorecard floor 8/10"
+    constraints:
+      - "Do not start implementation until the next tranche plan passes Codex self-review and required peer gates."
+      - "Prefer the next slice that moves the strict score floor toward 9, not the easiest local cleanup."
+      - "Do not mechanically split AIBuilderProposalProcessor; topology work must reduce cognitive load through deletion, consolidation, or clear canonical entry points."
+      - "If ranking telemetry accounting next, explicitly decide whether changing description-repair token tracking is a behavior change and how to test planner telemetry output."
+      - "Preserve unrelated dirty files."
+    acceptance_criteria:
+      - "Next tranche ranking names rejected alternatives and explains why the selected slice moves the 8/10 floor most."
+      - "The ranking explicitly addresses Antigravity's T036 telemetry finding and Claude's processor-duplication readability concern."
+      - "If selecting topology/readability work, the plan must include concrete file/function ownership targets and reviewability metrics."
+      - "If selecting generated-client/full-source baseline work, the plan must show how it avoids broad unrelated churn."
+      - "Claude and Antigravity review the same revised plan unless Antigravity quota/tooling returns an explicit skip."
+    verify:
+      - "git status --short --branch"
+      - "Review T036 receipt and current scorecard"
+      - "Produce .codex/artifacts/flow-ai-builder-t037-next-tranche-ranking.md"
 
 checks:
   dirty_fingerprint:
@@ -4035,16 +4187,18 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T034 completed and T035 activated. T034 extracts compiled-proposal finalization into CompiledProposalFinalizer, removes the proposal-policy feedback import cycle, deletes retry context reconstruction, tightens metadata_tool_call to RuntimeToolCall, and adds direct finalizer behavior tests plus static ownership guards. Full AI Builder unit tests passed, strict Pyright for src/intric/flows/ai_builder passed, Claude post-review iteration 2 returned GREEN_LIGHT yes / MIN_SCORE 8, and Antigravity post-review returned GREEN_LIGHT yes / MIN_SCORE 8. The broader goal remains active with strict floor 8/10 because finalizer request coupling, generated-client determinism, full-source baseline, broader module/test topology, and repeated live-eval proof still block 9/10."
-    task: T034
+    result: "T036 completed and T037 activated. T036 moves constrained edit-description repair ownership into ai_builder_edit_repair.py, removes ProposalCompletionFn and LLM repair fields from CompiledProposalFinalizer/CompiledProposalFinalizationRequest, keeps process_edit_arguments compile-only, and adds behavior plus AST ownership tests. Focused tests passed, full AI Builder unit tests passed, strict Pyright for src/intric/flows/ai_builder passed, Claude post-review returned GREEN_LIGHT yes / MIN_SCORE 8, and Antigravity post-review returned GREEN_LIGHT yes / MIN_SCORE 9. The broader goal remains active with strict floor 8/10 because processor topology/readability, generated-client determinism, full-source baseline, repeated live-eval proof, and telemetry-accounting decisions still block 9/10."
+    task: T036
     commands:
-      - "git status --short --branch: branch feature/refactor-flows-flowai ahead 31 during T034; no staged files before final staging; unrelated .devcontainer/.gitignore/AGENTS/icons/media files preserved unstaged"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_finalization.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_policy.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q: 182 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_discovery_flow.py::TestProposalGating::test_outline_flow_is_rejected_until_latest_requirements_are_confirmed -q: 1 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2261 passed, 4 skipped, 11 warnings"
-      - "cd backend && uv run ruff check <T034 changed backend files/tests>: passed"
-      - "cd backend && uv run ruff format --check <T034 changed backend files/tests>: passed"
+      - "git status --short --branch: branch feature/refactor-flows-flowai ahead 32 during T036; unrelated .devcontainer/.gitignore/AGENTS/icons/media files preserved unstaged"
+      - "RED first: cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q: failed before production edits for finalizer repair imports and request LLM fields"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_finalization.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q: 70 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2267 passed, 4 skipped, 11 warnings"
+      - "cd backend && uv run ruff check <T036 changed backend files/tests>: passed"
+      - "cd backend && uv run ruff format --check <T036 changed backend files/tests>: passed"
       - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder: 0 errors, 0 warnings, 0 informations"
+      - "git diff --check: passed"
+      - "ruby YAML parse of state.yaml: yaml ok"
       - "git diff --check: passed"
       - "Static negative rg checks for finalizer/processor imports, proposal-policy feedback cycle, old processor-owned finalization names, stale processor store_plan patches, and phase/slop markers: passed"
       - "Processor LOC gate: 2307 at T034 start, 1851 after extraction; production net LOC about +29 including new files"

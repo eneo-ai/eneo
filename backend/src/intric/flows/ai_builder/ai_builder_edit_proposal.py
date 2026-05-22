@@ -25,9 +25,6 @@ from intric.flows.ai_builder.ai_builder_edit_normalizer import (
     normalize_edit_draft_mechanics,
     normalize_loose_edit_arguments,
 )
-from intric.flows.ai_builder.ai_builder_edit_repair import (
-    validate_repair_invariance,
-)
 from intric.flows.ai_builder.ai_builder_edit_validator import validate_edit_draft
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
@@ -38,7 +35,6 @@ from intric.flows.ai_builder.ai_builder_proposal_policy import (
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
-    ProposalCompletionFn,
     ToolProcessingResult,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
@@ -50,9 +46,6 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
-from intric.flows.flow_authoring_spec import (
-    FlowDraftSpecCore,
-)
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -247,52 +240,3 @@ async def process_edit_arguments(
             edit_result=plan_edit_result,
         ),
     )
-
-
-async def attempt_description_repair(
-    *,
-    call_proposal_completion: ProposalCompletionFn,
-    compiled_spec: FlowDraftSpecCore,
-    litellm_model: str,
-    litellm_kwargs: dict[str, Any],
-    max_output_tokens: int,
-) -> FlowDraftSpecCore | None:
-    """Return a description-only repair when one LLM attempt preserves all other fields."""
-
-    repair_prompt = (
-        "The flow's input or output type changed but the description was not updated. "
-        "Generate ONLY a new flow_description that accurately reflects the current flow. "
-        f"Current flow name: {compiled_spec.flow_name}\n"
-        f"Current description (stale): {compiled_spec.flow_description}\n"
-        f"Steps: {', '.join(s.name for s in compiled_spec.steps)}\n"
-        f"Entry input: {compiled_spec.steps[0].input_type.value if compiled_spec.steps else 'none'}\n"
-        f"Terminal output: {compiled_spec.steps[-1].output_type.value if compiled_spec.steps else 'none'}\n"
-        "Respond with ONLY the new description text, nothing else."
-    )
-
-    try:
-        response = await call_proposal_completion(
-            messages=[{"role": "user", "content": repair_prompt}],
-            tool_schemas=[],
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            max_output_tokens=max_output_tokens,
-            temperature=0.3,
-        )
-        new_description = (response.choices[0].message.content or "").strip()
-        if not new_description:
-            return None
-
-        repaired = compiled_spec.model_copy(
-            update={"flow_description": new_description}
-        )
-        if not validate_repair_invariance(compiled_spec, repaired):
-            logger.warning(
-                "Description repair changed non-description fields, rejecting"
-            )
-            return None
-
-        return repaired
-    except Exception as exc:
-        logger.warning("Description repair failed: %s", exc)
-        return None

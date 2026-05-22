@@ -58,13 +58,24 @@ PROCESSOR_FINALIZATION_METHODS = frozenset(
         "_edit_quality_result",
         "_finalize_compiled_proposal",
         "_mcp_policy_feedback",
-        "_repair_edit_description_if_needed",
         "_retry_context",
         "mcp_clarification_events_if_needed",
     }
 )
 FINALIZATION_OWNER_NAMES = frozenset(
     {"CompiledProposalFinalizationRequest", "CompiledProposalFinalizer"}
+)
+FINALIZATION_REPAIR_IMPORT_NAMES = frozenset(
+    {
+        "attempt_description_repair",
+        "extract_description_provenance",
+        "ProposalCompletionFn",
+        "replace",
+        "should_attempt_description_repair",
+    }
+)
+FINALIZATION_REQUEST_REPAIR_FIELD_NAMES = frozenset(
+    {"litellm_model", "litellm_kwargs", "max_output_tokens"}
 )
 
 BANNED_DOMAIN_MODEL_IMPORTS = frozenset(
@@ -230,6 +241,47 @@ def test_compiled_proposal_finalization_has_single_owner() -> None:
                 and node.module == PROPOSAL_POLICY_MODULE
             ):
                 violations.append(f"{path}:{node.lineno} imports {node.module}")
+
+    assert violations == []
+
+
+def test_compiled_proposal_finalization_does_not_own_edit_repair() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    finalization_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_finalization.py"
+    )
+    finalization_tree = ast.parse(
+        finalization_path.read_text(), filename=str(finalization_path)
+    )
+
+    violations: list[str] = []
+    for node in ast.walk(finalization_tree):
+        if isinstance(node, ast.ImportFrom):
+            imported_names = {
+                alias.name
+                for alias in node.names
+                if alias.name in FINALIZATION_REPAIR_IMPORT_NAMES
+            }
+            if imported_names:
+                names = ", ".join(sorted(imported_names))
+                violations.append(f"{finalization_path}:{node.lineno} imports {names}")
+        if (
+            isinstance(node, ast.ClassDef)
+            and node.name == "CompiledProposalFinalizationRequest"
+        ):
+            request_field_names = {
+                stmt.target.id
+                for stmt in node.body
+                if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)
+            }
+            repair_field_names = sorted(
+                request_field_names & FINALIZATION_REQUEST_REPAIR_FIELD_NAMES
+            )
+            if repair_field_names:
+                fields = ", ".join(repair_field_names)
+                violations.append(
+                    f"{finalization_path}:{node.lineno} request fields {fields}"
+                )
 
     assert violations == []
 
