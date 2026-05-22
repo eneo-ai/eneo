@@ -17,8 +17,10 @@ from intric.flows.ai_builder.ai_builder_description_semantics import (
     description_hash,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
+    BuilderPlan,
     ConversationMessage,
     PlannerPlanEnvelope,
+    PlanStatus,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
     BuilderPlanEditResult,
@@ -36,6 +38,9 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
     MCP_SELECTION_USE_SERVER_PREFIX,
     MCP_SELECTION_WITHOUT,
+)
+from intric.flows.ai_builder.ai_builder_plan_edit_context import (
+    AIBuilderPlanEditContext,
 )
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
@@ -191,6 +196,18 @@ def _compiled_outline_proposal() -> CompiledProposal:
         plan_rationale="Classify incoming text.",
         reasoning=None,
         validation=SpecValidationResult(),
+    )
+
+
+def _builder_plan(spec: FlowDraftSpecCore) -> BuilderPlan:
+    return BuilderPlan(
+        id=uuid4(),
+        session_id=uuid4(),
+        tenant_id=uuid4(),
+        status=PlanStatus.PROPOSED,
+        spec=spec,
+        spec_hash="hash",
+        envelope=PlannerPlanEnvelope(spec=spec),
     )
 
 
@@ -593,6 +610,183 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
         schema["function"]["name"]
         for schema in handle_tool_call.call_args.kwargs["tool_schemas"]
     ] == [OUTLINE_FLOW_TOOL_NAME]
+
+
+@pytest.mark.asyncio
+async def test_propose_plan_preflights_scoped_model_change_on_ai_step_without_llm() -> (
+    None
+):
+    processor = _make_processor()
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[
+            {"id": "model-old", "name": "gpt-4o mini"},
+            {"id": "model-base", "name": "gpt-5.4"},
+            {"id": "model-nano", "name": "gpt-5.4-nano"},
+        ],
+        available_kbs=[],
+        available_mcps=[],
+    )
+    prior_spec = FlowDraftSpecCore(
+        flow_name="Mötesflöde",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Transkribera mötesljud",
+                assistant_spec=AssistantSpec(instructions="Transkribera ljudet."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.AUDIO,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+                output_type=OutputType.TEXT,
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                name="Analysera mötet",
+                assistant_spec=AssistantSpec(
+                    instructions="Analysera transkriptionen.",
+                    model_ref="model.gpt-4o-mini",
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+    prior_plan = _builder_plan(prior_spec)
+    captured_specs: list[FlowDraftSpecCore] = []
+
+    async def store_plan(**kwargs):
+        captured_specs.append(kwargs["spec"])
+        return await _store_compiled_plan(**kwargs)
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.call_proposal_completion_with_usage",
+            new=AsyncMock(),
+        ) as call_completion,
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+            new=store_plan,
+        ),
+    ):
+        events = [
+            event
+            async for event in processor.propose_plan(
+                turn=_make_turn(
+                    session_id=prior_plan.session_id,
+                    tenant_id=prior_plan.tenant_id,
+                ),
+                conversation=[
+                    ConversationMessage(
+                        role="user",
+                        content="ändra modell till gpt 5.4 nano",
+                    )
+                ],
+                new_messages_start=0,
+                llm_messages=[{"role": "system", "content": "Prompt"}],
+                litellm_model="openai/gpt-5.4",
+                litellm_kwargs={},
+                available_models=None,
+                available_kbs=None,
+                available_model_refs=catalog.model_refs,
+                available_kb_refs=None,
+                resource_catalog=catalog,
+                max_output_tokens=4096,
+                proposal_temperature=0.2,
+                request_id="req-model-edit",
+                plan_edit_context=AIBuilderPlanEditContext(
+                    scope="step",
+                    plan_id=prior_plan.id,
+                    target_plan_step_ref="step_b",
+                    target_step_name="Analysera mötet",
+                    target_step_number=2,
+                ),
+                prior_plan_for_revision=prior_plan,
+            )
+        ]
+
+    assert [event["event"] for event in events] == ["plan"]
+    call_completion.assert_not_awaited()
+    assert len(captured_specs) == 1
+    revised_spec = captured_specs[0]
+    assert revised_spec.steps[0].model_dump(mode="json") == prior_spec.steps[
+        0
+    ].model_dump(mode="json")
+    assert revised_spec.steps[1].assistant_spec.model_ref == "model.gpt-5-4-nano"
+
+
+@pytest.mark.asyncio
+async def test_propose_plan_preflights_transcription_step_model_notice_without_llm() -> (
+    None
+):
+    processor = _make_processor()
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[
+            {"id": "model-base", "name": "gpt-5.4"},
+            {"id": "model-nano", "name": "gpt-5.4-nano"},
+        ],
+        available_kbs=[],
+        available_mcps=[],
+    )
+    prior_spec = FlowDraftSpecCore(
+        flow_name="Mötesflöde",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Transkribera mötesljud",
+                assistant_spec=AssistantSpec(instructions="Transkribera ljudet."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.AUDIO,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+                output_type=OutputType.TEXT,
+            )
+        ],
+    )
+    prior_plan = _builder_plan(prior_spec)
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_processor.call_proposal_completion_with_usage",
+        new=AsyncMock(),
+    ) as call_completion:
+        events = [
+            event
+            async for event in processor.propose_plan(
+                turn=_make_turn(
+                    session_id=prior_plan.session_id,
+                    tenant_id=prior_plan.tenant_id,
+                ),
+                conversation=[
+                    ConversationMessage(
+                        role="user",
+                        content="ändra modell till gpt 5.4 nano",
+                    )
+                ],
+                new_messages_start=0,
+                llm_messages=[{"role": "system", "content": "Prompt"}],
+                litellm_model="openai/gpt-5.4",
+                litellm_kwargs={},
+                available_models=None,
+                available_kbs=None,
+                available_model_refs=catalog.model_refs,
+                available_kb_refs=None,
+                resource_catalog=catalog,
+                max_output_tokens=4096,
+                proposal_temperature=0.2,
+                request_id="req-model-edit-transcription",
+                plan_edit_context=AIBuilderPlanEditContext(
+                    scope="step",
+                    plan_id=prior_plan.id,
+                    target_plan_step_ref="step_a",
+                    target_step_name="Transkribera mötesljud",
+                    target_step_number=1,
+                ),
+                prior_plan_for_revision=prior_plan,
+            )
+        ]
+
+    assert [event["event"] for event in events] == ["text"]
+    assert "transkriberar ljud" in json.loads(events[0]["data"])["text"]
+    call_completion.assert_not_awaited()
 
 
 @pytest.mark.asyncio

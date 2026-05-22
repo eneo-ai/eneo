@@ -221,7 +221,7 @@ class AIBuilderProposalProcessor:
         submission_tool_name = self._proposal_submission.active_submission_tool_name(
             flow
         )
-        preflight_result = await self._mcp_preflight_events_if_needed(
+        mcp_preflight_result = await self._mcp_preflight_events_if_needed(
             turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
@@ -229,8 +229,8 @@ class AIBuilderProposalProcessor:
             flow=flow,
             assistant_metadata=assistant_metadata,
         )
-        if preflight_result is not None:
-            for event in preflight_result.events:
+        if mcp_preflight_result is not None:
+            for event in mcp_preflight_result.events:
                 yield event
             return
 
@@ -245,6 +245,38 @@ class AIBuilderProposalProcessor:
             request_id=request_id,
             model=litellm_model,
         )
+        scoped_model_preflight_result = await self._proposal_submission.preflight_scoped_model_revision_if_requested(
+            ctx=ProposalTurnContext(
+                turn=turn,
+                conversation=conversation,
+                new_messages_start=new_messages_start,
+                llm_messages=llm_messages,
+                tool_schemas=tool_schemas,
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                available_model_refs=available_model_refs,
+                available_kb_refs=available_kb_refs,
+                resource_catalog=resource_catalog,
+                max_output_tokens=max_output_tokens,
+                request_id=request_id,
+                flow=flow,
+                assistant_snapshots=assistant_snapshots,
+                assistant_metadata=assistant_metadata,
+                planning_state=planning_state,
+                usage_tracker=usage_tracker,
+                plan_edit_context=plan_edit_context,
+                prior_plan_for_revision=prior_plan_for_revision,
+            )
+        )
+        if scoped_model_preflight_result is not None:
+            if scoped_model_preflight_result.user_message is not None:
+                yield build_text_event(scoped_model_preflight_result.user_message)
+                return
+            if scoped_model_preflight_result.has_events:
+                for event in scoped_model_preflight_result.iter_events():
+                    yield event
+                return
+
         try:
             response = await call_proposal_completion_with_usage(
                 litellm_client=self.litellm_client,

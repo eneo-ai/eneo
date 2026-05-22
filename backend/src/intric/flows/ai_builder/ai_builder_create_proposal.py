@@ -89,6 +89,117 @@ def _latest_user_text(conversation: list[ConversationMessage]) -> str | None:
     return None
 
 
+def process_scoped_step_model_revision_if_requested(
+    *,
+    conversation: list[ConversationMessage],
+    available_model_refs: set[str] | None,
+    available_kb_refs: set[str] | None,
+    resource_catalog: AIBuilderResourceCatalog | None,
+    plan_edit_context: AIBuilderPlanEditContext | None,
+    prior_plan_for_revision: BuilderPlan | None,
+    plan_rationale: str | None = None,
+) -> ToolProcessingResult | None:
+    scoped_model_revision = resolve_scoped_step_model_revision_if_requested(
+        context=plan_edit_context,
+        prior_spec=(
+            prior_plan_for_revision.spec
+            if prior_plan_for_revision is not None
+            else None
+        ),
+        latest_user_text=_latest_user_text(conversation),
+        resource_catalog=resource_catalog,
+    )
+    if scoped_model_revision is None:
+        return None
+    if isinstance(scoped_model_revision, ScopedStepModelNotice):
+        return ToolProcessingResult(user_message=scoped_model_revision.message)
+
+    prepared = prepare_compiled_spec_for_session(
+        spec=scoped_model_revision.spec,
+        target_kind=TargetKind.CREATE,
+        available_model_refs=available_model_refs,
+        available_kb_refs=available_kb_refs,
+        resource_catalog=resource_catalog,
+        valid_existing_step_refs=None,
+        terminal_output_type=terminal_output_type_for_conversation(
+            conversation,
+            plan_edit_context=plan_edit_context,
+            prior_plan=prior_plan_for_revision,
+        ),
+    )
+    if prepared.failure_feedback is not None:
+        if prepared.validation is not None and prepared.validation.errors:
+            logger.info(
+                "Prepared scoped model revision spec validation failed: %s",
+                [error.message for error in prepared.validation.errors],
+            )
+        return ToolProcessingResult(
+            feedback=prepared.failure_feedback,
+            failure_kind="validation",
+            failure_codes=frozenset(error.code for error in prepared.validation.errors)
+            if prepared.validation is not None
+            else frozenset(),
+        )
+    assert prepared.spec is not None
+    assert prepared.validation is not None
+
+    scoped_revision_feedback = validate_scoped_plan_revision(
+        context=plan_edit_context,
+        prior_spec=(
+            prior_plan_for_revision.spec
+            if prior_plan_for_revision is not None
+            else None
+        ),
+        proposed_spec=prepared.spec,
+    )
+    if scoped_revision_feedback is not None:
+        return ToolProcessingResult(
+            feedback=format_create_outline_quality_feedback(scoped_revision_feedback),
+            failure_kind="quality",
+        )
+
+    return ToolProcessingResult(
+        compiled_proposal=CompiledProposal(
+            spec=prepared.spec,
+            assumptions=tuple(),
+            plan_rationale=plan_rationale
+            or _scoped_model_revision_rationale(conversation),
+            reasoning=None,
+            validation=prepared.validation,
+            resource_bindings=(
+                collect_flow_spec_resource_bindings(
+                    prepared.spec, catalog=resource_catalog
+                )
+                if resource_catalog is not None
+                else tuple()
+            ),
+        )
+    )
+
+
+def _scoped_model_revision_rationale(
+    conversation: list[ConversationMessage],
+) -> str:
+    if _scoped_model_revision_uses_swedish(conversation):
+        return "Bytte modell på det valda steget."
+    return "Updated the selected step model."
+
+
+def scoped_model_revision_assistant_text(
+    conversation: list[ConversationMessage],
+) -> str:
+    if _scoped_model_revision_uses_swedish(conversation):
+        return "Jag har uppdaterat modellen för det valda steget."
+    return "I updated the selected step model."
+
+
+def _scoped_model_revision_uses_swedish(
+    conversation: list[ConversationMessage],
+) -> bool:
+    latest = (_latest_user_text(conversation) or "").casefold()
+    return "modell" in latest
+
+
 async def process_outline_arguments(
     *,
     turn: SessionSendTurn,
@@ -263,52 +374,6 @@ async def _process_create_draft(
     assert prepared.validation is not None
     spec = prepared.spec
     validation = prepared.validation
-
-    scoped_model_revision = resolve_scoped_step_model_revision_if_requested(
-        context=plan_edit_context,
-        prior_spec=(
-            prior_plan_for_revision.spec
-            if prior_plan_for_revision is not None
-            else None
-        ),
-        latest_user_text=_latest_user_text(conversation),
-        resource_catalog=resource_catalog,
-    )
-    if scoped_model_revision is not None:
-        if isinstance(scoped_model_revision, ScopedStepModelNotice):
-            return ToolProcessingResult(user_message=scoped_model_revision.message)
-        prepared = prepare_compiled_spec_for_session(
-            spec=scoped_model_revision.spec,
-            target_kind=TargetKind.CREATE,
-            available_model_refs=available_model_refs,
-            available_kb_refs=available_kb_refs,
-            resource_catalog=resource_catalog,
-            valid_existing_step_refs=None,
-            terminal_output_type=terminal_output_type_for_conversation(
-                conversation,
-                plan_edit_context=plan_edit_context,
-                prior_plan=prior_plan_for_revision,
-            ),
-        )
-        if prepared.failure_feedback is not None:
-            if prepared.validation is not None and prepared.validation.errors:
-                logger.info(
-                    "Prepared scoped model revision spec validation failed: %s",
-                    [error.message for error in prepared.validation.errors],
-                )
-            return ToolProcessingResult(
-                feedback=prepared.failure_feedback,
-                failure_kind="validation",
-                failure_codes=frozenset(
-                    error.code for error in prepared.validation.errors
-                )
-                if prepared.validation is not None
-                else frozenset(),
-            )
-        assert prepared.spec is not None
-        assert prepared.validation is not None
-        spec = prepared.spec
-        validation = prepared.validation
 
     scoped_revision_feedback = validate_scoped_plan_revision(
         context=plan_edit_context,

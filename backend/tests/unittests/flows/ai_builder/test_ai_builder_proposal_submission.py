@@ -68,6 +68,47 @@ def test_create_submission_schema_keeps_mcp_refs_free_form() -> None:
 
 
 @pytest.mark.asyncio
+async def test_scoped_model_preflight_skips_existing_flow_edit_context() -> None:
+    processor = _make_processor()
+    ctx = _make_context(flow=SimpleNamespace(id=uuid4()))
+
+    result = await processor._proposal_submission.preflight_scoped_model_revision_if_requested(
+        ctx=ctx,
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_scoped_model_preflight_returns_error_event_for_deterministic_failure() -> (
+    None
+):
+    processor = _make_processor()
+    ctx = _make_context(request_id="req-deterministic-failure")
+    deterministic_failure = ToolProcessingResult(
+        feedback="Scoped plan edit target `step_a` disappeared.",
+        failure_kind="quality",
+    )
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_submission."
+        "process_scoped_step_model_revision_if_requested",
+        return_value=deterministic_failure,
+    ):
+        result = await processor._proposal_submission.preflight_scoped_model_revision_if_requested(
+            ctx=ctx,
+        )
+
+    assert result is not None
+    assert result.event is not None
+    payload = json.loads(result.event["data"])
+    assert payload["code"] == "bad_request"
+    assert payload["phase"] == "proposal"
+    assert payload["request_id"] == "req-deterministic-failure"
+    assert payload["details"] == {"failure_kind": "quality"}
+
+
+@pytest.mark.asyncio
 async def test_outline_quality_failure_records_failed_first_attempt() -> None:
     processor = _make_processor()
     tracker = ProposalTurnTelemetry(

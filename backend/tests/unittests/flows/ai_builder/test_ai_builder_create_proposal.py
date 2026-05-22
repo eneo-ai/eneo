@@ -12,6 +12,7 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
 )
 from intric.flows.ai_builder.ai_builder_create_proposal import (
     process_outline_arguments,
+    process_scoped_step_model_revision_if_requested,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -350,7 +351,6 @@ async def test_scoped_outline_revision_explains_model_change_on_transcription_st
         available_kbs=[],
         available_mcps=[],
     )
-    new_model_ref = "model.gpt-5-4-nano"
     prior_spec = FlowDraftSpecCore(
         flow_name="Mötesflöde",
         steps=[
@@ -378,47 +378,17 @@ async def test_scoped_outline_revision_explains_model_change_on_transcription_st
         ],
     )
     prior_plan = _builder_plan(prior_spec)
-    state = PlanningState.empty()
-    state.architecture_commit = finalize_architecture_commit(
-        ArchitectureCommitDraft(
-            tuples_chain=[
-                StepTriple(
-                    input_type="audio",
-                    output_type="text",
-                    output_mode="pass_through",
-                )
-            ],
-            chosen_patterns=["audio_to_artifact_report"],
-            required_capabilities=["input_audio", "output_mode_pass_through"],
-        )
-    )
 
-    result = await process_outline_arguments(
-        turn=_make_turn(
-            session_id=prior_plan.session_id, tenant_id=prior_plan.tenant_id
-        ),
+    result = process_scoped_step_model_revision_if_requested(
         conversation=[
             ConversationMessage(
                 role="user",
                 content="ändra modell till gpt 5.4 nano",
             )
         ],
-        arguments={
-            "flow_name": "Mötesflöde",
-            "plan_rationale": "Behåll flödet men byt modell.",
-            "steps": [
-                {
-                    "name": "Analysera mötet",
-                    "task": "Analysera transkriptionen.",
-                    "model_ref": new_model_ref,
-                }
-            ],
-        },
-        tool_call_id="call-model-change",
         available_model_refs=catalog.model_refs,
         available_kb_refs=None,
         resource_catalog=catalog,
-        planning_state=state,
         plan_edit_context=AIBuilderPlanEditContext(
             scope="step",
             plan_id=prior_plan.id,
@@ -433,7 +403,7 @@ async def test_scoped_outline_revision_explains_model_change_on_transcription_st
     assert result.feedback is None
     assert result.user_message is not None
     assert "transkriberar ljud" in result.user_message
-    assert new_model_ref not in result.user_message
+    assert "model.gpt-5-4-nano" not in result.user_message
 
 
 @pytest.mark.asyncio
@@ -475,47 +445,17 @@ async def test_scoped_outline_revision_changes_model_on_selected_ai_step() -> No
         ],
     )
     prior_plan = _builder_plan(prior_spec)
-    state = PlanningState.empty()
-    state.architecture_commit = finalize_architecture_commit(
-        ArchitectureCommitDraft(
-            tuples_chain=[
-                StepTriple(
-                    input_type="audio",
-                    output_type="text",
-                    output_mode="pass_through",
-                )
-            ],
-            chosen_patterns=["audio_to_artifact_report"],
-            required_capabilities=["input_audio", "output_mode_pass_through"],
-        )
-    )
 
-    result = await process_outline_arguments(
-        turn=_make_turn(
-            session_id=prior_plan.session_id, tenant_id=prior_plan.tenant_id
-        ),
+    result = process_scoped_step_model_revision_if_requested(
         conversation=[
             ConversationMessage(
                 role="user",
                 content="byt modell från gpt-4o mini till gpt 5.4 nano",
             )
         ],
-        arguments={
-            "flow_name": "Mötesflöde",
-            "plan_rationale": "Behåll flödet men byt modell.",
-            "steps": [
-                {
-                    "name": "Analysera mötet",
-                    "task": "Analysera transkriptionen.",
-                    "model_ref": new_model_ref,
-                }
-            ],
-        },
-        tool_call_id="call-model-change",
         available_model_refs=catalog.model_refs,
         available_kb_refs=None,
         resource_catalog=catalog,
-        planning_state=state,
         plan_edit_context=AIBuilderPlanEditContext(
             scope="step",
             plan_id=prior_plan.id,
@@ -528,7 +468,9 @@ async def test_scoped_outline_revision_changes_model_on_selected_ai_step() -> No
 
     assert result.compiled_proposal is not None
     assert result.feedback is None
-    assert result.compiled_proposal.plan_rationale == "Behåll flödet men byt modell."
+    assert (
+        result.compiled_proposal.plan_rationale == "Bytte modell på det valda steget."
+    )
     assert result.compiled_proposal.assumptions == tuple()
     revised_steps = result.compiled_proposal.spec.steps
     assert revised_steps[0].model_dump(mode="json") == prior_spec.steps[0].model_dump(

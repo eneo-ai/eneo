@@ -14,6 +14,8 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
 from intric.flows.ai_builder.ai_builder_create_proposal import (
     OUTLINE_FLOW_FORCED_TOOL_PROMPT,
     process_outline_arguments,
+    process_scoped_step_model_revision_if_requested,
+    scoped_model_revision_assistant_text,
 )
 from intric.flows.ai_builder.ai_builder_discovery_followup import (
     emit_discovery_followup_if_needed,
@@ -148,6 +150,64 @@ class ProposalSubmissionOwner:
                 resource_catalog=resource_catalog,
             )
         ]
+
+    async def preflight_scoped_model_revision_if_requested(
+        self,
+        *,
+        ctx: ProposalTurnContext,
+    ) -> ToolProcessingResult | None:
+        if ctx.flow is not None:
+            return None
+
+        result = process_scoped_step_model_revision_if_requested(
+            conversation=ctx.conversation,
+            available_model_refs=ctx.available_model_refs,
+            available_kb_refs=ctx.available_kb_refs,
+            resource_catalog=ctx.resource_catalog,
+            plan_edit_context=ctx.plan_edit_context,
+            prior_plan_for_revision=ctx.prior_plan_for_revision,
+        )
+        if result is None or result.compiled_proposal is None:
+            if result is not None and result.feedback is not None:
+                return ToolProcessingResult(
+                    event=build_ai_builder_error_event(
+                        message=(
+                            "The selected model change could not be applied to "
+                            "the current plan. Refresh the plan and try again."
+                        ),
+                        code=AIBuilderErrorCode.BAD_REQUEST,
+                        phase=AIBuilderErrorPhase.PROPOSAL,
+                        request_id=ctx.request_id,
+                        details={
+                            "failure_kind": result.failure_kind or "unknown",
+                        },
+                    )
+                )
+            return result
+
+        return await self._compiled_proposal_finalizer.finalize_compiled_proposal(
+            CompiledProposalFinalizationRequest(
+                turn=ctx.turn,
+                conversation=ctx.conversation,
+                new_messages_start=ctx.new_messages_start,
+                tool_name=OUTLINE_FLOW_TOOL_NAME,
+                arguments={
+                    "plan_rationale": result.compiled_proposal.plan_rationale or "",
+                    "revision_kind": "scoped_step_model",
+                },
+                assistant_content=scoped_model_revision_assistant_text(
+                    ctx.conversation
+                ),
+                assistant_metadata=ctx.assistant_metadata,
+                tool_call_id=f"server_scoped_model_revision:{ctx.request_id}",
+                metadata_tool_call=None,
+                compiled=result.compiled_proposal,
+                resource_catalog=ctx.resource_catalog,
+                flow=ctx.flow,
+                request_id=ctx.request_id,
+                usage_tracker=ctx.usage_tracker,
+            )
+        )
 
     def _outline_flow_retry_config(
         self,
