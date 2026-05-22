@@ -1089,6 +1089,8 @@ class Container(containers.DeclarativeContainer):
         completion_service=completion_service,
         references_service=references_service,
         icon_repo=icon_repo,
+        org_space_assistant_role_repo=org_space_assistant_role_repo,
+        help_assistant_assignment_history_repo=help_assistant_assignment_history_repo,
         api_key_scope_revoker=api_key_scope_revoker,
     )
     org_space_assistant_role_service = providers.Factory(

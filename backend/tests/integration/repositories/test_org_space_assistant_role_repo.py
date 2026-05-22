@@ -313,6 +313,45 @@ async def test_delete_removes_assignment(db_container, admin_user):
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_exists_active_for_assistant_true_when_assigned_false_after_delete(
+    db_container, admin_user
+):
+    async with db_container() as container:
+        session = container.session()
+        repo = container.org_space_assistant_role_repo()
+        factory = container.helper_assistants_factory()
+
+        space_id = await _get_org_space(session, tenant_id=admin_user.tenant_id)
+        helper_assistant_id = await _insert_assistant(
+            session, owner_user_id=admin_user.id, space_id=space_id
+        )
+        unrelated_assistant_id = await _insert_assistant(
+            session, owner_user_id=admin_user.id, space_id=space_id
+        )
+
+        # No row yet -> both assistants are "not active helpers".
+        assert await repo.exists_active_for_assistant(helper_assistant_id) is False
+        assert await repo.exists_active_for_assistant(unrelated_assistant_id) is False
+
+        added = await repo.add(
+            factory.create_role_assignment(
+                org_space_id=space_id,
+                kind=HelperKind.PROMPT_GUIDE,
+                assistant_id=helper_assistant_id,
+            )
+        )
+
+        # Only the assigned assistant is active.
+        assert await repo.exists_active_for_assistant(helper_assistant_id) is True
+        assert await repo.exists_active_for_assistant(unrelated_assistant_id) is False
+
+        # Deleting the assignment clears the active state.
+        await repo.delete(added.id)
+        assert await repo.exists_active_for_assistant(helper_assistant_id) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_duplicate_kind_for_org_space_raises_integrity_error(
     db_container, admin_user
 ):

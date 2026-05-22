@@ -116,3 +116,10 @@ class OrgSpaceAssistantRoleRepo:
             OrgSpaceAssistantRoles.id == id
         )
         await self.session.execute(stmt)
+
+    async def exists_active_for_assistant(self, assistant_id: UUID) -> bool:
+        stmt = sa.select(
+            sa.exists().where(OrgSpaceAssistantRoles.assistant_id == assistant_id)
+        )
+        result = await self.session.scalar(stmt)
+        return bool(result)

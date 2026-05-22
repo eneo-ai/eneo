@@ -63,6 +63,14 @@ def setup_fixture():
     mock_space.get_assistant.return_value = mock_assistant
     space_repo.get_space_by_assistant.return_value = mock_space
 
+    # The helper-assistant guard checks both repos before every ``ask``;
+    # default them to "not a helper" so non-guard tests in this file don't
+    # incidentally trip the 403 path.
+    role_repo_mock = AsyncMock()
+    role_repo_mock.exists_active_for_assistant.return_value = False
+    history_repo_mock = AsyncMock()
+    history_repo_mock.exists_for_assistant.return_value = False
+
     service = AssistantService(
         repo=repo,
         space_repo=space_repo,
@@ -82,6 +90,8 @@ def setup_fixture():
         completion_service=AsyncMock(),
         references_service=AsyncMock(),
         icon_repo=AsyncMock(),
+        org_space_assistant_role_repo=role_repo_mock,
+        help_assistant_assignment_history_repo=history_repo_mock,
     )
 
     setup = Setup(assistant=assistant, service=service, group_service=AsyncMock())

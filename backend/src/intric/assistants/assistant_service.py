@@ -20,6 +20,13 @@ from intric.authentication.auth_service import AuthService
 from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.completion_models.infrastructure.web_search import WebSearch
 from intric.files.file_service import FileService
+from intric.help_assistants.application.ask_guard import assert_not_helper_assistant
+from intric.help_assistants.infrastructure.help_assistant_assignment_history_repo import (  # noqa: E501
+    HelpAssistantAssignmentHistoryRepo,
+)
+from intric.help_assistants.infrastructure.org_space_assistant_role_repo import (
+    OrgSpaceAssistantRoleRepo,
+)
 from intric.icons.icon_repo import IconRepository
 from intric.logging.logging import LoggingDetails
 from intric.main.exceptions import BadRequestException, UnauthorizedException
@@ -137,6 +144,8 @@ class AssistantService:
         completion_service: "CompletionService",
         references_service: "ReferencesService",
         icon_repo: IconRepository,
+        org_space_assistant_role_repo: OrgSpaceAssistantRoleRepo,
+        help_assistant_assignment_history_repo: HelpAssistantAssignmentHistoryRepo,
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
         super().__init__()
@@ -158,6 +167,10 @@ class AssistantService:
         self.completion_service = completion_service
         self.references_service = references_service
         self.icon_repo = icon_repo
+        self.org_space_assistant_role_repo = org_space_assistant_role_repo
+        self.help_assistant_assignment_history_repo = (
+            help_assistant_assignment_history_repo
+        )
         self.api_key_scope_revoker = api_key_scope_revoker
 
     @property
@@ -1010,6 +1023,23 @@ class AssistantService:
         assistant_selector_tokens: int = 0,
         require_tool_approval: bool = False,
     ):
+        # PRD §6 "Critical tests #2": defense-in-depth — never run a Help
+        # Assistant via the normal ask path. Both ``POST /assistants/{id}/sessions/``
+        # and ``POST /assistants/{id}/sessions/{session_id}/`` flow through
+        # here, so guarding this method covers both router entry points and
+        # short-circuits before any session row is created.
+        await assert_not_helper_assistant(
+            assistant_id=assistant_id,
+            role_repo=self.org_space_assistant_role_repo,
+            history_repo=self.help_assistant_assignment_history_repo,
+        )
+        if tool_assistant_id is not None:
+            await assert_not_helper_assistant(
+                assistant_id=tool_assistant_id,
+                role_repo=self.org_space_assistant_role_repo,
+                history_repo=self.help_assistant_assignment_history_repo,
+            )
+
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         active_assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
