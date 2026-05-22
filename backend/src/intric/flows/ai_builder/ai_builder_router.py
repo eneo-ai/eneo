@@ -48,9 +48,12 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 )
 from intric.flows.ai_builder.ai_builder_error_contract import (
     AI_BUILDER_ERROR_REGISTRY,
+    AIBuilderBadRequestException,
     AIBuilderErrorCode,
     AIBuilderErrorPhase,
+    AIBuilderNotFoundException,
     AIBuilderPublicError,
+    AIBuilderUnauthorizedException,
     ai_builder_error_example,
     build_ai_builder_error,
     build_ai_builder_error_event,
@@ -99,6 +102,34 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _public_error_code_from_exception(
+    error: BadRequestException | UnauthorizedException | NotFoundException,
+    *,
+    default: AIBuilderErrorCode,
+    request_id: str | None,
+    surface: str,
+) -> AIBuilderErrorCode:
+    if isinstance(
+        error,
+        (
+            AIBuilderBadRequestException,
+            AIBuilderNotFoundException,
+            AIBuilderUnauthorizedException,
+        ),
+    ):
+        return error.code
+    logger.error(
+        "AI Builder raw public exception reached adapter.",
+        extra={
+            "request_id": request_id,
+            "surface": surface,
+            "raw_error_code": getattr(error, "code", None),
+            "fallback_error_code": default.value,
+        },
+    )
+    return coerce_ai_builder_error_code(getattr(error, "code", None), default=default)
+
+
 class AIBuilderPublicErrorRoute(APIRoute):
     def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
         original_route_handler = super().get_route_handler()
@@ -107,31 +138,43 @@ class AIBuilderPublicErrorRoute(APIRoute):
             try:
                 return await original_route_handler(request)
             except BadRequestException as error:
+                request_id = extract_request_id(request)
                 return _ai_builder_json_error_response(
                     request=request,
                     message=str(error)
                     or "The AI Builder request could not be processed.",
-                    code=coerce_ai_builder_error_code(error.code),
+                    code=_public_error_code_from_exception(
+                        error,
+                        default=AIBuilderErrorCode.BAD_REQUEST,
+                        request_id=request_id,
+                        surface="route_bad_request",
+                    ),
                     exception_context=error.context,
                 )
             except UnauthorizedException as error:
+                request_id = extract_request_id(request)
                 return _ai_builder_json_error_response(
                     request=request,
                     message=str(error)
                     or "You do not have permission to use this AI Builder resource.",
-                    code=coerce_ai_builder_error_code(
-                        error.code,
+                    code=_public_error_code_from_exception(
+                        error,
                         default=AIBuilderErrorCode.INSUFFICIENT_SPACE_PERMISSION,
+                        request_id=request_id,
+                        surface="route_unauthorized",
                     ),
                     exception_context=error.context,
                 )
             except NotFoundException as error:
+                request_id = extract_request_id(request)
                 return _ai_builder_json_error_response(
                     request=request,
                     message=str(error) or "AI Builder resource not found.",
-                    code=coerce_ai_builder_error_code(
-                        error.code,
+                    code=_public_error_code_from_exception(
+                        error,
                         default=AIBuilderErrorCode.NOT_FOUND,
+                        request_id=request_id,
+                        surface="route_not_found",
                     ),
                     exception_context=error.context,
                 )
@@ -190,9 +233,9 @@ async def _resolve_litellm_params(
 def _ensure_space_flow_edit_permission(container: Container, space: "Space") -> None:
     actor = container.actor_manager().get_space_actor_from_space(space)
     if not actor.can_edit_flows():
-        raise UnauthorizedException(
+        raise AIBuilderUnauthorizedException(
             "You do not have permission to use the AI builder in this space.",
-            code=AIBuilderErrorCode.INSUFFICIENT_SPACE_PERMISSION.value,
+            code=AIBuilderErrorCode.INSUFFICIENT_SPACE_PERMISSION,
             context={"auth_layer": "space_membership"},
         )
 
@@ -243,17 +286,17 @@ def _ensure_session_creator(
     session: BuilderSession,
 ) -> None:
     if session.actor_user_id != container.user().id:
-        raise UnauthorizedException(
+        raise AIBuilderUnauthorizedException(
             "Only the session creator can access this AI builder session.",
-            code=AIBuilderErrorCode.SESSION_CREATOR_REQUIRED.value,
+            code=AIBuilderErrorCode.SESSION_CREATOR_REQUIRED,
             context={"auth_layer": "session_creator"},
         )
 
 
 def _raise_scope_mismatch() -> NoReturn:
-    raise UnauthorizedException(
+    raise AIBuilderUnauthorizedException(
         "API key space scope does not match requested AI builder resource.",
-        code=AIBuilderErrorCode.INSUFFICIENT_SCOPE.value,
+        code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
         context={"auth_layer": "api_key_scope"},
     )
 
@@ -673,9 +716,14 @@ async def send_message(
                     event=done_event["event"],
                 )
         except BadRequestException as error:
-            code = error.code or "bad_request"
             message = str(error) or "The AI Builder request could not be processed."
             request_id = extract_request_id(request)
+            code = _public_error_code_from_exception(
+                error,
+                default=AIBuilderErrorCode.BAD_REQUEST,
+                request_id=request_id,
+                surface="event_stream_bad_request",
+            )
             diagnostic_context, details = _merged_ai_builder_error_fields(
                 exception_context=getattr(error, "context", None),
                 diagnostic_context={
@@ -689,12 +737,12 @@ async def send_message(
                     "request_id": request_id,
                     "session_id": str(session_id),
                     "space_id": str(session.space_id),
-                    "error_code": code,
+                    "error_code": code.value,
                 },
             )
             error_event = build_ai_builder_error_event(
                 message=message,
-                code=coerce_ai_builder_error_code(code),
+                code=code,
                 diagnostic_context=diagnostic_context,
                 details=details,
                 request_id=request_id,
@@ -1133,19 +1181,10 @@ async def apply_plan(
         session=session,
     )
 
-    try:
-        result: ApplyResult = await service.apply_plan(
-            plan_id=plan_id,
-            expected_revision=body.expected_revision,
-        )
-    except BadRequestException as e:
-        error_code = coerce_ai_builder_error_code(getattr(e, "code", None))
-        return _ai_builder_json_error_response(
-            request=request,
-            message=str(e) or "The AI Builder plan could not be applied.",
-            code=error_code,
-            exception_context=getattr(e, "context", None),
-        )
+    result: ApplyResult = await service.apply_plan(
+        plan_id=plan_id,
+        expected_revision=body.expected_revision,
+    )
 
     # Audit
     user = container.user()

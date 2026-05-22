@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from intric.flows.ai_builder.ai_builder_domain_models import SessionStatus
-from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
-from intric.main.exceptions import BadRequestException
+from intric.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 
 _ALLOWED_TRANSITIONS: dict[SessionStatus, set[SessionStatus]] = {
     SessionStatus.CHATTING: {
@@ -32,7 +34,7 @@ def ensure_valid_session_status_transition(
 ) -> None:
     if next_status in _ALLOWED_TRANSITIONS[current]:
         return
-    raise BadRequestException(
+    raise AIBuilderBadRequestException(
         f"Invalid AI Builder session transition: {current.value} -> {next_status.value}.",
-        code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION.value,
+        code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
     )

@@ -38,7 +38,10 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderSession,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+from intric.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_DONE as _SSE_EVENT_DONE,
 )
@@ -69,7 +72,6 @@ from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
-from intric.main.exceptions import BadRequestException
 from intric.model_providers.infrastructure.litellm_runtime_config import (
     configure_litellm_runtime,
 )
@@ -196,7 +198,10 @@ class AIBuilderService:
         force_new: bool = False,
     ) -> BuilderSession:
         if target_kind == TargetKind.EDIT and flow_id is None:
-            raise BadRequestException("flow_id is required for edit sessions.")
+            raise AIBuilderBadRequestException(
+                "flow_id is required for edit sessions.",
+                code=AIBuilderErrorCode.EDIT_SESSION_FLOW_REQUIRED,
+            )
 
         if flow_id is not None:
             flow = await self.flow_service.get_flow(flow_id)
@@ -427,9 +432,9 @@ class AIBuilderService:
                 )
             validated_files = await self.file_service.get_files_by_ids(message_file_ids)
             if len({file.id for file in validated_files}) != len(set(message_file_ids)):
-                raise BadRequestException(
+                raise AIBuilderBadRequestException(
                     "One or more referenced files are unavailable for this AI Builder session.",
-                    code=AIBuilderErrorCode.BUILDER_ATTACHMENT_UNAVAILABLE.value,
+                    code=AIBuilderErrorCode.BUILDER_ATTACHMENT_UNAVAILABLE,
                 )
 
         session_file_ids = await self.repo.list_session_file_ids(
@@ -466,9 +471,9 @@ class AIBuilderService:
     @staticmethod
     def _assert_flow_in_space(*, flow: Any, space_id: UUID) -> None:
         if getattr(flow, "space_id", None) != space_id:
-            raise BadRequestException(
+            raise AIBuilderBadRequestException(
                 "Flow space does not match the AI builder session space.",
-                code=AIBuilderErrorCode.FLOW_SPACE_MISMATCH.value,
+                code=AIBuilderErrorCode.FLOW_SPACE_MISMATCH,
             )
 
     async def send_message(

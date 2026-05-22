@@ -9,12 +9,14 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
 )
-from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+from intric.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     StepSpec,
 )
-from intric.main.exceptions import BadRequestException
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
@@ -107,9 +109,9 @@ async def resolve_plan_edit_context(
         return None, None
 
     if session.latest_plan_id != context.plan_id:
-        raise BadRequestException(
+        raise AIBuilderBadRequestException(
             "The AI Builder plan has changed. Refresh the plan and try the edit again.",
-            code=AIBuilderErrorCode.STALE_PLAN_REVISION.value,
+            code=AIBuilderErrorCode.STALE_PLAN_REVISION,
             context={
                 "latest_plan_id": str(session.latest_plan_id)
                 if session.latest_plan_id
@@ -120,15 +122,15 @@ async def resolve_plan_edit_context(
 
     plan = await repo.get_plan(plan_id=context.plan_id, tenant_id=tenant_id)
     if plan.session_id != session.id:
-        raise BadRequestException(
+        raise AIBuilderBadRequestException(
             "The edit context points to a plan outside this AI Builder session.",
-            code=AIBuilderErrorCode.PLAN_SESSION_MISMATCH.value,
+            code=AIBuilderErrorCode.PLAN_SESSION_MISMATCH,
         )
 
     if context.scope == "step" and _find_target_step(plan.spec, context) is None:
-        raise BadRequestException(
+        raise AIBuilderBadRequestException(
             "The selected step no longer exists in the current AI Builder plan.",
-            code=AIBuilderErrorCode.INVALID_PLAN_STEP_REF.value,
+            code=AIBuilderErrorCode.INVALID_PLAN_STEP_REF,
             context={"target_step_ref": step_ref_for_context(context)},
         )
 

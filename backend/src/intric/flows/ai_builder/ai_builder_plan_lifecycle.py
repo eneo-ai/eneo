@@ -23,7 +23,11 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 from intric.flows.ai_builder.ai_builder_edit_models import (
     BuilderPlanEditResult,
 )
-from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+from intric.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+    AIBuilderUnauthorizedException,
+)
 from intric.flows.ai_builder.ai_builder_materializer import (
     compile_changeset,
     execute_changeset,
@@ -54,7 +58,6 @@ from intric.flows.flow_authoring_spec import (
     InputType,
 )
 from intric.flows.flow_resource_bindings import LocalResourceBinding, LocalResourceKind
-from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -149,23 +152,23 @@ class AIBuilderPlanLifecycle:
         revision_type: str,
     ) -> BuilderPlan:
         if revision_type != "keep_current_description":
-            raise BadRequestException(
+            raise AIBuilderBadRequestException(
                 f"Unsupported revision type: {revision_type}",
-                code=AIBuilderErrorCode.UNSUPPORTED_REVISION_TYPE.value,
+                code=AIBuilderErrorCode.UNSUPPORTED_REVISION_TYPE,
             )
 
         plan = await self._get_plan(plan_id)
         if plan.status != PlanStatus.PROPOSED:
-            raise BadRequestException(
+            raise AIBuilderBadRequestException(
                 "Can only revise proposed plans.",
-                code=AIBuilderErrorCode.PLAN_NOT_PROPOSED.value,
+                code=AIBuilderErrorCode.PLAN_NOT_PROPOSED,
             )
 
         session = await self._require_session_creator(plan.session_id)
         if session.status != SessionStatus.AWAITING_APPROVAL:
-            raise BadRequestException(
+            raise AIBuilderBadRequestException(
                 "Can only revise plans when the session is awaiting approval.",
-                code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION.value,
+                code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
             )
 
         revised_edit_result = (plan.edit_result or BuilderPlanEditResult()).model_copy(
@@ -238,9 +241,9 @@ class AIBuilderPlanLifecycle:
 
         # Published flows cannot be mutated — require explicit unpublish first
         if current_flow is not None and current_flow.published_version is not None:
-            raise BadRequestException(
+            raise AIBuilderBadRequestException(
                 "Flow is currently published. Unpublish the flow before applying changes.",
-                code=AIBuilderErrorCode.FLOW_IS_PUBLISHED.value,
+                code=AIBuilderErrorCode.FLOW_IS_PUBLISHED,
                 context={
                     "flow_id": str(current_flow.id),
                     "published_version": current_flow.published_version,
@@ -355,9 +358,9 @@ class AIBuilderPlanLifecycle:
             return tuple()
 
         if not plan.resource_bindings:
-            raise BadRequestException(
+            raise AIBuilderBadRequestException(
                 "The plan is missing resource bindings. Generate a new proposal and try again.",
-                code=AIBuilderErrorCode.AI_BUILDER_PLAN_RESOURCE_BINDINGS_MISSING.value,
+                code=AIBuilderErrorCode.AI_BUILDER_PLAN_RESOURCE_BINDINGS_MISSING,
                 context={
                     "plan_id": str(plan.id),
                     "session_id": str(session.id),
@@ -374,10 +377,10 @@ class AIBuilderPlanLifecycle:
         for binding in plan.resource_bindings:
             if (binding.local_kind, binding.local_id) in available_targets:
                 continue
-            raise BadRequestException(
+            raise AIBuilderBadRequestException(
                 "A resource used by the plan is no longer available in this space. "
                 "Generate a new proposal and choose available resources.",
-                code=AIBuilderErrorCode.AI_BUILDER_PLAN_RESOURCE_BINDING_UNAVAILABLE.value,
+                code=AIBuilderErrorCode.AI_BUILDER_PLAN_RESOURCE_BINDING_UNAVAILABLE,
                 context={
                     "plan_id": str(plan.id),
                     "session_id": str(session.id),
@@ -400,9 +403,9 @@ class AIBuilderPlanLifecycle:
             tenant_id=self.user.tenant_id,
         )
         if session.actor_user_id != self.user.id:
-            raise UnauthorizedException(
+            raise AIBuilderUnauthorizedException(
                 "Only the session creator can manage plans.",
-                code=AIBuilderErrorCode.SESSION_CREATOR_REQUIRED.value,
+                code=AIBuilderErrorCode.SESSION_CREATOR_REQUIRED,
                 context={"auth_layer": "session_creator"},
             )
         return session
@@ -416,22 +419,25 @@ class AIBuilderPlanLifecycle:
         if session.target_kind != TargetKind.EDIT:
             return None
         if session.flow_id is None:
-            raise BadRequestException("Edit session has no flow_id.")
+            raise AIBuilderBadRequestException(
+                "Edit session has no flow_id.",
+                code=AIBuilderErrorCode.EDIT_SESSION_FLOW_REQUIRED,
+            )
 
         current_flow = await self.flow_service.get_flow(session.flow_id)
         if current_flow.space_id != session.space_id:
-            raise BadRequestException(
+            raise AIBuilderBadRequestException(
                 "Flow space does not match the AI builder session space.",
-                code=AIBuilderErrorCode.FLOW_SPACE_MISMATCH.value,
+                code=AIBuilderErrorCode.FLOW_SPACE_MISMATCH,
             )
         if (
             expected_revision is not None
             and current_flow.draft_revision != expected_revision
         ):
-            raise BadRequestException(
+            raise AIBuilderBadRequestException(
                 "Flödet ändrades av en annan användare. "
                 "Dina ändringar beräknas mot den nya versionen.",
-                code=AIBuilderErrorCode.STALE_REVISION.value,
+                code=AIBuilderErrorCode.STALE_REVISION,
             )
         return current_flow
 
@@ -456,9 +462,9 @@ class AIBuilderPlanLifecycle:
             return
 
         first_error = validation.errors[0]
-        raise BadRequestException(
+        raise AIBuilderBadRequestException(
             first_error.message,
-            code=AIBuilderErrorCode.INVALID_EXISTING_STEP_REF.value,
+            code=AIBuilderErrorCode.INVALID_EXISTING_STEP_REF,
             context={
                 "step_ref": first_error.step_ref,
                 "valid_refs": valid_existing_step_refs,
@@ -488,9 +494,10 @@ class AIBuilderPlanLifecycle:
     ) -> None:
         if plan.status == expected_status:
             return
-        raise BadRequestException(
+        raise AIBuilderBadRequestException(
             f"Cannot {action} plan in status '{plan.status.value}'. "
-            f"Plan must be {expected_status.value} first."
+            f"Plan must be {expected_status.value} first.",
+            code=AIBuilderErrorCode.INVALID_PLAN_STATUS,
         )
 
     @staticmethod
@@ -510,7 +517,7 @@ class AIBuilderPlanLifecycle:
             for step in plan.spec.steps
         ):
             return
-        raise BadRequestException(
+        raise AIBuilderBadRequestException(
             "A transcription model must be selected when using audio input steps.",
-            code=AIBuilderErrorCode.TRANSCRIPTION_MODEL_REQUIRED.value,
+            code=AIBuilderErrorCode.TRANSCRIPTION_MODEL_REQUIRED,
         )

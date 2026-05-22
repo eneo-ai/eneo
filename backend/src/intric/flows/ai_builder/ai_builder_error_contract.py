@@ -10,7 +10,12 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from intric.main.exceptions import ErrorCodes
+from intric.main.exceptions import (
+    BadRequestException,
+    ErrorCodes,
+    NotFoundException,
+    UnauthorizedException,
+)
 
 JsonScalar: TypeAlias = str | int | float | bool | None
 
@@ -33,14 +38,18 @@ class AIBuilderErrorCode(StrEnum):
     )
     BAD_REQUEST = "bad_request"
     BUILDER_ATTACHMENT_UNAVAILABLE = "builder_attachment_unavailable"
+    EDIT_SESSION_FLOW_REQUIRED = "edit_session_flow_required"
     FLOW_IS_PUBLISHED = "flow_is_published"
     FLOW_SPACE_MISMATCH = "flow_space_mismatch"
+    INVALID_AI_BUILDER_SETTINGS = "invalid_ai_builder_settings"
     INSUFFICIENT_SCOPE = "insufficient_scope"
     INSUFFICIENT_SPACE_PERMISSION = "insufficient_space_permission"
     INVALID_EXISTING_STEP_REF = "invalid_existing_step_ref"
     INVALID_PLAN_STEP_REF = "invalid_plan_step_ref"
+    INVALID_PLAN_STATUS = "invalid_plan_status"
     INVALID_QUESTION_PAYLOAD = "invalid_question_payload"
     INVALID_SESSION_TRANSITION = "invalid_session_transition"
+    MODEL_NOT_AVAILABLE = "model_not_available"
     NOT_FOUND = "not_found"
     NO_PLANNER_MODEL_AVAILABLE = "no_planner_model_available"
     PLAN_NOT_PROPOSED = "plan_not_proposed"
@@ -92,6 +101,54 @@ class AIBuilderErrorPhase(StrEnum):
     REQUIREMENTS = "requirements"
     ROUTER = "router"
     SELF_CORRECTION = "self_correction"
+
+
+class AIBuilderBadRequestException(BadRequestException):
+    """AI Builder bad-request exception with code narrowed to AIBuilderErrorCode."""
+
+    code: AIBuilderErrorCode
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: AIBuilderErrorCode,
+        context: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(message, code=code.value, context=context)
+        self.code = code
+
+
+class AIBuilderNotFoundException(NotFoundException):
+    """AI Builder not-found exception with code narrowed to AIBuilderErrorCode."""
+
+    code: AIBuilderErrorCode
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: AIBuilderErrorCode,
+        context: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(message, code=code.value, context=context)
+        self.code = code
+
+
+class AIBuilderUnauthorizedException(UnauthorizedException):
+    """AI Builder unauthorized exception with code narrowed to AIBuilderErrorCode."""
+
+    code: AIBuilderErrorCode
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: AIBuilderErrorCode,
+        context: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(message, code=code.value, context=context)
+        self.code = code
 
 
 _DIAGNOSTIC_STRING_KEYS = frozenset(
@@ -176,12 +233,22 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
             http_status=400,
             intric_error_code=ErrorCodes.BAD_REQUEST,
         ),
+        AIBuilderErrorCode.EDIT_SESSION_FLOW_REQUIRED: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+        ),
         AIBuilderErrorCode.FLOW_IS_PUBLISHED: _entry(
             category=AIBuilderErrorCategory.BAD_REQUEST,
             http_status=400,
             intric_error_code=ErrorCodes.BAD_REQUEST,
         ),
         AIBuilderErrorCode.FLOW_SPACE_MISMATCH: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+        ),
+        AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS: _entry(
             category=AIBuilderErrorCategory.BAD_REQUEST,
             http_status=400,
             intric_error_code=ErrorCodes.BAD_REQUEST,
@@ -206,6 +273,11 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
             http_status=400,
             intric_error_code=ErrorCodes.BAD_REQUEST,
         ),
+        AIBuilderErrorCode.INVALID_PLAN_STATUS: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+        ),
         AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD: _entry(
             category=AIBuilderErrorCategory.BAD_REQUEST,
             http_status=400,
@@ -215,6 +287,11 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
         AIBuilderErrorCode.INVALID_SESSION_TRANSITION: _entry(
             category=AIBuilderErrorCategory.CONFLICT,
             http_status=409,
+            intric_error_code=ErrorCodes.BAD_REQUEST,
+        ),
+        AIBuilderErrorCode.MODEL_NOT_AVAILABLE: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
             intric_error_code=ErrorCodes.BAD_REQUEST,
         ),
         AIBuilderErrorCode.NOT_FOUND: _entry(

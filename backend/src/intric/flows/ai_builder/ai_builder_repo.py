@@ -38,7 +38,11 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 from intric.flows.ai_builder.ai_builder_edit_models import (
     BuilderPlanEditResult,
 )
-from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+from intric.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+    AIBuilderNotFoundException,
+)
 from intric.flows.ai_builder.ai_builder_session_transitions import (
     ensure_valid_session_status_transition,
 )
@@ -58,7 +62,6 @@ from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
 )
 from intric.flows.flow_resource_bindings import LocalResourceBinding
-from intric.main.exceptions import BadRequestException, NotFoundException
 
 if TYPE_CHECKING:
     from intric.flows.flow import Flow
@@ -301,7 +304,10 @@ class AIBuilderRepository:
             )
             row = (await self.session.execute(stmt)).scalar_one_or_none()
             if row is None:
-                raise NotFoundException("Builder session not found.")
+                raise AIBuilderNotFoundException(
+                    "Builder session not found.",
+                    code=AIBuilderErrorCode.NOT_FOUND,
+                )
             return _session_from_row(row)
 
     async def attach_session_files(
@@ -421,7 +427,10 @@ class AIBuilderRepository:
                 await self.session.execute(current_stmt)
             ).scalar_one_or_none()
             if current_value is None:
-                raise NotFoundException("Builder session not found.")
+                raise AIBuilderNotFoundException(
+                    "Builder session not found.",
+                    code=AIBuilderErrorCode.NOT_FOUND,
+                )
             ensure_valid_session_status_transition(
                 current=SessionStatus(current_value),
                 next_status=status,
@@ -446,9 +455,9 @@ class AIBuilderRepository:
                 await self.session.execute(stmt)
                 updated_session_id = session_id
             if updated_session_id is None:
-                raise BadRequestException(
+                raise AIBuilderBadRequestException(
                     "The AI Builder session lease was lost while updating session status.",
-                    code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST.value,
+                    code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
                 )
 
     async def update_session_conversation(
@@ -478,9 +487,9 @@ class AIBuilderRepository:
                 stmt.returning(BuilderSessions.id)
             )
             if updated_session_id is None:
-                raise BadRequestException(
+                raise AIBuilderBadRequestException(
                     "The AI Builder session lease was lost while updating conversation state.",
-                    code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST.value,
+                    code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
                 )
 
     async def append_session_messages(
@@ -516,9 +525,9 @@ class AIBuilderRepository:
             )
             row = (await self.session.execute(stmt)).scalar_one_or_none()
             if row is None:
-                raise BadRequestException(
+                raise AIBuilderBadRequestException(
                     "The AI Builder session lease was lost while appending conversation messages.",
-                    code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST.value,
+                    code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
                 )
 
             existing = _session_from_row(row).conversation
@@ -540,9 +549,9 @@ class AIBuilderRepository:
                 update_stmt.returning(BuilderSessions.id)
             )
             if updated_session_id is None:
-                raise BadRequestException(
+                raise AIBuilderBadRequestException(
                     "The AI Builder session lease was lost while saving conversation messages.",
-                    code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST.value,
+                    code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
                 )
             if committed_file_ids:
                 rows = [
@@ -611,7 +620,10 @@ class AIBuilderRepository:
             )
             current_row = (await self.session.execute(current_stmt)).one_or_none()
             if current_row is None:
-                raise NotFoundException("Builder session not found.")
+                raise AIBuilderNotFoundException(
+                    "Builder session not found.",
+                    code=AIBuilderErrorCode.NOT_FOUND,
+                )
             (
                 current_status_value,
                 active_request_id,
@@ -638,16 +650,16 @@ class AIBuilderRepository:
                 }
             else:
                 if current_status != SessionStatus.AWAITING_APPROVAL:
-                    raise BadRequestException(
+                    raise AIBuilderBadRequestException(
                         "Can only revise plans when the session is awaiting approval.",
-                        code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION.value,
+                        code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
                     )
                 lock_is_set = active_request_id is not None or lock_token is not None
                 lock_is_expired = lock_expires_at is not None and lock_expires_at <= now
                 if lock_is_set and not lock_is_expired:
-                    raise BadRequestException(
+                    raise AIBuilderBadRequestException(
                         "An active send is currently in progress for this session.",
-                        code=AIBuilderErrorCode.SESSION_SEND_IN_PROGRESS.value,
+                        code=AIBuilderErrorCode.SESSION_SEND_IN_PROGRESS,
                     )
                 expired_lock_is_available = sa.and_(
                     BuilderSessions.lock_expires_at.is_not(None),
@@ -683,13 +695,13 @@ class AIBuilderRepository:
             )
             if updated_session_id is None:
                 if lease is not None:
-                    raise BadRequestException(
+                    raise AIBuilderBadRequestException(
                         "The AI Builder session lease was lost while recording the latest plan.",
-                        code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST.value,
+                        code=AIBuilderErrorCode.SESSION_SEND_LEASE_LOST,
                     )
-                raise BadRequestException(
+                raise AIBuilderBadRequestException(
                     "The latest plan could not be updated due to a concurrent session change.",
-                    code=AIBuilderErrorCode.SESSION_LATEST_PLAN_UPDATE_CONFLICT.value,
+                    code=AIBuilderErrorCode.SESSION_LATEST_PLAN_UPDATE_CONFLICT,
                 )
 
     async def update_session_flow_id(
@@ -851,7 +863,10 @@ class AIBuilderRepository:
             )
             row = (await self.session.execute(stmt)).scalar_one_or_none()
             if row is None:
-                raise NotFoundException("Builder plan not found.")
+                raise AIBuilderNotFoundException(
+                    "Builder plan not found.",
+                    code=AIBuilderErrorCode.NOT_FOUND,
+                )
             return _plan_from_row(row)
 
     async def list_session_plans(
@@ -940,7 +955,7 @@ class AIBuilderRepository:
         requires the row's current `planning_state_version` to equal
         it. If the row moved on (concurrent writer committed in
         between), the UPDATE matches zero rows and this raises
-        `BadRequestException(code=AIBuilderErrorCode.PLANNING_STATE_VERSION_MISMATCH)`.
+        `AIBuilderBadRequestException(code=AIBuilderErrorCode.PLANNING_STATE_VERSION_MISMATCH)`.
         Callers should reload the state and retry with the fresh
         version. When `base_version` is `None` the save is
         unconditional (last-writer-wins).
@@ -988,16 +1003,17 @@ class AIBuilderRepository:
                 await self.session.execute(exists_stmt)
             ).scalar_one_or_none()
             if current_version is None:
-                raise NotFoundException(
+                raise AIBuilderNotFoundException(
                     f"Builder session {session_id} not found for tenant "
-                    f"{tenant_id}; planning state not saved."
+                    f"{tenant_id}; planning state not saved.",
+                    code=AIBuilderErrorCode.NOT_FOUND,
                 )
-            raise BadRequestException(
+            raise AIBuilderBadRequestException(
                 (
                     f"Planning state version mismatch: expected base_version="
                     f"{base_version}, found {current_version}."
                 ),
-                code=AIBuilderErrorCode.PLANNING_STATE_VERSION_MISMATCH.value,
+                code=AIBuilderErrorCode.PLANNING_STATE_VERSION_MISMATCH,
             )
 
     async def load_planning_state(
@@ -1029,8 +1045,9 @@ class AIBuilderRepository:
             )
             row = (await self.session.execute(stmt)).one_or_none()
             if row is None:
-                raise NotFoundException(
-                    f"Builder session {session_id} not found for tenant {tenant_id}."
+                raise AIBuilderNotFoundException(
+                    f"Builder session {session_id} not found for tenant {tenant_id}.",
+                    code=AIBuilderErrorCode.NOT_FOUND,
                 )
             payload = row[1]
             if payload is None:

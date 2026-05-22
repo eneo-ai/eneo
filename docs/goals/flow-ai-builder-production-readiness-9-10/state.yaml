@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T028
+active_task: T029
 
 scoring_target:
   dimensions:
@@ -50,7 +50,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T026b implementation/post-review: conversation metadata/tool-call JSONB, public error diagnostics, frontend diagnostic reports, targeted runtime-field intent, AI Builder model import ownership, builder session send-lock persistence, the live-eval harness, and runtime slot-classification persistence/replay now have typed/canonical ownership or DB-backed/runtime evidence. The five-case authenticated live eval now passes C1-C5, including C4 runtime form fields. The broader score floor remains 8 because full-source Pyright/test baseline and API/error-code discipline remain below 9, readability/module/test topology still needs consolidation, and future output-quality changes must keep the live eval green."
+  source: "After T028 implementation/post-review: conversation metadata/tool-call JSONB, public error diagnostics, frontend diagnostic reports, targeted runtime-field intent, AI Builder model import ownership, builder session send-lock persistence, the live-eval harness, runtime slot-classification persistence/replay, and public error-code discipline now have typed/canonical ownership or DB-backed/runtime evidence. The five-case authenticated live eval passes C1-C5, including C4 runtime form fields. API Contract Quality moves to 9 after typed AI Builder public exceptions, a zero-allowlist static guard, single JSON route-class translation owner, and Claude GREEN_LIGHT yes / MIN_SCORE 8. The broader score floor remains 8 because readability/module topology, test topology, generated-client regeneration determinism, and full-source Pyright/test baseline still need consolidation or documented resolution."
   Maintainability: 8
   Code_Quality: 8
   Clean_Architecture: 8
@@ -60,18 +60,18 @@ current_scorecard:
   Human_Reviewability: 8
   Runtime_Reliability: 9
   Data_Model_Schema_Quality: 9
-  API_Contract_Quality: 8
+  API_Contract_Quality: 9
   Test_Coverage_Quality: 8
   Developer_Diagnostic_Experience: 9
   AI_Slop_Comment_Naming_Quality: 8
   Normal_User_Output_Quality: 9
   Overall: 8
   blockers:
-    - "Public/lifecycle/CAS error-code discipline improved, but calls that omit code= entirely can still silently use generic codes; future error-contract work must continue without creating a third public context carrier."
+    - "Public/lifecycle/CAS error-code discipline is now typed and guarded in AI Builder-owned raise sites, but generated-client regeneration determinism is not solved; T028 kept only the intentional enum literals after openapi-typescript produced broad unrelated churn."
     - "The five-case authenticated live eval now proves C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX, C4 runtime form fields, and C5 revise/edit through the public API, but this gate must be repeated after later planner/runtime changes rather than treated as permanent output-quality proof."
     - "ai_builder_proposal_processor.py is materially smaller after T011 but still oversized at 1830 LOC; structured-question recovery, confirm requirements, and retry orchestration remain in one processor."
     - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, and full-source Pyright baseline failures outside AI Builder."
-    - "Overall remains 8 until full-source typing/test baseline, API/error-code discipline, consolidation/readability/test-topology tranches, and repeated live-eval evidence prove every dimension is honestly at least 9."
+    - "Overall remains 8 until generated-client tooling determinism, full-source typing/test baseline, consolidation/readability/test-topology tranches, and repeated live-eval evidence prove every dimension is honestly at least 9."
 
 score_floor_completion_gates:
   source: "2026-05-21 user review: the board must prevent 'plan executed' from being confused with '9/10 achieved'."
@@ -3273,7 +3273,7 @@ tasks:
   - id: T028
     type: worker
     assignee: Worker
-    status: active
+    status: completed
     reasoning_hint: xhigh
     objective: "Implement typed AI Builder public exception/error-code discipline so REST/SSE errors cannot silently fall back to generic bad_request for AI Builder-owned failures."
     inputs:
@@ -3333,7 +3333,100 @@ tasks:
       - "Generated client impact is broader than intentional enum additions."
       - "The migration requires files outside the allowed list, exceeds 500 non-test LOC excluding mechanical import/raise rewrites, or changes planner/proposal behavior beyond exception type/code."
       - "Claude post-implementation review finds a blocking issue that cannot be resolved within T028 scope."
-    receipt: null
+    receipt:
+      completed_at: "2026-05-22T03:54:00+02:00"
+      result: done
+      summary:
+        - "Added typed AI Builder public exception subclasses in ai_builder_error_contract.py: AIBuilderBadRequestException, AIBuilderNotFoundException, and AIBuilderUnauthorizedException require AIBuilderErrorCode."
+        - "Migrated all AI Builder-owned raw public exception raises to typed local exceptions with enum code arguments; the static discipline guard has zero production allowlist entries."
+        - "Added four specific public error codes: edit_session_flow_required, model_not_available, invalid_plan_status, and invalid_ai_builder_settings."
+        - "Replaced silent router/SSE fallback with _public_error_code_from_exception; typed exceptions return enum codes directly, raw public exception leaks are logged with request_id/surface/raw_error_code/fallback_error_code."
+        - "Deleted the apply_plan inline bad-request translator so synchronous JSON public-error translation has one canonical route-class owner. SSE stream translation remains inline because it yields events instead of JSON."
+        - "Updated route/wire tests so stale-revision and published-flow apply errors exercise AIBuilderPublicErrorRoute via TestClient; added direct raw-public-exception fallback-log coverage."
+        - "OpenAPI generation proved the new enum values exist. The local openapi-typescript run produced broad unrelated churn, so T028 kept only the four intentional enum literal additions in schema.d.ts and records a durable generated-client tooling follow-up."
+      peer_review:
+        claude:
+          iteration_1:
+            artifact: ".codex/artifacts/claude-peer-loop-flow-ai-builder-t028-typed-error-discipline-implementation-20260522T014131Z.md"
+            verdict: "changes_required"
+            green_light: false
+            min_score: 7
+            blockers:
+              - "Commit scope had to exclude unrelated dirty files."
+              - "apply_plan duplicated AIBuilderPublicErrorRoute JSON translation."
+              - "Generated-client manual enum patch needed a durable follow-up."
+              - "Raw-exception logging fallback lacked direct test coverage."
+          iteration_2:
+            artifact: ".codex/artifacts/claude-peer-loop-flow-ai-builder-t028-typed-error-discipline-implementation-20260522T015258Z.md"
+            verdict: "green"
+            green_light: true
+            min_score: 8
+            residual_followups:
+              - "Persist generated-client regeneration determinism cleanup so manual schema enum patches do not become long-term workflow."
+              - "Keep git staging restricted to T028-owned files."
+              - "Optional future coverage: add wire-shape assertions for the other new enum codes if they become high-risk public paths."
+        antigravity:
+          status: "SKIPPED_DUE_TO_QUOTA"
+          reason: "Quota status previously recommended skip because Gemini models were 0%; Antigravity not counted as pass for T028."
+      verification:
+        - command: "cd backend && uv run pytest tests/unit/test_ai_builder_error_code_discipline.py -q"
+          result: "passed: 1 passed"
+        - command: "cd backend && uv run pytest tests/unit/test_ai_builder_error_code_discipline.py tests/unittests/flows/ai_builder/test_ai_builder_error_contract.py tests/unittests/flows/ai_builder/test_ai_builder_router.py tests/unit/test_ai_builder_openapi_contract.py -q"
+          result: "passed after Claude blocker fixes: 92 passed, 15 pre-existing warnings"
+        - command: "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+          result: "passed: 2248 passed, 4 skipped, 11 pre-existing warnings"
+        - command: "cd backend && uv run ruff check <T028 backend files/tests>"
+          result: "passed"
+        - command: "cd backend && uv run ruff format --check <T028 backend files/tests>"
+          result: "passed: 14 files already formatted"
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+          result: "passed: 0 errors, 0 warnings, 0 informations"
+        - command: "cd frontend/packages/intric-js && bun run check"
+          result: "passed"
+        - command: "cd backend && uv run python - <<'PY' > /tmp/eneo-openapi-t028.json; from intric.server.main import get_application; import json; print(json.dumps(get_application().openapi())); PY; uv run python <enum-check>"
+          result: "passed: AIBuilderErrorCode OpenAPI enum contains edit_session_flow_required, model_not_available, invalid_plan_status, and invalid_ai_builder_settings"
+        - command: "git diff --check"
+          result: "passed"
+      residual_risks:
+        - "Overall broader goal remains 8/10, not complete."
+        - "Generated-client regeneration is not deterministic in this environment; T028 records this as a follow-up rather than committing broad generated churn."
+        - "Large orchestration files, misleading test names, compatibility comments, and full-source Pyright/test baseline still block Maintainability, Human Readability, Human Reviewability, Test Coverage Quality, Code Quality, Clean Architecture, Separation of Concerns, and AI Slop / Comment / Naming Quality from honest 9/10."
+        - "Normal-user live eval currently passes but must be repeated after future planner/runtime/output changes."
+      next_recommendation: "Activate T029 as a PM/Judge re-rank focused on the remaining 8/10 floor: generated-client regeneration determinism, readability/module/test topology simplification, full-source baseline failures, and whether live eval should be repeated before or after topology work."
+
+  - id: T029
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: xhigh
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T028, with pressure on generated-client regeneration determinism, readability/module/test topology, full-source baseline failures, AI slop cleanup, and whether normal-user live eval should be repeated before further topology work."
+    inputs:
+      - "T028 receipt and Claude green implementation review"
+      - "Current worktree after the T028 commit"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t028-implementation-summary.md"
+    constraints:
+      - "Do not implement in T029; produce an evidence-backed ranking and implementation-ready next-tranche plan first."
+      - "Do not start broad file splitting by line count. Any topology tranche must reduce navigation burden through deletion, merge, rename, or clearer canonical entry points."
+      - "Do not treat generated-client manual schema patching as acceptable long-term workflow; either plan deterministic regeneration cleanup or explicitly justify deferral."
+      - "Repeat Antigravity only if quota is available; otherwise record SKIPPED_DUE_TO_QUOTA, not pass."
+      - "Use Claude peer-loop for the non-trivial ranking/plan gate before implementation."
+    acceptance_criteria:
+      - "Current dirty worktree is reconciled and unrelated dirty files remain outside the next tranche."
+      - "The ranking names the exact dimension floor blockers after T028 and explains why the selected tranche moves the minimum score more than alternatives."
+      - "Candidate tranches include at least generated-client tooling determinism, readability/module/test topology consolidation, full-source baseline cleanup, and repeat live-eval/product-output gating."
+      - "The selected worker has allowed files, non-goals, acceptance criteria, validation commands, residual risks, and peer-review gates."
+      - "Scorecard remains honest; no dimension is moved to 9 without implementation and verification evidence."
+    verify:
+      - "git status --short --branch"
+      - "git log --oneline --decorate -8"
+      - "rg/nl evidence for selected blockers"
+      - "Claude peer-loop GREEN_LIGHT yes / MIN_SCORE >= 8 for the selected next-tranche plan, or documented disagreement."
+      - "Antigravity quota status or peer-loop result recorded if used."
+    stop_if:
+      - "The next tranche requires a broad architecture rewrite, destructive migration, or wider file scope than the evidence can justify."
+      - "Claude finds a blocking ranking/plan issue that cannot be resolved in two iterations."
+      - "Antigravity and Claude disagree on the next tranche and Codex cannot resolve the disagreement with source evidence."
 
 checks:
   dirty_fingerprint:
@@ -3341,16 +3434,20 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T027 completed and T028 activated. T027 re-ranked the next tranche after T026b, selected typed AI Builder public exception/error-code discipline as the next bounded worker, revised after two Claude rejections, and received Claude GREEN_LIGHT yes / MIN_SCORE 8 on iteration 3. Antigravity quota status recommended skipping because Gemini models were 0%, so Antigravity is recorded as SKIPPED_DUE_TO_QUOTA, not pass. Broader goal remains incomplete with overall strict floor 8/10."
-    task: T027
+    result: "T028 completed and T029 activated. T028 implemented typed AI Builder public exception/error-code discipline, removed duplicate apply_plan JSON error translation, added static and wire coverage, preserved unrelated dirty files unstaged, moved API Contract Quality to 9, and kept the broader strict floor at 8/10. Claude iteration 1 required changes; Claude iteration 2 returned GREEN_LIGHT yes / MIN_SCORE 8. Antigravity remains SKIPPED_DUE_TO_QUOTA, not pass."
+    task: T028
     commands:
-      - "git status --short --branch: branch feature/refactor-flows-flowai ahead 25; only unrelated dirty files plus board update"
+      - "git status --short --branch: branch feature/refactor-flows-flowai ahead 26 before T028 commit; unrelated .devcontainer/.gitignore/AGENTS/icons/media files preserved unstaged"
+      - "cd backend && uv run pytest tests/unit/test_ai_builder_error_code_discipline.py -q: 1 passed"
+      - "cd backend && uv run pytest tests/unit/test_ai_builder_error_code_discipline.py tests/unittests/flows/ai_builder/test_ai_builder_error_contract.py tests/unittests/flows/ai_builder/test_ai_builder_router.py tests/unit/test_ai_builder_openapi_contract.py -q: 92 passed, 15 warnings"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2248 passed, 4 skipped, 11 warnings"
+      - "cd backend && uv run ruff check <T028 backend files/tests>: passed"
+      - "cd backend && uv run ruff format --check <T028 backend files/tests>: 14 files already formatted"
       - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder: 0 errors, 0 warnings, 0 informations"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric: 112 existing errors outside flows/ai_builder"
-      - "cd backend && uv run python <AST missing-code inventory>: 13 missing-code AI Builder public exception sites, 0 bare string code values, 0 code=None values"
-      - "cd backend && uv run python <AST .value inventory>: 34 existing AIBuilderErrorCode.*.value public exception sites to migrate mechanically"
-      - "Antigravity quota status: recommended skip; Gemini models 0%; SKIPPED_DUE_TO_QUOTA, not pass"
-      - "Claude T027 iteration 1: .codex/artifacts/claude-peer-loop-flow-ai-builder-t027-next-tranche-ranking-20260522T010850Z.md: GREEN_LIGHT no; MIN_SCORE 5"
-      - "Claude T027 iteration 2: .codex/artifacts/claude-peer-loop-flow-ai-builder-t027-next-tranche-ranking-iteration-2-20260522T011617Z.md: GREEN_LIGHT no; MIN_SCORE 7"
-      - "Claude T027 iteration 3: .codex/artifacts/claude-peer-loop-flow-ai-builder-t027-next-tranche-ranking-iteration-3-20260522T011951Z.md: GREEN_LIGHT yes; MIN_SCORE 8"
+      - "cd frontend/packages/intric-js && bun run check: passed"
+      - "cd backend && uv run python get_application().openapi() plus enum JSON check: four new AIBuilderErrorCode values present"
+      - "git diff --check: passed"
+      - "Claude T028 iteration 1: .codex/artifacts/claude-peer-loop-flow-ai-builder-t028-typed-error-discipline-implementation-20260522T014131Z.md: GREEN_LIGHT no; MIN_SCORE 7"
+      - "Claude T028 iteration 2: .codex/artifacts/claude-peer-loop-flow-ai-builder-t028-typed-error-discipline-implementation-20260522T015258Z.md: GREEN_LIGHT yes; MIN_SCORE 8"
+      - "Antigravity: SKIPPED_DUE_TO_QUOTA, not pass"
       - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"': yaml ok"

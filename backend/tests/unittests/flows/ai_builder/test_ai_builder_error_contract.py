@@ -7,10 +7,13 @@ from pydantic import ValidationError
 
 from intric.flows.ai_builder.ai_builder_error_contract import (
     AI_BUILDER_ERROR_REGISTRY,
+    AIBuilderBadRequestException,
     AIBuilderDiagnosticContext,
     AIBuilderErrorCode,
     AIBuilderErrorPhase,
+    AIBuilderNotFoundException,
     AIBuilderPublicError,
+    AIBuilderUnauthorizedException,
     build_ai_builder_error,
     build_ai_builder_error_event,
     split_ai_builder_error_context,
@@ -20,6 +23,25 @@ from intric.main.exceptions import ErrorCodes
 
 def test_error_registry_has_entry_for_every_error_code_enum_member() -> None:
     assert set(AI_BUILDER_ERROR_REGISTRY) == set(AIBuilderErrorCode)
+
+
+def test_typed_public_exceptions_store_enum_error_code() -> None:
+    bad_request = AIBuilderBadRequestException(
+        "Invalid settings.",
+        code=AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS,
+    )
+    not_found = AIBuilderNotFoundException(
+        "Missing plan.",
+        code=AIBuilderErrorCode.NOT_FOUND,
+    )
+    unauthorized = AIBuilderUnauthorizedException(
+        "Forbidden.",
+        code=AIBuilderErrorCode.INSUFFICIENT_SPACE_PERMISSION,
+    )
+
+    assert bad_request.code is AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS
+    assert not_found.code is AIBuilderErrorCode.NOT_FOUND
+    assert unauthorized.code is AIBuilderErrorCode.INSUFFICIENT_SPACE_PERMISSION
 
 
 def test_error_event_serializes_to_public_v2_schema() -> None:

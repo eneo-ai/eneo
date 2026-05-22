@@ -54,6 +54,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
 )
 from intric.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
     AIBuilderErrorCode,
     AIBuilderErrorPhase,
     build_ai_builder_error_event,
@@ -163,7 +164,6 @@ from intric.flows.ai_builder.planning_state_builder import (
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY
 from intric.main.config import get_settings
-from intric.main.exceptions import BadRequestException
 from intric.main.logging import get_logger
 from intric.model_providers.domain.model_defaults import lookup_model_defaults
 from intric.observability.failure_events import (
@@ -1073,9 +1073,9 @@ class AIBuilderPlanner:
             max_output_tokens = defaults.max_output_tokens if defaults else None
 
         if max_input_tokens is None or max_output_tokens is None:
-            raise BadRequestException(
+            raise AIBuilderBadRequestException(
                 "AI Builder planner budget settings are missing.",
-                code=AIBuilderErrorCode.PLANNER_BUDGET_MISSING.value,
+                code=AIBuilderErrorCode.PLANNER_BUDGET_MISSING,
             )
 
         response_format_selection = build_planner_request_response_format(
@@ -1088,8 +1088,9 @@ class AIBuilderPlanner:
         )
         session_status = _session_status_value(session.status)
         if session_status not in _MESSAGE_ACCEPTING_SESSION_STATUSES:
-            raise BadRequestException(
-                f"Cannot send messages in session status '{session_status}'."
+            raise AIBuilderBadRequestException(
+                f"Cannot send messages in session status '{session_status}'.",
+                code=AIBuilderErrorCode.INVALID_SESSION_TRANSITION,
             )
 
         request_id = str(uuid4())
@@ -1111,9 +1112,9 @@ class AIBuilderPlanner:
             lock_expires_at=self._next_send_lock_expiry(),
         )
         if not claimed:
-            raise BadRequestException(
+            raise AIBuilderBadRequestException(
                 "Another AI Builder message is already being processed for this session.",
-                code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS.value,
+                code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS,
             )
         lease_task = asyncio.create_task(
             self._maintain_send_lock_lease(
@@ -1421,8 +1422,8 @@ class AIBuilderPlanner:
                     build_new_messages=_build_new_messages,
                     precomputed_output=precomputed_output,
                 )
-            except BadRequestException as error:
-                if error.code == "session_send_lease_lost":
+            except AIBuilderBadRequestException as error:
+                if error.code is AIBuilderErrorCode.SESSION_SEND_LEASE_LOST:
                     yield build_ai_builder_error_event(
                         message=(
                             "The AI Builder session lock was lost while the "

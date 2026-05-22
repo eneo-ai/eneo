@@ -4,7 +4,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from intric.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+from intric.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 from intric.flows.ai_builder.ai_builder_mcp_resources import (
     AIBuilderMCPServerResource,
     normalize_ai_builder_mcp_resources,
@@ -17,7 +20,6 @@ from intric.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
     resolve_ai_builder_budget_policy,
 )
-from intric.main.exceptions import BadRequestException
 from intric.model_providers.domain.model_defaults import lookup_model_defaults
 
 if TYPE_CHECKING:
@@ -109,9 +111,9 @@ def resolve_planner_model(space: "Space") -> "CompletionModel":
         return model
     if space.completion_models:
         return space.completion_models[0]
-    raise BadRequestException(
+    raise AIBuilderBadRequestException(
         "No AI builder planner model is available in this space.",
-        code=AIBuilderErrorCode.NO_PLANNER_MODEL_AVAILABLE.value,
+        code=AIBuilderErrorCode.NO_PLANNER_MODEL_AVAILABLE,
     )
 
 
@@ -130,7 +132,10 @@ def resolve_requested_model(
         None,
     )
     if model is None:
-        raise BadRequestException("Selected model not available in this space")
+        raise AIBuilderBadRequestException(
+            "Selected model not available in this space",
+            code=AIBuilderErrorCode.MODEL_NOT_AVAILABLE,
+        )
     return model
 
 
@@ -152,18 +157,18 @@ def build_planner_context(
         or budget_policy.unknown_model_context_window_tokens
     )
     if max_input_tokens is None:
-        raise BadRequestException(
+        raise AIBuilderBadRequestException(
             "Planner model is missing a usable context window. Configure max_input_tokens for the model or set an AI Builder fallback in flow settings.",
-            code=AIBuilderErrorCode.PLANNER_MODEL_MISSING_CONTEXT_WINDOW.value,
+            code=AIBuilderErrorCode.PLANNER_MODEL_MISSING_CONTEXT_WINDOW,
         )
 
     max_output_tokens = getattr(model, "max_output_tokens", None) or (
         defaults.max_output_tokens if defaults else None
     )
     if max_output_tokens is None:
-        raise BadRequestException(
+        raise AIBuilderBadRequestException(
             "Planner model is missing max_output_tokens. Configure the model before using AI Builder.",
-            code=AIBuilderErrorCode.PLANNER_MODEL_MISSING_OUTPUT_TOKENS.value,
+            code=AIBuilderErrorCode.PLANNER_MODEL_MISSING_OUTPUT_TOKENS,
         )
 
     available_models = serialize_space_models(space)

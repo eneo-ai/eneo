@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 from fastapi import APIRouter, FastAPI
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from intric.audit.domain.action_types import ActionType
@@ -33,6 +35,12 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     PlanStatus,
     SessionStatus,
     TargetKind,
+)
+from intric.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+    AIBuilderNotFoundException,
+    AIBuilderUnauthorizedException,
 )
 from intric.flows.ai_builder.ai_builder_router import (
     AIBuilderPublicErrorRoute,
@@ -83,30 +91,40 @@ def test_ai_builder_route_class_translates_http_errors_to_public_contract() -> N
 
     @test_router.get("/busy")
     async def busy() -> None:
-        raise BadRequestException(
+        raise AIBuilderBadRequestException(
             "Another AI Builder message is already being processed.",
-            code="session_message_in_progress",
+            code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS,
         )
 
     @test_router.get("/planner-budget")
     async def planner_budget() -> None:
-        raise BadRequestException(
+        raise AIBuilderBadRequestException(
             "No planner output budget is configured.",
-            code="planner_budget_missing",
+            code=AIBuilderErrorCode.PLANNER_BUDGET_MISSING,
             context={"budget_owner": "space"},
+        )
+
+    @test_router.get("/invalid-settings")
+    async def invalid_settings() -> None:
+        raise AIBuilderBadRequestException(
+            "minimum_conversation_budget_tokens must be an integer.",
+            code=AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS,
         )
 
     @test_router.get("/forbidden")
     async def forbidden() -> None:
-        raise UnauthorizedException(
+        raise AIBuilderUnauthorizedException(
             "You do not have permission to use the AI builder in this space.",
-            code="insufficient_space_permission",
+            code=AIBuilderErrorCode.INSUFFICIENT_SPACE_PERMISSION,
             context={"auth_layer": "space_membership"},
         )
 
     @test_router.get("/missing")
     async def missing() -> None:
-        raise NotFoundException("AI Builder resource not found.")
+        raise AIBuilderNotFoundException(
+            "AI Builder resource not found.",
+            code=AIBuilderErrorCode.NOT_FOUND,
+        )
 
     app.include_router(test_router)
     client = TestClient(app)
@@ -149,6 +167,24 @@ def test_ai_builder_route_class_translates_http_errors_to_public_contract() -> N
         "details": {"budget_owner": "space"},
     }
 
+    response = client.get("/invalid-settings", headers={"x-request-id": "req-settings"})
+    assert response.status_code == 400
+    assert response.json() == {
+        "schema_version": 2,
+        "code": "invalid_ai_builder_settings",
+        "category": "bad_request",
+        "message": "minimum_conversation_budget_tokens must be an integer.",
+        "phase": "router",
+        "intric_error_code": int(ErrorCodes.BAD_REQUEST),
+        "request_id": "req-settings",
+        "diagnostic_context": {
+            "request_id": "req-settings",
+            "error_code": "invalid_ai_builder_settings",
+            "error_category": "bad_request",
+            "error_phase": "router",
+        },
+    }
+
     response = client.get("/forbidden", headers={"x-request-id": "req-forbidden"})
     assert response.status_code == 403
     assert response.json() == {
@@ -185,6 +221,39 @@ def test_ai_builder_route_class_translates_http_errors_to_public_contract() -> N
             "error_phase": "router",
         },
     }
+
+
+def test_ai_builder_route_class_logs_raw_public_exception_fallback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app = FastAPI()
+    test_router = APIRouter(route_class=AIBuilderPublicErrorRoute)
+
+    @test_router.get("/raw")
+    async def raw_exception() -> None:
+        raise BadRequestException("Raw AI Builder exception.", code="not_registered")
+
+    app.include_router(test_router)
+    client = TestClient(app)
+
+    with caplog.at_level(
+        logging.ERROR,
+        logger="intric.flows.ai_builder.ai_builder_router",
+    ):
+        response = client.get("/raw", headers={"x-request-id": "req-raw"})
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "bad_request"
+    records = [
+        record
+        for record in caplog.records
+        if record.message == "AI Builder raw public exception reached adapter."
+    ]
+    assert len(records) == 1
+    assert records[0].request_id == "req-raw"
+    assert records[0].surface == "route_bad_request"
+    assert records[0].raw_error_code == "not_registered"
+    assert records[0].fallback_error_code == "bad_request"
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +342,27 @@ def _make_container(
     container.completion_model_crud_service.return_value = model_service
 
     return container
+
+
+def _make_apply_plan_client(container: MagicMock) -> TestClient:
+    app = FastAPI()
+    app.include_router(ai_builder_router)
+
+    async def override_container():
+        return container
+
+    for route in app.routes:
+        if (
+            isinstance(route, APIRoute)
+            and route.path == "/ai-builder/plans/{plan_id}/apply"
+        ):
+            for dependency in route.dependant.dependencies:
+                if dependency.name == "container":
+                    app.dependency_overrides[dependency.call] = override_container
+                    return TestClient(app)
+            raise AssertionError("AI Builder apply-plan container dependency was missing.")
+
+    raise AssertionError("AI Builder apply-plan route was not registered.")
 
 
 def _make_request(*, scoped_space_id=None) -> MagicMock:
@@ -1688,9 +1778,9 @@ class TestSendMessageEndpoint:
         service.get_session.return_value = session
 
         async def rejected_events(*args, **kwargs):
-            raise BadRequestException(
+            raise AIBuilderBadRequestException(
                 "Another AI Builder message is already being processed for this session.",
-                code="session_message_in_progress",
+                code=AIBuilderErrorCode.SESSION_MESSAGE_IN_PROGRESS,
             )
             yield  # pragma: no cover
 
@@ -1734,9 +1824,9 @@ class TestSendMessageEndpoint:
         service.get_session.return_value = session
 
         async def rejected_events(*args, **kwargs):
-            raise BadRequestException(
+            raise AIBuilderBadRequestException(
                 "No planner output budget is configured.",
-                code="planner_budget_missing",
+                code=AIBuilderErrorCode.PLANNER_BUDGET_MISSING,
                 context={"budget_owner": "space"},
             )
             yield  # pragma: no cover
@@ -1991,19 +2081,18 @@ class TestApplyPlanEndpoint:
         service = container.ai_builder_service.return_value
         service.get_plan.return_value = plan
         service.get_session.return_value = session
-        service.apply_plan.side_effect = BadRequestException(
+        service.apply_plan.side_effect = AIBuilderBadRequestException(
             "Flow draft revision is stale.",
-            code="stale_revision",
+            code=AIBuilderErrorCode.STALE_REVISION,
+        )
+        client = _make_apply_plan_client(container)
+
+        response = client.post(
+            f"/ai-builder/plans/{plan.id}/apply",
+            json={"expected_revision": 3},
         )
 
-        response = await apply_plan(
-            request=MagicMock(),
-            plan_id=plan.id,
-            body=ApplyPlanRequest(expected_revision=3),
-            container=container,
-        )
-
-        payload = __import__("json").loads(response.body)
+        payload = response.json()
         assert response.status_code == 409
         assert payload["schema_version"] == 2
         assert payload["message"] == "Flow draft revision is stale."
@@ -2022,22 +2111,20 @@ class TestApplyPlanEndpoint:
         service = container.ai_builder_service.return_value
         service.get_plan.return_value = plan
         service.get_session.return_value = session
-        service.apply_plan.side_effect = BadRequestException(
+        service.apply_plan.side_effect = AIBuilderBadRequestException(
             "Flow is currently published. Unpublish the flow before applying changes.",
-            code="flow_is_published",
+            code=AIBuilderErrorCode.FLOW_IS_PUBLISHED,
             context={"flow_id": "flow-1", "published_version": 3},
         )
-        request = _make_request()
-        request.headers = {"x-request-id": "req-published"}
+        client = _make_apply_plan_client(container)
 
-        response = await apply_plan(
-            request=request,
-            plan_id=plan.id,
-            body=ApplyPlanRequest(expected_revision=3),
-            container=container,
+        response = client.post(
+            f"/ai-builder/plans/{plan.id}/apply",
+            json={"expected_revision": 3},
+            headers={"x-request-id": "req-published"},
         )
 
-        payload = json.loads(response.body)
+        payload = response.json()
         assert response.status_code == 400
         assert payload["schema_version"] == 2
         assert payload["code"] == "flow_is_published"

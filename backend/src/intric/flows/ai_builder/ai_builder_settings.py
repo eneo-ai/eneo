@@ -3,8 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, cast
 
+from intric.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 from intric.main.config import get_settings
-from intric.main.exceptions import BadRequestException
 
 _MIN_TOKENS = 1
 _MAX_TOKENS = 10_000_000
@@ -54,10 +57,14 @@ def _parse_token_int(
     if value is None and allow_none:
         return None
     if not isinstance(value, int) or isinstance(value, bool):
-        raise BadRequestException(f"{field_name} must be an integer.")
+        raise AIBuilderBadRequestException(
+            f"{field_name} must be an integer.",
+            code=AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS,
+        )
     if value < _MIN_TOKENS or value > _MAX_TOKENS:
-        raise BadRequestException(
-            f"{field_name} must be between {_MIN_TOKENS} and {_MAX_TOKENS}."
+        raise AIBuilderBadRequestException(
+            f"{field_name} must be between {_MIN_TOKENS} and {_MAX_TOKENS}.",
+            code=AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS,
         )
     return value
 
