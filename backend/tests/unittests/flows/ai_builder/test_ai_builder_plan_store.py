@@ -19,7 +19,6 @@ from intric.flows.ai_builder.ai_builder_plan_store import (
     _persist_active_send_plan_proposal,
     append_plan_messages,
     build_lint_warnings,
-    format_validation_feedback,
     store_plan_and_update_conversation,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import (
@@ -27,7 +26,6 @@ from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendTurn,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import (
-    SpecValidationError,
     SpecValidationResult,
 )
 from intric.flows.ai_builder.planning_state import PlanningState
@@ -109,70 +107,6 @@ def test_append_plan_messages_uses_active_submission_tool_name() -> None:
 
     assert conversation[0].tool_calls is not None
     assert conversation[0].tool_calls[0]["name"] == OUTLINE_FLOW_TOOL_NAME
-
-
-def test_format_validation_feedback_does_not_add_step_ref_guidance_for_runtime_alias_error() -> (
-    None
-):
-    spec = FlowDraftSpecCore(
-        flow_name="Unit plan",
-        steps=[
-            StepSpec(
-                plan_step_ref="step_a",
-                name="Extract",
-                assistant_spec=AssistantSpec(instructions="Extract."),
-                input_source=InputSource.FLOW_INPUT,
-            ),
-            StepSpec(
-                plan_step_ref="step_b",
-                name="Summarize",
-                assistant_spec=AssistantSpec(instructions="Summarize."),
-                input_source=InputSource.PREVIOUS_STEP,
-            ),
-        ],
-    )
-
-    feedback = format_validation_feedback(
-        spec=spec,
-        errors=[
-            SpecValidationError(
-                step_ref="step_a",
-                code="flow_step_invalid",
-                message="Invalid step reference 'step_a' in input bindings.",
-            )
-        ],
-    )
-
-    assert "Invalid step reference 'step_a' in input bindings." in feedback
-    assert "Declared step refs in this draft: step_a, step_b" not in feedback
-
-
-def test_format_validation_feedback_keeps_undeclared_step_ref_visible() -> None:
-    spec = FlowDraftSpecCore(
-        flow_name="Unit plan",
-        steps=[
-            StepSpec(
-                plan_step_ref="step_a",
-                name="Extract",
-                assistant_spec=AssistantSpec(instructions="Extract."),
-                input_source=InputSource.FLOW_INPUT,
-            )
-        ],
-    )
-
-    feedback = format_validation_feedback(
-        spec=spec,
-        errors=[
-            SpecValidationError(
-                step_ref="step_a",
-                code="invalid_runtime_variable_path",
-                message="Invalid step reference 'step_z' in template expression.",
-            )
-        ],
-    )
-
-    assert "Invalid step reference 'step_z' in template expression." in feedback
-    assert "Declared step refs in this draft: step_a" not in feedback
 
 
 @asynccontextmanager

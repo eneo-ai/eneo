@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -18,8 +18,11 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     make_persisted_assistant_tool_call,
     requirements_summary_to_metadata,
 )
+from intric.flows.ai_builder.ai_builder_create_feedback import (
+    format_create_outline_quality_feedback,
+)
 from intric.flows.ai_builder.ai_builder_create_proposal import (
-    outline_flow_retry_config,
+    OUTLINE_FLOW_FORCED_TOOL_PROMPT,
     process_outline_arguments,
 )
 from intric.flows.ai_builder.ai_builder_discovery import (
@@ -38,8 +41,13 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
 from intric.flows.ai_builder.ai_builder_edit_proposal import (
-    edit_flow_retry_config,
+    EDIT_FLOW_FORCED_TOOL_PROMPT,
+    attempt_description_repair,
     process_edit_arguments,
+)
+from intric.flows.ai_builder.ai_builder_edit_repair import (
+    extract_description_provenance,
+    should_attempt_description_repair,
 )
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import (
     EDIT_FLOW_TOOL_NAME,
@@ -55,6 +63,7 @@ from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
 from intric.flows.ai_builder.ai_builder_events import (
+    build_plan_event,
     build_requirements_summary_event,
     build_status_event,
     build_text_event,
@@ -74,12 +83,20 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
     find_named_mcp_request_issue,
     mcp_clarification_issue_if_needed,
     mcp_selection_answer_allows_planning,
+    mcp_selection_policy_feedback,
 )
 from intric.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
+from intric.flows.ai_builder.ai_builder_plan_store import (
+    store_plan_and_update_conversation,
+)
 from intric.flows.ai_builder.ai_builder_proposal_policy import (
+    format_contextual_quality_feedback,
+    format_create_contextual_quality_feedback,
+    format_quality_feedback,
+    format_validation_feedback,
     resolve_ui_language,
 )
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
@@ -101,7 +118,7 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     proposal_repair_reason_from_tool_failure,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
-    ProposalToolDeps,
+    CompiledProposal,
     ToolProcessingResult,
     ToolRetryConfig,
     ToolRetryInvocation,
@@ -356,14 +373,7 @@ class AIBuilderProposalProcessor:
         self.self_correction_temperature = self_correction_temperature
         self.self_correction_bumped_temperature = self_correction_bumped_temperature
         self.forced_proposal_temperature = forced_proposal_temperature
-        self._proposal_tool_deps = ProposalToolDeps(
-            repo=self.repo,
-            quality_retry_warning_codes=frozenset(quality_retry_warning_codes),
-            call_proposal_completion=self.call_proposal_completion,
-            mcp_clarification_events_if_needed=(
-                self.mcp_clarification_events_if_needed
-            ),
-        )
+        self._quality_retry_warning_codes = frozenset(quality_retry_warning_codes)
 
     async def mcp_clarification_events_if_needed(
         self,
@@ -418,6 +428,454 @@ class AIBuilderProposalProcessor:
                 "user selection from enabled space resources."
             ),
             flow=flow,
+        )
+
+    async def _finalize_compiled_proposal(
+        self,
+        *,
+        ctx: ProposalContext,
+        tool_name: str,
+        arguments: dict[str, Any],
+        assistant_content: str,
+        assistant_metadata: dict[str, Any] | None,
+        assistant_metadata_builder: Callable[[], dict[str, Any] | None] | None,
+        proposal_success_recorder: Callable[[], None] | None,
+        tool_call_id: str,
+        compiled: CompiledProposal,
+    ) -> ToolProcessingResult:
+        """Keep active-send side effects in one place after tool compilation."""
+
+        metadata_built = False
+
+        def _accepted_proposal_metadata() -> dict[str, Any] | None:
+            nonlocal assistant_metadata, metadata_built
+            if not metadata_built:
+                # Record success before building metadata; telemetry reads it.
+                if proposal_success_recorder is not None:
+                    proposal_success_recorder()
+                if assistant_metadata_builder is not None:
+                    assistant_metadata = assistant_metadata_builder()
+                metadata_built = True
+            return assistant_metadata
+
+        mcp_clarification_events = await self.mcp_clarification_events_if_needed(
+            turn=ctx.turn,
+            conversation=ctx.conversation,
+            new_messages_start=ctx.new_messages_start,
+            spec=compiled.spec,
+            resource_catalog=ctx.resource_catalog,
+            flow=ctx.flow,
+            assistant_metadata_builder=_accepted_proposal_metadata,
+        )
+        if mcp_clarification_events:
+            return ToolProcessingResult(
+                event=mcp_clarification_events.events[0],
+                events=tuple(mcp_clarification_events.events[1:]),
+                new_planning_state_version=(
+                    mcp_clarification_events.new_planning_state_version
+                ),
+            )
+
+        mcp_policy_feedback = self._mcp_policy_feedback(
+            ctx=ctx,
+            tool_name=tool_name,
+            spec=compiled.spec,
+            tool_call_id=tool_call_id,
+        )
+        if tool_name == OUTLINE_FLOW_TOOL_NAME:
+            create_result = self._create_quality_result(
+                ctx=ctx,
+                compiled=compiled,
+                mcp_policy_feedback=mcp_policy_feedback,
+                tool_call_id=tool_call_id,
+            )
+            if create_result is not None:
+                return create_result
+        elif tool_name == EDIT_FLOW_TOOL_NAME:
+            compiled = await self._repair_edit_description_if_needed(
+                ctx=ctx,
+                compiled=compiled,
+            )
+            edit_result = self._edit_quality_result(
+                ctx=ctx,
+                compiled=compiled,
+                mcp_policy_feedback=mcp_policy_feedback,
+            )
+            if edit_result is not None:
+                return edit_result
+
+        stored_plan = await store_plan_and_update_conversation(
+            repo=self.repo,
+            turn=ctx.turn,
+            conversation=ctx.conversation,
+            new_messages_start=ctx.new_messages_start,
+            assistant_content=assistant_content,
+            assistant_metadata=_accepted_proposal_metadata(),
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            arguments=arguments,
+            spec=compiled.spec,
+            assumptions=list(compiled.assumptions),
+            plan_rationale=compiled.plan_rationale,
+            reasoning=compiled.reasoning,
+            validation=compiled.validation,
+            resource_bindings=compiled.resource_bindings,
+            edit_result=compiled.edit_result,
+            flow=ctx.flow,
+        )
+        return ToolProcessingResult(
+            event=build_plan_event(
+                plan_id=stored_plan.plan.id,
+                envelope=stored_plan.envelope,
+                edit_result=compiled.edit_result,
+            ),
+            new_planning_state_version=stored_plan.new_planning_state_version,
+        )
+
+    def _mcp_policy_feedback(
+        self,
+        *,
+        ctx: ProposalContext,
+        tool_name: str,
+        spec: FlowDraftSpecCore,
+        tool_call_id: str,
+    ) -> str | None:
+        if ctx.resource_catalog is None:
+            return None
+        feedback = mcp_selection_policy_feedback(
+            conversation=ctx.conversation,
+            spec=spec,
+            catalog=ctx.resource_catalog,
+        )
+        if feedback is not None:
+            logger.info(
+                "ai_builder_mcp_selection_policy_violation "
+                "session_id=%s tool_name=%s tool_call_id=%s",
+                ctx.session_id,
+                tool_name,
+                tool_call_id,
+            )
+        return feedback
+
+    def _create_quality_result(
+        self,
+        *,
+        ctx: ProposalContext,
+        compiled: CompiledProposal,
+        mcp_policy_feedback: str | None,
+        tool_call_id: str,
+    ) -> ToolProcessingResult | None:
+        if not compiled.validation.valid:
+            logger.info(
+                "Compiled create spec validation failed: %s",
+                [error.message for error in compiled.validation.errors],
+            )
+            quality_hint = format_quality_feedback(
+                compiled.validation,
+                quality_retry_warning_codes=self._quality_retry_warning_codes,
+            )
+            contextual_hint = format_create_contextual_quality_feedback(
+                conversation=ctx.conversation,
+                spec=compiled.spec,
+                aggregation_intent=compiled.aggregation_intent,
+                resource_catalog=ctx.resource_catalog,
+            )
+            hard_feedback = format_validation_feedback(
+                spec=compiled.spec,
+                errors=compiled.validation.errors,
+            )
+            combined_feedback = "\n\n".join(
+                feedback
+                for feedback in (
+                    hard_feedback,
+                    mcp_policy_feedback,
+                    quality_hint,
+                    contextual_hint,
+                )
+                if feedback
+            )
+            return ToolProcessingResult(
+                feedback=format_create_outline_quality_feedback(combined_feedback),
+                failure_kind="validation",
+                failure_codes=frozenset(
+                    error.code for error in compiled.validation.errors
+                ),
+            )
+
+        quality_feedback = format_quality_feedback(
+            compiled.validation,
+            quality_retry_warning_codes=self._quality_retry_warning_codes,
+        )
+        contextual_quality_feedback = format_create_contextual_quality_feedback(
+            conversation=ctx.conversation,
+            spec=compiled.spec,
+            aggregation_intent=compiled.aggregation_intent,
+            resource_catalog=ctx.resource_catalog,
+        )
+        combined_quality_feedback = (
+            "\n\n".join(
+                feedback
+                for feedback in (
+                    mcp_policy_feedback,
+                    quality_feedback,
+                    contextual_quality_feedback,
+                )
+                if feedback is not None
+            )
+            or None
+        )
+        combined_quality_feedback = format_create_outline_quality_feedback(
+            combined_quality_feedback
+        )
+        if combined_quality_feedback is None:
+            return None
+        logger.info(
+            "ai_builder_create_quality_feedback "
+            "session_id=%s tool_call_id=%s warning_codes=%s feedback=%s",
+            ctx.session_id,
+            tool_call_id,
+            ",".join(warning.code for warning in compiled.validation.warnings) or "-",
+            combined_quality_feedback[:1200],
+        )
+        return ToolProcessingResult(
+            feedback=combined_quality_feedback,
+            failure_kind="quality",
+        )
+
+    async def _repair_edit_description_if_needed(
+        self,
+        *,
+        ctx: ProposalContext,
+        compiled: CompiledProposal,
+    ) -> CompiledProposal:
+        if ctx.flow is None or compiled.edit_result is None:
+            return compiled
+        edit_result = compiled.edit_result.compiled_edit
+        if edit_result is None:
+            return compiled
+        current_provenance = extract_description_provenance(ctx.flow.metadata_json)
+        if not should_attempt_description_repair(
+            advisories=edit_result.advisories,
+            current_description=ctx.flow.description,
+            current_provenance=current_provenance,
+        ):
+            return compiled
+
+        repaired_spec = await attempt_description_repair(
+            call_proposal_completion=self.call_proposal_completion,
+            compiled_spec=compiled.spec,
+            litellm_model=ctx.litellm_model,
+            litellm_kwargs=ctx.litellm_kwargs,
+            max_output_tokens=min(ctx.max_output_tokens, 256),
+        )
+        if repaired_spec is None:
+            return compiled
+
+        repaired_edit = edit_result.model_copy(
+            update={
+                "compiled_spec": repaired_spec,
+                "advisories": [
+                    advisory
+                    for advisory in edit_result.advisories
+                    if advisory.code != "flow_description_update_required"
+                ],
+            }
+        )
+        return replace(
+            compiled,
+            spec=repaired_spec,
+            edit_result=compiled.edit_result.model_copy(
+                update={"compiled_edit": repaired_edit}
+            ),
+        )
+
+    def _edit_quality_result(
+        self,
+        *,
+        ctx: ProposalContext,
+        compiled: CompiledProposal,
+        mcp_policy_feedback: str | None,
+    ) -> ToolProcessingResult | None:
+        quality_feedback = format_quality_feedback(
+            compiled.validation,
+            quality_retry_warning_codes=self._quality_retry_warning_codes,
+        )
+        contextual_quality_feedback = format_contextual_quality_feedback(
+            conversation=ctx.conversation,
+            spec=compiled.spec,
+            flow=ctx.flow,
+            resource_catalog=ctx.resource_catalog,
+        )
+        combined_quality_feedback = "\n\n".join(
+            feedback
+            for feedback in (
+                mcp_policy_feedback,
+                quality_feedback,
+                contextual_quality_feedback,
+            )
+            if feedback
+        )
+        if not combined_quality_feedback:
+            return None
+        logger.info(
+            "ai_builder_edit_quality_feedback "
+            "session_id=%s warning_codes=%s feedback=%s",
+            ctx.session_id,
+            ",".join(warning.code for warning in compiled.validation.warnings) or "-",
+            combined_quality_feedback[:1200],
+        )
+        return ToolProcessingResult(
+            feedback=combined_quality_feedback,
+            failure_kind="quality",
+        )
+
+    def _outline_flow_retry_config(
+        self,
+        *,
+        litellm_model: str,
+        litellm_kwargs: dict[str, Any],
+        max_output_tokens: int,
+        request_id: str,
+        planning_state: PlanningState | None,
+        plan_edit_context: AIBuilderPlanEditContext | None,
+        prior_plan_for_revision: BuilderPlan | None,
+        usage_tracker: ProposalTurnTelemetry | None,
+    ) -> ToolRetryConfig:
+        async def _process_tool_invocation(
+            invocation: ToolRetryInvocation,
+        ) -> ToolProcessingResult:
+            result = await process_outline_arguments(
+                turn=invocation.turn,
+                conversation=invocation.conversation,
+                arguments=invocation.arguments,
+                tool_call_id=invocation.tool_call_id,
+                available_model_refs=invocation.available_model_refs,
+                available_kb_refs=invocation.available_kb_refs,
+                resource_catalog=invocation.resource_catalog,
+                planning_state=planning_state,
+                plan_edit_context=plan_edit_context,
+                prior_plan_for_revision=prior_plan_for_revision,
+            )
+            if result.compiled_proposal is None:
+                return result
+            return await self._finalize_compiled_proposal(
+                ctx=self._retry_context(
+                    invocation=invocation,
+                    litellm_model=litellm_model,
+                    litellm_kwargs=litellm_kwargs,
+                    max_output_tokens=max_output_tokens,
+                    request_id=request_id,
+                    planning_state=planning_state,
+                    plan_edit_context=plan_edit_context,
+                    prior_plan_for_revision=prior_plan_for_revision,
+                    usage_tracker=usage_tracker,
+                ),
+                tool_name=OUTLINE_FLOW_TOOL_NAME,
+                arguments=invocation.arguments,
+                assistant_content=invocation.assistant_content,
+                assistant_metadata=invocation.assistant_metadata,
+                assistant_metadata_builder=None,
+                proposal_success_recorder=None,
+                tool_call_id=invocation.tool_call_id,
+                compiled=result.compiled_proposal,
+            )
+
+        return ToolRetryConfig(
+            target_tool_name=OUTLINE_FLOW_TOOL_NAME,
+            forced_tool_prompt=OUTLINE_FLOW_FORCED_TOOL_PROMPT,
+            process_tool_invocation=_process_tool_invocation,
+        )
+
+    def _edit_flow_retry_config(
+        self,
+        *,
+        assistant_snapshots: AssistantAuthoringSnapshots | None,
+        litellm_model: str,
+        litellm_kwargs: dict[str, Any],
+        max_output_tokens: int,
+        request_id: str,
+        plan_edit_context: AIBuilderPlanEditContext | None,
+        prior_plan_for_revision: BuilderPlan | None,
+        usage_tracker: ProposalTurnTelemetry | None,
+    ) -> ToolRetryConfig:
+        async def _process_tool_invocation(
+            invocation: ToolRetryInvocation,
+        ) -> ToolProcessingResult:
+            result = await process_edit_arguments(
+                turn=invocation.turn,
+                conversation=invocation.conversation,
+                arguments=invocation.arguments,
+                available_model_refs=invocation.available_model_refs,
+                available_kb_refs=invocation.available_kb_refs,
+                flow=invocation.flow,
+                assistant_snapshots=assistant_snapshots,
+                resource_catalog=invocation.resource_catalog,
+                plan_edit_context=plan_edit_context,
+                prior_plan_for_revision=prior_plan_for_revision,
+            )
+            if result.compiled_proposal is None:
+                return result
+            return await self._finalize_compiled_proposal(
+                ctx=self._retry_context(
+                    invocation=invocation,
+                    litellm_model=litellm_model,
+                    litellm_kwargs=litellm_kwargs,
+                    max_output_tokens=max_output_tokens,
+                    request_id=request_id,
+                    planning_state=None,
+                    plan_edit_context=plan_edit_context,
+                    prior_plan_for_revision=prior_plan_for_revision,
+                    usage_tracker=usage_tracker,
+                ),
+                tool_name=EDIT_FLOW_TOOL_NAME,
+                arguments=invocation.arguments,
+                assistant_content=invocation.assistant_content,
+                assistant_metadata=invocation.assistant_metadata,
+                assistant_metadata_builder=None,
+                proposal_success_recorder=None,
+                tool_call_id=invocation.tool_call_id,
+                compiled=result.compiled_proposal,
+            )
+
+        return ToolRetryConfig(
+            target_tool_name=EDIT_FLOW_TOOL_NAME,
+            forced_tool_prompt=EDIT_FLOW_FORCED_TOOL_PROMPT,
+            process_tool_invocation=_process_tool_invocation,
+        )
+
+    def _retry_context(
+        self,
+        *,
+        invocation: ToolRetryInvocation,
+        litellm_model: str,
+        litellm_kwargs: dict[str, Any],
+        max_output_tokens: int,
+        request_id: str,
+        planning_state: PlanningState | None,
+        plan_edit_context: AIBuilderPlanEditContext | None,
+        prior_plan_for_revision: BuilderPlan | None,
+        usage_tracker: ProposalTurnTelemetry | None,
+    ) -> ProposalContext:
+        return ProposalContext(
+            turn=invocation.turn,
+            conversation=invocation.conversation,
+            new_messages_start=invocation.new_messages_start,
+            llm_messages=[],
+            tool_schemas=[],
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            available_model_refs=invocation.available_model_refs,
+            available_kb_refs=invocation.available_kb_refs,
+            resource_catalog=invocation.resource_catalog,
+            max_output_tokens=max_output_tokens,
+            request_id=request_id,
+            flow=invocation.flow,
+            assistant_snapshots=None,
+            assistant_metadata=invocation.assistant_metadata,
+            planning_state=planning_state,
+            usage_tracker=usage_tracker,
+            plan_edit_context=plan_edit_context,
+            prior_plan_for_revision=prior_plan_for_revision,
         )
 
     @staticmethod
@@ -795,11 +1253,15 @@ class AIBuilderProposalProcessor:
         if blocked:
             return
 
-        retry_config = outline_flow_retry_config(
-            proposal_deps=self._proposal_tool_deps,
+        retry_config = self._outline_flow_retry_config(
+            litellm_model=ctx.litellm_model,
+            litellm_kwargs=ctx.litellm_kwargs,
+            max_output_tokens=ctx.max_output_tokens,
+            request_id=ctx.request_id,
             planning_state=ctx.planning_state,
             plan_edit_context=ctx.plan_edit_context,
             prior_plan_for_revision=ctx.prior_plan_for_revision,
+            usage_tracker=ctx.usage_tracker,
         )
 
         try:
@@ -845,15 +1307,9 @@ class AIBuilderProposalProcessor:
 
         try:
             outline_result = await process_outline_arguments(
-                proposal_deps=self._proposal_tool_deps,
                 turn=ctx.turn,
                 conversation=ctx.conversation,
-                new_messages_start=ctx.new_messages_start,
                 arguments=arguments,
-                assistant_content="Här är mitt förslag:",
-                assistant_metadata=None,
-                assistant_metadata_builder=_build_assistant_metadata,
-                proposal_success_recorder=_record_successful_proposal,
                 tool_call_id=tool_call.id,
                 available_model_refs=ctx.available_model_refs,
                 available_kb_refs=ctx.available_kb_refs,
@@ -862,6 +1318,18 @@ class AIBuilderProposalProcessor:
                 plan_edit_context=ctx.plan_edit_context,
                 prior_plan_for_revision=ctx.prior_plan_for_revision,
             )
+            if outline_result.compiled_proposal is not None:
+                outline_result = await self._finalize_compiled_proposal(
+                    ctx=ctx,
+                    tool_name=OUTLINE_FLOW_TOOL_NAME,
+                    arguments=arguments,
+                    assistant_content="Här är mitt förslag:",
+                    assistant_metadata=None,
+                    assistant_metadata_builder=_build_assistant_metadata,
+                    proposal_success_recorder=_record_successful_proposal,
+                    tool_call_id=tool_call.id,
+                    compiled=outline_result.compiled_proposal,
+                )
         except AIBuilderArchitectureError as error:
             _record_proposal_architecture_failure(
                 ctx.usage_tracker,
@@ -900,7 +1368,6 @@ class AIBuilderProposalProcessor:
                 yield event
             return
 
-        _record_successful_proposal()
         for event in outline_result.iter_events():
             yield event
 
@@ -1136,22 +1603,28 @@ class AIBuilderProposalProcessor:
         usage_tracker: ProposalTurnTelemetry | None = None,
         assistant_metadata: dict[str, Any] | None = None,
     ) -> EventBatch | None:
+        request_id = usage_tracker.request_id if usage_tracker is not None else ""
         retry_config = (
-            outline_flow_retry_config(
-                proposal_deps=self._proposal_tool_deps,
+            self._outline_flow_retry_config(
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                max_output_tokens=max_output_tokens,
+                request_id=request_id,
                 planning_state=planning_state,
                 plan_edit_context=plan_edit_context,
                 prior_plan_for_revision=prior_plan_for_revision,
+                usage_tracker=usage_tracker,
             )
             if flow is None
-            else edit_flow_retry_config(
-                proposal_deps=self._proposal_tool_deps,
+            else self._edit_flow_retry_config(
                 assistant_snapshots=assistant_snapshots,
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs,
                 max_output_tokens=max_output_tokens,
+                request_id=request_id,
                 plan_edit_context=plan_edit_context,
                 prior_plan_for_revision=prior_plan_for_revision,
+                usage_tracker=usage_tracker,
             )
         )
         outcome = await self.retry_forced_tool_after_text(
@@ -1172,7 +1645,7 @@ class AIBuilderProposalProcessor:
             resource_catalog=resource_catalog,
             flow=flow,
             usage_tracker=usage_tracker,
-            request_id=usage_tracker.request_id if usage_tracker is not None else None,
+            request_id=request_id,
             build_assistant_metadata=(
                 lambda: _assistant_metadata_with_usage(
                     conversation=conversation,
@@ -1643,14 +2116,15 @@ class AIBuilderProposalProcessor:
         ctx: ProposalContext,
         tool_call: Any,
     ) -> AsyncGenerator[dict[str, str], None]:
-        retry_config = edit_flow_retry_config(
-            proposal_deps=self._proposal_tool_deps,
+        retry_config = self._edit_flow_retry_config(
             assistant_snapshots=ctx.assistant_snapshots,
             litellm_model=ctx.litellm_model,
             litellm_kwargs=ctx.litellm_kwargs,
             max_output_tokens=ctx.max_output_tokens,
+            request_id=ctx.request_id,
             plan_edit_context=ctx.plan_edit_context,
             prior_plan_for_revision=ctx.prior_plan_for_revision,
+            usage_tracker=ctx.usage_tracker,
         )
         try:
             raw_args = json.loads(tool_call.function.arguments)
@@ -1694,27 +2168,29 @@ class AIBuilderProposalProcessor:
             )
 
         edit_result = await process_edit_arguments(
-            proposal_deps=self._proposal_tool_deps,
             turn=ctx.turn,
             conversation=ctx.conversation,
-            new_messages_start=ctx.new_messages_start,
             arguments=raw_args,
-            assistant_content=ctx.text_content or "",
-            tool_call_id=tool_call.id,
             available_model_refs=ctx.available_model_refs,
             available_kb_refs=ctx.available_kb_refs,
             flow=ctx.flow,
             assistant_snapshots=ctx.assistant_snapshots,
-            litellm_model=ctx.litellm_model,
-            litellm_kwargs=ctx.litellm_kwargs,
-            max_output_tokens=ctx.max_output_tokens,
-            assistant_metadata=None,
-            assistant_metadata_builder=_build_assistant_metadata,
-            proposal_success_recorder=_record_successful_proposal,
             resource_catalog=ctx.resource_catalog,
             plan_edit_context=ctx.plan_edit_context,
             prior_plan_for_revision=ctx.prior_plan_for_revision,
         )
+        if edit_result.compiled_proposal is not None:
+            edit_result = await self._finalize_compiled_proposal(
+                ctx=ctx,
+                tool_name=EDIT_FLOW_TOOL_NAME,
+                arguments=raw_args,
+                assistant_content=ctx.text_content or "",
+                assistant_metadata=None,
+                assistant_metadata_builder=_build_assistant_metadata,
+                proposal_success_recorder=_record_successful_proposal,
+                tool_call_id=tool_call.id,
+                compiled=edit_result.compiled_proposal,
+            )
         if edit_result.event is None:
             proposal_repair_reason = proposal_repair_reason_from_tool_failure(
                 edit_result.failure_kind
@@ -1741,7 +2217,6 @@ class AIBuilderProposalProcessor:
                 yield event
             return
 
-        _record_successful_proposal()
         yield edit_result.event
 
     async def emit_discovery_followup_if_needed(

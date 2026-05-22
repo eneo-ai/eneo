@@ -20,7 +20,6 @@ from intric.flows.ai_builder.ai_builder_prompts import build_plan_summary
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_validation_common import (
-    SpecValidationError,
     SpecValidationResult,
 )
 from intric.flows.ai_builder.planning_state_builder import (
@@ -80,80 +79,6 @@ def build_plan_envelope(
         plan_rationale=plan_rationale,
         reasoning=reasoning,
         lint_warnings=build_lint_warnings(validation),
-    )
-
-
-def warnings_for_quality_retry(
-    validation: SpecValidationResult,
-    *,
-    retry_warning_codes: set[str] | frozenset[str],
-) -> list[LintWarning]:
-    return [
-        warning
-        for warning in validation.warnings
-        if warning.code in retry_warning_codes
-    ]
-
-
-def format_revision_feedback(title: str, issues: list[str]) -> str:
-    if not issues:
-        return title
-    numbered = "\n".join(
-        f"{index}. {issue}" for index, issue in enumerate(issues, start=1)
-    )
-    return f"{title}:\n{numbered}"
-
-
-def format_validation_feedback(
-    *,
-    spec: FlowDraftSpecCore,
-    errors: list[SpecValidationError],
-) -> str:
-    feedback = format_revision_feedback(
-        "Validation errors",
-        [error.message for error in errors],
-    )
-
-    if not any(_requires_reference_guidance(error) for error in errors):
-        return feedback
-
-    declared_refs = ", ".join(
-        step.plan_step_ref for step in spec.steps if step.plan_step_ref
-    )
-    reference_guidance = [
-        "Step reference rules:",
-        "- Use the exact plan_step_ref values declared in steps[*].plan_step_ref inside all template bindings.",
-        "- In AI Builder drafts, step_a / step_b style refs are authoring aliases. Do not switch to runtime aliases like step_1.",
-    ]
-    if declared_refs:
-        reference_guidance.append(
-            f"- Declared step refs in this draft: {declared_refs}"
-        )
-    reference_guidance.append(
-        "- If you rename a plan_step_ref, update every {{ ref.output.* }} binding that points to it."
-    )
-    return f"{feedback}\n\n" + "\n".join(reference_guidance)
-
-
-def _requires_reference_guidance(error: SpecValidationError) -> bool:
-    if error.code in {
-        "invalid_step_reference",
-        "future_step_reference",
-        "structured_access_requires_json_output",
-        "unknown_output_contract_field",
-    }:
-        return True
-
-    if error.code != "flow_step_invalid":
-        return False
-
-    message = error.message.casefold()
-    return any(
-        marker in message
-        for marker in (
-            "input bindings may only reference outputs from earlier steps",
-            "input binding references unknown step order",
-        )
     )
 
 

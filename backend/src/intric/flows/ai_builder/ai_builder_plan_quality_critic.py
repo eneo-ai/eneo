@@ -18,11 +18,11 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
-from intric.flows.ai_builder.ai_builder_plan_store import format_revision_feedback
 from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     build_requirements_signal_text,
     detect_planner_pattern_signals,
 )
+from intric.flows.ai_builder.ai_builder_proposal_policy import format_revision_feedback
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     resolve_requirements_state,
 )

@@ -9,17 +9,17 @@ from typing import TYPE_CHECKING, Any, Protocol
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from intric.flows.ai_builder.ai_builder_edit_models import BuilderPlanEditResult
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ToolProcessingFailureKind,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from intric.flows.ai_builder.planning_state import AggregationIntent
+from intric.flows.flow_resource_bindings import LocalResourceBinding
 
 if TYPE_CHECKING:
-    from intric.flows.ai_builder.ai_builder_discovery_followup import (
-        BackendQuestionPersistenceResult,
-    )
-    from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
     from intric.flows.domain.flow import Flow
     from intric.flows.flow_authoring_spec import FlowDraftSpecCore
 
@@ -38,32 +38,23 @@ class ProposalCompletionFn(Protocol):
     ) -> Awaitable[Any]: ...
 
 
-class MCPClarificationFn(Protocol):
-    def __call__(
-        self,
-        *,
-        turn: SessionSendTurn,
-        conversation: list[ConversationMessage],
-        new_messages_start: int,
-        spec: "FlowDraftSpecCore",
-        resource_catalog: AIBuilderResourceCatalog | None,
-        flow: "Flow | None",
-        assistant_metadata_builder: Callable[[], dict[str, Any] | None] | None = None,
-    ) -> Awaitable["BackendQuestionPersistenceResult | None"]: ...
-
-
 @dataclass(frozen=True)
-class ProposalToolDeps:
-    repo: "AIBuilderRepository"
-    quality_retry_warning_codes: frozenset[str]
-    call_proposal_completion: ProposalCompletionFn
-    mcp_clarification_events_if_needed: MCPClarificationFn
+class CompiledProposal:
+    spec: "FlowDraftSpecCore"
+    assumptions: tuple[str, ...]
+    plan_rationale: str | None
+    reasoning: str | None
+    validation: SpecValidationResult
+    resource_bindings: tuple[LocalResourceBinding, ...] = tuple()
+    edit_result: BuilderPlanEditResult | None = None
+    aggregation_intent: AggregationIntent = "linear"
 
 
 @dataclass(frozen=True)
 class ToolProcessingResult:
     event: dict[str, str] | None = None
     events: tuple[dict[str, str], ...] = ()
+    compiled_proposal: CompiledProposal | None = None
     feedback: str | None = None
     failure_kind: ToolProcessingFailureKind | None = None
     failure_codes: frozenset[str] = frozenset()

@@ -17,6 +17,7 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
+    PlannerPlanEnvelope,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
     CompiledEditResult,
@@ -25,7 +26,6 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepChange,
 )
 from intric.flows.ai_builder.ai_builder_edit_proposal import (
-    edit_flow_retry_config,
     process_edit_arguments,
 )
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
@@ -46,7 +46,7 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
-    ProposalToolDeps,
+    CompiledProposal,
     ToolProcessingResult,
     ToolRetryConfig,
     ToolRetryInvocation,
@@ -89,17 +89,6 @@ def _make_processor(**overrides) -> AIBuilderProposalProcessor:
     }
     defaults.update(overrides)
     return AIBuilderProposalProcessor(**defaults)
-
-
-def _make_proposal_deps(processor: AIBuilderProposalProcessor) -> ProposalToolDeps:
-    return ProposalToolDeps(
-        repo=processor.repo,
-        quality_retry_warning_codes=frozenset(),
-        call_proposal_completion=processor.call_proposal_completion,
-        mcp_clarification_events_if_needed=(
-            processor.mcp_clarification_events_if_needed
-        ),
-    )
 
 
 def _make_turn(
@@ -187,6 +176,145 @@ def _stored_plan_result(*, plan=None, envelope=None):
         envelope=envelope or MagicMock(),
         new_planning_state_version=1,
     )
+
+
+def _compiled_outline_proposal() -> CompiledProposal:
+    spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
+    return CompiledProposal(
+        spec=spec,
+        assumptions=(),
+        plan_rationale="Classify incoming text.",
+        reasoning=None,
+        validation=SpecValidationResult(),
+    )
+
+
+def _compiled_outline_proposal_with_validation(
+    validation: SpecValidationResult,
+) -> CompiledProposal:
+    compiled = _compiled_outline_proposal()
+    return CompiledProposal(
+        spec=compiled.spec,
+        assumptions=compiled.assumptions,
+        plan_rationale=compiled.plan_rationale,
+        reasoning=compiled.reasoning,
+        validation=validation,
+        resource_bindings=compiled.resource_bindings,
+        edit_result=compiled.edit_result,
+        aggregation_intent=compiled.aggregation_intent,
+    )
+
+
+async def _store_compiled_plan(**kwargs):
+    return _stored_plan_result(
+        envelope=PlannerPlanEnvelope(spec=kwargs["spec"]),
+    )
+
+
+@pytest.mark.asyncio
+async def test_finalize_compiled_proposal_records_success_once_when_persisted() -> None:
+    processor = _make_processor()
+    ctx = _make_context()
+    success_recorder = MagicMock()
+    metadata_builder = MagicMock(return_value={"planner_telemetry": {"ok": True}})
+    captured_metadata: list[dict[str, object] | None] = []
+
+    async def store_plan(**kwargs):
+        captured_metadata.append(kwargs["assistant_metadata"])
+        return await _store_compiled_plan(**kwargs)
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+        new=store_plan,
+    ):
+        result = await processor._finalize_compiled_proposal(
+            ctx=ctx,
+            tool_name=OUTLINE_FLOW_TOOL_NAME,
+            arguments={"flow_name": "Test", "steps": []},
+            assistant_content="Här är mitt förslag:",
+            assistant_metadata=None,
+            assistant_metadata_builder=metadata_builder,
+            proposal_success_recorder=success_recorder,
+            tool_call_id="call-outline",
+            compiled=_compiled_outline_proposal(),
+        )
+
+    assert result.event is not None
+    assert result.event["event"] == "plan"
+    success_recorder.assert_called_once_with()
+    metadata_builder.assert_called_once_with()
+    assert captured_metadata == [{"planner_telemetry": {"ok": True}}]
+
+
+@pytest.mark.asyncio
+async def test_finalize_compiled_proposal_does_not_record_success_on_quality_reject() -> (
+    None
+):
+    processor = _make_processor(quality_retry_warning_codes={"quality_issue"})
+    validation = SpecValidationResult()
+    validation.add_warning(
+        step_ref="step_a",
+        code="quality_issue",
+        message="The plan should be improved before persistence.",
+    )
+    success_recorder = MagicMock()
+    metadata_builder = MagicMock(return_value={"planner_telemetry": {"ok": True}})
+    store_plan = AsyncMock(return_value=_stored_plan_result())
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+        new=store_plan,
+    ):
+        result = await processor._finalize_compiled_proposal(
+            ctx=_make_context(),
+            tool_name=OUTLINE_FLOW_TOOL_NAME,
+            arguments={"flow_name": "Test", "steps": []},
+            assistant_content="Här är mitt förslag:",
+            assistant_metadata=None,
+            assistant_metadata_builder=metadata_builder,
+            proposal_success_recorder=success_recorder,
+            tool_call_id="call-outline",
+            compiled=_compiled_outline_proposal_with_validation(validation),
+        )
+
+    assert result.event is None
+    assert result.failure_kind == "quality"
+    success_recorder.assert_not_called()
+    metadata_builder.assert_not_called()
+    store_plan.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_finalize_compiled_proposal_accepts_retry_metadata_without_recorder() -> (
+    None
+):
+    processor = _make_processor()
+    retry_metadata = {"planner_telemetry": {"request_id": "req-retry"}}
+    captured_metadata: list[dict[str, object] | None] = []
+
+    async def store_plan(**kwargs):
+        captured_metadata.append(kwargs["assistant_metadata"])
+        return await _store_compiled_plan(**kwargs)
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+        new=store_plan,
+    ):
+        result = await processor._finalize_compiled_proposal(
+            ctx=_make_context(),
+            tool_name=OUTLINE_FLOW_TOOL_NAME,
+            arguments={"flow_name": "Retry", "steps": []},
+            assistant_content="Här är mitt korrigerade förslag:",
+            assistant_metadata=retry_metadata,
+            assistant_metadata_builder=None,
+            proposal_success_recorder=None,
+            tool_call_id="call-retry",
+            compiled=_compiled_outline_proposal(),
+        )
+
+    assert result.event is not None
+    assert result.event["event"] == "plan"
+    assert captured_metadata == [retry_metadata]
 
 
 def _make_response_with_tool_calls(
@@ -716,7 +844,7 @@ async def test_dispatch_known_tool_call_routes_outline_flow_handler() -> None:
         assert dispatched is not None
         events = [event async for event in dispatched]
 
-    assert events == [{"event": "plan", "data": "{}"}]
+    assert [event["event"] for event in events] == ["plan"]
     handle_outline_flow.assert_called_once_with(ctx=ctx, tool_call=tool_call)
 
 
@@ -770,7 +898,7 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
             )
         ]
 
-    assert events == [{"event": "plan", "data": "{}"}]
+    assert [event["event"] for event in events] == ["plan"]
     assert call_completion.await_args.kwargs["tool_choice"] == {
         "type": "function",
         "function": {"name": OUTLINE_FLOW_TOOL_NAME},
@@ -1352,9 +1480,11 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
     captured_metadata: list[dict[str, object] | None] = []
 
     async def process_outline(**kwargs) -> ToolProcessingResult:
-        kwargs["proposal_success_recorder"]()
-        captured_metadata.append(kwargs["assistant_metadata_builder"]())
-        return ToolProcessingResult(event={"event": "plan", "data": "{}"})
+        return ToolProcessingResult(compiled_proposal=_compiled_outline_proposal())
+
+    async def store_plan(**kwargs):
+        captured_metadata.append(kwargs["assistant_metadata"])
+        return await _store_compiled_plan(**kwargs)
 
     with (
         patch(
@@ -1368,6 +1498,10 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
         patch(
             "intric.flows.ai_builder.ai_builder_create_proposal.process_outline_arguments",
             new=process_outline,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            new=store_plan,
         ),
     ):
         events = [
@@ -1392,7 +1526,7 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
             )
         ]
 
-    assert events == [{"event": "plan", "data": "{}"}]
+    assert [event["event"] for event in events] == ["plan"]
     metadata = captured_metadata[0]
     assert isinstance(metadata, dict)
     planner_telemetry = metadata["planner_telemetry"]
@@ -1446,15 +1580,21 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
         ),
     ]
     captured_metadata: list[dict[str, object] | None] = []
+    process_attempts = 0
 
     async def process_outline(**kwargs) -> ToolProcessingResult:
-        captured_metadata.append(kwargs.get("assistant_metadata"))
-        if len(captured_metadata) == 1:
+        nonlocal process_attempts
+        process_attempts += 1
+        if process_attempts == 1:
             return ToolProcessingResult(
                 feedback="Invalid outline.",
                 failure_kind="parse",
             )
-        return ToolProcessingResult(event={"event": "plan", "data": "{}"})
+        return ToolProcessingResult(compiled_proposal=_compiled_outline_proposal())
+
+    async def store_plan(**kwargs):
+        captured_metadata.append(kwargs["assistant_metadata"])
+        return await _store_compiled_plan(**kwargs)
 
     with (
         patch(
@@ -1468,6 +1608,10 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
         patch(
             "intric.flows.ai_builder.ai_builder_create_proposal.process_outline_arguments",
             new=process_outline,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            new=store_plan,
         ),
     ):
         events = [
@@ -1493,7 +1637,7 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
         ]
 
     assert [event["event"] for event in events] == ["status", "plan"]
-    metadata = captured_metadata[1]
+    metadata = captured_metadata[0]
     assert isinstance(metadata, dict)
     planner_telemetry = metadata["planner_telemetry"]
     assert planner_telemetry["prompt_tokens"] == 14
@@ -1541,8 +1685,11 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
     captured_metadata: list[dict[str, object] | None] = []
 
     async def process_outline(**kwargs) -> ToolProcessingResult:
-        captured_metadata.append(kwargs.get("assistant_metadata"))
-        return ToolProcessingResult(event={"event": "plan", "data": "{}"})
+        return ToolProcessingResult(compiled_proposal=_compiled_outline_proposal())
+
+    async def store_plan(**kwargs):
+        captured_metadata.append(kwargs["assistant_metadata"])
+        return await _store_compiled_plan(**kwargs)
 
     with (
         patch(
@@ -1556,6 +1703,10 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
         patch(
             "intric.flows.ai_builder.ai_builder_create_proposal.process_outline_arguments",
             new=process_outline,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            new=store_plan,
         ),
     ):
         events = [
@@ -1669,7 +1820,6 @@ async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> No
 async def test_edit_proposal_returns_validation_when_snapshot_resource_is_unavailable() -> (
     None
 ):
-    processor = _make_processor()
     flow = MagicMock()
     flow.steps = [
         FlowStep(
@@ -1709,26 +1859,15 @@ async def test_edit_proposal_returns_validation_when_snapshot_resource_is_unavai
                 local_ref="missing-kb",
             ),
         ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
-            return_value=SpecValidationResult(),
-        ),
     ):
         result = await process_edit_arguments(
-            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(base_planning_state_version=7),
             conversation=[],
-            new_messages_start=0,
             arguments=arguments,
-            assistant_content="Här är mitt förslag:",
-            tool_call_id="call_edit",
             available_model_refs=None,
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            litellm_model="openai/gpt-4",
-            litellm_kwargs={"api_key": "sk-test"},
-            max_output_tokens=1024,
             resource_catalog=None,
         )
 
@@ -1742,7 +1881,6 @@ async def test_edit_proposal_returns_validation_when_snapshot_resource_is_unavai
 
 @pytest.mark.asyncio
 async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> None:
-    processor = _make_processor()
     flow = MagicMock()
     flow.steps = []
     flow.draft_revision = 7
@@ -1805,34 +1943,22 @@ async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> Non
             return_value=SpecValidationResult(),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.format_contextual_quality_feedback",
-            return_value="Quality issues:\nStop after compile for this test.",
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
-            new_callable=AsyncMock,
-            return_value=_stored_plan_result(),
+            "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
+            return_value=SpecValidationResult(),
         ),
     ):
         result = await process_edit_arguments(
-            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(),
             conversation=[],
-            new_messages_start=0,
             arguments=arguments,
-            assistant_content="Här är mitt förslag:",
-            tool_call_id="call_edit",
             available_model_refs=None,
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            litellm_model="openai/gpt-4",
-            litellm_kwargs={"api_key": "sk-test"},
-            max_output_tokens=1024,
             resource_catalog=None,
         )
 
-    assert result.failure_kind == "quality"
+    assert result.compiled_proposal is not None
     draft = compile_edit.call_args.args[0]
     payload = draft.operations[0].add_payload
     assert payload is not None
@@ -1848,7 +1974,6 @@ async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> Non
 
 @pytest.mark.asyncio
 async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
-    processor = _make_processor()
     flow = MagicMock()
     flow.steps = []
     flow.draft_revision = 7
@@ -1889,48 +2014,24 @@ async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
             "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
             return_value=SpecValidationResult(),
         ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.format_contextual_quality_feedback",
-            return_value=(
-                "Quality issues:\n"
-                "Konversationen efterfrågar genererad DOCX utan mall, men planen använder fortfarande "
-                '`output_mode="template_fill"`.'
-            ),
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
-            new_callable=AsyncMock,
-            return_value=_stored_plan_result(),
-        ) as store_plan,
     ):
         result = await process_edit_arguments(
-            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(base_planning_state_version=7),
             conversation=[],
-            new_messages_start=0,
             arguments=draft.model_dump(mode="json"),
-            assistant_content="Här är mitt förslag:",
-            tool_call_id="call_edit",
             available_model_refs=None,
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            litellm_model="openai/gpt-4",
-            litellm_kwargs={"api_key": "sk-test"},
-            max_output_tokens=1024,
             resource_catalog=None,
         )
 
-    assert result.event is None
-    assert result.failure_kind == "quality"
-    assert result.feedback is not None
-    assert "template_fill" in result.feedback
-    store_plan.assert_not_awaited()
+    assert result.compiled_proposal is not None
+    assert result.has_events is False
 
 
 @pytest.mark.asyncio
 async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
-    processor = _make_processor()
     flow = MagicMock()
     flow.steps = []
     flow.draft_revision = 7
@@ -1986,13 +2087,8 @@ async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
             "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
             return_value=SpecValidationResult(),
         ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
-            new_callable=AsyncMock,
-        ) as store_plan,
     ):
         result = await process_edit_arguments(
-            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(),
             conversation=[
                 ConversationMessage(
@@ -2001,34 +2097,21 @@ async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
                     metadata={"ui_language": "sv"},
                 )
             ],
-            new_messages_start=0,
             arguments=draft.model_dump(mode="json"),
-            assistant_content="Här är mitt förslag:",
-            tool_call_id="call_edit",
             available_model_refs=None,
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            litellm_model="openai/gpt-4",
-            litellm_kwargs={"api_key": "sk-test"},
-            max_output_tokens=1024,
             resource_catalog=catalog,
         )
 
-    assert [event["event"] for event in result.iter_events()] == ["text", "question"]
-    question_payload = json.loads(result.iter_events()[1]["data"])
-    assert question_payload["question_id"] == MCP_RESOURCE_SELECTION_QUESTION_ID
-    assert [option["value"] for option in question_payload["options"]] == [
-        MCP_SELECTION_WITHOUT,
-        f"{MCP_SELECTION_USE_SERVER_PREFIX}mcp_server.time-mcp",
-    ]
+    assert result.compiled_proposal is not None
+    assert result.has_events is False
     assert prepare_spec.call_args.kwargs["resource_catalog"] is catalog
-    store_plan.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_edit_proposal_enforces_without_mcp_selection() -> None:
-    processor = _make_processor()
     flow = MagicMock()
     flow.steps = []
     flow.draft_revision = 7
@@ -2066,9 +2149,6 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
     )
     edit_result = _make_compiled_edit_result(compiled_spec)
     compiled_validation = MagicMock(valid=True, errors=[])
-    proposal_success_recorder = MagicMock()
-    assistant_metadata_builder = MagicMock(return_value={"planner_telemetry": {}})
-
     with (
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.prepare_compiled_spec_for_session",
@@ -2086,13 +2166,8 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
             "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
             return_value=SpecValidationResult(),
         ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
-            new_callable=AsyncMock,
-        ) as store_plan,
     ):
         result = await process_edit_arguments(
-            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(),
             conversation=[
                 ConversationMessage(
@@ -2106,34 +2181,20 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
                     },
                 )
             ],
-            new_messages_start=0,
             arguments=draft.model_dump(mode="json"),
-            assistant_content="Här är mitt förslag:",
-            tool_call_id="call_edit",
             available_model_refs=None,
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            litellm_model="openai/gpt-4",
-            litellm_kwargs={"api_key": "sk-test"},
-            max_output_tokens=1024,
             resource_catalog=catalog,
-            assistant_metadata_builder=assistant_metadata_builder,
-            proposal_success_recorder=proposal_success_recorder,
         )
 
-    assert result.event is None
-    assert result.failure_kind == "quality"
-    assert result.feedback is not None
-    assert "continue without MCP" in result.feedback
-    proposal_success_recorder.assert_not_called()
-    assistant_metadata_builder.assert_not_called()
-    store_plan.assert_not_awaited()
+    assert result.compiled_proposal is not None
+    assert result.has_events is False
 
 
 @pytest.mark.asyncio
 async def test_edit_proposal_passes_metadata_to_edit_validator() -> None:
-    processor = _make_processor()
     flow = MagicMock()
     flow.steps = []
     flow.draft_revision = 7
@@ -2178,52 +2239,27 @@ async def test_edit_proposal_passes_metadata_to_edit_validator() -> None:
             "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
             return_value=SpecValidationResult(),
         ) as validate_edit,
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.format_contextual_quality_feedback",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.build_plan_event",
-            return_value={"event": "plan", "data": "{}"},
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
-            new_callable=AsyncMock,
-            return_value=_stored_plan_result(),
-        ) as store_plan,
     ):
         turn = _make_turn(base_planning_state_version=7)
         await process_edit_arguments(
-            proposal_deps=_make_proposal_deps(processor),
             turn=turn,
             conversation=[],
-            new_messages_start=0,
             arguments=draft.model_dump(mode="json"),
-            assistant_content="Här är mitt förslag:",
-            tool_call_id="call_edit",
             available_model_refs=None,
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            litellm_model="openai/gpt-4",
-            litellm_kwargs={"api_key": "sk-test"},
-            max_output_tokens=1024,
             resource_catalog=None,
         )
 
     assert validate_edit.call_args is not None
     assert validate_edit.call_args.kwargs["current_metadata_json"] == flow.metadata_json
-    store_plan.assert_awaited_once()
-    assert store_plan.await_args is not None
-    assert store_plan.await_args.kwargs["flow"] is flow
-    assert store_plan.await_args.kwargs["turn"] == turn
 
 
 @pytest.mark.asyncio
 async def test_edit_proposal_canonicalizes_duplicate_modify_ops_before_validation() -> (
     None
 ):
-    processor = _make_processor()
     flow = MagicMock()
     flow.steps = [
         FlowStep(
@@ -2276,43 +2312,19 @@ async def test_edit_proposal_canonicalizes_duplicate_modify_ops_before_validatio
             "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
             return_value=edit_result,
         ) as compile_edit,
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.format_quality_feedback",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.format_contextual_quality_feedback",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.build_plan_event",
-            return_value={"event": "plan", "data": "{}"},
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
-            new_callable=AsyncMock,
-            return_value=_stored_plan_result(),
-        ),
     ):
         result = await process_edit_arguments(
-            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(),
             conversation=[],
-            new_messages_start=0,
             arguments=arguments,
-            assistant_content="Här är mitt förslag:",
-            tool_call_id="call_edit",
             available_model_refs=None,
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            litellm_model="openai/gpt-4",
-            litellm_kwargs={"api_key": "sk-test"},
-            max_output_tokens=1024,
             resource_catalog=None,
         )
 
-    assert result.event == {"event": "plan", "data": "{}"}
+    assert result.compiled_proposal is not None
     compiled_draft = compile_edit.call_args.args[0]
     assert len(compiled_draft.operations) == 1
     patch_payload = compiled_draft.operations[0].patch
@@ -2325,7 +2337,6 @@ async def test_edit_proposal_canonicalizes_duplicate_modify_ops_before_validatio
 async def test_edit_proposal_returns_specific_feedback_for_conflicting_duplicate_modifies() -> (
     None
 ):
-    processor = _make_processor()
     flow = MagicMock()
     flow.steps = [
         FlowStep(
@@ -2366,20 +2377,13 @@ async def test_edit_proposal_returns_specific_feedback_for_conflicting_duplicate
         "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft"
     ) as compile_edit:
         result = await process_edit_arguments(
-            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(),
             conversation=[],
-            new_messages_start=0,
             arguments=arguments,
-            assistant_content="Här är mitt förslag:",
-            tool_call_id="call_edit",
             available_model_refs=None,
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            litellm_model="openai/gpt-4",
-            litellm_kwargs={"api_key": "sk-test"},
-            max_output_tokens=1024,
             resource_catalog=None,
         )
 
@@ -2392,7 +2396,6 @@ async def test_edit_proposal_returns_specific_feedback_for_conflicting_duplicate
 
 @pytest.mark.asyncio
 async def test_edit_proposal_normalizes_mechanical_refs_before_validation() -> None:
-    processor = _make_processor()
     flow = MagicMock()
     flow.steps = [
         MagicMock(
@@ -2448,35 +2451,15 @@ async def test_edit_proposal_normalizes_mechanical_refs_before_validation() -> N
             "intric.flows.ai_builder.ai_builder_edit_proposal.validate_edit_draft",
             return_value=SpecValidationResult(),
         ) as validate_edit,
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.format_contextual_quality_feedback",
-            return_value=None,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.build_plan_event",
-            return_value={"event": "plan", "data": "{}"},
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
-            new_callable=AsyncMock,
-            return_value=_stored_plan_result(),
-        ),
     ):
         await process_edit_arguments(
-            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(),
             conversation=[],
-            new_messages_start=0,
             arguments=arguments,
-            assistant_content="Här är mitt förslag:",
-            tool_call_id="call_edit",
             available_model_refs=None,
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            litellm_model="openai/gpt-4",
-            litellm_kwargs={"api_key": "sk-test"},
-            max_output_tokens=1024,
             resource_catalog=None,
         )
 
@@ -2496,7 +2479,6 @@ async def test_edit_proposal_normalizes_mechanical_refs_before_validation() -> N
 async def test_edit_proposal_returns_validation_feedback_for_explicit_mechanics_conflict() -> (
     None
 ):
-    processor = _make_processor()
     flow = MagicMock()
     flow.steps = [
         FlowStep(
@@ -2535,26 +2517,15 @@ async def test_edit_proposal_returns_validation_feedback_for_explicit_mechanics_
         patch(
             "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft",
         ) as compile_edit,
-        patch(
-            "intric.flows.ai_builder.ai_builder_edit_proposal.store_plan_and_update_conversation",
-            new_callable=AsyncMock,
-        ) as store_plan,
     ):
         result = await process_edit_arguments(
-            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(),
             conversation=[],
-            new_messages_start=0,
             arguments=arguments,
-            assistant_content="Här är mitt förslag:",
-            tool_call_id="call_edit",
             available_model_refs=None,
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            litellm_model="openai/gpt-4",
-            litellm_kwargs={"api_key": "sk-test"},
-            max_output_tokens=1024,
             resource_catalog=None,
         )
 
@@ -2563,7 +2534,6 @@ async def test_edit_proposal_returns_validation_feedback_for_explicit_mechanics_
     assert "output_mode 'template_fill'" in result.feedback
     assert "output_type 'pdf'" in result.feedback
     compile_edit.assert_not_called()
-    store_plan.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2738,14 +2708,15 @@ async def test_edit_flow_retry_config_carries_invocation_context() -> None:
     plan_edit_context = MagicMock()
     prior_plan_for_revision = MagicMock()
 
-    config = edit_flow_retry_config(
-        proposal_deps=_make_proposal_deps(processor),
+    config = processor._edit_flow_retry_config(
         assistant_snapshots=assistant_snapshots,
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={"timeout": 30},
         max_output_tokens=2048,
+        request_id="req",
         plan_edit_context=plan_edit_context,
         prior_plan_for_revision=prior_plan_for_revision,
+        usage_tracker=None,
     )
 
     assert isinstance(config, ToolRetryConfig)
@@ -2770,7 +2741,7 @@ async def test_edit_flow_retry_config_carries_invocation_context() -> None:
     )
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_edit_proposal.process_edit_arguments",
+        "intric.flows.ai_builder.ai_builder_proposal_processor.process_edit_arguments",
         new=process_edit,
     ):
         result = await config.process_tool_invocation(invocation)
@@ -2781,13 +2752,7 @@ async def test_edit_flow_retry_config_carries_invocation_context() -> None:
     assert process_edit.await_args.kwargs["conversation"] is invocation.conversation
     assert process_edit.await_args.kwargs["flow"] is flow
     assert process_edit.await_args.kwargs["assistant_snapshots"] is assistant_snapshots
-    assert process_edit.await_args.kwargs["litellm_model"] == "openai/gpt-5.4"
-    assert process_edit.await_args.kwargs["litellm_kwargs"] == {"timeout": 30}
-    assert process_edit.await_args.kwargs["max_output_tokens"] == 2048
     assert process_edit.await_args.kwargs["resource_catalog"] is resource_catalog
-    assert process_edit.await_args.kwargs["assistant_metadata"] == {
-        "planner_telemetry": {"request_id": "req"}
-    }
     assert process_edit.await_args.kwargs["plan_edit_context"] is plan_edit_context
     assert (
         process_edit.await_args.kwargs["prior_plan_for_revision"]

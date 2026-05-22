@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import json
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -14,29 +11,16 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
 from intric.flows.ai_builder.ai_builder_create_proposal import (
-    format_create_contextual_quality_feedback,
-    outline_flow_retry_config,
     process_outline_arguments,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
-    BuilderPlan,
     ConversationMessage,
-    PlannerPlanEnvelope,
-    PlanStatus,
 )
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
 )
-from intric.flows.ai_builder.ai_builder_plan_edit_context import (
-    AIBuilderPlanEditContext,
-)
-from intric.flows.ai_builder.ai_builder_proposal_processor import (
-    AIBuilderProposalProcessor,
-)
-from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
-    ProposalToolDeps,
-    ToolProcessingResult,
-    ToolRetryInvocation,
+from intric.flows.ai_builder.ai_builder_proposal_policy import (
+    format_create_contextual_quality_feedback,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
@@ -59,31 +43,6 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-
-
-def _make_processor(**overrides) -> AIBuilderProposalProcessor:
-    defaults = {
-        "user": MagicMock(tenant_id=uuid4()),
-        "repo": AsyncMock(),
-        "litellm_client": AsyncMock(),
-        "self_correction_temperature": 0.2,
-        "self_correction_bumped_temperature": 0.5,
-        "forced_proposal_temperature": 0.3,
-        "quality_retry_warning_codes": set(),
-    }
-    defaults.update(overrides)
-    return AIBuilderProposalProcessor(**defaults)
-
-
-def _make_proposal_deps(processor: AIBuilderProposalProcessor) -> ProposalToolDeps:
-    return ProposalToolDeps(
-        repo=processor.repo,
-        quality_retry_warning_codes=frozenset(),
-        call_proposal_completion=processor.call_proposal_completion,
-        mcp_clarification_events_if_needed=(
-            processor.mcp_clarification_events_if_needed
-        ),
-    )
 
 
 def _make_turn(
@@ -155,26 +114,6 @@ def _json_all_previous_architecture_spec() -> FlowDraftSpecCore:
     )
 
 
-def _make_plan(spec: FlowDraftSpecCore) -> BuilderPlan:
-    return BuilderPlan(
-        id=uuid4(),
-        session_id=uuid4(),
-        tenant_id=uuid4(),
-        status=PlanStatus.PROPOSED,
-        spec=spec,
-        spec_hash=spec.spec_hash(),
-        envelope=PlannerPlanEnvelope(spec=spec),
-    )
-
-
-def _stored_plan_result(*, plan=None, envelope=None):
-    return SimpleNamespace(
-        plan=plan or MagicMock(id=uuid4()),
-        envelope=envelope or MagicMock(),
-        new_planning_state_version=1,
-    )
-
-
 def test_create_contextual_quality_feedback_uses_semantic_remediation() -> None:
     feedback = format_create_contextual_quality_feedback(
         conversation=[],
@@ -206,51 +145,9 @@ def test_create_contextual_quality_feedback_still_enforces_architecture() -> Non
 
 
 @pytest.mark.asyncio
-async def test_outline_flow_retry_config_carries_revision_context() -> None:
-    processor = _make_processor()
-    planning_state = PlanningState.empty()
-    plan = _make_plan(_structured_fan_in_spec())
-    plan_edit_context = AIBuilderPlanEditContext(
-        scope="step",
-        plan_id=plan.id,
-        target_plan_step_ref="step_a",
-    )
-
-    config = outline_flow_retry_config(
-        proposal_deps=_make_proposal_deps(processor),
-        planning_state=planning_state,
-        plan_edit_context=plan_edit_context,
-        prior_plan_for_revision=plan,
-    )
-
-    with patch(
-        "intric.flows.ai_builder.ai_builder_create_proposal.process_outline_arguments",
-        new=AsyncMock(
-            return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
-        ),
-    ) as process_outline:
-        await config.process_tool_invocation(
-            ToolRetryInvocation(
-                turn=_make_turn(),
-                conversation=[],
-                new_messages_start=0,
-                arguments={"flow_name": "Test", "plan_rationale": "R", "steps": []},
-                assistant_content="Här är mitt korrigerade förslag:",
-                tool_call_id="call_retry",
-                available_model_refs=None,
-                available_kb_refs=None,
-            )
-        )
-
-    process_outline.assert_awaited_once()
-    assert process_outline.await_args.kwargs["planning_state"] is planning_state
-    assert process_outline.await_args.kwargs["plan_edit_context"] is plan_edit_context
-    assert process_outline.await_args.kwargs["prior_plan_for_revision"] is plan
-
-
-@pytest.mark.asyncio
-async def test_outline_processing_enforces_without_mcp_selection() -> None:
-    processor = _make_processor()
+async def test_outline_processing_returns_compiled_proposal_for_processor_finalization() -> (
+    None
+):
     catalog = build_ai_builder_resource_catalog(
         available_models=[],
         available_kbs=[],
@@ -280,10 +177,8 @@ async def test_outline_processing_enforces_without_mcp_selection() -> None:
     ]
 
     result = await process_outline_arguments(
-        proposal_deps=_make_proposal_deps(processor),
         turn=_make_turn(),
         conversation=conversation,
-        new_messages_start=0,
         arguments={
             "flow_name": "Time flow",
             "plan_rationale": "Use MCP despite the user's decline.",
@@ -295,22 +190,21 @@ async def test_outline_processing_enforces_without_mcp_selection() -> None:
                 }
             ],
         },
-        assistant_content="",
         tool_call_id="call-time",
         available_model_refs=None,
         available_kb_refs=None,
         resource_catalog=catalog,
     )
 
-    assert result.failure_kind == "quality"
-    assert result.feedback is not None
-    assert "continue without MCP" in result.feedback
-    processor.repo.commit_turn.assert_not_awaited()
+    assert result.compiled_proposal is not None
+    assert result.feedback is None
+    assert result.has_events is False
 
 
 @pytest.mark.asyncio
-async def test_outline_processing_asks_when_mcp_is_used_before_selection() -> None:
-    processor = _make_processor()
+async def test_outline_processing_leaves_mcp_question_persistence_to_processor() -> (
+    None
+):
     catalog = build_ai_builder_resource_catalog(
         available_models=[],
         available_kbs=[],
@@ -324,7 +218,6 @@ async def test_outline_processing_asks_when_mcp_is_used_before_selection() -> No
     )
 
     result = await process_outline_arguments(
-        proposal_deps=_make_proposal_deps(processor),
         turn=_make_turn(),
         conversation=[
             ConversationMessage(
@@ -333,7 +226,6 @@ async def test_outline_processing_asks_when_mcp_is_used_before_selection() -> No
                 metadata={"ui_language": "sv"},
             )
         ],
-        new_messages_start=0,
         arguments={
             "flow_name": "Time flow",
             "plan_rationale": "Use selected MCP tooling.",
@@ -345,32 +237,21 @@ async def test_outline_processing_asks_when_mcp_is_used_before_selection() -> No
                 }
             ],
         },
-        assistant_content="Här är mitt förslag:",
         tool_call_id="call-time",
         available_model_refs=None,
         available_kb_refs=None,
         resource_catalog=catalog,
     )
 
-    assert [event["event"] for event in result.iter_events()] == ["text", "question"]
-    question_payload = json.loads(result.iter_events()[1]["data"])
-    assert question_payload["question_id"] == MCP_RESOURCE_SELECTION_QUESTION_ID
-    assert [option["value"] for option in question_payload["options"]] == [
-        "without_mcp",
-        "use_mcp_server:mcp_server.time-mcp",
-    ]
-    processor.repo.commit_turn.assert_awaited_once()
+    assert result.compiled_proposal is not None
+    assert result.has_events is False
 
 
 @pytest.mark.asyncio
 async def test_outline_validation_failure_preserves_duplicate_step_name_code() -> None:
-    processor = _make_processor()
-
     result = await process_outline_arguments(
-        proposal_deps=_make_proposal_deps(processor),
         turn=_make_turn(),
         conversation=[ConversationMessage(role="user", content="Bygg ett textflöde.")],
-        new_messages_start=0,
         arguments={
             "flow_name": "Duplicate names",
             "plan_rationale": "Two semantic steps accidentally share a name.",
@@ -379,22 +260,20 @@ async def test_outline_validation_failure_preserves_duplicate_step_name_code() -
                 {"name": "Förbered PDF-innehåll", "task": "Skriv slutrapport."},
             ],
         },
-        assistant_content="",
         tool_call_id="call-duplicate-name",
         available_model_refs=None,
         available_kb_refs=None,
     )
 
-    assert result.failure_kind == "validation"
-    assert "duplicate_step_name" in result.failure_codes
-    assert result.feedback is not None
-    assert "Duplicate step name" in result.feedback
-    processor.repo.commit_turn.assert_not_awaited()
+    assert result.compiled_proposal is not None
+    validation = result.compiled_proposal.validation
+    assert not validation.valid
+    assert any(error.code == "duplicate_step_name" for error in validation.errors)
+    assert any("Duplicate step name" in error.message for error in validation.errors)
 
 
 @pytest.mark.asyncio
-async def test_outline_audio_to_docx_returns_plan_event() -> None:
-    processor = _make_processor()
+async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
     state = PlanningState.empty()
     state.architecture_commit = finalize_architecture_commit(
         ArchitectureCommitDraft(
@@ -410,45 +289,31 @@ async def test_outline_audio_to_docx_returns_plan_event() -> None:
         )
     )
 
-    async def _store_plan(**kwargs):
-        spec = kwargs["spec"]
-        return _stored_plan_result(
-            plan=_make_plan(spec),
-            envelope=PlannerPlanEnvelope(spec=spec),
-        )
-
-    with patch(
-        "intric.flows.ai_builder.ai_builder_create_proposal.store_plan_and_update_conversation",
-        new=AsyncMock(side_effect=_store_plan),
-    ):
-        result = await process_outline_arguments(
-            proposal_deps=_make_proposal_deps(processor),
-            turn=_make_turn(),
-            conversation=[
-                ConversationMessage(
-                    role="user",
-                    content="Bygg ett flöde som transkriberar ljud och skapar DOCX.",
-                )
+    result = await process_outline_arguments(
+        turn=_make_turn(),
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="Bygg ett flöde som transkriberar ljud och skapar DOCX.",
+            )
+        ],
+        arguments={
+            "flow_name": "Ljudrapport",
+            "plan_rationale": "Skapa en DOCX-rapport från uppladdat ljud.",
+            "steps": [
+                {
+                    "name": "Sammanfatta inspelningen",
+                    "task": "Sammanfatta den transkriberade inspelningen.",
+                }
             ],
-            new_messages_start=0,
-            arguments={
-                "flow_name": "Ljudrapport",
-                "plan_rationale": "Skapa en DOCX-rapport från uppladdat ljud.",
-                "steps": [
-                    {
-                        "name": "Sammanfatta inspelningen",
-                        "task": "Sammanfatta den transkriberade inspelningen.",
-                    }
-                ],
-            },
-            assistant_content="",
-            tool_call_id="call-audio-docx",
-            available_model_refs=None,
-            available_kb_refs=None,
-            planning_state=state,
-        )
+        },
+        tool_call_id="call-audio-docx",
+        available_model_refs=None,
+        available_kb_refs=None,
+        planning_state=state,
+    )
 
-    assert result.event is not None
-    payload = json.loads(result.event["data"])
-    assert payload["envelope"]["spec"]["steps"][0]["input_type"] == "audio"
-    assert payload["envelope"]["spec"]["steps"][-1]["output_type"] == "docx"
+    assert result.compiled_proposal is not None
+    spec = result.compiled_proposal.spec
+    assert spec.steps[0].input_type == InputType.AUDIO
+    assert spec.steps[-1].output_type == OutputType.DOCX

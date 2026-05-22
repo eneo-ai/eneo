@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, cast
+from typing import TYPE_CHECKING, Any
 
 from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
 from intric.flows.ai_builder.ai_builder_create_feedback import (
     format_create_quality_feedback,
-)
-from intric.flows.ai_builder.ai_builder_description_semantics import (
-    DescriptionProvenance,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -29,31 +26,20 @@ from intric.flows.ai_builder.ai_builder_edit_normalizer import (
     normalize_loose_edit_arguments,
 )
 from intric.flows.ai_builder.ai_builder_edit_repair import (
-    should_attempt_description_repair,
     validate_repair_invariance,
 )
-from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_edit_validator import validate_edit_draft
-from intric.flows.ai_builder.ai_builder_events import build_plan_event
-from intric.flows.ai_builder.ai_builder_mcp_intent import mcp_selection_policy_feedback
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     validate_scoped_plan_revision,
 )
-from intric.flows.ai_builder.ai_builder_plan_store import (
-    store_plan_and_update_conversation,
-)
 from intric.flows.ai_builder.ai_builder_proposal_policy import (
-    format_contextual_quality_feedback,
-    format_quality_feedback,
     terminal_output_type_for_conversation,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    CompiledProposal,
     ProposalCompletionFn,
-    ProposalToolDeps,
     ToolProcessingResult,
-    ToolRetryConfig,
-    ToolRetryInvocation,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -81,39 +67,17 @@ EDIT_FLOW_FORCED_TOOL_PROMPT = (
 
 async def process_edit_arguments(
     *,
-    proposal_deps: ProposalToolDeps,
     turn: SessionSendTurn,
     conversation: list[ConversationMessage],
-    new_messages_start: int,
     arguments: dict[str, Any],
-    assistant_content: str,
-    tool_call_id: str,
     available_model_refs: set[str] | None,
     available_kb_refs: set[str] | None,
     flow: Flow | None,
     assistant_snapshots: AssistantAuthoringSnapshots | None,
-    litellm_model: str,
-    litellm_kwargs: dict[str, Any],
-    max_output_tokens: int,
-    assistant_metadata: dict[str, Any] | None = None,
-    assistant_metadata_builder: Callable[[], dict[str, Any] | None] | None = None,
-    proposal_success_recorder: Callable[[], None] | None = None,
     resource_catalog: AIBuilderResourceCatalog | None = None,
     plan_edit_context: AIBuilderPlanEditContext | None = None,
     prior_plan_for_revision: BuilderPlan | None = None,
 ) -> ToolProcessingResult:
-    metadata_built = False
-
-    def _accepted_proposal_metadata() -> dict[str, Any] | None:
-        nonlocal assistant_metadata, metadata_built
-        if not metadata_built:
-            if proposal_success_recorder is not None:
-                proposal_success_recorder()
-            if assistant_metadata_builder is not None:
-                assistant_metadata = assistant_metadata_builder()
-            metadata_built = True
-        return assistant_metadata
-
     if flow is None:
         return ToolProcessingResult(
             feedback="edit_flow requires an existing flow context.",
@@ -264,130 +228,24 @@ async def process_edit_arguments(
             failure_kind="quality",
         )
 
-    mcp_clarification_events = await proposal_deps.mcp_clarification_events_if_needed(
-        turn=turn,
-        conversation=conversation,
-        new_messages_start=new_messages_start,
-        spec=compiled_spec,
-        resource_catalog=resource_catalog,
-        flow=flow,
-        assistant_metadata_builder=_accepted_proposal_metadata,
-    )
-    if mcp_clarification_events:
-        return ToolProcessingResult(
-            event=mcp_clarification_events.events[0],
-            events=tuple(mcp_clarification_events.events[1:]),
-            new_planning_state_version=(
-                mcp_clarification_events.new_planning_state_version
-            ),
-        )
-    mcp_policy_feedback = (
-        mcp_selection_policy_feedback(
-            conversation=conversation,
-            spec=compiled_spec,
-            catalog=resource_catalog,
-        )
-        if resource_catalog is not None
-        else None
-    )
-    if mcp_policy_feedback is not None:
-        logger.info(
-            "ai_builder_edit_mcp_selection_policy_violation "
-            "session_id=%s tool_call_id=%s",
-            turn.session_id,
-            tool_call_id,
-        )
-
-    current_provenance = _extract_description_provenance(flow.metadata_json)
-    if should_attempt_description_repair(
-        advisories=edit_result.advisories,
-        current_description=flow.description,
-        current_provenance=current_provenance,
-    ):
-        repaired_spec = await attempt_description_repair(
-            call_proposal_completion=proposal_deps.call_proposal_completion,
-            compiled_spec=compiled_spec,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            max_output_tokens=min(max_output_tokens, 256),
-        )
-        if repaired_spec is not None:
-            compiled_spec = repaired_spec
-            edit_result = edit_result.model_copy(
-                update={
-                    "compiled_spec": compiled_spec,
-                    "advisories": [
-                        advisory
-                        for advisory in edit_result.advisories
-                        if advisory.code != "flow_description_update_required"
-                    ],
-                }
-            )
-
-    quality_feedback = format_quality_feedback(
-        validation,
-        quality_retry_warning_codes=proposal_deps.quality_retry_warning_codes,
-    )
-    contextual_quality_feedback = format_contextual_quality_feedback(
-        conversation=conversation,
-        spec=compiled_spec,
-        flow=flow,
-        resource_catalog=resource_catalog,
-    )
-    combined_quality_feedback = "\n\n".join(
-        feedback
-        for feedback in (
-            mcp_policy_feedback,
-            quality_feedback,
-            contextual_quality_feedback,
-        )
-        if feedback
-    )
-    if combined_quality_feedback:
-        logger.info(
-            "ai_builder_edit_quality_feedback "
-            "session_id=%s warning_codes=%s feedback=%s",
-            turn.session_id,
-            ",".join(warning.code for warning in validation.warnings) or "-",
-            combined_quality_feedback[:1200],
-        )
-        return ToolProcessingResult(
-            feedback=combined_quality_feedback,
-            failure_kind="quality",
-        )
-
     assumptions = list(draft.assumptions) if draft.assumptions else []
     plan_edit_result = BuilderPlanEditResult(compiled_edit=edit_result)
-    stored_plan = await store_plan_and_update_conversation(
-        repo=proposal_deps.repo,
-        turn=turn,
-        conversation=conversation,
-        new_messages_start=new_messages_start,
-        assistant_content=assistant_content,
-        assistant_metadata=_accepted_proposal_metadata(),
-        tool_call_id=tool_call_id,
-        tool_name=EDIT_FLOW_TOOL_NAME,
-        arguments=arguments,
-        spec=compiled_spec,
-        assumptions=assumptions,
-        plan_rationale=draft.plan_rationale,
-        reasoning=None,
-        validation=validation,
-        resource_bindings=(
-            collect_flow_spec_resource_bindings(compiled_spec, catalog=resource_catalog)
-            if resource_catalog is not None
-            else tuple()
-        ),
-        edit_result=plan_edit_result,
-        flow=flow,
-    )
     return ToolProcessingResult(
-        event=build_plan_event(
-            plan_id=stored_plan.plan.id,
-            envelope=stored_plan.envelope,
+        compiled_proposal=CompiledProposal(
+            spec=compiled_spec,
+            assumptions=tuple(assumptions),
+            plan_rationale=draft.plan_rationale,
+            reasoning=None,
+            validation=validation,
+            resource_bindings=(
+                collect_flow_spec_resource_bindings(
+                    compiled_spec, catalog=resource_catalog
+                )
+                if resource_catalog is not None
+                else tuple()
+            ),
             edit_result=plan_edit_result,
         ),
-        new_planning_state_version=stored_plan.new_planning_state_version,
     )
 
 
@@ -437,85 +295,4 @@ async def attempt_description_repair(
         return repaired
     except Exception as exc:
         logger.warning("Description repair failed: %s", exc)
-        return None
-
-
-def _bind_process_edit_arguments(
-    proposal_deps: ProposalToolDeps,
-    *,
-    assistant_snapshots: AssistantAuthoringSnapshots | None,
-    litellm_model: str,
-    litellm_kwargs: dict[str, Any],
-    max_output_tokens: int,
-    plan_edit_context: AIBuilderPlanEditContext | None,
-    prior_plan_for_revision: BuilderPlan | None,
-) -> Callable[[ToolRetryInvocation], Awaitable[ToolProcessingResult]]:
-    async def _bound_process_edit_arguments(
-        invocation: ToolRetryInvocation,
-    ) -> ToolProcessingResult:
-        return await process_edit_arguments(
-            proposal_deps=proposal_deps,
-            turn=invocation.turn,
-            conversation=invocation.conversation,
-            new_messages_start=invocation.new_messages_start,
-            arguments=invocation.arguments,
-            assistant_content=invocation.assistant_content,
-            tool_call_id=invocation.tool_call_id,
-            available_model_refs=invocation.available_model_refs,
-            available_kb_refs=invocation.available_kb_refs,
-            flow=invocation.flow,
-            assistant_snapshots=assistant_snapshots,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            max_output_tokens=max_output_tokens,
-            assistant_metadata=invocation.assistant_metadata,
-            resource_catalog=invocation.resource_catalog,
-            plan_edit_context=plan_edit_context,
-            prior_plan_for_revision=prior_plan_for_revision,
-        )
-
-    return _bound_process_edit_arguments
-
-
-def edit_flow_retry_config(
-    *,
-    proposal_deps: ProposalToolDeps,
-    assistant_snapshots: AssistantAuthoringSnapshots | None,
-    litellm_model: str,
-    litellm_kwargs: dict[str, Any],
-    max_output_tokens: int,
-    plan_edit_context: AIBuilderPlanEditContext | None,
-    prior_plan_for_revision: BuilderPlan | None,
-) -> ToolRetryConfig:
-    return ToolRetryConfig(
-        target_tool_name=EDIT_FLOW_TOOL_NAME,
-        forced_tool_prompt=EDIT_FLOW_FORCED_TOOL_PROMPT,
-        process_tool_invocation=_bind_process_edit_arguments(
-            proposal_deps,
-            assistant_snapshots=assistant_snapshots,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            max_output_tokens=max_output_tokens,
-            plan_edit_context=plan_edit_context,
-            prior_plan_for_revision=prior_plan_for_revision,
-        ),
-    )
-
-
-def _extract_description_provenance(
-    metadata_json: dict[str, Any] | None,
-) -> DescriptionProvenance | None:
-    """Extract description provenance from flow metadata, if present."""
-
-    if not isinstance(metadata_json, dict):
-        return None
-    ai_builder = metadata_json.get("ai_builder")
-    if not isinstance(ai_builder, dict):
-        return None
-    desc_raw = cast(dict[str, Any], ai_builder).get("description")
-    if not isinstance(desc_raw, dict):
-        return None
-    try:
-        return DescriptionProvenance.model_validate(desc_raw)
-    except Exception:
         return None

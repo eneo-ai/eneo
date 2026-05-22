@@ -309,7 +309,7 @@ class TestProposalGating:
         )
 
         with patch(
-            "intric.flows.ai_builder.ai_builder_create_proposal.store_plan_and_update_conversation",
+            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
             new_callable=AsyncMock,
         ) as store_plan:
             events: list[dict[str, str]] = []

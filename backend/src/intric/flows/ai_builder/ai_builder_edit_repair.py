@@ -7,6 +7,8 @@ description-only repair and validates that the repair didn't change anything els
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from intric.flows.ai_builder.ai_builder_description_semantics import (
     DescriptionProvenance,
     description_hash,
@@ -44,6 +46,23 @@ def should_attempt_description_repair(
 
     current_hash = description_hash(current_description)
     return current_hash == current_provenance.last_generated_hash
+
+
+def extract_description_provenance(
+    metadata_json: dict[str, Any] | None,
+) -> DescriptionProvenance | None:
+    if not isinstance(metadata_json, dict):
+        return None
+    ai_builder = metadata_json.get("ai_builder")
+    if not isinstance(ai_builder, dict):
+        return None
+    desc_raw = cast(dict[str, Any], ai_builder).get("description")
+    if not isinstance(desc_raw, dict):
+        return None
+    try:
+        return DescriptionProvenance.model_validate(desc_raw)
+    except Exception:
+        return None
 
 
 def validate_repair_invariance(
