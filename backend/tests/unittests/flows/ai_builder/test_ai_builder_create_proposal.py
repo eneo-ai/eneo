@@ -14,10 +14,16 @@ from intric.flows.ai_builder.ai_builder_create_proposal import (
     process_outline_arguments,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
+    BuilderPlan,
     ConversationMessage,
+    PlannerPlanEnvelope,
+    PlanStatus,
 )
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
+)
+from intric.flows.ai_builder.ai_builder_plan_edit_context import (
+    AIBuilderPlanEditContext,
 )
 from intric.flows.ai_builder.ai_builder_proposal_policy import (
     format_create_contextual_quality_feedback,
@@ -111,6 +117,18 @@ def _json_all_previous_architecture_spec() -> FlowDraftSpecCore:
                 spec.steps[2].model_copy(update={"input_type": InputType.JSON}),
             ]
         }
+    )
+
+
+def _builder_plan(spec: FlowDraftSpecCore) -> BuilderPlan:
+    return BuilderPlan(
+        id=uuid4(),
+        session_id=uuid4(),
+        tenant_id=uuid4(),
+        status=PlanStatus.PROPOSED,
+        spec=spec,
+        spec_hash=spec.spec_hash(),
+        envelope=PlannerPlanEnvelope(spec=spec),
     )
 
 
@@ -317,3 +335,202 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
     spec = result.compiled_proposal.spec
     assert spec.steps[0].input_type == InputType.AUDIO
     assert spec.steps[-1].output_type == OutputType.DOCX
+
+
+@pytest.mark.asyncio
+async def test_scoped_outline_revision_explains_model_change_on_transcription_step() -> (
+    None
+):
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[
+            {"id": "model-old", "name": "gpt-4o mini"},
+            {"id": "model-nano", "name": "gpt-5.4-nano"},
+        ],
+        available_kbs=[],
+        available_mcps=[],
+    )
+    new_model_ref = "model.gpt-5-4-nano"
+    prior_spec = FlowDraftSpecCore(
+        flow_name="Mötesflöde",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Transkribera mötesljud",
+                assistant_spec=AssistantSpec(instructions="Transkribera ljudet."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.AUDIO,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+                output_type=OutputType.TEXT,
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                name="Analysera mötet",
+                assistant_spec=AssistantSpec(
+                    instructions="Analysera transkriptionen.",
+                    model_ref="model.gpt-4o-mini",
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+    prior_plan = _builder_plan(prior_spec)
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type="text",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["audio_to_artifact_report"],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+        )
+    )
+
+    result = await process_outline_arguments(
+        turn=_make_turn(
+            session_id=prior_plan.session_id, tenant_id=prior_plan.tenant_id
+        ),
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="ändra modell till gpt 5.4 nano",
+            )
+        ],
+        arguments={
+            "flow_name": "Mötesflöde",
+            "plan_rationale": "Behåll flödet men byt modell.",
+            "steps": [
+                {
+                    "name": "Analysera mötet",
+                    "task": "Analysera transkriptionen.",
+                    "model_ref": new_model_ref,
+                }
+            ],
+        },
+        tool_call_id="call-model-change",
+        available_model_refs=catalog.model_refs,
+        available_kb_refs=None,
+        resource_catalog=catalog,
+        planning_state=state,
+        plan_edit_context=AIBuilderPlanEditContext(
+            scope="step",
+            plan_id=prior_plan.id,
+            target_plan_step_ref="step_a",
+            target_step_name="Transkribera mötesljud",
+            target_step_number=1,
+        ),
+        prior_plan_for_revision=prior_plan,
+    )
+
+    assert result.compiled_proposal is None
+    assert result.feedback is None
+    assert result.user_message is not None
+    assert "transkriberar ljud" in result.user_message
+    assert new_model_ref not in result.user_message
+
+
+@pytest.mark.asyncio
+async def test_scoped_outline_revision_changes_model_on_selected_ai_step() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[
+            {"id": "model-old", "name": "gpt-4o mini"},
+            {"id": "model-nano", "name": "gpt-5.4-nano"},
+        ],
+        available_kbs=[],
+        available_mcps=[],
+    )
+    old_model_ref = "model.gpt-4o-mini"
+    new_model_ref = "model.gpt-5-4-nano"
+    prior_spec = FlowDraftSpecCore(
+        flow_name="Mötesflöde",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Transkribera mötesljud",
+                assistant_spec=AssistantSpec(instructions="Transkribera ljudet."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.AUDIO,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+                output_type=OutputType.TEXT,
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                name="Analysera mötet",
+                assistant_spec=AssistantSpec(
+                    instructions="Analysera transkriptionen.",
+                    model_ref=old_model_ref,
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+    prior_plan = _builder_plan(prior_spec)
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type="text",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["audio_to_artifact_report"],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+        )
+    )
+
+    result = await process_outline_arguments(
+        turn=_make_turn(
+            session_id=prior_plan.session_id, tenant_id=prior_plan.tenant_id
+        ),
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="byt modell från gpt-4o mini till gpt 5.4 nano",
+            )
+        ],
+        arguments={
+            "flow_name": "Mötesflöde",
+            "plan_rationale": "Behåll flödet men byt modell.",
+            "steps": [
+                {
+                    "name": "Analysera mötet",
+                    "task": "Analysera transkriptionen.",
+                    "model_ref": new_model_ref,
+                }
+            ],
+        },
+        tool_call_id="call-model-change",
+        available_model_refs=catalog.model_refs,
+        available_kb_refs=None,
+        resource_catalog=catalog,
+        planning_state=state,
+        plan_edit_context=AIBuilderPlanEditContext(
+            scope="step",
+            plan_id=prior_plan.id,
+            target_plan_step_ref="step_b",
+            target_step_name="Analysera mötet",
+            target_step_number=2,
+        ),
+        prior_plan_for_revision=prior_plan,
+    )
+
+    assert result.compiled_proposal is not None
+    assert result.feedback is None
+    assert result.compiled_proposal.plan_rationale == "Behåll flödet men byt modell."
+    assert result.compiled_proposal.assumptions == tuple()
+    revised_steps = result.compiled_proposal.spec.steps
+    assert revised_steps[0].model_dump(mode="json") == prior_spec.steps[0].model_dump(
+        mode="json"
+    )
+    assert revised_steps[1].assistant_spec.model_ref == new_model_ref

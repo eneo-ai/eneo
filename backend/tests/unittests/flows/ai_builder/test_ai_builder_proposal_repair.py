@@ -126,6 +126,49 @@ async def test_retry_forced_tool_after_text_builds_typed_invocation() -> None:
 
 
 @pytest.mark.asyncio
+async def test_retry_forced_tool_after_text_surfaces_tool_user_message() -> None:
+    async def process_invocation(
+        _: ToolRetryInvocation,
+    ) -> ToolProcessingResult:
+        return ToolProcessingResult(
+            user_message="Det markerade steget använder ingen chattmodell."
+        )
+
+    result = await retry_forced_tool_after_text(
+        correction_messages=[{"role": "system", "content": "Prompt"}],
+        assistant_text="Här är mitt förslag.",
+        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        turn=_make_turn(),
+        conversation=[],
+        new_messages_start=0,
+        available_model_refs=None,
+        available_kb_refs=None,
+        max_output_tokens=1024,
+        target_tool_name="outline_flow",
+        forced_tool_prompt="Call outline_flow.",
+        forced_proposal_temperature=0.1,
+        call_proposal_completion=AsyncMock(
+            return_value=_tool_response(
+                tool_name="outline_flow",
+                arguments={"flow_name": "Test", "plan_rationale": "R", "steps": []},
+            )
+        ),
+        process_tool_invocation=process_invocation,
+        flow=None,
+        resource_catalog=None,
+    )
+
+    assert result.events == (
+        {
+            "event": "text",
+            "data": '{"text":"Det markerade steget använder ingen chattmodell."}',
+        },
+    )
+
+
+@pytest.mark.asyncio
 async def test_retry_forced_tool_after_text_accepts_json_arguments_returned_as_text() -> (
     None
 ):

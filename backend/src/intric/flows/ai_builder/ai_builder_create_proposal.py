@@ -42,6 +42,8 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
 )
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
+    ScopedStepModelNotice,
+    resolve_scoped_step_model_revision_if_requested,
     validate_scoped_plan_revision,
 )
 from intric.flows.ai_builder.ai_builder_proposal_policy import (
@@ -76,6 +78,15 @@ OUTLINE_FLOW_FORCED_TOOL_PROMPT = (
     "Now call outline_flow with one complete semantic outline. "
     "Do not answer with prose."
 )
+
+
+def _latest_user_text(conversation: list[ConversationMessage]) -> str | None:
+    for message in reversed(conversation):
+        if message.role == "user" and isinstance(message.content, str):
+            content = message.content.strip()
+            if content:
+                return content
+    return None
 
 
 async def process_outline_arguments(
@@ -252,6 +263,52 @@ async def _process_create_draft(
     assert prepared.validation is not None
     spec = prepared.spec
     validation = prepared.validation
+
+    scoped_model_revision = resolve_scoped_step_model_revision_if_requested(
+        context=plan_edit_context,
+        prior_spec=(
+            prior_plan_for_revision.spec
+            if prior_plan_for_revision is not None
+            else None
+        ),
+        latest_user_text=_latest_user_text(conversation),
+        resource_catalog=resource_catalog,
+    )
+    if scoped_model_revision is not None:
+        if isinstance(scoped_model_revision, ScopedStepModelNotice):
+            return ToolProcessingResult(user_message=scoped_model_revision.message)
+        prepared = prepare_compiled_spec_for_session(
+            spec=scoped_model_revision.spec,
+            target_kind=TargetKind.CREATE,
+            available_model_refs=available_model_refs,
+            available_kb_refs=available_kb_refs,
+            resource_catalog=resource_catalog,
+            valid_existing_step_refs=None,
+            terminal_output_type=terminal_output_type_for_conversation(
+                conversation,
+                plan_edit_context=plan_edit_context,
+                prior_plan=prior_plan_for_revision,
+            ),
+        )
+        if prepared.failure_feedback is not None:
+            if prepared.validation is not None and prepared.validation.errors:
+                logger.info(
+                    "Prepared scoped model revision spec validation failed: %s",
+                    [error.message for error in prepared.validation.errors],
+                )
+            return ToolProcessingResult(
+                feedback=prepared.failure_feedback,
+                failure_kind="validation",
+                failure_codes=frozenset(
+                    error.code for error in prepared.validation.errors
+                )
+                if prepared.validation is not None
+                else frozenset(),
+            )
+        assert prepared.spec is not None
+        assert prepared.validation is not None
+        spec = prepared.spec
+        validation = prepared.validation
 
     scoped_revision_feedback = validate_scoped_plan_revision(
         context=plan_edit_context,

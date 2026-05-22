@@ -931,6 +931,9 @@ class AIBuilderProposalProcessor:
                 tool_name=OUTLINE_FLOW_TOOL_NAME,
             )
             return
+        if outline_result.user_message is not None:
+            yield build_text_event(outline_result.user_message)
+            return
         if not outline_result.has_events:
             proposal_repair_reason = proposal_repair_reason_from_tool_failure(
                 outline_result.failure_kind

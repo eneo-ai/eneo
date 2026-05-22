@@ -128,15 +128,20 @@ def _invalid_tool_arguments_message(error: Exception) -> str:
 def _tool_result_has_events(tool_result: Any) -> bool:
     event = getattr(tool_result, "event", None)
     events = getattr(tool_result, "events", None)
-    return event is not None or bool(events)
+    user_message = getattr(tool_result, "user_message", None)
+    return event is not None or bool(events) or user_message is not None
 
 
 def _tool_result_events(tool_result: Any) -> EventBatch:
     event = getattr(tool_result, "event", None)
     events = tuple(getattr(tool_result, "events", tuple()) or tuple())
+    user_message = getattr(tool_result, "user_message", None)
+    user_message_events = (
+        (build_text_event(user_message),) if user_message is not None else tuple()
+    )
     if event is None:
-        return events
-    return (event, *events)
+        return (*events, *user_message_events)
+    return (event, *events, *user_message_events)
 
 
 def _tool_result_failure_codes(tool_result: object) -> frozenset[str]:

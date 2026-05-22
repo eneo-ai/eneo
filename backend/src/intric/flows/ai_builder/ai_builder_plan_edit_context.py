@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
@@ -15,13 +16,30 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
 )
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
+    OutputMode,
     StepSpec,
 )
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+    from intric.flows.ai_builder.ai_builder_resource_catalog import (
+        AIBuilderResourceCatalog,
+    )
 
 PlanEditScope = Literal["whole_plan", "step"]
+
+
+@dataclass(frozen=True, slots=True)
+class ScopedStepModelSpecRevision:
+    spec: FlowDraftSpecCore
+
+
+@dataclass(frozen=True, slots=True)
+class ScopedStepModelNotice:
+    message: str
+
+
+ScopedStepModelRevision = ScopedStepModelSpecRevision | ScopedStepModelNotice
 
 
 class AIBuilderPlanEditContext(BaseModel):
@@ -234,6 +252,97 @@ def validate_scoped_plan_revision(
     if preservation_feedback is not None:
         return preservation_feedback
     return None
+
+
+def resolve_scoped_step_model_revision_if_requested(
+    *,
+    context: AIBuilderPlanEditContext | None,
+    prior_spec: FlowDraftSpecCore | None,
+    latest_user_text: str | None,
+    resource_catalog: "AIBuilderResourceCatalog | None",
+) -> ScopedStepModelRevision | None:
+    """Handle selected-step model swaps that are safer as deterministic patches.
+
+    The outline LLM cannot reliably edit backend-inserted steps such as the
+    audio transcription step. When the selected step and catalog model are
+    unambiguous, patch the prior plan directly instead of asking repair to
+    chase LLM drift on unrelated steps.
+    """
+
+    if (
+        context is None
+        or context.scope != "step"
+        or prior_spec is None
+        or resource_catalog is None
+        or not latest_user_text
+        or not _looks_like_model_revision_request(latest_user_text)
+    ):
+        return None
+
+    mentioned_model_refs = resource_catalog.refs_mentioned_in_text(
+        kind="model",
+        text=latest_user_text,
+    )
+
+    target = _find_target_step(prior_spec, context)
+    if target is None:
+        return None
+
+    if len(mentioned_model_refs) == 1:
+        model_ref = next(iter(mentioned_model_refs))
+    else:
+        current_model_ref = target.assistant_spec.model_ref
+        if current_model_ref is None:
+            return None
+        candidate_refs = mentioned_model_refs - {current_model_ref}
+        if len(candidate_refs) != 1:
+            return None
+        model_ref = next(iter(candidate_refs))
+
+    if target.assistant_spec.model_ref == model_ref:
+        return None
+
+    if target.output_mode == OutputMode.TRANSCRIBE_ONLY:
+        return ScopedStepModelNotice(
+            message=_transcription_step_model_revision_message(latest_user_text)
+        )
+
+    updated_target = target.model_copy(
+        update={
+            "assistant_spec": target.assistant_spec.model_copy(
+                update={"model_ref": model_ref}
+            )
+        }
+    )
+    revised_spec = prior_spec.model_copy(
+        update={
+            "steps": [
+                updated_target if step == target else step for step in prior_spec.steps
+            ]
+        }
+    )
+    return ScopedStepModelSpecRevision(spec=revised_spec)
+
+
+def _looks_like_model_revision_request(text: str) -> bool:
+    # The catalog-bounded model-name check is the real guard; this only avoids
+    # treating ordinary mentions of a model name as selected-step edit commands.
+    normalized = text.casefold()
+    return "model" in normalized
+
+
+def _transcription_step_model_revision_message(text: str) -> str:
+    if "modell" in text.casefold():
+        return (
+            "Det markerade steget transkriberar ljud och använder flödets "
+            "transkriberingsmodell, inte en chattmodell som GPT. Välj ett "
+            "analys- eller skrivsteg om du vill byta LLM-modell."
+        )
+    return (
+        "The selected step transcribes audio and uses the flow transcription "
+        "model, not a chat model such as GPT. Select an analysis or writing "
+        "step if you want to change the LLM model."
+    )
 
 
 _DOWNSTREAM_INPUT_REPAIR_FIELDS = {

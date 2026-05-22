@@ -55,6 +55,7 @@ class ToolProcessingResult:
     event: dict[str, str] | None = None
     events: tuple[dict[str, str], ...] = ()
     compiled_proposal: CompiledProposal | None = None
+    user_message: str | None = None
     feedback: str | None = None
     failure_kind: ToolProcessingFailureKind | None = None
     failure_codes: frozenset[str] = frozenset()

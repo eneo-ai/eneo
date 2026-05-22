@@ -30,6 +30,32 @@ agents:
 
 active_task: T050
 
+interruptions:
+  - id: I001
+    kind: live_bug_hotfix
+    status: committed
+    reported_at: "2026-05-22T13:32:07Z"
+    summary: "Live edit-mode failure when the selected step was a backend-created transcribe_only step and the user asked to change the step model to GPT 5.4 nano. Root cause: runtime transcription does not use assistant_spec.model_ref, while the outline LLM drifted the model change to a downstream step and scoped validation correctly rejected that broader edit until self-correction exhausted."
+    decision: "Handle deterministic selected-step model edits before repair. Patch only real AI steps; for transcribe_only targets, return an explicit user-facing explanation that the step uses the flow transcription model instead of silently writing a no-op GPT model_ref."
+    artifacts:
+      - ".codex/artifacts/flow-ai-builder-scoped-model-revision-hotfix-summary.md"
+      - ".codex/artifacts/claude-peer-loop-scoped-model-revision-hotfix-review-20260522T135308Z.md"
+      - ".codex/artifacts/claude-peer-loop-scoped-model-revision-hotfix-review-iteration-2-20260522T141023Z.md"
+    validation:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 97 passed"
+      - "cd backend && uv run ruff check touched AI Builder source/test files -> passed"
+      - "cd backend && uv run ruff format --check touched AI Builder source/test files -> passed"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
+      - "git diff --check -> passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2305 passed, 4 skipped, 11 warnings"
+      - "Staged-only temp-worktree check with local backend/.env copied into the temp backend: uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q -> 37 passed"
+    peer_review:
+      claude_iteration_1: "GREEN_LIGHT no / MIN_SCORE 5; required negative heuristic tests, no silent transcribe_only no-op, why-level comment, and non-target preservation proof."
+      claude_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 8 after transcribe_only notice, typed union, negative tests, AI-step patch test, and repair user_message event test."
+      antigravity: "SKIPPED_DUE_TO_QUOTA per current instruction; not counted as a pass."
+    score_impact: "No score increase. This is a targeted reliability/output-quality hotfix inside the broader goal; active T050 remains open and the strict overall floor remains 8/10."
+    commit_hygiene: "Committed after selective staging. Active T050 source/test changes remain dirty and were not included."
+
 scoring_target:
   dimensions:
     - Maintainability
@@ -5179,10 +5205,15 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T049 judge completed. Revised next-tranche ranking selected T050 proposal repair runtime boundary after Claude iteration 1 rejected the retry_forced_proposal_after_text seam and Claude iteration 2 returned GREEN_LIGHT yes / MIN_SCORE 8. Antigravity is skipped due quota per current instruction. Broader goal remains active with strict floor 8/10."
-    task: T049
+    result: "I001 live bug hotfix validated pending scoped commit. Selected-step model edits now bypass LLM drift for real AI steps and return an explicit transcribe_only notice instead of exhausting self-correction. Claude iteration 2 returned GREEN_LIGHT yes / MIN_SCORE 8. Active T050 remains open; broader goal remains active with strict floor 8/10."
+    task: I001
     commands:
-      - "git status --short --branch -> only unrelated dirty workspace files plus T049 plan/board changes during the judge task"
-      - "Produced .codex/artifacts/flow-ai-builder-t049-next-tranche-ranking.md"
-      - "Claude iteration 1: .codex/artifacts/claude-peer-loop-t049-next-tranche-ranking-20260522T130808Z.md -> GREEN_LIGHT no / MIN_SCORE 6"
-      - "Claude iteration 2: .codex/artifacts/claude-peer-loop-t049-next-tranche-ranking-iteration-2-20260522T131438Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 97 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2305 passed, 4 skipped, 11 warnings"
+      - "cd backend && uv run ruff check touched AI Builder source/test files -> passed"
+      - "cd backend && uv run ruff format --check touched AI Builder source/test files -> passed"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
+      - "git diff --check -> passed"
+      - "Staged-only temp-worktree check with local backend/.env copied into the temp backend -> 37 passed"
+      - "Claude iteration 1: .codex/artifacts/claude-peer-loop-scoped-model-revision-hotfix-review-20260522T135308Z.md -> GREEN_LIGHT no / MIN_SCORE 5"
+      - "Claude iteration 2: .codex/artifacts/claude-peer-loop-scoped-model-revision-hotfix-review-iteration-2-20260522T141023Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
