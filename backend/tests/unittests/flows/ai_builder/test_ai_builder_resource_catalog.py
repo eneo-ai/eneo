@@ -781,6 +781,26 @@ def test_catalog_detects_explicit_resource_alias_mentions_with_boundaries() -> N
     )
 
 
+def test_catalog_prefers_longest_overlapping_model_alias_mention() -> None:
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[
+            {"id": "model-base", "name": "gpt-5.4"},
+            {"id": "model-nano", "name": "gpt-5.4-nano"},
+        ],
+        available_kbs=[],
+        available_mcps=[],
+    )
+
+    assert catalog.refs_mentioned_in_text(
+        kind="model",
+        text="Ändra modell till gpt 5.4 nano.",
+    ) == frozenset({"model.gpt-5-4-nano"})
+    assert catalog.refs_mentioned_in_text(
+        kind="model",
+        text="Jämför gpt 5.4 och gpt 5.4 nano.",
+    ) == frozenset({"model.gpt-5-4", "model.gpt-5-4-nano"})
+
+
 def test_unknown_mcp_tool_alias_returns_typed_issue() -> None:
     catalog = build_ai_builder_resource_catalog(
         available_models=[],

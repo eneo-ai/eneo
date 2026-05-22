@@ -344,6 +344,7 @@ async def test_scoped_outline_revision_explains_model_change_on_transcription_st
     catalog = build_ai_builder_resource_catalog(
         available_models=[
             {"id": "model-old", "name": "gpt-4o mini"},
+            {"id": "model-base", "name": "gpt-5.4"},
             {"id": "model-nano", "name": "gpt-5.4-nano"},
         ],
         available_kbs=[],

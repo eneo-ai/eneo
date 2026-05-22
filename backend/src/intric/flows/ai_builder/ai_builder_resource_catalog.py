@@ -271,12 +271,16 @@ class AIBuilderResourceCatalog:
         if not haystack:
             return frozenset()
         allowed = set(allowed_refs) if allowed_refs is not None else None
-        matched: set[str] = set()
+        mention_spans: list[tuple[int, int, AIBuilderResourceCatalogEntry]] = []
         for entry in self._entries_for_kind(kind):
             if allowed is not None and entry.authoring_ref not in allowed:
                 continue
-            if _entry_alias_is_mentioned(entry=entry, normalized_text=haystack):
-                matched.add(entry.authoring_ref)
+            mention_spans.extend(
+                _entry_alias_mention_spans(entry=entry, normalized_text=haystack)
+            )
+        matched: set[str] = set()
+        for _, _, entry in _without_nested_alias_prefix_mentions(mention_spans):
+            matched.add(entry.authoring_ref)
         return frozenset(matched)
 
     def _alias_index_for_kind(
@@ -898,15 +902,47 @@ def _normalize_alias(value: str) -> str:
     return collapsed or stripped
 
 
-def _entry_alias_is_mentioned(
+def _entry_alias_mention_spans(
     *,
     entry: AIBuilderResourceCatalogEntry,
     normalized_text: str,
-) -> bool:
+) -> list[tuple[int, int, AIBuilderResourceCatalogEntry]]:
     bounded_text = f"-{normalized_text}-"
+    spans: list[tuple[int, int, AIBuilderResourceCatalogEntry]] = []
     for alias in entry.aliases:
         if not alias:
             continue
-        if f"-{alias}-" in bounded_text:
-            return True
-    return False
+        needle = f"-{alias}-"
+        start = 0
+        while True:
+            index = bounded_text.find(needle, start)
+            if index < 0:
+                break
+            spans.append((index, index + len(needle), entry))
+            start = index + 1
+    return spans
+
+
+def _without_nested_alias_prefix_mentions(
+    mentions: list[tuple[int, int, AIBuilderResourceCatalogEntry]],
+) -> list[tuple[int, int, AIBuilderResourceCatalogEntry]]:
+    return [
+        mention
+        for mention in mentions
+        if not _has_longer_covering_alias_mention(mention, mentions)
+    ]
+
+
+def _has_longer_covering_alias_mention(
+    mention: tuple[int, int, AIBuilderResourceCatalogEntry],
+    mentions: list[tuple[int, int, AIBuilderResourceCatalogEntry]],
+) -> bool:
+    start, end, entry = mention
+    length = end - start
+    return any(
+        other_entry.authoring_ref != entry.authoring_ref
+        and other_start <= start
+        and end <= other_end
+        and other_end - other_start > length
+        for other_start, other_end, other_entry in mentions
+    )
