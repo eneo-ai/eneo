@@ -316,7 +316,7 @@ def test_compiled_proposal_finalization_does_not_own_edit_repair() -> None:
     assert violations == []
 
 
-def test_proposal_processor_has_single_typed_completion_boundary() -> None:
+def test_proposal_processor_no_longer_owns_completion_boundary() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     processor_path = backend_root / Path(
         "src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
@@ -329,7 +329,7 @@ def test_proposal_processor_has_single_typed_completion_boundary() -> None:
         if isinstance(node, ast.Attribute) and node.attr == "acompletion"
     ]
     violations: list[str] = []
-    if len(acompletion_refs) != 1:
+    if acompletion_refs:
         lines = ", ".join(str(node.lineno) for node in acompletion_refs) or "none"
         violations.append(f"{processor_path}: acompletion refs {lines}")
 
@@ -342,6 +342,70 @@ def test_proposal_processor_has_single_typed_completion_boundary() -> None:
         annotation = ast.unparse(kwarg.annotation) if kwarg.annotation else ""
         if kwarg.arg == "kwargs" and annotation == "Any":
             violations.append(f"{processor_path}:{node.lineno} defines **kwargs: Any")
+
+    assert violations == []
+
+
+def test_proposal_completion_has_single_typed_completion_boundary() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    completion_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_completion.py"
+    )
+    completion_tree = ast.parse(
+        completion_path.read_text(), filename=str(completion_path)
+    )
+
+    acompletion_refs = [
+        node
+        for node in ast.walk(completion_tree)
+        if isinstance(node, ast.Attribute) and node.attr == "acompletion"
+    ]
+    violations: list[str] = []
+    if len(acompletion_refs) != 1:
+        lines = ", ".join(str(node.lineno) for node in acompletion_refs) or "none"
+        violations.append(f"{completion_path}: acompletion refs {lines}")
+
+    for node in ast.walk(completion_tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        kwarg = node.args.kwarg
+        if kwarg is None:
+            continue
+        annotation = ast.unparse(kwarg.annotation) if kwarg.annotation else ""
+        if kwarg.arg == "kwargs" and annotation == "Any":
+            violations.append(f"{completion_path}:{node.lineno} defines **kwargs: Any")
+
+    assert violations == []
+
+
+def test_proposal_completion_dependency_direction_stays_leaf_owned() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    completion_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_completion.py"
+    )
+    telemetry_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py"
+    )
+    completion_tree = ast.parse(
+        completion_path.read_text(), filename=str(completion_path)
+    )
+    telemetry_tree = ast.parse(telemetry_path.read_text(), filename=str(telemetry_path))
+
+    violations: list[str] = []
+    for node in ast.walk(completion_tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if node.module in {
+            "intric.flows.ai_builder.ai_builder_proposal_processor",
+            "intric.flows.ai_builder.ai_builder_planner",
+        }:
+            violations.append(f"{completion_path}:{node.lineno} imports {node.module}")
+
+    for node in ast.walk(telemetry_tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if node.module == "intric.flows.ai_builder.ai_builder_proposal_completion":
+            violations.append(f"{telemetry_path}:{node.lineno} imports {node.module}")
 
     assert violations == []
 

@@ -80,6 +80,10 @@ from intric.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourc
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
+from intric.flows.ai_builder.ai_builder_proposal_completion import (
+    call_proposal_completion_with_usage,
+    make_usage_tracked_proposal_completion,
+)
 from intric.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizationRequest,
     CompiledProposalFinalizer,
@@ -106,7 +110,6 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     record_proposal_first_attempt,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
-    ProposalCompletionFn,
     ToolProcessingResult,
     ToolRetryConfig,
     ToolRetryInvocation,
@@ -402,7 +405,8 @@ class AIBuilderProposalProcessor:
             compiled = await repair_compiled_edit_description_if_needed(
                 compiled=result.compiled_proposal,
                 flow=invocation.flow,
-                call_proposal_completion=self._make_usage_tracked_completion_fn(
+                call_proposal_completion=make_usage_tracked_proposal_completion(
+                    litellm_client=self.litellm_client,
                     usage_tracker=usage_tracker,
                     counts_as_repair=False,
                 ),
@@ -574,7 +578,8 @@ class AIBuilderProposalProcessor:
             model=litellm_model,
         )
         try:
-            response = await self._call_proposal_completion_with_usage(
+            response = await call_proposal_completion_with_usage(
+                litellm_client=self.litellm_client,
                 messages=llm_messages,
                 tool_schemas=tool_schemas,
                 litellm_model=litellm_model,
@@ -920,95 +925,6 @@ class AIBuilderProposalProcessor:
         for event in outline_result.iter_events():
             yield event
 
-    async def call_proposal_completion(
-        self,
-        *,
-        messages: list[dict[str, Any]],
-        tool_schemas: list[dict[str, Any]],
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        max_output_tokens: int,
-        temperature: float,
-        tool_choice: dict[str, Any] | None = None,
-    ) -> Any:
-        provider_kwargs = dict(litellm_kwargs)
-        provider_kwargs.pop("drop_params", None)
-        dropped_response_format = provider_kwargs.pop("response_format", None)
-        if dropped_response_format is not None:
-            logger.debug("ai_builder_proposal_completion_dropped_response_format")
-
-        return await self.litellm_client.acompletion(
-            model=litellm_model,
-            messages=messages,
-            tools=tool_schemas,
-            tool_choice=tool_choice,
-            stream=False,
-            drop_params=True,
-            max_tokens=max_output_tokens,
-            temperature=temperature,
-            **provider_kwargs,
-        )
-
-    async def _call_proposal_completion_with_usage(
-        self,
-        *,
-        messages: list[dict[str, Any]],
-        tool_schemas: list[dict[str, Any]],
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        max_output_tokens: int,
-        temperature: float,
-        usage_tracker: ProposalTurnTelemetry | None,
-        tool_choice: dict[str, Any] | None = None,
-        counts_as_repair: bool = False,
-    ) -> Any:
-        response = await self.call_proposal_completion(
-            messages=messages,
-            tool_schemas=tool_schemas,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            max_output_tokens=max_output_tokens,
-            temperature=temperature,
-            tool_choice=tool_choice,
-        )
-        if usage_tracker is not None:
-            usage_tracker.record_response(
-                response,
-                messages=messages,
-                counts_as_repair=counts_as_repair,
-            )
-        return response
-
-    def _make_usage_tracked_completion_fn(
-        self,
-        *,
-        usage_tracker: ProposalTurnTelemetry | None,
-        counts_as_repair: bool,
-    ) -> ProposalCompletionFn:
-        async def _tracked_completion(
-            *,
-            messages: list[dict[str, Any]],
-            tool_schemas: list[dict[str, Any]],
-            litellm_model: str,
-            litellm_kwargs: dict[str, Any],
-            max_output_tokens: int,
-            temperature: float,
-            tool_choice: dict[str, Any] | None = None,
-        ) -> Any:
-            return await self._call_proposal_completion_with_usage(
-                messages=messages,
-                tool_schemas=tool_schemas,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                max_output_tokens=max_output_tokens,
-                temperature=temperature,
-                usage_tracker=usage_tracker,
-                tool_choice=tool_choice,
-                counts_as_repair=counts_as_repair,
-            )
-
-        return _tracked_completion
-
     async def _request_tool_self_correction(
         self,
         *,
@@ -1024,7 +940,8 @@ class AIBuilderProposalProcessor:
                 usage_tracker=ctx.usage_tracker,
             )
 
-        call_proposal_completion = self._make_usage_tracked_completion_fn(
+        call_proposal_completion = make_usage_tracked_proposal_completion(
+            litellm_client=self.litellm_client,
             usage_tracker=ctx.usage_tracker,
             counts_as_repair=True,
         )
@@ -1144,7 +1061,8 @@ class AIBuilderProposalProcessor:
         request_id: str | None = None,
         build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
     ) -> ForcedToolRetryOutcome:
-        call_proposal_completion = self._make_usage_tracked_completion_fn(
+        call_proposal_completion = make_usage_tracked_proposal_completion(
+            litellm_client=self.litellm_client,
             usage_tracker=usage_tracker,
             counts_as_repair=True,
         )
@@ -1355,7 +1273,8 @@ class AIBuilderProposalProcessor:
         active_messages = correction_messages
         while True:
             try:
-                response = await self._call_proposal_completion_with_usage(
+                response = await call_proposal_completion_with_usage(
+                    litellm_client=self.litellm_client,
                     messages=active_messages,
                     tool_schemas=filtered_tool_schemas,
                     litellm_model=litellm_model,
@@ -1781,7 +1700,8 @@ class AIBuilderProposalProcessor:
             compiled = await repair_compiled_edit_description_if_needed(
                 compiled=edit_result.compiled_proposal,
                 flow=ctx.flow,
-                call_proposal_completion=self._make_usage_tracked_completion_fn(
+                call_proposal_completion=make_usage_tracked_proposal_completion(
+                    litellm_client=self.litellm_client,
                     usage_tracker=ctx.usage_tracker,
                     counts_as_repair=False,
                 ),

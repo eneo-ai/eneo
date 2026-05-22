@@ -363,32 +363,6 @@ def test_self_correction_parse_error_uses_actionable_user_message() -> None:
     assert "operations.0" not in payload["message"]
 
 
-@pytest.mark.asyncio
-async def test_call_proposal_completion_strips_planner_response_format_kwargs() -> None:
-    processor = _make_processor()
-    response = _make_response_with_text("ok")
-    processor.litellm_client.acompletion = AsyncMock(return_value=response)
-
-    result = await processor.call_proposal_completion(
-        messages=[{"role": "user", "content": "Build a flow"}],
-        tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={
-            "response_format": {"type": "json_object"},
-            "drop_params": False,
-            "api_base": "http://provider.example",
-        },
-        max_output_tokens=1024,
-        temperature=0.2,
-    )
-
-    assert result is response
-    call_kwargs = processor.litellm_client.acompletion.await_args.kwargs
-    assert call_kwargs["drop_params"] is True
-    assert call_kwargs["api_base"] == "http://provider.example"
-    assert "response_format" not in call_kwargs
-
-
 def _make_flow_spec(
     *,
     model_ref: str | None,
@@ -532,9 +506,8 @@ async def test_request_non_question_continuation_uses_backend_followup_when_only
             "intric.flows.ai_builder.ai_builder_proposal_processor.emit_discovery_followup_if_needed",
             new=AsyncMock(return_value=SimpleNamespace(events=followup_events)),
         ) as emit_followup,
-        patch.object(
-            processor,
-            "call_proposal_completion",
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.call_proposal_completion_with_usage",
             new=AsyncMock(),
         ) as proposal_completion,
     ):
@@ -619,14 +592,13 @@ async def test_request_non_question_continuation_recovers_with_requirements_summ
         ) as emit_followup,
         patch.object(
             processor,
-            "call_proposal_completion",
-            new=AsyncMock(return_value=_make_response_with_tool_calls(summary_call)),
-        ) as proposal_completion,
-        patch.object(
-            processor,
             "handle_tool_call",
             return_value=_handled_events(),
         ) as handle_tool_call,
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.call_proposal_completion_with_usage",
+            new=AsyncMock(return_value=_make_response_with_tool_calls(summary_call)),
+        ) as proposal_completion,
     ):
         events = [
             event
@@ -710,9 +682,8 @@ async def test_request_non_question_continuation_returns_typed_error_when_no_fol
             "intric.flows.ai_builder.ai_builder_proposal_processor.analyze_discovery_ready",
             return_value=False,
         ),
-        patch.object(
-            processor,
-            "call_proposal_completion",
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.call_proposal_completion_with_usage",
             new=AsyncMock(),
         ) as proposal_completion,
     ):
@@ -813,14 +784,13 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
     with (
         patch.object(
             processor,
-            "call_proposal_completion",
-            new=AsyncMock(return_value=_make_response_with_tool_calls(outline_call)),
-        ) as call_completion,
-        patch.object(
-            processor,
             "handle_tool_call",
             side_effect=_handled_events,
         ) as handle_tool_call,
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.call_proposal_completion_with_usage",
+            new=AsyncMock(return_value=_make_response_with_tool_calls(outline_call)),
+        ) as call_completion,
     ):
         events = [
             event
@@ -2621,12 +2591,10 @@ async def test_outline_self_correction_returns_typed_error_when_completion_raise
             "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
             return_value=SimpleNamespace(confirmed=True),
         ),
-        patch.object(
-            processor,
-            "call_proposal_completion",
-            new=AsyncMock(side_effect=RuntimeError("provider unavailable")),
-        ),
     ):
+        processor.litellm_client.acompletion = AsyncMock(
+            side_effect=RuntimeError("provider unavailable")
+        )
         events = [
             event
             async for event in processor._handle_outline_flow_tool_call(

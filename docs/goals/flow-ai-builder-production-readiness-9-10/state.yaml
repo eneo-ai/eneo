@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T041
+active_task: T043
 
 scoring_target:
   dimensions:
@@ -50,7 +50,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T038 implementation/post-review: edit-description repair completions now flow through a typed usage-tracked ProposalCompletionFn factory and record token usage without incrementing self-correction repair_attempts. The processor has one raw litellm_client.acompletion boundary, no **kwargs: Any completion wrappers, focused telemetry regression tests, full AI Builder unit coverage, strict Pyright for src/intric/flows/ai_builder, and Claude/Antigravity post-review GREEN_LIGHT yes / MIN_SCORE 8. The broader score floor remains 8 because AIBuilderProposalProcessor is still a 1917 LOC multi-concern orchestration file, generated-client determinism remains unresolved, full-source typing/test baseline is still broader than AI Builder, and live-eval/output-quality proof must repeat after behavior-affecting changes."
+  source: "After T042 implementation/post-review: proposal completion provider calls and usage-tracked ProposalCompletionFn construction are owned by the new ai_builder_proposal_completion leaf module. AIBuilderProposalProcessor no longer defines call_proposal_completion, _call_proposal_completion_with_usage, _make_usage_tracked_completion_fn, or raw litellm_client.acompletion calls, and it is down to 1820 LOC from the 1900 LOC T041 baseline. Static ownership tests enforce zero processor acompletion refs, exactly one completion-owner acompletion ref, no completion-to-processor/planner import, and no telemetry-to-completion import. Claude and Antigravity post-review both returned GREEN_LIGHT yes / MIN_SCORE 8. The broader score floor remains 8 because AIBuilderProposalProcessor still owns dispatch, self-correction bridge, structured-question recovery, confirm requirements, create/edit orchestration, and finalization wiring; generated-client determinism, full-source typing/test baseline, and repeated live-eval/output-quality proof remain unresolved."
   Maintainability: 8
   Code_Quality: 9
   Clean_Architecture: 8
@@ -69,7 +69,7 @@ current_scorecard:
   blockers:
     - "Public/lifecycle/CAS error-code discipline is now typed and guarded in AI Builder-owned raise sites, but generated-client regeneration determinism is not solved; T028 kept only the intentional enum literals after openapi-typescript produced broad unrelated churn."
     - "The five-case authenticated live eval now proves C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX, C4 runtime form fields, and C5 revise/edit through the public API, but this gate must be repeated after later planner/runtime changes rather than treated as permanent output-quality proof."
-    - "T038 makes proposal completion telemetry explicit and typed, but ai_builder_proposal_processor.py is still 1917 LOC and remains oversized; proposal completion, structured-question recovery, confirm requirements, retry orchestration, and self-correction paths still require broader topology work before maintainability/readability can honestly reach 9."
+    - "T042 removed proposal completion ownership from ai_builder_proposal_processor.py, but the processor is still 1820 LOC and remains oversized; structured-question recovery, confirm requirements, dispatcher/retry orchestration, self-correction bridge, create/edit orchestration, and finalization wiring still require broader topology work before maintainability/readability can honestly reach 9."
     - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, partial processor-bound facades, and full-source Pyright baseline failures outside AI Builder."
     - "Both Claude and Antigravity recommended a small future clarification of counts_as_repair semantics in ai_builder_proposal_telemetry.py; it was not added in T038 because that file was outside the approved write scope."
     - "Overall remains 8 until generated-client tooling determinism, full-source typing/test baseline, consolidation/readability/test-topology tranches, and repeated live-eval evidence prove every dimension is honestly at least 9."
@@ -4461,28 +4461,168 @@ tasks:
   - id: T041
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
-    objective: "Plan the next processor topology/readability tranche after T040, with explicit callback-boundary design and no broad observability/DX work until the OpenTelemetry branch is reviewed."
+    objective: "Re-rank the next processor topology/readability tranche after T040 using the stricter architecture steering: compare completion/telemetry ownership before question-flow extraction, avoid facade/callback-bag designs, and keep broad observability/DX paused until the OpenTelemetry branch is reviewed."
     inputs:
       - "T039 ranking artifact and peer reviews"
       - "T040 implementation summary and post-review artifacts"
       - "Current scorecard floor 8/10"
     constraints:
       - "Do not implement in T041; produce an evidence-backed next-tranche plan first."
-      - "Do not move request_non_question_continuation until the dispatcher re-entry boundary is designed or explicitly scoped out."
-      - "If moving confirm-requirements handling, list every callback edge back into AIBuilderProposalProcessor by name and signature before implementation."
-      - "Do not accept broad dependency bags, processor injection, Callable[..., Any], or ProposalContext as a catch-all bag for a new module."
+      - "Do not treat LOC reduction as the objective; the plan must improve canonical ownership, locality, and human reviewability."
+      - "Explicitly compare Option A completion/telemetry ownership, Option B question/requirements lifecycle with callback boundaries, Option C larger topology refactor, Option D generated-client determinism, Option E narrow stream diagnostics, and Option F live eval."
+      - "If moving question-flow or requirements lifecycle, list every callback edge back into AIBuilderProposalProcessor by typed Protocol name and signature before implementation."
+      - "Do not accept facade modules, broad dependency bags, processor injection, Callable[..., Any], **kwargs: Any, or ProposalContext as a catch-all bag for a new module."
+      - "Do not add source comments/docstrings with phase IDs, tranche language, plan language, or tutorial prose."
       - "Do not start broad frontend-backend DX/observability until the OpenTelemetry branch is reviewed with source evidence."
       - "Preserve unrelated dirty files."
     acceptance_criteria:
-      - "The next topology plan states canonical owners, allowed files, callback boundaries, stop conditions, tests, and score impact."
-      - "The plan explicitly decides whether the next slice is dispatcher extraction, confirm-requirements extraction, another deletion/consolidation, or a different higher-score-moving tranche."
-      - "Claude reviews the revised plan with GREEN_LIGHT yes / MIN_SCORE >= 8; Antigravity reviews if quota/tooling is available, otherwise exact skip/failure is recorded."
+      - "The next topology plan states canonical owners, what moves, what gets deleted, allowed files, callback boundaries, stop conditions, behavior-test mapping, and score impact."
+      - "The plan includes a table for proposal completion/token usage/assistant metadata, self-correction, tool dispatch, structured-question recovery, confirm requirements, discovery follow-up persistence, and requirements metadata/versioning."
+      - "The plan explicitly decides whether the next slice is completion ownership, question/requirements lifecycle, dispatcher extraction, a larger topology refactor, generated-client determinism, stream diagnostics, live eval, or another deletion/consolidation."
+      - "Acceptance criteria require processor public surface to shrink, no new pass-through layers, AST ownership tests with positive and negative invariants, and no source plan-language comments."
+      - "Claude iteration 2 P1 clarifications are folded into the worker plan: update the existing processor acompletion AST guard from exactly one to zero, add a mirror new-owner acompletion guard, add a drop_params=True provider-call behavior test, state completion-to-telemetry import direction, and reuse ProposalCompletionFn from its canonical owner."
+      - "Each behavior bullet maps to a concrete test name or an explicit retained/future test gate."
+      - "Claude reviews the revised plan in session flow-ai-builder-t039-next-tranche-direction-20260522 with GREEN_LIGHT yes / MIN_SCORE >= 8; Antigravity reviews if quota/tooling is available, otherwise exact skip/failure is recorded."
       - "Overall score remains 8 unless evidence proves the weakest dimension moves."
     verify:
       - "Review T040 receipt and current scorecard"
       - "Produce .codex/artifacts/flow-ai-builder-t041-next-topology-plan.md"
+      - "Fold Claude iteration 2 P1 clarifications into the plan before Antigravity or worker activation"
+    receipt:
+      completed_at: "2026-05-22T10:35:00+02:00"
+      summary: "Re-ranked the next processor topology/readability slice after the stricter T039/T040 architecture steering. Selected T042 proposal-completion ownership first, ahead of question/requirements lifecycle extraction, because completion/telemetry is the coupling axis that would otherwise force a facade/callback-bag design. The plan keeps the score floor at 8 and forbids broad observability/DX work until the OpenTelemetry branch is reviewed."
+      plan_artifact: ".codex/artifacts/flow-ai-builder-t041-next-topology-plan.md"
+      amended_prior_artifact: ".codex/artifacts/flow-ai-builder-t039-next-tranche-ranking.md"
+      peer_gates:
+        codex_self_review: "PASS: T042 is the cleanest currently reviewable topology slice; it deletes processor completion ownership rather than splitting code for LOC optics."
+        claude_plan_review: ".codex/artifacts/claude-peer-loop-t041-revised-next-topology-plan-after-steering-20260522T082237Z.md GREEN_LIGHT yes / MIN_SCORE 8. Claude P1 clarifications were folded into the plan before worker activation."
+        antigravity_plan_review: ".codex/artifacts/antigravity-peer-loop-t041-revised-topology-plan-challenge-20260522T082851Z.md GREEN_LIGHT yes / MIN_SCORE 8."
+      selected_next_tranche: T042
+      rejected_options:
+        - "Question/requirements lifecycle first: rejected because it still needs completion, self-correction, dispatcher re-entry, and metadata/usage edges, making a facade/callback bag likely."
+        - "Larger processor topology refactor: rejected as too broad for safe human review."
+        - "Generated-client determinism: deferred as real but not the current processor topology blocker."
+        - "Narrow stream diagnostics: deferred; broad DX/observability remains paused for OpenTelemetry review."
+        - "Live eval: deferred until behavior-affecting changes; T042 is intended as behavior-preserving."
+      residual_risks:
+        - "AIBuilderProposalProcessor remains oversized and still owns dispatch, self-correction bridge, question recovery, confirm requirements, and create/edit orchestration."
+        - "T042 is expected to keep the strict floor at 8 unless implementation evidence proves the weakest dimension moved."
+
+  - id: T042
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Move proposal completion provider calls and usage-tracked ProposalCompletionFn construction into a canonical completion leaf module, deleting the processor-owned completion methods without changing proposal behavior."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t041-next-topology-plan.md"
+      - ".codex/artifacts/claude-peer-loop-t041-revised-next-topology-plan-after-steering-20260522T082237Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t041-revised-topology-plan-challenge-20260522T082851Z.md"
+      - "Current scorecard floor 8/10"
+    constraints:
+      - "Implement the approved T042 plan only; do not move question-flow, requirements confirmation, dispatcher, self-correction, frontend, API, DB, Celery, OpenTelemetry, live-eval, or broad diagnostic logic."
+      - "Create a domain-specific function module, not a service/manager/processor class or facade."
+      - "Delete processor completion methods rather than preserving wrappers for compatibility."
+      - "Do not introduce processor injection, broad dependency bags, Callable[..., Any], **kwargs: Any, new Protocol/callable aliases for ProposalCompletionFn, or untyped dict bags beyond the existing LiteLLM boundary."
+      - "Preserve unrelated dirty files."
+      - "Do not raise the scorecard above 8 unless post-implementation evidence and peer review show the weakest dimension actually moved."
+    acceptance_criteria:
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_completion.py owns call_proposal_completion, call_proposal_completion_with_usage, and make_usage_tracked_proposal_completion as functions."
+      - "AIBuilderProposalProcessor no longer defines call_proposal_completion, _call_proposal_completion_with_usage, or _make_usage_tracked_completion_fn."
+      - "AIBuilderProposalProcessor no longer contains raw litellm_client.acompletion references."
+      - "The new completion module has exactly one acompletion reference, strips planner-only response_format/drop_params kwargs, and forces drop_params=True on the provider call."
+      - "The new module imports ProposalCompletionFn from ai_builder_proposal_tool_contracts and ProposalTurnTelemetry from ai_builder_proposal_telemetry; telemetry does not import completion."
+      - "No new source comments/docstrings include phase IDs, tranche language, plan language, or tutorial prose; any new comment explains a non-obvious boundary or tradeoff."
+      - "Behavior tests cover kwargs filtering, forced drop_params=True, non-repair usage tracking, repair usage tracking, and retained T038 repair_attempts semantics."
+      - "AST ownership tests include negative processor invariants and positive completion-owner invariants, including zero processor acompletion references and exactly one completion-owner acompletion reference."
+      - "Processor public surface shrinks, and implementation summary records before/after processor LOC."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_completion.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t042-implementation-summary.md"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check <T042 changed backend files/tests>"
+      - "cd backend && uv run ruff format --check <T042 changed backend files/tests>"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "if rg -n \"def call_proposal_completion|def _call_proposal_completion_with_usage|def _make_usage_tracked_completion_fn|litellm_client\\.acompletion\" backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py; then exit 1; fi"
+      - "git diff --check"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+    stop_if:
+      - "The new module needs to import AIBuilderProposalProcessor or ai_builder_planner."
+      - "The processor needs wrapper methods to preserve completion APIs."
+      - "Question-flow, self-correction, dispatcher, prompt, event-order, or public API behavior must change to make the extraction work."
+      - "The diff needs files outside allowed_files."
+      - "Tests become implementation-patch tests instead of behavior/ownership tests."
+    receipt:
+      completed_at: "2026-05-22T10:54:23+02:00"
+      summary: "Moved proposal completion provider calls and usage-tracked ProposalCompletionFn construction into ai_builder_proposal_completion.py. Deleted AIBuilderProposalProcessor.call_proposal_completion, _call_proposal_completion_with_usage, and _make_usage_tracked_completion_fn without preserving wrappers. Processor call sites now use the leaf owner directly, while telemetry remains in ai_builder_proposal_telemetry and the callable contract remains in ai_builder_proposal_tool_contracts."
+      implementation_artifact: ".codex/artifacts/flow-ai-builder-t042-implementation-summary.md"
+      changed_files:
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_completion.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      peer_gates:
+        codex_self_review: "PASS: this is a real ownership move, not a facade; the processor public surface shrank and the broader score floor remains 8."
+        claude_post_review: ".codex/artifacts/claude-peer-loop-t042-completion-owner-post-implementation-review-after-p2-cleanup-20260522T085103Z.md GREEN_LIGHT yes / MIN_SCORE 8 after Codex fixed Claude's P2 test-layer finding."
+        antigravity_post_review: ".codex/artifacts/antigravity-peer-loop-t042-completion-owner-post-implementation-review-20260522T085315Z.md GREEN_LIGHT yes / MIN_SCORE 8."
+      verification_results:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q: 10 passed in 3.43s."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q: 53 passed in 2.03s after the test-layer P2 fix."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2279 passed, 4 skipped, 11 warnings in 15.33s."
+        - "cd backend && uv run ruff check changed T042 backend files/tests: All checks passed."
+        - "cd backend && uv run ruff format --check changed T042 backend files/tests: 5 files already formatted."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder: 0 errors, 0 warnings, 0 informations."
+        - "Final pre-commit focused run: cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q: 63 passed in 8.62s."
+        - "Moved-ownership grep for old processor methods/raw acompletion: passed, no output."
+        - "Anti-slippage grep for T042 in backend/src and backend/tests: passed, no output."
+        - "git diff --check: passed."
+        - "ruby YAML parse of state.yaml: yaml ok."
+      scorecard_after_t042:
+        Overall: 8
+      residual_risks:
+        - "AIBuilderProposalProcessor remains oversized and still owns dispatch, self-correction bridge, structured-question recovery, confirm requirements, create/edit orchestration, and finalization wiring."
+        - "Some pre-existing processor tests still inspect litellm_client.acompletion; Claude and Antigravity accepted leaving them out of T042 scope, but they should be considered in a later test-topology cleanup."
+        - "Generated-client determinism and full-source Pyright baseline remain unresolved."
+        - "Broad AI Builder DX/observability remains paused until the platform OpenTelemetry branch is reviewed."
+        - "Live eval must repeat after behavior-affecting planner/runtime changes."
+
+  - id: T043
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest-score-moving tranche after T042, deciding whether to continue processor topology/readability, migrate remaining provider-coupled tests, address generated-client determinism, or repeat live-eval/output-quality proof."
+    inputs:
+      - "T042 implementation summary and post-review artifacts"
+      - "Current scorecard floor 8/10"
+      - "Claude and Antigravity P3 follow-up notes from T042"
+    constraints:
+      - "Do not implement in T043; produce a peer-gated next-tranche plan first."
+      - "Do not treat further LOC reduction as sufficient; the next tranche must move canonical ownership, locality, human readability, human reviewability, or a known 9/10 blocker."
+      - "Do not start broad frontend-backend DX/observability until the OpenTelemetry branch is reviewed with source evidence."
+      - "Preserve unrelated dirty files."
+    acceptance_criteria:
+      - "The next-tranche ranking compares processor topology/readability, remaining provider-coupled processor tests, self-correction/dispatcher ownership, question/requirements lifecycle, generated-client determinism, narrow stream diagnostics, full-source baseline, and live-eval/output-quality proof."
+      - "The selected worker slice has allowed_files, stop_if, acceptance criteria, behavior-focused tests, and score impact."
+      - "Claude reviews the plan with GREEN_LIGHT yes / MIN_SCORE >= 8; Antigravity reviews if quota/tooling is available, otherwise exact skip/failure is recorded."
+      - "Overall score remains 8 unless evidence proves the weakest dimension moved."
+    verify:
+      - "Review T042 receipt and current scorecard"
+      - "Produce a T043 next-tranche ranking artifact under .codex/artifacts/"
+    receipt: null
 
 checks:
   dirty_fingerprint:
@@ -4490,16 +4630,18 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T040 completed. The AIBuilderProposalProcessor discovery-followup pass-through was deleted, planner/processor callers now use the canonical ai_builder_discovery_followup owner directly, tests patch the consumer-module leaf import, and an AST guard prevents the processor bridge from returning. Claude and Antigravity post-review both returned GREEN_LIGHT yes / MIN_SCORE 8. The broader goal remains active with strict floor 8/10 because processor topology/readability, generated-client determinism, full-source baseline, and OpenTelemetry-coordinated DX boundaries remain unresolved."
-    task: T040
+    result: "T042 completed. Proposal completion provider calls and usage-tracked ProposalCompletionFn construction are now owned by ai_builder_proposal_completion.py. AIBuilderProposalProcessor no longer defines completion methods or raw litellm_client.acompletion calls, and AST guards enforce the new ownership boundary. Claude and Antigravity post-review both returned GREEN_LIGHT yes / MIN_SCORE 8. The broader goal remains active with strict floor 8/10 because the processor is still an 1820 LOC multi-concern orchestration file and generated-client determinism, full-source baseline, OpenTelemetry-coordinated DX boundaries, and repeated live-eval proof remain unresolved."
+    task: T042
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q: 8 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_structured_question_recovery_with_lost_lease_rolls_back -q: 51 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2274 passed, 4 skipped"
-      - "cd backend && uv run ruff check changed T040 backend files/tests: passed"
-      - "cd backend && uv run ruff format --check changed T040 backend files/tests: passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q: 10 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q: 53 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2279 passed, 4 skipped"
+      - "cd backend && uv run ruff check changed T042 backend files/tests: passed"
+      - "cd backend && uv run ruff format --check changed T042 backend files/tests: passed"
       - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder: 0 errors"
-      - "git diff --check: passed"
+      - "Moved-ownership grep for old processor methods/raw acompletion: passed"
+      - "Anti-slippage grep for T042 in backend/src and backend/tests: passed"
       - "ruby YAML parse of state.yaml: yaml ok"
-      - "Claude post-review: .codex/artifacts/claude-peer-loop-t040-discovery-followup-bridge-post-implementation-review-20260522T075858Z.md GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity post-review: .codex/artifacts/antigravity-peer-loop-t040-discovery-followup-bridge-post-implementation-review-20260522T080219Z.md GREEN_LIGHT yes / MIN_SCORE 8"
+      - "git diff --check: passed"
+      - "Claude post-review: .codex/artifacts/claude-peer-loop-t042-completion-owner-post-implementation-review-after-p2-cleanup-20260522T085103Z.md GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity post-review: .codex/artifacts/antigravity-peer-loop-t042-completion-owner-post-implementation-review-20260522T085315Z.md GREEN_LIGHT yes / MIN_SCORE 8"
