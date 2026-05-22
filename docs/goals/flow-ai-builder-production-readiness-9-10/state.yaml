@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T033
+active_task: T034
 
 scoring_target:
   dimensions:
@@ -3808,7 +3808,7 @@ tasks:
   - id: T033
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: xhigh
     objective: "Re-rank the next Flow AI Builder maintainability tranche after T032, with focus on ProposalFinalizer extraction, deferred import/circularity cleanup, retry assistant_snapshots forwarding, processor topology, and whether any smaller cleanup should precede a finalizer extraction."
     inputs:
@@ -3834,6 +3834,117 @@ tasks:
     stop_if:
       - "The next tranche requires broad product behavior decisions or wider write scope than can be made reviewable."
       - "Claude and Antigravity disagree and Codex cannot resolve the disagreement with source evidence."
+    receipt:
+      result: done
+      completed_at: "2026-05-22T06:53:00+02:00"
+      summary: "Re-ranked the next tranche after T032. Selected a bounded CompiledProposalFinalizer extraction that moves the compiled-proposal to active-send-effects lifecycle out of AIBuilderProposalProcessor, breaks the proposal_policy feedback-formatting import cycle, deletes retry context reconstruction, and keeps snapshots as an edit-compilation input rather than a fake finalization dependency."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t033-next-tranche-ranking.md"
+        - ".codex/artifacts/flow-ai-builder-t033-next-tranche-ranking-v2.md"
+        - ".codex/artifacts/claude-peer-loop-t033-compiled-proposal-finalizer-extraction-plan-20260522T044026Z.md"
+        - ".codex/artifacts/claude-peer-loop-t033-compiled-proposal-finalizer-extraction-plan-v2-20260522T044653Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t033-compiled-proposal-finalizer-extraction-plan-v2-20260522T045032Z.md"
+      decision:
+        selected_worker: T034
+        selected_reason: "T032 made create/edit proposal modules compile-only; the remaining 7/10 maintainability floor is now the processor-owned finalization lifecycle. Extracting a real finalizer is the next highest score-moving boundary because it removes one cohesive lifecycle stage instead of splitting by line count."
+        rejected:
+          - candidate: "Only move format_revision_feedback and delete _retry_context"
+            reason: "Safe but too small to move the 7/10 maintainability floor; folded into T034 as boundary cleanup."
+          - candidate: "Generated-client deterministic regeneration cleanup"
+            reason: "Still queued, but it does not address the current processor/finalizer topology blocker."
+          - candidate: "Broad ai_builder_proposal_processor.py split"
+            reason: "Rejected again because a line-count split risks shallow modules and parameter forwarding."
+          - candidate: "Repeat five-case live eval before T034"
+            reason: "T034 is intended behavior-preserving source topology work; repeat live eval after planner/runtime behavior changes or after this tranche if peer review sees risk."
+      peer_review:
+        claude:
+          iteration_1:
+            artifact: ".codex/artifacts/claude-peer-loop-t033-compiled-proposal-finalizer-extraction-plan-20260522T044026Z.md"
+            result: "VERDICT changes_required; GREEN_LIGHT no; MIN_SCORE 6"
+            codex_response: "Accepted blockers: finalizer public surface, callback policy, RED test, test owner, and assistant_snapshots story were underspecified."
+          iteration_2:
+            artifact: ".codex/artifacts/claude-peer-loop-t033-compiled-proposal-finalizer-extraction-plan-v2-20260522T044653Z.md"
+            result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t033-compiled-proposal-finalizer-extraction-plan-v2-20260522T045032Z.md"
+          result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
+          required_refinements:
+            - "CompiledProposalFinalizationRequest must be @dataclass(frozen=True)."
+            - "Moved telemetry helpers must become public names without leading underscores."
+            - "Finalizer must handle usage_tracker=None safely."
+
+  - id: T034
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Extract the compiled-proposal finalization lifecycle from AIBuilderProposalProcessor into a real CompiledProposalFinalizer owner, break the proposal feedback-formatting import cycle, and delete retry context reconstruction without changing user-visible planner/API/runtime behavior."
+    inputs:
+      - "T033 receipt and V2 plan"
+      - ".codex/artifacts/flow-ai-builder-t033-next-tranche-ranking-v2.md"
+      - ".codex/artifacts/claude-peer-loop-t033-compiled-proposal-finalizer-extraction-plan-v2-20260522T044653Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t033-compiled-proposal-finalizer-extraction-plan-v2-20260522T045032Z.md"
+    constraints:
+      - "Stage the RED import-ownership test first and verify it fails before production edits."
+      - "Implement the V2 plan, not the rejected V1 plan."
+      - "Do not create ProposalPersistenceService, MCPClarificationService, manager/helper/utils/common modules, or a pass-through facade."
+      - "Do not change planner prompts, public API/SSE/frontend generated types, DB schema, Celery behavior, lease/CAS behavior, or live-eval prompts."
+      - "No callback bag may cross the finalizer boundary; ProposalCompletionFn is the only callback contract."
+      - "CompiledProposalFinalizationRequest must be a frozen dataclass and must not contain assistant_snapshots."
+      - "Move telemetry helpers to public names in ai_builder_proposal_telemetry.py and handle usage_tracker=None safely."
+      - "New modules use at most one-line docstrings; comments explain why, not what, and must not mention T034 or extraction history."
+      - "Preserve unrelated dirty files."
+      - "If net production LOC increases above 150 or processor LOC does not decrease by at least 250, stop and re-rank before committing."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_finalization.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_feedback_formatting.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_policy.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_quality_critic.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_feedback.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_finalization.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_policy.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t034-implementation-summary.md"
+    acceptance_criteria:
+      - "CompiledProposalFinalizer owns compiled-proposal finalization: MCP clarification persistence, MCP policy feedback, quality feedback, edit description repair, accepted-plan persistence, success telemetry, assistant metadata, and plan event emission."
+      - "CompiledProposalFinalizer.__init__ takes repo, quality_retry_warning_codes, and call_proposal_completion; finalize_compiled_proposal takes one CompiledProposalFinalizationRequest."
+      - "CompiledProposalFinalizationRequest is @dataclass(frozen=True), has no assistant_snapshots field, and has no mutable per-request state on the finalizer instance."
+      - "AIBuilderProposalProcessor constructs exactly one finalizer in __init__ and delegates compiled proposal success from initial create/edit and retry create/edit paths."
+      - "AIBuilderProposalProcessor no longer defines _finalize_compiled_proposal, _mcp_policy_feedback, _create_quality_result, _edit_quality_result, _repair_edit_description_if_needed, _retry_context, or mcp_clarification_events_if_needed."
+      - "Processor create/edit handlers no longer define _record_successful_proposal or _build_assistant_metadata callbacks for finalization."
+      - "assistant_metadata_with_usage and record_proposal_first_attempt are public helpers in ai_builder_proposal_telemetry.py and all moved call sites use the public names."
+      - "format_revision_feedback lives in ai_builder_feedback_formatting.py; ai_builder_plan_quality_critic.py and ai_builder_create_feedback.py do not import ai_builder_proposal_policy.py."
+      - "ai_builder_proposal_policy.py has top-level imports for critic/create feedback dependencies and no deferred imports inside contextual feedback functions."
+      - "_retry_context is deleted; retry success builds CompiledProposalFinalizationRequest directly from ToolRetryInvocation and captured retry config values."
+      - "Direct finalizer behavior tests live in test_ai_builder_proposal_finalization.py and construct CompiledProposalFinalizer directly."
+      - "Existing edit retry snapshot behavior remains covered by the process_edit_arguments assistant_snapshots assertion."
+      - "Static import-ownership tests prevent finalization modules from importing the processor and prevent critic/create feedback modules from importing proposal policy."
+    verify:
+      - "RED first: cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q must fail before production edits for missing finalization owner / processor-owned finalization methods."
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_finalization.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_policy.py tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q if modified or added"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check <T034 changed backend files/tests>"
+      - "cd backend && uv run ruff format --check <T034 changed backend files/tests>"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "rg -n 'from intric\\.flows\\.ai_builder\\.ai_builder_proposal_processor|import .*ai_builder_proposal_processor' backend/src/intric/flows/ai_builder/ai_builder_proposal_finalization.py backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+      - "rg -n 'from intric\\.flows\\.ai_builder\\.ai_builder_proposal_policy import|import .*ai_builder_proposal_policy' backend/src/intric/flows/ai_builder/ai_builder_plan_quality_critic.py backend/src/intric/flows/ai_builder/ai_builder_create_feedback.py"
+      - "rg -n '^\\s+from intric\\.flows\\.ai_builder\\.ai_builder_(plan_quality_critic|create_feedback|critic_invariants)' backend/src/intric/flows/ai_builder/ai_builder_proposal_policy.py"
+      - "git diff --numstat -- <T034 production files>"
+      - "git diff --check"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+    stop_if:
+      - "The finalizer needs callbacks beyond ProposalCompletionFn."
+      - "The extraction cannot pass finalizer tests without constructing AIBuilderProposalProcessor."
+      - "The implementation needs product behavior, API, DB, Celery, generated-client, or live-eval changes."
+      - "Claude or Antigravity implementation review finds a blocker Codex cannot resolve inside this scope."
 
 checks:
   dirty_fingerprint:
