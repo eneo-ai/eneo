@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T027
+active_task: T028
 
 scoring_target:
   dimensions:
@@ -3211,7 +3211,7 @@ tasks:
   - id: T027
     type: judge
     assignee: Judge
-    status: active
+    status: completed
     reasoning_hint: xhigh
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T026b, with pressure on full-source typing/test baseline, API/error-code discipline, readability/module/test topology, and whether the remaining slot-classification merge/writer P3 duplication should be folded into a broader simplification slice."
     inputs:
@@ -3238,6 +3238,101 @@ tasks:
       - "The next tranche requires product direction outside the current 9/10 goal."
       - "The next tranche cannot be bounded to a human-reviewable diff."
       - "Peer review disagrees on canonical ownership and the disagreement cannot be resolved with source evidence."
+    receipt:
+      completed_at: "2026-05-22T03:20:00+02:00"
+      result: "T027 completed. Re-ranked the next tranche after T026b from current repository evidence. Initial Codex plan selected API/error-code discipline over readability topology, but Claude iteration 1 rejected the draft because the missing-code inventory undercounted 13 sites as 5 and allowed files excluded ai_builder_repo.py / ai_builder_planner.py. Codex verified the full AST inventory, revised T028 to use typed AI Builder public exception subclasses rather than only an AST checker, widened scope to all public exception raise owners, and hardened router/wire-test acceptance. Claude iteration 2 rejected only crisp implementation-design gaps; Codex revised again to specify enum code storage, no Unauthorized default, zero allowlist, one wire test per subclass, explicit logged fallback, and 47-site mechanical migration disclosure. Claude iteration 3 returned GREEN_LIGHT yes / MIN_SCORE 8. Antigravity quota check recommended skip because Gemini models were 0%; recorded SKIPPED_DUE_TO_QUOTA, not pass."
+      artifact: ".codex/artifacts/flow-ai-builder-t027-next-tranche-ranking.md"
+      claude_artifacts:
+        - ".codex/artifacts/claude-peer-loop-flow-ai-builder-t027-next-tranche-ranking-20260522T010850Z.md: GREEN_LIGHT no; MIN_SCORE 5; inventory/scope/typed-boundary blockers accepted"
+        - ".codex/artifacts/claude-peer-loop-flow-ai-builder-t027-next-tranche-ranking-iteration-2-20260522T011617Z.md: GREEN_LIGHT no; MIN_SCORE 7; subclass storage/router/wire-test blockers accepted"
+        - ".codex/artifacts/claude-peer-loop-flow-ai-builder-t027-next-tranche-ranking-iteration-3-20260522T011951Z.md: GREEN_LIGHT yes; MIN_SCORE 8"
+      antigravity: "SKIPPED_DUE_TO_QUOTA; quota status at 2026-05-22T03:00:44+02:00 reported Gemini models at 0% and recommended skipping Antigravity."
+      scorecard_after_t027:
+        Maintainability: 8
+        Code_Quality: 8
+        Clean_Architecture: 8
+        Separation_of_Concerns: 8
+        Single_Source_of_Truth: 9
+        Human_Readability: 8
+        Human_Reviewability: 8
+        Runtime_Reliability: 9
+        Data_Model_Schema_Quality: 9
+        API_Contract_Quality: 8
+        Test_Coverage_Quality: 8
+        Developer_Diagnostic_Experience: 9
+        AI_Slop_Comment_Naming_Quality: 8
+        Normal_User_Output_Quality: 9
+        Overall: 8
+      selected_next_task: T028
+      remaining_blockers:
+        - "T028 must implement typed AI Builder public exceptions and public error-code discipline before API_Contract_Quality can honestly move to 9."
+        - "T029 must still handle readability/module/test topology; T028 must not absorb topology refactors."
+        - "Full backend Pyright remains red with 112 existing errors outside flows/ai_builder; AI Builder-local Pyright is green."
+        - "Repeated live-eval evidence must remain green after later planner/runtime changes."
+
+  - id: T028
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: xhigh
+    objective: "Implement typed AI Builder public exception/error-code discipline so REST/SSE errors cannot silently fall back to generic bad_request for AI Builder-owned failures."
+    inputs:
+      - "T027 artifact and Claude green plan gate"
+      - "Full 13-site missing-code AST inventory"
+      - "Current AI Builder public error contract and router tests"
+    constraints:
+      - "Do not touch proposal/planner behavior except replacing raw public exception raises with typed AI Builder exceptions and adding the single missing code at ai_builder_planner.py:1091."
+      - "Do not touch frontend diagnostic-report UI, live-eval product fixes, DB migrations, or large topology moves."
+      - "Do not edit global intric.main.exceptions classes."
+      - "Antigravity remains SKIPPED_DUE_TO_QUOTA unless quota status changes; do not mark it as passed."
+      - "If implementation exceeds the T027 split trigger, stop and re-plan T028a/T028b rather than broadening silently."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_error_contract.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_context.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_edit_context.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_repo.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_router.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_service.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_session_transitions.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_settings.py"
+      - "backend/tests/unit/test_ai_builder_error_code_discipline.py"
+      - "backend/tests/unit/test_ai_builder_openapi_contract.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_error_contract.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_router.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_service.py"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t028-*.md"
+    acceptance_criteria:
+      - "Typed AI Builder exception classes exist in ai_builder_error_contract.py and require AIBuilderErrorCode."
+      - "All 13 verified missing-code sites are resolved by typed AI Builder exceptions; allowlist count must be zero at close."
+      - "All current raw global public exception raises in AI Builder are migrated to typed AI Builder exceptions or T028 is split before close."
+      - "Static discipline test rejects raw global public exception raises, missing code on typed subclasses, bare string code values, code=None, and .value usage on typed subclass raises."
+      - "New enum codes, if added, are registered with category, status, Intric/Eneo error code, and default phase."
+      - "Router/SSE fallback no longer uses error.code or 'bad_request' silently; unexpected raw global exceptions are logged and mapped to an explicit enum-typed fallback."
+      - "Wire-level route/SSE tests cover one path per typed subclass and at least one formerly missing-code path."
+      - "details and diagnostic_context behavior is preserved; no third public context carrier is introduced."
+      - "OpenAPI/generated-client impact is limited to intentional enum additions or proven unchanged."
+      - "Receipt records subclass storage pattern, red/green static-test evidence, OpenAPI determinism/diff result, and Claude post-implementation review."
+    verify:
+      - "cd backend && uv run pytest tests/unit/test_ai_builder_error_code_discipline.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_error_contract.py tests/unittests/flows/ai_builder/test_ai_builder_router.py tests/unit/test_ai_builder_openapi_contract.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_error_contract.py src/intric/flows/ai_builder/ai_builder_context.py src/intric/flows/ai_builder/ai_builder_plan_edit_context.py src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/ai_builder_repo.py src/intric/flows/ai_builder/ai_builder_router.py src/intric/flows/ai_builder/ai_builder_service.py src/intric/flows/ai_builder/ai_builder_session_transitions.py src/intric/flows/ai_builder/ai_builder_settings.py tests/unit/test_ai_builder_error_code_discipline.py tests/unit/test_ai_builder_openapi_contract.py tests/unittests/flows/ai_builder/test_ai_builder_error_contract.py tests/unittests/flows/ai_builder/test_ai_builder_router.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_error_contract.py src/intric/flows/ai_builder/ai_builder_context.py src/intric/flows/ai_builder/ai_builder_plan_edit_context.py src/intric/flows/ai_builder/ai_builder_plan_lifecycle.py src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/ai_builder_repo.py src/intric/flows/ai_builder/ai_builder_router.py src/intric/flows/ai_builder/ai_builder_service.py src/intric/flows/ai_builder/ai_builder_session_transitions.py src/intric/flows/ai_builder/ai_builder_settings.py tests/unit/test_ai_builder_error_code_discipline.py tests/unit/test_ai_builder_openapi_contract.py tests/unittests/flows/ai_builder/test_ai_builder_error_contract.py tests/unittests/flows/ai_builder/test_ai_builder_router.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder tests/unit/test_ai_builder_openapi_contract.py tests/unit/test_ai_builder_error_code_discipline.py -q"
+      - "cd backend && uv run python - <<'PY' > /tmp/eneo-openapi-t028.json; from intric.server.main import get_application; import json; print(json.dumps(get_application().openapi())); PY"
+      - "cd frontend/packages/intric-js && bun x openapi-typescript /tmp/eneo-openapi-t028.json -o src/types/schema.d.ts --default-non-nullable=false if enum schema changes"
+      - "git diff --check"
+      - "python3 - <<'PY'; import yaml, pathlib; yaml.safe_load(pathlib.Path('docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml').read_text()); print('yaml ok'); PY"
+    stop_if:
+      - "The fix requires broad generic BAD_REQUEST use instead of specific AIBuilderErrorCode values."
+      - "The implementation requires editing existing global exception classes."
+      - "Generated client impact is broader than intentional enum additions."
+      - "The migration requires files outside the allowed list, exceeds 500 non-test LOC excluding mechanical import/raise rewrites, or changes planner/proposal behavior beyond exception type/code."
+      - "Claude post-implementation review finds a blocking issue that cannot be resolved within T028 scope."
     receipt: null
 
 checks:
@@ -3246,16 +3341,16 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T026b completed and T027 judge gate activated. Runtime slot classification now has a typed conversation-metadata owner and replay path; all focused tests/static checks passed; broader AI Builder unit tests passed; authenticated five-case live eval passed C1-C5 including C4. Claude final recheck returned GREEN_LIGHT yes / MIN_SCORE 9 after the invalid-slot metadata asymmetry fix. Broader goal remains incomplete with overall strict floor 8/10."
-    task: T026b
+    result: "T027 completed and T028 activated. T027 re-ranked the next tranche after T026b, selected typed AI Builder public exception/error-code discipline as the next bounded worker, revised after two Claude rejections, and received Claude GREEN_LIGHT yes / MIN_SCORE 8 on iteration 3. Antigravity quota status recommended skipping because Gemini models were 0%, so Antigravity is recorded as SKIPPED_DUE_TO_QUOTA, not pass. Broader goal remains incomplete with overall strict floor 8/10."
+    task: T027
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py -q: 93 passed in 6.11s"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2246 passed, 4 skipped, 11 warnings in 22.66s"
-      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_conversation_metadata.py src/intric/flows/ai_builder/ai_builder_discovery_runtime.py src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py: All checks passed"
-      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_conversation_metadata.py src/intric/flows/ai_builder/ai_builder_discovery_runtime.py src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py: 8 files already formatted"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder/ai_builder_conversation_metadata.py src/intric/flows/ai_builder/ai_builder_discovery_runtime.py src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/planning_state_builder.py: 0 errors, 0 warnings, 0 informations"
-      - "Authenticated T026b live eval with env-only API key/space id: /tmp/flow-ai-builder-t026b-live-eval/20260522T004058Z passed C1/C2/C3/C4/C5"
-      - "Claude T026b iteration 1: .codex/artifacts/claude-peer-loop-t026b-slot-classification-metadata-replay-implementation-20260522T004922Z.md: GREEN_LIGHT yes; MIN_SCORE 8; P1 invalid-slot asymmetry fixed before commit"
-      - "Claude T026b iteration 2: .codex/artifacts/claude-peer-loop-t026b-slot-classification-metadata-replay-final-recheck-20260522T005320Z.md: GREEN_LIGHT yes; MIN_SCORE 9"
-      - "Antigravity T026b gate: SKIPPED_DUE_TO_QUOTA; not passed"
+      - "git status --short --branch: branch feature/refactor-flows-flowai ahead 25; only unrelated dirty files plus board update"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder: 0 errors, 0 warnings, 0 informations"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric: 112 existing errors outside flows/ai_builder"
+      - "cd backend && uv run python <AST missing-code inventory>: 13 missing-code AI Builder public exception sites, 0 bare string code values, 0 code=None values"
+      - "cd backend && uv run python <AST .value inventory>: 34 existing AIBuilderErrorCode.*.value public exception sites to migrate mechanically"
+      - "Antigravity quota status: recommended skip; Gemini models 0%; SKIPPED_DUE_TO_QUOTA, not pass"
+      - "Claude T027 iteration 1: .codex/artifacts/claude-peer-loop-flow-ai-builder-t027-next-tranche-ranking-20260522T010850Z.md: GREEN_LIGHT no; MIN_SCORE 5"
+      - "Claude T027 iteration 2: .codex/artifacts/claude-peer-loop-flow-ai-builder-t027-next-tranche-ranking-iteration-2-20260522T011617Z.md: GREEN_LIGHT no; MIN_SCORE 7"
+      - "Claude T027 iteration 3: .codex/artifacts/claude-peer-loop-flow-ai-builder-t027-next-tranche-ranking-iteration-3-20260522T011951Z.md: GREEN_LIGHT yes; MIN_SCORE 8"
       - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"': yaml ok"
