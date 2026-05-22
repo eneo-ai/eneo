@@ -406,36 +406,35 @@ export class ChatService {
 
         const streamAborted = error instanceof Error && error.message.includes("aborted");
         if (streamAborted) {
-          // In that case nothing more to do, just return
-          return;
-        }
-
-        // If the error happened before streaming started (ref is undefined),
-        // no message was added to the conversation — just propagate the error
-        // so ConversationInput can restore the user's input.
-        if (!ref) {
+          // Backend persists the user's message before stream start and best-effort
+          // saves a partial assistant reply on abort, so the conversation survives a
+          // refresh. Falling through to reloadHistory() (below) syncs the sidebar with
+          // the now-persisted state instead of leaving the new session invisible until
+          // a manual reload.
+        } else if (!ref) {
+          // If the error happened before streaming started (ref is undefined),
+          // no message was added to the conversation — just propagate the error
+          // so ConversationInput can restore the user's input.
           console.error(error);
           throw error;
-        }
-
-        // If streaming started but no content arrived yet, remove the empty message
-        if (error instanceof IntricError && !ref.answer) {
+        } else if (error instanceof IntricError && !ref.answer) {
+          // If streaming started but no content arrived yet, remove the empty message
           this.currentConversation.messages.pop();
           console.error(error);
           throw error;
-        }
+        } else {
+          // Error during streaming — show inline in the conversation
+          let message = "We encountered an error processing your request.";
+          if (error instanceof IntricError) {
+            message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
+          } else if (error instanceof Object && "message" in error && "name" in error) {
+            message += `\n\`\`\`\n${error.name}: "${error.message}"\n\`\`\``;
+          }
 
-        // Error during streaming — show inline in the conversation
-        let message = "We encountered an error processing your request.";
-        if (error instanceof IntricError) {
-          message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
-        } else if (error instanceof Object && "message" in error && "name" in error) {
-          message += `\n\`\`\`\n${error.name}: "${error.message}"\n\`\`\``;
+          this.currentConversation.messages[this.currentConversation.messages?.length - 1].answer =
+            message;
+          console.error(error);
         }
-
-        this.currentConversation.messages[this.currentConversation.messages?.length - 1].answer =
-          message;
-        console.error(error);
       } finally {
         if (this.#streamGen === streamGen) {
           if (ref && inrefBuffer) {

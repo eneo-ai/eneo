@@ -337,62 +337,88 @@ class GroupChatService:
         completion_model: "CompletionModel",
         session: "SessionInDB",
         stream: bool,
+        question_id: "UUID",
         assistant_selector_tokens: int = 0,
     ):
         """Handle response for group chat selector, matching assistant_service"""
 
+        # Capture tenant_id outside the generator so the abort-path background save
+        # doesn't depend on self.user being safely accessible during teardown.
+        tenant_id = self.user.tenant_id
+
         if stream:
 
             async def response_stream():
-                chunk_response = response.split()
                 response_string = ""
-                for i, chunk in enumerate(chunk_response):
-                    if i < len(chunk_response):
-                        chunk_text = chunk + " "
-                    else:
-                        chunk_text = chunk
+                completed = False
 
-                    response_string += chunk_text
-                    # yield empty references and chunk text, matching assistant_service format
-                    yield Completion(
-                        text=chunk_text,
-                        response_type=ResponseType.TEXT,
-                        reference_chunks=[],
+                try:
+                    chunk_response = response.split()
+                    for i, chunk in enumerate(chunk_response):
+                        if i < len(chunk_response):
+                            chunk_text = chunk + " "
+                        else:
+                            chunk_text = chunk
+
+                        response_string += chunk_text
+                        # yield empty references and chunk text, matching assistant_service format
+                        yield Completion(
+                            text=chunk_text,
+                            response_type=ResponseType.TEXT,
+                            reference_chunks=[],
+                        )
+                        await asyncio.sleep(0.05)
+
+                    # NOTE: refactor question_token_count to include the whole contructed prompt.
+                    question_token_count = count_tokens(question, completion_model.name)
+                    token_count = count_tokens(response, completion_model.name)
+                    await self.session_service.complete_question_with_answer(
+                        question_id=question_id,
+                        answer=response,
+                        num_tokens_question=question_token_count
+                        + assistant_selector_tokens,
+                        num_tokens_answer=token_count,
+                        completion_model=completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
+                        info_blob_chunks=[],
+                        logging_details=None,
                     )
-                    await asyncio.sleep(0.05)
+                    completed = True
+                finally:
+                    # Selector-echo stream did not reach normal completion. The
+                    # placeholder already captures the question; only schedule a
+                    # background UPDATE when there's actual content to persist.
+                    if not completed and response_string:
+                        from intric.sessions.session_service import (
+                            persist_partial_question_answer,
+                            safe_count_tokens,
+                            schedule_background_save,
+                        )
 
-                # NOTE: refactor question_token_count to include the whole contructed prompt.
-                question_token_count = count_tokens(question, completion_model.name)
-                token_count = count_tokens(response, completion_model.name)
-                await self.session_service.add_question_to_session(
-                    question=question,
-                    answer=response,
-                    num_tokens_question=question_token_count
-                    + assistant_selector_tokens,
-                    num_tokens_answer=token_count,
-                    session=session,
-                    completion_model=completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
-                    info_blob_chunks=[],
-                    files=[],
-                    logging_details=None,
-                )
+                        partial_tokens_answer = safe_count_tokens(
+                            response_string, completion_model.name
+                        )
+                        schedule_background_save(
+                            persist_partial_question_answer(
+                                tenant_id=tenant_id,
+                                question_id=question_id,
+                                answer=response_string,
+                                num_tokens_answer=partial_tokens_answer,
+                            )
+                        )
 
             return response_stream()
         else:
             # NOTE: refactor question_token_count to include the whole contructed prompt.
             question_token_count = count_tokens(question, completion_model.name)
             token_count = count_tokens(response, completion_model.name)
-            await self.session_service.add_question_to_session(
-                question=question,
+            await self.session_service.complete_question_with_answer(
+                question_id=question_id,
                 answer=response,
                 num_tokens_question=question_token_count + assistant_selector_tokens,
                 num_tokens_answer=token_count,
-                session=session,
                 completion_model=completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
                 info_blob_chunks=[],
-                files=[],
                 logging_details=None,
-                assistant_id=None,
             )
             return response
 
@@ -466,12 +492,22 @@ class GroupChatService:
             assert (
                 first_completion_model is not None
             )  # assistant must have a model to be usable
+            # Persist a placeholder Question row before the selector echo streams out, so
+            # the user's question survives even if the stream is aborted.
+            question_id = await self.session_service.create_question_placeholder(
+                question=question,
+                session=session,
+                files=[],
+                assistant_id=None,
+                completion_model=first_completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
+            )
             final_response = await self._handle_response(
                 response=response_from_selector,
                 question=question,
                 completion_model=first_completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
                 session=session,
                 stream=stream,
+                question_id=question_id,
                 assistant_selector_tokens=selection_result.assistant_selector_tokens,
             )
             response = AssistantResponse(
@@ -484,6 +520,7 @@ class GroupChatService:
                 tools=UseTools(assistants=[]),
                 description=None,
                 web_search_results=[],
+                question_id=question_id,
             )
         else:
             response = await self.assistant_service.ask(
