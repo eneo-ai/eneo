@@ -40,6 +40,7 @@ from intric.flows.ai_builder.ai_builder_discovery import (
     build_registry_question_followup,
 )
 from intric.flows.ai_builder.ai_builder_discovery_followup import (
+    emit_discovery_followup_if_needed,
     persist_backend_question,
 )
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
@@ -1213,20 +1214,20 @@ class AIBuilderPlanner:
                 and not prepared_request.llm_messages
                 and prepared_request.discovery_block_message is not None
             ):
-                followup_result = (
-                    await self.proposal_processor.emit_discovery_followup_if_needed(
-                        turn=turn,
-                        conversation=conversation,
-                        new_messages_start=new_messages_start,
-                        flow=flow,
-                        litellm_model=litellm_model,
-                        litellm_kwargs=litellm_kwargs,
-                        ui_language=ui_language,
-                        assistant_metadata=build_assistant_message_metadata(
-                            conversation,
-                            tool_calls=[{"name": "ask_structured_question"}],
-                        ),
-                    )
+                followup_result = await emit_discovery_followup_if_needed(
+                    repo=self.repo,
+                    turn=turn,
+                    conversation=conversation,
+                    new_messages_start=new_messages_start,
+                    flow=flow,
+                    litellm_client=self.litellm_client,
+                    litellm_model=litellm_model,
+                    litellm_kwargs=litellm_kwargs,
+                    ui_language=ui_language,
+                    assistant_metadata=build_assistant_message_metadata(
+                        conversation,
+                        tool_calls=[{"name": "ask_structured_question"}],
+                    ),
                 )
                 if followup_result is not None:
                     for event in followup_result.events:
@@ -1238,17 +1239,17 @@ class AIBuilderPlanner:
                 prepared_request.server_output is None
                 and prepared_request.should_emit_forced_followup
             ):
-                followup_result = (
-                    await self.proposal_processor.emit_discovery_followup_if_needed(
-                        turn=turn,
-                        conversation=conversation,
-                        new_messages_start=new_messages_start,
-                        flow=flow,
-                        assistant_metadata=build_assistant_message_metadata(
-                            conversation,
-                            tool_calls=[{"name": "ask_structured_question"}],
-                        ),
-                    )
+                followup_result = await emit_discovery_followup_if_needed(
+                    repo=self.repo,
+                    turn=turn,
+                    conversation=conversation,
+                    new_messages_start=new_messages_start,
+                    flow=flow,
+                    litellm_client=self.litellm_client,
+                    assistant_metadata=build_assistant_message_metadata(
+                        conversation,
+                        tool_calls=[{"name": "ask_structured_question"}],
+                    ),
                 )
                 if followup_result is not None:
                     for event in followup_result.events:

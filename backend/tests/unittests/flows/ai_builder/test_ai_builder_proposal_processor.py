@@ -528,9 +528,8 @@ async def test_request_non_question_continuation_uses_backend_followup_when_only
     ]
 
     with (
-        patch.object(
-            processor,
-            "emit_discovery_followup_if_needed",
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.emit_discovery_followup_if_needed",
             new=AsyncMock(return_value=SimpleNamespace(events=followup_events)),
         ) as emit_followup,
         patch.object(
@@ -614,9 +613,8 @@ async def test_request_non_question_continuation_recovers_with_requirements_summ
         yield {"event": "requirements_summary", "data": "{}"}
 
     with (
-        patch.object(
-            processor,
-            "emit_discovery_followup_if_needed",
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.emit_discovery_followup_if_needed",
             new=AsyncMock(return_value=None),
         ) as emit_followup,
         patch.object(
@@ -704,9 +702,8 @@ async def test_request_non_question_continuation_returns_typed_error_when_no_fol
     )
 
     with (
-        patch.object(
-            processor,
-            "emit_discovery_followup_if_needed",
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.emit_discovery_followup_if_needed",
             new=AsyncMock(return_value=None),
         ) as emit_followup,
         patch(

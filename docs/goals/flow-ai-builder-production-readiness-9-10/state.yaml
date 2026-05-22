@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T039
+active_task: T041
 
 scoring_target:
   dimensions:
@@ -4329,7 +4329,7 @@ tasks:
   - id: T039
     type: pm
     assignee: PM
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T038, with special pressure on processor topology/readability, generated-client determinism, full-source typing/test baseline, repeated live-eval proof, and whether a completion-provider/telemetry semantics cleanup should be folded into a broader simplification slice."
     inputs:
@@ -4358,6 +4358,131 @@ tasks:
       - "git status --short --branch"
       - "Review T038 receipt and current scorecard"
       - "Produce .codex/artifacts/flow-ai-builder-t039-next-tranche-ranking.md"
+    receipt:
+      completed_at: "2026-05-22T09:48:00+02:00"
+      summary: "Re-ranked the next Flow AI Builder tranche after T038. The first broad question/requirements topology extraction was rejected after Claude iteration 1 because it would create broad callback/re-entry coupling back into AIBuilderProposalProcessor. The revised plan selects a narrower T040 prerequisite cleanup: delete the AIBuilderProposalProcessor.emit_discovery_followup_if_needed pass-through and route planner/processor callers directly to the canonical ai_builder_discovery_followup.emit_discovery_followup_if_needed owner."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t039-next-tranche-ranking.md"
+        - ".codex/artifacts/claude-peer-loop-t039-next-flow-ai-builder-tranche-ranking-20260522T072903Z.md"
+        - ".codex/artifacts/claude-peer-loop-t039-next-flow-ai-builder-tranche-ranking-iteration-2-20260522T073949Z.md"
+        - ".codex/artifacts/claude-peer-loop-t039-next-flow-ai-builder-tranche-ranking-iteration-3-20260522T074240Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t039-final-next-tranche-challenge-20260522T074619Z.md"
+      peer_gates:
+        codex_self_review: "PASS: the original topology split was revised into a smaller deletion-first slice because the broad extraction would move coupling instead of reducing it."
+        claude:
+          iteration_1: "changes_required; GREEN_LIGHT no; MIN_SCORE 6; blocked broad extraction on dispatcher re-entry, litellm/self-correction coupling, incomplete allowed files, and pass-through wrapper movement."
+          iteration_2: "tooling failure; API Error: socket connection was closed unexpectedly; recorded as no verdict."
+          iteration_3: "green; GREEN_LIGHT yes; MIN_SCORE 8; approved narrower T040 with minor plan corrections."
+        antigravity: "green; GREEN_LIGHT yes; MIN_SCORE 8; approved T040 and highlighted the silent integration-test mock trap."
+      selected_worker: T040
+      scorecard_after_t039:
+        Overall: 8
+      residual_risks:
+        - "T040 is a prerequisite simplification and will not by itself move the overall score floor above 8."
+        - "The broader processor topology/readability problem remains for T041+ after the bridge is deleted."
+        - "Broad frontend-backend DX/observability remains paused until the separate OpenTelemetry branch is reviewed."
+
+  - id: T040
+    type: worker
+    assignee: Codex
+    status: completed
+    reasoning_hint: medium
+    objective: "Delete the AIBuilderProposalProcessor discovery-followup pass-through and make planner/processor call the canonical ai_builder_discovery_followup.emit_discovery_followup_if_needed owner directly."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t039-next-tranche-ranking.md"
+      - ".codex/artifacts/claude-peer-loop-t039-next-flow-ai-builder-tranche-ranking-iteration-3-20260522T074240Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t039-final-next-tranche-challenge-20260522T074619Z.md"
+      - "Current scorecard floor 8/10"
+    constraints:
+      - "Implement only the peer-approved bridge deletion; do not start the broader question/requirements extraction in T040."
+      - "Do not touch frontend, generated clients, DB schema, Celery tasks, public API schemas, OpenTelemetry, broad diagnostics, planner prompts, live-eval fixtures, or new proposal question-flow modules."
+      - "Preserve unrelated dirty files."
+      - "Do not claim the broader goal is complete or the score floor is above 8 from this cleanup alone."
+    acceptance_criteria:
+      - "AIBuilderProposalProcessor no longer defines emit_discovery_followup_if_needed."
+      - "No self.emit_discovery_followup_if_needed calls remain in ai_builder_proposal_processor.py, including the current call sites around :768, :1294, :1441, and :1688."
+      - "No proposal_processor.emit_discovery_followup_if_needed calls remain in ai_builder_planner.py."
+      - "Discovery follow-up persistence remains owned by ai_builder_discovery_followup.emit_discovery_followup_if_needed."
+      - "Processor and planner pass explicit dependencies to the leaf owner; no new wrapper, service, protocol, or dependency bag is introduced."
+      - "Tests no longer assign or patch processor.emit_discovery_followup_if_needed; any remaining patch uses the consumer module's imported leaf reference."
+      - "Static ownership guard fails if AIBuilderProposalProcessor grows an emit_discovery_followup_if_needed method again."
+      - "No new Any, Callable[..., Any], **kwargs: Any, broad compatibility path, observability/correlation abstraction, or AI-slop comments are introduced."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t040-implementation-summary.md"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_structured_question_recovery_with_lost_lease_rolls_back -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check <T040 changed backend files/tests>"
+      - "cd backend && uv run ruff format --check <T040 changed backend files/tests>"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "git diff --check"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+    receipt:
+      completed_at: "2026-05-22T10:03:00+02:00"
+      summary: "Deleted the AIBuilderProposalProcessor.emit_discovery_followup_if_needed pass-through. AIBuilderProposalProcessor and AIBuilderPlanner now call ai_builder_discovery_followup.emit_discovery_followup_if_needed directly with explicit repo/litellm_client dependencies. Updated processor and integration tests to patch the consumer-module leaf import rather than a fake processor method, and added an AST ownership guard that fails if the bridge method returns."
+      implementation_artifact: ".codex/artifacts/flow-ai-builder-t040-implementation-summary.md"
+      changed_files:
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_planner.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+        - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      peer_gates:
+        codex_self_review: "PASS: this is deletion of a fake seam, not a new abstraction; the broader score floor remains 8."
+        claude_post_review: ".codex/artifacts/claude-peer-loop-t040-discovery-followup-bridge-post-implementation-review-20260522T075858Z.md GREEN_LIGHT yes / MIN_SCORE 8."
+        antigravity_post_review: ".codex/artifacts/antigravity-peer-loop-t040-discovery-followup-bridge-post-implementation-review-20260522T080219Z.md GREEN_LIGHT yes / MIN_SCORE 8; accepted P3 class_found guard hardening before final verification."
+      verification_results:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q: 8 passed in 2.85s after Antigravity P3 fix."
+        - "Negative guard proof: temporarily reintroduced AIBuilderProposalProcessor.emit_discovery_followup_if_needed; test_proposal_processor_does_not_own_discovery_followup_bridge failed with defines emit_discovery_followup_if_needed; removed stub."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_structured_question_recovery_with_lost_lease_rolls_back -q: 51 passed, 16 warnings in 13.22s."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2274 passed, 4 skipped, 11 warnings in 14.03s."
+        - "cd backend && uv run ruff check changed T040 backend files/tests: All checks passed."
+        - "cd backend && uv run ruff format --check changed T040 backend files/tests: 5 files already formatted."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder: 0 errors, 0 warnings, 0 informations."
+        - "rg exact old src references and old test assignment: no output."
+        - "git diff --check: passed."
+        - "ruby YAML parse of state.yaml: yaml ok."
+      scorecard_after_t040:
+        Overall: 8
+      residual_risks:
+        - "AIBuilderProposalProcessor remains oversized and still owns proposal entry, completion execution, self-correction, create/edit routing, question recovery, requirements confirmation, and finalization."
+        - "T041 must design the next topology slice with explicit callback boundaries before moving question/requirements logic."
+        - "Generated-client determinism and full-source Pyright baseline remain unresolved."
+        - "Broad AI Builder DX/observability remains paused until the platform OpenTelemetry branch is reviewed."
+
+  - id: T041
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Plan the next processor topology/readability tranche after T040, with explicit callback-boundary design and no broad observability/DX work until the OpenTelemetry branch is reviewed."
+    inputs:
+      - "T039 ranking artifact and peer reviews"
+      - "T040 implementation summary and post-review artifacts"
+      - "Current scorecard floor 8/10"
+    constraints:
+      - "Do not implement in T041; produce an evidence-backed next-tranche plan first."
+      - "Do not move request_non_question_continuation until the dispatcher re-entry boundary is designed or explicitly scoped out."
+      - "If moving confirm-requirements handling, list every callback edge back into AIBuilderProposalProcessor by name and signature before implementation."
+      - "Do not accept broad dependency bags, processor injection, Callable[..., Any], or ProposalContext as a catch-all bag for a new module."
+      - "Do not start broad frontend-backend DX/observability until the OpenTelemetry branch is reviewed with source evidence."
+      - "Preserve unrelated dirty files."
+    acceptance_criteria:
+      - "The next topology plan states canonical owners, allowed files, callback boundaries, stop conditions, tests, and score impact."
+      - "The plan explicitly decides whether the next slice is dispatcher extraction, confirm-requirements extraction, another deletion/consolidation, or a different higher-score-moving tranche."
+      - "Claude reviews the revised plan with GREEN_LIGHT yes / MIN_SCORE >= 8; Antigravity reviews if quota/tooling is available, otherwise exact skip/failure is recorded."
+      - "Overall score remains 8 unless evidence proves the weakest dimension moves."
+    verify:
+      - "Review T040 receipt and current scorecard"
+      - "Produce .codex/artifacts/flow-ai-builder-t041-next-topology-plan.md"
 
 checks:
   dirty_fingerprint:
@@ -4365,18 +4490,16 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T037 completed and T038 activated. T037 ranked the next tranche after T036 and selected typed proposal-completion telemetry cleanup only after Claude iteration 2 returned GREEN_LIGHT yes / MIN_SCORE 8 and Antigravity returned GREEN_LIGHT yes / MIN_SCORE 8 on the same revised plan. The broader goal remains active with strict floor 8/10 because T038 is a bounded runtime telemetry/type cleanup slice and does not resolve the processor topology/readability floor, generated-client determinism, full-source baseline, or repeated live-eval proof."
-    task: T037
+    result: "T040 completed. The AIBuilderProposalProcessor discovery-followup pass-through was deleted, planner/processor callers now use the canonical ai_builder_discovery_followup owner directly, tests patch the consumer-module leaf import, and an AST guard prevents the processor bridge from returning. Claude and Antigravity post-review both returned GREEN_LIGHT yes / MIN_SCORE 8. The broader goal remains active with strict floor 8/10 because processor topology/readability, generated-client determinism, full-source baseline, and OpenTelemetry-coordinated DX boundaries remain unresolved."
+    task: T040
     commands:
-      - "git status --short --branch: branch feature/refactor-flows-flowai ahead 33 during T037; no staged files before board update; unrelated .devcontainer/.gitignore/AGENTS/media files preserved unstaged"
-      - "Produce .codex/artifacts/flow-ai-builder-t037-next-tranche-ranking.md"
-      - "Claude iteration 1 on T037 ranking: changes_required; GREEN_LIGHT no; MIN_SCORE 7"
-      - "Claude iteration 2 on revised T037 ranking: VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
-      - "Antigravity on same revised T037 ranking: VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
-      - "ruby YAML parse of state.yaml: yaml ok"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q: 8 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_structured_question_recovery_with_lost_lease_rolls_back -q: 51 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2274 passed, 4 skipped"
+      - "cd backend && uv run ruff check changed T040 backend files/tests: passed"
+      - "cd backend && uv run ruff format --check changed T040 backend files/tests: passed"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder: 0 errors"
       - "git diff --check: passed"
-      - "Static negative rg checks for finalizer/processor imports, proposal-policy feedback cycle, old processor-owned finalization names, stale processor store_plan patches, and phase/slop markers: passed"
-      - "Processor LOC gate: 2307 at T034 start, 1851 after extraction; production net LOC about +29 including new files"
-      - "Claude post-implementation review: .codex/artifacts/claude-peer-loop-t034-compiled-proposal-finalizer-post-implementation-review-iteration-2-20260522T052714Z.md GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity post-implementation review: .codex/artifacts/antigravity-peer-loop-t034-compiled-proposal-finalizer-post-implementation-review-20260522T052945Z.md GREEN_LIGHT yes / MIN_SCORE 8"
-      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"': yaml ok"
+      - "ruby YAML parse of state.yaml: yaml ok"
+      - "Claude post-review: .codex/artifacts/claude-peer-loop-t040-discovery-followup-bridge-post-implementation-review-20260522T075858Z.md GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity post-review: .codex/artifacts/antigravity-peer-loop-t040-discovery-followup-bridge-post-implementation-review-20260522T080219Z.md GREEN_LIGHT yes / MIN_SCORE 8"

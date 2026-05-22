@@ -2469,8 +2469,13 @@ async def test_handle_structured_question_recovery_with_lost_lease_rolls_back(
             tenant_id=tenant_id,
             base_planning_state_version=0,
         )
-        processor.emit_discovery_followup_if_needed = AsyncMock(return_value=None)  # type: ignore[method-assign]
-        with pytest.raises(BadRequestException) as exc:
+        with (
+            patch(
+                "intric.flows.ai_builder.ai_builder_proposal_processor.emit_discovery_followup_if_needed",
+                new=AsyncMock(return_value=None),
+            ),
+            pytest.raises(BadRequestException) as exc,
+        ):
             _ = [
                 event
                 async for event in processor.handle_tool_call(

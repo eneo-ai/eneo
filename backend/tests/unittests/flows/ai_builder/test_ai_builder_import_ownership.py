@@ -62,6 +62,7 @@ PROCESSOR_FINALIZATION_METHODS = frozenset(
         "mcp_clarification_events_if_needed",
     }
 )
+DISCOVERY_FOLLOWUP_BRIDGE_METHOD = "emit_discovery_followup_if_needed"
 FINALIZATION_OWNER_NAMES = frozenset(
     {"CompiledProposalFinalizationRequest", "CompiledProposalFinalizer"}
 )
@@ -242,6 +243,35 @@ def test_compiled_proposal_finalization_has_single_owner() -> None:
             ):
                 violations.append(f"{path}:{node.lineno} imports {node.module}")
 
+    assert violations == []
+
+
+def test_proposal_processor_does_not_own_discovery_followup_bridge() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    processor_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+    )
+    processor_tree = ast.parse(processor_path.read_text(), filename=str(processor_path))
+    violations: list[str] = []
+    class_found = False
+
+    for node in ast.walk(processor_tree):
+        if (
+            not isinstance(node, ast.ClassDef)
+            or node.name != "AIBuilderProposalProcessor"
+        ):
+            continue
+        class_found = True
+        for class_node in node.body:
+            if (
+                isinstance(class_node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and class_node.name == DISCOVERY_FOLLOWUP_BRIDGE_METHOD
+            ):
+                violations.append(
+                    f"{processor_path}:{class_node.lineno} defines {class_node.name}"
+                )
+
+    assert class_found
     assert violations == []
 
 

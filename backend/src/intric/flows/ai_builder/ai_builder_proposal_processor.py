@@ -765,11 +765,13 @@ class AIBuilderProposalProcessor:
         if requirements_state.confirmed:
             return False, []
 
-        followup_result = await self.emit_discovery_followup_if_needed(
+        followup_result = await emit_discovery_followup_if_needed(
+            repo=self.repo,
             turn=ctx.turn,
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,
             flow=ctx.flow,
+            litellm_client=self.litellm_client,
             litellm_model=ctx.litellm_model,
             litellm_kwargs=ctx.litellm_kwargs,
             assistant_metadata=assistant_metadata_with_usage(
@@ -1291,11 +1293,13 @@ class AIBuilderProposalProcessor:
         ]
         discovery_ready = analyze_discovery_ready(conversation, flow=flow)
         if not filtered_tool_schemas:
-            followup_result = await self.emit_discovery_followup_if_needed(
+            followup_result = await emit_discovery_followup_if_needed(
+                repo=self.repo,
                 turn=turn,
                 conversation=conversation,
                 new_messages_start=new_messages_start,
                 flow=flow,
+                litellm_client=self.litellm_client,
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs,
                 assistant_metadata=assistant_metadata_with_usage(
@@ -1438,11 +1442,13 @@ class AIBuilderProposalProcessor:
         ctx: ProposalContext,
         tool_call: Any,
     ) -> AsyncGenerator[dict[str, str], None]:
-        followup_result = await self.emit_discovery_followup_if_needed(
+        followup_result = await emit_discovery_followup_if_needed(
+            repo=self.repo,
             turn=ctx.turn,
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,
             flow=ctx.flow,
+            litellm_client=self.litellm_client,
             litellm_model=ctx.litellm_model,
             litellm_kwargs=ctx.litellm_kwargs,
             assistant_metadata=assistant_metadata_with_usage(
@@ -1685,11 +1691,13 @@ class AIBuilderProposalProcessor:
         )
         if confirm_result.event is None:
             if confirm_result.failure_kind == "validation":
-                followup_result = await self.emit_discovery_followup_if_needed(
+                followup_result = await emit_discovery_followup_if_needed(
+                    repo=self.repo,
                     turn=ctx.turn,
                     conversation=ctx.conversation,
                     new_messages_start=ctx.new_messages_start,
                     flow=ctx.flow,
+                    litellm_client=self.litellm_client,
                     litellm_model=ctx.litellm_model,
                     litellm_kwargs=ctx.litellm_kwargs,
                     assistant_metadata=assistant_metadata_with_usage(
@@ -1828,31 +1836,6 @@ class AIBuilderProposalProcessor:
             return
 
         yield edit_result.event
-
-    async def emit_discovery_followup_if_needed(
-        self,
-        *,
-        turn: SessionSendTurn,
-        conversation: list[ConversationMessage],
-        new_messages_start: int,
-        litellm_model: str | None = None,
-        litellm_kwargs: dict[str, Any] | None = None,
-        ui_language: str | None = None,
-        flow: "Flow | None" = None,
-        assistant_metadata: dict[str, Any] | None = None,
-    ) -> BackendQuestionPersistenceResult | None:
-        return await emit_discovery_followup_if_needed(
-            repo=self.repo,
-            turn=turn,
-            conversation=conversation,
-            new_messages_start=new_messages_start,
-            flow=flow,
-            litellm_client=self.litellm_client,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            ui_language=ui_language,
-            assistant_metadata=assistant_metadata,
-        )
 
     def _confirm_requirements_retry_config(
         self, ctx: ProposalContext
