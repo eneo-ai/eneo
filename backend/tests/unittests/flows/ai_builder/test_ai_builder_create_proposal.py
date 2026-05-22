@@ -34,6 +34,7 @@ from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalToolDeps,
     ToolProcessingResult,
     ToolRetryInvocation,
 )
@@ -72,6 +73,17 @@ def _make_processor(**overrides) -> AIBuilderProposalProcessor:
     }
     defaults.update(overrides)
     return AIBuilderProposalProcessor(**defaults)
+
+
+def _make_proposal_deps(processor: AIBuilderProposalProcessor) -> ProposalToolDeps:
+    return ProposalToolDeps(
+        repo=processor.repo,
+        quality_retry_warning_codes=frozenset(),
+        call_proposal_completion=processor.call_proposal_completion,
+        mcp_clarification_events_if_needed=(
+            processor.mcp_clarification_events_if_needed
+        ),
+    )
 
 
 def _make_turn(
@@ -205,7 +217,7 @@ async def test_outline_flow_retry_config_carries_revision_context() -> None:
     )
 
     config = outline_flow_retry_config(
-        processor=processor,
+        proposal_deps=_make_proposal_deps(processor),
         planning_state=planning_state,
         plan_edit_context=plan_edit_context,
         prior_plan_for_revision=plan,
@@ -268,7 +280,7 @@ async def test_outline_processing_enforces_without_mcp_selection() -> None:
     ]
 
     result = await process_outline_arguments(
-        processor=processor,
+        proposal_deps=_make_proposal_deps(processor),
         turn=_make_turn(),
         conversation=conversation,
         new_messages_start=0,
@@ -297,11 +309,65 @@ async def test_outline_processing_enforces_without_mcp_selection() -> None:
 
 
 @pytest.mark.asyncio
+async def test_outline_processing_asks_when_mcp_is_used_before_selection() -> None:
+    processor = _make_processor()
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "id": "time-server",
+                "name": "Time MCP",
+                "tools": [{"id": "current-time", "name": "get_current_time"}],
+            }
+        ],
+    )
+
+    result = await process_outline_arguments(
+        proposal_deps=_make_proposal_deps(processor),
+        turn=_make_turn(),
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="Använd Time MCP för att hämta aktuell tid.",
+                metadata={"ui_language": "sv"},
+            )
+        ],
+        new_messages_start=0,
+        arguments={
+            "flow_name": "Time flow",
+            "plan_rationale": "Use selected MCP tooling.",
+            "steps": [
+                {
+                    "name": "Hämta tid",
+                    "task": "Hämta aktuell tid via Time MCP.",
+                    "mcp_tool_refs": ["mcp_tool.time-mcp-get-current-time"],
+                }
+            ],
+        },
+        assistant_content="Här är mitt förslag:",
+        tool_call_id="call-time",
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=catalog,
+    )
+
+    assert [event["event"] for event in result.iter_events()] == ["text", "question"]
+    question_payload = json.loads(result.iter_events()[1]["data"])
+    assert question_payload["question_id"] == MCP_RESOURCE_SELECTION_QUESTION_ID
+    assert [option["value"] for option in question_payload["options"]] == [
+        "without_mcp",
+        "use_mcp_server:mcp_server.time-mcp",
+    ]
+    processor.repo.commit_turn.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_outline_validation_failure_preserves_duplicate_step_name_code() -> None:
     processor = _make_processor()
 
     result = await process_outline_arguments(
-        processor=processor,
+        proposal_deps=_make_proposal_deps(processor),
         turn=_make_turn(),
         conversation=[ConversationMessage(role="user", content="Bygg ett textflöde.")],
         new_messages_start=0,
@@ -356,7 +422,7 @@ async def test_outline_audio_to_docx_returns_plan_event() -> None:
         new=AsyncMock(side_effect=_store_plan),
     ):
         result = await process_outline_arguments(
-            processor=processor,
+            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(),
             conversation=[
                 ConversationMessage(

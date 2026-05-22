@@ -86,7 +86,7 @@ def build_plan_envelope(
 def warnings_for_quality_retry(
     validation: SpecValidationResult,
     *,
-    retry_warning_codes: set[str],
+    retry_warning_codes: set[str] | frozenset[str],
 ) -> list[LintWarning]:
     return [
         warning

@@ -10,6 +10,16 @@ AI_BUILDER_MODELS_MODULE = ".".join(
 AI_BUILDER_DOMAIN_MODELS_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_domain_models")
 )
+AI_BUILDER_PROPOSAL_PROCESSOR_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_proposal_processor")
+)
+BANNED_PROPOSAL_PROCESSOR_IMPORTS = frozenset(
+    {AI_BUILDER_PROPOSAL_PROCESSOR_MODULE, "ai_builder_proposal_processor"}
+)
+PROPOSAL_TOOL_MODULES = (
+    Path("src/intric/flows/ai_builder/ai_builder_create_proposal.py"),
+    Path("src/intric/flows/ai_builder/ai_builder_edit_proposal.py"),
+)
 
 BANNED_DOMAIN_MODEL_IMPORTS = frozenset(
     {
@@ -57,6 +67,22 @@ def test_ai_builder_model_imports_use_canonical_owners() -> None:
                 violations.append(
                     f"{path}:{node.lineno} imports {names} from {node.module}"
                 )
+
+    assert violations == []
+
+
+def test_proposal_tool_modules_do_not_import_proposal_processor() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    violations: list[str] = []
+
+    for relative_path in PROPOSAL_TOOL_MODULES:
+        path = backend_root / relative_path
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if node.module in BANNED_PROPOSAL_PROCESSOR_IMPORTS:
+                violations.append(f"{path}:{node.lineno} imports {node.module}")
 
     assert violations == []
 

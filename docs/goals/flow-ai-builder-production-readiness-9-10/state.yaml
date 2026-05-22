@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T029
+active_task: T031
 
 scoring_target:
   dimensions:
@@ -50,7 +50,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T028 implementation/post-review: conversation metadata/tool-call JSONB, public error diagnostics, frontend diagnostic reports, targeted runtime-field intent, AI Builder model import ownership, builder session send-lock persistence, the live-eval harness, runtime slot-classification persistence/replay, and public error-code discipline now have typed/canonical ownership or DB-backed/runtime evidence. The five-case authenticated live eval passes C1-C5, including C4 runtime form fields. API Contract Quality moves to 9 after typed AI Builder public exceptions, a zero-allowlist static guard, single JSON route-class translation owner, and Claude GREEN_LIGHT yes / MIN_SCORE 8. The broader score floor remains 8 because readability/module topology, test topology, generated-client regeneration determinism, and full-source Pyright/test baseline still need consolidation or documented resolution."
+  source: "After T030 implementation/post-review: conversation metadata/tool-call JSONB, public error diagnostics, frontend diagnostic reports, targeted runtime-field intent, AI Builder model import ownership, builder session send-lock persistence, the live-eval harness, runtime slot-classification persistence/replay, public error-code discipline, and create/edit proposal tool dependency backedges now have typed/canonical ownership or DB-backed/runtime evidence. The five-case authenticated live eval passes C1-C5, including C4 runtime form fields and C5 revise/edit. T030 passed Claude GREEN_LIGHT yes / MIN_SCORE 8 and Antigravity GREEN_LIGHT yes / MIN_SCORE 8. The broader score floor remains 8 because ai_builder_proposal_processor.py still owns too many orchestration concerns, ProposalToolDeps is a direction-improving facade rather than full ownership decomposition, generated-client regeneration determinism is unresolved, and full-source Pyright/test baseline plus broader module/test topology still need consolidation or documented resolution."
   Maintainability: 8
   Code_Quality: 8
   Clean_Architecture: 8
@@ -69,8 +69,9 @@ current_scorecard:
   blockers:
     - "Public/lifecycle/CAS error-code discipline is now typed and guarded in AI Builder-owned raise sites, but generated-client regeneration determinism is not solved; T028 kept only the intentional enum literals after openapi-typescript produced broad unrelated churn."
     - "The five-case authenticated live eval now proves C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX, C4 runtime form fields, and C5 revise/edit through the public API, but this gate must be repeated after later planner/runtime changes rather than treated as permanent output-quality proof."
-    - "ai_builder_proposal_processor.py is materially smaller after T011 but still oversized at 1830 LOC; structured-question recovery, confirm requirements, and retry orchestration remain in one processor."
-    - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, and full-source Pyright baseline failures outside AI Builder."
+    - "T030 removes create/edit proposal imports of AIBuilderProposalProcessor, but ProposalToolDeps still carries processor-bound callables and repo access; this improves dependency direction but does not fully decompose ownership."
+    - "ai_builder_proposal_processor.py is materially smaller than the initial 2.6k-line state but still oversized; structured-question recovery, confirm requirements, retry orchestration, proposal completion, MCP clarification persistence, and telemetry remain in one processor."
+    - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, partial processor-bound facades, and full-source Pyright baseline failures outside AI Builder."
     - "Overall remains 8 until generated-client tooling determinism, full-source typing/test baseline, consolidation/readability/test-topology tranches, and repeated live-eval evidence prove every dimension is honestly at least 9."
 
 score_floor_completion_gates:
@@ -3397,7 +3398,7 @@ tasks:
   - id: T029
     type: pm
     assignee: PM
-    status: active
+    status: completed
     reasoning_hint: xhigh
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T028, with pressure on generated-client regeneration determinism, readability/module/test topology, full-source baseline failures, AI slop cleanup, and whether normal-user live eval should be repeated before further topology work."
     inputs:
@@ -3427,6 +3428,242 @@ tasks:
       - "The next tranche requires a broad architecture rewrite, destructive migration, or wider file scope than the evidence can justify."
       - "Claude finds a blocking ranking/plan issue that cannot be resolved in two iterations."
       - "Antigravity and Claude disagree on the next tranche and Codex cannot resolve the disagreement with source evidence."
+    receipt:
+      result: done
+      completed_at: "2026-05-22T04:27:00+02:00"
+      summary:
+        - "Reconciled repository reality after T028: no staged T017b files exist; T017b is committed as 474c001a7 and T018b is committed as b760d46b2. Only unrelated workspace files remain dirty and unstaged."
+        - "Re-ranked the next highest-score-moving tranche from current evidence. Generated-client determinism remains real but smaller than expected after formatted type generation; full-source Pyright is broad repo health; live eval currently passes and should repeat after behavior-affecting changes."
+        - "Selected T030 proposal topology cleanup because create/edit proposal modules still depend back on the whole AIBuilderProposalProcessor as a dependency bag."
+        - "Initial Claude revision green-lit moving MCP orchestration into ai_builder_mcp_intent.py, but Antigravity blocked that as a pure-module boundary violation. Codex revised the plan: ai_builder_mcp_intent.py stays pure/synchronous/repository-free; only pure MCP policy centralizes there; DB-persisting question orchestration stays on the processor or a typed bound dependency."
+        - "Final plan passed Claude and Antigravity on the same revised artifact. Broader 9/10 goal remains active with strict floor 8/10."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t029-next-tranche-ranking.md"
+        - ".codex/artifacts/claude-peer-loop-flow-ai-builder-t029-next-tranche-ranking-20260522T020849Z.md"
+        - ".codex/artifacts/claude-peer-loop-flow-ai-builder-t029-next-tranche-ranking-20260522T021309Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-t029-final-next-tranche-challenge-20260522T021908Z.md"
+        - ".codex/artifacts/claude-peer-loop-flow-ai-builder-t029-next-tranche-ranking-after-antigravity-20260522T022350Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-t029-final-next-tranche-challenge-iteration-2-20260522T022536Z.md"
+      peer_review:
+        claude:
+          iteration_1:
+            artifact: ".codex/artifacts/claude-peer-loop-flow-ai-builder-t029-next-tranche-ranking-20260522T020849Z.md"
+            verdict: "changes_required"
+            green_light: false
+            min_score: 6
+          iteration_2:
+            artifact: ".codex/artifacts/claude-peer-loop-flow-ai-builder-t029-next-tranche-ranking-20260522T021309Z.md"
+            verdict: "green"
+            green_light: true
+            min_score: 8
+          iteration_3_after_antigravity:
+            artifact: ".codex/artifacts/claude-peer-loop-flow-ai-builder-t029-next-tranche-ranking-after-antigravity-20260522T022350Z.md"
+            verdict: "green"
+            green_light: true
+            min_score: 8
+        antigravity:
+          iteration_1:
+            artifact: ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-t029-final-next-tranche-challenge-20260522T021908Z.md"
+            verdict: "changes_required"
+            green_light: false
+            min_score: 7
+            blocker: "Do not move DB-persisting async MCP orchestration into pure ai_builder_mcp_intent.py."
+          iteration_2:
+            artifact: ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-t029-final-next-tranche-challenge-iteration-2-20260522T022536Z.md"
+            verdict: "green"
+            green_light: true
+            min_score: 9
+      verification:
+        - command: "git status --short --branch"
+          result: "branch feature/refactor-flows-flowai ahead 27; no staged files; unrelated dirty .devcontainer/.gitignore/AGENTS/icons/PRODUCT/media files preserved unstaged"
+        - command: "git show --name-status --oneline 474c001a7"
+          result: "T017b committed as Harden AI Builder diagnostic error contract"
+        - command: "git show --name-status --oneline b760d46b2"
+          result: "T018b committed as Add AI Builder diagnostic reports"
+      residual_risks:
+        - "T030 is not implemented yet; scorecard remains strict floor 8/10."
+        - "Generated-client regeneration determinism, full-source Pyright/test baseline, broader module/test topology, and repeat live-eval evidence still remain as follow-ups."
+
+  - id: T030
+    type: worker
+    assignee: Worker
+    status: completed
+    reasoning_hint: high
+    objective: "Remove whole-processor backedges from AI Builder create/edit proposal tool modules while preserving the pure MCP-intent policy boundary."
+    inputs:
+      - "T029 receipt and final revised peer-gated plan"
+      - ".codex/artifacts/flow-ai-builder-t029-next-tranche-ranking.md"
+      - ".codex/artifacts/claude-peer-loop-flow-ai-builder-t029-next-tranche-ranking-after-antigravity-20260522T022350Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-t029-final-next-tranche-challenge-iteration-2-20260522T022536Z.md"
+    constraints:
+      - "Do not split ai_builder_proposal_processor.py by line count."
+      - "Do not move DB-persisting orchestration into ai_builder_mcp_intent.py; that module must remain pure, synchronous, repository-free, and persist_backend_question-free."
+      - "Do not create generic utils/helpers/managers/services or fake interfaces."
+      - "Do not move planner behavior, prompt behavior, output-quality logic, runtime/CAS/lease behavior, or generated frontend schema."
+      - "If net production LOC increases by more than 50 lines, stop and re-rank before continuing."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_proposal.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_mcp_intent.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_store.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_policy.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t030-implementation-summary.md"
+    acceptance_criteria:
+      - "ProposalToolDeps is a frozen dataclass in ai_builder_proposal_tool_contracts.py and carries only explicit dependencies needed by proposal tool modules."
+      - "ProposalCompletionFn and the MCP clarification callable are strict keyword-only Protocols, not loose Callable[..., Any] aliases."
+      - "quality_retry_warning_codes is immutable at the dependency boundary, preferably frozenset[str]."
+      - "ai_builder_create_proposal.py and ai_builder_edit_proposal.py have no runtime or TYPE_CHECKING imports from ai_builder_proposal_processor.py."
+      - "process_outline_arguments, process_edit_arguments, outline_flow_retry_config, and edit_flow_retry_config accept proposal_deps, not processor."
+      - "Both MCP twins use pure policy functions in ai_builder_mcp_intent.py; ai_builder_mcp_intent.py gains no async functions, awaits, repository imports, DB writes, or persist_backend_question import."
+      - "DB-persisting MCP question orchestration stays on AIBuilderProposalProcessor or a bound dependency it provides through ProposalToolDeps."
+      - "attempt_description_repair removes dead llm_messages/tool_schemas parameters while preserving call_proposal_completion's required tool_schemas kwarg internally."
+      - "Behavior tests cover outline/create MCP clarification, edit MCP clarification, and edit description repair through the injected ProposalCompletionFn while preserving non-description fields."
+      - "Existing behavior for outline, edit, retry, MCP clarification, MCP preflight, and description repair remains unchanged."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check <changed backend files/tests>"
+      - "cd backend && uv run ruff format --check <changed backend files/tests>"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "Authenticated five-case live AI Builder eval if local service/API key are available; otherwise record exact blocker"
+      - "git diff --check"
+    stop_if:
+      - "ai_builder_mcp_intent.py would need persistence imports or async orchestration."
+      - "ProposalCompletionFn or MCP clarification is implemented as a loose Callable alias."
+      - "The implementation needs planner/runtime/API/generated-client changes outside T030 scope."
+      - "Focused behavior tests fail in a way that requires a new product or architecture decision."
+    receipt:
+      result: done
+      completed_at: "2026-05-22T04:59:00+02:00"
+      summary:
+        - "Removed the AIBuilderProposalProcessor import/type-checking backedge from create/edit proposal modules by introducing ProposalToolDeps plus strict ProposalCompletionFn and MCPClarificationFn Protocols."
+        - "Kept ai_builder_mcp_intent.py pure: it gained only mcp_clarification_issue_if_needed and no async functions, awaits, repository imports, DB writes, or persist_backend_question import."
+        - "Kept DB-persisting MCP question orchestration on AIBuilderProposalProcessor while exposing it to create/edit modules through the typed dependency boundary."
+        - "Removed dead flow/llm_messages/tool_schemas parameters from attempt_description_repair and covered the ProposalCompletionFn boundary with a behavior test."
+        - "Extended the import-ownership AST guard so create/edit proposal modules cannot import ai_builder_proposal_processor.py, including TYPE_CHECKING imports."
+        - "Claude iteration 1 blocked on private _proposal_tool_deps test coupling and frozenset-to-set conversions; both were fixed before the green pass."
+        - "Post-implementation Claude and Antigravity both returned GREEN_LIGHT yes with MIN_SCORE 8. Broader score floor remains 8/10, not complete."
+      changed_files:
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_mcp_intent.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_plan_store.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_policy.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_create_proposal.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t030-implementation-summary.md"
+        - ".codex/artifacts/claude-peer-loop-flow-ai-builder-t030-implementation-review-20260522T025146Z.md"
+        - ".codex/artifacts/claude-peer-loop-flow-ai-builder-t030-implementation-review-iteration-2-20260522T025620Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-t030-implementation-review-20260522T025804Z.md"
+        - ".codex/artifacts/flow-ai-builder-live-eval.md"
+      peer_review:
+        codex_self_review: "pass; T030 is production-ready for the approved tranche, but it intentionally improves dependency direction rather than fully decomposing processor-owned proposal completion, MCP clarification persistence, retry, telemetry, or persistence ownership."
+        claude:
+          iteration_1:
+            artifact: ".codex/artifacts/claude-peer-loop-flow-ai-builder-t030-implementation-review-20260522T025146Z.md"
+            verdict: "changes_required"
+            green_light: false
+            min_score: 7
+            blockers:
+              - "Tests accessed private processor._proposal_tool_deps."
+              - "frozenset quality retry codes were converted back to set at use sites."
+          iteration_2:
+            artifact: ".codex/artifacts/claude-peer-loop-flow-ai-builder-t030-implementation-review-iteration-2-20260522T025620Z.md"
+            verdict: "green"
+            green_light: true
+            min_score: 8
+        antigravity:
+          iteration_1:
+            artifact: ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-t030-implementation-review-20260522T025804Z.md"
+            verdict: "green"
+            green_light: true
+            min_score: 8
+            residual_findings:
+              - "ProposalToolDeps still exposes repo to tool executor modules; future work should consider moving persistence out of executors via returned intents only if it reduces real complexity."
+              - "Tests still instantiate AIBuilderProposalProcessor to build deps; future extraction of proposal completion/MCP clarification primitives should allow pure mocked deps."
+      verification:
+        - command: "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+          result: "passed: 2 passed"
+        - command: "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py -q"
+          result: "passed: 40 passed"
+        - command: "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py -q"
+          result: "passed: 258 passed"
+        - command: "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+          result: "passed: 2252 passed, 4 skipped, 11 pre-existing warnings"
+        - command: "cd backend && uv run ruff check <T030 backend files/tests>"
+          result: "passed"
+        - command: "cd backend && uv run ruff format --check <T030 backend files/tests>"
+          result: "passed: 12 files already formatted"
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+          result: "passed: 0 errors, 0 warnings, 0 informations"
+        - command: "rg -n 'async def|await|persist_backend_question|AIBuilderRepository|repo\\.' backend/src/intric/flows/ai_builder/ai_builder_mcp_intent.py"
+          result: "passed: no matches"
+        - command: "git diff --numstat -- <T030 production files>"
+          result: "passed: production net LOC +50"
+        - command: "git diff --check"
+          result: "passed"
+        - command: "Authenticated five-case live AI Builder eval"
+          result: "passed: C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX report, C4 runtime form fields, C5 revise/edit flow"
+          raw_artifacts: "/tmp/flow-ai-builder-t030-live-eval-20260522T024409Z/20260522T024409Z"
+      residual_risks:
+        - "ProposalToolDeps improves dependency direction but still carries processor-bound callables and repo access; this is an 8/10 tranche, not final architecture."
+        - "ProposalCompletionFn still returns Awaitable[Any] because the litellm response boundary is untyped."
+        - "Generated-client regeneration determinism remains unresolved."
+        - "Full-source Pyright/test baseline and broader module/test topology remain below 9/10."
+        - "A future tranche should consider whether ProposalLitellmClient, MCPClarificationService, or persistence-intent returns genuinely reduce processor responsibility before adding new modules."
+      next_recommendation: "Activate T031 to re-rank the next score-moving tranche after T030, with pressure on processor responsibility decomposition versus generated-client determinism, full-source baseline, and test/module topology."
+
+  - id: T031
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: xhigh
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T030, with pressure on processor responsibility decomposition, repo/persistence ownership in proposal tools, generated-client determinism, full-source baseline, test isolation, and module/test topology."
+    inputs:
+      - "T030 receipt and implementation reviews"
+      - ".codex/artifacts/flow-ai-builder-t030-implementation-summary.md"
+      - ".codex/artifacts/claude-peer-loop-flow-ai-builder-t030-implementation-review-iteration-2-20260522T025620Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-flow-ai-builder-t030-implementation-review-20260522T025804Z.md"
+      - "Current dirty worktree after the T030 commit"
+    constraints:
+      - "Do not assume the next tranche is automatically ProposalLitellmClient, MCPClarificationService, persistence intents, generated-client determinism, or test cleanup; re-rank from current evidence."
+      - "Do not start a broad processor rewrite or file split without a peer-gated architecture plan."
+      - "Preserve unrelated dirty files outside the active tranche."
+      - "If proposing a processor decomposition, prove it reduces real ownership burden rather than adding a facade layer."
+    acceptance_criteria:
+      - "The ranking compares at least processor responsibility decomposition, generated-client deterministic regeneration, full-source baseline cleanup, test/module topology cleanup, and repeat live-eval/product-output gating."
+      - "The selected worker has canonical owners, allowed files, non-goals, acceptance criteria, tests, live-eval expectations, and residual risks."
+      - "The plan explicitly decides whether exposing repo through ProposalToolDeps is acceptable for now or should be the next ownership fix."
+      - "Claude and Antigravity review the same revised plan before implementation, or Antigravity failure is recorded as missing coverage."
+      - "Scorecard remains honest; no dimension moves to 9 without implementation and review evidence."
+    verify:
+      - "git status --short --branch"
+      - "git log --oneline --decorate -8"
+      - "rg/nl evidence for selected blockers"
+      - "Claude peer-loop GREEN_LIGHT yes / MIN_SCORE >= 8 for the selected next-tranche plan, or documented disagreement."
+      - "Antigravity peer-loop pass/no-blocking result if quota is available, or exact SKIPPED_DUE_TO_QUOTA failure."
+    stop_if:
+      - "The next tranche requires a broad architecture rewrite, destructive migration, or wider file scope than evidence can justify."
+      - "Claude and Antigravity disagree and Codex cannot resolve the disagreement with source evidence."
 
 checks:
   dirty_fingerprint:
@@ -3434,12 +3671,21 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T028 completed and T029 activated. T028 implemented typed AI Builder public exception/error-code discipline, removed duplicate apply_plan JSON error translation, added static and wire coverage, preserved unrelated dirty files unstaged, moved API Contract Quality to 9, and kept the broader strict floor at 8/10. Claude iteration 1 required changes; Claude iteration 2 returned GREEN_LIGHT yes / MIN_SCORE 8. Antigravity remains SKIPPED_DUE_TO_QUOTA, not pass."
-    task: T028
+    result: "T030 completed and T031 activated. T030 removed create/edit proposal module imports of AIBuilderProposalProcessor through a frozen ProposalToolDeps boundary, kept ai_builder_mcp_intent.py pure/repository-free, preserved DB-persisting MCP question orchestration on the processor side, added import-ownership and behavior coverage, passed the focused and full AI Builder unit suites, passed strict Pyright for src/intric/flows/ai_builder, and passed the authenticated five-case live eval. Claude post-review iteration 1 required fixes; iteration 2 returned GREEN_LIGHT yes / MIN_SCORE 8. Antigravity post-review returned GREEN_LIGHT yes / MIN_SCORE 8. The broader goal remains active with strict floor 8/10."
+    task: T030
     commands:
-      - "git status --short --branch: branch feature/refactor-flows-flowai ahead 26 before T028 commit; unrelated .devcontainer/.gitignore/AGENTS/icons/media files preserved unstaged"
-      - "cd backend && uv run pytest tests/unit/test_ai_builder_error_code_discipline.py -q: 1 passed"
-      - "cd backend && uv run pytest tests/unit/test_ai_builder_error_code_discipline.py tests/unittests/flows/ai_builder/test_ai_builder_error_contract.py tests/unittests/flows/ai_builder/test_ai_builder_router.py tests/unit/test_ai_builder_openapi_contract.py -q: 92 passed, 15 warnings"
+      - "git status --short --branch: branch feature/refactor-flows-flowai ahead 27 before T030 commit; no staged files; unrelated .devcontainer/.gitignore/AGENTS/icons/media files preserved unstaged"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py -q: 258 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2252 passed, 4 skipped, 11 pre-existing warnings"
+      - "cd backend && uv run ruff check <T030 backend files/tests>: passed"
+      - "cd backend && uv run ruff format --check <T030 backend files/tests>: passed; 12 files already formatted"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder: passed; 0 errors, 0 warnings, 0 informations"
+      - "rg -n 'async def|await|persist_backend_question|AIBuilderRepository|repo\\.' backend/src/intric/flows/ai_builder/ai_builder_mcp_intent.py: passed; no matches"
+      - "git diff --numstat -- <T030 production files>: passed; production net LOC +50"
+      - "git diff --check: passed"
+      - "Authenticated five-case live AI Builder eval: passed C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX report, C4 runtime form fields, C5 revise/edit flow"
+      - "Claude post-implementation review: .codex/artifacts/claude-peer-loop-flow-ai-builder-t030-implementation-review-iteration-2-20260522T025620Z GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity post-implementation review: .codex/artifacts/antigravity-peer-loop-flow-ai-builder-t030-implementation-review-20260522T025804Z GREEN_LIGHT yes / MIN_SCORE 8"
       - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2248 passed, 4 skipped, 11 warnings"
       - "cd backend && uv run ruff check <T028 backend files/tests>: passed"
       - "cd backend && uv run ruff format --check <T028 backend files/tests>: 14 files already formatted"

@@ -46,6 +46,7 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalToolDeps,
     ToolProcessingResult,
     ToolRetryConfig,
     ToolRetryInvocation,
@@ -88,6 +89,17 @@ def _make_processor(**overrides) -> AIBuilderProposalProcessor:
     }
     defaults.update(overrides)
     return AIBuilderProposalProcessor(**defaults)
+
+
+def _make_proposal_deps(processor: AIBuilderProposalProcessor) -> ProposalToolDeps:
+    return ProposalToolDeps(
+        repo=processor.repo,
+        quality_retry_warning_codes=frozenset(),
+        call_proposal_completion=processor.call_proposal_completion,
+        mcp_clarification_events_if_needed=(
+            processor.mcp_clarification_events_if_needed
+        ),
+    )
 
 
 def _make_turn(
@@ -1703,7 +1715,7 @@ async def test_edit_proposal_returns_validation_when_snapshot_resource_is_unavai
         ),
     ):
         result = await process_edit_arguments(
-            processor=processor,
+            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(base_planning_state_version=7),
             conversation=[],
             new_messages_start=0,
@@ -1803,7 +1815,7 @@ async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> Non
         ),
     ):
         result = await process_edit_arguments(
-            processor=processor,
+            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(),
             conversation=[],
             new_messages_start=0,
@@ -1892,7 +1904,7 @@ async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
         ) as store_plan,
     ):
         result = await process_edit_arguments(
-            processor=processor,
+            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(base_planning_state_version=7),
             conversation=[],
             new_messages_start=0,
@@ -1980,7 +1992,7 @@ async def test_edit_proposal_asks_before_accepting_mcp_usage() -> None:
         ) as store_plan,
     ):
         result = await process_edit_arguments(
-            processor=processor,
+            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(),
             conversation=[
                 ConversationMessage(
@@ -2080,7 +2092,7 @@ async def test_edit_proposal_enforces_without_mcp_selection() -> None:
         ) as store_plan,
     ):
         result = await process_edit_arguments(
-            processor=processor,
+            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(),
             conversation=[
                 ConversationMessage(
@@ -2182,7 +2194,7 @@ async def test_edit_proposal_passes_metadata_to_edit_validator() -> None:
     ):
         turn = _make_turn(base_planning_state_version=7)
         await process_edit_arguments(
-            processor=processor,
+            proposal_deps=_make_proposal_deps(processor),
             turn=turn,
             conversation=[],
             new_messages_start=0,
@@ -2283,7 +2295,7 @@ async def test_edit_proposal_canonicalizes_duplicate_modify_ops_before_validatio
         ),
     ):
         result = await process_edit_arguments(
-            processor=processor,
+            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(),
             conversation=[],
             new_messages_start=0,
@@ -2354,7 +2366,7 @@ async def test_edit_proposal_returns_specific_feedback_for_conflicting_duplicate
         "intric.flows.ai_builder.ai_builder_edit_proposal.compile_edit_draft"
     ) as compile_edit:
         result = await process_edit_arguments(
-            processor=processor,
+            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(),
             conversation=[],
             new_messages_start=0,
@@ -2451,7 +2463,7 @@ async def test_edit_proposal_normalizes_mechanical_refs_before_validation() -> N
         ),
     ):
         await process_edit_arguments(
-            processor=processor,
+            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(),
             conversation=[],
             new_messages_start=0,
@@ -2529,7 +2541,7 @@ async def test_edit_proposal_returns_validation_feedback_for_explicit_mechanics_
         ) as store_plan,
     ):
         result = await process_edit_arguments(
-            processor=processor,
+            proposal_deps=_make_proposal_deps(processor),
             turn=_make_turn(),
             conversation=[],
             new_messages_start=0,
@@ -2727,7 +2739,7 @@ async def test_edit_flow_retry_config_carries_invocation_context() -> None:
     prior_plan_for_revision = MagicMock()
 
     config = edit_flow_retry_config(
-        processor=processor,
+        proposal_deps=_make_proposal_deps(processor),
         assistant_snapshots=assistant_snapshots,
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={"timeout": 30},

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -16,7 +16,48 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourc
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 
 if TYPE_CHECKING:
+    from intric.flows.ai_builder.ai_builder_discovery_followup import (
+        BackendQuestionPersistenceResult,
+    )
+    from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
     from intric.flows.domain.flow import Flow
+    from intric.flows.flow_authoring_spec import FlowDraftSpecCore
+
+
+class ProposalCompletionFn(Protocol):
+    def __call__(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        tool_schemas: list[dict[str, Any]],
+        litellm_model: str,
+        litellm_kwargs: dict[str, Any],
+        max_output_tokens: int,
+        temperature: float,
+        tool_choice: dict[str, Any] | None = None,
+    ) -> Awaitable[Any]: ...
+
+
+class MCPClarificationFn(Protocol):
+    def __call__(
+        self,
+        *,
+        turn: SessionSendTurn,
+        conversation: list[ConversationMessage],
+        new_messages_start: int,
+        spec: "FlowDraftSpecCore",
+        resource_catalog: AIBuilderResourceCatalog | None,
+        flow: "Flow | None",
+        assistant_metadata_builder: Callable[[], dict[str, Any] | None] | None = None,
+    ) -> Awaitable["BackendQuestionPersistenceResult | None"]: ...
+
+
+@dataclass(frozen=True)
+class ProposalToolDeps:
+    repo: "AIBuilderRepository"
+    quality_retry_warning_codes: frozenset[str]
+    call_proposal_completion: ProposalCompletionFn
+    mcp_clarification_events_if_needed: MCPClarificationFn
 
 
 @dataclass(frozen=True)

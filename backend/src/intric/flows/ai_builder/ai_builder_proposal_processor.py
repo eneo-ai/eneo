@@ -71,9 +71,8 @@ from intric.flows.ai_builder.ai_builder_interaction_utils import (
 )
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     build_mcp_resource_selection_question,
-    find_mcp_usage_without_selection_issue,
-    find_named_mcp_reference_issue,
     find_named_mcp_request_issue,
+    mcp_clarification_issue_if_needed,
     mcp_selection_answer_allows_planning,
 )
 from intric.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
@@ -102,6 +101,7 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     proposal_repair_reason_from_tool_failure,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalToolDeps,
     ToolProcessingResult,
     ToolRetryConfig,
     ToolRetryInvocation,
@@ -356,7 +356,14 @@ class AIBuilderProposalProcessor:
         self.self_correction_temperature = self_correction_temperature
         self.self_correction_bumped_temperature = self_correction_bumped_temperature
         self.forced_proposal_temperature = forced_proposal_temperature
-        self.quality_retry_warning_codes = quality_retry_warning_codes
+        self._proposal_tool_deps = ProposalToolDeps(
+            repo=self.repo,
+            quality_retry_warning_codes=frozenset(quality_retry_warning_codes),
+            call_proposal_completion=self.call_proposal_completion,
+            mcp_clarification_events_if_needed=(
+                self.mcp_clarification_events_if_needed
+            ),
+        )
 
     async def mcp_clarification_events_if_needed(
         self,
@@ -367,31 +374,22 @@ class AIBuilderProposalProcessor:
         spec: FlowDraftSpecCore,
         resource_catalog: AIBuilderResourceCatalog | None,
         flow: "Flow | None",
-        assistant_metadata: dict[str, Any] | None = None,
         assistant_metadata_builder: Callable[[], dict[str, Any] | None] | None = None,
     ) -> BackendQuestionPersistenceResult | None:
-        if resource_catalog is None or mcp_selection_answer_allows_planning(
-            conversation
-        ):
-            return None
-
-        issue = find_named_mcp_reference_issue(
+        issue = mcp_clarification_issue_if_needed(
+            conversation=conversation,
             spec=spec,
             catalog=resource_catalog,
             signal_text=aggregate_freeform_user_text(conversation),
         )
         if issue is None:
-            issue = find_mcp_usage_without_selection_issue(
-                spec=spec,
-                catalog=resource_catalog,
-            )
-        if issue is None:
             return None
+        assert resource_catalog is not None
 
         metadata = (
             assistant_metadata_builder()
             if assistant_metadata_builder is not None
-            else assistant_metadata
+            else None
         )
         question_data, assistant_text = build_mcp_resource_selection_question(
             issue=issue,
@@ -798,7 +796,7 @@ class AIBuilderProposalProcessor:
             return
 
         retry_config = outline_flow_retry_config(
-            processor=self,
+            proposal_deps=self._proposal_tool_deps,
             planning_state=ctx.planning_state,
             plan_edit_context=ctx.plan_edit_context,
             prior_plan_for_revision=ctx.prior_plan_for_revision,
@@ -847,7 +845,7 @@ class AIBuilderProposalProcessor:
 
         try:
             outline_result = await process_outline_arguments(
-                processor=self,
+                proposal_deps=self._proposal_tool_deps,
                 turn=ctx.turn,
                 conversation=ctx.conversation,
                 new_messages_start=ctx.new_messages_start,
@@ -1140,14 +1138,14 @@ class AIBuilderProposalProcessor:
     ) -> EventBatch | None:
         retry_config = (
             outline_flow_retry_config(
-                processor=self,
+                proposal_deps=self._proposal_tool_deps,
                 planning_state=planning_state,
                 plan_edit_context=plan_edit_context,
                 prior_plan_for_revision=prior_plan_for_revision,
             )
             if flow is None
             else edit_flow_retry_config(
-                processor=self,
+                proposal_deps=self._proposal_tool_deps,
                 assistant_snapshots=assistant_snapshots,
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs,
@@ -1646,7 +1644,7 @@ class AIBuilderProposalProcessor:
         tool_call: Any,
     ) -> AsyncGenerator[dict[str, str], None]:
         retry_config = edit_flow_retry_config(
-            processor=self,
+            proposal_deps=self._proposal_tool_deps,
             assistant_snapshots=ctx.assistant_snapshots,
             litellm_model=ctx.litellm_model,
             litellm_kwargs=ctx.litellm_kwargs,
@@ -1696,7 +1694,7 @@ class AIBuilderProposalProcessor:
             )
 
         edit_result = await process_edit_arguments(
-            processor=self,
+            proposal_deps=self._proposal_tool_deps,
             turn=ctx.turn,
             conversation=ctx.conversation,
             new_messages_start=ctx.new_messages_start,

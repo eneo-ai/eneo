@@ -305,6 +305,26 @@ def find_mcp_usage_without_selection_issue(
     return None
 
 
+def mcp_clarification_issue_if_needed(
+    *,
+    conversation: list[ConversationMessage],
+    spec: FlowDraftSpecCore,
+    catalog: AIBuilderResourceCatalog | None,
+    signal_text: str,
+) -> NamedMCPReferenceIssue | None:
+    if catalog is None or mcp_selection_answer_allows_planning(conversation):
+        return None
+
+    return find_named_mcp_reference_issue(
+        spec=spec,
+        catalog=catalog,
+        signal_text=signal_text,
+    ) or find_mcp_usage_without_selection_issue(
+        spec=spec,
+        catalog=catalog,
+    )
+
+
 def mcp_resource_selection_values(
     conversation: list[ConversationMessage],
 ) -> frozenset[str]:

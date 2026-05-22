@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+
 from intric.flows.ai_builder.ai_builder_description_semantics import (
     DescriptionProvenance,
     FlowSemanticSignature,
     _description_hash,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import EditAdvisory
+from intric.flows.ai_builder.ai_builder_edit_proposal import attempt_description_repair
 from intric.flows.ai_builder.ai_builder_edit_repair import (
     should_attempt_description_repair,
     validate_repair_invariance,
@@ -169,3 +175,34 @@ class TestValidateRepairInvariance:
         original = _spec(description="Same")
         repaired = original.model_copy(update={"flow_name": "Different Name"})
         assert validate_repair_invariance(original, repaired) is False
+
+
+@pytest.mark.asyncio
+async def test_attempt_description_repair_uses_completion_boundary_only_for_description() -> (
+    None
+):
+    completion = AsyncMock(
+        return_value=SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="New generated description")
+                )
+            ]
+        )
+    )
+    original = _spec(description="Old generated description")
+
+    repaired = await attempt_description_repair(
+        call_proposal_completion=completion,
+        compiled_spec=original,
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={"timeout": 30},
+        max_output_tokens=128,
+    )
+
+    assert repaired is not None
+    assert repaired.flow_description == "New generated description"
+    assert repaired.flow_name == original.flow_name
+    assert repaired.steps == original.steps
+    completion.assert_awaited_once()
+    assert completion.await_args.kwargs["tool_schemas"] == []

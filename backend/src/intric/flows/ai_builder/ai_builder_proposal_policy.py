@@ -47,7 +47,7 @@ _PRESERVED_PLAN_EDIT_TERMINAL_TYPES = frozenset(
 def format_quality_feedback(
     validation: SpecValidationResult,
     *,
-    quality_retry_warning_codes: set[str],
+    quality_retry_warning_codes: set[str] | frozenset[str],
 ) -> str | None:
     quality_warnings = warnings_for_quality_retry(
         validation,

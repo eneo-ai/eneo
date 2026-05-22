@@ -49,6 +49,8 @@ from intric.flows.ai_builder.ai_builder_proposal_policy import (
     terminal_output_type_for_conversation,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalCompletionFn,
+    ProposalToolDeps,
     ToolProcessingResult,
     ToolRetryConfig,
     ToolRetryInvocation,
@@ -68,9 +70,6 @@ from intric.flows.flow_authoring_spec import (
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
-    from intric.flows.ai_builder.ai_builder_proposal_processor import (
-        AIBuilderProposalProcessor,
-    )
     from intric.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
@@ -82,7 +81,7 @@ EDIT_FLOW_FORCED_TOOL_PROMPT = (
 
 async def process_edit_arguments(
     *,
-    processor: AIBuilderProposalProcessor,
+    proposal_deps: ProposalToolDeps,
     turn: SessionSendTurn,
     conversation: list[ConversationMessage],
     new_messages_start: int,
@@ -265,7 +264,7 @@ async def process_edit_arguments(
             failure_kind="quality",
         )
 
-    mcp_clarification_events = await processor.mcp_clarification_events_if_needed(
+    mcp_clarification_events = await proposal_deps.mcp_clarification_events_if_needed(
         turn=turn,
         conversation=conversation,
         new_messages_start=new_messages_start,
@@ -306,11 +305,8 @@ async def process_edit_arguments(
         current_provenance=current_provenance,
     ):
         repaired_spec = await attempt_description_repair(
-            processor=processor,
+            call_proposal_completion=proposal_deps.call_proposal_completion,
             compiled_spec=compiled_spec,
-            flow=flow,
-            llm_messages=[],
-            tool_schemas=[],
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
             max_output_tokens=min(max_output_tokens, 256),
@@ -330,7 +326,7 @@ async def process_edit_arguments(
 
     quality_feedback = format_quality_feedback(
         validation,
-        quality_retry_warning_codes=processor.quality_retry_warning_codes,
+        quality_retry_warning_codes=proposal_deps.quality_retry_warning_codes,
     )
     contextual_quality_feedback = format_contextual_quality_feedback(
         conversation=conversation,
@@ -363,7 +359,7 @@ async def process_edit_arguments(
     assumptions = list(draft.assumptions) if draft.assumptions else []
     plan_edit_result = BuilderPlanEditResult(compiled_edit=edit_result)
     stored_plan = await store_plan_and_update_conversation(
-        repo=processor.repo,
+        repo=proposal_deps.repo,
         turn=turn,
         conversation=conversation,
         new_messages_start=new_messages_start,
@@ -397,11 +393,8 @@ async def process_edit_arguments(
 
 async def attempt_description_repair(
     *,
-    processor: AIBuilderProposalProcessor,
+    call_proposal_completion: ProposalCompletionFn,
     compiled_spec: FlowDraftSpecCore,
-    flow: Flow,
-    llm_messages: list[dict[str, Any]],
-    tool_schemas: list[dict[str, Any]],
     litellm_model: str,
     litellm_kwargs: dict[str, Any],
     max_output_tokens: int,
@@ -420,9 +413,9 @@ async def attempt_description_repair(
     )
 
     try:
-        response = await processor.call_proposal_completion(
+        response = await call_proposal_completion(
             messages=[{"role": "user", "content": repair_prompt}],
-            tool_schemas=tool_schemas,
+            tool_schemas=[],
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
             max_output_tokens=max_output_tokens,
@@ -448,7 +441,7 @@ async def attempt_description_repair(
 
 
 def _bind_process_edit_arguments(
-    processor: AIBuilderProposalProcessor,
+    proposal_deps: ProposalToolDeps,
     *,
     assistant_snapshots: AssistantAuthoringSnapshots | None,
     litellm_model: str,
@@ -461,7 +454,7 @@ def _bind_process_edit_arguments(
         invocation: ToolRetryInvocation,
     ) -> ToolProcessingResult:
         return await process_edit_arguments(
-            processor=processor,
+            proposal_deps=proposal_deps,
             turn=invocation.turn,
             conversation=invocation.conversation,
             new_messages_start=invocation.new_messages_start,
@@ -486,7 +479,7 @@ def _bind_process_edit_arguments(
 
 def edit_flow_retry_config(
     *,
-    processor: AIBuilderProposalProcessor,
+    proposal_deps: ProposalToolDeps,
     assistant_snapshots: AssistantAuthoringSnapshots | None,
     litellm_model: str,
     litellm_kwargs: dict[str, Any],
@@ -498,7 +491,7 @@ def edit_flow_retry_config(
         target_tool_name=EDIT_FLOW_TOOL_NAME,
         forced_tool_prompt=EDIT_FLOW_FORCED_TOOL_PROMPT,
         process_tool_invocation=_bind_process_edit_arguments(
-            processor,
+            proposal_deps,
             assistant_snapshots=assistant_snapshots,
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,

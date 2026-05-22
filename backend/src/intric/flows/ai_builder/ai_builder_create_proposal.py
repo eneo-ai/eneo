@@ -65,6 +65,7 @@ from intric.flows.ai_builder.ai_builder_proposal_policy import (
     terminal_output_type_for_conversation,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalToolDeps,
     ToolProcessingResult,
     ToolRetryConfig,
     ToolRetryInvocation,
@@ -91,9 +92,6 @@ from intric.flows.flow_authoring_spec import (
 from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
-    from intric.flows.ai_builder.ai_builder_proposal_processor import (
-        AIBuilderProposalProcessor,
-    )
     from intric.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
@@ -106,7 +104,7 @@ OUTLINE_FLOW_FORCED_TOOL_PROMPT = (
 
 async def process_outline_arguments(
     *,
-    processor: "AIBuilderProposalProcessor",
+    proposal_deps: ProposalToolDeps,
     turn: SessionSendTurn,
     conversation: list[ConversationMessage],
     new_messages_start: int,
@@ -186,7 +184,7 @@ async def process_outline_arguments(
         )
 
     return await _process_create_draft(
-        processor=processor,
+        proposal_deps=proposal_deps,
         turn=turn,
         conversation=conversation,
         new_messages_start=new_messages_start,
@@ -214,7 +212,7 @@ async def process_outline_arguments(
 
 async def _process_create_draft(
     *,
-    processor: "AIBuilderProposalProcessor",
+    proposal_deps: ProposalToolDeps,
     turn: SessionSendTurn,
     conversation: list[ConversationMessage],
     new_messages_start: int,
@@ -338,7 +336,7 @@ async def _process_create_draft(
             failure_kind="quality",
         )
 
-    mcp_clarification_events = await processor.mcp_clarification_events_if_needed(
+    mcp_clarification_events = await proposal_deps.mcp_clarification_events_if_needed(
         turn=turn,
         conversation=conversation,
         new_messages_start=new_messages_start,
@@ -378,7 +376,7 @@ async def _process_create_draft(
         )
         quality_hint = format_quality_feedback(
             validation,
-            quality_retry_warning_codes=processor.quality_retry_warning_codes,
+            quality_retry_warning_codes=proposal_deps.quality_retry_warning_codes,
         )
         contextual_hint = format_create_contextual_quality_feedback(
             conversation=conversation,
@@ -409,7 +407,7 @@ async def _process_create_draft(
 
     quality_feedback = format_quality_feedback(
         validation,
-        quality_retry_warning_codes=processor.quality_retry_warning_codes,
+        quality_retry_warning_codes=proposal_deps.quality_retry_warning_codes,
     )
     contextual_quality_feedback = format_create_contextual_quality_feedback(
         conversation=conversation,
@@ -439,7 +437,7 @@ async def _process_create_draft(
         )
 
     stored_plan = await store_plan_and_update_conversation(
-        repo=processor.repo,
+        repo=proposal_deps.repo,
         turn=turn,
         conversation=conversation,
         new_messages_start=new_messages_start,
@@ -489,7 +487,7 @@ def format_create_contextual_quality_feedback(
 
 def outline_flow_retry_config(
     *,
-    processor: "AIBuilderProposalProcessor",
+    proposal_deps: ProposalToolDeps,
     planning_state: PlanningState | None = None,
     plan_edit_context: AIBuilderPlanEditContext | None = None,
     prior_plan_for_revision: BuilderPlan | None = None,
@@ -498,7 +496,7 @@ def outline_flow_retry_config(
         target_tool_name=OUTLINE_FLOW_TOOL_NAME,
         forced_tool_prompt=OUTLINE_FLOW_FORCED_TOOL_PROMPT,
         process_tool_invocation=_bind_process_outline_arguments(
-            processor=processor,
+            proposal_deps=proposal_deps,
             planning_state=planning_state,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
@@ -507,7 +505,7 @@ def outline_flow_retry_config(
 
 
 def _bind_process_outline_arguments(
-    processor: "AIBuilderProposalProcessor",
+    proposal_deps: ProposalToolDeps,
     *,
     planning_state: PlanningState | None,
     plan_edit_context: AIBuilderPlanEditContext | None,
@@ -517,7 +515,7 @@ def _bind_process_outline_arguments(
         invocation: ToolRetryInvocation,
     ) -> ToolProcessingResult:
         return await process_outline_arguments(
-            processor=processor,
+            proposal_deps=proposal_deps,
             turn=invocation.turn,
             conversation=invocation.conversation,
             new_messages_start=invocation.new_messages_start,

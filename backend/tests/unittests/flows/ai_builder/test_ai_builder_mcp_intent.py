@@ -7,11 +7,13 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 )
 from intric.flows.ai_builder.ai_builder_events import build_question_event
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
+    MCP_RESOURCE_SELECTION_QUESTION_ID,
     build_mcp_resource_selection_question,
     explicit_mcp_name_groups,
     find_mcp_usage_without_selection_issue,
     find_named_mcp_reference_issue,
     find_named_mcp_request_issue,
+    mcp_clarification_issue_if_needed,
     mcp_resource_selection_values,
     mcp_selection_answer_allows_planning,
     mcp_selection_policy_feedback,
@@ -362,6 +364,32 @@ def test_detects_mcp_usage_before_user_selection() -> None:
     assert issue is not None
     assert issue.reason == "missing_selection"
     assert issue.resolved_server_ref == TIME_SERVER_SLOT
+
+
+def test_mcp_clarification_issue_if_needed_uses_shared_selection_gate() -> None:
+    issue = mcp_clarification_issue_if_needed(
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="Använd Time MCP.",
+                metadata={
+                    "question_answer": {
+                        "question_id": MCP_RESOURCE_SELECTION_QUESTION_ID,
+                        "selected_values": [f"use_mcp_server:{TIME_SERVER_SLOT}"],
+                    }
+                },
+            )
+        ],
+        spec=_spec_with_step(
+            name="Hämta tid via Time MCP",
+            instructions="Hämta aktuell tid.",
+            mcp_tool_refs=[TIME_TOOL_SLOT],
+        ),
+        catalog=_time_catalog(),
+        signal_text="Använd Time MCP.",
+    )
+
+    assert issue is None
 
 
 def test_mcp_selection_question_lists_only_enabled_servers() -> None:
