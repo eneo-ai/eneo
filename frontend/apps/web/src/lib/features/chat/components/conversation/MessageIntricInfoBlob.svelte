@@ -36,10 +36,10 @@
   });
 
   type MetaBag = Record<string, unknown> & {
-    "eneoknowledge.sourceType"?: string;
-    "eneoknowledge.title"?: string;
-    "eneoknowledge.pageRange"?: string;
-    "eneoknowledge.section"?: string;
+    "ladan.sourceType"?: string;
+    "ladan.title"?: string;
+    "ladan.pageRange"?: string;
+    "ladan.section"?: string;
   };
 
   const mcpReference = $derived.by(() => {
@@ -47,10 +47,10 @@
     if (idx > -1) {
       const ref = mcpToolReferences[idx];
       const meta = (ref.meta ?? {}) as MetaBag;
-      const sourceType = meta["eneoknowledge.sourceType"];
-      const title = meta["eneoknowledge.title"] ?? hostFromUri(ref.uri);
-      const pageRange = meta["eneoknowledge.pageRange"] ?? null;
-      const section = meta["eneoknowledge.section"] ?? null;
+      const sourceType = meta["ladan.sourceType"];
+      const title = meta["ladan.title"] ?? hostFromUri(ref.uri);
+      const pageRange = meta["ladan.pageRange"] ?? null;
+      const section = meta["ladan.section"] ?? null;
       const labelText = section ? `${title} → ${section}` : title;
       return {
         id: ref.id,

@@ -57,7 +57,7 @@
   let loading = $state(true);
 
   // Split available servers into two groups so the UI can label them.
-  // ``space_id`` non-null = space-private (today, eneo-knowledge sources);
+  // ``space_id`` non-null = space-private (today, Ladan sources);
   // null = tenant-curated catalog. No behavioural branching depends on
   // this — pure presentation.
   let spaceScopedServers = $derived(availableServers.filter((s) => !!s.space_id));

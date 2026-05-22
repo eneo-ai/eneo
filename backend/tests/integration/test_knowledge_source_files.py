@@ -1,4 +1,4 @@
-"""Integration tests for the generic eneo-knowledge proxy mount.
+"""Integration tests for the generic Ladan proxy mount.
 
 The "files" surface (upload + list + delete) used to live in its own explicit
 endpoints; it now goes through `/upstream/{path:rest}` like every other
@@ -8,7 +8,7 @@ upstream operation. These tests exercise the proxy:
 - Tenant + space gating: a knowledge source owned by space A cannot be
   acted on through space B's URL, nor by users in other tenants.
 
-Stub strategy: ``stub_eneo_knowledge_proxy`` patches the single client
+Stub strategy: ``stub_ladan_proxy`` patches the single client
 method (``proxy_collection_request``) and synthesises minimal upstream
 responses based on the (method, path) it sees, including parsing the
 multipart filename out of POST bodies for assertion symmetry.
@@ -24,14 +24,14 @@ import pytest
 import sqlalchemy as sa
 
 from intric.database.tables.spaces_table import Spaces, SpacesUsers
-from intric.eneo_knowledge.client import (
+from intric.ladan.client import (
     CreatedCollection,
-    EneoKnowledgeClient,
     KnowledgeCollection,
+    LadanClient,
     PairedMcpServer,
     ProxiedResponse,
 )
-from intric.eneo_knowledge.table import KnowledgeSources
+from intric.ladan.table import KnowledgeSources
 from intric.main.config import get_settings, set_settings
 from intric.mcp_servers.application.mcp_server_service import (
     ConnectionResult,
@@ -59,8 +59,8 @@ def configure_knowledge_proxy(monkeypatch):
     original = get_settings()
     overrides = original.model_copy(
         update={
-            "knowledge_url": "http://eneo-knowledge.test",
-            "knowledge_api_key": "test-api-key",
+            "ladan_url": "http://ladan.test",
+            "ladan_api_key": "test-api-key",
         }
     )
     set_settings(overrides)
@@ -72,7 +72,7 @@ _FILENAME_RE = re.compile(rb'filename="([^"]+)"')
 
 
 @pytest.fixture
-def stub_eneo_knowledge_proxy(monkeypatch):
+def stub_ladan_proxy(monkeypatch):
     """Stub the upstream client at the proxy boundary.
 
     The single ``proxy_collection_request`` method now handles every file
@@ -94,7 +94,7 @@ def stub_eneo_knowledge_proxy(monkeypatch):
                 id=str(uuid4()),
                 slug=slug,
                 name=name,
-                endpoint=f"http://eneo-knowledge.test/mcp/{slug}",
+                endpoint=f"http://ladan.test/mcp/{slug}",
                 bearer="upstream-bearer",
                 template_id="knowledge",
             ),
@@ -159,13 +159,9 @@ def stub_eneo_knowledge_proxy(monkeypatch):
             content_type="application/json",
         )
 
-    monkeypatch.setattr(
-        EneoKnowledgeClient, "create_collection", fake_create_collection
-    )
-    monkeypatch.setattr(
-        EneoKnowledgeClient, "delete_collection", fake_delete_collection
-    )
-    monkeypatch.setattr(EneoKnowledgeClient, "proxy_collection_request", fake_proxy)
+    monkeypatch.setattr(LadanClient, "create_collection", fake_create_collection)
+    monkeypatch.setattr(LadanClient, "delete_collection", fake_delete_collection)
+    monkeypatch.setattr(LadanClient, "proxy_collection_request", fake_proxy)
     return calls
 
 
@@ -220,7 +216,7 @@ async def test_upload_list_delete_roundtrip(
     client,
     default_user_token,
     configure_knowledge_proxy,
-    stub_eneo_knowledge_proxy,
+    stub_ladan_proxy,
     stub_mcp_connection_probe,
 ):
     """Upload then list returns the file; delete then list returns empty."""
@@ -263,11 +259,9 @@ async def test_upload_list_delete_roundtrip(
     assert listed_again.json() == []
 
     # Upstream was called with the matching slug at every step.
-    create_call = next(
-        c for c in stub_eneo_knowledge_proxy if c["op"] == "create_collection"
-    )
+    create_call = next(c for c in stub_ladan_proxy if c["op"] == "create_collection")
     upstream_slug = create_call["slug"]
-    proxy_calls = _proxy_calls(stub_eneo_knowledge_proxy)
+    proxy_calls = _proxy_calls(stub_ladan_proxy)
     assert any(
         c["method"] == "POST" and c["upstream_path"] == "files" for c in proxy_calls
     )
@@ -282,7 +276,7 @@ async def test_cross_space_file_op_rejected(
     client,
     default_user_token,
     configure_knowledge_proxy,
-    stub_eneo_knowledge_proxy,
+    stub_ladan_proxy,
     stub_mcp_connection_probe,
 ):
     """A knowledge source owned by space A cannot be addressed via space B's URL."""
@@ -305,7 +299,7 @@ async def test_cross_space_file_op_rejected(
     assert cross_list.status_code == 404, cross_list.text
 
     # And no proxy call ever hit the upstream client (gate fires before HTTP).
-    assert _proxy_calls(stub_eneo_knowledge_proxy) == []
+    assert _proxy_calls(stub_ladan_proxy) == []
 
 
 @pytest.mark.integration
@@ -316,7 +310,7 @@ async def test_cross_tenant_file_op_rejected(
     default_user,
     default_user_token,
     configure_knowledge_proxy,
-    stub_eneo_knowledge_proxy,
+    stub_ladan_proxy,
     stub_mcp_connection_probe,
     tenant_factory,
     user_factory,
@@ -374,7 +368,7 @@ async def test_list_returns_knowledge_sources_for_space(
     client,
     default_user_token,
     configure_knowledge_proxy,
-    stub_eneo_knowledge_proxy,
+    stub_ladan_proxy,
     stub_mcp_connection_probe,
     db_container,
     default_user,

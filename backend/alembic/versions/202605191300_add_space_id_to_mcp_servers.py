@@ -2,7 +2,7 @@
 
 Today the ``mcp_servers`` catalog is tenant-wide and admin-curated. Space
 owners and editors should be able to register their own MCP servers
-(including upcoming eneo-knowledge collections proxied through eneo) without
+(including upcoming Ladan collections proxied through eneo) without
 involving a tenant admin. We add a nullable ``space_id`` column:
 
 - ``NULL``  -> tenant-wide catalog entry (current behavior, admin-managed)

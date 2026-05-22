@@ -58,8 +58,8 @@ class McpToolReferencePublic(InDB):
 
     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
     raw `meta` dict are exposed. Frontend may read well-known keys from
-    `meta` (e.g. `eneoknowledge.sourceType`, `eneoknowledge.title`) to drive
-    richer affordances but must degrade gracefully when meta is empty.
+    `meta` (e.g. `ladan.sourceType`, `ladan.title`) to drive richer
+    affordances but must degrade gracefully when meta is empty.
     """
 
     uri: str

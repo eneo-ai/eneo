@@ -249,8 +249,8 @@ class MCPClient:
              ``terminate_on_close=False`` so the previous turn's DELETE didn't
              evict the server-side session, pre-seed the SDK transport's
              session_id with the persisted value, and SKIP ``initialize()``.
-             Calling ``initialize()`` on resume is fatal — the eneo-knowledge
-             server mints a fresh Mcp-Session-Id on every initialize regardless
+             Calling ``initialize()`` on resume is fatal — the Ladan server
+             mints a fresh Mcp-Session-Id on every initialize regardless
              of the resume header, and the SDK then adopts the new id; tool
              calls land on the new session and lose all per-session state (eg
              file-workbench ingest rows). See the cross-turn contract in

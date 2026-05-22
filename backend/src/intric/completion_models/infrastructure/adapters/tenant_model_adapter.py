@@ -63,10 +63,10 @@ def _pick_resource_title(meta: dict[str, Any], uri: Optional[str]) -> str:
     falls back to the URI hostname (for http/https) or the URI itself. Returns
     a non-empty string suitable for display in the Källor footer.
     """
-    # Well-known key for the eneo-knowledge MCP server. Adding more namespaces
+    # Well-known key for the Ladan MCP server. Adding more namespaces
     # later is additive — backend remains generic for servers that omit them.
     candidates = (
-        meta.get("eneoknowledge.title"),
+        meta.get("ladan.title"),
         meta.get("title"),
     )
     for cand in candidates:
@@ -83,7 +83,7 @@ def _pick_resource_title(meta: dict[str, Any], uri: Optional[str]) -> str:
 def _format_footer_label(meta: dict[str, Any], uri: Optional[str]) -> str:
     """Render one footer line label: '<title> (pages X-Y)' if page range present."""
     title = _pick_resource_title(meta, uri)
-    page_range = meta.get("eneoknowledge.pageRange")
+    page_range = meta.get("ladan.pageRange")
     if isinstance(page_range, str) and page_range.strip():
         return f"{title} (sid. {page_range.strip()})"
     return title

@@ -2,7 +2,7 @@
 
 Captures MCP resource content blocks returned by tool calls so the chat UI
 can render source chips for MCP-backed search. Generic across MCP servers:
-no eneo-knowledge-specific columns. Tenancy cascades via question_id.
+no Ladan-specific columns. Tenancy cascades via question_id.
 
 GDPR / right-to-be-forgotten: rows include the resource snippet (`content`
 column), which is partial copy of upstream document text. Deletion cascades

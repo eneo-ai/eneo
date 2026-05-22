@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from intric import eneo_knowledge
+from intric import ladan
 from intric.admin.admin_router import router as admin_router
 from intric.ai_models.ai_models_router import router as ai_models_router
 from intric.allowed_origins.allowed_origin_router import (
@@ -403,16 +403,16 @@ router.include_router(
         Depends(require_api_key_scope_check(resource_type="space", path_param="id")),
     ],
 )
-if eneo_knowledge.is_enabled():
-    # The eneo-knowledge integration is configured (KNOWLEDGE_URL +
-    # KNOWLEDGE_API_KEY both set). Mount its endpoints alongside the space
-    # router so URLs stay at ``/api/v1/spaces/{id}/knowledge-sources/...``.
-    # When the integration is disabled this block is skipped entirely —
-    # the endpoints simply don't exist.
+if ladan.is_enabled():
+    # The Ladan integration is configured (LADAN_URL + LADAN_API_KEY both
+    # set). Mount its endpoints alongside the space router so URLs stay at
+    # ``/api/v1/spaces/{id}/knowledge-sources/...``. When the integration
+    # is disabled this block is skipped entirely — the endpoints simply
+    # don't exist.
     router.include_router(
-        eneo_knowledge.router,
+        ladan.router,
         prefix="/spaces",
-        tags=["spaces", "eneo-knowledge"],
+        tags=["spaces", "ladan"],
         dependencies=[
             Depends(require_resource_permission_for_method("spaces")),
             Depends(

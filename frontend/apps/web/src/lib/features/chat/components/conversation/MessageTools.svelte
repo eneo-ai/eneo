@@ -20,10 +20,10 @@
   const mcpRefs = $derived(message.mcp_tool_references ?? []);
 
   type MetaBag = Record<string, unknown> & {
-    "eneoknowledge.sourceType"?: string;
-    "eneoknowledge.title"?: string;
-    "eneoknowledge.pageRange"?: string;
-    "eneoknowledge.section"?: string;
+    "ladan.sourceType"?: string;
+    "ladan.title"?: string;
+    "ladan.pageRange"?: string;
+    "ladan.section"?: string;
   };
 
   function readMeta(ref: (typeof mcpRefs)[number]) {
@@ -35,10 +35,10 @@
       /* leave as URI */
     }
     return {
-      sourceType: meta["eneoknowledge.sourceType"] ?? null,
-      title: meta["eneoknowledge.title"] ?? host,
-      pageRange: meta["eneoknowledge.pageRange"] ?? null,
-      section: meta["eneoknowledge.section"] ?? null
+      sourceType: meta["ladan.sourceType"] ?? null,
+      title: meta["ladan.title"] ?? host,
+      pageRange: meta["ladan.pageRange"] ?? null,
+      section: meta["ladan.section"] ?? null
     };
   }
 

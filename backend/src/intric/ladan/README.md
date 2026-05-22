@@ -1,16 +1,16 @@
-# eneo_knowledge — external service integration
+# ladan — external service integration
 
-This package wraps eneo's integration with **eneo-knowledge**, a separate
-Next.js service that hosts collections, file ingestion, and paired MCP
-servers for semantic search. eneo-knowledge is single-tenant; eneo proxies
-all calls on behalf of its users with a single API key, and enforces tenant
-+ space isolation inside eneo via the `knowledge_sources` ownership table.
+This package wraps eneo's integration with **Ladan**, a separate Next.js
+service that hosts collections, file ingestion, and paired MCP servers
+for semantic search. Ladan is single-tenant; eneo proxies all calls on
+behalf of its users with a single API key, and enforces tenant + space
+isolation inside eneo via the `knowledge_sources` ownership table.
 
 ## Layout
 
 | File | Role |
 |---|---|
-| `client.py` | `EneoKnowledgeClient` — httpx wrapper for the admin API + per-MCP runtime. Owns URL rewriting for devcontainer reachability. |
+| `client.py` | `LadanClient` — httpx wrapper for the admin API + per-MCP runtime. Owns URL rewriting for devcontainer reachability. |
 | `service.py` | `KnowledgeSourceService` — create / list / delete knowledge sources, plus file upload / list / delete on a source. Orchestrates the proxy + the matching space-scoped MCP server row. |
 | `table.py` | `KnowledgeSources` SQLAlchemy ownership table. |
 | `models.py` | Pydantic DTOs for the router. |
@@ -19,12 +19,12 @@ all calls on behalf of its users with a single API key, and enforces tenant
 
 ## Disabling the integration
 
-Unset either `KNOWLEDGE_URL` or `KNOWLEDGE_API_KEY` in your `.env`. Effects:
+Unset either `LADAN_URL` or `LADAN_API_KEY` in your `.env`. Effects:
 
 1. `is_enabled()` returns `False`.
-2. `server/routers.py` skips `include_router(eneo_knowledge.router, ...)`,
+2. `server/routers.py` skips `include_router(ladan.router, ...)`,
    so the `/spaces/{id}/knowledge-sources/...` endpoints are simply absent.
-3. The DI container's `eneo_knowledge_client` provider returns `None`;
+3. The DI container's `ladan_client` provider returns `None`;
    service methods that depend on it raise `BadRequestException` if
    reached through any other path.
 
@@ -36,8 +36,8 @@ websites, integrations) is unaffected.
 - It is **not** the place to put generic external file storage logic.
   `file_storage_uploader.py` (one level up) handles
   per-chat-session uploads to whatever URL `FILE_STORAGE_URL` points at —
-  the same eneo-knowledge instance today, but the API is generic on
-  purpose (POST bytes, get a URL back).
+  the same Ladan instance today, but the API is generic on purpose
+  (POST bytes, get a URL back).
 - It does **not** introduce a "knowledge backend kind" discriminator. The
   resulting MCP server in eneo's catalog is just a space-scoped MCP server
   like any other; downstream code paths (assistant editor, MCP proxy,
@@ -45,8 +45,8 @@ websites, integrations) is unaffected.
 
 ## Cross-repo coordination
 
-The companion plan for eneo-knowledge lives at
-`/Users/alexander/code/eneo-knowledge/.claude/plans/integration-with-eneo.md`.
+The companion plan for Ladan lives at
+`/Users/alexander/code/ladan/.claude/plans/integration-with-eneo.md`.
 That side defines:
 
 - `POST /api/collections {slug, name, embeddingModelId}` →

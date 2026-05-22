@@ -846,7 +846,7 @@ async def create_space_mcp_server(
     summary="Delete a space-private MCP server",
     description=(
         "If the MCP server was provisioned through the knowledge-source flow, "
-        "the matching upstream eneo-knowledge collection is also deleted. "
+        "the matching upstream Ladan collection is also deleted. "
         "Plain space-private MCP servers (no knowledge-source mapping) are "
         "just removed locally."
     ),
@@ -881,7 +881,7 @@ async def delete_space_mcp_server(
     # Now best-effort upstream cleanup.
     if ownership is not None:
         await knowledge_source_service.delete_upstream_collection(
-            slug=ownership.eneo_knowledge_slug
+            slug=ownership.ladan_slug
         )
 
     space = None
@@ -899,11 +899,11 @@ async def delete_space_mcp_server(
     extra: dict[str, str] = {"space_id": str(id)}
     if ownership is not None:
         description = (
-            f"Deleted knowledge source '{deleted.name}' (eneo-knowledge slug "
-            f"'{ownership.eneo_knowledge_slug}') from space "
+            f"Deleted knowledge source '{deleted.name}' (Ladan slug "
+            f"'{ownership.ladan_slug}') from space "
             f"'{space.name if space else 'unknown'}'"
         )
-        extra["eneo_knowledge_slug"] = ownership.eneo_knowledge_slug
+        extra["ladan_slug"] = ownership.ladan_slug
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         user=user,
@@ -929,7 +929,7 @@ async def delete_space_mcp_server(
         "Calls `tools/list` against the MCP server and writes the returned "
         "descriptions/schemas directly onto the existing tool rows — bypasses "
         "the admin pending/approval queue because the user owns this server. "
-        "Use this after the upstream eneo-knowledge tool definitions change."
+        "Use this after the upstream Ladan tool definitions change."
     ),
 )
 async def refresh_space_mcp_server_tools(

@@ -3906,7 +3906,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a space-private MCP server
-     * @description If the MCP server was provisioned through the knowledge-source flow, the matching upstream eneo-knowledge collection is also deleted. Plain space-private MCP servers (no knowledge-source mapping) are just removed locally.
+     * @description If the MCP server was provisioned through the knowledge-source flow, the matching upstream Ladan collection is also deleted. Plain space-private MCP servers (no knowledge-source mapping) are just removed locally.
      */
     delete: operations["delete_space_mcp_server_api_v1_spaces__id__mcp_servers__mcp_server_id___delete"];
     options?: never;
@@ -3925,7 +3925,7 @@ export interface paths {
     put?: never;
     /**
      * Re-discover and upsert tool definitions for a space-private MCP
-     * @description Calls `tools/list` against the MCP server and writes the returned descriptions/schemas directly onto the existing tool rows — bypasses the admin pending/approval queue because the user owns this server. Use this after the upstream eneo-knowledge tool definitions change.
+     * @description Calls `tools/list` against the MCP server and writes the returned descriptions/schemas directly onto the existing tool rows — bypasses the admin pending/approval queue because the user owns this server. Use this after the upstream Ladan tool definitions change.
      */
     post: operations["refresh_space_mcp_server_tools_api_v1_spaces__id__mcp_servers__mcp_server_id__refresh_tools__post"];
     delete?: never;
@@ -4169,7 +4169,7 @@ export interface paths {
     put?: never;
     /**
      * Provision a knowledge source (plug-and-play)
-     * @description Create an eneo-knowledge Collection on the user's behalf and register the paired MCP server as a space-private entry. The user only supplies a display name; eneo derives the upstream slug and uses the configured default embedding model. The resulting MCP server then appears in the assistant editor like any other.
+     * @description Create a Ladan Collection on the user's behalf and register the paired MCP server as a space-private entry. The user only supplies a display name; eneo derives the upstream slug and uses the configured default embedding model. The resulting MCP server then appears in the assistant editor like any other.
      */
     post: operations["create_space_knowledge_source_api_v1_spaces__id__knowledge_sources__post"];
     delete?: never;
@@ -4186,30 +4186,30 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Proxy a request to the eneo-knowledge collection backing this knowledge source
-     * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on eneo-knowledge. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
+     * Proxy a request to the Ladan collection backing this knowledge source
+     * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on Ladan. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
      */
     get: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete"];
     /**
-     * Proxy a request to the eneo-knowledge collection backing this knowledge source
-     * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on eneo-knowledge. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
+     * Proxy a request to the Ladan collection backing this knowledge source
+     * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on Ladan. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
      */
     put: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete"];
     /**
-     * Proxy a request to the eneo-knowledge collection backing this knowledge source
-     * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on eneo-knowledge. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
+     * Proxy a request to the Ladan collection backing this knowledge source
+     * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on Ladan. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
      */
     post: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete"];
     /**
-     * Proxy a request to the eneo-knowledge collection backing this knowledge source
-     * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on eneo-knowledge. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
+     * Proxy a request to the Ladan collection backing this knowledge source
+     * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on Ladan. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
      */
     delete: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete"];
     options?: never;
     head?: never;
     /**
-     * Proxy a request to the eneo-knowledge collection backing this knowledge source
-     * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on eneo-knowledge. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
+     * Proxy a request to the Ladan collection backing this knowledge source
+     * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on Ladan. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
      */
     patch: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete"];
     trace?: never;
@@ -11396,8 +11396,8 @@ export interface components {
        * Format: uuid
        */
       knowledge_source_id: string;
-      /** Eneo Knowledge Slug */
-      eneo_knowledge_slug: string;
+      /** Ladan Slug */
+      ladan_slug: string;
       mcp_server: components["schemas"]["MCPServerPublic"];
       /** Description */
       description?: string | null;
@@ -11412,8 +11412,8 @@ export interface components {
        * Format: uuid
        */
       id: string;
-      /** Eneo Knowledge Slug */
-      eneo_knowledge_slug: string;
+      /** Ladan Slug */
+      ladan_slug: string;
       /**
        * Mcp Server Id
        * Format: uuid
@@ -11769,8 +11769,8 @@ export interface components {
      *
      *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
      *     raw `meta` dict are exposed. Frontend may read well-known keys from
-     *     `meta` (e.g. `eneoknowledge.sourceType`, `eneoknowledge.title`) to drive
-     *     richer affordances but must degrade gracefully when meta is empty.
+     *     `meta` (e.g. `ladan.sourceType`, `ladan.title`) to drive richer
+     *     affordances but must degrade gracefully when meta is empty.
      */
     McpToolReferencePublic: {
       /** Created At */
@@ -20730,8 +20730,8 @@ export interface operations {
                *
                *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
                *     raw `meta` dict are exposed. Frontend may read well-known keys from
-               *     `meta` (e.g. `eneoknowledge.sourceType`, `eneoknowledge.title`) to drive
-               *     richer affordances but must degrade gracefully when meta is empty.
+               *     `meta` (e.g. `ladan.sourceType`, `ladan.title`) to drive richer
+               *     affordances but must degrade gracefully when meta is empty.
                */
               McpToolReferencePublic: {
                 /** Created At */
@@ -21121,8 +21121,8 @@ export interface operations {
                *
                *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
                *     raw `meta` dict are exposed. Frontend may read well-known keys from
-               *     `meta` (e.g. `eneoknowledge.sourceType`, `eneoknowledge.title`) to drive
-               *     richer affordances but must degrade gracefully when meta is empty.
+               *     `meta` (e.g. `ladan.sourceType`, `ladan.title`) to drive richer
+               *     affordances but must degrade gracefully when meta is empty.
                */
               McpToolReferencePublic: {
                 /** Created At */
@@ -22024,8 +22024,8 @@ export interface operations {
                    *
                    *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
                    *     raw `meta` dict are exposed. Frontend may read well-known keys from
-                   *     `meta` (e.g. `eneoknowledge.sourceType`, `eneoknowledge.title`) to drive
-                   *     richer affordances but must degrade gracefully when meta is empty.
+                   *     `meta` (e.g. `ladan.sourceType`, `ladan.title`) to drive richer
+                   *     affordances but must degrade gracefully when meta is empty.
                    */
                   McpToolReferencePublic: {
                     /** Created At */
@@ -22298,8 +22298,8 @@ export interface operations {
                    *
                    *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
                    *     raw `meta` dict are exposed. Frontend may read well-known keys from
-                   *     `meta` (e.g. `eneoknowledge.sourceType`, `eneoknowledge.title`) to drive
-                   *     richer affordances but must degrade gracefully when meta is empty.
+                   *     `meta` (e.g. `ladan.sourceType`, `ladan.title`) to drive richer
+                   *     affordances but must degrade gracefully when meta is empty.
                    */
                   McpToolReferencePublic: {
                     /** Created At */

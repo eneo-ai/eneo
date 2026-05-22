@@ -10,21 +10,20 @@ from intric.database.tables.tenant_table import Tenants
 
 
 class KnowledgeSources(IdMixin, BaseWithTableName):
-    """Ownership map for proxied eneo-knowledge collections.
+    """Ownership map for proxied Ladan collections.
 
     Each row links a tenant + space (in eneo) to a slug owned by the shared
-    single-tenant eneo-knowledge instance, and to the backing
-    ``mcp_servers`` row (space-scoped) that assistants pick up via the
-    Phase 1 visibility query. Rows are immutable once written — there is
-    no update path, only create and delete — so we deliberately omit
-    ``updated_at``.
+    single-tenant Ladan instance, and to the backing ``mcp_servers`` row
+    (space-scoped) that assistants pick up via the Phase 1 visibility
+    query. Rows are immutable once written — there is no update path,
+    only create and delete — so we deliberately omit ``updated_at``.
     """
 
     __tablename__ = "knowledge_sources"  # type: ignore[assignment]
     __table_args__ = (
         UniqueConstraint(
             "tenant_id",
-            "eneo_knowledge_slug",
+            "ladan_slug",
             name="uq_knowledge_sources_tenant_slug",
         ),
     )
@@ -38,7 +37,7 @@ class KnowledgeSources(IdMixin, BaseWithTableName):
     owner_user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    eneo_knowledge_slug: Mapped[str] = mapped_column(Text, nullable=False)
+    ladan_slug: Mapped[str] = mapped_column(Text, nullable=False)
     mcp_server_id: Mapped[UUID] = mapped_column(
         ForeignKey("mcp_servers.id", ondelete="CASCADE"),
         nullable=False,

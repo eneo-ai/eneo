@@ -4,7 +4,7 @@ Eneo's file processor extracts text from documents on upload and drops the
 original bytes. That makes eneo unable to hand a downstream consumer
 (eg an MCP server's ``ingest_url`` tool) the real PDF/DOCX/etc. We now
 also push the raw bytes to an external file-storage service (today
-eneo-knowledge) at upload time and persist the returned URL on the file
+Ladan) at upload time and persist the returned URL on the file
 row, so chat turns can surface that URL without re-uploading and without
 trying to reconstruct lost bytes from extracted text.
 

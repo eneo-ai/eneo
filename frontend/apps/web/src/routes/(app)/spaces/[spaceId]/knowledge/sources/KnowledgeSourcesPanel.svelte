@@ -53,12 +53,12 @@
 
   type KnowledgeSourceRow = {
     id: string;
-    eneo_knowledge_slug: string;
+    ladan_slug: string;
     mcp_server_id: string;
     name: string;
   };
 
-  // Shape matches eneo-knowledge's File JSON verbatim — the generic /upstream
+  // Shape matches Ladan's File JSON verbatim — the generic /upstream
   // proxy relays upstream camelCase unchanged, no snake_case translation.
   type KnowledgeFile = {
     id: string;
@@ -100,9 +100,9 @@
       const nameById = new Map(serverList.map((s) => [s.id, s.name]));
       knowledgeSources = ksList.map((ks) => ({
         id: ks.id,
-        eneo_knowledge_slug: ks.eneo_knowledge_slug,
+        ladan_slug: ks.ladan_slug,
         mcp_server_id: ks.mcp_server_id,
-        name: nameById.get(ks.mcp_server_id) ?? ks.eneo_knowledge_slug
+        name: nameById.get(ks.mcp_server_id) ?? ks.ladan_slug
       }));
     } catch (err) {
       const e = err as { message?: string; body?: { message?: string } };
@@ -444,7 +444,7 @@
 <div class="flex flex-col gap-4 py-4 pr-6">
   <div class="flex items-start justify-between gap-6">
     <p class="text-muted max-w-prose text-sm">
-      Lägg till kunskapskällor som lever i eneo-knowledge. De dyker upp som vanliga MCP-servrar för
+      Lägg till kunskapskällor som lever i Ladan. De dyker upp som vanliga MCP-servrar för
       assistenterna i utrymmet — välj dem under "MCP-servrar" på en assistent och börja ladda upp
       filer för att fylla på källan.
     </p>
@@ -687,8 +687,8 @@
         {/if}
 
         <p class="text-muted text-sm">
-          Ge kunskapskällan ett namn. Den skapas direkt i eneo-knowledge och kopplas till detta
-          utrymme. Assistenter i utrymmet får tillgång till den automatiskt.
+          Ge kunskapskällan ett namn. Den skapas direkt i Ladan och kopplas till detta utrymme.
+          Assistenter i utrymmet får tillgång till den automatiskt.
         </p>
 
         <div>

@@ -84,8 +84,6 @@ from intric.embedding_models.infrastructure.create_embeddings_service import (
     CreateEmbeddingsService,
 )
 from intric.embedding_models.infrastructure.datastore import Datastore
-from intric.eneo_knowledge.client import EneoKnowledgeClient
-from intric.eneo_knowledge.service import KnowledgeSourceService
 from intric.feature_flag.feature_flag_factory import FeatureFlagFactory
 from intric.feature_flag.feature_flag_repo import FeatureFlagRepository
 from intric.feature_flag.feature_flag_service import FeatureFlagService
@@ -229,6 +227,8 @@ from intric.integration.presentation.assemblers.user_integration_assembler impor
 from intric.jobs.job_repo import JobRepository
 from intric.jobs.job_service import JobService
 from intric.jobs.task_service import TaskService
+from intric.ladan.client import LadanClient
+from intric.ladan.service import KnowledgeSourceService
 from intric.limits.limit_service import LimitService
 from intric.main.aiohttp_client import aiohttp_client
 from intric.main.config import get_settings
@@ -346,13 +346,13 @@ from intric.workflows.step_repo import StepRepository
 _logger = get_logger(__name__)
 
 
-def _build_eneo_knowledge_client() -> EneoKnowledgeClient | None:
+def _build_ladan_client() -> LadanClient | None:
     settings = get_settings()
-    url = settings.knowledge_url
-    api_key = settings.knowledge_api_key
+    url = settings.ladan_url
+    api_key = settings.ladan_api_key
     if not url or not api_key:
         return None
-    return EneoKnowledgeClient(base_url=url, api_key=api_key)
+    return LadanClient(base_url=url, api_key=api_key)
 
 
 def _create_redis_client() -> aioredis.Redis:
@@ -1160,7 +1160,7 @@ class Container(containers.DeclarativeContainer):
         actor_manager=actor_manager,
     )
 
-    eneo_knowledge_client = providers.Singleton(_build_eneo_knowledge_client)
+    ladan_client = providers.Singleton(_build_ladan_client)
 
     knowledge_source_service = providers.Factory(
         KnowledgeSourceService,
@@ -1169,7 +1169,7 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         actor_manager=actor_manager,
         mcp_server_service=mcp_server_service,
-        eneo_knowledge_client=eneo_knowledge_client,
+        ladan_client=ladan_client,
     )
     mcp_server_settings_service = providers.Factory(
         MCPServerSettingsService,

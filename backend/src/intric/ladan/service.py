@@ -1,18 +1,18 @@
 """Application service for the proxied "Knowledge source" flow.
 
 A knowledge source is, in eneo's domain, a *backend bookkeeping detail*:
-the user clicks "Add knowledge source", we provision an eneo-knowledge
-``Collection`` on their behalf (single shared upstream, eneo-admin bearer),
-register the returned paired MCP server as a space-scoped row in eneo's
-``mcp_servers`` table (Phase 1 surface), and persist the (tenant, space,
-upstream slug, mcp_server_id) link in ``knowledge_sources``.
+the user clicks "Add knowledge source", we provision a Ladan ``Collection``
+on their behalf (single shared upstream, eneo-admin bearer), register the
+returned paired MCP server as a space-scoped row in eneo's ``mcp_servers``
+table (Phase 1 surface), and persist the (tenant, space, upstream slug,
+mcp_server_id) link in ``knowledge_sources``.
 
 Once persisted, assistants pick up the MCP server through the existing
 space-scoped catalog visibility — no special-casing. Generic over
 discriminators per the standing user preference: deletion of any
 space-scoped MCP server detects the knowledge_sources row, if present,
 and cascades the upstream collection delete; nothing in the chat/assistant
-layer ever needs to know "this MCP is from eneo-knowledge."
+layer ever needs to know "this MCP is from Ladan."
 """
 
 from __future__ import annotations
@@ -26,12 +26,12 @@ from uuid import UUID
 
 import sqlalchemy as sa
 
-from intric.eneo_knowledge.client import (
-    EneoKnowledgeClient,
-    EneoKnowledgeError,
+from intric.ladan.client import (
+    LadanClient,
+    LadanError,
     ProxiedResponse,
 )
-from intric.eneo_knowledge.table import KnowledgeSources
+from intric.ladan.table import KnowledgeSources
 from intric.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class KnowledgeSourceCreated:
     knowledge_source_id: UUID
-    eneo_knowledge_slug: str
+    ladan_slug: str
     mcp_server: "MCPServer"
 
 
@@ -62,7 +62,7 @@ class KnowledgeSourceRow:
     id: UUID
     tenant_id: UUID
     space_id: UUID
-    eneo_knowledge_slug: str
+    ladan_slug: str
     mcp_server_id: UUID
 
 
@@ -71,7 +71,7 @@ _SLUG_COLLAPSE = re.compile(r"-+")
 
 
 def _slugify(name: str) -> str:
-    """Squash a display name into eneo-knowledge's slug rules.
+    """Squash a display name into Ladan's slug rules.
 
     Returns at most 60 chars (leaving room for a uniqueness suffix added by
     the caller). Falls back to ``knowledge`` if the input contains no
@@ -91,31 +91,31 @@ class KnowledgeSourceService:
         space_service: "SpaceService",
         actor_manager: "ActorManager",
         mcp_server_service: "MCPServerService",
-        eneo_knowledge_client: EneoKnowledgeClient | None,
+        ladan_client: LadanClient | None,
     ):
         self._session = session
         self._user = user
         self._space_service = space_service
         self._actor_manager = actor_manager
         self._mcp_server_service = mcp_server_service
-        self._client = eneo_knowledge_client
+        self._client = ladan_client
 
     async def create_knowledge_source(
         self, *, space_id: UUID, name: str
     ) -> KnowledgeSourceCreated:
-        """Proxy-create an eneo-knowledge Collection and link it to this space.
+        """Proxy-create a Ladan Collection and link it to this space.
 
         The user only supplies a display name. We generate a slug
         (``slugified-name`` + 6 random hex chars for collision-resistance)
-        and call eneo-knowledge with the API key; eneo-knowledge picks the
-        embedding model server-side. The returned URL+bearer is then
-        registered as a space-scoped MCP server, which runs the standard
-        tools/list discovery and persists the bearer encrypted.
+        and call Ladan with the API key; Ladan picks the embedding model
+        server-side. The returned URL+bearer is then registered as a
+        space-scoped MCP server, which runs the standard tools/list
+        discovery and persists the bearer encrypted.
         """
         if self._client is None:
             raise BadRequestException(
                 "Knowledge sources are not configured for this deployment "
-                "(KNOWLEDGE_URL / KNOWLEDGE_API_KEY)"
+                "(LADAN_URL / LADAN_API_KEY)"
             )
 
         space = await self._space_service.get_space(space_id)
@@ -134,11 +134,11 @@ class KnowledgeSourceService:
                 slug=slug,
                 name=display_name,
             )
-        except EneoKnowledgeError:
+        except LadanError:
             raise
         except Exception as exc:
             logger.exception(
-                "Failed to call eneo-knowledge create_collection for tenant=%s space=%s",
+                "Failed to call Ladan create_collection for tenant=%s space=%s",
                 self._user.tenant_id,
                 space.id,
             )
@@ -155,7 +155,7 @@ class KnowledgeSourceService:
                 name=display_name,
                 http_url=created.mcp_server.endpoint,
                 http_auth_type="bearer",
-                description=f"Kunskapskälla i eneo-knowledge ({slug})",
+                description=f"Kunskapskälla i Ladan ({slug})",
                 http_auth_config_schema={"token": created.mcp_server.bearer},
             )
         except Exception:
@@ -194,7 +194,7 @@ class KnowledgeSourceService:
                 tenant_id=self._user.tenant_id,
                 space_id=space.id,
                 owner_user_id=self._user.id,
-                eneo_knowledge_slug=slug,
+                ladan_slug=slug,
                 mcp_server_id=mcp_result.server.id,
             )
             .returning(KnowledgeSources.id)
@@ -204,7 +204,7 @@ class KnowledgeSourceService:
 
         return KnowledgeSourceCreated(
             knowledge_source_id=knowledge_source_id,
-            eneo_knowledge_slug=slug,
+            ladan_slug=slug,
             mcp_server=mcp_result.server,
         )
 
@@ -225,7 +225,7 @@ class KnowledgeSourceService:
                     KnowledgeSources.id,
                     KnowledgeSources.tenant_id,
                     KnowledgeSources.space_id,
-                    KnowledgeSources.eneo_knowledge_slug,
+                    KnowledgeSources.ladan_slug,
                     KnowledgeSources.mcp_server_id,
                 )
                 .where(KnowledgeSources.tenant_id == self._user.tenant_id)
@@ -238,7 +238,7 @@ class KnowledgeSourceService:
                 id=row.id,
                 tenant_id=row.tenant_id,
                 space_id=row.space_id,
-                eneo_knowledge_slug=row.eneo_knowledge_slug,
+                ladan_slug=row.ladan_slug,
                 mcp_server_id=row.mcp_server_id,
             )
             for row in rows
@@ -250,8 +250,8 @@ class KnowledgeSourceService:
         """Look up the ownership row for an MCP server, if it is a knowledge source.
 
         Used by the space-scoped DELETE endpoint to decide whether to also
-        delete the upstream eneo-knowledge collection. Returns ``None`` for
-        any space-scoped MCP server not registered through this flow.
+        delete the upstream Ladan collection. Returns ``None`` for any
+        space-scoped MCP server not registered through this flow.
         """
         row = (
             await self._session.execute(
@@ -259,7 +259,7 @@ class KnowledgeSourceService:
                     KnowledgeSources.id,
                     KnowledgeSources.tenant_id,
                     KnowledgeSources.space_id,
-                    KnowledgeSources.eneo_knowledge_slug,
+                    KnowledgeSources.ladan_slug,
                     KnowledgeSources.mcp_server_id,
                 ).where(KnowledgeSources.mcp_server_id == mcp_server_id)
             )
@@ -270,7 +270,7 @@ class KnowledgeSourceService:
             id=row.id,
             tenant_id=row.tenant_id,
             space_id=row.space_id,
-            eneo_knowledge_slug=row.eneo_knowledge_slug,
+            ladan_slug=row.ladan_slug,
             mcp_server_id=row.mcp_server_id,
         )
 
@@ -280,8 +280,8 @@ class KnowledgeSourceService:
         """Look up an ownership row gated by tenant + URL-supplied space_id.
 
         Used by every file operation. The tenant gate prevents cross-tenant
-        proxy abuse even though eneo-knowledge itself is single-tenant; the
-        space gate prevents a member of space A from acting on a row that
+        proxy abuse even though Ladan itself is single-tenant; the space
+        gate prevents a member of space A from acting on a row that
         actually belongs to space B in the same tenant.
         """
         row = (
@@ -290,7 +290,7 @@ class KnowledgeSourceService:
                     KnowledgeSources.id,
                     KnowledgeSources.tenant_id,
                     KnowledgeSources.space_id,
-                    KnowledgeSources.eneo_knowledge_slug,
+                    KnowledgeSources.ladan_slug,
                     KnowledgeSources.mcp_server_id,
                 )
                 .where(KnowledgeSources.id == knowledge_source_id)
@@ -304,7 +304,7 @@ class KnowledgeSourceService:
             id=row.id,
             tenant_id=row.tenant_id,
             space_id=row.space_id,
-            eneo_knowledge_slug=row.eneo_knowledge_slug,
+            ladan_slug=row.ladan_slug,
             mcp_server_id=row.mcp_server_id,
         )
 
@@ -349,7 +349,7 @@ class KnowledgeSourceService:
                 "Knowledge sources are not configured for this deployment"
             )
         response = await self._client.proxy_collection_request(
-            slug=ownership.eneo_knowledge_slug,
+            slug=ownership.ladan_slug,
             method=normalized,
             upstream_path=upstream_path,
             body=body,
@@ -368,7 +368,7 @@ class KnowledgeSourceService:
             return
         try:
             await self._client.delete_collection(slug=slug)
-        except EneoKnowledgeError:
+        except LadanError:
             raise
         except Exception:
             logger.exception(

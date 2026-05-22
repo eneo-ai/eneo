@@ -3,8 +3,8 @@
  */
 export function initMCPServers(client) {
   /**
-   * Generic eneo-knowledge proxy. Forwards `method` + `upstream_path` to
-   * `/api/collections/{slug}/{upstream_path}` on eneo-knowledge.
+   * Generic Ladan proxy. Forwards `method` + `upstream_path` to
+   * `/api/collections/{slug}/{upstream_path}` on Ladan.
    * Pass `formData` for multipart uploads (file ingestion), `body` for JSON
    * payloads. Mutually exclusive — `formData` wins if both are set.
    * @param {{ space_id: string, knowledge_source_id: string, upstream_path: string, method?: "GET"|"POST"|"PATCH"|"PUT"|"DELETE", body?: unknown, formData?: FormData }} params
@@ -429,7 +429,7 @@ export function initMCPServers(client) {
     },
 
     /**
-     * Provision an eneo-knowledge collection and its paired MCP server in one
+     * Provision a Ladan collection and its paired MCP server in one
      * call. The user only supplies a display name; eneo derives the upstream
      * slug and uses the configured default embedding model. The resulting MCP
      * server then appears in the assistant editor like any other.
@@ -507,7 +507,7 @@ export function initMCPServers(client) {
       }),
 
     /**
-     * Generic eneo-knowledge proxy — see the closure-scope `proxyKnowledgeSource`
+     * Generic Ladan proxy — see the closure-scope `proxyKnowledgeSource`
      * for the full contract. Re-exposed on the returned object so callers can
      * invoke arbitrary upstream paths (runs, preview, ...) without a wrapper.
      */

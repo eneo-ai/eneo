@@ -1,4 +1,4 @@
-"""FastAPI router for the eneo-knowledge integration.
+"""FastAPI router for the Ladan integration.
 
 Mounted at `/api/v1/spaces` by ``server/routers.py``, but only when
 :func:`feature_flag.is_enabled` returns ``True``. When the integration is
@@ -15,8 +15,8 @@ Three endpoints live under ``/{id}/knowledge-sources``:
 
 The space-scoped generic MCP endpoints (POST/DELETE/GET /{id}/mcp-servers/,
 refresh-tools) stay in ``spaces/api/space_router.py`` because they're not
-specific to eneo-knowledge — they happen to be the substrate this
-integration builds on.
+specific to Ladan — they happen to be the substrate this integration
+builds on.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-from intric.eneo_knowledge.models import (
+from intric.ladan.models import (
     KnowledgeSourceCreate,
     KnowledgeSourceCreateResponse,
     KnowledgeSourceSparse,
@@ -60,7 +60,7 @@ async def _resolve_space_for_audit(container: Container, space_id: UUID):
     responses=responses.get_responses([400, 403, 404]),
     summary="Provision a knowledge source (plug-and-play)",
     description=(
-        "Create an eneo-knowledge Collection on the user's behalf and "
+        "Create a Ladan Collection on the user's behalf and "
         "register the paired MCP server as a space-private entry. The user "
         "only supplies a display name; eneo derives the upstream slug and "
         "uses the configured default embedding model. The resulting MCP "
@@ -88,7 +88,7 @@ async def create_space_knowledge_source(
         entity_id=created.mcp_server.id,
         description=(
             f"Created knowledge source '{created.mcp_server.name}' "
-            f"(eneo-knowledge slug '{created.eneo_knowledge_slug}') in space "
+            f"(Ladan slug '{created.ladan_slug}') in space "
             f"'{space.name if space else 'unknown'}'"
         ),
         metadata=AuditMetadata.standard(
@@ -97,7 +97,7 @@ async def create_space_knowledge_source(
             space=space,
             extra={
                 "space_id": str(id),
-                "eneo_knowledge_slug": created.eneo_knowledge_slug,
+                "ladan_slug": created.ladan_slug,
                 "knowledge_source_id": str(created.knowledge_source_id),
             },
         ),
@@ -105,7 +105,7 @@ async def create_space_knowledge_source(
 
     return KnowledgeSourceCreateResponse(
         knowledge_source_id=created.knowledge_source_id,
-        eneo_knowledge_slug=created.eneo_knowledge_slug,
+        ladan_slug=created.ladan_slug,
         mcp_server=assembler.from_domain_to_model(created.mcp_server),
     )
 
@@ -125,7 +125,7 @@ async def list_space_knowledge_sources(
     return [
         KnowledgeSourceSparse(
             id=row.id,
-            eneo_knowledge_slug=row.eneo_knowledge_slug,
+            ladan_slug=row.ladan_slug,
             mcp_server_id=row.mcp_server_id,
         )
         for row in rows
@@ -184,10 +184,10 @@ def _audit_body_preview(content: bytes | None, content_type: str | None) -> str:
     "/{id}/knowledge-sources/{knowledge_source_id}/upstream/{upstream_path:path}",
     methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
     responses=responses.get_responses([400, 403, 404]),
-    summary="Proxy a request to the eneo-knowledge collection backing this knowledge source",
+    summary="Proxy a request to the Ladan collection backing this knowledge source",
     description=(
         "Generic passthrough to `/api/collections/{slug}/{upstream_path}` on "
-        "eneo-knowledge. The eneo backend authenticates the user, resolves "
+        "Ladan. The eneo backend authenticates the user, resolves "
         "the upstream slug from the ownership table (tenant + space gated), "
         "injects the shared admin bearer, and relays the response verbatim. "
         "Use this for any pure-passthrough operation; endpoints that need "
@@ -229,8 +229,8 @@ async def proxy_knowledge_source_request(
             entity_type=EntityType.MCP_SERVER,
             entity_id=ownership.mcp_server_id,
             description=(
-                f"{request.method.upper()} eneo-knowledge "
-                f"'collections/{ownership.eneo_knowledge_slug}/{cleaned}' "
+                f"{request.method.upper()} Ladan "
+                f"'collections/{ownership.ladan_slug}/{cleaned}' "
                 f"→ {proxied.status_code} in space "
                 f"'{space.name if space else 'unknown'}'"
             ),
@@ -241,7 +241,7 @@ async def proxy_knowledge_source_request(
                 extra={
                     "space_id": str(id),
                     "knowledge_source_id": str(knowledge_source_id),
-                    "eneo_knowledge_slug": ownership.eneo_knowledge_slug,
+                    "ladan_slug": ownership.ladan_slug,
                     "upstream_method": request.method.upper(),
                     "upstream_path": cleaned,
                     "upstream_status": str(proxied.status_code),

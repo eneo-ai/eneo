@@ -1,16 +1,16 @@
-"""knowledge_sources: ownership map for proxied eneo-knowledge collections
+"""knowledge_sources: ownership map for proxied Ladan collections
 
 Eneo proxies its users' "New knowledge source" actions through a single
-shared eneo-knowledge instance (single-tenant upstream, multi-tenant
-caller). Tenant and space isolation are enforced on the eneo side via this
-ownership table — every row maps an upstream eneo-knowledge slug to the
-owning (tenant_id, space_id, owner_user_id, mcp_server_id) tuple.
+shared Ladan instance (single-tenant upstream, multi-tenant caller).
+Tenant and space isolation are enforced on the eneo side via this
+ownership table — every row maps an upstream Ladan slug to the owning
+(tenant_id, space_id, owner_user_id, mcp_server_id) tuple.
 
 The matching MCP server row in eneo's own ``mcp_servers`` table is what
 assistants actually pick up (via Phase 1's space-scoped MCP visibility).
 Deleting an ownership row cascades through the FK to the MCP server row
-(``ON DELETE CASCADE``) and the upstream eneo-knowledge collection is
-deleted by the service layer in the same flow.
+(``ON DELETE CASCADE``) and the upstream Ladan collection is deleted by
+the service layer in the same flow.
 
 Revision ID: 202605191500
 Revises: 202605191300
@@ -54,7 +54,7 @@ def upgrade() -> None:
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
-        sa.Column("eneo_knowledge_slug", sa.Text(), nullable=False),
+        sa.Column("ladan_slug", sa.Text(), nullable=False),
         sa.Column(
             "mcp_server_id",
             sa.dialects.postgresql.UUID(),
@@ -77,7 +77,7 @@ def upgrade() -> None:
     op.create_unique_constraint(
         "uq_knowledge_sources_tenant_slug",
         "knowledge_sources",
-        ["tenant_id", "eneo_knowledge_slug"],
+        ["tenant_id", "ladan_slug"],
     )
 
 

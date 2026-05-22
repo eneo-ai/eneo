@@ -3,9 +3,9 @@
 Eneo only persists extracted text for document uploads (PDFs, DOCX, ...).
 That makes eneo unable to hand a downstream consumer (eg an MCP server's
 ``ingest_url`` tool) the *original* file. To bridge that gap we POST the
-raw upload bytes to a dedicated storage service (today: the eneo-knowledge
-file-storage feature, which lives on the same host as the eneo-knowledge
-MCP but is itself NOT part of the MCP protocol) the moment a file is
+raw upload bytes to a dedicated storage service (today: the Ladan
+file-storage feature, which lives on the same host as the Ladan MCP but
+is itself NOT part of the MCP protocol) the moment a file is
 uploaded, and persist the returned URL on the file row. Chat turns then
 read ``file.storage_url`` directly — no per-turn upload, no need for eneo
 to retain originals.

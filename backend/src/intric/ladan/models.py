@@ -19,7 +19,7 @@ class KnowledgeSourceCreate(BaseModel):
 
 class KnowledgeSourceCreateResponse(BaseModel):
     knowledge_source_id: UUID
-    eneo_knowledge_slug: str
+    ladan_slug: str
     mcp_server: MCPServerPublic
     description: Optional[str] = None
 
@@ -28,5 +28,5 @@ class KnowledgeSourceSparse(BaseModel):
     """Listing entry — just enough for the UI to map MCP servers to ownership rows."""
 
     id: UUID
-    eneo_knowledge_slug: str
+    ladan_slug: str
     mcp_server_id: UUID

@@ -1,11 +1,11 @@
 """Phase 2 tests for the proxied knowledge-source flow.
 
 What this file owns:
-- The happy-path proxy-create wires together: eneo-knowledge admin call,
+- The happy-path proxy-create wires together: Ladan admin call,
   Phase 1 space-scoped MCP registration (with connection-probe shortcircuited),
   and the `knowledge_sources` ownership row insert.
 - Deleting through the existing space-MCP DELETE endpoint must also call
-  eneo-knowledge to drop the upstream collection.
+  Ladan to drop the upstream collection.
 
 Cross-tenant and cross-space MCP visibility is already covered by
 ``test_space_scoped_mcp_servers.py`` — the proxy flow reuses that surface,
@@ -20,13 +20,13 @@ import pytest
 import sqlalchemy as sa
 
 from intric.database.tables.mcp_server_table import MCPServers
-from intric.eneo_knowledge.client import (
+from intric.ladan.client import (
     CreatedCollection,
-    EneoKnowledgeClient,
     KnowledgeCollection,
+    LadanClient,
     PairedMcpServer,
 )
-from intric.eneo_knowledge.table import KnowledgeSources
+from intric.ladan.table import KnowledgeSources
 from intric.main.config import get_settings, set_settings
 from intric.mcp_servers.application.mcp_server_service import (
     ConnectionResult,
@@ -50,13 +50,13 @@ async def default_user_token(db_container, patch_auth_service_jwt, default_user)
 
 @pytest.fixture
 def configure_knowledge_proxy(monkeypatch):
-    """Set the knowledge-* settings so the proxy flow is enabled in tests."""
+    """Set the ladan_* settings so the proxy flow is enabled in tests."""
 
     original = get_settings()
     overrides = original.model_copy(
         update={
-            "knowledge_url": "http://eneo-knowledge.test",
-            "knowledge_api_key": "test-api-key",
+            "ladan_url": "http://ladan.test",
+            "ladan_api_key": "test-api-key",
         }
     )
     set_settings(overrides)
@@ -65,12 +65,12 @@ def configure_knowledge_proxy(monkeypatch):
 
 
 @pytest.fixture
-def stub_eneo_knowledge_client(monkeypatch):
-    """Replace the HTTP calls in EneoKnowledgeClient with in-process stubs.
+def stub_ladan_client(monkeypatch):
+    """Replace the HTTP calls in LadanClient with in-process stubs.
 
     Returns a dict that grows with each call so tests can assert on what was
-    sent (slug, name). The embedding model is picked server-side by
-    eneo-knowledge, so eneo no longer supplies it.
+    sent (slug, name). The embedding model is picked server-side by Ladan,
+    so eneo no longer supplies it.
     """
 
     calls: dict[str, list] = {"create": [], "delete": []}
@@ -88,7 +88,7 @@ def stub_eneo_knowledge_client(monkeypatch):
                 id=str(uuid4()),
                 slug=slug,
                 name=name,
-                endpoint=f"http://eneo-knowledge.test/mcp/{slug}",
+                endpoint=f"http://ladan.test/mcp/{slug}",
                 bearer="upstream-bearer",
                 template_id="knowledge",
             ),
@@ -97,12 +97,8 @@ def stub_eneo_knowledge_client(monkeypatch):
     async def fake_delete_collection(self, *, slug):
         calls["delete"].append({"slug": slug})
 
-    monkeypatch.setattr(
-        EneoKnowledgeClient, "create_collection", fake_create_collection
-    )
-    monkeypatch.setattr(
-        EneoKnowledgeClient, "delete_collection", fake_delete_collection
-    )
+    monkeypatch.setattr(LadanClient, "create_collection", fake_create_collection)
+    monkeypatch.setattr(LadanClient, "delete_collection", fake_delete_collection)
     return calls
 
 
@@ -143,13 +139,13 @@ async def _create_space(client, token: str) -> str:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_create_knowledge_source_proxies_to_eneo_knowledge(
+async def test_create_knowledge_source_proxies_to_ladan(
     client,
     db_container,
     default_user,
     default_user_token,
     configure_knowledge_proxy,
-    stub_eneo_knowledge_client,
+    stub_ladan_client,
     stub_mcp_connection_probe,
 ):
     """POST /knowledge-sources/ creates upstream collection + paired space MCP."""
@@ -164,10 +160,10 @@ async def test_create_knowledge_source_proxies_to_eneo_knowledge(
     payload = response.json()
 
     # Upstream call happened with the user-supplied name + a derived slug.
-    # The embedding model is picked by eneo-knowledge server-side; eneo
-    # does not send it.
-    assert len(stub_eneo_knowledge_client["create"]) == 1
-    upstream_call = stub_eneo_knowledge_client["create"][0]
+    # The embedding model is picked by Ladan server-side; eneo does not
+    # send it.
+    assert len(stub_ladan_client["create"]) == 1
+    upstream_call = stub_ladan_client["create"][0]
     assert upstream_call["name"] == "Handboken"
     assert upstream_call["slug"].startswith("handboken-")
     assert "embedding_model_id" not in upstream_call
@@ -181,14 +177,14 @@ async def test_create_knowledge_source_proxies_to_eneo_knowledge(
                 sa.select(
                     KnowledgeSources.tenant_id,
                     KnowledgeSources.space_id,
-                    KnowledgeSources.eneo_knowledge_slug,
+                    KnowledgeSources.ladan_slug,
                     KnowledgeSources.mcp_server_id,
                 ).where(KnowledgeSources.id == knowledge_source_id)
             )
         ).one()
         assert ownership.tenant_id == default_user.tenant_id
         assert str(ownership.space_id) == space_id
-        assert ownership.eneo_knowledge_slug == upstream_call["slug"]
+        assert ownership.ladan_slug == upstream_call["slug"]
 
         mcp_row = (
             await session.execute(
@@ -209,10 +205,10 @@ async def test_delete_space_mcp_also_drops_upstream_collection(
     default_user,
     default_user_token,
     configure_knowledge_proxy,
-    stub_eneo_knowledge_client,
+    stub_ladan_client,
     stub_mcp_connection_probe,
 ):
-    """The existing DELETE endpoint must cascade to eneo-knowledge."""
+    """The existing DELETE endpoint must cascade to Ladan."""
     space_id = await _create_space(client, default_user_token)
 
     create_response = await client.post(
@@ -222,7 +218,7 @@ async def test_delete_space_mcp_also_drops_upstream_collection(
     )
     assert create_response.status_code == 201, create_response.text
     mcp_server_id = create_response.json()["mcp_server"]["id"]
-    upstream_slug = stub_eneo_knowledge_client["create"][0]["slug"]
+    upstream_slug = stub_ladan_client["create"][0]["slug"]
 
     delete_response = await client.delete(
         f"/api/v1/spaces/{space_id}/mcp-servers/{mcp_server_id}/",
@@ -231,8 +227,8 @@ async def test_delete_space_mcp_also_drops_upstream_collection(
     assert delete_response.status_code == 204, delete_response.text
 
     # Upstream was called with the exact slug we created.
-    assert len(stub_eneo_knowledge_client["delete"]) == 1
-    assert stub_eneo_knowledge_client["delete"][0]["slug"] == upstream_slug
+    assert len(stub_ladan_client["delete"]) == 1
+    assert stub_ladan_client["delete"][0]["slug"] == upstream_slug
 
     async with db_container() as container:
         session = container.session()
@@ -256,7 +252,7 @@ async def test_delete_space_mcp_also_drops_upstream_collection(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_create_returns_400_when_not_configured(client, default_user_token):
-    """Without KNOWLEDGE_ADMIN_* configured the endpoint must fail cleanly."""
+    """Without LADAN_* configured the endpoint must fail cleanly."""
     space_id = await _create_space(client, default_user_token)
 
     response = await client.post(
