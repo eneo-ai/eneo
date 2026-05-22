@@ -43,6 +43,9 @@ from intric.embedding_models.presentation.tenant_embedding_models_router import 
 from intric.files.file_router import router as files_router
 from intric.group_chat.presentation.group_chat_router import router as group_chat_router
 from intric.groups_legacy.api.group_router import router as groups_router
+from intric.help_assistants.api.admin_router import (
+    router as help_assistants_admin_router,
+)
 from intric.icons.api.icon_router import router as icons_router
 from intric.info_blobs.info_blobs_router import router as info_blobs_router
 from intric.integration.presentation.admin_sharepoint_router import (
@@ -486,6 +489,12 @@ router.include_router(
     admin_sharepoint_router,
     prefix="/admin",
     tags=["admin"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    help_assistants_admin_router,
+    prefix="/admin/help-assistants",
+    tags=["admin", "help-assistants"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(ai_models_router, prefix="/ai-models", tags=["ai-models"])
