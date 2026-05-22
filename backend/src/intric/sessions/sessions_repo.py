@@ -128,6 +128,24 @@ class SessionRepository:
         )
         return await self.delegate.get_model_from_query(query)
 
+    async def get_for_helper_run(
+        self, id: UUID, tenant_id: UUID
+    ) -> SessionInDB | None:
+        """Load a helper-run session with its prior questions eager-loaded.
+
+        Documented exception to ``_exclude_helper_run_sessions``: the
+        HelperRunService follow-up-turn path needs the session row that
+        ``help_assistant_runs`` points at, so the completion call can rebuild
+        prior conversation context. Tenant-scoped defensively via
+        :meth:`_filter_by_tenant` — the caller already authorized against the
+        run's actor, but a stray cross-tenant lookup must still fail. No
+        other code path may call this method. See PRD §4 + §6.
+        """
+        query = self._filter_by_tenant(
+            sa.select(Sessions).where(Sessions.id == id), tenant_id
+        )
+        return await self.delegate.get_model_from_query(query)
+
     async def _get_total_count(
         self,
         assistant_id: UUID | None = None,

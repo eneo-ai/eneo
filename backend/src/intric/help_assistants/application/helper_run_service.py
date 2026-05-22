@@ -30,6 +30,7 @@ lives in step 020.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, AsyncGenerator, cast
 from uuid import UUID
 
@@ -50,7 +51,11 @@ from intric.info_blobs.info_blob import (
     InfoBlobChunkInDBWithScore,
     InfoBlobInDBWithScore,
 )
-from intric.main.exceptions import BadRequestException, UnauthorizedException
+from intric.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from intric.main.logging import get_logger
 from intric.main.models import ResourcePermission
 from intric.questions.question import QuestionAdd
@@ -225,6 +230,151 @@ class HelperRunService:
             answer=answer_text,
             info_blobs=datastore_result.info_blobs,
         )
+
+    async def continue_turn(
+        self,
+        *,
+        run_id: UUID,
+        question: str,
+        stream: bool = False,
+    ) -> HelperRunResponse:
+        """Append a follow-up turn to an existing helper run.
+
+        Reuses the run's ``session_id`` so prior conversation context flows
+        into the completion call. Re-runs the availability / actor / model
+        checks every turn — admins may toggle role enablement between turns,
+        and a previously-working completion model can be removed. Same
+        ``extended_logging=False`` rule as :meth:`run`. Does **not** mutate
+        ``run.status`` (status transitions are user-driven via
+        :meth:`set_status`).
+        """
+        run = await self._load_run_for_actor(run_id)
+
+        role = await self.role_service.get_active(run.kind)
+        if role is None or not role.is_enabled or not role.is_visible_to_users:
+            raise UnauthorizedException(
+                f"Help assistant '{run.kind.value}' is not available.",
+                code="helper_not_available",
+            )
+
+        if run.assistant_id is None:
+            raise NotFoundException(
+                "Helper assistant for this run is no longer available."
+            )
+        helper_assistant = await self._load_assistant(run.assistant_id)
+        self._check_helper_completion_model(helper_assistant)
+
+        session = await self.session_repo.get_for_helper_run(
+            run.session_id, self.user.tenant_id
+        )
+        if session is None:
+            raise NotFoundException("Helper run session not found.")
+
+        # PRD §6.5: helper runs use ONLY the helper assistant's tools/knowledge.
+        # Do not forward anything from target_assistant — silent inheritance is
+        # the specific failure mode this design rules out.
+        datastore_result = await self.references_service.get_references(
+            question=question,
+            session=session,
+            collections=list(helper_assistant.collections),
+            websites=list(helper_assistant.websites),
+            integration_knowledge_list=list(
+                helper_assistant.integration_knowledge_list
+            ),
+        )
+
+        assert helper_assistant.completion_model is not None
+        completion_model = cast("AICompletionModel", helper_assistant.completion_model)
+        response = await self.completion_service.get_response(
+            model=completion_model,
+            text_input=question,
+            prompt=helper_assistant.get_prompt_text(),
+            prompt_files=helper_assistant.attachments,
+            info_blob_chunks=datastore_result.chunks,
+            session=session,
+            stream=stream,
+            # PRD §6 + Critical test #3: same hard-coded gate as run().
+            extended_logging=False,
+            model_kwargs=helper_assistant.completion_model_kwargs,
+            mcp_servers=(
+                []
+                if helper_assistant.has_knowledge()
+                else list(helper_assistant.mcp_servers)
+            ),
+        )
+
+        if stream:
+            return HelperRunResponse(
+                run=run,
+                session=session,
+                # TODO(step 022): same SSE wiring as run() — assembled
+                # answer + tokens persist on stream close in the router.
+                answer=self._iter_stream(response),
+                info_blobs=datastore_result.info_blobs,
+            )
+
+        answer_text = await self._persist_answer(
+            response=response,
+            session=session,
+            question=question,
+            datastore_chunks=datastore_result.no_duplicate_chunks,
+            helper_assistant=helper_assistant,
+        )
+
+        return HelperRunResponse(
+            run=run,
+            session=session,
+            answer=answer_text,
+            info_blobs=datastore_result.info_blobs,
+        )
+
+    async def set_status(
+        self,
+        *,
+        run_id: UUID,
+        status: HelperRunStatus,
+    ) -> HelperRun:
+        """Move an in-progress run to a terminal status.
+
+        UX-driven: ``COMPLETED`` is set by the modal's Apply button,
+        ``ABANDONED`` by closing the modal without applying, ``FAILED`` by
+        the router when a completion call blows up mid-stream. Only the
+        original actor may transition their own run, and only from
+        ``IN_PROGRESS`` — repeat transitions or "un-completing" a run are
+        rejected. No audit log entry: the row itself is the record.
+        """
+        run = await self._load_run_for_actor(run_id)
+
+        if status == HelperRunStatus.IN_PROGRESS:
+            raise BadRequestException(
+                "Cannot set helper-run status to 'in_progress'; only "
+                "terminal statuses are allowed."
+            )
+
+        if run.status != HelperRunStatus.IN_PROGRESS:
+            raise BadRequestException(
+                f"Cannot transition helper run from '{run.status.value}' "
+                f"to '{status.value}'; only IN_PROGRESS runs may transition."
+            )
+
+        completed_at = datetime.now(timezone.utc)
+        return await self.helper_run_repo.update_status(
+            id=run_id,
+            tenant_id=self.user.tenant_id,
+            status=status,
+            completed_at=completed_at,
+        )
+
+    async def _load_run_for_actor(self, run_id: UUID) -> HelperRun:
+        run = await self.helper_run_repo.get_by_id(run_id, self.user.tenant_id)
+        if run is None:
+            raise NotFoundException("Helper run not found.")
+        if run.actor_user_id != self.user.id:
+            raise UnauthorizedException(
+                "You do not have permission to access this helper run.",
+                code="forbidden_action",
+            )
+        return run
 
     async def _load_target_with_edit_permission(
         self, target_id: UUID
