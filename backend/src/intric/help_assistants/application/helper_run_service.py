@@ -1,0 +1,344 @@
+"""Application service for executing a single Help-Assistant run.
+
+The service owns the orchestration of one helper-run: it authorizes the
+caller against the *target* resource (the assistant whose prompt the user
+wants help with), resolves the helper assistant from the active role
+assignment, stamps the run, then drives the completion call.
+
+Key invariants pinned here:
+
+* **Tool / knowledge isolation (PRD §6.5).** The completion request is
+  built from the *helper* assistant's prompt, model, collections, websites,
+  integration_knowledge_list, and MCP servers. Nothing leaks from the
+  ``target_assistant`` — silent inheritance is the failure mode this
+  design rules out.
+* **No extended logging (PRD §6 + Critical test #3).** ``extended_logging``
+  is hard-coded to ``False`` on every call to ``completion_service``,
+  regardless of the helper assistant's stored ``logging_enabled`` /
+  ``insight_enabled``. The Question row is persisted with
+  ``logging_details=None`` so ``questions_repo.add`` never inserts into
+  the ``logging`` table.
+* **Helper sessions stay hidden.** Each run writes a row in
+  ``help_assistant_runs`` keyed on the new ``sessions.id``; the central
+  ``_exclude_helper_run_sessions`` filter (step 013) keeps that session
+  out of every session / conversation / insights endpoint.
+
+The service does not touch the existing ``assistant_service.ask()`` path
+— the guard in ``assistant_service.ask()`` rejecting helper assistants
+lives in step 020.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, AsyncGenerator, cast
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict
+
+from intric.ai_models.completion_models.completion_model import (
+    Completion,
+    CompletionModelResponse,
+)
+from intric.assistants.assistant import Assistant
+from intric.assistants.references import ReferencesService
+from intric.help_assistants.domain.factory import HelperAssistantsFactory
+from intric.help_assistants.domain.helper_kind import HelperKind
+from intric.help_assistants.domain.helper_run import HelperRun
+from intric.help_assistants.domain.helper_run_status import HelperRunStatus
+from intric.help_assistants.infrastructure.helper_run_repo import HelperRunRepo
+from intric.info_blobs.info_blob import (
+    InfoBlobChunkInDBWithScore,
+    InfoBlobInDBWithScore,
+)
+from intric.main.exceptions import BadRequestException, UnauthorizedException
+from intric.main.logging import get_logger
+from intric.main.models import ResourcePermission
+from intric.questions.question import QuestionAdd
+from intric.questions.questions_repo import QuestionRepository
+from intric.sessions.session import SessionAdd, SessionInDB
+from intric.sessions.sessions_repo import SessionRepository
+from intric.users.user import UserInDB
+
+if TYPE_CHECKING:
+    from intric.ai_models.completion_models.completion_model import (
+        CompletionModel as AICompletionModel,
+    )
+    from intric.assistants.assistant_service import AssistantService
+    from intric.audit.application.audit_service import AuditService
+    from intric.completion_models.infrastructure.completion_service import (
+        CompletionService,
+    )
+    from intric.help_assistants.application.org_space_assistant_role_service import (
+        OrgSpaceAssistantRoleService,
+    )
+
+
+logger = get_logger(__name__)
+
+
+_SUPPORTED_TARGET_TYPES = frozenset({"assistant"})
+
+
+class HelperRunResponse(BaseModel):
+    """Result of one ``HelperRunService.run`` call.
+
+    Carries enough context for the router (step 022) to render a non-stream
+    JSON body or stream Server-Sent Events back to the client. ``answer``
+    is either the final string (non-stream) or an async generator that
+    yields ``Completion`` chunks (stream).
+    """
+
+    run: HelperRun
+    session: SessionInDB
+    answer: str | AsyncGenerator[Completion, None]
+    info_blobs: list[InfoBlobInDBWithScore]
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class HelperRunService:
+    def __init__(
+        self,
+        user: UserInDB,
+        helper_run_repo: HelperRunRepo,
+        role_service: "OrgSpaceAssistantRoleService",
+        assistant_service: "AssistantService",
+        session_repo: SessionRepository,
+        question_repo: QuestionRepository,
+        completion_service: "CompletionService",
+        references_service: ReferencesService,
+        factory: HelperAssistantsFactory,
+        audit_service: "AuditService",
+    ) -> None:
+        self.user = user
+        self.helper_run_repo = helper_run_repo
+        self.role_service = role_service
+        self.assistant_service = assistant_service
+        self.session_repo = session_repo
+        self.question_repo = question_repo
+        self.completion_service = completion_service
+        self.references_service = references_service
+        self.factory = factory
+        self.audit_service = audit_service
+
+    async def run(
+        self,
+        *,
+        kind: HelperKind,
+        target_type: str,
+        target_id: UUID,
+        question: str,
+        stream: bool = False,
+    ) -> HelperRunResponse:
+        if target_type not in _SUPPORTED_TARGET_TYPES:
+            raise BadRequestException(
+                f"Unsupported helper-run target_type '{target_type}'."
+            )
+
+        target_assistant = await self._load_target_with_edit_permission(target_id)
+
+        role = await self.role_service.get_active(kind)
+        if role is None or not role.is_enabled or not role.is_visible_to_users:
+            raise UnauthorizedException(
+                f"Help assistant '{kind.value}' is not available.",
+                code="helper_not_available",
+            )
+
+        helper_assistant = await self._load_assistant(role.assistant_id)
+        self._check_helper_completion_model(helper_assistant)
+
+        session = await self._create_helper_session(
+            helper_assistant_id=helper_assistant.id, question=question
+        )
+
+        run_entity = self.factory.create_helper_run(
+            tenant_id=self.user.tenant_id,
+            org_space_id=role.org_space_id,
+            kind=kind,
+            assistant_id=helper_assistant.id,
+            target_type=target_type,
+            target_id=target_assistant.id,
+            session_id=session.id,
+            actor_user_id=self.user.id,
+            status=HelperRunStatus.IN_PROGRESS,
+        )
+        run = await self.helper_run_repo.add(run_entity)
+
+        # PRD §6.5: helper runs use ONLY the helper assistant's tools/knowledge.
+        # Do not forward anything from target_assistant — silent inheritance is
+        # the specific failure mode this design rules out.
+        datastore_result = await self.references_service.get_references(
+            question=question,
+            session=session,
+            collections=list(helper_assistant.collections),
+            websites=list(helper_assistant.websites),
+            integration_knowledge_list=list(
+                helper_assistant.integration_knowledge_list
+            ),
+        )
+
+        assert helper_assistant.completion_model is not None
+        completion_model = cast("AICompletionModel", helper_assistant.completion_model)
+        response = await self.completion_service.get_response(
+            model=completion_model,
+            text_input=question,
+            prompt=helper_assistant.get_prompt_text(),
+            prompt_files=helper_assistant.attachments,
+            info_blob_chunks=datastore_result.chunks,
+            session=session,
+            stream=stream,
+            # PRD §6 + Critical test #3: helper runs never produce extended
+            # logging or insights aggregation, regardless of the helper
+            # assistant's stored ``logging_enabled`` / ``insight_enabled``.
+            extended_logging=False,
+            model_kwargs=helper_assistant.completion_model_kwargs,
+            mcp_servers=(
+                []
+                if helper_assistant.has_knowledge()
+                else list(helper_assistant.mcp_servers)
+            ),
+        )
+
+        if stream:
+            return HelperRunResponse(
+                run=run,
+                session=session,
+                # TODO(step 022): wrap the generator so the router emits SSE
+                # and persists the assembled answer + tokens on stream close.
+                # The non-stream branch below already covers persistence; the
+                # streaming branch will mirror that once the router lands.
+                answer=self._iter_stream(response),
+                info_blobs=datastore_result.info_blobs,
+            )
+
+        answer_text = await self._persist_answer(
+            response=response,
+            session=session,
+            question=question,
+            datastore_chunks=datastore_result.no_duplicate_chunks,
+            helper_assistant=helper_assistant,
+        )
+
+        return HelperRunResponse(
+            run=run,
+            session=session,
+            answer=answer_text,
+            info_blobs=datastore_result.info_blobs,
+        )
+
+    async def _load_target_with_edit_permission(
+        self, target_id: UUID
+    ) -> Assistant:
+        target_assistant, permissions = await self.assistant_service.get_assistant(
+            assistant_id=target_id
+        )
+        if ResourcePermission.EDIT not in permissions:
+            raise UnauthorizedException(
+                "You do not have permission to use a helper on this assistant.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "helper_run",
+                    "auth_layer": "domain_policy",
+                },
+            )
+        return target_assistant
+
+    async def _load_assistant(self, assistant_id: UUID) -> Assistant:
+        assistant, _permissions = await self.assistant_service.get_assistant(
+            assistant_id=assistant_id
+        )
+        return assistant
+
+    def _check_helper_completion_model(self, helper: Assistant) -> None:
+        if helper.completion_model is None:
+            raise BadRequestException(
+                "Help assistant has no completion model configured. "
+                "An admin must pick one before this helper can run."
+            )
+        if not helper.completion_model.can_access:
+            raise UnauthorizedException(
+                "Help assistant's completion model is not accessible.",
+                code="forbidden_action",
+            )
+
+    async def _create_helper_session(
+        self, *, helper_assistant_id: UUID, question: str
+    ) -> SessionInDB:
+        # Sessions.name has no length cap at the schema layer, but matching
+        # what assistant_service.ask does (uses the question verbatim) keeps
+        # the row shape consistent with non-helper conversations. The session
+        # is hidden from every listing anyway via the helper-run filter.
+        return await self.session_repo.add(
+            SessionAdd(
+                name=question,
+                user_id=self.user.id,
+                assistant_id=helper_assistant_id,
+            )
+        )
+
+    async def _persist_answer(
+        self,
+        *,
+        response: CompletionModelResponse,
+        session: SessionInDB,
+        question: str,
+        datastore_chunks: list[InfoBlobChunkInDBWithScore],
+        helper_assistant: Assistant,
+    ) -> str:
+        # Mirror session_service.add_question_to_session inline so we never
+        # accidentally route through code paths that aggregate insights or
+        # write to the logging table. ``logging_details`` is always ``None``
+        # because we forced ``extended_logging=False`` upstream.
+        completion = response.completion
+        if isinstance(completion, str):
+            final_answer = completion
+        elif completion is None:
+            final_answer = ""
+        else:
+            final_answer = getattr(completion, "text", "") or ""
+
+        usage = getattr(response, "usage", None)
+        if usage is not None and usage.prompt_tokens is not None:
+            num_tokens_question = usage.prompt_tokens
+        else:
+            num_tokens_question = response.total_token_count
+
+        if usage is not None and usage.completion_tokens is not None:
+            num_tokens_answer = usage.completion_tokens
+        else:
+            num_tokens_answer = 0
+
+        assert helper_assistant.completion_model is not None
+        question_add = QuestionAdd(
+            tenant_id=self.user.tenant_id,
+            question=question,
+            answer=final_answer,
+            num_tokens_question=num_tokens_question,
+            num_tokens_answer=num_tokens_answer,
+            completion_model_id=helper_assistant.completion_model.id,
+            session_id=session.id,
+            logging_details=None,
+            assistant_id=helper_assistant.id,
+        )
+        await self.question_repo.add(
+            question_add,
+            info_blob_chunks=list(datastore_chunks),
+        )
+        return final_answer
+
+    async def _iter_stream(
+        self, response: CompletionModelResponse
+    ) -> AsyncGenerator[Completion, None]:
+        """Re-yield streaming chunks for the router to consume.
+
+        Persistence for streaming runs lands in step 022 alongside the SSE
+        router so chunk assembly and token accounting live next to the
+        wire-format handler, not behind a second abstraction here.
+        """
+
+        completion = response.completion
+        if isinstance(completion, str) or completion is None:
+            return
+        async for chunk in completion:
+            yield chunk
