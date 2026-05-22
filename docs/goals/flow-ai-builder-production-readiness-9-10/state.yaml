@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T049
+active_task: T050
 
 scoring_target:
   dimensions:
@@ -5062,7 +5062,7 @@ tasks:
   - id: T049
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T048. Compare remaining processor topology/readability work, Claude T048 follow-ups, source-material label/live-eval-runner follow-ups, generated-client determinism, full-source Pyright baseline, and repeated normal-user live eval proof before selecting the next implementation slice."
     inputs:
@@ -5086,6 +5086,91 @@ tasks:
       - "Inspect current board scorecard and blockers."
       - "Produce a T049 next-tranche ranking artifact under .codex/artifacts/."
       - "Run Claude peer-loop plan gate."
+    receipt:
+      completed_at: "2026-05-22T13:15:03Z"
+      summary: "Re-ranked the next tranche after T048 and selected a bounded T050 proposal repair runtime ownership slice. The revised plan does not move retry_forced_proposal_after_text into the runtime because that method is an active-submission dispatcher tied to processor-owned outline/edit retry-config builders; moving it now would create the callback-bag seam Claude rejected."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t049-next-tranche-ranking.md"
+        - ".codex/artifacts/claude-peer-loop-t049-next-tranche-ranking-20260522T130808Z.md"
+        - ".codex/artifacts/claude-peer-loop-t049-next-tranche-ranking-iteration-2-20260522T131438Z.md"
+      decision:
+        selected: "T050 proposal repair runtime boundary"
+        rejected:
+          - "Edit handler extraction first: would still depend on processor-owned repair runtime."
+          - "Outline handler extraction first: broader and would still depend on processor-owned repair runtime."
+          - "T048 telemetry follow-up alone: real but too narrow to move the score floor."
+          - "Source-material label/live-eval-runner cleanup: useful but not the current maintainability/readability floor."
+          - "Generated-client determinism: still a blocker before final 9/10 but not the highest topology tranche."
+          - "Full-source Pyright baseline: broad and mostly outside AI Builder."
+          - "Broad processor rewrite: too hard to review safely."
+      peer_review:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t049-next-tranche-ranking-20260522T130808Z.md -> GREEN_LIGHT no / MIN_SCORE 6; rejected unresolved retry_forced_proposal_after_text seam and completion/error-event ambiguity."
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t049-next-tranche-ranking-iteration-2-20260522T131438Z.md -> GREEN_LIGHT yes / MIN_SCORE 8 after seam revision."
+        antigravity: "SKIPPED_DUE_TO_QUOTA per current instruction; not counted as a pass."
+      codex_self_review:
+        verdict: "pass for plan activation; repair runtime is the coupling axis that should move before edit/outline handler extraction."
+        broader_goal_complete: false
+        score_floor: 8
+      score_impact: "No score increase. T049 only selected and peer-gated the next tranche; the strict floor remains 8 until implementation and post-review prove the runtime/readability topology has improved."
+
+  - id: T050
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Move proposal self-correction and forced-tool repair runtime primitives out of AIBuilderProposalProcessor into a repair-owned runtime boundary without moving edit/outline handlers or active-submission retry-config ownership."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t049-next-tranche-ranking.md"
+      - ".codex/artifacts/claude-peer-loop-t049-next-tranche-ranking-iteration-2-20260522T131438Z.md"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_completion.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair_runtime.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - ".codex/artifacts/flow-ai-builder-t050-implementation-summary.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    constraints:
+      - "Red tests first for ownership and runtime module behavior."
+      - "Do not move edit/outline handlers, _outline_flow_retry_config, or _edit_flow_retry_config in this tranche."
+      - "Keep retry_forced_proposal_after_text in the processor as an active-submission dispatcher unless a narrower private rename is justified; it must call the repair runtime wrapper, not the core repair algorithm."
+      - "Runtime accepts one repair-flagged ProposalCompletionFn per request; it must not import litellm_client or construct provider calls directly."
+      - "Delete the single-use BuildSelfCorrectionErrorEvent callback seam if implementation confirms one implementation and one caller."
+      - "Do not add Callable[..., Any], **kwargs: Any, Pyright ignores, generic service classes, processor imports, observability/correlation work, generated-client files, DB files, frontend files, prompts, tool schemas, or public event-contract changes."
+      - "Keep scorecard floor at 8 unless implementation and peer review prove weakest dimensions moved to 9."
+    acceptance_criteria:
+      - "AIBuilderProposalProcessor no longer defines _request_tool_self_correction or retry_forced_tool_after_text."
+      - "Former outline/edit/confirm repair call sites invoke repair runtime free functions directly."
+      - "The retained active-submission dispatcher selects the right ToolRetryConfig and invokes the repair runtime wrapper, never ai_builder_proposal_repair.retry_forced_tool_after_text directly."
+      - "Repair runtime owner does not import ai_builder_proposal_processor and does not define Processor, Manager, Handler, or Service classes."
+      - "Repair runtime reuses ToolRetryConfig, ToolRetryInvocation, ToolProcessingResult, ForcedToolRetryOutcome, and ProposalCompletionFn rather than defining parallel contracts."
+      - "Self-correction error message/event mapping lives with ai_builder_proposal_repair.py and the single-use BuildSelfCorrectionErrorEvent Protocol is deleted if confirmed dead."
+      - "Architecture errors in self-correction and forced-tool paths still produce sanitized error events and architecture telemetry."
+      - "Repair attempts, token usage accounting, information-request short-circuit, JSON-text fallback, and forced tool retry behavior remain unchanged."
+      - "Runtime tests cover binding behavior only; core retry-loop behavior remains protected by test_ai_builder_proposal_repair.py."
+      - "Processor LOC and repair-specific public/private surface decrease by real ownership movement, not wrappers."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check touched T050 source/test files"
+      - "cd backend && uv run ruff format --check touched T050 source/test files"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "git diff --check"
+      - "scripts/gate-local/anti_slippage.sh after staging"
+      - "Claude post-implementation review for the non-trivial diff."
+    live_eval: "Not required unless implementation changes prompts, tool schemas, output construction, or proposal behavior."
+    stop_if:
+      - "Implementation needs frontend/API/generated-client files, DB schema/migration files, prompt/tool-schema changes, or OpenTelemetry/correlation work."
+      - "Implementation needs to move edit/outline handlers or retry-config builders in the same tranche."
+      - "Implementation needs broad Any, Callable[..., Any], **kwargs: Any, or Pyright ignores."
+      - "Repair runtime becomes a pass-through facade or broad dependency bag."
     receipt: null
 
 checks:
@@ -5094,13 +5179,10 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T048 implementation completed and passed focused tests, full AI Builder unit tests, Ruff, Pyright, git diff check, and Claude post-implementation review. Confirm-requirements lifecycle ownership moved to ai_builder_confirm_requirements.py, while the processor keeps only JSON boundary parsing, owner dispatch, event yielding, and generic self-correction routing for this path. T049 is active as the next judge task. Antigravity is skipped due quota per current instruction. Broader goal remains active with strict floor 8/10."
-    task: T048
+    result: "T049 judge completed. Revised next-tranche ranking selected T050 proposal repair runtime boundary after Claude iteration 1 rejected the retry_forced_proposal_after_text seam and Claude iteration 2 returned GREEN_LIGHT yes / MIN_SCORE 8. Antigravity is skipped due quota per current instruction. Broader goal remains active with strict floor 8/10."
+    task: T049
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_confirm_requirements.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 64 passed"
-      - "cd backend && uv run ruff check touched T048 source/test files -> passed"
-      - "cd backend && uv run ruff format --check touched T048 source/test files -> passed"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2295 passed, 4 skipped, 11 warnings"
-      - "git diff --check -> passed"
-      - "Claude post-implementation review: .codex/artifacts/claude-peer-loop-t048-confirm-requirements-owner-implementation-review-20260522T125048Z.md GREEN_LIGHT yes / MIN_SCORE 8"
+      - "git status --short --branch -> only unrelated dirty workspace files plus T049 plan/board changes during the judge task"
+      - "Produced .codex/artifacts/flow-ai-builder-t049-next-tranche-ranking.md"
+      - "Claude iteration 1: .codex/artifacts/claude-peer-loop-t049-next-tranche-ranking-20260522T130808Z.md -> GREEN_LIGHT no / MIN_SCORE 6"
+      - "Claude iteration 2: .codex/artifacts/claude-peer-loop-t049-next-tranche-ranking-iteration-2-20260522T131438Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
