@@ -13,13 +13,18 @@ export async function readEvents(response, { onOpen, onMessage, onClose }) {
   if (response.ok) {
     if (onOpen) await onOpen?.(response);
 
+    const handleMessage = (message) => {
+      if (isEmptySseFrame(message)) return;
+      (onMessage ?? (() => {}))(message);
+    };
+
     await getBytes(
       response.body,
       getLines(
         getMessages(
           () => {},
           () => {},
-          onMessage ?? (() => {})
+          handleMessage
         )
       )
     );
@@ -29,4 +34,8 @@ export async function readEvents(response, { onOpen, onMessage, onClose }) {
   } else {
     throw new PartialError("RESPONSE", response.status, await response.json());
   }
+}
+
+function isEmptySseFrame(message) {
+  return message.event === "" && message.data === "" && message.id === "";
 }
