@@ -6,6 +6,9 @@
   import type { AIBuilderDiagnosticReport } from "./aiBuilderDiagnosticReport";
   import type { AIBuilderSuggestChangeIntent, StepChangeKind, StepSpec } from "./protocol";
 
+  // Mirrors backend requires_completion_model: transcription uses flow config, not GPT.
+  const TRANSCRIBE_ONLY_OUTPUT_MODE = "transcribe_only";
+
   interface Props {
     step: StepSpec;
     stepNumber: number;
@@ -54,6 +57,7 @@
   const inputType = $derived(step.input_type ?? "text");
   const outputType = $derived(step.output_type ?? "text");
   const outputMode = $derived(step.output_mode ?? "pass_through");
+  const usesFlowTranscriptionModel = $derived(outputMode === TRANSCRIBE_ONLY_OUTPUT_MODE);
   const knowledgeRefs = $derived(step.assistant_spec.knowledge_refs ?? []);
   const inputContractProperties = $derived(schemaProperties(step.input_contract));
   const outputContractProperties = $derived(schemaProperties(step.output_contract));
@@ -78,7 +82,7 @@
   );
 
   const resolvedModel = $derived(
-    step.assistant_spec.model_ref
+    !usesFlowTranscriptionModel && step.assistant_spec.model_ref
       ? (resolveModelName?.(step.assistant_spec.model_ref) ?? step.assistant_spec.model_ref)
       : null
   );
@@ -97,6 +101,7 @@
   const hasAnyDetails = $derived(
     hasInstructions ||
       resolvedModel ||
+      usesFlowTranscriptionModel ||
       hasKnowledge ||
       hasMcp ||
       hasBindings ||
@@ -273,7 +278,7 @@
                 </section>
               {/if}
 
-              {#if resolvedModel || hasKnowledge || hasMcp}
+              {#if resolvedModel || usesFlowTranscriptionModel || hasKnowledge || hasMcp}
                 <section class="grid gap-x-6 gap-y-4 sm:grid-cols-2">
                   {#if resolvedModel}
                     <div class="flex flex-col gap-1">
@@ -281,6 +286,16 @@
                         {m.ai_builder_step_model()}
                       </h4>
                       <p class="text-secondary text-[13px] leading-snug">{resolvedModel}</p>
+                    </div>
+                  {/if}
+                  {#if usesFlowTranscriptionModel}
+                    <div class="flex flex-col gap-1">
+                      <h4 class="text-muted text-[11px] font-semibold tracking-[0.06em] uppercase">
+                        {m.ai_builder_step_transcription_model()}
+                      </h4>
+                      <p class="text-secondary text-[13px] leading-snug">
+                        {m.ai_builder_step_transcription_model_hint()}
+                      </p>
                     </div>
                   {/if}
                   {#if hasKnowledge}

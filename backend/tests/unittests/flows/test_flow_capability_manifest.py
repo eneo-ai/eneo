@@ -52,6 +52,7 @@ from intric.flows.flow_capability_manifest import (
     coverage_report,
     is_citation_capable_step,
     render_critic_invariants,
+    requires_completion_model,
     resolve_capability_for_tuple,
     resolve_document_generation_mode,
     supports_step_io_tuple,
@@ -261,6 +262,23 @@ def test_input_capability_rejects_missing_channel() -> None:
             not_exposed_reason=None,
             channel=None,
         )
+
+
+@pytest.mark.parametrize(
+    "output_mode",
+    list(FlowOutputMode),
+)
+def test_requires_completion_model_rejects_transcribe_only(
+    output_mode: FlowOutputMode,
+) -> None:
+    expected = output_mode is not FlowOutputMode.TRANSCRIBE_ONLY
+
+    assert requires_completion_model(output_mode) is expected
+
+
+def test_requires_completion_model_rejects_non_enum() -> None:
+    with pytest.raises(TypeError, match="output_mode must be FlowOutputMode"):
+        requires_completion_model("transcribe_only")  # type: ignore[arg-type]
 
 
 def test_input_text_has_no_absorbed_invariants() -> None:

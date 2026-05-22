@@ -42,6 +42,53 @@ describe("FlowAIBuilderStepCard", () => {
     ).toBeTruthy();
   });
 
+  it("hides completion model details for transcribe-only steps by output mode", async () => {
+    render(FlowAIBuilderStepCard, {
+      step: makeStep({
+        name: "Transcribe meeting audio",
+        output_mode: "transcribe_only",
+        assistant_spec: {
+          instructions: "Transcribe the audio.",
+          model_ref: "model.gpt-5-4-nano",
+          knowledge_refs: [],
+          mcp_server_refs: [],
+          mcp_tool_refs: []
+        }
+      }),
+      stepNumber: 1,
+      resolveModelName: (ref) => (ref === "model.gpt-5-4-nano" ? "gpt-5.4 nano" : ref)
+    });
+
+    expect(screen.queryByText("gpt-5.4 nano")).toBeNull();
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: /^(Step|Steg) 1: Transcribe meeting audio \((NEW|NY)\)$/ })
+    );
+
+    expect(screen.queryByText(/^(Model|Modell)$/)).toBeNull();
+    expect(
+      screen.getByText(/(Uses the flow transcription model|Använder flödets transkriberingsmodell)/)
+    ).toBeTruthy();
+  });
+
+  it("shows completion model details for pass-through steps", async () => {
+    render(FlowAIBuilderStepCard, {
+      step: makeStep({
+        assistant_spec: {
+          instructions: "Summarize the transcript.",
+          model_ref: "model.gpt-5-4-nano",
+          knowledge_refs: [],
+          mcp_server_refs: [],
+          mcp_tool_refs: []
+        }
+      }),
+      stepNumber: 1,
+      resolveModelName: (ref) => (ref === "model.gpt-5-4-nano" ? "gpt-5.4 nano" : ref)
+    });
+
+    expect(screen.getAllByText("gpt-5.4 nano").length).toBeGreaterThan(0);
+  });
+
   it("emits structured step edit context instead of relying on button text", async () => {
     const onsuggestchange = vi.fn();
     render(FlowAIBuilderStepCard, {

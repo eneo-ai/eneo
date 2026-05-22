@@ -558,6 +558,15 @@ def supports_step_io_tuple(
     return True
 
 
+def requires_completion_model(output_mode: FlowOutputMode) -> bool:
+    """True when this output mode runs a completion model at runtime."""
+    if not isinstance(output_mode, FlowOutputMode):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError(
+            f"output_mode must be FlowOutputMode, got {type(output_mode).__name__}"
+        )
+    return output_mode is not FlowOutputMode.TRANSCRIBE_ONLY
+
+
 def resolve_document_generation_mode(
     *,
     output_type: FlowOutputType,

@@ -54,6 +54,7 @@ def _compiled_step(
     step_order: int = 1,
     change_kind: FlowDraftStepChangeKind = FlowDraftStepChangeKind.ADDED,
     assistant_id: UUID | None = None,
+    output_mode: str = "pass_through",
 ) -> FlowDraftCompiledStep:
     return FlowDraftCompiledStep(
         plan_step_ref=plan_step_ref,
@@ -63,7 +64,7 @@ def _compiled_step(
         assistant_id=assistant_id,
         input_source="flow_input",
         input_type="text",
-        output_mode="pass_through",
+        output_mode=output_mode,
         output_type="text",
         mcp_policy="inherit",
     )
@@ -181,7 +182,9 @@ async def test_create_mode_cleans_up_temp_flow_after_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_edit_mode_updates_assistants_before_flow_and_deletes_after_flow() -> None:
+async def test_edit_mode_updates_assistants_before_flow_and_deletes_after_flow() -> (
+    None
+):
     flow_id = uuid4()
     existing_assistant_id = uuid4()
     deleted_assistant_id = uuid4()
@@ -423,6 +426,91 @@ async def test_step_without_knowledge_or_mcp_clears_resource_lists() -> None:
     assert command.mcp_tools == []
     assert command.prompt is not None
     assert command.prompt.text == ""
+
+
+@pytest.mark.asyncio
+async def test_materializer_clears_completion_model_for_transcribe_only_create_changeset() -> (
+    None
+):
+    flow_id = uuid4()
+    service = _flow_service()
+    service.create_flow.return_value = _flow(flow_id=flow_id)
+    assistant = MagicMock()
+    assistant.id = uuid4()
+    service.create_flow_assistant.return_value = (assistant, [])
+
+    await FlowDraftMaterializer().execute(
+        changeset=FlowDraftChangeSet(
+            flow_name="Transcription flow",
+            flow_description="",
+            assistants_to_create=[
+                FlowDraftAssistantToCreate(
+                    plan_step_ref="transcribe",
+                    assistant_spec=AssistantSpec(
+                        instructions="Transcribe.",
+                        model_ref="model.default",
+                    ),
+                )
+            ],
+            compiled_steps=[
+                _compiled_step(
+                    plan_step_ref="transcribe",
+                    output_mode="transcribe_only",
+                )
+            ],
+        ),
+        flow_service=service,
+        space_id=uuid4(),
+        flow_id=None,
+        binding_source=FlowResourceBindingSource.AI_BUILDER,
+    )
+
+    command = service.update_flow_assistant.await_args.kwargs["update"]
+    assert isinstance(command, FlowAssistantUpdateCommand)
+    assert command.completion_model_id is None
+    assert "completion_model_id" in command.model_fields_set
+
+
+@pytest.mark.asyncio
+async def test_materializer_clears_completion_model_for_transcribe_only_update_changeset() -> (
+    None
+):
+    flow_id = uuid4()
+    assistant_id = uuid4()
+    service = _flow_service()
+
+    await FlowDraftMaterializer().execute(
+        changeset=FlowDraftChangeSet(
+            flow_name="Transcription flow",
+            flow_description="",
+            assistants_to_update=[
+                FlowDraftAssistantToUpdate(
+                    existing_assistant_id=assistant_id,
+                    assistant_spec=AssistantSpec(
+                        instructions="Transcribe.",
+                        model_ref="model.default",
+                    ),
+                )
+            ],
+            compiled_steps=[
+                _compiled_step(
+                    plan_step_ref="transcribe",
+                    change_kind=FlowDraftStepChangeKind.MODIFIED,
+                    assistant_id=assistant_id,
+                    output_mode="transcribe_only",
+                )
+            ],
+        ),
+        flow_service=service,
+        space_id=uuid4(),
+        flow_id=flow_id,
+        binding_source=FlowResourceBindingSource.AI_BUILDER,
+    )
+
+    command = service.update_flow_assistant.await_args.kwargs["update"]
+    assert isinstance(command, FlowAssistantUpdateCommand)
+    assert command.completion_model_id is None
+    assert "completion_model_id" in command.model_fields_set
 
 
 @pytest.mark.asyncio

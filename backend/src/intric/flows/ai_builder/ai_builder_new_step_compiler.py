@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import string
 from typing import Any
 
@@ -13,9 +14,12 @@ from intric.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
     StepSpec,
+    completion_model_ref_was_stripped,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from intric.flows.flow_variable_definitions import form_field_reference_expression
+
+logger = logging.getLogger(__name__)
 
 
 def compile_new_step_draft(
@@ -40,7 +44,7 @@ def compile_new_step_draft(
     )
     output_config = compile_output_config(step_draft)
 
-    return StepSpec(
+    step = StepSpec(
         plan_step_ref=plan_step_ref,
         name=step_draft.name,
         assistant_spec=AssistantSpec(
@@ -61,6 +65,34 @@ def compile_new_step_draft(
         input_config=input_config,
         output_config=output_config,
         review_policy=compile_review_policy(step_draft.review_mode),
+    )
+    _log_transcribe_only_model_ref_stripped(
+        supplied_model_ref=step_draft.model_ref,
+        validated_step=step,
+        source="draft",
+    )
+    return step
+
+
+def _log_transcribe_only_model_ref_stripped(
+    *,
+    supplied_model_ref: str | None,
+    validated_step: StepSpec,
+    source: str,
+) -> None:
+    if not completion_model_ref_was_stripped(
+        supplied_model_ref=supplied_model_ref,
+        validated_step=validated_step,
+    ):
+        return
+    logger.info(
+        "ai_builder_transcribe_only_model_ref_stripped",
+        extra={
+            "plan_step_ref": validated_step.plan_step_ref,
+            "existing_step_ref": validated_step.existing_step_ref,
+            "source": source,
+            "output_mode": validated_step.output_mode.value,
+        },
     )
 
 

@@ -55,6 +55,75 @@ interruptions:
       antigravity: "SKIPPED_DUE_TO_QUOTA per current instruction; not counted as a pass."
     score_impact: "No score increase. This is a targeted reliability/output-quality hotfix inside the broader goal; active T050 remains open and the strict overall floor remains 8/10."
     commit_hygiene: "Committed after selective staging. Active T050 source/test changes remain dirty and were not included."
+  - id: I002
+    kind: live_bug_follow_up
+    status: completed
+    reported_at: "2026-05-22T13:32:07Z"
+    summary: "Transcribe-only AI Builder steps can display and preserve a GPT/completion model even though runtime transcription uses the flow transcription model, while the chat input model is only the AI Builder planner/editor model."
+    decision: "Temporarily pause read-only T055 and implement a small SSoT/UX/DX fix: use output_mode=transcribe_only as the canonical source that completion model_ref is inapplicable, hide stale completion model display on those step cards, and return typed selected-step notices for transcribe-only model-change requests even when the requested model name is not catalog-resolved."
+    artifacts:
+      - ".codex/artifacts/flow-ai-builder-i002-transcribe-only-model-ssot-plan.md"
+      - ".codex/artifacts/claude-peer-loop-i002-transcribe-only-model-ssot-plan-20260522T174536Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-i002-transcribe-only-model-ssot-synthesis-20260522T174846Z.md"
+      - ".codex/artifacts/claude-peer-loop-i002-transcribe-only-model-ssot-plan-iteration-2-20260522T175514Z.md"
+      - ".codex/artifacts/claude-peer-loop-i002-transcribe-only-model-ssot-revised-plan-20260522T180345Z.md"
+      - ".codex/artifacts/claude-peer-loop-i002-transcribe-only-model-ssot-plan-final-check-20260522T180749Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-i002-transcribe-only-model-ssot-final-plan-20260522T181021Z.md"
+      - ".codex/artifacts/flow-ai-builder-i002-transcribe-only-model-ssot-implementation-summary.md"
+      - ".codex/artifacts/claude-peer-loop-i002-transcribe-only-model-ssot-implementation-review-20260522T183657Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-i002-transcribe-only-model-ssot-final-implementation-review-20260522T184440Z.md"
+    constraints:
+      - "Do not add runtime_model_kind, model_applicability, DB fields, migrations, or per-step transcription model selectors."
+      - "Do not broaden into observability/DX work while the OpenTelemetry branch is pending review."
+      - "Run Claude plan gate before source implementation; Antigravity only if quota/tooling is available and record quota skips as missing coverage."
+      - "Preserve unrelated dirty files."
+    peer_gate_status:
+      claude_iteration_1: "GREEN_LIGHT no / MIN_SCORE 6; required one engine-truth predicate, explicit materializer join, stronger heuristic tests, and drift visibility."
+      antigravity_iteration_1: "GREEN_LIGHT no / MIN_SCORE 8; quota available; agreed on one requires_completion_model predicate and local materializer join; rejected duplicating output_mode into assistant change models."
+      claude_iteration_2: "GREEN_LIGHT no / MIN_SCORE 7; blocker verified locally: completion_model_id=None does not currently clear persisted assistant completion_model because Assistant.update ignores None. Plan revised to use existing NOT_PROVIDED sentinel semantics."
+      claude_iteration_3: "GREEN_LIGHT no / MIN_SCORE 7; blocker verified locally: public assistant router collapses deprecated completion_model input to None, which would accidentally clear ordinary assistants after sentinel semantics. Plan revised to make router NOT_PROVIDED preservation mandatory."
+      claude_iteration_4: "GREEN_LIGHT yes / MIN_SCORE 8; no blockers after mandatory router preservation, output_mode-pinned frontend tests, strip-log emission rule, and security-validator clear test were added."
+      antigravity_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 9 in final verdict; quota available. Implementation guardrails: widen Assistant.completion_model setter for None, preserve public router updates with NOT_PROVIDED, keep requires_completion_model enum-strict, and verify StepCard output_mode rule."
+      claude_implementation_gate: "GREEN_LIGHT yes / MIN_SCORE 8; no blockers. Codex accepted and fixed in-scope hygiene nits: materializer missing-compiled-step now raises RuntimeError, Swedish hint token duplication is derived, and model-pill accessible label includes visible model text."
+      antigravity_implementation_gate: "GREEN_LIGHT yes / MIN_SCORE 9; quota available. Confirmed final implementation is scoped, SSoT-centered, type-safe, accessible, and ready to commit. Noted only non-blocking future deduplication of compiler strip-log helpers and existing non-I002 frontend check diagnostics."
+      codex_revision: "I002 now includes explicit clear semantics across FlowService -> AssistantService -> Assistant.update, mandatory assistant-router preserve semantics for deprecated completion_model, bounded strip logs, target-preposition guarded transcribe-only intent widening, and additional negative tests before implementation."
+    acceptance:
+      - "Compiled create/outline transcribe_only steps have assistant_spec.model_ref null even if the draft included a completion model."
+      - "Compiled edit previews strip stale or patched completion model_ref from transcribe_only steps."
+      - "Materialization does not write completion_model_id for transcribe_only compiled steps as defense-in-depth."
+      - "Explicit assistant completion-model clears are real: NOT_PROVIDED preserves, None clears, and UUID sets."
+      - "Ordinary public assistant PATCH requests preserve completion_model when deprecated completion_model input is absent or null."
+      - "Selected transcribe_only step model-change phrases such as 'Ändra modell till gpt 5.5', 'Byt till gpt 5.4 nano', and 'Change model to gpt-5.5' return notice, not self-correction failure."
+      - "'Modellera om upplägget lite' does not trigger model-change handling."
+      - "'Change the GPT prompt slightly', 'Använd en kort lista', and 'gptproof' do not trigger model-change handling."
+      - "Frontend StepCard hides completion model rows for transcribe_only steps and shows localized flow-transcription-model copy."
+      - "Frontend input model selector copy distinguishes the AI Builder planner/editor model from runtime transcription/completion models."
+    receipt:
+      completed_at: "2026-05-22T18:45:00Z"
+      summary: "Closed the live transcribe-only model SSoT/UX follow-up. Flow AI Builder now treats output_mode=transcribe_only as the canonical signal that completion model_ref is inapplicable, strips stale/LLM-proposed assistant_spec.model_ref at StepSpec validation, logs bounded strip events from create/edit compilers, explicitly clears completion_model_id in materialization, preserves ordinary public assistant PATCH model state through NOT_PROVIDED, and shows frontend copy that transcribe-only steps use the flow transcription model while the chat input model is the AI Builder planner/editor model."
+      validation:
+        - "Red test before implementation failed as expected on missing requires_completion_model import."
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_capability_manifest.py tests/unittests/flows/test_flow_authoring_spec.py tests/unittests/flows/test_flow_service.py tests/unittests/assistants/test_assistant.py tests/unittests/assistants/test_assistants_service.py tests/unittests/assistants/test_assistant_router.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py tests/unittests/flows/test_flow_draft_materialization_executor.py -q -> 689 passed, 30 warnings."
+        - "cd backend && uv run ruff check touched backend source/test files -> passed."
+        - "cd backend && uv run ruff format --check touched backend source/test files -> passed."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows src/intric/assistants -> 0 errors, 0 warnings."
+        - "cd frontend/apps/web && bun run i18n:compile -> passed."
+        - "cd frontend/apps/web && ../../node_modules/.bin/vitest run FlowAIBuilderStepCard -> 5 passed."
+        - "cd frontend/apps/web && ../../node_modules/.bin/prettier --check messages/en.json messages/sv.json src/lib/features/flows/ai-builder/FlowAIBuilderInput.svelte src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.svelte src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.test.ts -> passed."
+        - "cd frontend/apps/web && ../../node_modules/.bin/eslint src/lib/features/flows/ai-builder/FlowAIBuilderInput.svelte src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.svelte src/lib/features/flows/ai-builder/FlowAIBuilderStepCard.test.ts -> passed."
+        - "git diff --check -> passed."
+      known_validation_limitations:
+        - "cd frontend/apps/web && bun run check still fails on existing non-I002 diagnostics: frontend/packages/intric-js/src/client/stream.js implicit any on message parameters, and frontend/apps/web/src/lib/features/api-keys/ExtendExpirationDialog.svelte state_referenced_locally warning. These files were not modified or staged for I002."
+      codex_self_review:
+        verdict: "pass for the approved tranche. The result fixes the root SSoT problem rather than only hiding UI, keeps output_mode as the canonical owner, uses existing NOT_PROVIDED semantics instead of new public fields, preserves public assistant router behavior, and includes behavior-focused backend/frontend regression coverage."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "Compiler-local strip-log helper remains duplicated between create and edit compilers; peer reviewers agreed it is non-blocking until a third compiler appears."
+        - "No DB integration test proves SQL-level assistant completion_model_id clearing; unit coverage proves command shape, service sentinel semantics, and Assistant.update behavior. Add an integration test if this path regresses in a real DB scenario."
+        - "The broader 9/10 goal remains incomplete; T055 must resume to re-rank the next highest-score-moving tranche."
+      score_impact: "Improves Single Source of Truth, Human Reviewability, Runtime Reliability, Developer Diagnostic Experience, and Normal-User Output Quality for the live transcribe-only model confusion. Does not raise the strict overall score floor above 8 because broader topology/readability, full-source typing/check baseline, and repeated live-eval evidence still block a defensible 9."
 
 scoring_target:
   dimensions:
@@ -5560,7 +5629,9 @@ tasks:
       - "Selected next worker objective."
       - "Allowed files, acceptance criteria, verification commands, stop conditions, and peer-gate requirements."
       - "Whether the selected tranche can move any 8/10 dimension to 9, or why the floor stays 8."
-    receipt: null
+    receipt:
+      interrupted_at: "2026-05-22T13:32:07Z"
+      reason: "Live UX/DX/SSoT bug I002 preempts the read-only next-tranche ranking. T055 remains incomplete and should resume after I002 is committed or explicitly blocked."
 
 checks:
   dirty_fingerprint:
@@ -5568,14 +5639,18 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T054 completed and Claude-approved after post-implementation review. Generated-client regeneration determinism is closed without schema.d.ts churn. Active task is now T055 judge: re-rank the next highest-score-moving tranche after generated-client tooling was hardened. Broader goal remains active with strict floor 8/10."
-    task: T054
+    result: "I002 live bug follow-up completed and ready for scoped commit. Claude implementation gate passed GREEN_LIGHT yes / MIN_SCORE 8. Antigravity was available and passed the final implementation gate GREEN_LIGHT yes / MIN_SCORE 9. Broader goal remains active with strict floor 8/10; T055 is active again for next-tranche ranking."
+    task: I002
     commands:
-      - "cd frontend/packages/intric-js && bun run test -> 8 passed"
-      - "cd frontend/packages/intric-js && bun run check -> passed with pinned typescript@5.9.3"
-      - "cd frontend/packages/intric-js && bun x prettier --check update.js update.test.js README.md package.json -> passed"
-      - "cd frontend/packages/intric-js && bun x eslint update.js update.test.js -> passed"
-      - "cmp -s /tmp/eneo-schema-t054-a.d.ts /tmp/eneo-schema-t054-b.d.ts -> cmp_exit=0"
-      - "git diff --stat frontend/packages/intric-js/src/types/schema.d.ts -> no output"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_capability_manifest.py tests/unittests/flows/test_flow_authoring_spec.py tests/unittests/flows/test_flow_service.py tests/unittests/assistants/test_assistant.py tests/unittests/assistants/test_assistants_service.py tests/unittests/assistants/test_assistant_router.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py tests/unittests/flows/test_flow_draft_materialization_executor.py -q -> 689 passed, 30 warnings"
+      - "cd backend && uv run ruff check touched backend source/test files -> passed"
+      - "cd backend && uv run ruff format --check touched backend source/test files -> passed"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows src/intric/assistants -> 0 errors"
+      - "cd frontend/apps/web && bun run i18n:compile -> passed"
+      - "cd frontend/apps/web && ../../node_modules/.bin/vitest run FlowAIBuilderStepCard -> 5 passed"
+      - "cd frontend/apps/web && ../../node_modules/.bin/prettier --check touched frontend files -> passed"
+      - "cd frontend/apps/web && ../../node_modules/.bin/eslint touched AI Builder frontend files -> passed"
+      - "cd frontend/apps/web && bun run check -> fails only on existing non-I002 diagnostics in frontend/packages/intric-js/src/client/stream.js and ExtendExpirationDialog.svelte"
       - "git diff --check -> passed"
-      - "Claude commit gate: .codex/artifacts/claude-peer-loop-t054-generated-client-determinism-implementation-review-iteration-2-20260522T170201Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Claude commit gate: .codex/artifacts/claude-peer-loop-i002-transcribe-only-model-ssot-implementation-review-20260522T183657Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity final implementation gate: .codex/artifacts/antigravity-peer-loop-i002-transcribe-only-model-ssot-final-implementation-review-20260522T184440Z.md -> GREEN_LIGHT yes / MIN_SCORE 9"

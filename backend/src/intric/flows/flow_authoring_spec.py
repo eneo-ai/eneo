@@ -20,9 +20,11 @@ from intric.flows.enums import (
 from intric.flows.enums import (
     FlowMcpPolicy as MCPPolicy,
 )
+from intric.flows.enums import FlowOutputMode
 from intric.flows.enums import (
     FlowOutputType as OutputType,
 )
+from intric.flows.flow_capability_manifest import requires_completion_model
 from intric.flows.flow_resource_bindings import is_uuid_shaped_resource_ref
 from intric.flows.flow_review_policy import FlowStepReviewPolicy
 
@@ -96,6 +98,10 @@ class StepSpec(BaseModel):
     output_config: JsonObject | None = None
     review_policy: FlowStepReviewPolicy | None = None
 
+    @model_validator(mode="after")
+    def normalize_completion_model_applicability(self) -> "StepSpec":
+        return strip_inapplicable_completion_model(self)
+
     @field_validator("input_bindings")
     @classmethod
     def normalize_input_bindings(cls, value: JsonObject | None) -> JsonObject | None:
@@ -108,6 +114,29 @@ class StepSpec(BaseModel):
                 "question": question.strip(),
             }
         return value
+
+
+def strip_inapplicable_completion_model(step: StepSpec) -> StepSpec:
+    if requires_completion_model(FlowOutputMode(step.output_mode.value)):
+        return step
+    if step.assistant_spec.model_ref is None:
+        return step
+    step.assistant_spec = step.assistant_spec.model_copy(update={"model_ref": None})
+    return step
+
+
+def completion_model_ref_was_stripped(
+    *,
+    supplied_model_ref: str | None,
+    validated_step: StepSpec,
+) -> bool:
+    return (
+        supplied_model_ref is not None
+        and validated_step.assistant_spec.model_ref is None
+        and not requires_completion_model(
+            FlowOutputMode(validated_step.output_mode.value)
+        )
+    )
 
 
 _VALID_FORM_FIELD_TYPES = {"text", "number", "date", "select", "multiselect"}
@@ -183,4 +212,6 @@ __all__ = [
     "OutputMode",
     "OutputType",
     "StepSpec",
+    "completion_model_ref_was_stripped",
+    "strip_inapplicable_completion_model",
 ]

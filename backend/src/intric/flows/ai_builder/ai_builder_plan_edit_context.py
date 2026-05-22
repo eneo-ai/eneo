@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 from uuid import UUID
@@ -273,9 +274,23 @@ def resolve_scoped_step_model_revision_if_requested(
         context is None
         or context.scope != "step"
         or prior_spec is None
-        or resource_catalog is None
         or not latest_user_text
-        or not _looks_like_model_revision_request(latest_user_text)
+    ):
+        return None
+
+    target = _find_target_step(prior_spec, context)
+    if target is None:
+        return None
+
+    if target.output_mode == OutputMode.TRANSCRIBE_ONLY:
+        if _looks_like_transcribe_only_model_revision_request(latest_user_text):
+            return ScopedStepModelNotice(
+                message=_transcription_step_model_revision_message(latest_user_text)
+            )
+        return None
+
+    if resource_catalog is None or not _looks_like_catalog_model_revision_request(
+        latest_user_text
     ):
         return None
 
@@ -283,10 +298,6 @@ def resolve_scoped_step_model_revision_if_requested(
         kind="model",
         text=latest_user_text,
     )
-
-    target = _find_target_step(prior_spec, context)
-    if target is None:
-        return None
 
     if len(mentioned_model_refs) == 1:
         model_ref = next(iter(mentioned_model_refs))
@@ -301,11 +312,6 @@ def resolve_scoped_step_model_revision_if_requested(
 
     if target.assistant_spec.model_ref == model_ref:
         return None
-
-    if target.output_mode == OutputMode.TRANSCRIBE_ONLY:
-        return ScopedStepModelNotice(
-            message=_transcription_step_model_revision_message(latest_user_text)
-        )
 
     updated_target = target.model_copy(
         update={
@@ -324,15 +330,54 @@ def resolve_scoped_step_model_revision_if_requested(
     return ScopedStepModelSpecRevision(spec=revised_spec)
 
 
-def _looks_like_model_revision_request(text: str) -> bool:
+def _looks_like_catalog_model_revision_request(text: str) -> bool:
     # The catalog-bounded model-name check is the real guard; this only avoids
     # treating ordinary mentions of a model name as selected-step edit commands.
-    normalized = text.casefold()
-    return "model" in normalized
+    return bool(_MODEL_WORDS & _word_tokens(text))
+
+
+_MODEL_WORDS = frozenset({"model", "modell"})
+_MODEL_ACTION_WORDS = frozenset(
+    {
+        "byt",
+        "byta",
+        "ändra",
+        "andra",
+        "switch",
+        "change",
+        "use",
+        "använd",
+        "anvanda",
+        "kör",
+        "kor",
+    }
+)
+_MODEL_FAMILY_WORDS = frozenset({"gpt", "claude", "gemini", "llama", "mistral"})
+_MODEL_TARGET_PREPOSITION_WORDS = frozenset({"till", "to"})
+_SWEDISH_MODEL_REVISION_HINT_WORDS = (
+    _MODEL_ACTION_WORDS - {"switch", "change", "use"}
+) | {"modell", "till"}
+_WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
+
+
+def _looks_like_transcribe_only_model_revision_request(text: str) -> bool:
+    tokens = _word_tokens(text)
+    if _MODEL_WORDS & tokens:
+        return True
+    return bool(
+        (_MODEL_ACTION_WORDS & tokens)
+        and (_MODEL_TARGET_PREPOSITION_WORDS & tokens)
+        and (_MODEL_FAMILY_WORDS & tokens)
+    )
+
+
+def _word_tokens(text: str) -> set[str]:
+    return set(_WORD_PATTERN.findall(text.casefold()))
 
 
 def _transcription_step_model_revision_message(text: str) -> str:
-    if "modell" in text.casefold():
+    tokens = _word_tokens(text)
+    if tokens & _SWEDISH_MODEL_REVISION_HINT_WORDS:
         return (
             "Det markerade steget transkriberar ljud och använder flödets "
             "transkriberingsmodell, inte en chattmodell som GPT. Välj ett "

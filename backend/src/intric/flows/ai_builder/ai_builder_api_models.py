@@ -115,7 +115,7 @@ AI_BUILDER_PLAN_RESPONSE_EXAMPLE: JsonObject = {
                     "name": "Transcribe uploaded audio",
                     "assistant_spec": {
                         "instructions": "Transcribe the uploaded audio into Swedish text.",
-                        "model_ref": "model.gpt-5-4",
+                        "model_ref": None,
                         "knowledge_refs": [],
                         "mcp_server_refs": [],
                         "mcp_tool_refs": [],

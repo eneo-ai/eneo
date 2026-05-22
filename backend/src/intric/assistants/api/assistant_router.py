@@ -307,9 +307,7 @@ async def update_assistant(
             (tool.tool_id, tool.is_enabled) for tool in assistant.mcp_tools
         ]
 
-    completion_model_id = None
-    if assistant.completion_model is not None:
-        completion_model_id = assistant.completion_model.id
+    completion_model_id = NOT_PROVIDED
 
     completion_model_kwargs = None
     if assistant.completion_model_kwargs is not None:
@@ -373,7 +371,8 @@ async def update_assistant(
 
     # Model change
     if (
-        completion_model_id
+        is_provided(completion_model_id)
+        and completion_model_id is not None
         and old_assistant.completion_model
         and completion_model_id != old_assistant.completion_model.id
     ):

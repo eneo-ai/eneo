@@ -992,6 +992,9 @@ def test_edit_compiler_preserves_audio_transcription_mode_when_patch_only_rename
         output_mode="transcribe_only",
         output_type="text",
     )
+    assistant_snapshots, resource_catalog = _make_assistant_snapshot_context(
+        existing_step
+    )
     draft = FlowEditDraft(
         operations=[
             StepEditOperation(
@@ -1002,12 +1005,19 @@ def test_edit_compiler_preserves_audio_transcription_mode_when_patch_only_rename
         ]
     )
 
-    result = compile_edit_draft(draft, [existing_step], base_flow_revision=1)
+    result = compile_edit_draft(
+        draft,
+        [existing_step],
+        base_flow_revision=1,
+        assistant_snapshots=assistant_snapshots,
+        resource_catalog=resource_catalog,
+    )
 
     step = result.compiled_spec.steps[0]
     assert step.name == "Transkribera ljud"
     assert step.output_mode == OutputMode.TRANSCRIBE_ONLY
     assert step.output_type == OutputType.TEXT
+    assert step.assistant_spec.model_ref is None
 
 
 def test_edit_compiler_preserves_generated_docx_mode_when_patch_only_renames() -> None:

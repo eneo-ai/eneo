@@ -29,7 +29,12 @@ from intric.main.exceptions import (
     UnauthorizedException,
 )
 from intric.main.logging import get_logger
-from intric.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
+from intric.main.models import (
+    NOT_PROVIDED,
+    NotProvided,
+    ResourcePermission,
+    is_provided,
+)
 from intric.prompts.api.prompt_models import PromptCreate
 from intric.prompts.prompt import Prompt
 from intric.prompts.prompt_service import PromptService
@@ -376,7 +381,7 @@ class AssistantService:
         assistant_id: UUID,
         name: str | None = None,
         prompt: PromptCreate | None = None,
-        completion_model_id: UUID | None = None,
+        completion_model_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
         completion_model_kwargs: ModelKwargs | None = None,
         logging_enabled: bool | None = None,
         groups: list[UUID] | None = None,
@@ -434,9 +439,13 @@ class AssistantService:
                     owner_user_id=prompt_owner_id,
                 )
 
-        completion_model = None
-        if completion_model_id is not None:
-            completion_model = space.get_completion_model(completion_model_id)
+        completion_model = NOT_PROVIDED
+        if is_provided(completion_model_id):
+            completion_model = (
+                space.get_completion_model(completion_model_id)
+                if completion_model_id is not None
+                else None
+            )
 
         attachments = None
         if attachment_ids is not None:
@@ -555,7 +564,7 @@ class AssistantService:
         self.validate_space_assistant(
             space=space,
             assistant=assistant,
-            completion_model_changing=completion_model is not None,
+            completion_model_changing=is_provided(completion_model),
             knowledge_changing=knowledge_changing,
         )
 

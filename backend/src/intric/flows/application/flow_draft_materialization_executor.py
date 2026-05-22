@@ -20,6 +20,7 @@ from intric.flows.application.flow_service import FlowService
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_name import normalize_flow_name
 from intric.flows.flow_authoring_spec import AssistantSpec
+from intric.flows.flow_capability_manifest import requires_completion_model
 from intric.flows.flow_resource_bindings import (
     FlowResourceBindingResolutionError,
     FlowResourceBindingResolutionReason,
@@ -71,6 +72,12 @@ class FlowDraftMaterializer:
 
         try:
             ref_to_assistant_id: dict[str, UUID] = {}
+            completion_required_by_plan_ref = _completion_required_by_plan_ref(
+                changeset.compiled_steps
+            )
+            completion_required_by_assistant_id = _completion_required_by_assistant_id(
+                changeset.compiled_steps
+            )
             flow_name = changeset.flow_name
 
             if is_create:
@@ -108,6 +115,10 @@ class FlowDraftMaterializer:
                     flow_id=flow_id,
                     assistant_id=assistant.id,
                     assistant_spec=assistant_to_create.assistant_spec,
+                    requires_completion_model_for_step=_completion_required_for_plan_ref(
+                        plan_step_ref=assistant_to_create.plan_step_ref,
+                        completion_required_by_plan_ref=completion_required_by_plan_ref,
+                    ),
                     resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
                 )
                 progress.assistants_configured += 1
@@ -123,6 +134,10 @@ class FlowDraftMaterializer:
                     flow_id=flow_id,
                     assistant_id=assistant_to_update.existing_assistant_id,
                     assistant_spec=assistant_to_update.assistant_spec,
+                    requires_completion_model_for_step=_completion_required_for_assistant_id(
+                        assistant_id=assistant_to_update.existing_assistant_id,
+                        completion_required_by_assistant_id=completion_required_by_assistant_id,
+                    ),
                     resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
                 )
                 progress.assistants_updated += 1
@@ -185,7 +200,10 @@ class FlowDraftMaterializer:
                     logger.warning(
                         "Failed to clean up temporary flow after materialization error",
                         exc_info=cleanup_error,
-                        extra={"flow_id": str(created_flow_id), "space_id": str(space_id)},
+                        extra={
+                            "flow_id": str(created_flow_id),
+                            "space_id": str(space_id),
+                        },
                     )
             raise
 
@@ -257,6 +275,51 @@ def _build_flow_steps(
     return final_steps
 
 
+def _completion_required_by_plan_ref(
+    compiled_steps: list[FlowDraftCompiledStep],
+) -> dict[str, bool]:
+    return {
+        step.plan_step_ref: requires_completion_model(step.output_mode)
+        for step in compiled_steps
+    }
+
+
+def _completion_required_by_assistant_id(
+    compiled_steps: list[FlowDraftCompiledStep],
+) -> dict[UUID, bool]:
+    return {
+        step.assistant_id: requires_completion_model(step.output_mode)
+        for step in compiled_steps
+        if step.assistant_id is not None
+    }
+
+
+def _completion_required_for_plan_ref(
+    *,
+    plan_step_ref: str,
+    completion_required_by_plan_ref: Mapping[str, bool],
+) -> bool:
+    try:
+        return completion_required_by_plan_ref[plan_step_ref]
+    except KeyError as exc:
+        raise RuntimeError(
+            f"Compiled step missing for assistant create operation: {plan_step_ref}"
+        ) from exc
+
+
+def _completion_required_for_assistant_id(
+    *,
+    assistant_id: UUID,
+    completion_required_by_assistant_id: Mapping[UUID, bool],
+) -> bool:
+    try:
+        return completion_required_by_assistant_id[assistant_id]
+    except KeyError as exc:
+        raise RuntimeError(
+            f"Compiled step missing for assistant update operation: {assistant_id}"
+        ) from exc
+
+
 async def _delete_removed_assistant(
     *,
     flow_service: FlowService,
@@ -287,12 +350,15 @@ async def _configure_assistant(
     flow_id: UUID,
     assistant_id: UUID,
     assistant_spec: AssistantSpec,
+    requires_completion_model_for_step: bool,
     resource_bindings_by_slot_ref: Mapping[str, LocalResourceBinding],
 ) -> None:
     command_fields: dict[str, object] = {
         "prompt": PromptCreate(text=assistant_spec.instructions)
     }
-    if assistant_spec.model_ref is not None:
+    if not requires_completion_model_for_step:
+        command_fields["completion_model_id"] = None
+    elif assistant_spec.model_ref is not None:
         command_fields["completion_model_id"] = _resolve_materializer_resource_ref(
             assistant_spec.model_ref,
             expected_slot_kind=ResourceSlotKind.MODEL,

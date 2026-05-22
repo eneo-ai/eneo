@@ -17,7 +17,7 @@ from intric.main.exceptions import (
     ModelNotAvailableException,
     UnauthorizedException,
 )
-from intric.main.models import ModelId
+from intric.main.models import NOT_PROVIDED, ModelId
 from intric.prompts.api.prompt_models import PromptCreate
 from tests.fixtures import (
     TEST_ASSISTANT,
@@ -177,6 +177,25 @@ async def test_partial_update_skips_completion_model_validation(setup: Setup):
     await setup.service.update_assistant(assistant_id=TEST_UUID, icon_id=uuid4())
 
     space.is_completion_model_in_space.assert_not_called()
+
+
+async def test_update_assistant_omitted_completion_model_preserves_existing_model(
+    setup: Setup,
+):
+    await setup.service.update_assistant(assistant_id=TEST_UUID, name="new name")
+
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    assert assistant.update.call_args.kwargs["completion_model"] is NOT_PROVIDED
+
+
+async def test_update_assistant_explicit_none_clears_completion_model(setup: Setup):
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        completion_model_id=None,
+    )
+
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    assert assistant.update.call_args.kwargs["completion_model"] is None
 
 
 async def test_update_assistant_completion_model_in_space(setup: Setup):

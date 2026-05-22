@@ -1878,7 +1878,7 @@ async def test_update_flow_assistant_passes_include_hidden(user):
         include_hidden=True,
         name="Updated",
         prompt=None,
-        completion_model_id=None,
+        completion_model_id=NOT_PROVIDED,
         completion_model_kwargs=None,
         logging_enabled=None,
         groups=None,
@@ -1892,6 +1892,60 @@ async def test_update_flow_assistant_passes_include_hidden(user):
         data_retention_days=NOT_PROVIDED,
         metadata_json=NOT_PROVIDED,
         icon_id=NOT_PROVIDED,
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_flow_assistant_explicit_none_forwards_completion_model_clear(
+    user,
+):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    assistant_service = AsyncMock()
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=assistant_service,
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+    )
+
+    flow_id = uuid4()
+    space_id = uuid4()
+    flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=space_id,
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[],
+    )
+    flow_repo.get.return_value = flow
+    owned_assistant = _build_assistant(flow_id=flow_id, space_id=space_id, user=user)
+    assistant_service.get_assistant.return_value = (owned_assistant, [])
+    assistant_service.update_assistant.return_value = (owned_assistant, [])
+
+    await service.update_flow_assistant(
+        flow_id=flow_id,
+        assistant_id=owned_assistant.id,
+        update=FlowAssistantUpdateCommand(completion_model_id=None),
+    )
+
+    assert (
+        "completion_model_id"
+        in FlowAssistantUpdateCommand(completion_model_id=None).model_fields_set
+    )
+    assert (
+        assistant_service.update_assistant.await_args.kwargs["completion_model_id"]
+        is None
     )
 
 
@@ -2082,12 +2136,65 @@ async def test_update_flow_assistant_validates_explicit_security_field_set_to_no
     )
     assistant_service.get_assistant.return_value = (assistant, [])
     assistant_service.update_assistant.return_value = (assistant, [])
-    space_service.get_space.return_value = _FlowSecuritySpaceStub(level=1)
+    space_service.get_space.return_value = _FlowSecuritySpaceStub()
 
     await service.update_flow_assistant(
         flow_id=flow_id,
         assistant_id=assistant.id,
         update=FlowAssistantUpdateCommand(groups=None),
+    )
+
+    space_service.get_space.assert_awaited_once_with(flow.space_id)
+
+
+@pytest.mark.asyncio
+async def test_update_flow_assistant_security_validation_accepts_model_clear(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    assistant_service = AsyncMock()
+    space_service = AsyncMock()
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=assistant_service,
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+        space_service=space_service,
+    )
+
+    flow_id = uuid4()
+    step = _step(step_order=1)
+    flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[step],
+    )
+    flow_repo.get.return_value = flow
+    assistant = _build_assistant(flow_id=flow_id, space_id=flow.space_id, user=user)
+    assistant.id = step.assistant_id
+    assistant.completion_model = SimpleNamespace(
+        security_classification=_classification(1),
+        can_access=True,
+    )
+    assistant_service.get_assistant.return_value = (assistant, [])
+    assistant_service.update_assistant.return_value = (assistant, [])
+    space_service.get_space.return_value = _FlowSecuritySpaceStub()
+
+    await service.update_flow_assistant(
+        flow_id=flow_id,
+        assistant_id=assistant.id,
+        update=FlowAssistantUpdateCommand(completion_model_id=None),
     )
 
     space_service.get_space.assert_awaited_once_with(flow.space_id)

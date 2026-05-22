@@ -448,6 +448,7 @@ def test_compile_create_draft_derives_transcribe_only_for_audio_upload() -> None
                 input_source="flow_input",
                 input_type="audio",
                 output_type="text",
+                model_ref="model.gpt-5-4-nano",
                 runtime_upload=True,
                 runtime_required=True,
             )
@@ -458,6 +459,7 @@ def test_compile_create_draft_derives_transcribe_only_for_audio_upload() -> None
 
     step = compiled.steps[0]
     assert step.output_mode.value == "transcribe_only"
+    assert step.assistant_spec.model_ref is None
     assert step.input_bindings == {"question": "{{ step_input.text }}"}
     assert step.input_config is not None
     assert step.input_config["runtime_input"]["input_format"] == "audio"

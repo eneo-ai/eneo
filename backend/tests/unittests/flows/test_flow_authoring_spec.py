@@ -10,6 +10,7 @@ from intric.flows.flow_authoring_spec import (
     FormFieldSpec,
     InputSource,
     JsonObject,
+    OutputMode,
     StepSpec,
 )
 
@@ -81,12 +82,38 @@ def test_flow_draft_spec_hash_is_key_order_independent() -> None:
     assert first.spec_hash() == second.spec_hash()
 
 
-def _step(input_bindings: JsonObject | None = None) -> StepSpec:
+def test_step_spec_strips_completion_model_ref_for_transcribe_only() -> None:
+    step = _step(output_mode=OutputMode.TRANSCRIBE_ONLY, model_ref="model.default")
+
+    assert step.assistant_spec.model_ref is None
+
+
+@pytest.mark.parametrize(
+    "output_mode", [OutputMode.PASS_THROUGH, OutputMode.TEMPLATE_FILL]
+)
+def test_step_spec_keeps_completion_model_ref_when_runtime_uses_completion_model(
+    output_mode: OutputMode,
+) -> None:
+    step = _step(output_mode=output_mode, model_ref="model.default")
+
+    assert step.assistant_spec.model_ref == "model.default"
+
+
+def _step(
+    input_bindings: JsonObject | None = None,
+    *,
+    output_mode: OutputMode = OutputMode.PASS_THROUGH,
+    model_ref: str | None = None,
+) -> StepSpec:
     return StepSpec(
         plan_step_ref="collect_input",
         name="Collect input",
-        assistant_spec=AssistantSpec(instructions="Use the provided input."),
+        assistant_spec=AssistantSpec(
+            instructions="Use the provided input.",
+            model_ref=model_ref,
+        ),
         input_source=InputSource.FLOW_INPUT,
+        output_mode=output_mode,
         input_bindings=input_bindings,
     )
 

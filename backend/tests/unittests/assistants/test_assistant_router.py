@@ -18,10 +18,13 @@ import pytest
 from intric.assistants.api.assistant_models import (
     AskAssistant,
     AssistantResponse,
+    AssistantUpdatePublic,
 )
-from intric.assistants.api.assistant_router import ask_assistant
+from intric.assistants.api.assistant_router import ask_assistant, update_assistant
+from intric.assistants.assistant import AssistantOrigin
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.main.models import NOT_PROVIDED
 from intric.sessions.session import SessionInDB
 
 
@@ -56,6 +59,28 @@ def mock_assistant():
     assistant.id = uuid.uuid4()
     assistant.name = "Test Assistant"
     assistant.space_id = uuid.uuid4()
+    return assistant
+
+
+def _router_assistant(assistant_id: uuid.UUID):
+    assistant = MagicMock()
+    assistant.id = assistant_id
+    assistant.name = "Assistant"
+    assistant.space_id = uuid.uuid4()
+    assistant.origin = AssistantOrigin.USER
+    assistant.managing_flow_id = None
+    assistant.completion_model = MagicMock(id=uuid.uuid4(), nickname="gpt")
+    assistant.completion_model_kwargs = MagicMock(temperature=None, top_p=None)
+    assistant.description = None
+    assistant.insight_enabled = False
+    assistant.data_retention_days = None
+    assistant.collections = []
+    assistant.websites = []
+    assistant.attachments = []
+    assistant.integration_knowledge_list = []
+    assistant.mcp_servers = []
+    assistant.mcp_tools = []
+    assistant.type.value = "standard"
     return assistant
 
 
@@ -94,6 +119,10 @@ def mock_container(mock_user, mock_assistant, mock_response, mock_space):
     assistant_service.ask.return_value = mock_response
     assistant_service.get_assistant.return_value = (mock_assistant, None)
     container.assistant_service.return_value = assistant_service
+
+    assistant_assembler = MagicMock()
+    assistant_assembler.from_assistant_to_model.return_value = MagicMock()
+    container.assistant_assembler.return_value = assistant_assembler
 
     # Space service
     space_service = AsyncMock()
@@ -299,6 +328,54 @@ class TestAskAssistant:
         # Audit logging should still happen
         audit_service = mock_container.audit_service.return_value
         audit_service.log_async.assert_called_once()
+
+
+class TestUpdateAssistant:
+    async def test_preserves_completion_model_when_deprecated_field_absent(
+        self,
+        mock_container,
+    ):
+        assistant_id = uuid.uuid4()
+        old_assistant = _router_assistant(assistant_id)
+        updated_assistant = _router_assistant(assistant_id)
+        service = mock_container.assistant_service.return_value
+        service.get_assistant.return_value = (old_assistant, [])
+        service.update_assistant.return_value = (updated_assistant, [])
+        mock_container.assistant_assembler.return_value.from_assistant_to_model.return_value = MagicMock()
+
+        await update_assistant(
+            id=assistant_id,
+            assistant=AssistantUpdatePublic(name="Renamed"),
+            container=mock_container,
+        )
+
+        assert (
+            service.update_assistant.await_args.kwargs["completion_model_id"]
+            is NOT_PROVIDED
+        )
+
+    async def test_preserves_completion_model_when_deprecated_field_is_null(
+        self,
+        mock_container,
+    ):
+        assistant_id = uuid.uuid4()
+        old_assistant = _router_assistant(assistant_id)
+        updated_assistant = _router_assistant(assistant_id)
+        service = mock_container.assistant_service.return_value
+        service.get_assistant.return_value = (old_assistant, [])
+        service.update_assistant.return_value = (updated_assistant, [])
+        mock_container.assistant_assembler.return_value.from_assistant_to_model.return_value = MagicMock()
+
+        await update_assistant(
+            id=assistant_id,
+            assistant=AssistantUpdatePublic(name="Renamed", completion_model=None),
+            container=mock_container,
+        )
+
+        assert (
+            service.update_assistant.await_args.kwargs["completion_model_id"]
+            is NOT_PROVIDED
+        )
 
 
 class TestAssistantResponseStructure:

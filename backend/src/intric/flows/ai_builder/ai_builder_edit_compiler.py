@@ -7,6 +7,7 @@ the LLM describes the change, and the backend preserves everything else.
 
 from __future__ import annotations
 
+import logging
 import re
 from copy import deepcopy
 from typing import Any, cast
@@ -62,8 +63,12 @@ from intric.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
     StepSpec,
+    completion_model_ref_was_stripped,
+    strip_inapplicable_completion_model,
 )
 from intric.flows.flow_variable_definitions import form_field_reference_expression
+
+logger = logging.getLogger(__name__)
 
 _RUNTIME_STEP_ALIAS_PATTERN = re.compile(r"\{\{\s*step_(\d+)(\.[^{}]+?)\s*\}\}")
 
@@ -422,6 +427,8 @@ def _flow_step_to_spec(
         assistant_snapshots=assistant_snapshots,
         resource_catalog=resource_catalog,
     )
+    supplied_model_ref = base_assistant_spec.model_ref
+    model_ref_source = "snapshot"
 
     spec = StepSpec(
         plan_step_ref=plan_ref,
@@ -456,6 +463,9 @@ def _flow_step_to_spec(
         if patch.mcp_policy is not None:
             updates["mcp_policy"] = patch.mcp_policy
         if patch.assistant_spec is not None:
+            if "model_ref" in patch.assistant_spec.model_fields_set:
+                supplied_model_ref = patch.assistant_spec.model_ref
+                model_ref_source = "patch"
             updates["assistant_spec"] = _merge_assistant_specs(
                 base_assistant_spec,
                 patch.assistant_spec,
@@ -518,7 +528,35 @@ def _flow_step_to_spec(
             if derived_output_mode != spec.output_mode:
                 spec = spec.model_copy(update={"output_mode": derived_output_mode})
 
+    spec = strip_inapplicable_completion_model(spec)
+    _log_transcribe_only_model_ref_stripped(
+        supplied_model_ref=supplied_model_ref,
+        validated_step=spec,
+        source=model_ref_source,
+    )
     return spec
+
+
+def _log_transcribe_only_model_ref_stripped(
+    *,
+    supplied_model_ref: str | None,
+    validated_step: StepSpec,
+    source: str,
+) -> None:
+    if not completion_model_ref_was_stripped(
+        supplied_model_ref=supplied_model_ref,
+        validated_step=validated_step,
+    ):
+        return
+    logger.info(
+        "ai_builder_transcribe_only_model_ref_stripped",
+        extra={
+            "plan_step_ref": validated_step.plan_step_ref,
+            "existing_step_ref": validated_step.existing_step_ref,
+            "source": source,
+            "output_mode": validated_step.output_mode.value,
+        },
+    )
 
 
 def _derive_modify_patch_output_mode(

@@ -283,7 +283,9 @@ class FlowService:
         self._assert_flow_assistant_owned_by_flow(flow=flow, assistant=assistant)
         return assistant, permissions
 
-    async def get_flow_assistant_snapshots(self, flow: Flow) -> AssistantAuthoringSnapshots:
+    async def get_flow_assistant_snapshots(
+        self, flow: Flow
+    ) -> AssistantAuthoringSnapshots:
         assistant_ids = list(dict.fromkeys(step.assistant_id for step in flow.steps))
         return await self.flow_repo.get_assistant_snapshots(
             assistant_ids=assistant_ids,
@@ -311,7 +313,11 @@ class FlowService:
             include_hidden=True,
             name=update.name,
             prompt=update.prompt,
-            completion_model_id=update.completion_model_id,
+            completion_model_id=(
+                update.completion_model_id
+                if update.is_set("completion_model_id")
+                else NOT_PROVIDED
+            ),
             completion_model_kwargs=update.completion_model_kwargs,
             logging_enabled=update.logging_enabled,
             groups=update.groups,
@@ -592,9 +598,7 @@ class FlowService:
 
         websites = assistant.websites
         if update.is_set("websites") and update.websites is not None:
-            websites = [
-                space.get_website(website_id) for website_id in update.websites
-            ]
+            websites = [space.get_website(website_id) for website_id in update.websites]
 
         integration_knowledge_list = assistant.integration_knowledge_list
         if update.is_set("integration_knowledge_ids") and (

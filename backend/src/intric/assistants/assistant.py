@@ -161,8 +161,8 @@ class Assistant(Entity):
         return self._completion_model
 
     @completion_model.setter
-    def completion_model(self, model: CompletionModel) -> None:
-        if not model.can_access:
+    def completion_model(self, model: CompletionModel | None) -> None:
+        if model is not None and not model.can_access:
             raise UnauthorizedException(UNAUTHORIZED_EXCEPTION_MESSAGE)
 
         self._completion_model = model
@@ -271,7 +271,7 @@ class Assistant(Entity):
         self,
         name: str | None = None,
         prompt: Prompt | None = None,
-        completion_model: CompletionModel | None = None,
+        completion_model: CompletionModel | None | NotProvided = NOT_PROVIDED,
         completion_model_kwargs: ModelKwargs | None = None,
         attachments: list[File] | None = None,
         logging_enabled: bool | None = None,
@@ -292,8 +292,8 @@ class Assistant(Entity):
         if prompt is not None:
             self.prompt = prompt
 
-        if completion_model is not None:
-            self.completion_model = completion_model  # type: ignore[assignment]
+        if is_provided(completion_model):
+            self.completion_model = completion_model
 
         if completion_model_kwargs is not None:
             self.completion_model_kwargs = completion_model_kwargs

@@ -53,6 +53,10 @@
   const selectedModelName = $derived(
     service.availableModels.find((model) => model.id === service.selectedModelId)?.name ?? null
   );
+  const selectedOrDefaultModelName = $derived(selectedModelName ?? m.ai_builder_model_default());
+  const modelPillAccessibleLabel = $derived(
+    `${m.ai_builder_model_label()}: ${selectedOrDefaultModelName}`
+  );
   const canSubmit = $derived(
     (inputValue.trim().length > 0 || completedUploads.length > 0) &&
       service.canSendMessage &&
@@ -348,11 +352,15 @@
             <DropdownMenu.Root>
               <DropdownMenu.Trigger>
                 {#snippet child({ props })}
-                  <button {...props} type="button" class="model-pill">
+                  <button
+                    {...props}
+                    type="button"
+                    class="model-pill"
+                    aria-label={modelPillAccessibleLabel}
+                    title={m.ai_builder_model_usage_hint()}
+                  >
                     <span class="model-pill-dot" aria-hidden="true"></span>
-                    <span class="model-pill-name">
-                      {selectedModelName ?? m.ai_builder_model_label()}
-                    </span>
+                    <span class="model-pill-name">{selectedOrDefaultModelName}</span>
                     <svg
                       class="model-pill-chevron"
                       xmlns="http://www.w3.org/2000/svg"
@@ -391,18 +399,20 @@
                     {...props}
                     type="button"
                     aria-disabled="true"
+                    aria-label={modelPillAccessibleLabel}
                     class="model-pill model-pill-static"
                     onclick={(event) => event.preventDefault()}
                   >
                     <span class="model-pill-dot" aria-hidden="true"></span>
-                    <span class="model-pill-name">
-                      {selectedModelName ?? m.ai_builder_model_default()}
-                    </span>
+                    <span class="model-pill-name">{selectedOrDefaultModelName}</span>
                   </button>
                 {/snippet}
               </Tooltip.Trigger>
               <Tooltip.Content side="top" sideOffset={6}>
-                {m.ai_builder_model_only_one()}
+                <div class="flex max-w-64 flex-col gap-1">
+                  <span>{m.ai_builder_model_only_one()}</span>
+                  <span class="text-muted">{m.ai_builder_model_usage_hint()}</span>
+                </div>
               </Tooltip.Content>
             </Tooltip.Root>
           {/if}

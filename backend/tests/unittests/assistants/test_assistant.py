@@ -226,6 +226,15 @@ def test_has_mcp(assistant: Assistant):
     assert assistant.has_mcp()
 
 
+def test_assistant_update_accepts_none_completion_model(assistant: Assistant) -> None:
+    completion_model = MagicMock(can_access=True)
+    assistant.completion_model = completion_model
+
+    assistant.update(completion_model=None)
+
+    assert assistant.completion_model is None
+
+
 def test_update_metadata_json(assistant: Assistant):
     metadata_json = {"key": "value"}
     assistant.update(metadata_json=metadata_json)
