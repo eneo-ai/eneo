@@ -2,16 +2,26 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import get_args
 
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    LLMResolvableSlotName,
     metadata_for_user_message,
+    metadata_with_slot_classification,
     question_answer_from_metadata,
     question_answer_question_id,
     requirements_confirmation_from_metadata,
     requirements_summary_from_metadata,
     requirements_summary_to_metadata,
+    slot_classification_from_metadata,
+    slot_classification_metadata_from_result,
     tool_calls_from_message,
 )
+from intric.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedSlot,
+    SlotClassificationResult,
+)
+from intric.flows.ai_builder.ai_builder_slot_vocabulary import LLM_RESOLVABLE_SLOT_NAMES
 
 _AI_BUILDER_SRC = (
     Path(__file__).resolve().parents[4] / "src" / "intric" / "flows" / "ai_builder"
@@ -142,11 +152,186 @@ def test_requirements_summary_round_trips_through_canonical_metadata() -> None:
     assert parsed.requirements_summary.summary == "Build a document summary flow."
 
 
+def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
+    values_by_slot = {
+        "primary_runtime_input": "documents",
+        "terminal_output": "structured_text",
+        "document_material_scope": "flexible_document_case",
+        "structured_analysis_need": "use_structured_analysis",
+        "runtime_metadata_fields": "detailed_case_metadata",
+    }
+    result = SlotClassificationResult(
+        slots=tuple(
+            ClassifiedSlot(
+                slot_name=slot_name,
+                value=value,
+                confidence="high",
+                reason=f"{slot_name} evidence",
+            )
+            for slot_name, value in values_by_slot.items()
+        ),
+        assumptions=("User wants runtime form fields.",),
+        contradictions=("No contradiction.",),
+    )
+
+    classification = slot_classification_metadata_from_result(
+        result,
+        prompt_hash="a" * 64,
+    )
+    metadata = metadata_with_slot_classification(None, classification)
+    parsed = slot_classification_from_metadata(metadata)
+
+    assert classification is not None
+    assert parsed is not None
+    assert {slot.slot_name for slot in parsed.slots} == LLM_RESOLVABLE_SLOT_NAMES
+    assert set(get_args(LLMResolvableSlotName)) == LLM_RESOLVABLE_SLOT_NAMES
+    assert parsed.to_result().slots == result.slots
+
+
+def test_slot_classification_metadata_rejects_extra_nested_fields() -> None:
+    assert (
+        slot_classification_from_metadata(
+            {
+                "slot_classification": {
+                    "prompt_hash": "a" * 64,
+                    "slots": [
+                        {
+                            "slot_name": "terminal_output",
+                            "value": "structured_text",
+                            "confidence": "high",
+                            "reason": "report output",
+                            "extra": "not persisted",
+                        }
+                    ],
+                }
+            }
+        )
+        is None
+    )
+
+
+def test_slot_classification_metadata_rejects_overlong_reason() -> None:
+    assert (
+        slot_classification_from_metadata(
+            {
+                "slot_classification": {
+                    "prompt_hash": "a" * 64,
+                    "slots": [
+                        {
+                            "slot_name": "terminal_output",
+                            "value": "structured_text",
+                            "confidence": "high",
+                            "reason": "x" * 501,
+                        }
+                    ],
+                }
+            }
+        )
+        is None
+    )
+
+
+def test_slot_classification_writer_bounds_reason_text() -> None:
+    classification = slot_classification_metadata_from_result(
+        SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="terminal_output",
+                    value="structured_text",
+                    confidence="high",
+                    reason="x" * 800,
+                ),
+            )
+        ),
+        prompt_hash="a" * 64,
+    )
+
+    assert classification is not None
+    assert len(classification.slots[0].reason) == 500
+
+
+def test_slot_classification_writer_keeps_valid_slots_when_one_slot_is_invalid() -> (
+    None
+):
+    classification = slot_classification_metadata_from_result(
+        SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="terminal_output",
+                    value="structured_text",
+                    confidence="high",
+                    reason="valid",
+                ),
+                ClassifiedSlot(
+                    slot_name="runtime_metadata_fields",
+                    value="not_a_runtime_metadata_value",
+                    confidence="high",
+                    reason="invalid",
+                ),
+                ClassifiedSlot(
+                    slot_name="primary_runtime_input",
+                    value="unknown",
+                    confidence="low",
+                    reason="ignored",
+                ),
+            )
+        ),
+        prompt_hash="a" * 64,
+    )
+
+    assert classification is not None
+    assert [slot.slot_name for slot in classification.slots] == ["terminal_output"]
+
+
+def test_slot_classification_model_rejects_duplicate_slots() -> None:
+    metadata = {
+        "prompt_hash": "a" * 64,
+        "slots": [
+            {
+                "slot_name": "terminal_output",
+                "value": "structured_text",
+                "confidence": "high",
+                "reason": "first",
+            },
+            {
+                "slot_name": "terminal_output",
+                "value": "structured_json",
+                "confidence": "high",
+                "reason": "second",
+            },
+        ],
+    }
+
+    assert slot_classification_from_metadata({"slot_classification": metadata}) is None
+
+
+def test_slot_classification_model_rejects_non_llm_slot_name() -> None:
+    assert (
+        slot_classification_from_metadata(
+            {
+                "slot_classification": {
+                    "prompt_hash": "a" * 64,
+                    "slots": [
+                        {
+                            "slot_name": "docx_output_mode",
+                            "value": "generated_docx",
+                            "confidence": "high",
+                            "reason": "not LLM resolvable",
+                        }
+                    ],
+                }
+            }
+        )
+        is None
+    )
+
+
 def test_conversation_metadata_keys_are_not_read_from_scattered_raw_gets() -> None:
     forbidden = re.compile(
         r'metadata\.get\("'
         r"(question_answer|requirements_confirmed|requirements_summary|"
-        r'requirements_version|ui_language|file_ids|edit_context)"'
+        r"requirements_version|ui_language|file_ids|edit_context|"
+        r'slot_classification)"'
     )
     hits = _source_hits(
         forbidden,

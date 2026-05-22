@@ -12,6 +12,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    slot_classification_from_metadata,
+)
 from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_discovery_defaults,
 )
@@ -101,7 +104,7 @@ def build_planning_state_from_conversation(
     """
     resolved_slots = _resolve_slots(conversation, flow=flow)
     phase = "discovering" if resolved_slots else "awaiting_input"
-    return PlanningState(
+    state = PlanningState(
         fcm_version=FCM_VERSION,
         planner_contract_version=PLANNER_CONTRACT_VERSION,
         builder_schema_version=BUILDER_SCHEMA_VERSION,
@@ -111,6 +114,29 @@ def build_planning_state_from_conversation(
         ),
         resolved_slots=resolved_slots,
     )
+    _replay_slot_classification_metadata(state, conversation)
+    return state
+
+
+def _replay_slot_classification_metadata(
+    state: PlanningState,
+    conversation: list[ConversationMessage],
+) -> None:
+    """Replay persisted classifier facts and only then apply derived defaults."""
+    freeform_text = aggregate_freeform_user_text(conversation)
+    replayed = False
+    for message in conversation:
+        classification = slot_classification_from_metadata(message.metadata)
+        if classification is None:
+            continue
+        merge_llm_resolved_slots(
+            state,
+            classification.to_result(),
+            prompt_hash=classification.prompt_hash,
+        )
+        replayed = True
+    if replayed:
+        apply_policy_defaults_from_resolved_slots(state, freeform_text=freeform_text)
 
 
 # PlanningPhase advance order. Stored as a tuple (not a dict with a get-default)
@@ -294,6 +320,13 @@ def _model_slot_can_replace(
     existing_slot: ResolvedSlot | None,
     model_confidence: SlotConfidence,
 ) -> bool:
+    """Return whether model classification may write this slot.
+
+    Earlier model-sourced slots intentionally anchor the conversation until
+    explicit structured answers, flow defaults, or requirements summaries
+    produce a different source. This avoids a later speculative classifier
+    turn rewriting accepted model evidence without user-visible confirmation.
+    """
     if existing_slot is None:
         return model_confidence in {"high", "medium"}
     if existing_slot.source in _MODEL_PROTECTED_SOURCES:

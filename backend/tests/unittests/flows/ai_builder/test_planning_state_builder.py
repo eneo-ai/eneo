@@ -15,6 +15,13 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_architecture_derivation import (
+    derive_architecture_commit_draft,
+)
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    metadata_with_slot_classification,
+    slot_classification_metadata_from_result,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
@@ -102,6 +109,20 @@ def _classified(
         confidence=confidence,
         reason=f"{slot_name} classified",
     )
+
+
+def _slot_classification_metadata(
+    *slots: ClassifiedSlot,
+    prompt_hash: str = "a" * 64,
+) -> dict[str, object]:
+    metadata = slot_classification_metadata_from_result(
+        SlotClassificationResult(slots=slots),
+        prompt_hash=prompt_hash,
+    )
+    assert metadata is not None
+    result = metadata_with_slot_classification(None, metadata)
+    assert result is not None
+    return result
 
 
 class TestPersistedNone:
@@ -495,6 +516,114 @@ class TestPolicyDefaults:
         assert slot.source == "heuristic"
         assert slot.confidence == "high"
         assert state.resolved_slots["terminal_output"].value == "docx_document"
+
+
+class TestSlotClassificationMetadataReplay:
+    def test_replays_terminal_output_and_runtime_fields_from_conversation_metadata(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "The user uploads documents and provides customer name, "
+                        "case type, and analysis request before receiving a report."
+                    ),
+                    metadata=_slot_classification_metadata(
+                        _classified("primary_runtime_input", "documents", "high"),
+                        _classified("terminal_output", "structured_text", "high"),
+                        _classified(
+                            "runtime_metadata_fields",
+                            "detailed_case_metadata",
+                            "high",
+                        ),
+                    ),
+                )
+            ]
+        )
+
+        assert state.resolved_slots["terminal_output"].value == "structured_text"
+        assert state.resolved_slots["terminal_output"].source == "model"
+        assert state.resolved_slots["runtime_metadata_fields"].value == (
+            "detailed_case_metadata"
+        )
+        commit = derive_architecture_commit_draft(state)
+        assert commit is not None
+        assert commit.chosen_patterns == [
+            "document_to_structured_report",
+            "form_field_runtime_inputs",
+        ]
+
+    def test_structured_answer_wins_over_classifier_metadata(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content="Make the final answer JSON.",
+                    metadata={
+                        "question_answer": {
+                            "question_id": "final_output_mode",
+                            "selected_option_id": "structured_json",
+                            "selected_value": "structured_json",
+                        },
+                        **_slot_classification_metadata(
+                            _classified("terminal_output", "structured_text", "high"),
+                        ),
+                    },
+                )
+            ]
+        )
+
+        slot = state.resolved_slots["terminal_output"]
+        assert slot.value == "structured_json"
+        assert slot.source == "structured_answer"
+
+    def test_replays_metadata_in_conversation_order_without_replacing_model_slots(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content="Initial preference.",
+                    metadata=_slot_classification_metadata(
+                        _classified("terminal_output", "structured_text", "high"),
+                        prompt_hash="a" * 64,
+                    ),
+                ),
+                ConversationMessage(
+                    role="user",
+                    content="Later preference.",
+                    metadata=_slot_classification_metadata(
+                        _classified("terminal_output", "structured_json", "high"),
+                        prompt_hash="b" * 64,
+                    ),
+                ),
+            ]
+        )
+
+        slot = state.resolved_slots["terminal_output"]
+        assert slot.value == "structured_text"
+        assert slot.evidence == ["model:terminal_output:" + "a" * 64]
+
+    def test_legacy_metadata_without_slot_classification_replays_without_error(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Skapa ett enkelt flöde som tar emot en kort text från "
+                        "användaren och sammanfattar den."
+                    ),
+                    metadata={"legacy": "kept"},
+                )
+            ]
+        )
+
+        assert state.resolved_slots["primary_runtime_input"].value == "text"
 
 
 class TestModelSlotMerge:

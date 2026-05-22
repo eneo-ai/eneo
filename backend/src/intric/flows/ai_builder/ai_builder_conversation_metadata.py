@@ -10,10 +10,17 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from typing import Annotated, Any, Literal, Protocol, TypeAlias, cast
+from typing import Annotated, Any, Literal, Protocol, TypeAlias, cast, get_args
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from intric.flows.ai_builder.ai_builder_canonicalization import (
     normalize_question_answer,
@@ -25,6 +32,16 @@ from intric.flows.ai_builder.ai_builder_event_models import (
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
+from intric.flows.ai_builder.ai_builder_slot_classifier import (
+    UNKNOWN_SLOT_VALUE,
+    ClassifiedSlot,
+    SlotClassificationConfidence,
+    SlotClassificationResult,
+)
+from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
+    LLM_RESOLVABLE_SLOT_NAMES,
+)
+from intric.flows.ai_builder.question_catalog import legal_slot_values
 from intric.flows.flow_authoring_spec import JsonObject
 
 QUESTION_ANSWER_METADATA_KEY = "question_answer"
@@ -35,8 +52,98 @@ UI_LANGUAGE_METADATA_KEY = "ui_language"
 FILE_IDS_METADATA_KEY = "file_ids"
 EDIT_CONTEXT_METADATA_KEY = "edit_context"
 ASSISTANT_QUESTION_ID_METADATA_KEY = "question_id"
+SLOT_CLASSIFICATION_METADATA_KEY = "slot_classification"
 
 JsonScalar: TypeAlias = str | int | float | bool | None
+LLMResolvableSlotName: TypeAlias = Literal[
+    "primary_runtime_input",
+    "terminal_output",
+    "document_material_scope",
+    "structured_analysis_need",
+    "runtime_metadata_fields",
+]
+
+_MAX_SLOT_CLASSIFICATION_REASON_LENGTH = 500
+_MAX_SLOT_CLASSIFICATION_NOTE_LENGTH = 500
+_MAX_SLOT_CLASSIFICATION_NOTES = 10
+
+
+class SlotClassificationSlotMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    slot_name: LLMResolvableSlotName
+    value: str = Field(min_length=1, max_length=128)
+    confidence: SlotClassificationConfidence
+    reason: str = Field(min_length=1, max_length=_MAX_SLOT_CLASSIFICATION_REASON_LENGTH)
+
+    @model_validator(mode="after")
+    def validate_slot_value(self) -> "SlotClassificationSlotMetadata":
+        legal_values = legal_slot_values(self.slot_name) | {"unknown"}
+        if self.value not in legal_values:
+            raise ValueError(f"unsupported slot value for {self.slot_name}")
+        return self
+
+    def to_classified_slot(self) -> ClassifiedSlot:
+        return ClassifiedSlot(
+            slot_name=self.slot_name,
+            value=self.value,
+            confidence=self.confidence,
+            reason=self.reason,
+        )
+
+
+SlotClassificationNote: TypeAlias = Annotated[
+    str,
+    Field(min_length=1, max_length=_MAX_SLOT_CLASSIFICATION_NOTE_LENGTH),
+]
+
+
+def _empty_slot_classification_slots() -> list[SlotClassificationSlotMetadata]:
+    return []
+
+
+def _empty_slot_classification_notes() -> list[SlotClassificationNote]:
+    return []
+
+
+class SlotClassificationMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prompt_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    slots: list[SlotClassificationSlotMetadata] = Field(
+        default_factory=_empty_slot_classification_slots,
+        max_length=len(LLM_RESOLVABLE_SLOT_NAMES),
+    )
+    assumptions: list[SlotClassificationNote] = Field(
+        default_factory=_empty_slot_classification_notes,
+        max_length=_MAX_SLOT_CLASSIFICATION_NOTES,
+    )
+    contradictions: list[SlotClassificationNote] = Field(
+        default_factory=_empty_slot_classification_notes,
+        max_length=_MAX_SLOT_CLASSIFICATION_NOTES,
+    )
+
+    @field_validator("slots")
+    @classmethod
+    def ensure_unique_slots(
+        cls,
+        slots: list[SlotClassificationSlotMetadata],
+    ) -> list[SlotClassificationSlotMetadata]:
+        slot_names = [slot.slot_name for slot in slots]
+        if len(slot_names) != len(set(slot_names)):
+            raise ValueError("slot classification metadata must not duplicate slots")
+        return slots
+
+    def to_result(self) -> SlotClassificationResult:
+        return SlotClassificationResult(
+            slots=tuple(slot.to_classified_slot() for slot in self.slots),
+            assumptions=tuple(self.assumptions),
+            contradictions=tuple(self.contradictions),
+        )
+
+
+if set(get_args(LLMResolvableSlotName)) != set(LLM_RESOLVABLE_SLOT_NAMES):
+    raise RuntimeError("LLMResolvableSlotName must match LLM_RESOLVABLE_SLOT_NAMES")
 
 
 class StructuredQuestionAnswerMetadata(BaseModel):
@@ -151,6 +258,13 @@ def _object_sequence(value: object) -> Sequence[object] | None:
     return cast(Sequence[object], value)
 
 
+def _bounded_metadata_text(value: str, *, fallback: str) -> str:
+    stripped = value.strip()
+    if not stripped:
+        return fallback
+    return stripped[:_MAX_SLOT_CLASSIFICATION_NOTE_LENGTH]
+
+
 def requirements_confirmation_from_question_answer(
     value: AIBuilderQuestionAnswerInput | None,
 ) -> RequirementsConfirmationMetadata | None:
@@ -244,6 +358,95 @@ def requirements_confirmation_from_metadata(
         )
     except ValidationError:
         return None
+
+
+def slot_classification_metadata_from_result(
+    result: SlotClassificationResult,
+    *,
+    prompt_hash: str,
+) -> SlotClassificationMetadata | None:
+    slot_payloads = [
+        payload
+        for slot in result.slots
+        if (payload := _slot_classification_slot_payload(slot)) is not None
+    ]
+    if not slot_payloads:
+        return None
+    try:
+        return SlotClassificationMetadata.model_validate(
+            {
+                "prompt_hash": prompt_hash,
+                "slots": slot_payloads,
+                "assumptions": [
+                    _bounded_metadata_text(value, fallback="assumption")
+                    for value in result.assumptions
+                    if value.strip()
+                ][:_MAX_SLOT_CLASSIFICATION_NOTES],
+                "contradictions": [
+                    _bounded_metadata_text(value, fallback="contradiction")
+                    for value in result.contradictions
+                    if value.strip()
+                ][:_MAX_SLOT_CLASSIFICATION_NOTES],
+            }
+        )
+    except ValidationError:
+        return None
+
+
+def _slot_classification_slot_payload(slot: ClassifiedSlot) -> dict[str, str] | None:
+    if slot.slot_name not in LLM_RESOLVABLE_SLOT_NAMES:
+        return None
+    if slot.confidence == "low" or slot.value == UNKNOWN_SLOT_VALUE:
+        return None
+    if slot.value not in legal_slot_values(slot.slot_name):
+        return None
+    return {
+        "slot_name": slot.slot_name,
+        "value": slot.value,
+        "confidence": slot.confidence,
+        "reason": _bounded_metadata_text(
+            slot.reason,
+            fallback="slot classification",
+        ),
+    }
+
+
+def slot_classification_to_metadata(
+    classification: SlotClassificationMetadata,
+) -> JsonObject:
+    return {
+        SLOT_CLASSIFICATION_METADATA_KEY: classification.model_dump(
+            mode="json",
+            exclude_none=True,
+        )
+    }
+
+
+def slot_classification_from_metadata(
+    metadata: object,
+) -> SlotClassificationMetadata | None:
+    metadata_map = _metadata_mapping(metadata)
+    if metadata_map is None:
+        return None
+    classification = _mapping_value(metadata_map.get(SLOT_CLASSIFICATION_METADATA_KEY))
+    if classification is None:
+        return None
+    try:
+        return SlotClassificationMetadata.model_validate(classification)
+    except ValidationError:
+        return None
+
+
+def metadata_with_slot_classification(
+    metadata: JsonObject | None,
+    classification: SlotClassificationMetadata | None,
+) -> JsonObject | None:
+    if classification is None:
+        return metadata
+    return {
+        **(metadata or {}),
+        **slot_classification_to_metadata(classification),
+    }
 
 
 def requirements_summary_to_metadata(

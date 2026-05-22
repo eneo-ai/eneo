@@ -26,8 +26,10 @@ from intric.flows.ai_builder.ai_builder_capability_projection import (
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     UI_LANGUAGE_METADATA_KEY,
     AIBuilderQuestionAnswerInput,
+    SlotClassificationMetadata,
     metadata_for_user_message,
     metadata_has_question_answer,
+    metadata_with_slot_classification,
     question_answer_from_metadata,
     requirements_confirmation_from_question_answer,
     tool_calls_from_message,
@@ -44,7 +46,7 @@ from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
 )
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
-    build_discovery_block_message_runtime,
+    build_discovery_runtime_result,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -265,6 +267,11 @@ class PlannerPreparedRequest:
     # When populated, `send_message` dispatches this output directly and
     # skips the planner LLM contract entirely.
     server_output: PlannerOutput | None = None
+    # Runtime classifier evidence accepted into the same planning state
+    # the prompt/action policy used. `send_message` persists it on the
+    # current user turn before any branch writes, keeping future rebuilds
+    # deterministic from conversation metadata instead of worker memory.
+    slot_classification_metadata: SlotClassificationMetadata | None = None
     # Stable hash of the assembled system prompt, computed where the
     # prompt is built so the hash is tied to the literal bytes. Logging
     # it out of the prepared request instead of re-walking
@@ -575,11 +582,7 @@ class AIBuilderPlanner:
         requirements_state = resolve_requirements_state(conversation)
         has_requirements_summary = requirements_state.latest_summary is not None
         ui_language = _resolve_ui_language(conversation)
-        (
-            discovery_block_message,
-            discovery_analysis,
-            rebuilt_planning_state,
-        ) = await build_discovery_block_message_runtime(
+        discovery_runtime = await build_discovery_runtime_result(
             conversation,
             flow=flow,
             litellm_client=self.litellm_client,
@@ -589,6 +592,9 @@ class AIBuilderPlanner:
             allow_semantic_adjudication=allow_discovery_semantic_adjudication,
             tenant_id=self.user.tenant_id,
         )
+        discovery_block_message = discovery_runtime.discovery_block_message
+        discovery_analysis = discovery_runtime.discovery_analysis
+        rebuilt_planning_state = discovery_runtime.planning_state
 
         is_edit_mode = flow is not None
         flow_context = None
@@ -686,6 +692,9 @@ class AIBuilderPlanner:
                 rebuilt_planning_state=rebuilt_planning_state,
                 action_policy=action_policy,
                 server_output=server_output,
+                slot_classification_metadata=(
+                    discovery_runtime.slot_classification_metadata
+                ),
             )
 
         if action_policy.allowed_action_kinds == ("propose_plan",):
@@ -764,6 +773,9 @@ class AIBuilderPlanner:
                 plan_edit_context=plan_edit_context,
                 prior_plan_for_revision=prior_plan_for_revision,
                 proposal_resource_catalog=resource_catalog,
+                slot_classification_metadata=(
+                    discovery_runtime.slot_classification_metadata
+                ),
             )
 
         planning_state_block = render_llm_prompt_context(
@@ -848,6 +860,9 @@ class AIBuilderPlanner:
                 base_planning_state_version=base_planning_state_version,
                 rebuilt_planning_state=rebuilt_planning_state,
                 action_policy=action_policy,
+                slot_classification_metadata=(
+                    discovery_runtime.slot_classification_metadata
+                ),
             )
 
         return PlannerPreparedRequest(
@@ -860,6 +875,7 @@ class AIBuilderPlanner:
             rebuilt_planning_state=rebuilt_planning_state,
             action_policy=action_policy,
             system_prompt_hash=stable_hash(system_prompt),
+            slot_classification_metadata=discovery_runtime.slot_classification_metadata,
         )
 
     async def _dispatch_chained_server_action_after_commit(
@@ -1186,6 +1202,10 @@ class AIBuilderPlanner:
             )
             requirements_state = prepared_request.requirements_state
             ui_language = prepared_request.ui_language
+            user_message.metadata = metadata_with_slot_classification(
+                user_message.metadata,
+                prepared_request.slot_classification_metadata,
+            )
 
             if (
                 prepared_request.server_output is None

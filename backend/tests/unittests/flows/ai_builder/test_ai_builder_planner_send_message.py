@@ -37,6 +37,10 @@ from intric.flows.ai_builder.ai_builder_action_policy import (
     PlannerActionPolicy,
     build_planner_action_policy,
 )
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    SlotClassificationMetadata,
+    slot_classification_metadata_from_result,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderSession,
     SessionStatus,
@@ -74,6 +78,10 @@ from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendTurn,
 )
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+from intric.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedSlot,
+    SlotClassificationResult,
+)
 from intric.flows.ai_builder.planning_state import PlanningState
 
 
@@ -105,7 +113,9 @@ def _make_planner() -> AIBuilderPlanner:
 
 
 def _make_prepared_request(
-    *, should_emit_forced_followup: bool = False
+    *,
+    should_emit_forced_followup: bool = False,
+    slot_classification_metadata: SlotClassificationMetadata | None = None,
 ) -> PlannerPreparedRequest:
     return PlannerPreparedRequest(
         requirements_state=SimpleNamespace(latest_summary=None, confirmed=False),
@@ -114,7 +124,26 @@ def _make_prepared_request(
         llm_messages=[{"role": "system", "content": "system"}],
         should_emit_forced_followup=should_emit_forced_followup,
         base_planning_state_version=0,
+        slot_classification_metadata=slot_classification_metadata,
     )
+
+
+def _slot_classification_metadata() -> SlotClassificationMetadata:
+    metadata = slot_classification_metadata_from_result(
+        SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="terminal_output",
+                    value="structured_text",
+                    confidence="high",
+                    reason="user requested a readable report",
+                ),
+            )
+        ),
+        prompt_hash="a" * 64,
+    )
+    assert metadata is not None
+    return metadata
 
 
 def _make_turn(*, base_version: int = 0) -> SessionSendTurn:
@@ -552,7 +581,9 @@ async def test_send_message_does_not_persist_internal_commit_note_as_assistant_t
     None
 ):
     planner = _make_planner()
-    prepared = _make_prepared_request()
+    prepared = _make_prepared_request(
+        slot_classification_metadata=_slot_classification_metadata(),
+    )
     action = CommitArchitectureAction(
         kind="commit_architecture",
         payload=CommitArchitecturePayload(
@@ -596,6 +627,8 @@ async def test_send_message_does_not_persist_internal_commit_note_as_assistant_t
         await _collect_events(planner, **_send_kwargs())
 
     assert [message.role for message in captured["new_messages"]] == ["user"]
+    assert captured["new_messages"][0].metadata is not None
+    assert "slot_classification" in captured["new_messages"][0].metadata
     assert all(
         "Architecture committed" not in message.content
         for message in captured["new_messages"]
@@ -1199,6 +1232,7 @@ async def test_send_message_auto_advances_server_commit_to_requirements_summary(
         rebuilt_planning_state=state,
         action_policy=action_policy,
         server_output=server_output,
+        slot_classification_metadata=_slot_classification_metadata(),
     )
 
     committed_state = PlanningState.empty()
@@ -1250,6 +1284,11 @@ async def test_send_message_auto_advances_server_commit_to_requirements_summary(
     assert summary_payload["input_description"] == "Primary runtime input: Documents."
     assert summary_payload["output_description"] == "Primary final output: docx."
     assert planner.repo.commit_turn.await_count == 2
+    first_commit_messages = planner.repo.commit_turn.await_args_list[0].kwargs[
+        "new_messages"
+    ]
+    assert first_commit_messages[0].metadata is not None
+    assert "slot_classification" in first_commit_messages[0].metadata
     planner.litellm_client.acompletion.assert_not_called()
 
 
@@ -1266,6 +1305,7 @@ async def test_send_message_routes_proposal_mode_to_task_specific_proposer() -> 
         rebuilt_planning_state=PlanningState.empty(),
         action_policy=PlannerActionPolicy(allowed_action_kinds=("propose_plan",)),
         proposal_mode=True,
+        slot_classification_metadata=_slot_classification_metadata(),
     )
     captured: dict[str, Any] = {}
 
@@ -1300,6 +1340,9 @@ async def test_send_message_routes_proposal_mode_to_task_specific_proposer() -> 
 
     assert [event["event"] for event in events] == ["plan", "done"]
     assert captured["llm_messages"] == [{"role": "system", "content": "proposal task"}]
+    proposal_conversation = captured["conversation"]
+    assert proposal_conversation[-1].metadata is not None
+    assert "slot_classification" in proposal_conversation[-1].metadata
     assert captured["available_model_refs"] == set()
     assert captured["available_kb_refs"] == set()
 

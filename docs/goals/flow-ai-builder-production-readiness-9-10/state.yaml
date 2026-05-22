@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T026b
+active_task: T027
 
 scoring_target:
   dimensions:
@@ -50,7 +50,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T026a implementation/post-review: conversation metadata/tool-call JSONB, public error diagnostics, frontend diagnostic reports, targeted runtime-field intent, AI Builder model import ownership, builder session send-lock persistence, and the live-eval harness now have typed/canonical ownership or DB-backed/runtime evidence. The broader score floor remains 8 because the five-case live eval still fails C4 runtime form fields, full-source Pyright/test baseline and API/error-code discipline remain below 9, and readability/module/test topology still needs consolidation."
+  source: "After T026b implementation/post-review: conversation metadata/tool-call JSONB, public error diagnostics, frontend diagnostic reports, targeted runtime-field intent, AI Builder model import ownership, builder session send-lock persistence, the live-eval harness, and runtime slot-classification persistence/replay now have typed/canonical ownership or DB-backed/runtime evidence. The five-case authenticated live eval now passes C1-C5, including C4 runtime form fields. The broader score floor remains 8 because full-source Pyright/test baseline and API/error-code discipline remain below 9, readability/module/test topology still needs consolidation, and future output-quality changes must keep the live eval green."
   Maintainability: 8
   Code_Quality: 8
   Clean_Architecture: 8
@@ -64,14 +64,14 @@ current_scorecard:
   Test_Coverage_Quality: 8
   Developer_Diagnostic_Experience: 9
   AI_Slop_Comment_Naming_Quality: 8
-  Normal_User_Output_Quality: 8
+  Normal_User_Output_Quality: 9
   Overall: 8
   blockers:
     - "Public/lifecycle/CAS error-code discipline improved, but calls that omit code= entirely can still silently use generic codes; future error-contract work must continue without creating a third public context carrier."
-    - "The five-case authenticated live eval now proves C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX, and C5 revise/edit through the public API, but C4 runtime form fields still fails with planner_invalid_repair_response after the requirements summary misclassifies the prompt as document input."
+    - "The five-case authenticated live eval now proves C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX, C4 runtime form fields, and C5 revise/edit through the public API, but this gate must be repeated after later planner/runtime changes rather than treated as permanent output-quality proof."
     - "ai_builder_proposal_processor.py is materially smaller after T011 but still oversized at 1830 LOC; structured-question recovery, confirm requirements, and retry orchestration remain in one processor."
     - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, and full-source Pyright baseline failures outside AI Builder."
-    - "Overall remains 8 until broad live eval/output quality, full-source typing/test baseline, API/error-code discipline, and consolidation/readability tranches prove every dimension is honestly at least 9."
+    - "Overall remains 8 until full-source typing/test baseline, API/error-code discipline, consolidation/readability/test-topology tranches, and repeated live-eval evidence prove every dimension is honestly at least 9."
 
 score_floor_completion_gates:
   source: "2026-05-21 user review: the board must prevent 'plan executed' from being confused with '9/10 achieved'."
@@ -3131,7 +3131,7 @@ tasks:
   - id: T026b
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: xhigh
     objective: "Persist runtime slot classification as typed AI Builder conversation metadata and replay it in PlanningState derivation so accepted planner/server actions and persisted state share the same conversation-visible facts."
     inputs:
@@ -3173,6 +3173,71 @@ tasks:
       - "The metadata writer cannot attach before all persistence branches without broader planner topology changes."
       - "The only apparent fix is adding trigger/keyword phrases."
       - "Conversation replay with classifier metadata disagrees with runtime-built planning state in a way that cannot be resolved by existing merge_llm_resolved_slots semantics."
+    receipt:
+      result: "T026b completed. Runtime slot classification is now persisted as typed slot_classification conversation metadata and replayed by build_planning_state_from_conversation, preserving conversation metadata as the canonical PlanningState input instead of adding a repo overlay or worker-memory state path. The planner attaches classifier metadata to the current user message before planner-turn commit, server-output commit, and proposal persistence branches. A P1 Claude finding about whole-batch metadata drop on one invalid slot was fixed with per-slot writer filtering that mirrors merge_llm_resolved_slots; final Claude recheck returned GREEN_LIGHT yes / MIN_SCORE 9. Antigravity remains SKIPPED_DUE_TO_QUOTA, not a pass. The authenticated five-case live eval passed C1-C5, including C4 runtime form fields."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t026b-implementation-summary.md"
+        - ".codex/artifacts/claude-peer-loop-t026b-slot-classification-metadata-replay-implementation-20260522T004922Z.md"
+        - ".codex/artifacts/claude-peer-loop-t026b-slot-classification-metadata-replay-final-recheck-20260522T005320Z.md"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py -q: 93 passed in 6.11s"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2246 passed, 4 skipped, 11 warnings in 22.66s"
+        - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_conversation_metadata.py src/intric/flows/ai_builder/ai_builder_discovery_runtime.py src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py: All checks passed"
+        - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_conversation_metadata.py src/intric/flows/ai_builder/ai_builder_discovery_runtime.py src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py: 8 files already formatted"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder/ai_builder_conversation_metadata.py src/intric/flows/ai_builder/ai_builder_discovery_runtime.py src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/planning_state_builder.py: 0 errors, 0 warnings, 0 informations"
+        - "rg -n 'metadata\\.get\\(\"slot_classification\"|metadata\\[\"slot_classification\"|slot_classification\\]' backend/src/intric/flows/ai_builder -g '*.py': no raw readers outside the canonical metadata owner"
+      live_eval:
+        artifact_root: "/tmp/flow-ai-builder-t026b-live-eval/20260522T004058Z"
+        ledger: "/tmp/flow-ai-builder-t026b-live-eval/ledger.md"
+        model: "gpt-5.4-2026-03-05"
+        result: "All five cases passed. C4 produced a proposed plan with terminal_output=structured_text and form_fields customer_name, analysis_request."
+      reviewer_gates:
+        codex_self_review: "pass; the final implementation keeps one canonical persisted owner, avoids keyword patches, avoids a repo overlay, passes unit/static/live checks, and fixes Claude's in-scope P1 before commit."
+        claude:
+          iteration_1: "GREEN_LIGHT yes; MIN_SCORE 8; found non-blocking P1 whole-batch invalid-slot asymmetry and requested per-slot writer filtering before T027."
+          iteration_2: "GREEN_LIGHT yes; MIN_SCORE 9; P1 fixed, no blockers."
+        antigravity:
+          status: "SKIPPED_DUE_TO_QUOTA"
+          evidence: "Quota unavailable in current window; missing coverage, not a pass."
+      scorecard_after:
+        Normal_User_Output_Quality: 9
+        Overall: 8
+      residual_risks:
+        - "The metadata writer and merge function still duplicate the accepted-slot predicate; Claude rated this P3 future cleanup, not a T026b blocker."
+        - "The metadata reader remains whole-or-nothing for persisted invalid legacy payloads; safe for current writer-owned data but worth revisiting if LLM-resolvable vocabulary shrinks."
+        - "Legacy sessions that already committed architecture without classifier metadata are not backfilled."
+        - "Broader goal remains incomplete: full-source Pyright/baseline tests, API/error-code discipline, readability/module/test topology, and repeated output-quality gates remain below a strict 9."
+
+  - id: T027
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: xhigh
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T026b, with pressure on full-source typing/test baseline, API/error-code discipline, readability/module/test topology, and whether the remaining slot-classification merge/writer P3 duplication should be folded into a broader simplification slice."
+    inputs:
+      - "T026b receipt and final Claude recheck"
+      - "Current scorecard after all five live-eval cases passed"
+      - "Current dirty worktree after the T026b commit"
+    constraints:
+      - "Do not implement source changes in T027; this is a judge/planning gate."
+      - "Do not inflate scores because T026b passed; the broader goal remains active with Overall 8."
+      - "Prefer the tranche that moves the strict score floor most, not the next easiest cleanup."
+      - "Antigravity is SKIPPED_DUE_TO_QUOTA unless the wrapper reports available quota; do not mark it as passed."
+    allowed_files:
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t027-next-tranche-ranking.md"
+    acceptance_criteria:
+      - "Reconcile git status and preserve unrelated dirty files."
+      - "Re-score every dimension honestly after T026b."
+      - "Name the next worker tranche, allowed files, acceptance criteria, verification commands, peer gates, and stop conditions."
+      - "Explicitly compare API/error-code discipline, readability/module/test topology, full-source typing/test baseline, and the remaining slot-classification predicate duplication."
+      - "Run Claude plan gate for any selected non-trivial worker; run Antigravity only if quota/tooling is available and record SKIPPED_DUE_TO_QUOTA otherwise."
+    verify:
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+    stop_if:
+      - "The next tranche requires product direction outside the current 9/10 goal."
+      - "The next tranche cannot be bounded to a human-reviewable diff."
+      - "Peer review disagrees on canonical ownership and the disagreement cannot be resolved with source evidence."
     receipt: null
 
 checks:
@@ -3181,13 +3246,16 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T026b0 completed and T026b activated. The first C4 owner guess was rejected as premature. Fresh C4 rerun reproduced the no-plan failure. Claude rejected the initial repo-overlay design (GREEN_LIGHT no / MIN_SCORE 5) and green-lit the revised typed conversation-metadata replay design (GREEN_LIGHT yes / MIN_SCORE 8). Broader goal remains incomplete with overall strict floor 8/10."
-    task: T026b0
+    result: "T026b completed and T027 judge gate activated. Runtime slot classification now has a typed conversation-metadata owner and replay path; all focused tests/static checks passed; broader AI Builder unit tests passed; authenticated five-case live eval passed C1-C5 including C4. Claude final recheck returned GREEN_LIGHT yes / MIN_SCORE 9 after the invalid-slot metadata asymmetry fix. Broader goal remains incomplete with overall strict floor 8/10."
+    task: T026b
     commands:
-      - "jq . /tmp/flow-ai-builder-t026-live-eval/20260521T234246Z/C4_runtime_form_fields/result.json: C4 failed before plan with planner_invalid_repair_response"
-      - "Authenticated T026b0 C4 rerun with env-only API key/space id: /tmp/flow-ai-builder-t026b0-c4-rerun/20260522T000345Z/C4_runtime_form_fields_rerun/result.json failed before plan with self_correction_quality_failure"
-      - "DB inspection for 5fd41221-62a8-4ce9-a9c6-0b64255452a9: persisted PlanningState had architecture_commit but no terminal_output resolved slot"
-      - "Claude T026b0 iteration 1: .codex/artifacts/claude-peer-loop-t026b0-flow-ai-builder-c4-proximate-cause-owner-decision-20260522T001557Z.md: GREEN_LIGHT no; MIN_SCORE 5"
-      - "Claude T026b0 iteration 2: .codex/artifacts/claude-peer-loop-t026b0-flow-ai-builder-c4-proximate-cause-owner-decision-iteration-2-20260522T002124Z.md: GREEN_LIGHT yes; MIN_SCORE 8"
-      - "Antigravity T026b0 gate: SKIPPED_DUE_TO_QUOTA; not passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py -q: 93 passed in 6.11s"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2246 passed, 4 skipped, 11 warnings in 22.66s"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_conversation_metadata.py src/intric/flows/ai_builder/ai_builder_discovery_runtime.py src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py: All checks passed"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_conversation_metadata.py src/intric/flows/ai_builder/ai_builder_discovery_runtime.py src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py: 8 files already formatted"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder/ai_builder_conversation_metadata.py src/intric/flows/ai_builder/ai_builder_discovery_runtime.py src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/planning_state_builder.py: 0 errors, 0 warnings, 0 informations"
+      - "Authenticated T026b live eval with env-only API key/space id: /tmp/flow-ai-builder-t026b-live-eval/20260522T004058Z passed C1/C2/C3/C4/C5"
+      - "Claude T026b iteration 1: .codex/artifacts/claude-peer-loop-t026b-slot-classification-metadata-replay-implementation-20260522T004922Z.md: GREEN_LIGHT yes; MIN_SCORE 8; P1 invalid-slot asymmetry fixed before commit"
+      - "Claude T026b iteration 2: .codex/artifacts/claude-peer-loop-t026b-slot-classification-metadata-replay-final-recheck-20260522T005320Z.md: GREEN_LIGHT yes; MIN_SCORE 9"
+      - "Antigravity T026b gate: SKIPPED_DUE_TO_QUOTA; not passed"
       - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"': yaml ok"

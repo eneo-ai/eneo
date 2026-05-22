@@ -10,6 +10,10 @@ from uuid import uuid4
 import pytest
 
 from intric.files.file_models import File, FileType
+from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
+from intric.flows.ai_builder.ai_builder_discovery_runtime import (
+    DiscoveryRuntimeResult,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
@@ -79,6 +83,18 @@ def _make_file(text: str = "Reference") -> File:
         owner_api_key_id=None,
         user_id=uuid4(),
         tenant_id=uuid4(),
+    )
+
+
+def _runtime_result(
+    discovery_block_message: str | None,
+    discovery_analysis: object,
+    planning_state: PlanningState,
+) -> DiscoveryRuntimeResult:
+    return DiscoveryRuntimeResult(
+        discovery_block_message=discovery_block_message,
+        discovery_analysis=cast(DiscoveryAnalysis, discovery_analysis),
+        planning_state=planning_state,
     )
 
 
@@ -330,9 +346,11 @@ async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_he
             return_value=requirements_state,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.build_discovery_block_message_runtime",
+            "intric.flows.ai_builder.ai_builder_planner.build_discovery_runtime_result",
             new_callable=AsyncMock,
-            return_value=(None, discovery_analysis, PlanningState.empty()),
+            return_value=_runtime_result(
+                None, discovery_analysis, PlanningState.empty()
+            ),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_planner.latest_confirmed_requirements",
@@ -413,9 +431,11 @@ async def test_prepare_planner_request_skips_prompt_for_server_owned_action() ->
             return_value=requirements_state,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.build_discovery_block_message_runtime",
+            "intric.flows.ai_builder.ai_builder_planner.build_discovery_runtime_result",
             new_callable=AsyncMock,
-            return_value=(None, discovery_analysis, PlanningState.empty()),
+            return_value=_runtime_result(
+                None, discovery_analysis, PlanningState.empty()
+            ),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_planner.build_system_prompt",
@@ -478,9 +498,9 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
             return_value=requirements_state,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.build_discovery_block_message_runtime",
+            "intric.flows.ai_builder.ai_builder_planner.build_discovery_runtime_result",
             new_callable=AsyncMock,
-            return_value=(
+            return_value=_runtime_result(
                 "legacy discovery question",
                 discovery_analysis,
                 planning_state,
@@ -534,9 +554,11 @@ async def test_prepare_planner_request_passes_attachment_context_into_system_pro
             return_value=requirements_state,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.build_discovery_block_message_runtime",
+            "intric.flows.ai_builder.ai_builder_planner.build_discovery_runtime_result",
             new_callable=AsyncMock,
-            return_value=(None, discovery_analysis, PlanningState.empty()),
+            return_value=_runtime_result(
+                None, discovery_analysis, PlanningState.empty()
+            ),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_planner.latest_confirmed_requirements",
@@ -633,9 +655,9 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
             return_value=requirements_state,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.build_discovery_block_message_runtime",
+            "intric.flows.ai_builder.ai_builder_planner.build_discovery_runtime_result",
             new_callable=AsyncMock,
-            return_value=(None, discovery_analysis, state),
+            return_value=_runtime_result(None, discovery_analysis, state),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_planner.latest_confirmed_requirements",
@@ -697,9 +719,11 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
             return_value=requirements_state,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.build_discovery_block_message_runtime",
+            "intric.flows.ai_builder.ai_builder_planner.build_discovery_runtime_result",
             new_callable=AsyncMock,
-            return_value=(None, discovery_analysis, PlanningState.empty()),
+            return_value=_runtime_result(
+                None, discovery_analysis, PlanningState.empty()
+            ),
         ) as discovery_runtime,
         patch(
             "intric.flows.ai_builder.ai_builder_planner.latest_confirmed_requirements",
@@ -760,9 +784,11 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
             return_value=requirements_state,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.build_discovery_block_message_runtime",
+            "intric.flows.ai_builder.ai_builder_planner.build_discovery_runtime_result",
             new_callable=AsyncMock,
-            return_value=(None, discovery_analysis, PlanningState.empty()),
+            return_value=_runtime_result(
+                None, discovery_analysis, PlanningState.empty()
+            ),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_planner.latest_confirmed_requirements",
@@ -827,9 +853,11 @@ async def test_prepare_planner_request_projects_pre_commit_into_system_prompt() 
             return_value=requirements_state,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.build_discovery_block_message_runtime",
+            "intric.flows.ai_builder.ai_builder_planner.build_discovery_runtime_result",
             new_callable=AsyncMock,
-            return_value=(None, discovery_analysis, PlanningState.empty()),
+            return_value=_runtime_result(
+                None, discovery_analysis, PlanningState.empty()
+            ),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_planner.latest_confirmed_requirements",
@@ -911,9 +939,11 @@ async def test_prepare_planner_request_threads_unresolved_core_slots_into_system
             return_value=requirements_state,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.build_discovery_block_message_runtime",
+            "intric.flows.ai_builder.ai_builder_planner.build_discovery_runtime_result",
             new_callable=AsyncMock,
-            return_value=(None, discovery_analysis, PlanningState.empty()),
+            return_value=_runtime_result(
+                None, discovery_analysis, PlanningState.empty()
+            ),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_planner.latest_confirmed_requirements",
@@ -1003,9 +1033,11 @@ async def test_prepare_planner_request_carries_forward_persisted_commit_into_pro
             return_value=requirements_state,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.build_discovery_block_message_runtime",
+            "intric.flows.ai_builder.ai_builder_planner.build_discovery_runtime_result",
             new_callable=AsyncMock,
-            return_value=(None, discovery_analysis, PlanningState.empty()),
+            return_value=_runtime_result(
+                None, discovery_analysis, PlanningState.empty()
+            ),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_planner.latest_confirmed_requirements",

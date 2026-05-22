@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    SlotClassificationMetadata,
+    slot_classification_metadata_from_result,
+)
 from intric.flows.ai_builder.ai_builder_discovery import (
     analyze_discovery,
     build_discovery_block_message,
@@ -35,6 +39,15 @@ from intric.flows.domain.flow import Flow
 class RuntimeDiscoveryContext:
     planning_state: PlanningState
     slot_classification_result: SlotClassificationResult | None = None
+    slot_classification_metadata: SlotClassificationMetadata | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DiscoveryRuntimeResult:
+    discovery_block_message: str | None
+    discovery_analysis: DiscoveryAnalysis
+    planning_state: PlanningState
+    slot_classification_metadata: SlotClassificationMetadata | None = None
 
 
 async def analyze_discovery_runtime(
@@ -111,6 +124,10 @@ async def build_runtime_discovery_context(
     return RuntimeDiscoveryContext(
         planning_state=state,
         slot_classification_result=result,
+        slot_classification_metadata=slot_classification_metadata_from_result(
+            result,
+            prompt_hash=prompt_hash,
+        ),
     )
 
 
@@ -149,6 +166,34 @@ async def build_discovery_block_message_runtime(
     allow_semantic_adjudication: bool = True,
     tenant_id: UUID,
 ) -> tuple[str | None, DiscoveryAnalysis, PlanningState]:
+    result = await build_discovery_runtime_result(
+        conversation,
+        flow=flow,
+        litellm_client=litellm_client,
+        litellm_model=litellm_model,
+        litellm_kwargs=litellm_kwargs,
+        ui_language=ui_language,
+        allow_semantic_adjudication=allow_semantic_adjudication,
+        tenant_id=tenant_id,
+    )
+    return (
+        result.discovery_block_message,
+        result.discovery_analysis,
+        result.planning_state,
+    )
+
+
+async def build_discovery_runtime_result(
+    conversation: list[ConversationMessage],
+    *,
+    flow: Flow | None = None,
+    litellm_client: Any | None = None,
+    litellm_model: str | None = None,
+    litellm_kwargs: dict[str, Any] | None = None,
+    ui_language: str | None = None,
+    allow_semantic_adjudication: bool = True,
+    tenant_id: UUID,
+) -> DiscoveryRuntimeResult:
     context = await build_runtime_discovery_context(
         conversation,
         flow=flow,
@@ -165,14 +210,15 @@ async def build_discovery_block_message_runtime(
         planning_state=context.planning_state,
         slot_classification_result=context.slot_classification_result,
     )
-    return (
-        build_discovery_block_message(
+    return DiscoveryRuntimeResult(
+        discovery_block_message=build_discovery_block_message(
             conversation,
             flow=flow,
             analysis=analysis,
         ),
-        analysis,
-        context.planning_state,
+        discovery_analysis=analysis,
+        planning_state=context.planning_state,
+        slot_classification_metadata=context.slot_classification_metadata,
     )
 
 
