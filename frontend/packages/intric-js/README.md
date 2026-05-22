@@ -69,10 +69,25 @@ bun install
 
 ### Update schema
 
-To regnerate/update the backend types run
+To regenerate the backend types from the configured backend URL, run
 
 ```bash
 bun run update && bun run lint
 ```
+
+`bun run update` reads `ENEO_BACKEND_URL`, then `INTRIC_BACKEND_URL`, then falls back to `http://localhost:8123`. `bun run update -- --local` forces `http://localhost:8123`.
+
+For reviewable, byte-stable regeneration, first save one backend OpenAPI snapshot and then update from that file:
+
+```bash
+cd ../../../backend
+uv run python -c 'from intric.server.main import get_application; import json; print(json.dumps(get_application().openapi(), sort_keys=True))' > /tmp/eneo-openapi.json
+
+cd ../frontend/packages/intric-js
+node update.js --schema-file /tmp/eneo-openapi.json
+git diff --stat src/types/schema.d.ts
+```
+
+`--schema-file` is mutually exclusive with `--local` and ignores backend URL environment variables. URL mode preserves the backend's raw OpenAPI response ordering; use a saved, canonicalized schema file when a byte-identical diff is required.
 
 Update the endpoints accordingly.

@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T053
+active_task: T055
 
 interruptions:
   - id: I001
@@ -76,7 +76,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T052 implementation/post-review: active create/edit proposal-submission ownership moved from AIBuilderProposalProcessor into ProposalSubmissionOwner. Claude post-implementation review returned GREEN_LIGHT yes / MIN_SCORE 8 and accepted the 1197 -> 560 LOC processor movement as real ownership deletion rather than a facade. The broader score floor remains 8 because generated-client determinism, full-source typing/test baseline, remaining topology/readability/test-fixture coupling, and repeated live-eval evidence still block a defensible 9."
+  source: "After T054 implementation/post-review: generated-client regeneration determinism is closed by making frontend/packages/intric-js/update.js generate client version and schema from one OpenAPI snapshot, with Claude GREEN_LIGHT yes / MIN_SCORE 8. The broader score floor remains 8 because full-source typing/test baseline, remaining topology/readability/test-fixture coupling, source-material/live-eval assertion gaps, and repeated live-eval evidence still block a defensible 9."
   Maintainability: 8
   Code_Quality: 9
   Clean_Architecture: 8
@@ -93,13 +93,13 @@ current_scorecard:
   Normal_User_Output_Quality: 9
   Overall: 8
   blockers:
-    - "Public/lifecycle/CAS error-code discipline is now typed and guarded in AI Builder-owned raise sites, but generated-client regeneration determinism is not solved; T028 kept only the intentional enum literals after openapi-typescript produced broad unrelated churn."
+    - "Generated-client regeneration determinism is now closed by T054: update.js supports --schema-file review snapshots, URL mode fetches OpenAPI once into a temp snapshot, openapi-typescript uses argv-array spawn, and schema.d.ts diff stats were inspected with no generated churn."
     - "The five-case authenticated live eval now proves C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX, C4 runtime form fields, and C5 revise/edit through the public API, but this gate must be repeated after later planner/runtime changes rather than treated as permanent output-quality proof."
-    - "T042/T044/T048/T050/T052 removed proposal completion, structured-question recovery, confirm-requirements ownership, repair-runtime ownership, and active create/edit proposal-submission ownership from ai_builder_proposal_processor.py. The processor is now 560 LOC, but maintainability/readability remain 8 because ProposalSubmissionOwner is still a 690 LOC concentrated owner, submission tests import processor test builders, and the next score-moving tranche must prove whether consolidation/test-topology/generator determinism or live-eval proof is now the highest blocker."
+    - "T042/T044/T048/T050/T052 removed proposal completion, structured-question recovery, confirm-requirements ownership, repair-runtime ownership, and active create/edit proposal-submission ownership from ai_builder_proposal_processor.py. The processor is now 592 LOC after the scoped-model-edit hotfix, but maintainability/readability remain 8 because ProposalSubmissionOwner is still a 754 LOC concentrated owner, submission tests import processor test builders, and the next score-moving tranche must prove whether consolidation/test-topology or live-eval/source-material proof is now the highest blocker."
     - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, partial processor-bound facades, and full-source Pyright baseline failures outside AI Builder."
     - "Both Claude and Antigravity recommended a small future clarification of counts_as_repair semantics in ai_builder_proposal_telemetry.py; it was not added in T038 because that file was outside the approved write scope."
     - "T046 improved audio/transcript structured-underlag output quality, but source-material labeling differs between source-material normalization and dataflow auto-bind, and the live eval runner still cannot directly assert absence of broad structured JSON bindings."
-    - "Overall remains 8 until generated-client tooling determinism, full-source typing/test baseline, consolidation/readability/test-topology tranches, and repeated live-eval evidence prove every dimension is honestly at least 9."
+    - "Overall remains 8 until full-source typing/test baseline, consolidation/readability/test-topology tranches, source-material/live-eval assertion gaps, and repeated live-eval evidence prove every dimension is honestly at least 9."
 
 score_floor_completion_gates:
   source: "2026-05-21 user review: the board must prevent 'plan executed' from being confused with '9/10 achieved'."
@@ -5393,7 +5393,7 @@ tasks:
   - id: T053
     type: judge
     assignee: Judge
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T052, using current evidence rather than mechanically continuing processor splitting."
     inputs:
@@ -5414,6 +5414,152 @@ tasks:
       - "Selected next worker objective."
       - "Allowed files, acceptance criteria, verification commands, stop conditions, and peer-gate requirements."
       - "Whether the selected tranche can move any 8/10 dimension to 9, or why the floor stays 8."
+    receipt:
+      completed_at: "2026-05-22T16:46:00Z"
+      result: done
+      summary: "Re-ranked the next tranche after T052 and the scoped-model-edit hotfix. The first draft selected proposal test-topology cleanup, but Claude rejected that as cleanup-tier rather than highest-score-moving work. Revision 2 selected generated-client regeneration determinism for frontend/packages/intric-js because T028 proved OpenAPI generation can create broad unrelated schema.d.ts churn, and the active scorecard still names generated-client determinism as a completion blocker. Codex ran a fixed-input openapi-typescript probe before implementation planning: openapi-typescript v7.13.0 generated byte-identical output twice from /tmp/eneo-openapi-t054-fixed.json, proving the tool is deterministic for fixed input and that update.js's two-live-read/shell path is the next bounded blocker."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t053-next-tranche-ranking.md"
+        - ".codex/artifacts/claude-peer-loop-t053-next-flow-ai-builder-tranche-ranking-20260522T160124Z.md"
+        - ".codex/artifacts/claude-peer-loop-t053-revised-flow-ai-builder-next-tranche-ranking-20260522T163937Z.md"
+        - ".codex/artifacts/claude-peer-loop-t053-revised-flow-ai-builder-next-tranche-ranking-iteration-3-20260522T164437Z.md"
+      peer_review:
+        claude_iteration_1: "GREEN_LIGHT no / MIN_SCORE 7; proposal test-topology cleanup was useful but not framed as a highest-score-moving tranche."
+        claude_iteration_2: "GREEN_LIGHT no / MIN_SCORE 7; generated-client determinism direction was better but needed fixed-input generator probe, main-flow determinism test, CLI precedence/temp lifecycle, schema.d.ts diff inspection, and JSDoc requirements."
+        claude_iteration_3: "GREEN_LIGHT yes / MIN_SCORE 8 after fixed-input probe, stricter acceptance criteria, and honest score impact."
+        antigravity: "SKIPPED_DUE_TO_QUOTA per current instruction; not counted as a pass."
+      evidence:
+        - "frontend/packages/intric-js/update.js currently fetches /openapi.json for version and separately shells openapi-typescript against the live URL."
+        - "T028 receipt records that openapi-typescript produced broad unrelated churn, forcing manual enum curation."
+        - "Fixed snapshot /tmp/eneo-openapi-t054-fixed.json size 1216741 bytes; openapi-typescript v7.13.0 generated two identical outputs with sha256 fe696978cdf1c4778b1377f45aaf1a1416ea6d7d3a0d3ac8badbd0bc134e4dd3."
+      selected_next_task: T054
+      score_impact: "No score increase yet. T053 selects the next score-moving blocker to close; broader floor remains 8."
+
+  - id: T054
+    type: worker
+    assignee: Worker
+    status: completed
+    reasoning_hint: high
+    objective: "Make frontend/packages/intric-js generated-client regeneration deterministic and reviewable from one OpenAPI snapshot."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t053-next-tranche-ranking.md"
+      - ".codex/artifacts/claude-peer-loop-t053-revised-flow-ai-builder-next-tranche-ranking-iteration-3-20260522T164437Z.md"
+      - "frontend/packages/intric-js/update.js"
+      - "frontend/packages/intric-js/package.json"
+      - "frontend/packages/intric-js/README.md"
+    constraints:
+      - "Do not create a parallel generator; update.js remains the canonical owner."
+      - "Do not touch backend API schema, Flow AI Builder source, OpenTelemetry/DX surfaces, or proposal topology in this tranche."
+      - "Do not commit broad schema.d.ts churn; generated schema output is a stop condition unless intentionally narrow and peer-reviewable."
+      - "Preserve --local, ENEO_BACKEND_URL, INTRIC_BACKEND_URL, and default localhost behavior."
+      - "Use spawn argv or equivalent non-shell invocation; no shell-string interpolation for openapi-typescript."
+      - "Antigravity remains SKIPPED_DUE_TO_QUOTA unless explicitly re-enabled/confirmed."
+    allowed_files:
+      - "frontend/packages/intric-js/update.js"
+      - "frontend/packages/intric-js/update.test.js"
+      - "frontend/packages/intric-js/package.json"
+      - "frontend/packages/intric-js/README.md"
+      - ".codex/artifacts/flow-ai-builder-t054-generated-client-determinism.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    acceptance_criteria:
+      - "URL mode fetches /openapi.json exactly once, writes a temp OpenAPI snapshot under os.tmpdir() with an eneo-openapi-*.json name, prints the snapshot path, and uses that same snapshot for client version and openapi-typescript."
+      - "--schema-file <path> uses that JSON file for both client version and schema generation and performs zero fetches."
+      - "--schema-file and --local are mutually exclusive; passing both exits non-zero with a clear one-line message."
+      - "Missing or invalid --schema-file input exits non-zero with a clear message."
+      - "--local overrides ENEO_BACKEND_URL and INTRIC_BACKEND_URL; otherwise URL mode uses ENEO_BACKEND_URL || INTRIC_BACKEND_URL || http://localhost:8123."
+      - "openapi-typescript is invoked via argv array, not shell interpolation, and keeps --default-non-nullable=false with the existing compatibility rationale preserved."
+      - "New helper functions have concrete JSDoc param/return types and no broad Object/any contracts."
+      - "Tests use Node's built-in test runner and cover CLI precedence, client-version replacement, openapi-typescript argv construction, URL-mode one-fetch/shared-snapshot behavior, schema-file zero-fetch behavior, and conflicting/missing/invalid schema-file errors."
+      - "package.json exposes a focused test script if needed; no broad test framework is introduced."
+      - "README documents the canonical backend snapshot command, schema-file mode, diff-review workflow, CLI precedence, and the caveat that URL mode preserves backend response ordering while byte-identical review should use a saved/canonicalized schema file."
+      - "No source comments/docstrings mention internal tranche IDs or explain obvious code."
+      - "Generated-client determinism is marked closed only if validation passes and schema.d.ts diff stats are inspected; overall score floor remains 8."
+    verify:
+      - "cd frontend/packages/intric-js && bun run test"
+      - "cd frontend/packages/intric-js && bun run check"
+      - "cd frontend/packages/intric-js && bun x prettier --check update.js update.test.js README.md package.json"
+      - "cd frontend/packages/intric-js && bun x eslint update.js update.test.js"
+      - "cd frontend/packages/intric-js && bun x openapi-typescript /tmp/eneo-openapi-t054-fixed.json -o /tmp/eneo-schema-t054-a.d.ts --default-non-nullable=false"
+      - "cd frontend/packages/intric-js && bun x openapi-typescript /tmp/eneo-openapi-t054-fixed.json -o /tmp/eneo-schema-t054-b.d.ts --default-non-nullable=false"
+      - "cmp -s /tmp/eneo-schema-t054-a.d.ts /tmp/eneo-schema-t054-b.d.ts"
+      - "git diff --stat frontend/packages/intric-js/src/types/schema.d.ts"
+      - "git diff --check"
+      - "cd backend && uv run python - <<'PY'; import yaml, pathlib; yaml.safe_load(pathlib.Path('../docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml').read_text()); print('yaml ok'); PY"
+    stop_if:
+      - "Implementation needs backend API schema changes or AI Builder source changes."
+      - "Generated schema diff is broad/unrelated or cannot be explained."
+      - "A viable focused test path requires broad package/test infrastructure."
+      - "The implementation removes or weakens existing default URL behavior."
+      - "Fixed-input openapi-typescript output becomes non-byte-identical after implementation."
+      - "Claude post-implementation review finds a blocker that cannot be fixed within T054 scope."
+    receipt:
+      completed_at: "2026-05-22T17:05:00Z"
+      result: done
+      summary: "Made frontend/packages/intric-js/update.js deterministic and reviewable from one OpenAPI snapshot. URL mode now fetches /openapi.json once, writes a temp eneo-openapi-*.json snapshot, prints that path, and uses the same snapshot for client version replacement and openapi-typescript. Schema-file mode performs zero fetches and lets reviewers regenerate from a saved/canonicalized backend OpenAPI snapshot. openapi-typescript is invoked with spawn argv rather than shell interpolation. No schema.d.ts diff was produced."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t053-next-tranche-ranking.md"
+        - ".codex/artifacts/flow-ai-builder-t054-generated-client-determinism.md"
+        - ".codex/artifacts/claude-peer-loop-t054-generated-client-determinism-implementation-review-20260522T165759Z.md"
+        - ".codex/artifacts/claude-peer-loop-t054-generated-client-determinism-implementation-review-iteration-2-20260522T170201Z.md"
+      files_changed:
+        - "frontend/packages/intric-js/update.js"
+        - "frontend/packages/intric-js/update.test.js"
+        - "frontend/packages/intric-js/package.json"
+        - "frontend/packages/intric-js/README.md"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      peer_review:
+        claude_iteration_1: "GREEN_LIGHT no / MIN_SCORE 7; required restoring --default-non-nullable rationale, trimming speculative exports, removing unused outputPath default/default-param DI, and strengthening snapshot-write assertion."
+        claude_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 8 after fixes; remaining items were optional P3 parser coverage and receipt notes."
+        antigravity: "SKIPPED_DUE_TO_QUOTA per current instruction; not counted as a pass."
+      validation:
+        - "cd frontend/packages/intric-js && bun run test -> 8 passed"
+        - "cd frontend/packages/intric-js && bun run check -> passed with pinned typescript@5.9.3"
+        - "cd frontend/packages/intric-js && bun x prettier --check update.js update.test.js README.md package.json -> passed"
+        - "cd frontend/packages/intric-js && bun x eslint update.js update.test.js -> passed"
+        - "cd frontend/packages/intric-js && bun x openapi-typescript /tmp/eneo-openapi-t054-fixed.json -o /tmp/eneo-schema-t054-a.d.ts --default-non-nullable=false -> passed"
+        - "cd frontend/packages/intric-js && bun x openapi-typescript /tmp/eneo-openapi-t054-fixed.json -o /tmp/eneo-schema-t054-b.d.ts --default-non-nullable=false -> passed"
+        - "cmp -s /tmp/eneo-schema-t054-a.d.ts /tmp/eneo-schema-t054-b.d.ts; printf 'cmp_exit=%s\\n' $? -> cmp_exit=0"
+        - "git diff --stat frontend/packages/intric-js/src/types/schema.d.ts -> no output"
+        - "git diff --check -> passed"
+        - "cd backend && uv run python - <<'PY' ... yaml.safe_load(...) -> yaml ok"
+        - "rg for external update.js imports -> only package script, README, and update.test.js"
+      codex_self_review:
+        verdict: "pass for the approved tranche. The implementation keeps one generator owner, removes live double-fetch and shell interpolation, tests the core invariant, and avoids generated schema churn."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "The real node update.js --schema-file mutation path was not run against the working tree to avoid rewriting client.js/schema.d.ts; schema-file behavior is covered by unit tests and generator determinism by fixed-input probe."
+        - "JSDoc types in update.js are not enforced by the package type-smoke check; this is acceptable for the build script but remains below fully typed source quality."
+        - "Proposal submission test topology, live eval underlag assertions, and source-material label cleanup remain candidates for the next score-moving tranche."
+      score_impact: "Closes generated-client regeneration determinism as a named blocker. Does not raise the strict overall score floor above 8."
+
+  - id: T055
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T054 closed generated-client regeneration determinism."
+    inputs:
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t054-generated-client-determinism.md"
+      - ".codex/artifacts/claude-peer-loop-t054-generated-client-determinism-implementation-review-iteration-2-20260522T170201Z.md"
+      - "backend/src/intric/flows/ai_builder"
+      - "backend/tests/unittests/flows/ai_builder"
+      - "backend/scripts/flow_ai_builder_live_eval.py"
+    constraints:
+      - "Read-only judge task; do not implement the next tranche until the revised plan is peer-gated."
+      - "Compare proposal submission test-topology cleanup, source-material/live-eval underlag assertion gaps, repeated authenticated live eval, full-source typing/test baseline, and any remaining topology/readability blockers."
+      - "Do not select work merely because it reduces LOC; select the tranche that most plausibly moves one of the remaining 8/10 dimensions toward 9."
+      - "If selecting proposal test-topology cleanup, use the T053 corrected acceptance criteria: proposal_turn_builders.py, public-behavior assertions, no private finalizer reach-through, typed builders, no fixture dump, no score inflation."
+      - "Do not start broad observability/DX work until the OpenTelemetry branch is reviewed."
+      - "Antigravity remains SKIPPED_DUE_TO_QUOTA unless explicitly re-enabled or quota is confirmed."
+    expected_output:
+      - "Current score-floor blockers after T054."
+      - "Ranked options with rejected alternatives."
+      - "Selected next worker objective."
+      - "Allowed files, acceptance criteria, verification commands, stop conditions, and peer-gate requirements."
+      - "Whether the selected tranche can move any 8/10 dimension to 9, or why the floor stays 8."
     receipt: null
 
 checks:
@@ -5422,13 +5568,14 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T052 completed and Claude-approved after post-implementation review. Active task is now T053 judge: re-rank the next highest-score-moving tranche after the processor dropped to 560 LOC. Broader goal remains active with strict floor 8/10."
-    task: T052
+    result: "T054 completed and Claude-approved after post-implementation review. Generated-client regeneration determinism is closed without schema.d.ts churn. Active task is now T055 judge: re-rank the next highest-score-moving tranche after generated-client tooling was hardened. Broader goal remains active with strict floor 8/10."
+    task: T054
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q -> 82 passed"
-      - "cd backend && uv run ruff check touched T052 source/test files -> passed"
-      - "cd backend && uv run ruff format --check touched T052 source/test files -> passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2305 passed, 4 skipped, 11 warnings"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
+      - "cd frontend/packages/intric-js && bun run test -> 8 passed"
+      - "cd frontend/packages/intric-js && bun run check -> passed with pinned typescript@5.9.3"
+      - "cd frontend/packages/intric-js && bun x prettier --check update.js update.test.js README.md package.json -> passed"
+      - "cd frontend/packages/intric-js && bun x eslint update.js update.test.js -> passed"
+      - "cmp -s /tmp/eneo-schema-t054-a.d.ts /tmp/eneo-schema-t054-b.d.ts -> cmp_exit=0"
+      - "git diff --stat frontend/packages/intric-js/src/types/schema.d.ts -> no output"
       - "git diff --check -> passed"
-      - "Claude commit gate: .codex/artifacts/claude-peer-loop-t052-proposal-submission-owner-implementation-review-20260522T154631Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Claude commit gate: .codex/artifacts/claude-peer-loop-t054-generated-client-determinism-implementation-review-iteration-2-20260522T170201Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
