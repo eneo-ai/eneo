@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T037
+active_task: T038
 
 scoring_target:
   dimensions:
@@ -4156,7 +4156,7 @@ tasks:
   - id: T037
     type: pm
     assignee: PM
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T036, comparing processor topology/readability, description-repair telemetry accounting, generated-client determinism, full-source Pyright baseline, repeated live-eval proof, and finalizer telemetry-closure cleanup."
     inputs:
@@ -4180,6 +4180,76 @@ tasks:
       - "git status --short --branch"
       - "Review T036 receipt and current scorecard"
       - "Produce .codex/artifacts/flow-ai-builder-t037-next-tranche-ranking.md"
+    receipt:
+      completed_at: "2026-05-22T08:45:12+02:00"
+      summary: "Re-ranked the next tranche after T036. Selected T038 for typed proposal-completion telemetry cleanup because edit-description repair currently bypasses proposal telemetry and the processor still has type-erased **kwargs completion wrappers. The plan explicitly does not claim to move the overall score floor past 8 because AIBuilderProposalProcessor topology/readability remains the maintainability anchor. Rejected broad processor topology for the immediate next tranche only because T038 is a cheap production telemetry correctness fix; topology remains the likely next score-floor tranche."
+      artifact: ".codex/artifacts/flow-ai-builder-t037-next-tranche-ranking.md"
+      peer_review:
+        claude:
+          iteration_1_artifact: ".codex/artifacts/claude-peer-loop-t037-next-flow-ai-builder-tranche-ranking-20260522T063752Z.md"
+          iteration_1_result: "VERDICT changes_required; GREEN_LIGHT no; MIN_SCORE 7"
+          codex_response: "Accepted blockers: commit counts_as_repair semantics, stop overstating score-floor movement, broaden structural guards, add edge-case tests, include import ownership test explicitly, and record topology/readability as still 8/10 after T038."
+          iteration_2_artifact: ".codex/artifacts/claude-peer-loop-t037-next-flow-ai-builder-tranche-ranking-iteration-2-20260522T064119Z.md"
+          iteration_2_result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t037-next-flow-ai-builder-tranche-ranking-20260522T064413Z.md"
+          result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
+          codex_response: "Accepted implementation-specific notes: remove the remaining **kwargs Any retry_forced_tool_after_text closure, use a pytest static guard rather than shell-only checks, verify fallback estimated token behavior, and audit retry_forced_proposal_after_text/request_non_question_continuation completion paths."
+      selected_worker: T038
+
+  - id: T038
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Make proposal-completion telemetry explicit and typed by replacing type-erased completion wrappers with one usage-tracked ProposalCompletionFn factory and by recording edit-description repair completion tokens without incrementing self-correction repair_attempts."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t037-next-tranche-ranking.md"
+      - ".codex/artifacts/claude-peer-loop-t037-next-flow-ai-builder-tranche-ranking-iteration-2-20260522T064119Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t037-next-flow-ai-builder-tranche-ranking-20260522T064413Z.md"
+      - "Current scorecard floor 8/10"
+    constraints:
+      - "Implement the peer-approved T038 plan exactly; do not broaden into processor topology splitting, generated-client determinism, full-source Pyright baseline, live eval, or finalizer telemetry-closure cleanup."
+      - "Add RED tests first proving edit-description repair completion usage is currently unrecorded."
+      - "Description-repair completion usage records token totals but does not increment repair_attempts."
+      - "Self-correction and forced-tool retry repair completions keep counts_as_repair=True semantics."
+      - "Remove all **kwargs: Any wrappers from ai_builder_proposal_processor.py, including the retry_forced_tool_after_text closure in _request_tool_self_correction."
+      - "Do not add a new completion service/module or wrapper class in this tranche."
+      - "Preserve unrelated dirty files."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t038-implementation-summary.md"
+    acceptance_criteria:
+      - "A single typed private method, named like _make_usage_tracked_completion_fn, returns ProposalCompletionFn callables."
+      - "The returned callable spells out the full ProposalCompletionFn keyword-only signature; no **kwargs forwarding."
+      - "Direct and retry edit-description repair paths pass a usage-aware completion callable, not raw self.call_proposal_completion."
+      - "Existing self-correction and forced-tool retry paths no longer define local async def _call_proposal_completion(**kwargs: Any) wrappers."
+      - "The _request_tool_self_correction retry_forced_tool_after_text closure no longer uses **kwargs: Any and spells out its keyword-only arguments."
+      - "rg '**kwargs: Any' in ai_builder_proposal_processor.py returns zero matches."
+      - "litellm_client.acompletion appears exactly once in ai_builder_proposal_processor.py, inside call_proposal_completion."
+      - "Audit proves retry_forced_proposal_after_text and request_non_question_continuation flow through usage-tracked completion pipelines."
+      - "No public API, DB, Celery, generated-client, live-eval, prompt, finalization, or edit-repair eligibility behavior changes."
+      - "The overall score floor remains 8 after T038 unless topology/readability evidence changes; do not inflate the board."
+    verify:
+      - "RED first: focused processor tests for direct and retry edit-description repair telemetry must fail before source edits."
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check <T038 changed backend files/tests>"
+      - "cd backend && uv run ruff format --check <T038 changed backend files/tests>"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "rg \"\\*\\*kwargs: Any\" backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "rg \"litellm_client\\.acompletion\" backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "rg -n \"self\\.call_proposal_completion|call_proposal_completion=\" backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "git diff --check"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+    stop_if:
+      - "Telemetry semantics require counting description repair as repair_attempts and peers have not reviewed that change."
+      - "The implementation needs a new completion service/module or wrapper class."
+      - "The implementation touches public API, DB, Celery, generated clients, live eval, prompt behavior, or finalizer ownership."
+      - "A hidden untracked completion path is found that expands scope beyond the approved processor/test slice."
 
 checks:
   dirty_fingerprint:
@@ -4187,17 +4257,14 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T036 completed and T037 activated. T036 moves constrained edit-description repair ownership into ai_builder_edit_repair.py, removes ProposalCompletionFn and LLM repair fields from CompiledProposalFinalizer/CompiledProposalFinalizationRequest, keeps process_edit_arguments compile-only, and adds behavior plus AST ownership tests. Focused tests passed, full AI Builder unit tests passed, strict Pyright for src/intric/flows/ai_builder passed, Claude post-review returned GREEN_LIGHT yes / MIN_SCORE 8, and Antigravity post-review returned GREEN_LIGHT yes / MIN_SCORE 9. The broader goal remains active with strict floor 8/10 because processor topology/readability, generated-client determinism, full-source baseline, repeated live-eval proof, and telemetry-accounting decisions still block 9/10."
-    task: T036
+    result: "T037 completed and T038 activated. T037 ranked the next tranche after T036 and selected typed proposal-completion telemetry cleanup only after Claude iteration 2 returned GREEN_LIGHT yes / MIN_SCORE 8 and Antigravity returned GREEN_LIGHT yes / MIN_SCORE 8 on the same revised plan. The broader goal remains active with strict floor 8/10 because T038 is a bounded runtime telemetry/type cleanup slice and does not resolve the processor topology/readability floor, generated-client determinism, full-source baseline, or repeated live-eval proof."
+    task: T037
     commands:
-      - "git status --short --branch: branch feature/refactor-flows-flowai ahead 32 during T036; unrelated .devcontainer/.gitignore/AGENTS/icons/media files preserved unstaged"
-      - "RED first: cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q: failed before production edits for finalizer repair imports and request LLM fields"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_finalization.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q: 70 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2267 passed, 4 skipped, 11 warnings"
-      - "cd backend && uv run ruff check <T036 changed backend files/tests>: passed"
-      - "cd backend && uv run ruff format --check <T036 changed backend files/tests>: passed"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder: 0 errors, 0 warnings, 0 informations"
-      - "git diff --check: passed"
+      - "git status --short --branch: branch feature/refactor-flows-flowai ahead 33 during T037; no staged files before board update; unrelated .devcontainer/.gitignore/AGENTS/media files preserved unstaged"
+      - "Produce .codex/artifacts/flow-ai-builder-t037-next-tranche-ranking.md"
+      - "Claude iteration 1 on T037 ranking: changes_required; GREEN_LIGHT no; MIN_SCORE 7"
+      - "Claude iteration 2 on revised T037 ranking: VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
+      - "Antigravity on same revised T037 ranking: VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
       - "ruby YAML parse of state.yaml: yaml ok"
       - "git diff --check: passed"
       - "Static negative rg checks for finalizer/processor imports, proposal-policy feedback cycle, old processor-owned finalization names, stale processor store_plan patches, and phase/slop markers: passed"
