@@ -78,11 +78,10 @@ class Transcriber:
                 language=language,
             )
 
-            # Store the transcription in the file object
-            file.transcription = result
+            if language is None:
+                file.transcription = result
 
-            # If we have a repository, update the file in the database
-            if self.file_repo:
+            if language is None and self.file_repo:
                 await self.file_repo.update(file)
         finally:
             if temp_file_path is not None:
@@ -182,4 +181,4 @@ class Transcriber:
         adapter = await self._get_adapter(transcription_model)
 
         async with audio.to_wav(str(filepath)) as wav_file:
-            return await adapter.get_text_from_file(wav_file)
+            return await adapter.get_text_from_file(wav_file, language=language)

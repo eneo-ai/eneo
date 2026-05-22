@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -44,8 +45,36 @@ async def test_transcriber_bypasses_cache_for_explicit_language():
     result = await transcriber.transcribe(file, model, language="sv")
 
     assert result == "sv-transcript"
-    assert file.transcription == "sv-transcript"
+    assert file.transcription == "cached-transcript"
     transcriber.transcribe_from_filepath.assert_awaited_once()
+    file_repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_transcriber_explicit_language_does_not_fill_auto_cache():
+    file_repo = AsyncMock()
+    transcriber = Transcriber(file_repo=file_repo)
+    transcriber.transcribe_from_filepath = AsyncMock(
+        side_effect=["sv-transcript", "auto-transcript"]
+    )
+
+    file = SimpleNamespace(
+        blob=b"audio-bytes",
+        mimetype="audio/wav",
+        transcription=None,
+    )
+    model = SimpleNamespace(name="whisper-1")
+
+    explicit_result = await transcriber.transcribe(file, model, language="sv")
+    auto_result = await transcriber.transcribe(file, model, language=None)
+
+    assert explicit_result == "sv-transcript"
+    assert auto_result == "auto-transcript"
+    assert file.transcription == "auto-transcript"
+    assert [
+        call.kwargs["language"]
+        for call in transcriber.transcribe_from_filepath.await_args_list
+    ] == ["sv", None]
     file_repo.update.assert_awaited_once_with(file)
 
 
@@ -69,6 +98,32 @@ async def test_transcriber_auto_language_without_cache_persists_result():
     assert transcriber.transcribe_from_filepath.await_args.kwargs["language"] is None
     assert file.transcription == "new-transcript"
     file_repo.update.assert_awaited_once_with(file)
+
+
+@pytest.mark.parametrize("language", ["sv", "en", None])
+@pytest.mark.asyncio
+async def test_transcribe_from_filepath_passes_language_to_adapter(
+    monkeypatch, tmp_path, language
+):
+    transcriber = Transcriber(file_repo=AsyncMock())
+    adapter = SimpleNamespace(get_text_from_file=AsyncMock(return_value="transcript"))
+    transcriber._get_adapter = AsyncMock(return_value=adapter)
+    wav_file = SimpleNamespace(name="converted.wav")
+
+    @asynccontextmanager
+    async def fake_to_wav(_filepath):
+        yield wav_file
+
+    monkeypatch.setattr("intric.files.transcriber.audio.to_wav", fake_to_wav)
+
+    result = await transcriber.transcribe_from_filepath(
+        filepath=tmp_path / "input.wav",
+        transcription_model=SimpleNamespace(name="whisper-1"),
+        language=language,
+    )
+
+    assert result == "transcript"
+    adapter.get_text_from_file.assert_awaited_once_with(wav_file, language=language)
 
 
 @pytest.mark.asyncio
