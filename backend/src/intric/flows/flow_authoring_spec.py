@@ -139,6 +139,25 @@ def completion_model_ref_was_stripped(
     )
 
 
+def completion_model_ref_strip_log_extra(
+    *,
+    supplied_model_ref: str | None,
+    validated_step: StepSpec,
+    source: str,
+) -> dict[str, str | None] | None:
+    if not completion_model_ref_was_stripped(
+        supplied_model_ref=supplied_model_ref,
+        validated_step=validated_step,
+    ):
+        return None
+    return {
+        "plan_step_ref": validated_step.plan_step_ref,
+        "existing_step_ref": validated_step.existing_step_ref,
+        "source": source,
+        "output_mode": validated_step.output_mode.value,
+    }
+
+
 _VALID_FORM_FIELD_TYPES = {"text", "number", "date", "select", "multiselect"}
 
 _FORM_FIELD_TYPE_COERCIONS: dict[str, str] = {
@@ -212,6 +231,7 @@ __all__ = [
     "OutputMode",
     "OutputType",
     "StepSpec",
+    "completion_model_ref_strip_log_extra",
     "completion_model_ref_was_stripped",
     "strip_inapplicable_completion_model",
 ]

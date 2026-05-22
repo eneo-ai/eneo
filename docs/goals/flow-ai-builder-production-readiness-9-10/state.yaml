@@ -124,6 +124,73 @@ interruptions:
         - "No DB integration test proves SQL-level assistant completion_model_id clearing; unit coverage proves command shape, service sentinel semantics, and Assistant.update behavior. Add an integration test if this path regresses in a real DB scenario."
         - "The broader 9/10 goal remains incomplete; T055 must resume to re-rank the next highest-score-moving tranche."
       score_impact: "Improves Single Source of Truth, Human Reviewability, Runtime Reliability, Developer Diagnostic Experience, and Normal-User Output Quality for the live transcribe-only model confusion. Does not raise the strict overall score floor above 8 because broader topology/readability, full-source typing/check baseline, and repeated live-eval evidence still block a defensible 9."
+  - id: I003
+    kind: live_bug_hotfix
+    status: completed
+    reported_at: "2026-05-22T19:00:00Z"
+    summary: "After I002, a valid selected-step model change worked, then a later planner turn crashed upstream because persisted AI Builder conversation history contained a synthetic tool_call id longer than the OpenAI provider limit: `server_scoped_model_revision:{uuid}` is 65 chars while OpenAI accepts max 64."
+    decision: "Pause T055 again and implement a narrow backwards-compatible provider contract fix: normalize persisted AI Builder tool_call ids at provider-bound serialization, generate bounded ids for new server-created synthetic tool calls, and return clear selected-step unknown-model notices instead of letting invalid model-edit requests fall into planner/self-correction/upstream failure paths."
+    constraints:
+      - "Do not implement a prefix-shortening-only patch; existing sessions may already contain 65-char tool_call ids in persisted conversation history."
+      - "Do not mutate persisted conversation data unless a stronger reason appears; prefer provider-bound serialization normalization."
+      - "Do not add broad observability, new diagnostic schema, DB migration, model selector redesign, OpenTelemetry work, or public API changes."
+      - "Keep transcribe-only model notices separate from completion-step unknown-model notices."
+      - "Preserve unrelated dirty files."
+    peer_gate_status:
+      claude_live_error_review: "GREEN_LIGHT no / MIN_SCORE 6 after I002; requested small cleanup before T055 resumes but I003 live provider contract bug has priority."
+      antigravity_live_error_review: "GREEN_LIGHT no / MIN_SCORE 6; required two-pronged fix: provider-bound outbound normalization for historical invalid ids plus bounded canonical generation for new server-created synthetic tool_call ids."
+      codex_plan: "Adopt the reviewed two-pronged fix and keep I002 cleanup limited to small, reviewable changes: router preservation test for non-null deprecated completion_model, strip-log helper dedupe, and removal/justification of requires_completion_model non-enum defensive check."
+      claude_final_gate: "GREEN_LIGHT yes / MIN_SCORE 8 after Antigravity blocker fixes and broader test-hygiene fixes; artifact .codex/artifacts/claude-peer-loop-i003-provider-safe-ai-builder-tool-call-ids-final-after-test-fixes-20260522T195248Z.md."
+      antigravity_final_gate: "GREEN_LIGHT yes / MIN_SCORE 9 after blocker fixes; artifact .codex/artifacts/antigravity-peer-loop-i003-provider-safe-ai-builder-tool-call-ids-final-after-test-fixes-20260522T195511Z.md."
+    acceptance:
+      - "A canonical AI Builder conversation-contract owner defines the provider max tool_call id length and provider-safe id mapping."
+      - "Provider-bound planner serialization preserves ids already <=64 chars and deterministically maps ids >64 chars to a <=64-char id."
+      - "Mapped assistant tool_calls[i].id and matching tool message tool_call_id stay equal after normalization."
+      - "The old exact bad id shape `server_scoped_model_revision:{uuid}` cannot be sent to OpenAI unchanged."
+      - "New server-created scoped model revision tool_call ids are generated bounded and always <=64 chars."
+      - "No planner request can contain a tool_call id >64 in the covered serialization path."
+      - "Selected completion-step unknown-model edits return a clear notice derived from resource catalog state instead of falling through to generic planner/upstream failure."
+      - "Transcribe-only selected-step model edit notice behavior remains separate."
+      - "Small I002 cleanup is included only if it remains narrow: non-null deprecated completion_model router preservation test, strip-log helper dedupe, and removal or explicit justification of defensive non-enum requires_completion_model runtime check."
+    validation_required:
+      - "Focused backend tests for AI Builder conversation metadata/planner serialization provider-safe tool_call ids."
+      - "Focused backend tests for scoped model revision submission id generation and selected-step model-edit behavior."
+      - "Focused backend tests for assistant_router deprecated completion_model preservation, and touched compiler/materializer tests if cleanup touches them."
+      - "Ruff check/format on touched backend files."
+      - "Pyright on touched AI Builder and assistant files."
+      - "git diff --check."
+      - "Live authenticated smoke if local service is available after restart: valid selected-step model change, follow-up planner turn without OpenAI 400, then non-existent model notice."
+    receipt:
+      completed_at: "2026-05-22T19:56:00Z"
+      summary: "Closed the live provider-contract bug by giving AI Builder tool_call id length one canonical conversation-contract owner, normalizing oversized persisted and retry-message tool_call ids at provider-bound serialization, generating bounded server-created scoped-model-revision ids, and returning clear selected-step unknown-model notices only when completion-step text explicitly asks for a model change. Also completed the small I002 cleanup items that stayed narrow: assistant router deprecated completion_model preservation, transcribe-only strip-log payload dedupe, removal of the defensive requires_completion_model non-enum check, and two test-hygiene fixes surfaced by broader validation."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-i003-provider-safe-tool-call-ids-implementation-summary.md"
+        - ".codex/artifacts/claude-peer-loop-i003-provider-safe-ai-builder-tool-call-ids-final-after-test-fixes-20260522T195248Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-i003-provider-safe-ai-builder-tool-call-ids-final-after-test-fixes-20260522T195511Z.md"
+      validation:
+        - "Red tests before implementation failed as expected on missing provider-safe id owner/imports."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_ai_builder_service.py::TestSendMessageToolCall tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/assistants/test_assistant_router.py tests/unittests/flows/test_flow_capability_manifest.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py -q -> 599 passed, 33 warnings."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2322 passed, 4 skipped, 11 warnings."
+        - "cd backend && uv run pytest tests/unittests/assistants/test_assistant_router.py tests/unittests/flows/test_flow_capability_manifest.py -q -> 370 passed, 33 warnings."
+        - "cd backend && uv run ruff check touched backend files -> passed."
+        - "cd backend && uv run ruff format --check touched backend files -> passed."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder src/intric/flows/flow_authoring_spec.py src/intric/flows/flow_capability_manifest.py src/intric/assistants -> 0 errors, 0 warnings."
+        - "git diff --check -> passed."
+      live_smoke:
+        status: "not_run"
+        reason: "No backend/frontend restart and authenticated browser smoke was performed in this turn. Unit/replay coverage proves the provider-bound serialization failure mode; live smoke remains a recommended post-commit check."
+      codex_self_review:
+        verdict: "pass for I003. The implementation fixes the root provider-bound contract without mutating persisted conversation data, keeps model-edit heuristic ownership in ai_builder_plan_edit_context, avoids new observability/API/data-model surface, and keeps unrelated dirty files out of scope."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "Live authenticated smoke remains pending after local service restart."
+        - "Provider-safe mapping protects current serialization seams, but a future cleanup should route remaining bounded synthetic id constructors such as call_text_* and discovery_* through make_provider_safe_server_tool_call_id for construction-time discipline."
+        - "ai_builder_plan_edit_context can be simplified by collapsing duplicate catalog-model guards after the Antigravity false-positive fix; not needed for I003 correctness."
+        - "build_tool_retry_messages still uses the pre-existing Any boundary for provider tool calls; a small follow-up can tighten it to RuntimeToolCall."
+        - "The broader 9/10 goal remains incomplete; T055 resumes to re-rank the next highest-score-moving tranche."
+      score_impact: "Improves Runtime Reliability, Human Reviewability, Developer Diagnostic Experience, and Normal-User Output Quality for a live session-breaking provider-contract bug. Does not raise the strict overall score floor above 8 because broader topology/readability, full-source typing/check baseline, and repeated live-eval evidence still block a defensible 9."
 
 scoring_target:
   dimensions:
@@ -5631,7 +5698,8 @@ tasks:
       - "Whether the selected tranche can move any 8/10 dimension to 9, or why the floor stays 8."
     receipt:
       interrupted_at: "2026-05-22T13:32:07Z"
-      reason: "Live UX/DX/SSoT bug I002 preempts the read-only next-tranche ranking. T055 remains incomplete and should resume after I002 is committed or explicitly blocked."
+      resumed_at: "2026-05-22T19:56:00Z"
+      reason: "Live provider-contract bug I003 preempted the read-only next-tranche ranking after I002. I003 is now validated and peer-gated, so T055 is the active next board task again after the I003 commit."
 
 checks:
   dirty_fingerprint:
@@ -5639,15 +5707,16 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "I002 live bug follow-up completed and ready for scoped commit. Claude implementation gate passed GREEN_LIGHT yes / MIN_SCORE 8. Antigravity was available and passed the final implementation gate GREEN_LIGHT yes / MIN_SCORE 9. Broader goal remains active with strict floor 8/10; T055 is active again for next-tranche ranking."
-    task: I002
+    result: "I003 live provider-contract hotfix is validated and peer-gated; T055 read-only next-tranche ranking is active again. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: I003
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/test_flow_capability_manifest.py tests/unittests/flows/test_flow_authoring_spec.py tests/unittests/flows/test_flow_service.py tests/unittests/assistants/test_assistant.py tests/unittests/assistants/test_assistants_service.py tests/unittests/assistants/test_assistant_router.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py tests/unittests/flows/test_flow_draft_materialization_executor.py -q -> 689 passed, 30 warnings"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_ai_builder_service.py::TestSendMessageToolCall tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/assistants/test_assistant_router.py tests/unittests/flows/test_flow_capability_manifest.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py -q -> 599 passed, 33 warnings"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2322 passed, 4 skipped, 11 warnings"
+      - "cd backend && uv run pytest tests/unittests/assistants/test_assistant_router.py tests/unittests/flows/test_flow_capability_manifest.py -q -> 370 passed, 33 warnings"
       - "cd backend && uv run ruff check touched backend source/test files -> passed"
       - "cd backend && uv run ruff format --check touched backend source/test files -> passed"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows src/intric/assistants -> 0 errors"
-      - "cd frontend/apps/web && bun run i18n:compile -> passed"
-      - "cd frontend/apps/web && ../../node_modules/.bin/vitest run FlowAIBuilderStepCard -> 5 passed"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder src/intric/flows/flow_authoring_spec.py src/intric/flows/flow_capability_manifest.py src/intric/assistants -> 0 errors"
+      - "git diff --check -> passed"
       - "cd frontend/apps/web && ../../node_modules/.bin/prettier --check touched frontend files -> passed"
       - "cd frontend/apps/web && ../../node_modules/.bin/eslint touched AI Builder frontend files -> passed"
       - "cd frontend/apps/web && bun run check -> fails only on existing non-I002 diagnostics in frontend/packages/intric-js/src/client/stream.js and ExtendExpirationDialog.svelte"

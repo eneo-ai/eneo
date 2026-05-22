@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
     make_persisted_assistant_tool_call,
 )
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
@@ -46,6 +47,30 @@ def test_build_tool_retry_messages_appends_tool_call_and_feedback() -> None:
         "tool_call_id": "call_1",
         "content": "Please fix the draft.",
     }
+
+
+def test_build_tool_retry_messages_normalizes_oversized_tool_call_ids() -> None:
+    legacy_id = "server_scoped_model_revision:00000000-0000-0000-0000-000000000000"
+    assert len(legacy_id) == PROVIDER_TOOL_CALL_ID_MAX_LENGTH + 1
+    tool_call = SimpleNamespace(
+        id=legacy_id,
+        function=SimpleNamespace(
+            name=OUTLINE_FLOW_TOOL_NAME,
+            arguments='{"flow_name":"Draft"}',
+        ),
+    )
+
+    messages = build_tool_retry_messages(
+        llm_messages=[{"role": "system", "content": "Prompt"}],
+        tool_call=tool_call,
+        tool_feedback="Please fix the draft.",
+    )
+
+    assistant_id = messages[1]["tool_calls"][0]["id"]
+    tool_result_id = messages[2]["tool_call_id"]
+    assert assistant_id == tool_result_id
+    assert assistant_id != legacy_id
+    assert len(assistant_id) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH
 
 
 def test_make_persisted_assistant_tool_call_returns_canonical_tool_shape() -> None:

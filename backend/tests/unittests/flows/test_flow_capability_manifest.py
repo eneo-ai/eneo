@@ -276,11 +276,6 @@ def test_requires_completion_model_rejects_transcribe_only(
     assert requires_completion_model(output_mode) is expected
 
 
-def test_requires_completion_model_rejects_non_enum() -> None:
-    with pytest.raises(TypeError, match="output_mode must be FlowOutputMode"):
-        requires_completion_model("transcribe_only")  # type: ignore[arg-type]
-
-
 def test_input_text_has_no_absorbed_invariants() -> None:
     """Positive guardrail: `input_text` has `contract_allowed=True`,
     `requires_extraction=False`, `requires_files=False` → zero absorbed

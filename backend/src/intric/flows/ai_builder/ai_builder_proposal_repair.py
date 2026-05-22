@@ -6,6 +6,9 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 from uuid import uuid4
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    provider_safe_tool_call_id,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
@@ -244,13 +247,14 @@ def build_tool_retry_messages(
     tool_feedback: str,
     assistant_content: str | None = None,
 ) -> list[dict[str, Any]]:
+    tool_call_id = provider_safe_tool_call_id(tool_call.id)
     return list(llm_messages) + [
         {
             "role": "assistant",
             "content": assistant_content,
             "tool_calls": [
                 {
-                    "id": tool_call.id,
+                    "id": tool_call_id,
                     "type": "function",
                     "function": {
                         "name": tool_call.function.name,
@@ -261,7 +265,7 @@ def build_tool_retry_messages(
         },
         {
             "role": "tool",
-            "tool_call_id": tool_call.id,
+            "tool_call_id": tool_call_id,
             "content": tool_feedback,
         },
     ]

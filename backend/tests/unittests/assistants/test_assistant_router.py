@@ -24,7 +24,7 @@ from intric.assistants.api.assistant_router import ask_assistant, update_assista
 from intric.assistants.assistant import AssistantOrigin
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-from intric.main.models import NOT_PROVIDED
+from intric.main.models import NOT_PROVIDED, ModelId
 from intric.sessions.session import SessionInDB
 
 
@@ -369,6 +369,32 @@ class TestUpdateAssistant:
         await update_assistant(
             id=assistant_id,
             assistant=AssistantUpdatePublic(name="Renamed", completion_model=None),
+            container=mock_container,
+        )
+
+        assert (
+            service.update_assistant.await_args.kwargs["completion_model_id"]
+            is NOT_PROVIDED
+        )
+
+    async def test_preserves_completion_model_when_deprecated_field_is_non_null(
+        self,
+        mock_container,
+    ):
+        assistant_id = uuid.uuid4()
+        old_assistant = _router_assistant(assistant_id)
+        updated_assistant = _router_assistant(assistant_id)
+        service = mock_container.assistant_service.return_value
+        service.get_assistant.return_value = (old_assistant, [])
+        service.update_assistant.return_value = (updated_assistant, [])
+        mock_container.assistant_assembler.return_value.from_assistant_to_model.return_value = MagicMock()
+
+        await update_assistant(
+            id=assistant_id,
+            assistant=AssistantUpdatePublic(
+                name="Renamed",
+                completion_model=ModelId(id=uuid.uuid4()),
+            ),
             container=mock_container,
         )
 

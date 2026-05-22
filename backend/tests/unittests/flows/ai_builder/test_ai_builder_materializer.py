@@ -2682,6 +2682,7 @@ class TestExecuteResultCounting:
         mock_assistant.id = uuid4()
         mock_flow_service.create_flow_assistant.return_value = (mock_assistant, [])
         mock_flow_service.update_flow_assistant.return_value = (mock_assistant, [])
+        mod_assistant_id = uuid4()
 
         changeset = FlowChangeSet(
             flow_name="Test",
@@ -2694,7 +2695,7 @@ class TestExecuteResultCounting:
             assistants_to_update=[
                 AssistantToUpdate(
                     existing_step_id=uuid4(),
-                    existing_assistant_id=uuid4(),
+                    existing_assistant_id=mod_assistant_id,
                     assistant_spec=AssistantSpec(instructions="y"),
                 ),
             ],
@@ -2707,7 +2708,7 @@ class TestExecuteResultCounting:
                     plan_step_ref="mod",
                     step_order=1,
                     change_kind=StepChangeKind.MODIFIED,
-                    assistant_id=uuid4(),
+                    assistant_id=mod_assistant_id,
                 ),
                 _compiled_step(
                     plan_step_ref="new", step_order=2, change_kind=StepChangeKind.ADDED

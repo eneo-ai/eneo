@@ -8,6 +8,7 @@ contract has one owner.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal, Protocol, TypeAlias, cast, get_args
@@ -53,6 +54,7 @@ FILE_IDS_METADATA_KEY = "file_ids"
 EDIT_CONTEXT_METADATA_KEY = "edit_context"
 ASSISTANT_QUESTION_ID_METADATA_KEY = "question_id"
 SLOT_CLASSIFICATION_METADATA_KEY = "slot_classification"
+PROVIDER_TOOL_CALL_ID_MAX_LENGTH = 64
 
 JsonScalar: TypeAlias = str | int | float | bool | None
 LLMResolvableSlotName: TypeAlias = Literal[
@@ -219,6 +221,31 @@ class PersistedAssistantToolCall(BaseModel):
             if isinstance(parsed, dict):
                 payload["arguments"] = parsed
         return payload
+
+
+def provider_safe_tool_call_id(tool_call_id: str) -> str:
+    if len(tool_call_id) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH:
+        return tool_call_id
+    digest = hashlib.sha256(tool_call_id.encode("utf-8")).hexdigest()[:32]
+    return f"tc_{digest}"
+
+
+def make_provider_safe_server_tool_call_id(
+    *,
+    kind: str,
+    stable_key: str,
+) -> str:
+    kind_part = _tool_call_id_segment(kind, max_length=22) or "tool"
+    key_part = _tool_call_id_segment(stable_key, max_length=12) or "key"
+    digest = hashlib.sha256(f"{kind}:{stable_key}".encode("utf-8")).hexdigest()[:16]
+    return provider_safe_tool_call_id(f"srv_{kind_part}_{key_part}_{digest}")
+
+
+def _tool_call_id_segment(value: str, *, max_length: int) -> str:
+    compact = "".join(
+        char.casefold() for char in value if char.isalnum() or char in {"_", "-"}
+    ).strip("_-")
+    return compact[:max_length]
 
 
 class RuntimeToolFunction(Protocol):

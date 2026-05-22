@@ -181,6 +181,47 @@ def test_scoped_model_revision_pass_through_without_model_word_does_not_short_ci
     assert result is None
 
 
+def test_scoped_model_revision_completion_step_unknown_model_returns_notice() -> None:
+    result = resolve_scoped_step_model_revision_if_requested(
+        context=_step_context(),
+        prior_spec=_spec(model_ref="model.gpt-4o-mini"),
+        latest_user_text="Ändra modell till gpt 5.5",
+        resource_catalog=_catalog(),
+    )
+
+    assert isinstance(result, ScopedStepModelNotice)
+    assert "hittar inte den modellen" in result.message
+    assert "modellväljaren" in result.message
+
+
+def test_scoped_model_revision_completion_step_unknown_model_uses_english_notice() -> (
+    None
+):
+    result = resolve_scoped_step_model_revision_if_requested(
+        context=_step_context(),
+        prior_spec=_spec(model_ref="model.gpt-4o-mini"),
+        latest_user_text="Change model to gpt 5.5",
+        resource_catalog=_catalog(),
+    )
+
+    assert isinstance(result, ScopedStepModelNotice)
+    assert "cannot find that model" in result.message
+    assert "model picker" in result.message
+
+
+def test_scoped_model_revision_completion_step_does_not_hijack_prompt_edit_with_model_family_word() -> (
+    None
+):
+    result = resolve_scoped_step_model_revision_if_requested(
+        context=_step_context(),
+        prior_spec=_spec(model_ref="model.gpt-4o-mini"),
+        latest_user_text="Byt till gpt kod för den här funktionen",
+        resource_catalog=_catalog(),
+    )
+
+    assert result is None
+
+
 def test_scoped_model_revision_transcribe_only_ignores_prompt_edit_with_model_family_word() -> (
     None
 ):

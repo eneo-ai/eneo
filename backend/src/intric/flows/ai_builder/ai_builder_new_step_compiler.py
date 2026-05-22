@@ -14,7 +14,7 @@ from intric.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
     StepSpec,
-    completion_model_ref_was_stripped,
+    completion_model_ref_strip_log_extra,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from intric.flows.flow_variable_definitions import form_field_reference_expression
@@ -80,20 +80,14 @@ def _log_transcribe_only_model_ref_stripped(
     validated_step: StepSpec,
     source: str,
 ) -> None:
-    if not completion_model_ref_was_stripped(
+    extra = completion_model_ref_strip_log_extra(
         supplied_model_ref=supplied_model_ref,
         validated_step=validated_step,
-    ):
-        return
-    logger.info(
-        "ai_builder_transcribe_only_model_ref_stripped",
-        extra={
-            "plan_step_ref": validated_step.plan_step_ref,
-            "existing_step_ref": validated_step.existing_step_ref,
-            "source": source,
-            "output_mode": validated_step.output_mode.value,
-        },
+        source=source,
     )
+    if extra is None:
+        return
+    logger.info("ai_builder_transcribe_only_model_ref_stripped", extra=extra)
 
 
 def make_plan_step_ref(index: int) -> str:

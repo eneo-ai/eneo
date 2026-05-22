@@ -289,7 +289,7 @@ def resolve_scoped_step_model_revision_if_requested(
             )
         return None
 
-    if resource_catalog is None or not _looks_like_catalog_model_revision_request(
+    if resource_catalog is None or not _looks_like_model_revision_request(
         latest_user_text
     ):
         return None
@@ -300,8 +300,18 @@ def resolve_scoped_step_model_revision_if_requested(
     )
 
     if len(mentioned_model_refs) == 1:
+        if not _looks_like_catalog_model_revision_request(latest_user_text):
+            return None
         model_ref = next(iter(mentioned_model_refs))
     else:
+        if not mentioned_model_refs:
+            if not _looks_like_catalog_model_revision_request(latest_user_text):
+                return None
+            return ScopedStepModelNotice(
+                message=_unknown_step_model_revision_message(latest_user_text)
+            )
+        if not _looks_like_catalog_model_revision_request(latest_user_text):
+            return None
         current_model_ref = target.assistant_spec.model_ref
         if current_model_ref is None:
             return None
@@ -336,6 +346,17 @@ def _looks_like_catalog_model_revision_request(text: str) -> bool:
     return bool(_MODEL_WORDS & _word_tokens(text))
 
 
+def _looks_like_model_revision_request(text: str) -> bool:
+    tokens = _word_tokens(text)
+    if _MODEL_WORDS & tokens:
+        return True
+    return bool(
+        (_MODEL_ACTION_WORDS & tokens)
+        and (_MODEL_TARGET_PREPOSITION_WORDS & tokens)
+        and (_MODEL_FAMILY_WORDS & tokens)
+    )
+
+
 _MODEL_WORDS = frozenset({"model", "modell"})
 _MODEL_ACTION_WORDS = frozenset(
     {
@@ -361,14 +382,7 @@ _WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
 
 
 def _looks_like_transcribe_only_model_revision_request(text: str) -> bool:
-    tokens = _word_tokens(text)
-    if _MODEL_WORDS & tokens:
-        return True
-    return bool(
-        (_MODEL_ACTION_WORDS & tokens)
-        and (_MODEL_TARGET_PREPOSITION_WORDS & tokens)
-        and (_MODEL_FAMILY_WORDS & tokens)
-    )
+    return _looks_like_model_revision_request(text)
 
 
 def _word_tokens(text: str) -> set[str]:
@@ -387,6 +401,19 @@ def _transcription_step_model_revision_message(text: str) -> str:
         "The selected step transcribes audio and uses the flow transcription "
         "model, not a chat model such as GPT. Select an analysis or writing "
         "step if you want to change the LLM model."
+    )
+
+
+def _unknown_step_model_revision_message(text: str) -> str:
+    tokens = _word_tokens(text)
+    if tokens & _SWEDISH_MODEL_REVISION_HINT_WORDS:
+        return (
+            "Jag hittar inte den modellen i det här utrymmet. Välj en "
+            "tillgänglig modell i modellväljaren eller skriv exakt modellnamn."
+        )
+    return (
+        "I cannot find that model in this space. Select an available model in "
+        "the model picker or type the exact model name."
     )
 
 

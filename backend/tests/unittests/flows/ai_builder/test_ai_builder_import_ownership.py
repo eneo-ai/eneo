@@ -146,6 +146,7 @@ PROPOSAL_SUBMISSION_PUBLIC_METHODS = frozenset(
         "active_submission_tool_schemas",
         "handle_outline_flow_tool_call",
         "handle_edit_flow_tool_call",
+        "preflight_scoped_model_revision_if_requested",
         "retry_forced_proposal_after_text",
     }
 )

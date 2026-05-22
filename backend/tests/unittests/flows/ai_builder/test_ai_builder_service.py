@@ -43,6 +43,9 @@ def _make_repo_mock() -> AsyncMock:
 import pytest
 
 from intric.files.file_models import File, FileType
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
+)
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -1426,6 +1429,52 @@ class TestSendMessageToolCall:
         tool_msgs = [m for m in messages if m["role"] == "tool"]
         assert len(tool_msgs) == 1
         assert tool_msgs[0]["tool_call_id"] == "call_prior"
+
+    @pytest.mark.anyio
+    async def test_conversation_replay_provider_normalizes_oversized_tool_call_ids(
+        self,
+    ):
+        legacy_id = "server_scoped_model_revision:00000000-0000-0000-0000-000000000000"
+        assert len(legacy_id) == PROVIDER_TOOL_CALL_ID_MAX_LENGTH + 1
+        prior_conversation = [
+            ConversationMessage(
+                role="assistant",
+                content="Jag uppdaterade modellen.",
+                tool_calls=[
+                    {
+                        "id": legacy_id,
+                        "name": OUTLINE_FLOW_TOOL_NAME,
+                        "arguments": {"revision_kind": "scoped_step_model"},
+                    }
+                ],
+            ),
+            ConversationMessage(
+                role="tool",
+                content="Plan: updated",
+                tool_call_id=legacy_id,
+            ),
+        ]
+
+        messages = [
+            AIBuilderPlanner.conversation_msg_to_llm_dict(message)
+            for message in prior_conversation
+        ]
+
+        assistant_id = messages[0]["tool_calls"][0]["id"]
+        tool_result_id = messages[1]["tool_call_id"]
+        assert assistant_id == tool_result_id
+        assert assistant_id != legacy_id
+        assert len(assistant_id) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH
+        assert all(
+            len(tool_call["id"]) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH
+            for message in messages
+            for tool_call in message.get("tool_calls", [])
+        )
+        assert all(
+            len(message["tool_call_id"]) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH
+            for message in messages
+            if "tool_call_id" in message
+        )
 
     @pytest.mark.anyio
     async def test_unknown_tool_calls_are_ignored(self):

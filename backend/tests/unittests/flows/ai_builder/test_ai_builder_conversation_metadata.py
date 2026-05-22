@@ -5,9 +5,11 @@ from pathlib import Path
 from typing import get_args
 
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
     LLMResolvableSlotName,
     metadata_for_user_message,
     metadata_with_slot_classification,
+    provider_safe_tool_call_id,
     question_answer_from_metadata,
     question_answer_question_id,
     requirements_confirmation_from_metadata,
@@ -125,6 +127,23 @@ def test_tool_calls_from_message_skips_malformed_arguments() -> None:
         )
         == tuple()
     )
+
+
+def test_provider_safe_tool_call_id_preserves_valid_ids() -> None:
+    tool_call_id = "call_valid_123"
+
+    assert provider_safe_tool_call_id(tool_call_id) == tool_call_id
+
+
+def test_provider_safe_tool_call_id_maps_legacy_scoped_revision_id() -> None:
+    legacy_id = "server_scoped_model_revision:00000000-0000-0000-0000-000000000000"
+    assert len(legacy_id) == PROVIDER_TOOL_CALL_ID_MAX_LENGTH + 1
+
+    mapped = provider_safe_tool_call_id(legacy_id)
+
+    assert mapped == provider_safe_tool_call_id(legacy_id)
+    assert mapped != legacy_id
+    assert len(mapped) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH
 
 
 def test_requirements_summary_round_trips_through_canonical_metadata() -> None:

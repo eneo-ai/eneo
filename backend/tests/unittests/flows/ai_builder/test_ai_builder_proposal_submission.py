@@ -11,12 +11,18 @@ import pytest
 from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
+)
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_RESOURCE_SELECTION_QUESTION_ID,
     MCP_SELECTION_WITHOUT,
+)
+from intric.flows.ai_builder.ai_builder_plan_edit_context import (
+    AIBuilderPlanEditContext,
 )
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     ForcedToolRetryOutcome,
@@ -33,6 +39,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from tests.unittests.flows.ai_builder.test_ai_builder_proposal_processor import (
+    _builder_plan,
     _compiled_edit_proposal,
     _description_update_advisory,
     _flow_with_builder_description,
@@ -106,6 +113,50 @@ async def test_scoped_model_preflight_returns_error_event_for_deterministic_fail
     assert payload["phase"] == "proposal"
     assert payload["request_id"] == "req-deterministic-failure"
     assert payload["details"] == {"failure_kind": "quality"}
+
+
+@pytest.mark.asyncio
+async def test_scoped_model_preflight_uses_bounded_server_tool_call_id() -> None:
+    processor = _make_processor()
+    prior_spec = _make_flow_spec(model_ref="model.gpt-4o-mini", knowledge_refs=[])
+    prior_plan = _builder_plan(prior_spec)
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[
+            {"id": "model-old", "name": "gpt-4o mini"},
+            {"id": "model-nano", "name": "gpt-5.4-nano"},
+        ],
+        available_kbs=[],
+        available_mcps=[],
+    )
+    finalize = AsyncMock(return_value=({"event": "plan", "data": "{}"},))
+    ctx = _make_context(
+        conversation=[
+            ConversationMessage(role="user", content="byt modell till gpt 5.4 nano")
+        ],
+        prior_plan_for_revision=prior_plan,
+        plan_edit_context=AIBuilderPlanEditContext(
+            scope="step",
+            plan_id=prior_plan.id,
+            target_plan_step_ref="step_a",
+        ),
+        resource_catalog=catalog,
+        available_model_refs=catalog.model_refs,
+        request_id="00000000-0000-0000-0000-000000000000",
+    )
+
+    with patch.object(
+        processor._proposal_submission._compiled_proposal_finalizer,
+        "finalize_compiled_proposal",
+        new=finalize,
+    ):
+        result = await processor._proposal_submission.preflight_scoped_model_revision_if_requested(
+            ctx=ctx,
+        )
+
+    assert result == ({"event": "plan", "data": "{}"},)
+    request = finalize.await_args.args[0]
+    assert request.tool_call_id != f"server_scoped_model_revision:{ctx.request_id}"
+    assert len(request.tool_call_id) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH
 
 
 @pytest.mark.asyncio

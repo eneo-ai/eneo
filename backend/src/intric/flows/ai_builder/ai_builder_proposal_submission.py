@@ -11,6 +11,9 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
     build_proposal_architecture_error_event,
     record_proposal_architecture_failure,
 )
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    make_provider_safe_server_tool_call_id,
+)
 from intric.flows.ai_builder.ai_builder_create_proposal import (
     OUTLINE_FLOW_FORCED_TOOL_PROMPT,
     process_outline_arguments,
@@ -199,7 +202,10 @@ class ProposalSubmissionOwner:
                     ctx.conversation
                 ),
                 assistant_metadata=ctx.assistant_metadata,
-                tool_call_id=f"server_scoped_model_revision:{ctx.request_id}",
+                tool_call_id=make_provider_safe_server_tool_call_id(
+                    kind="scoped_model_revision",
+                    stable_key=ctx.request_id,
+                ),
                 metadata_tool_call=None,
                 compiled=result.compiled_proposal,
                 resource_catalog=ctx.resource_catalog,

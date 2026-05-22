@@ -30,6 +30,7 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_for_user_message,
     metadata_has_question_answer,
     metadata_with_slot_classification,
+    provider_safe_tool_call_id,
     question_answer_from_metadata,
     requirements_confirmation_from_question_answer,
     tool_calls_from_message,
@@ -401,7 +402,7 @@ class AIBuilderPlanner:
         if tool_calls:
             payload["tool_calls"] = [
                 {
-                    "id": tool_call.id,
+                    "id": provider_safe_tool_call_id(tool_call.id),
                     "type": "function",
                     "function": {
                         "name": tool_call.name,
@@ -411,7 +412,7 @@ class AIBuilderPlanner:
                 for tool_call in tool_calls
             ]
         if msg.tool_call_id:
-            payload["tool_call_id"] = msg.tool_call_id
+            payload["tool_call_id"] = provider_safe_tool_call_id(msg.tool_call_id)
         return payload
 
     @staticmethod

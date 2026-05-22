@@ -559,11 +559,11 @@ def supports_step_io_tuple(
 
 
 def requires_completion_model(output_mode: FlowOutputMode) -> bool:
-    """True when this output mode runs a completion model at runtime."""
-    if not isinstance(output_mode, FlowOutputMode):  # pyright: ignore[reportUnnecessaryIsInstance]
-        raise TypeError(
-            f"output_mode must be FlowOutputMode, got {type(output_mode).__name__}"
-        )
+    """True when this output mode runs a completion model at runtime.
+
+    Transcription-only steps route through the flow-scoped transcription
+    configuration instead of an assistant completion model.
+    """
     return output_mode is not FlowOutputMode.TRANSCRIBE_ONLY
 
 
