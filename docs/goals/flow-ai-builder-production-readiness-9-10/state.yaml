@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T038
+active_task: T039
 
 scoring_target:
   dimensions:
@@ -50,7 +50,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T034 implementation/post-review: CompiledProposalFinalizer is now the canonical owner for compiled-proposal finalization, feedback formatting no longer creates a proposal-policy import cycle, retry success no longer reconstructs a lossy retry context, and direct finalizer tests cover success telemetry, retry metadata, MCP clarification, usage_tracker=None, and edit description repair through the injected completion boundary. Full AI Builder unit tests pass and strict Pyright for src/intric/flows/ai_builder is clean. Claude post-review iteration 2 returned GREEN_LIGHT yes / MIN_SCORE 8; Antigravity returned GREEN_LIGHT yes / MIN_SCORE 8. The broader score floor is honestly 8 because finalizer request coupling, remaining large orchestration files, generated-client determinism, full-source baseline, broader module/test topology, and repeated live-eval proof still block a strict 9/10."
+  source: "After T038 implementation/post-review: edit-description repair completions now flow through a typed usage-tracked ProposalCompletionFn factory and record token usage without incrementing self-correction repair_attempts. The processor has one raw litellm_client.acompletion boundary, no **kwargs: Any completion wrappers, focused telemetry regression tests, full AI Builder unit coverage, strict Pyright for src/intric/flows/ai_builder, and Claude/Antigravity post-review GREEN_LIGHT yes / MIN_SCORE 8. The broader score floor remains 8 because AIBuilderProposalProcessor is still a 1917 LOC multi-concern orchestration file, generated-client determinism remains unresolved, full-source typing/test baseline is still broader than AI Builder, and live-eval/output-quality proof must repeat after behavior-affecting changes."
   Maintainability: 8
   Code_Quality: 9
   Clean_Architecture: 8
@@ -69,10 +69,10 @@ current_scorecard:
   blockers:
     - "Public/lifecycle/CAS error-code discipline is now typed and guarded in AI Builder-owned raise sites, but generated-client regeneration determinism is not solved; T028 kept only the intentional enum literals after openapi-typescript produced broad unrelated churn."
     - "The five-case authenticated live eval now proves C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX, C4 runtime form fields, and C5 revise/edit through the public API, but this gate must be repeated after later planner/runtime changes rather than treated as permanent output-quality proof."
-    - "T034 extracts CompiledProposalFinalizer and removes the proposal-policy feedback import cycle, but the finalizer still carries description-repair LLM parameters through a 17-field request; Antigravity recommends reassessing whether edit description repair should move upstream before calling the finalizer."
-    - "ai_builder_proposal_processor.py is down to 1851 LOC but remains oversized; proposal completion, structured-question recovery, confirm requirements, retry orchestration, and self-correction paths still require broader topology work before maintainability/readability can honestly reach 9."
+    - "T038 makes proposal completion telemetry explicit and typed, but ai_builder_proposal_processor.py is still 1917 LOC and remains oversized; proposal completion, structured-question recovery, confirm requirements, retry orchestration, and self-correction paths still require broader topology work before maintainability/readability can honestly reach 9."
     - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, partial processor-bound facades, and full-source Pyright baseline failures outside AI Builder."
-    - "Overall remains 8 until finalizer request coupling, generated-client tooling determinism, full-source typing/test baseline, consolidation/readability/test-topology tranches, and repeated live-eval evidence prove every dimension is honestly at least 9."
+    - "Both Claude and Antigravity recommended a small future clarification of counts_as_repair semantics in ai_builder_proposal_telemetry.py; it was not added in T038 because that file was outside the approved write scope."
+    - "Overall remains 8 until generated-client tooling determinism, full-source typing/test baseline, consolidation/readability/test-topology tranches, and repeated live-eval evidence prove every dimension is honestly at least 9."
 
 score_floor_completion_gates:
   source: "2026-05-21 user review: the board must prevent 'plan executed' from being confused with '9/10 achieved'."
@@ -109,6 +109,32 @@ score_floor_completion_gates:
     T021:
       - "Must run earlier and/or repeat after major tranches so normal-user output quality influences architecture decisions."
       - "Must require product fixes when vague normal-user prompts fail to produce correct flows or useful clarification questions."
+
+observability_coordination:
+  source: "2026-05-22 user update: a separate OpenTelemetry branch is coming for the Eneo platform."
+  rule:
+    - "Do not build a parallel AI Builder observability, correlation, trace, replay, or lifecycle-tracing system while the platform OpenTelemetry branch is pending review."
+    - "Pause broad AI Builder frontend-backend DX/observability work after T038 until the OpenTelemetry branch can be reviewed with source evidence."
+    - "AI Builder diagnostic reports should complement OpenTelemetry rather than replace it: OpenTelemetry should show where in the system a failure happened; AI Builder diagnostics should show which AI Builder contract or user flow broke."
+  allowed_narrow_ai_builder_work_if_ranked_high_enough:
+    - "Improve unknown stream event diagnostics so empty event names render as <empty> and details include bounded scalar fields such as raw_event_name, data_length, and parse_failure_kind."
+    - "Improve malformed JSON diagnostics in AI Builder stream events with event name and data_length, without raw payload."
+    - "Add a realistic stream regression test for real event, comment-only : ping heartbeat, real event or done."
+    - "Keep strict AI Builder protocol behavior: unknown real events remain fatal."
+  non_goals_until_otel_review:
+    - "No StreamLifecycleTracer."
+    - "No event counters or replay framework."
+    - "No new observability channel."
+    - "No parallel diagnostic schema for correlation."
+    - "Do not backfill request_id on client errors if doing so would destroy request_id_source provenance in the diagnostic report."
+  required_open_telemetry_branch_review_questions:
+    - "Does the OpenTelemetry branch include frontend/browser instrumentation?"
+    - "Is W3C traceparent propagated from frontend to backend?"
+    - "Do backend logs include trace_id and span_id?"
+    - "Does tracing work for long-lived SSE streams?"
+    - "Can AI Builder diagnostic report include trace_id or link to a trace without creating a parallel correlation system?"
+    - "Are session_id, request_id, and trace_id connected to planner/proposal/LLM/DB spans?"
+    - "Are raw prompt text, file content, plan JSON, and LLM payloads still excluded?"
 
 dirty_worktree_baseline:
   observed_at: "2026-05-21T08:28:38+02:00"
@@ -4200,7 +4226,7 @@ tasks:
   - id: T038
     type: worker
     assignee: Worker
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Make proposal-completion telemetry explicit and typed by replacing type-erased completion wrappers with one usage-tracked ProposalCompletionFn factory and by recording edit-description repair completion tokens without incrementing self-correction repair_attempts."
     inputs:
@@ -4250,6 +4276,88 @@ tasks:
       - "The implementation needs a new completion service/module or wrapper class."
       - "The implementation touches public API, DB, Celery, generated clients, live eval, prompt behavior, or finalizer ownership."
       - "A hidden untracked completion path is found that expands scope beyond the approved processor/test slice."
+    receipt:
+      completed_at: "2026-05-22T09:12:00+02:00"
+      summary: "Implemented typed proposal-completion telemetry cleanup. AIBuilderProposalProcessor now has one usage-tracked ProposalCompletionFn factory, edit-description repair completion calls record token usage without incrementing repair_attempts, self-correction/forced-tool retry still count as repair attempts, and the processor no longer contains **kwargs: Any completion wrappers. A live SSE heartbeat parser bug was also fixed and committed separately as 9d3a504ed before resuming T038; that commit did not touch T038-owned backend files."
+      artifact: ".codex/artifacts/flow-ai-builder-t038-implementation-summary.md"
+      red_first:
+        command: "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py::test_edit_flow_retry_config_description_repair_records_tokens_without_repair_attempt tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py::test_handle_edit_flow_description_repair_records_tokens_without_repair_attempt tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py::test_edit_description_repair_rejection_still_records_spent_tokens tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py::test_edit_description_repair_without_provider_usage_records_estimate tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_processor_has_single_typed_completion_boundary -q"
+        result: "failed before production edits as expected because edit-description repair telemetry stayed at llm_calls_made == 0 and the static guard found three **kwargs: Any wrappers."
+      verification:
+        - "Focused post-rename tests: cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q: 57 passed"
+        - "Full post-rename AI Builder suite: cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2273 passed, 4 skipped, 11 warnings"
+        - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py: passed"
+        - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py: passed"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder: 0 errors, 0 warnings, 0 informations"
+        - "rg '**kwargs: Any' backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py: zero matches"
+        - "rg 'litellm_client\\.acompletion' backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py: exactly one match inside call_proposal_completion"
+        - "rg -n 'self\\.call_proposal_completion|call_proposal_completion=' backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py: sanctioned references only at the raw usage wrapper and tracked callable injection sites"
+        - "git diff --check: passed"
+        - "ruby YAML parse of state.yaml before board edit: yaml ok"
+      peer_review:
+        claude:
+          artifact: ".codex/artifacts/claude-peer-loop-t038-completion-telemetry-post-implementation-review-20260522T070741Z.md"
+          result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
+          codex_response: "Accepted Claude's small readability recommendation by renaming the inner factory closure to _tracked_completion and reran focused tests, Ruff, format check, and Pyright. Kept counts_as_repair docstring/comment as follow-up because it touches ai_builder_proposal_telemetry.py outside the approved T038 write scope."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t038-completion-telemetry-post-implementation-review-20260522T071109Z.md"
+          result: "VERDICT green; GREEN_LIGHT yes; MIN_SCORE 8"
+          codex_response: "Accepted that T038 is production-ready as scoped and that the broader score floor remains 8. Recorded the optional counts_as_repair documentation suggestion as a follow-up rather than broadening the commit."
+      score_after_tranche:
+        Overall: 8
+        Maintainability: 8
+        Code_Quality: 9
+        Clean_Architecture: 8
+        Separation_of_Concerns: 8
+        Single_Source_of_Truth: 9
+        Human_Readability: 8
+        Human_Reviewability: 9
+        Runtime_Reliability: 9
+        Data_Model_Schema_Quality: 9
+        API_Contract_Quality: 9
+        Test_Coverage_Quality: 9
+        Developer_Diagnostic_Experience: 9
+        AI_Slop_Comment_Naming_Quality: 8
+        Normal_User_Output_Quality: 9
+      residual_risks:
+        - "AIBuilderProposalProcessor is still 1917 LOC and remains the primary maintainability/readability blocker."
+        - "Generated-client regeneration determinism remains unresolved."
+        - "Full-source Pyright/test baseline work remains outside the scoped AI Builder checks."
+        - "Live eval/output-quality proof must repeat after later behavior-affecting planner/runtime changes."
+        - "counts_as_repair semantics should be clarified in ai_builder_proposal_telemetry.py in a future scoped cleanup or topology tranche."
+
+  - id: T039
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T038, with special pressure on processor topology/readability, generated-client determinism, full-source typing/test baseline, repeated live-eval proof, and whether a completion-provider/telemetry semantics cleanup should be folded into a broader simplification slice."
+    inputs:
+      - "T038 receipt and implementation summary"
+      - ".codex/artifacts/claude-peer-loop-t038-completion-telemetry-post-implementation-review-20260522T070741Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t038-completion-telemetry-post-implementation-review-20260522T071109Z.md"
+      - "Current scorecard floor 8/10"
+    constraints:
+      - "Do not implement in T039; produce an evidence-backed ranking and implementation-ready next-tranche plan first."
+      - "Prefer the next slice that moves the strict score floor most, not the next easiest cleanup."
+      - "Do not mechanically split AIBuilderProposalProcessor; topology work must reduce cognitive load through deletion, consolidation, or a clear canonical owner."
+      - "If selecting a completion-provider service or telemetry semantics cleanup, prove it removes real processor coupling instead of adding a pass-through layer."
+      - "If selecting generated-client/full-source baseline/live-eval work, prove the scope is coherent and reviewable."
+      - "Do not select broad frontend-backend DX/observability work until the separate OpenTelemetry branch is reviewed; narrow AI Builder stream error diagnostics are allowed only if they rank higher than topology/generated-client/full-source/live-eval work and remain contract-specific."
+      - "Do not add StreamLifecycleTracer, event counters, replay framework, new observability channel, or a parallel diagnostic/correlation schema."
+      - "Preserve unrelated dirty files."
+    acceptance_criteria:
+      - "The next tranche ranking names rejected alternatives and explains why the selected slice moves the 8/10 floor most."
+      - "The ranking explicitly addresses T038 peer feedback: optional counts_as_repair documentation, possible future ProposalCompletionService, and the processor topology/readability floor."
+      - "If selecting topology/readability work, the plan must include concrete deletion/consolidation targets, allowed files, and reviewability metrics."
+      - "If selecting generated-client determinism, full-source baseline, or live eval, the plan must include validation commands and stop_if conditions that prevent broad unrelated churn."
+      - "If selecting stream diagnostics, the plan must preserve strict unknown-real-event fatal behavior, avoid raw payload capture, and prove heartbeat frames remain ignored in the shared SSE transport."
+      - "If selecting diagnostic/DX work beyond narrow stream error messages, the plan must first review the OpenTelemetry branch evidence and explain how AI Builder diagnostics complement rather than duplicate platform tracing."
+      - "Claude reviews the revised plan with GREEN_LIGHT yes / MIN_SCORE >= 8; Antigravity reviews if quota/tooling is available, otherwise record the exact skip/failure."
+    verify:
+      - "git status --short --branch"
+      - "Review T038 receipt and current scorecard"
+      - "Produce .codex/artifacts/flow-ai-builder-t039-next-tranche-ranking.md"
 
 checks:
   dirty_fingerprint:

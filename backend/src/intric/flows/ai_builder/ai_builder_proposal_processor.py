@@ -106,6 +106,7 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     record_proposal_first_attempt,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalCompletionFn,
     ToolProcessingResult,
     ToolRetryConfig,
     ToolRetryInvocation,
@@ -401,7 +402,10 @@ class AIBuilderProposalProcessor:
             compiled = await repair_compiled_edit_description_if_needed(
                 compiled=result.compiled_proposal,
                 flow=invocation.flow,
-                call_proposal_completion=self.call_proposal_completion,
+                call_proposal_completion=self._make_usage_tracked_completion_fn(
+                    usage_tracker=usage_tracker,
+                    counts_as_repair=False,
+                ),
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs,
                 max_output_tokens=max_output_tokens,
@@ -973,6 +977,36 @@ class AIBuilderProposalProcessor:
             )
         return response
 
+    def _make_usage_tracked_completion_fn(
+        self,
+        *,
+        usage_tracker: ProposalTurnTelemetry | None,
+        counts_as_repair: bool,
+    ) -> ProposalCompletionFn:
+        async def _tracked_completion(
+            *,
+            messages: list[dict[str, Any]],
+            tool_schemas: list[dict[str, Any]],
+            litellm_model: str,
+            litellm_kwargs: dict[str, Any],
+            max_output_tokens: int,
+            temperature: float,
+            tool_choice: dict[str, Any] | None = None,
+        ) -> Any:
+            return await self._call_proposal_completion_with_usage(
+                messages=messages,
+                tool_schemas=tool_schemas,
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                max_output_tokens=max_output_tokens,
+                temperature=temperature,
+                usage_tracker=usage_tracker,
+                tool_choice=tool_choice,
+                counts_as_repair=counts_as_repair,
+            )
+
+        return _tracked_completion
+
     async def _request_tool_self_correction(
         self,
         *,
@@ -988,19 +1022,53 @@ class AIBuilderProposalProcessor:
                 usage_tracker=ctx.usage_tracker,
             )
 
-        async def _call_proposal_completion(**kwargs: Any) -> Any:
-            return await self._call_proposal_completion_with_usage(
-                **kwargs,
-                usage_tracker=ctx.usage_tracker,
-                counts_as_repair=True,
-            )
+        call_proposal_completion = self._make_usage_tracked_completion_fn(
+            usage_tracker=ctx.usage_tracker,
+            counts_as_repair=True,
+        )
 
         async def _retry_forced_tool_after_text(
-            **kwargs: Any,
+            *,
+            correction_messages: list[dict[str, Any]],
+            assistant_text: str,
+            tool_schemas: list[dict[str, Any]],
+            litellm_model: str,
+            litellm_kwargs: dict[str, Any],
+            turn: SessionSendTurn,
+            conversation: list[ConversationMessage],
+            new_messages_start: int,
+            available_model_refs: set[str] | None,
+            available_kb_refs: set[str] | None,
+            max_output_tokens: int,
+            target_tool_name: str,
+            forced_tool_prompt: str,
+            process_tool_invocation: Callable[
+                [ToolRetryInvocation], Awaitable[ToolProcessingResult]
+            ],
+            resource_catalog: AIBuilderResourceCatalog | None = None,
+            flow: "Flow | None" = None,
+            build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
+            request_id: str | None = None,
         ) -> ForcedToolRetryOutcome:
-            kwargs.setdefault("request_id", ctx.request_id)
             return await self.retry_forced_tool_after_text(
-                **kwargs,
+                correction_messages=correction_messages,
+                assistant_text=assistant_text,
+                tool_schemas=tool_schemas,
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                turn=turn,
+                conversation=conversation,
+                new_messages_start=new_messages_start,
+                available_model_refs=available_model_refs,
+                available_kb_refs=available_kb_refs,
+                max_output_tokens=max_output_tokens,
+                target_tool_name=target_tool_name,
+                forced_tool_prompt=forced_tool_prompt,
+                process_tool_invocation=process_tool_invocation,
+                resource_catalog=resource_catalog,
+                flow=flow,
+                build_assistant_metadata=build_assistant_metadata,
+                request_id=request_id or ctx.request_id,
                 usage_tracker=ctx.usage_tracker,
             )
 
@@ -1024,7 +1092,7 @@ class AIBuilderProposalProcessor:
                     self.self_correction_bumped_temperature
                 ),
                 max_self_correction_retries=MAX_SELF_CORRECTION_RETRIES,
-                call_proposal_completion=_call_proposal_completion,
+                call_proposal_completion=call_proposal_completion,
                 process_tool_invocation=retry_config.process_tool_invocation,
                 target_tool_name=retry_config.target_tool_name,
                 forced_tool_prompt=retry_config.forced_tool_prompt,
@@ -1074,12 +1142,10 @@ class AIBuilderProposalProcessor:
         request_id: str | None = None,
         build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
     ) -> ForcedToolRetryOutcome:
-        async def _call_proposal_completion(**kwargs: Any) -> Any:
-            return await self._call_proposal_completion_with_usage(
-                **kwargs,
-                usage_tracker=usage_tracker,
-                counts_as_repair=True,
-            )
+        call_proposal_completion = self._make_usage_tracked_completion_fn(
+            usage_tracker=usage_tracker,
+            counts_as_repair=True,
+        )
 
         try:
             return await run_retry_forced_tool_after_text(
@@ -1097,7 +1163,7 @@ class AIBuilderProposalProcessor:
                 target_tool_name=target_tool_name,
                 forced_tool_prompt=forced_tool_prompt,
                 forced_proposal_temperature=self.forced_proposal_temperature,
-                call_proposal_completion=_call_proposal_completion,
+                call_proposal_completion=call_proposal_completion,
                 process_tool_invocation=process_tool_invocation,
                 resource_catalog=resource_catalog,
                 flow=flow,
@@ -1707,7 +1773,10 @@ class AIBuilderProposalProcessor:
             compiled = await repair_compiled_edit_description_if_needed(
                 compiled=edit_result.compiled_proposal,
                 flow=ctx.flow,
-                call_proposal_completion=self.call_proposal_completion,
+                call_proposal_completion=self._make_usage_tracked_completion_fn(
+                    usage_tracker=ctx.usage_tracker,
+                    counts_as_repair=False,
+                ),
                 litellm_model=ctx.litellm_model,
                 litellm_kwargs=ctx.litellm_kwargs,
                 max_output_tokens=ctx.max_output_tokens,

@@ -286,6 +286,36 @@ def test_compiled_proposal_finalization_does_not_own_edit_repair() -> None:
     assert violations == []
 
 
+def test_proposal_processor_has_single_typed_completion_boundary() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    processor_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+    )
+    processor_tree = ast.parse(processor_path.read_text(), filename=str(processor_path))
+
+    acompletion_refs = [
+        node
+        for node in ast.walk(processor_tree)
+        if isinstance(node, ast.Attribute) and node.attr == "acompletion"
+    ]
+    violations: list[str] = []
+    if len(acompletion_refs) != 1:
+        lines = ", ".join(str(node.lineno) for node in acompletion_refs) or "none"
+        violations.append(f"{processor_path}: acompletion refs {lines}")
+
+    for node in ast.walk(processor_tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        kwarg = node.args.kwarg
+        if kwarg is None:
+            continue
+        annotation = ast.unparse(kwarg.annotation) if kwarg.annotation else ""
+        if kwarg.arg == "kwargs" and annotation == "Any":
+            violations.append(f"{processor_path}:{node.lineno} defines **kwargs: Any")
+
+    assert violations == []
+
+
 def _python_files() -> list[Path]:
     backend_root = Path(__file__).resolve().parents[4]
     roots = (backend_root / "src", backend_root / "tests")

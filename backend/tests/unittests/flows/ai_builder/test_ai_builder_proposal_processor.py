@@ -15,6 +15,10 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_description_semantics import (
+    DescriptionProvenance,
+    description_hash,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     PlannerPlanEnvelope,
@@ -229,6 +233,29 @@ def _compiled_edit_proposal(
         reasoning=None,
         validation=SpecValidationResult(),
         edit_result=BuilderPlanEditResult(compiled_edit=compiled_edit),
+    )
+
+
+def _description_update_advisory() -> EditAdvisory:
+    return EditAdvisory(
+        code="flow_description_update_required",
+        message="Refresh the flow description.",
+        severity="warning",
+        field="flow_description",
+    )
+
+
+def _flow_with_builder_description(description: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        description=description,
+        metadata_json={
+            "ai_builder": {
+                "description": DescriptionProvenance(
+                    mode="builder_managed",
+                    last_generated_hash=description_hash(description),
+                ).model_dump(mode="json")
+            }
+        },
     )
 
 
@@ -2735,11 +2762,78 @@ async def test_edit_flow_retry_config_repairs_compiled_edit_before_finalization(
     assert repair.await_args.kwargs["compiled"] is original
     assert repair.await_args.kwargs["flow"] is flow
     completion = repair.await_args.kwargs["call_proposal_completion"]
-    assert completion.__self__ is processor
-    assert completion.__func__ is AIBuilderProposalProcessor.call_proposal_completion
+    assert callable(completion)
+    assert getattr(completion, "__self__", None) is None
     finalize.assert_awaited_once()
     request = finalize.await_args.args[0]
     assert request.compiled is repaired
+
+
+@pytest.mark.asyncio
+async def test_edit_flow_retry_config_description_repair_records_tokens_without_repair_attempt() -> (
+    None
+):
+    processor = _make_processor()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-retry-description-repair",
+        model="openai/gpt-5.4",
+    )
+    original = _compiled_edit_proposal(
+        spec=_make_flow_spec(
+            model_ref=None,
+            knowledge_refs=[],
+        ).model_copy(update={"flow_description": "Old generated description"}),
+        advisories=[_description_update_advisory()],
+    )
+    flow = _flow_with_builder_description("Old generated description")
+    processor.litellm_client.acompletion = AsyncMock(
+        return_value=_make_response_with_text(
+            "New generated description",
+            prompt_tokens=9,
+            completion_tokens=3,
+            total_tokens=12,
+        )
+    )
+    config = processor._edit_flow_retry_config(
+        assistant_snapshots=None,
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={"timeout": 30},
+        max_output_tokens=2048,
+        request_id=tracker.request_id,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        usage_tracker=tracker,
+    )
+    invocation = _make_retry_invocation(
+        flow=flow,
+        arguments={"plan_rationale": "Edit", "operations": []},
+    )
+    finalize = AsyncMock(
+        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.process_edit_arguments",
+            new=AsyncMock(
+                return_value=ToolProcessingResult(compiled_proposal=original)
+            ),
+        ),
+        patch.object(
+            processor._compiled_proposal_finalizer,
+            "finalize_compiled_proposal",
+            new=finalize,
+        ),
+    ):
+        result = await config.process_tool_invocation(invocation)
+
+    assert result.event == {"event": "plan", "data": "{}"}
+    telemetry = tracker.build_planner_telemetry(tool_call_count=1)
+    assert telemetry["llm_calls_made"] == 1
+    assert telemetry["total_tokens"] == 12
+    assert telemetry["repair_attempts"] == 0
+    request = finalize.await_args.args[0]
+    assert request.compiled.spec.flow_description == "New generated description"
 
 
 @pytest.mark.asyncio
@@ -2798,6 +2892,258 @@ async def test_handle_edit_flow_repairs_compiled_edit_before_finalization() -> N
     finalize.assert_awaited_once()
     request = finalize.await_args.args[0]
     assert request.compiled is repaired
+
+
+@pytest.mark.asyncio
+async def test_handle_edit_flow_description_repair_records_tokens_without_repair_attempt() -> (
+    None
+):
+    processor = _make_processor()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-direct-description-repair",
+        model="openai/gpt-5.4",
+    )
+    original = _compiled_edit_proposal(
+        spec=_make_flow_spec(
+            model_ref=None,
+            knowledge_refs=[],
+        ).model_copy(update={"flow_description": "Old generated description"}),
+        advisories=[_description_update_advisory()],
+    )
+    flow = _flow_with_builder_description("Old generated description")
+    ctx = _make_context(
+        flow=flow,
+        usage_tracker=tracker,
+        text_content="Assistant text",
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={"timeout": 30},
+        max_output_tokens=2048,
+    )
+    tool_call = _make_tool_call(
+        EDIT_FLOW_TOOL_NAME,
+        {"plan_rationale": "Edit", "operations": []},
+        tool_call_id="call-edit-description-repair",
+    )
+    processor.litellm_client.acompletion = AsyncMock(
+        return_value=_make_response_with_text(
+            "New generated description",
+            prompt_tokens=7,
+            completion_tokens=4,
+            total_tokens=11,
+        )
+    )
+    finalize = AsyncMock(
+        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.process_edit_arguments",
+            new=AsyncMock(
+                return_value=ToolProcessingResult(compiled_proposal=original)
+            ),
+        ),
+        patch.object(
+            processor._compiled_proposal_finalizer,
+            "finalize_compiled_proposal",
+            new=finalize,
+        ),
+    ):
+        events = [
+            event
+            async for event in processor._handle_edit_flow(ctx=ctx, tool_call=tool_call)
+        ]
+
+    assert events == [{"event": "plan", "data": "{}"}]
+    telemetry = tracker.build_planner_telemetry(tool_call_count=1)
+    assert telemetry["llm_calls_made"] == 1
+    assert telemetry["total_tokens"] == 11
+    assert telemetry["repair_attempts"] == 0
+    request = finalize.await_args.args[0]
+    assert request.compiled.spec.flow_description == "New generated description"
+
+
+@pytest.mark.asyncio
+async def test_edit_description_repair_rejection_still_records_spent_tokens() -> None:
+    processor = _make_processor()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-rejected-description-repair",
+        model="openai/gpt-5.4",
+    )
+    original = _compiled_edit_proposal(
+        spec=_make_flow_spec(
+            model_ref=None,
+            knowledge_refs=[],
+        ).model_copy(update={"flow_description": "Old generated description"}),
+        advisories=[_description_update_advisory()],
+    )
+    ctx = _make_context(
+        flow=_flow_with_builder_description("Old generated description"),
+        usage_tracker=tracker,
+    )
+    tool_call = _make_tool_call(
+        EDIT_FLOW_TOOL_NAME,
+        {"plan_rationale": "Edit", "operations": []},
+    )
+    processor.litellm_client.acompletion = AsyncMock(
+        return_value=_make_response_with_text(
+            "",
+            prompt_tokens=8,
+            completion_tokens=1,
+            total_tokens=9,
+        )
+    )
+    finalize = AsyncMock(
+        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.process_edit_arguments",
+            new=AsyncMock(
+                return_value=ToolProcessingResult(compiled_proposal=original)
+            ),
+        ),
+        patch.object(
+            processor._compiled_proposal_finalizer,
+            "finalize_compiled_proposal",
+            new=finalize,
+        ),
+    ):
+        events = [
+            event
+            async for event in processor._handle_edit_flow(ctx=ctx, tool_call=tool_call)
+        ]
+
+    assert events == [{"event": "plan", "data": "{}"}]
+    telemetry = tracker.build_planner_telemetry(tool_call_count=1)
+    assert telemetry["llm_calls_made"] == 1
+    assert telemetry["total_tokens"] == 9
+    assert telemetry["repair_attempts"] == 0
+    request = finalize.await_args.args[0]
+    assert request.compiled is original
+
+
+@pytest.mark.asyncio
+async def test_ineligible_edit_description_repair_does_not_record_completion_usage() -> (
+    None
+):
+    processor = _make_processor()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-ineligible-description-repair",
+        model="openai/gpt-5.4",
+    )
+    original = _compiled_edit_proposal(
+        spec=_make_flow_spec(
+            model_ref=None,
+            knowledge_refs=[],
+        ).model_copy(update={"flow_description": "Manual description"}),
+        advisories=[_description_update_advisory()],
+    )
+    ctx = _make_context(
+        flow=SimpleNamespace(description="Manual description", metadata_json=None),
+        usage_tracker=tracker,
+    )
+    tool_call = _make_tool_call(
+        EDIT_FLOW_TOOL_NAME,
+        {"plan_rationale": "Edit", "operations": []},
+    )
+    processor.litellm_client.acompletion = AsyncMock(
+        return_value=_make_response_with_text(
+            "Should not be used",
+            prompt_tokens=8,
+            completion_tokens=1,
+            total_tokens=9,
+        )
+    )
+    finalize = AsyncMock(
+        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.process_edit_arguments",
+            new=AsyncMock(
+                return_value=ToolProcessingResult(compiled_proposal=original)
+            ),
+        ),
+        patch.object(
+            processor._compiled_proposal_finalizer,
+            "finalize_compiled_proposal",
+            new=finalize,
+        ),
+    ):
+        events = [
+            event
+            async for event in processor._handle_edit_flow(ctx=ctx, tool_call=tool_call)
+        ]
+
+    assert events == [{"event": "plan", "data": "{}"}]
+    processor.litellm_client.acompletion.assert_not_awaited()
+    telemetry = tracker.build_planner_telemetry(tool_call_count=1)
+    assert telemetry["llm_calls_made"] == 0
+    assert telemetry["total_tokens"] is None
+    request = finalize.await_args.args[0]
+    assert request.compiled is original
+
+
+@pytest.mark.asyncio
+async def test_edit_description_repair_without_provider_usage_records_estimate() -> (
+    None
+):
+    processor = _make_processor()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-estimated-description-repair",
+        model="openai/gpt-5.4",
+    )
+    original = _compiled_edit_proposal(
+        spec=_make_flow_spec(
+            model_ref=None,
+            knowledge_refs=[],
+        ).model_copy(update={"flow_description": "Old generated description"}),
+        advisories=[_description_update_advisory()],
+    )
+    ctx = _make_context(
+        flow=_flow_with_builder_description("Old generated description"),
+        usage_tracker=tracker,
+    )
+    tool_call = _make_tool_call(
+        EDIT_FLOW_TOOL_NAME,
+        {"plan_rationale": "Edit", "operations": []},
+    )
+    processor.litellm_client.acompletion = AsyncMock(
+        return_value=_make_response_with_text("New generated description")
+    )
+    finalize = AsyncMock(
+        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor.process_edit_arguments",
+            new=AsyncMock(
+                return_value=ToolProcessingResult(compiled_proposal=original)
+            ),
+        ),
+        patch.object(
+            processor._compiled_proposal_finalizer,
+            "finalize_compiled_proposal",
+            new=finalize,
+        ),
+    ):
+        events = [
+            event
+            async for event in processor._handle_edit_flow(ctx=ctx, tool_call=tool_call)
+        ]
+
+    assert events == [{"event": "plan", "data": "{}"}]
+    telemetry = tracker.build_planner_telemetry(tool_call_count=1)
+    assert telemetry["llm_calls_made"] == 1
+    assert telemetry["repair_attempts"] == 0
+    assert telemetry["token_usage_source"] == "litellm_estimate"
+    assert telemetry["token_usage_estimated"] is True
+    assert telemetry["total_tokens"] is not None
+    assert telemetry["total_tokens"] > 0
 
 
 @pytest.mark.asyncio
