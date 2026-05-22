@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T031
+active_task: T032
 
 scoring_target:
   dimensions:
@@ -3635,7 +3635,7 @@ tasks:
   - id: T031
     type: pm
     assignee: PM
-    status: active
+    status: completed
     reasoning_hint: xhigh
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T030, with pressure on processor responsibility decomposition, repo/persistence ownership in proposal tools, generated-client determinism, full-source baseline, test isolation, and module/test topology."
     inputs:
@@ -3664,6 +3664,100 @@ tasks:
     stop_if:
       - "The next tranche requires a broad architecture rewrite, destructive migration, or wider file scope than evidence can justify."
       - "Claude and Antigravity disagree and Codex cannot resolve the disagreement with source evidence."
+    receipt:
+      result: done
+      completed_at: "2026-05-22T05:42:18+02:00"
+      summary:
+        - "Re-ranked the next score-moving Flow AI Builder tranche after T030 from current worktree evidence."
+        - "Rejected the initial ProposalPlanStoreFn Protocol plan after Antigravity correctly identified it as a fake seam that would duplicate a wide persistence signature while leaving persistence side effects in create/edit proposal modules."
+        - "Selected T032 as a pure compiled-proposal boundary: create/edit proposal modules compile into CompiledProposal, while AIBuilderProposalProcessor owns MCP clarification, description repair orchestration, accepted-plan persistence, retry finalization, and final events."
+        - "The final plan passed Claude GREEN_LIGHT yes / MIN_SCORE 8 and Antigravity GREEN_LIGHT yes / MIN_SCORE 8 on the same V2 artifact."
+        - "Broader goal remains active with strict score floor 8/10; T032 is a score-moving tranche, not goal completion."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t031-next-tranche-ranking-v2.md"
+        - ".codex/artifacts/claude-peer-loop-t031-next-flow-ai-builder-tranche-ranking-v2-final-recheck-20260522T033945Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t031-next-flow-ai-builder-tranche-ranking-v2-final-20260522T034135Z.md"
+      peer_review:
+        codex_self_review: "pass; V2 is cleaner than the first plausible plan because it deletes the proposal dependency bag and moves side-effect ownership to the processor instead of adding a typed facade."
+        claude:
+          final_artifact: ".codex/artifacts/claude-peer-loop-t031-next-flow-ai-builder-tranche-ranking-v2-final-recheck-20260522T033945Z.md"
+          verdict: "green"
+          green_light: true
+          min_score: 8
+        antigravity:
+          final_artifact: ".codex/artifacts/antigravity-peer-loop-t031-next-flow-ai-builder-tranche-ranking-v2-final-20260522T034135Z.md"
+          verdict: "green"
+          green_light: true
+          min_score: 8
+      selected_worker: T032
+
+  - id: T032
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Implement the pure compiled-proposal boundary for AI Builder proposal create/edit tools so compile modules return typed CompiledProposal values and the processor owns MCP clarification, description repair orchestration, accepted-plan persistence, retry finalization, and final event emission."
+    inputs:
+      - "T031 receipt and final peer-gated V2 plan"
+      - ".codex/artifacts/flow-ai-builder-t031-next-tranche-ranking-v2.md"
+      - ".codex/artifacts/claude-peer-loop-t031-next-flow-ai-builder-tranche-ranking-v2-final-recheck-20260522T033945Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t031-next-flow-ai-builder-tranche-ranking-v2-final-20260522T034135Z.md"
+    constraints:
+      - "Implement the approved V2 plan, not the rejected ProposalPlanStoreFn Protocol plan."
+      - "Do not split ai_builder_proposal_processor.py by line count."
+      - "Do not create ProposalPlanStoreFn, ProposalPersistenceService, MCPClarificationService, or generic helper/service/manager files."
+      - "Do not move persist_backend_question into ai_builder_mcp_intent.py."
+      - "Do not change planner prompts, public API schemas, frontend generated types, DB schema, Celery behavior, or live-eval prompts."
+      - "Preserve unrelated dirty files outside the tranche."
+      - "If net production LOC increases above 150, stop and re-rank before continuing."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_proposal.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_store.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_policy.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_quality_critic.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_feedback.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_policy.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t032-implementation-summary.md"
+    acceptance_criteria:
+      - "ProposalToolDeps and MCPClarificationFn are deleted."
+      - "CompiledProposal is a frozen typed carrier in ai_builder_proposal_tool_contracts.py and ToolProcessingResult exposes compiled_proposal."
+      - "ai_builder_create_proposal.py and ai_builder_edit_proposal.py do not import AIBuilderRepository, ai_builder_plan_store, build_plan_event, or use proposal_deps."
+      - "process_outline_arguments and process_edit_arguments do not perform DB writes, MCP question persistence, final plan-event building, description repair, or plan-store persistence."
+      - "format_revision_feedback, format_validation_feedback, and the private reference-guidance helper move from ai_builder_plan_store.py to ai_builder_proposal_policy.py; plan_store does not import proposal_policy."
+      - "Processor finalization preserves the pinned create/edit order from the V2 artifact and is documented with a short why-style invariant docstring."
+      - "Self-correction retry success returns final events through processor-owned finalization, not a bare compiled_proposal."
+      - "proposal_success_recorder and assistant metadata construction fire exactly once per accepted proposal path, including MCP clarification and persistence paths."
+      - "CompiledProposal.validation is treated as read-only; finalization does not mutate validation.errors or validation.warnings."
+      - "Static import/AST tests prevent reintroducing ProposalToolDeps, MCPClarificationFn, create/edit plan-store imports, create/edit event-builder imports, create/edit repository imports, proposal_deps usage, or a plan_store-to-proposal_policy reverse import."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_policy.py tests/unittests/flows/ai_builder/test_ai_builder_plan_store.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check <changed backend files/tests>"
+      - "cd backend && uv run ruff format --check <changed backend files/tests>"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "rg -n 'ProposalToolDeps|MCPClarificationFn|proposal_deps|store_plan_and_update_conversation|build_plan_event|AIBuilderRepository|format_validation_feedback|format_revision_feedback' backend/src/intric/flows/ai_builder/ai_builder_create_proposal.py backend/src/intric/flows/ai_builder/ai_builder_edit_proposal.py backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py backend/src/intric/flows/ai_builder/ai_builder_plan_store.py"
+      - "grep -nE '^def format_(revision|validation)_feedback' backend/src/intric/flows/ai_builder/ai_builder_proposal_policy.py"
+      - "git diff --numstat -- <T032 production files>"
+      - "git diff --check"
+    stop_if:
+      - "Implementation requires files outside allowed_files."
+      - "Finalization order would need to change from the peer-gated V2 artifact."
+      - "Retry behavior, MCP clarification behavior, or edit description repair behavior changes in a way that requires a new product decision."
+      - "Net production LOC exceeds 150."
 
 checks:
   dirty_fingerprint:
