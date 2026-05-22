@@ -151,6 +151,11 @@ INTENTIONALLY_UNGUARDED = {
     "/mcp-servers": "MCP server management is tenant-admin infrastructure with admin scope + admin key guards",
     "/auth": "Public federation/auth endpoints — no user auth required",
     "/api-docs": "Public API documentation endpoint",
+    "/help-assistants": "HelperRunService enforces ResourcePermission.EDIT on the target "
+    "assistant (in the request body) and run-actor identity (in the URL path), so the "
+    "router-level resource_permission_for_method check would be a no-op here — there is "
+    "no single resource_type/path-param pair that captures the gating. Mutating routes "
+    "are listed individually in MUTATING_ALLOWLIST_EXACT.",
 }
 
 # Route prefixes that intentionally do NOT have scope guards.
@@ -168,6 +173,9 @@ INTENTIONALLY_SCOPE_FREE = {
     "/modules": "Protected by super-duper API key dependency",
     "/auth": "Public federation auth endpoints",
     "/api-docs": "Public API documentation endpoint",
+    "/help-assistants": "Helper-run endpoints take the target assistant id in the body, "
+    "not the URL, so a path-level scope check would not gate anything. The HelperRunService "
+    "enforces edit-permission on the body's target_id and actor identity on the run.",
 }
 
 
@@ -857,6 +865,24 @@ MUTATING_ALLOWLIST_EXACT: dict[tuple[str, str], str] = {
         "/prompts/{id}/",
     ): "Scope=prompt gates which prompt the key can reach; basic DELETE→admin blocks non-admin keys. "
     "Prompts are intentionally outside the fine-grained resource_permissions vocabulary.",
+    (
+        "POST",
+        "/help-assistants/runs/",
+    ): "HelperRunService loads the target assistant from the body and rejects callers "
+    "without ResourcePermission.EDIT (403). The active role-assignment also gates the "
+    "call by tenant. Basic POST→write blocks read-only keys.",
+    (
+        "POST",
+        "/help-assistants/runs/{run_id}/turns/",
+    ): "HelperRunService loads the run by id + tenant and rejects callers other than the "
+    "original actor (403). The active role-assignment is re-validated on every follow-up "
+    "turn. Basic POST→write blocks read-only keys.",
+    (
+        "PATCH",
+        "/help-assistants/runs/{run_id}/",
+    ): "Status transitions are gated on (run.tenant_id, run.actor_user_id) inside "
+    "HelperRunService.set_status; repeat transitions return 400. Basic PATCH→write blocks "
+    "read-only keys.",
 }
 
 

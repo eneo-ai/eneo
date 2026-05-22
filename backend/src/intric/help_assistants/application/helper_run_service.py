@@ -39,6 +39,8 @@ from pydantic import BaseModel, ConfigDict
 from intric.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModelResponse,
+    ResponseType,
+    TokenUsage,
 )
 from intric.assistants.assistant import Assistant
 from intric.assistants.references import ReferencesService
@@ -208,11 +210,13 @@ class HelperRunService:
             return HelperRunResponse(
                 run=run,
                 session=session,
-                # TODO(step 022): wrap the generator so the router emits SSE
-                # and persists the assembled answer + tokens on stream close.
-                # The non-stream branch below already covers persistence; the
-                # streaming branch will mirror that once the router lands.
-                answer=self._iter_stream(response),
+                answer=self._stream_and_persist(
+                    response=response,
+                    session=session,
+                    question=question,
+                    datastore_chunks=datastore_result.no_duplicate_chunks,
+                    helper_assistant=helper_assistant,
+                ),
                 info_blobs=datastore_result.info_blobs,
             )
 
@@ -307,9 +311,13 @@ class HelperRunService:
             return HelperRunResponse(
                 run=run,
                 session=session,
-                # TODO(step 022): same SSE wiring as run() — assembled
-                # answer + tokens persist on stream close in the router.
-                answer=self._iter_stream(response),
+                answer=self._stream_and_persist(
+                    response=response,
+                    session=session,
+                    question=question,
+                    datastore_chunks=datastore_result.no_duplicate_chunks,
+                    helper_assistant=helper_assistant,
+                ),
                 info_blobs=datastore_result.info_blobs,
             )
 
@@ -477,18 +485,79 @@ class HelperRunService:
         )
         return final_answer
 
-    async def _iter_stream(
-        self, response: CompletionModelResponse
+    async def _stream_and_persist(
+        self,
+        *,
+        response: CompletionModelResponse,
+        session: SessionInDB,
+        question: str,
+        datastore_chunks: list[InfoBlobChunkInDBWithScore],
+        helper_assistant: Assistant,
     ) -> AsyncGenerator[Completion, None]:
-        """Re-yield streaming chunks for the router to consume.
+        """Yield streaming chunks and persist the assembled answer at close.
 
-        Persistence for streaming runs lands in step 022 alongside the SSE
-        router so chunk assembly and token accounting live next to the
-        wire-format handler, not behind a second abstraction here.
+        Mirrors the non-stream ``_persist_answer`` contract: at end of stream
+        the question + answer + token counts are written to
+        ``questions_repo`` with ``logging_details=None`` so no row reaches
+        the ``logging`` table (PRD §6 + Critical test #3). Token counts
+        prefer provider-reported values from the final ``TokenUsage`` chunk
+        and fall back to ``response.total_token_count`` if absent —
+        matching the assistant-service pattern.
+
+        The persistence call wraps a defensive ``session.begin()`` when the
+        request-scoped transaction has already committed — same idiom as
+        ``SessionService._write_transaction``. Streaming responses dispatch
+        their body iterator outside the request-level transaction in some
+        execution paths, so the persistence has to open its own short
+        write transaction whenever one is not already active.
         """
 
         completion = response.completion
         if isinstance(completion, str) or completion is None:
             return
+
+        response_string = ""
+        stream_usage: TokenUsage | None = None
+
         async for chunk in completion:
+            if chunk.usage is not None:
+                stream_usage = chunk.usage
+            if chunk.response_type == ResponseType.TEXT and chunk.text is not None:
+                response_string = f"{response_string}{chunk.text}"
             yield chunk
+
+        if stream_usage is not None and stream_usage.prompt_tokens is not None:
+            num_tokens_question = stream_usage.prompt_tokens
+        else:
+            num_tokens_question = response.total_token_count
+
+        if stream_usage is not None and stream_usage.completion_tokens is not None:
+            num_tokens_answer = stream_usage.completion_tokens
+        else:
+            num_tokens_answer = 0
+
+        assert helper_assistant.completion_model is not None
+        question_add = QuestionAdd(
+            tenant_id=self.user.tenant_id,
+            question=question,
+            answer=response_string,
+            num_tokens_question=num_tokens_question,
+            num_tokens_answer=num_tokens_answer,
+            completion_model_id=helper_assistant.completion_model.id,
+            session_id=session.id,
+            logging_details=None,
+            assistant_id=helper_assistant.id,
+        )
+
+        repo_session = self.question_repo.session
+        if repo_session.in_transaction():
+            await self.question_repo.add(
+                question_add,
+                info_blob_chunks=list(datastore_chunks),
+            )
+        else:
+            async with repo_session.begin():
+                await self.question_repo.add(
+                    question_add,
+                    info_blob_chunks=list(datastore_chunks),
+                )
