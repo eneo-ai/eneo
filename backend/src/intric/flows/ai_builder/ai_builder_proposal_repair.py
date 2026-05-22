@@ -49,16 +49,6 @@ class ForcedToolRetryOutcome:
     failure_kind: ToolProcessingFailureKind | None = None
 
 
-class BuildSelfCorrectionErrorEvent(Protocol):
-    def __call__(
-        self,
-        *,
-        feedback: str | None,
-        failure_kind: ToolProcessingFailureKind | None,
-        request_id: str | None = None,
-    ) -> dict[str, str]: ...
-
-
 @runtime_checkable
 class _ToolFailureCodes(Protocol):
     failure_codes: frozenset[str]
@@ -123,6 +113,71 @@ class _ProposalRepairRetryState:
 
 def _invalid_tool_arguments_message(error: Exception) -> str:
     return f"Invalid tool call arguments: {error}"
+
+
+def build_self_correction_error_event(
+    *,
+    feedback: str | None,
+    failure_kind: ToolProcessingFailureKind | None,
+    request_id: str | None = None,
+) -> dict[str, str]:
+    message = _self_correction_user_message(
+        feedback=feedback,
+        failure_kind=failure_kind,
+    )
+    if failure_kind in {"parse", "recoverable_parse"}:
+        code = AIBuilderErrorCode.SELF_CORRECTION_INVALID_PAYLOAD
+    elif failure_kind == "quality":
+        code = AIBuilderErrorCode.SELF_CORRECTION_QUALITY_FAILURE
+    else:
+        code = AIBuilderErrorCode.SELF_CORRECTION_INVALID_PLAN
+    return build_ai_builder_error_event(
+        message=message,
+        code=code,
+        phase=AIBuilderErrorPhase.SELF_CORRECTION,
+        request_id=request_id,
+    )
+
+
+def _self_correction_user_message(
+    *,
+    feedback: str | None,
+    failure_kind: ToolProcessingFailureKind | None,
+) -> str:
+    details = (feedback or "").casefold()
+    if failure_kind in {"parse", "recoverable_parse"}:
+        return (
+            "The AI Builder returned an incomplete plan configuration and could "
+            "not repair it automatically. Try again, or use a more capable model "
+            "if the same error repeats."
+        )
+    if "flow must have at least one step" in details or "empty_steps" in details:
+        return (
+            "The corrected plan did not contain any flow steps. Ask for at least "
+            "one concrete step, such as transcribing audio or summarizing text, "
+            "then try again."
+        )
+    if (
+        "input_source 'flow_input'" in details
+        or "runtime_upload" in details
+        or "first step" in details
+    ):
+        return (
+            "The corrected plan still could not connect the flow input to the "
+            "first step. For audio or file flows, the first step must receive the "
+            "uploaded file at runtime before later steps analyze the result."
+        )
+    if failure_kind == "quality":
+        return (
+            "The corrected plan still failed the AI Builder quality checks. "
+            "Revise the request with the exact input, output, and main steps you "
+            "want, then try again."
+        )
+    return (
+        "The corrected plan is still not a valid flow. Revise the request with "
+        "the input, output, and the concrete steps the flow should contain, then "
+        "try again."
+    )
 
 
 def _tool_result_has_events(tool_result: Any) -> bool:
@@ -297,14 +352,13 @@ async def request_self_correction(
     self_correction_temperature: float,
     self_correction_bumped_temperature: float,
     max_self_correction_retries: int,
+    forced_proposal_temperature: float,
     call_proposal_completion: Callable[..., Awaitable[Any]],
     process_tool_invocation: Callable[
         [ToolRetryInvocation], Awaitable[ToolProcessingResult]
     ],
     target_tool_name: str,
     forced_tool_prompt: str,
-    build_self_correction_error_event: BuildSelfCorrectionErrorEvent,
-    retry_forced_tool_after_text: Callable[..., Awaitable[ForcedToolRetryOutcome]],
     resource_catalog: AIBuilderResourceCatalog | None = None,
     flow: "Flow | None" = None,
     build_assistant_metadata: Callable[[], dict[str, Any] | None] | None = None,
@@ -450,6 +504,8 @@ async def request_self_correction(
                 max_output_tokens=max_output_tokens,
                 target_tool_name=target_tool_name,
                 forced_tool_prompt=forced_tool_prompt,
+                forced_proposal_temperature=forced_proposal_temperature,
+                call_proposal_completion=call_proposal_completion,
                 process_tool_invocation=process_tool_invocation,
                 resource_catalog=resource_catalog,
                 flow=flow,

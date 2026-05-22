@@ -29,6 +29,12 @@ PROPOSAL_POLICY_MODULE = ".".join(
 PROPOSAL_FINALIZATION_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_proposal_finalization")
 )
+PROPOSAL_REPAIR_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_proposal_repair")
+)
+PROPOSAL_REPAIR_RUNTIME_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_proposal_repair_runtime")
+)
 PROPOSAL_TOOL_CONTRACTS_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_proposal_tool_contracts")
 )
@@ -101,6 +107,23 @@ CONFIRM_REQUIREMENTS_ALLOWED_ANY_NAMES = frozenset(
         "assistant_metadata",
         "litellm_client",
         "litellm_kwargs",
+    }
+)
+PROPOSAL_REPAIR_RUNTIME_METHODS = frozenset(
+    {
+        "_request_tool_self_correction",
+        "retry_forced_tool_after_text",
+    }
+)
+PROPOSAL_REPAIR_RUNTIME_ALLOWED_ANY_NAMES = frozenset(
+    {
+        "assistant_metadata",
+        "build_assistant_metadata",
+        "correction_messages",
+        "litellm_kwargs",
+        "llm_messages",
+        "tool_call",
+        "tool_schemas",
     }
 )
 
@@ -619,6 +642,90 @@ def test_confirm_requirements_has_single_owner_and_typed_boundary() -> None:
 
     if 'tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}]' not in confirm_text:
         violations.append(f"{confirm_path}: missing synthetic ask-question stub")
+
+    assert violations == []
+
+
+def test_proposal_repair_runtime_has_single_owner_and_typed_boundary() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    processor_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+    )
+    repair_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+    )
+    runtime_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_repair_runtime.py"
+    )
+    assert importlib.util.find_spec(PROPOSAL_REPAIR_RUNTIME_MODULE) is not None
+
+    processor_tree = ast.parse(processor_path.read_text(), filename=str(processor_path))
+    repair_tree = ast.parse(repair_path.read_text(), filename=str(repair_path))
+    runtime_text = runtime_path.read_text()
+    runtime_tree = ast.parse(runtime_text, filename=str(runtime_path))
+    violations: list[str] = []
+
+    processor_class = next(
+        node
+        for node in ast.walk(processor_tree)
+        if isinstance(node, ast.ClassDef) and node.name == "AIBuilderProposalProcessor"
+    )
+    for node in processor_class.body:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in PROPOSAL_REPAIR_RUNTIME_METHODS
+        ):
+            violations.append(f"{processor_path}:{node.lineno} defines {node.name}")
+
+    for node in ast.walk(repair_tree):
+        if (
+            isinstance(node, ast.ClassDef)
+            and node.name == "BuildSelfCorrectionErrorEvent"
+        ):
+            violations.append(f"{repair_path}:{node.lineno} defines {node.name}")
+
+    for node in ast.walk(runtime_tree):
+        if isinstance(node, ast.ImportFrom) and (
+            node.module in BANNED_PROPOSAL_PROCESSOR_IMPORTS
+        ):
+            violations.append(f"{runtime_path}:{node.lineno} imports {node.module}")
+
+        if isinstance(node, ast.ClassDef) and node.name.endswith(
+            ("Processor", "Service", "Manager", "Handler")
+        ):
+            violations.append(f"{runtime_path}:{node.lineno} defines {node.name}")
+
+        if isinstance(node, ast.Attribute) and node.attr == "acompletion":
+            violations.append(f"{runtime_path}:{node.lineno} calls acompletion")
+
+        if isinstance(node, ast.Name) and node.id == "litellm_client":
+            violations.append(f"{runtime_path}:{node.lineno} uses litellm_client")
+
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.args.kwarg is not None:
+                annotation = node.args.kwarg.annotation
+                if annotation is not None and ast.unparse(annotation) == "Any":
+                    violations.append(
+                        f"{runtime_path}:{node.lineno} defines **kwargs: Any"
+                    )
+            for arg in [*node.args.args, *node.args.kwonlyargs]:
+                if _annotation_uses_any(arg.annotation) and (
+                    arg.arg not in PROPOSAL_REPAIR_RUNTIME_ALLOWED_ANY_NAMES
+                ):
+                    violations.append(
+                        f"{runtime_path}:{node.lineno} arg {arg.arg} uses Any"
+                    )
+
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if _annotation_uses_any(node.annotation) and (
+                node.target.id not in PROPOSAL_REPAIR_RUNTIME_ALLOWED_ANY_NAMES
+            ):
+                violations.append(
+                    f"{runtime_path}:{node.lineno} field {node.target.id} uses Any"
+                )
+
+    if "BuildSelfCorrectionErrorEvent" in runtime_text:
+        violations.append(f"{runtime_path}: preserves single-use error-event callback")
 
     assert violations == []
 

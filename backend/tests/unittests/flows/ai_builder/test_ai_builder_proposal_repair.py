@@ -17,9 +17,6 @@ from intric.flows.ai_builder.ai_builder_proposal_repair import (
     request_self_correction,
     retry_forced_tool_after_text,
 )
-from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
-    ToolProcessingFailureKind,
-)
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolProcessingResult,
     ToolRetryInvocation,
@@ -426,18 +423,11 @@ async def _run_repair_capturing(
         self_correction_temperature=base_temperature,
         self_correction_bumped_temperature=bumped_temperature,
         max_self_correction_retries=max_retries,
+        forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
         process_tool_invocation=process_invocation,
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
-        build_self_correction_error_event=lambda *,
-        feedback,
-        failure_kind,
-        request_id=None: {
-            "event": "error",
-            "data": feedback or "",
-        },
-        retry_forced_tool_after_text=AsyncMock(return_value=ForcedToolRetryOutcome()),
         flow=None,
     ):
         events.append(event)
@@ -486,7 +476,10 @@ async def test_request_self_correction_grants_one_extra_retry_for_recoverable_pa
     assert retry_feedback[2].startswith("FINAL CORRECTION ATTEMPT")
     assert retry_feedback[3].startswith("FINAL CORRECTION ATTEMPT")
     assert retry_feedback[4].startswith("FINAL CORRECTION ATTEMPT")
-    assert events[-1] == {"event": "error", "data": "still bad"}
+    assert events[-1]["event"] == "error"
+    payload = json.loads(events[-1]["data"])
+    assert payload["code"] == "self_correction_invalid_payload"
+    assert "still bad" not in payload["message"]
 
 
 @pytest.mark.asyncio
@@ -503,7 +496,17 @@ async def test_request_self_correction_rejects_non_extra_failure_after_normal_bu
 
     assert temps == [0.35, 0.6, 0.6, 0.6]
     assert len(retry_feedback) == 4
-    assert events[-1] == {"event": "error", "data": "still bad"}
+    assert events[-1]["event"] == "error"
+    payload = json.loads(events[-1]["data"])
+    expected_code = (
+        "self_correction_invalid_payload"
+        if failure_kind == "parse"
+        else "self_correction_quality_failure"
+        if failure_kind == "quality"
+        else "self_correction_invalid_plan"
+    )
+    assert payload["code"] == expected_code
+    assert "still bad" not in payload["message"]
 
 
 @pytest.mark.asyncio
@@ -562,18 +565,11 @@ async def test_request_self_correction_emits_error_event_when_planner_bails_to_c
         self_correction_temperature=0.35,
         self_correction_bumped_temperature=0.6,
         max_self_correction_retries=3,
+        forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
         process_tool_invocation=process_invocation,
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
-        build_self_correction_error_event=lambda *,
-        feedback,
-        failure_kind,
-        request_id=None: {
-            "event": "error",
-            "data": feedback or "",
-        },
-        retry_forced_tool_after_text=AsyncMock(return_value=ForcedToolRetryOutcome()),
         flow=None,
     ):
         events.append(event)
@@ -600,7 +596,7 @@ async def test_request_self_correction_emits_error_event_when_planner_bails_to_c
 
 
 @pytest.mark.asyncio
-async def test_request_self_correction_includes_forced_retry_validation_feedback() -> (
+async def test_request_self_correction_uses_request_id_on_forced_retry_validation_error() -> (
     None
 ):
     text_response = SimpleNamespace(
@@ -613,29 +609,26 @@ async def test_request_self_correction_includes_forced_retry_validation_feedback
             )
         ]
     )
+    tool_response = _tool_response(
+        tool_name="outline_flow",
+        arguments={
+            "flow_name": "Invalid",
+            "plan_rationale": "Invalid step reference.",
+            "steps": [{"name": "Step", "task": "Do work."}],
+        },
+    )
+    responses = [text_response, tool_response]
 
     async def call_proposal_completion(**_: Any) -> SimpleNamespace:
-        return text_response
+        return responses.pop(0)
 
-    forced_retry = AsyncMock(
-        return_value=ForcedToolRetryOutcome(
+    async def process_invocation(
+        _: ToolRetryInvocation,
+    ) -> ToolProcessingResult:
+        return ToolProcessingResult(
             feedback="Validation errors:\n1. Invalid step reference 'step_k'.",
             failure_kind="validation",
         )
-    )
-    observed_request_ids: list[str | None] = []
-
-    def build_self_correction_error_event(
-        *,
-        feedback: str | None,
-        failure_kind: ToolProcessingFailureKind | None,
-        request_id: str | None = None,
-    ) -> dict[str, str]:
-        observed_request_ids.append(request_id)
-        return {
-            "event": "error",
-            "data": feedback or "",
-        }
 
     events: list[dict[str, str]] = []
     async for event in request_self_correction(
@@ -655,22 +648,20 @@ async def test_request_self_correction_includes_forced_retry_validation_feedback
         self_correction_temperature=0.35,
         self_correction_bumped_temperature=0.6,
         max_self_correction_retries=0,
+        forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
-        process_tool_invocation=AsyncMock(),
+        process_tool_invocation=process_invocation,
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
-        build_self_correction_error_event=build_self_correction_error_event,
-        retry_forced_tool_after_text=forced_retry,
         flow=None,
     ):
         events.append(event)
 
-    assert events[-1] == {
-        "event": "error",
-        "data": "Validation errors:\n1. Invalid step reference 'step_k'.",
-    }
-    assert observed_request_ids == ["req-repair-feedback"]
-    forced_retry.assert_awaited_once()
+    assert events[-1]["event"] == "error"
+    payload = json.loads(events[-1]["data"])
+    assert payload["request_id"] == "req-repair-feedback"
+    assert payload["code"] == "self_correction_invalid_plan"
+    assert "Invalid step reference" not in payload["message"]
 
 
 @pytest.mark.asyncio
@@ -681,27 +672,31 @@ async def test_request_self_correction_retries_forced_retry_validation_feedback(
         choices=[
             SimpleNamespace(
                 message=SimpleNamespace(
-                    content=json.dumps(
-                        {
-                            "plan_rationale": "Try to repair as plain JSON.",
-                            "operations": [],
-                        }
-                    ),
+                    content="Här är en korrigerad plan.",
                     tool_calls=None,
                 )
             )
         ]
     )
-    tool_response = _tool_response(
+    invalid_tool_response = _tool_response(
+        tool_name="outline_flow",
+        arguments={
+            "flow_name": "Invalid repaired flow",
+            "plan_rationale": "Repair duplicate names.",
+            "steps": [{"name": "Duplicate", "task": "Do the work."}],
+        },
+    )
+    valid_tool_response = _tool_response(
         tool_name="outline_flow",
         arguments={
             "flow_name": "Valid repaired flow",
             "plan_rationale": "Repair duplicate names.",
-            "steps": [{"name": "Unique step", "task": "Do the work."}],
+            "steps": [{"name": "Unique", "task": "Do the work."}],
         },
     )
-    responses = [text_response, tool_response]
+    responses = [text_response, invalid_tool_response, valid_tool_response]
     observed_messages: list[list[dict[str, Any]]] = []
+    invocation_count = 0
 
     async def call_proposal_completion(
         *,
@@ -711,16 +706,19 @@ async def test_request_self_correction_retries_forced_retry_validation_feedback(
         observed_messages.append(messages)
         return responses.pop(0)
 
-    forced_retry = AsyncMock(
-        return_value=ForcedToolRetryOutcome(
-            feedback="Compiled edit spec validation failed: Duplicate step name 'Förbered DOCX-innehåll'.",
-            failure_kind="validation",
-        )
-    )
-
     async def process_invocation(
         _: ToolRetryInvocation,
     ) -> ToolProcessingResult:
+        nonlocal invocation_count
+        invocation_count += 1
+        if invocation_count == 1:
+            return ToolProcessingResult(
+                feedback=(
+                    "Compiled edit spec validation failed: Duplicate step name "
+                    "'Förbered DOCX-innehåll'."
+                ),
+                failure_kind="validation",
+            )
         return ToolProcessingResult(event={"event": "plan", "data": "{}"})
 
     events: list[dict[str, str]] = []
@@ -740,28 +738,21 @@ async def test_request_self_correction_retries_forced_retry_validation_feedback(
         self_correction_temperature=0.35,
         self_correction_bumped_temperature=0.6,
         max_self_correction_retries=3,
+        forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
         process_tool_invocation=process_invocation,
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
-        build_self_correction_error_event=lambda *,
-        feedback,
-        failure_kind,
-        request_id=None: {
-            "event": "error",
-            "data": feedback or "",
-        },
-        retry_forced_tool_after_text=forced_retry,
         flow=None,
     ):
         events.append(event)
 
     assert events[-1] == {"event": "plan", "data": "{}"}
-    assert len(observed_messages) == 2
-    retry_feedback = observed_messages[1][-1]
+    assert len(observed_messages) == 3
+    retry_feedback = observed_messages[2][-1]
     assert retry_feedback["role"] == "user"
     assert "Duplicate step name" in str(retry_feedback["content"])
-    forced_retry.assert_awaited_once()
+    assert invocation_count == 2
 
 
 @pytest.mark.asyncio
@@ -770,18 +761,28 @@ async def test_request_self_correction_limits_text_feedback_retry_budget() -> No
         choices=[
             SimpleNamespace(
                 message=SimpleNamespace(
-                    content=json.dumps(
-                        {
-                            "plan_rationale": "Still returning plain JSON.",
-                            "operations": [],
-                        }
-                    ),
+                    content="Här är en plan med samma fel.",
                     tool_calls=None,
                 )
             )
         ]
     )
+    invalid_tool_response = _tool_response(
+        tool_name="outline_flow",
+        arguments={
+            "flow_name": "Invalid repaired flow",
+            "plan_rationale": "Still duplicate.",
+            "steps": [{"name": "Duplicate", "task": "Do work."}],
+        },
+    )
+    responses = [
+        text_response,
+        invalid_tool_response,
+        text_response,
+        invalid_tool_response,
+    ]
     observed_messages: list[list[dict[str, Any]]] = []
+    invocation_count = 0
 
     async def call_proposal_completion(
         *,
@@ -789,14 +790,17 @@ async def test_request_self_correction_limits_text_feedback_retry_budget() -> No
         **_: Any,
     ) -> SimpleNamespace:
         observed_messages.append(messages)
-        return text_response
+        return responses.pop(0)
 
-    forced_retry = AsyncMock(
-        return_value=ForcedToolRetryOutcome(
+    async def process_invocation(
+        _: ToolRetryInvocation,
+    ) -> ToolProcessingResult:
+        nonlocal invocation_count
+        invocation_count += 1
+        return ToolProcessingResult(
             feedback="Compiled edit spec validation failed: duplicate step name.",
             failure_kind="validation",
         )
-    )
 
     events: list[dict[str, str]] = []
     async for event in request_self_correction(
@@ -815,29 +819,22 @@ async def test_request_self_correction_limits_text_feedback_retry_budget() -> No
         self_correction_temperature=0.35,
         self_correction_bumped_temperature=0.6,
         max_self_correction_retries=3,
+        forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
-        process_tool_invocation=AsyncMock(),
+        process_tool_invocation=process_invocation,
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
-        build_self_correction_error_event=lambda *,
-        feedback,
-        failure_kind,
-        request_id=None: {
-            "event": "error",
-            "data": feedback or "",
-        },
-        retry_forced_tool_after_text=forced_retry,
         flow=None,
     ):
         events.append(event)
 
-    assert events[-1] == {
-        "event": "error",
-        "data": "Compiled edit spec validation failed: duplicate step name.",
-    }
-    assert len(observed_messages) == 2
-    assert forced_retry.await_count == 2
-    retry_feedback = observed_messages[1][-1]
+    assert events[-1]["event"] == "error"
+    payload = json.loads(events[-1]["data"])
+    assert payload["code"] == "self_correction_invalid_plan"
+    assert "duplicate step name" not in payload["message"].casefold()
+    assert len(observed_messages) == 4
+    assert invocation_count == 2
+    retry_feedback = observed_messages[2][-1]
     assert retry_feedback["role"] == "user"
     assert "duplicate step name" in str(retry_feedback["content"])
 
@@ -883,18 +880,11 @@ async def test_request_self_correction_still_yields_text_for_legitimate_info_req
         self_correction_temperature=0.35,
         self_correction_bumped_temperature=0.6,
         max_self_correction_retries=3,
+        forced_proposal_temperature=0.1,
         call_proposal_completion=call_proposal_completion,
         process_tool_invocation=process_invocation,
         target_tool_name="outline_flow",
         forced_tool_prompt="Call outline_flow.",
-        build_self_correction_error_event=lambda *,
-        feedback,
-        failure_kind,
-        request_id=None: {
-            "event": "error",
-            "data": feedback or "",
-        },
-        retry_forced_tool_after_text=AsyncMock(return_value=ForcedToolRetryOutcome()),
         flow=None,
     ):
         events.append(event)

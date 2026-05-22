@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T050
+active_task: T051
 
 interruptions:
   - id: I001
@@ -76,7 +76,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T048 implementation/post-review: confirm-requirements parsing, validation follow-up, requirements metadata persistence, requirements_summary event construction, and retry config ownership moved from AIBuilderProposalProcessor to ai_builder_confirm_requirements.py. Claude post-implementation review returned GREEN_LIGHT yes / MIN_SCORE 8 and accepted the 1427 LOC processor result as real ownership movement. The broader score floor remains 8 because source-material label unification, generated-client determinism, full-source typing/test baseline, remaining processor topology/readability, broader live-eval runner assertions, and repeated normal-user output-quality proof remain unresolved."
+  source: "After T050 implementation/post-review: proposal self-correction and forced-tool repair runtime ownership moved from AIBuilderProposalProcessor into ai_builder_proposal_repair_runtime.py. Claude post-implementation review returned GREEN_LIGHT yes / MIN_SCORE 8 and accepted the 1430 -> 1197 LOC processor movement as real topology improvement. The broader score floor remains 8 because generated-client determinism, full-source typing/test baseline, remaining processor topology/readability, architecture-error helper placement, and repeated live-eval evidence still block a defensible 9."
   Maintainability: 8
   Code_Quality: 9
   Clean_Architecture: 8
@@ -95,7 +95,7 @@ current_scorecard:
   blockers:
     - "Public/lifecycle/CAS error-code discipline is now typed and guarded in AI Builder-owned raise sites, but generated-client regeneration determinism is not solved; T028 kept only the intentional enum literals after openapi-typescript produced broad unrelated churn."
     - "The five-case authenticated live eval now proves C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX, C4 runtime form fields, and C5 revise/edit through the public API, but this gate must be repeated after later planner/runtime changes rather than treated as permanent output-quality proof."
-    - "T042/T044/T048 removed proposal completion, structured-question recovery, and confirm-requirements ownership from ai_builder_proposal_processor.py, but the processor is still 1427 LOC and remains oversized; dispatcher/retry orchestration, self-correction bridge, create/edit orchestration, and finalization wiring still require broader topology work before maintainability/readability can honestly reach 9."
+    - "T042/T044/T048/T050 removed proposal completion, structured-question recovery, confirm-requirements ownership, and repair-runtime ownership from ai_builder_proposal_processor.py, but the processor is still 1197 LOC and remains oversized; dispatcher/retry-config selection, create/edit orchestration, and finalization wiring still require broader topology work before maintainability/readability can honestly reach 9."
     - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, partial processor-bound facades, and full-source Pyright baseline failures outside AI Builder."
     - "Both Claude and Antigravity recommended a small future clarification of counts_as_repair semantics in ai_builder_proposal_telemetry.py; it was not added in T038 because that file was outside the approved write scope."
     - "T046 improved audio/transcript structured-underlag output quality, but source-material labeling differs between source-material normalization and dataflow auto-bind, and the live eval runner still cannot directly assert absence of broad structured JSON bindings."
@@ -5142,7 +5142,7 @@ tasks:
   - id: T050
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Move proposal self-correction and forced-tool repair runtime primitives out of AIBuilderProposalProcessor into a repair-owned runtime boundary without moving edit/outline handlers or active-submission retry-config ownership."
     inputs:
@@ -5197,6 +5197,65 @@ tasks:
       - "Implementation needs to move edit/outline handlers or retry-config builders in the same tranche."
       - "Implementation needs broad Any, Callable[..., Any], **kwargs: Any, or Pyright ignores."
       - "Repair runtime becomes a pass-through facade or broad dependency bag."
+    receipt:
+      completed_at: "2026-05-22T14:45:00Z"
+      summary: "Moved proposal self-correction and forced-tool repair runtime ownership out of AIBuilderProposalProcessor into ai_builder_proposal_repair_runtime.py. The processor now builds typed ProposalSelfCorrectionRequest/ForcedToolAfterTextRequest objects and delegates repair runtime execution to free functions. The single-use BuildSelfCorrectionErrorEvent callback seam was deleted; self-correction error mapping now lives with ai_builder_proposal_repair.py. Processor LOC moved from 1430 after the model-edit hotfix to 1197."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t050-implementation-summary.md"
+        - ".codex/artifacts/claude-peer-loop-t050-repair-runtime-implementation-review-20260522T143442Z.md"
+      changed_files:
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair_runtime.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 83 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2305 passed, 4 skipped, 11 warnings"
+        - "cd backend && uv run ruff check touched T050 source/test files -> passed"
+        - "cd backend && uv run ruff format --check touched T050 source/test files -> passed"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
+        - "git diff --check -> passed"
+      peer_review:
+        claude: ".codex/artifacts/claude-peer-loop-t050-repair-runtime-implementation-review-20260522T143442Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity: "SKIPPED_DUE_TO_QUOTA per current instruction; not counted as a pass."
+      codex_self_review:
+        verdict: "pass for the scoped tranche. This is real ownership movement rather than a facade: the processor lost repair-runtime methods and architecture-error helpers, the repair runtime has no processor import or broad service class, and the AST guard enforces the boundary."
+        production_ready_for_scope: true
+        broader_goal_complete: false
+        score_floor: 8
+      deferred_followups:
+        - "Architecture-error event/telemetry helpers are now in ai_builder_proposal_repair_runtime.py but are also used by the processor first-attempt path. Claude accepted this as non-blocking but recommended moving them to a proposal architecture/error sibling in a later tranche."
+        - "request_self_correction still has an internal Callable[..., Awaitable[Any]] completion parameter. The runtime boundary uses ProposalCompletionFn, but a future tightening tranche could push that Protocol deeper."
+        - "The two runtime wrappers duplicate architecture-error try/except shape. Leave it until a third call site makes a helper clearly earned."
+      score_impact: "Improves Maintainability, Clean Architecture, Separation of Concerns, Human Readability, and AI Slop evidence, but the strict overall floor remains 8/10."
+
+  - id: T051
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T050, using current evidence rather than mechanically continuing processor splits."
+    inputs:
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t050-implementation-summary.md"
+      - ".codex/artifacts/claude-peer-loop-t050-repair-runtime-implementation-review-20260522T143442Z.md"
+      - "backend/src/intric/flows/ai_builder"
+      - "backend/tests/unittests/flows/ai_builder"
+    constraints:
+      - "Read-only judge task; no implementation before the next worker plan is peer-gated."
+      - "Compare remaining processor topology/readability work against generated-client determinism, full-source typing/test baseline, live-eval output proof, source-material label cleanup, and architecture-error helper ownership."
+      - "Prefer the tranche that most plausibly moves the strict score floor toward 9, not the easiest local cleanup."
+      - "Do not select broad observability/DX work until the OpenTelemetry branch is reviewed."
+      - "If selecting more processor topology work, reject facade/callback-bag designs and require a concrete canonical owner plus deletion/consolidation evidence."
+    expected_output:
+      - "Current score-floor blockers after T050."
+      - "Ranked options with rejected alternatives."
+      - "Selected next worker objective."
+      - "Allowed files, acceptance criteria, verification commands, stop conditions, and peer-gate requirements."
+      - "Whether the selected tranche can move any 8/10 dimension to 9, or why the floor stays 8."
     receipt: null
 
 checks:
@@ -5205,15 +5264,13 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "I001 live bug hotfix validated pending scoped commit. Selected-step model edits now bypass LLM drift for real AI steps and return an explicit transcribe_only notice instead of exhausting self-correction. Claude iteration 2 returned GREEN_LIGHT yes / MIN_SCORE 8. Active T050 remains open; broader goal remains active with strict floor 8/10."
-    task: I001
+    result: "T050 completed and Claude-approved. Proposal self-correction and forced-tool repair runtime ownership moved out of AIBuilderProposalProcessor into a typed repair-runtime boundary. Active task is now T051 judge re-ranking. Broader goal remains active with strict floor 8/10."
+    task: T050
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 97 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 83 passed"
       - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2305 passed, 4 skipped, 11 warnings"
-      - "cd backend && uv run ruff check touched AI Builder source/test files -> passed"
-      - "cd backend && uv run ruff format --check touched AI Builder source/test files -> passed"
+      - "cd backend && uv run ruff check touched T050 source/test files -> passed"
+      - "cd backend && uv run ruff format --check touched T050 source/test files -> passed"
       - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
       - "git diff --check -> passed"
-      - "Staged-only temp-worktree check with local backend/.env copied into the temp backend -> 37 passed"
-      - "Claude iteration 1: .codex/artifacts/claude-peer-loop-scoped-model-revision-hotfix-review-20260522T135308Z.md -> GREEN_LIGHT no / MIN_SCORE 5"
-      - "Claude iteration 2: .codex/artifacts/claude-peer-loop-scoped-model-revision-hotfix-review-iteration-2-20260522T141023Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Claude post-implementation review: .codex/artifacts/claude-peer-loop-t050-repair-runtime-implementation-review-20260522T143442Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"

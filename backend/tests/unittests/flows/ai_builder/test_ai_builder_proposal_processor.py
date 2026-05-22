@@ -47,6 +47,7 @@ from intric.flows.ai_builder.ai_builder_proposal_processor import (
 )
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     ForcedToolRetryOutcome,
+    build_self_correction_error_event,
 )
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
@@ -340,7 +341,7 @@ def _make_tool_call(
 def test_self_correction_error_event_keeps_internal_feedback_out_of_user_message() -> (
     None
 ):
-    event = AIBuilderProposalProcessor._build_self_correction_error_event(
+    event = build_self_correction_error_event(
         feedback=(
             "Compiled edit spec validation failed: Flow must have at least one step."
         ),
@@ -355,7 +356,7 @@ def test_self_correction_error_event_keeps_internal_feedback_out_of_user_message
 
 
 def test_self_correction_parse_error_uses_actionable_user_message() -> None:
-    event = AIBuilderProposalProcessor._build_self_correction_error_event(
+    event = build_self_correction_error_event(
         feedback="Invalid edit_flow arguments: operations.0.add_payload.knowledge_refs",
         failure_kind="parse",
     )
@@ -926,7 +927,7 @@ async def test_outline_quality_failure_records_failed_first_attempt() -> None:
         text_content="",
     )
 
-    async def _repair_events(**_kwargs):
+    async def _repair_events(_request):
         yield {"event": "status", "data": '{"status":"repairing"}'}
 
     with (
@@ -934,9 +935,9 @@ async def test_outline_quality_failure_records_failed_first_attempt() -> None:
             "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
             return_value=SimpleNamespace(confirmed=True),
         ),
-        patch.object(
-            processor,
-            "_request_tool_self_correction",
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor."
+            "run_tool_self_correction",
             side_effect=_repair_events,
         ),
     ):
@@ -994,7 +995,10 @@ async def test_handle_outline_flow_tool_call_returns_architecture_error_without_
             "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
             return_value=SimpleNamespace(confirmed=True),
         ),
-        patch.object(processor, "_request_tool_self_correction") as repair,
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor."
+            "run_tool_self_correction"
+        ) as repair,
         patch(
             "intric.flows.ai_builder.ai_builder_proposal_processor.process_outline_arguments",
             new=process_outline,
@@ -1023,106 +1027,6 @@ async def test_handle_outline_flow_tool_call_returns_architecture_error_without_
 
 
 @pytest.mark.asyncio
-async def test_self_correction_architecture_error_uses_sanitized_event() -> None:
-    processor = _make_processor()
-    tracker = ProposalTurnTelemetry(
-        request_id="req-repair-architecture",
-        model="openai/gpt-5.4-nano",
-    )
-    tool_call = _make_tool_call(
-        OUTLINE_FLOW_TOOL_NAME,
-        {
-            "flow_name": "Broken",
-            "plan_rationale": "Broken.",
-            "steps": [{"name": "Broken", "task": "Broken."}],
-        },
-        tool_call_id="call-repair-architecture",
-    )
-    ctx = _make_context(
-        usage_tracker=tracker,
-        request_id="req-repair-architecture",
-    )
-
-    async def _raise_architecture_error(**_kwargs):
-        raise AIBuilderArchitectureError(
-            public_code="architecture_critic_invariant_failed",
-            detail="critic invariant failed",
-            log_context={"critic_issue_ids": "pdf_terminal_output_alignment"},
-        )
-        yield {"event": "unused", "data": "{}"}
-
-    with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_processor.run_request_self_correction",
-        new=_raise_architecture_error,
-    ):
-        events = [
-            event
-            async for event in processor._request_tool_self_correction(
-                ctx=ctx,
-                error_message="Invalid flow",
-                tool_call=tool_call,
-                retry_config=ToolRetryConfig(
-                    target_tool_name=OUTLINE_FLOW_TOOL_NAME,
-                    forced_tool_prompt="Now call outline_flow.",
-                    process_tool_invocation=AsyncMock(),
-                ),
-            )
-        ]
-
-    assert [event["event"] for event in events] == ["error"]
-    payload = json.loads(events[0]["data"])
-    assert payload["code"] == "architecture_critic_invariant_failed"
-    telemetry = tracker.build_planner_telemetry()
-    assert telemetry["proposal_first_attempt_failure_kind"] == "architecture"
-    assert telemetry["proposal_repair_invocation_count"] == 0
-
-
-@pytest.mark.asyncio
-async def test_forced_tool_architecture_error_uses_sanitized_event() -> None:
-    processor = _make_processor()
-    tracker = ProposalTurnTelemetry(
-        request_id="req-forced-architecture",
-        model="openai/gpt-5.4-nano",
-    )
-
-    with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_processor.run_retry_forced_tool_after_text",
-        new=AsyncMock(
-            side_effect=AIBuilderArchitectureError(
-                public_code="architecture_materialization_failed",
-                detail="invalid skeleton",
-            )
-        ),
-    ):
-        outcome = await processor.retry_forced_tool_after_text(
-            correction_messages=[{"role": "user", "content": "Build"}],
-            assistant_text="Här är planen.",
-            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
-            litellm_model="openai/gpt-5.4",
-            litellm_kwargs={},
-            turn=_make_turn(),
-            conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
-            new_messages_start=1,
-            available_model_refs=None,
-            available_kb_refs=None,
-            max_output_tokens=4096,
-            target_tool_name=OUTLINE_FLOW_TOOL_NAME,
-            forced_tool_prompt="Now call outline_flow.",
-            process_tool_invocation=AsyncMock(),
-            usage_tracker=tracker,
-            request_id="req-forced-architecture",
-        )
-
-    assert outcome.events is not None
-    assert [event["event"] for event in outcome.events] == ["error"]
-    payload = json.loads(outcome.events[0]["data"])
-    assert payload["code"] == "architecture_materialization_failed"
-    telemetry = tracker.build_planner_telemetry()
-    assert telemetry["proposal_first_attempt_failure_kind"] == "architecture"
-    assert telemetry["proposal_repair_invocation_count"] == 0
-
-
-@pytest.mark.asyncio
 async def test_edit_flow_parse_failure_records_proposal_repair_reason() -> None:
     processor = _make_processor()
     tracker = ProposalTurnTelemetry(
@@ -1140,12 +1044,12 @@ async def test_edit_flow_parse_failure_records_proposal_repair_reason() -> None:
         flow=SimpleNamespace(id=uuid4()),
     )
 
-    async def _repair_events(**_kwargs):
+    async def _repair_events(_request):
         yield {"event": "error", "data": "{}"}
 
-    with patch.object(
-        processor,
-        "_request_tool_self_correction",
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_processor."
+        "run_tool_self_correction",
         side_effect=_repair_events,
     ):
         events = [
@@ -1491,9 +1395,9 @@ async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> No
             "intric.flows.ai_builder.ai_builder_proposal_processor.resolve_requirements_state",
             return_value=SimpleNamespace(confirmed=True),
         ),
-        patch.object(
-            processor,
-            "_request_tool_self_correction",
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor."
+            "run_tool_self_correction",
             return_value=_events(),
         ) as repair,
         patch(
@@ -1511,7 +1415,7 @@ async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> No
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     process_outline.assert_awaited_once()
-    retry_config = repair.call_args.kwargs["retry_config"]
+    retry_config = repair.call_args.args[0].retry_config
     assert isinstance(retry_config, ToolRetryConfig)
     process_signature = signature(retry_config.process_tool_invocation)
     assert list(process_signature.parameters) == ["invocation"]
@@ -2905,7 +2809,7 @@ async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mod
     processor = _make_processor()
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_processor.run_retry_forced_tool_after_text",
+        "intric.flows.ai_builder.ai_builder_proposal_processor.run_forced_tool_retry_after_text",
         new=AsyncMock(
             return_value=ForcedToolRetryOutcome(
                 events=({"event": "plan", "data": "{}"},)
@@ -2929,12 +2833,12 @@ async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mod
         )
 
     assert result == ({"event": "plan", "data": "{}"},)
-    kwargs = retry_forced_tool.await_args.kwargs
-    assert kwargs["target_tool_name"] == OUTLINE_FLOW_TOOL_NAME
-    process_signature = signature(kwargs["process_tool_invocation"])
+    request = retry_forced_tool.await_args.args[0]
+    assert request.retry_config.target_tool_name == OUTLINE_FLOW_TOOL_NAME
+    process_signature = signature(request.retry_config.process_tool_invocation)
     assert list(process_signature.parameters) == ["invocation"]
-    assert isinstance(kwargs["turn"], SessionSendTurn)
-    assert "Now call outline_flow" in kwargs["forced_tool_prompt"]
+    assert isinstance(request.turn, SessionSendTurn)
+    assert "Now call outline_flow" in request.retry_config.forced_tool_prompt
 
 
 @pytest.mark.asyncio
@@ -2961,9 +2865,9 @@ async def test_handle_edit_flow_parse_failure_triggers_self_correction() -> None
     async def _events():
         yield {"event": "status", "data": '{"status":"repairing"}'}
 
-    with patch.object(
-        processor,
-        "_request_tool_self_correction",
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_processor."
+        "run_tool_self_correction",
         return_value=_events(),
     ) as repair:
         events = [
@@ -2972,10 +2876,9 @@ async def test_handle_edit_flow_parse_failure_triggers_self_correction() -> None
         ]
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
-    assert "StepEditOperation" in repair.call_args.kwargs["error_message"]
-    assert (
-        repair.call_args.kwargs["retry_config"].target_tool_name == EDIT_FLOW_TOOL_NAME
-    )
+    request = repair.call_args.args[0]
+    assert "StepEditOperation" in request.error_message
+    assert request.retry_config.target_tool_name == EDIT_FLOW_TOOL_NAME
 
 
 @pytest.mark.asyncio
@@ -2994,9 +2897,9 @@ async def test_handle_confirm_requirements_parse_failure_triggers_self_correctio
     async def _events():
         yield {"event": "status", "data": '{"status":"repairing"}'}
 
-    with patch.object(
-        processor,
-        "_request_tool_self_correction",
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_processor."
+        "run_tool_self_correction",
         return_value=_events(),
     ) as repair:
         events = [
@@ -3007,11 +2910,9 @@ async def test_handle_confirm_requirements_parse_failure_triggers_self_correctio
         ]
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
-    assert "Invalid requirements summary" in repair.call_args.kwargs["error_message"]
-    assert (
-        repair.call_args.kwargs["retry_config"].target_tool_name
-        == CONFIRM_REQUIREMENTS_TOOL_NAME
-    )
+    request = repair.call_args.args[0]
+    assert "Invalid requirements summary" in request.error_message
+    assert request.retry_config.target_tool_name == CONFIRM_REQUIREMENTS_TOOL_NAME
 
 
 @pytest.mark.asyncio
@@ -3043,9 +2944,9 @@ async def test_handle_confirm_requirements_owner_events_skip_self_correction() -
             create=True,
             new=AsyncMock(return_value=ToolProcessingResult(events=followup_events)),
         ) as process_confirm,
-        patch.object(
-            processor,
-            "_request_tool_self_correction",
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor."
+            "run_tool_self_correction",
             return_value=_repair_events(),
         ) as repair,
     ):
@@ -3093,9 +2994,9 @@ async def test_handle_confirm_requirements_owner_feedback_triggers_self_correcti
                 )
             ),
         ) as process_confirm,
-        patch.object(
-            processor,
-            "_request_tool_self_correction",
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor."
+            "run_tool_self_correction",
             return_value=_repair_events(),
         ) as repair,
     ):
@@ -3109,4 +3010,4 @@ async def test_handle_confirm_requirements_owner_feedback_triggers_self_correcti
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     process_confirm.assert_awaited_once()
     repair.assert_called_once()
-    assert repair.call_args.kwargs["error_message"] == "Missing source material."
+    assert repair.call_args.args[0].error_message == "Missing source material."
