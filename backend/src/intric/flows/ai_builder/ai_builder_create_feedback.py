@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from intric.flows.ai_builder.ai_builder_critic_invariants import CriticIssue
-from intric.flows.ai_builder.ai_builder_proposal_policy import format_revision_feedback
+from intric.flows.ai_builder.ai_builder_feedback_formatting import (
+    format_revision_feedback,
+)
 from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 
 # Raw critic remediations stay mechanics-oriented for edit/compiled contexts.

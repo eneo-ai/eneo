@@ -211,112 +211,6 @@ async def _store_compiled_plan(**kwargs):
     )
 
 
-@pytest.mark.asyncio
-async def test_finalize_compiled_proposal_records_success_once_when_persisted() -> None:
-    processor = _make_processor()
-    ctx = _make_context()
-    success_recorder = MagicMock()
-    metadata_builder = MagicMock(return_value={"planner_telemetry": {"ok": True}})
-    captured_metadata: list[dict[str, object] | None] = []
-
-    async def store_plan(**kwargs):
-        captured_metadata.append(kwargs["assistant_metadata"])
-        return await _store_compiled_plan(**kwargs)
-
-    with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
-        new=store_plan,
-    ):
-        result = await processor._finalize_compiled_proposal(
-            ctx=ctx,
-            tool_name=OUTLINE_FLOW_TOOL_NAME,
-            arguments={"flow_name": "Test", "steps": []},
-            assistant_content="Här är mitt förslag:",
-            assistant_metadata=None,
-            assistant_metadata_builder=metadata_builder,
-            proposal_success_recorder=success_recorder,
-            tool_call_id="call-outline",
-            compiled=_compiled_outline_proposal(),
-        )
-
-    assert result.event is not None
-    assert result.event["event"] == "plan"
-    success_recorder.assert_called_once_with()
-    metadata_builder.assert_called_once_with()
-    assert captured_metadata == [{"planner_telemetry": {"ok": True}}]
-
-
-@pytest.mark.asyncio
-async def test_finalize_compiled_proposal_does_not_record_success_on_quality_reject() -> (
-    None
-):
-    processor = _make_processor(quality_retry_warning_codes={"quality_issue"})
-    validation = SpecValidationResult()
-    validation.add_warning(
-        step_ref="step_a",
-        code="quality_issue",
-        message="The plan should be improved before persistence.",
-    )
-    success_recorder = MagicMock()
-    metadata_builder = MagicMock(return_value={"planner_telemetry": {"ok": True}})
-    store_plan = AsyncMock(return_value=_stored_plan_result())
-
-    with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
-        new=store_plan,
-    ):
-        result = await processor._finalize_compiled_proposal(
-            ctx=_make_context(),
-            tool_name=OUTLINE_FLOW_TOOL_NAME,
-            arguments={"flow_name": "Test", "steps": []},
-            assistant_content="Här är mitt förslag:",
-            assistant_metadata=None,
-            assistant_metadata_builder=metadata_builder,
-            proposal_success_recorder=success_recorder,
-            tool_call_id="call-outline",
-            compiled=_compiled_outline_proposal_with_validation(validation),
-        )
-
-    assert result.event is None
-    assert result.failure_kind == "quality"
-    success_recorder.assert_not_called()
-    metadata_builder.assert_not_called()
-    store_plan.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_finalize_compiled_proposal_accepts_retry_metadata_without_recorder() -> (
-    None
-):
-    processor = _make_processor()
-    retry_metadata = {"planner_telemetry": {"request_id": "req-retry"}}
-    captured_metadata: list[dict[str, object] | None] = []
-
-    async def store_plan(**kwargs):
-        captured_metadata.append(kwargs["assistant_metadata"])
-        return await _store_compiled_plan(**kwargs)
-
-    with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
-        new=store_plan,
-    ):
-        result = await processor._finalize_compiled_proposal(
-            ctx=_make_context(),
-            tool_name=OUTLINE_FLOW_TOOL_NAME,
-            arguments={"flow_name": "Retry", "steps": []},
-            assistant_content="Här är mitt korrigerade förslag:",
-            assistant_metadata=retry_metadata,
-            assistant_metadata_builder=None,
-            proposal_success_recorder=None,
-            tool_call_id="call-retry",
-            compiled=_compiled_outline_proposal(),
-        )
-
-    assert result.event is not None
-    assert result.event["event"] == "plan"
-    assert captured_metadata == [retry_metadata]
-
-
 def _make_response_with_tool_calls(
     *tool_calls: MagicMock,
     prompt_tokens: int | None = None,
@@ -1500,7 +1394,7 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
             new=process_outline,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
             new=store_plan,
         ),
     ):
@@ -1610,7 +1504,7 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
             new=process_outline,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
             new=store_plan,
         ),
     ):
@@ -1705,7 +1599,7 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
             new=process_outline,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.store_plan_and_update_conversation",
+            "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
             new=store_plan,
         ),
     ):

@@ -18,6 +18,7 @@ architecture failures without treating them as repair invocations.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 from uuid import UUID
@@ -25,9 +26,13 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_telemetry import build_planner_telemetry
+from intric.flows.ai_builder.ai_builder_telemetry import (
+    build_assistant_message_metadata,
+    build_planner_telemetry,
+)
 from intric.flows.ai_builder.ai_builder_token_usage import (
     CompletionTokenUsage,
     combine_token_usage,
@@ -201,6 +206,48 @@ class ProposalTurnTelemetry:
             ),
             proposal_repair_invocation_count=proposal_repair_count,
             proposal_repair_invocation_reasons=proposal_repair_reasons,
+        )
+
+
+def assistant_metadata_with_usage(
+    *,
+    conversation: list[ConversationMessage],
+    base_metadata: dict[str, Any] | None,
+    usage_tracker: ProposalTurnTelemetry | None,
+    tool_calls: Sequence[object] | None = None,
+) -> dict[str, Any] | None:
+    if usage_tracker is None:
+        return base_metadata
+    return build_assistant_message_metadata(
+        conversation,
+        planner_telemetry=usage_tracker.build_planner_telemetry(
+            tool_call_count=len(tool_calls or [])
+        ),
+        base_metadata=base_metadata,
+        tool_calls=tool_calls,
+    )
+
+
+def record_proposal_first_attempt(
+    usage_tracker: ProposalTurnTelemetry | None,
+    *,
+    request_id: str,
+    tool_name: str,
+    success: bool,
+    failure_kind: ProposalFailureKind | None = None,
+) -> None:
+    if usage_tracker is None:
+        return
+    if usage_tracker.record_first_attempt(
+        tool_name=tool_name,
+        success=success,
+        failure_kind=failure_kind,
+    ):
+        log_proposal_first_attempt(
+            request_id=request_id,
+            tool_name=tool_name,
+            success=success,
+            failure_kind=failure_kind,
         )
 
 

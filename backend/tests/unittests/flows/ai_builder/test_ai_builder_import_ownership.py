@@ -26,6 +26,12 @@ PROPOSAL_PLAN_STORE_MODULE = ".".join(
 PROPOSAL_POLICY_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_proposal_policy")
 )
+PROPOSAL_FINALIZATION_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_proposal_finalization")
+)
+PROPOSAL_TOOL_CONTRACTS_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_proposal_tool_contracts")
+)
 BANNED_PROPOSAL_TOOL_IMPORT_MODULES = frozenset(
     {
         PROPOSAL_PLAN_STORE_MODULE,
@@ -45,6 +51,20 @@ BANNED_PROPOSAL_TOOL_NAMES = frozenset(
         "proposal_deps",
         "store_plan_and_update_conversation",
     }
+)
+PROCESSOR_FINALIZATION_METHODS = frozenset(
+    {
+        "_create_quality_result",
+        "_edit_quality_result",
+        "_finalize_compiled_proposal",
+        "_mcp_policy_feedback",
+        "_repair_edit_description_if_needed",
+        "_retry_context",
+        "mcp_clarification_events_if_needed",
+    }
+)
+FINALIZATION_OWNER_NAMES = frozenset(
+    {"CompiledProposalFinalizationRequest", "CompiledProposalFinalizer"}
 )
 
 BANNED_DOMAIN_MODEL_IMPORTS = frozenset(
@@ -150,6 +170,66 @@ def test_plan_store_does_not_import_proposal_policy_or_own_feedback_formatting()
             "format_validation_feedback",
         }:
             violations.append(f"{path}:{node.lineno} defines {node.name}")
+
+    assert violations == []
+
+
+def test_compiled_proposal_finalization_has_single_owner() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    finalization_spec = importlib.util.find_spec(PROPOSAL_FINALIZATION_MODULE)
+    assert finalization_spec is not None
+
+    finalization_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_finalization.py"
+    )
+    processor_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+    )
+    contracts_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+    )
+    critic_paths = (
+        backend_root
+        / Path("src/intric/flows/ai_builder/ai_builder_plan_quality_critic.py"),
+        backend_root
+        / Path("src/intric/flows/ai_builder/ai_builder_create_feedback.py"),
+    )
+
+    finalization_tree = ast.parse(
+        finalization_path.read_text(), filename=str(finalization_path)
+    )
+    owner_names = {
+        node.name
+        for node in ast.walk(finalization_tree)
+        if isinstance(node, ast.ClassDef)
+    }
+    assert FINALIZATION_OWNER_NAMES <= owner_names
+
+    violations: list[str] = []
+    processor_tree = ast.parse(processor_path.read_text(), filename=str(processor_path))
+    for node in ast.walk(processor_tree):
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in PROCESSOR_FINALIZATION_METHODS
+        ):
+            violations.append(f"{processor_path}:{node.lineno} defines {node.name}")
+
+    for path in (finalization_path, contracts_path):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and (
+                node.module in BANNED_PROPOSAL_PROCESSOR_IMPORTS
+            ):
+                violations.append(f"{path}:{node.lineno} imports {node.module}")
+
+    for path in critic_paths:
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module == PROPOSAL_POLICY_MODULE
+            ):
+                violations.append(f"{path}:{node.lineno} imports {node.module}")
 
     assert violations == []
 

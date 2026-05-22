@@ -7,15 +7,29 @@ from typing import TYPE_CHECKING, Literal
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     ui_language_from_metadata,
 )
+from intric.flows.ai_builder.ai_builder_create_feedback import (
+    format_create_critic_feedback,
+)
+from intric.flows.ai_builder.ai_builder_critic_invariants import (
+    enforce_architecture_critic_invariants,
+    evaluate_critic_invariants,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
     LintWarning,
 )
+from intric.flows.ai_builder.ai_builder_feedback_formatting import (
+    format_revision_feedback,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     extract_answer_signals,
     resolve_output_intent,
+)
+from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
+    build_conversation_aware_quality_feedback,
+    build_conversation_critic_context,
 )
 from intric.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationError,
@@ -51,15 +65,6 @@ def warnings_for_quality_retry(
         for warning in validation.warnings
         if warning.code in retry_warning_codes
     ]
-
-
-def format_revision_feedback(title: str, issues: list[str]) -> str:
-    if not issues:
-        return title
-    numbered = "\n".join(
-        f"{index}. {issue}" for index, issue in enumerate(issues, start=1)
-    )
-    return f"{title}:\n{numbered}"
 
 
 def format_validation_feedback(
@@ -140,10 +145,6 @@ def format_contextual_quality_feedback(
     aggregation_intent: AggregationIntent = "linear",
     resource_catalog: "AIBuilderResourceCatalog | None" = None,
 ) -> str | None:
-    from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
-        build_conversation_aware_quality_feedback,
-    )
-
     return build_conversation_aware_quality_feedback(
         conversation,
         spec,
@@ -160,17 +161,6 @@ def format_create_contextual_quality_feedback(
     aggregation_intent: AggregationIntent,
     resource_catalog: "AIBuilderResourceCatalog | None",
 ) -> str | None:
-    from intric.flows.ai_builder.ai_builder_create_feedback import (
-        format_create_critic_feedback,
-    )
-    from intric.flows.ai_builder.ai_builder_critic_invariants import (
-        enforce_architecture_critic_invariants,
-        evaluate_critic_invariants,
-    )
-    from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
-        build_conversation_critic_context,
-    )
-
     context = build_conversation_critic_context(
         conversation,
         spec,

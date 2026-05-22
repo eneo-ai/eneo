@@ -10,6 +10,9 @@ from intric.flows.ai_builder.ai_builder_critic_invariants import (
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from intric.flows.ai_builder.ai_builder_feedback_formatting import (
+    format_revision_feedback,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
     extract_answer_signals,
@@ -22,7 +25,6 @@ from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     build_requirements_signal_text,
     detect_planner_pattern_signals,
 )
-from intric.flows.ai_builder.ai_builder_proposal_policy import format_revision_feedback
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     resolve_requirements_state,
 )
