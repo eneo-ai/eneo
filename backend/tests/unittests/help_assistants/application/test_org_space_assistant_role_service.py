@@ -101,11 +101,19 @@ def _build_service(
     history_repo: AsyncMock | None = None,
     assistant_service: AsyncMock | None = None,
     audit_service: AsyncMock | None = None,
+    assistant_repo: AsyncMock | None = None,
+    prompt_service: AsyncMock | None = None,
+    users_repo: AsyncMock | None = None,
+    completion_model_crud_service: AsyncMock | None = None,
 ) -> tuple[OrgSpaceAssistantRoleService, dict[str, AsyncMock]]:
     role_repo = role_repo or AsyncMock()
     history_repo = history_repo or AsyncMock()
     assistant_service = assistant_service or AsyncMock()
     audit_service = audit_service or AsyncMock()
+    assistant_repo = assistant_repo or AsyncMock()
+    prompt_service = prompt_service or AsyncMock()
+    users_repo = users_repo or AsyncMock()
+    completion_model_crud_service = completion_model_crud_service or AsyncMock()
 
     space_service = AsyncMock()
     org_space = MagicMock()
@@ -117,6 +125,10 @@ def _build_service(
         role_repo=role_repo,
         history_repo=history_repo,
         assistant_service=assistant_service,
+        assistant_repo=assistant_repo,
+        prompt_service=prompt_service,
+        users_repo=users_repo,
+        completion_model_crud_service=completion_model_crud_service,
         space_service=space_service,
         audit_service=audit_service,
         factory=HelperAssistantsFactory(),
@@ -127,6 +139,10 @@ def _build_service(
         "assistant_service": assistant_service,
         "audit_service": audit_service,
         "space_service": space_service,
+        "assistant_repo": assistant_repo,
+        "prompt_service": prompt_service,
+        "users_repo": users_repo,
+        "completion_model_crud_service": completion_model_crud_service,
     }
 
 

@@ -3,8 +3,9 @@
 Owns the lifecycle of role slots in ``org_space_assistant_roles`` — list
 the active assignments for a tenant, assign / reassign an assistant to a
 role, unassign a role, toggle the ``is_enabled`` / ``is_visible_to_users``
-flags, and list the append-only history written to
-``help_assistant_assignment_history``.
+flags, list the append-only history written to
+``help_assistant_assignment_history``, and run the two admin reset
+actions (PRD §7).
 
 Enforces the cross-table invariant from PRD §4 ("the assistant filling a
 helper role must live in the org-space") and audit-logs every mutation.
@@ -12,19 +13,24 @@ All mutations require ``Permission.ADMIN``; ``get_active`` is admin-free
 because it drives the availability lookup the prompt-guide modal uses
 for every signed-in user.
 
-Reset actions (PRD §7) and archive-replaced helpers (PRD §3, §9) land in
-steps 016 / 017 — this file is intentionally limited to CRUD + history
-listing.
+The two reset paths consume :mod:`intric.help_assistants.defaults` — the
+single runtime source of truth for shipped Help Assistant config — so the
+admin UI cannot drift from what the team ships.
+
+Archive-replaced helpers (PRD §3, §9) lands in step 017.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
+from intric.ai_models.completion_models.completion_model import ModelKwargs
+from intric.assistants.assistant import Assistant
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.help_assistants.defaults import get_defaults
 from intric.help_assistants.domain.assignment_history import AssignmentHistory
 from intric.help_assistants.domain.assignment_history_reason import (
     AssignmentHistoryReason,
@@ -39,14 +45,21 @@ from intric.help_assistants.infrastructure.org_space_assistant_role_repo import 
     OrgSpaceAssistantRoleRepo,
 )
 from intric.main.exceptions import BadRequestException
+from intric.main.logging import get_logger
 from intric.roles.permissions import Permission, validate_permission
-from intric.users.user import UserInDB
+from intric.users.user import UserInDB, UserSparse
 
 if TYPE_CHECKING:
-    from intric.assistants.assistant import Assistant
+    from intric.assistants.assistant_repo import AssistantRepository
     from intric.assistants.assistant_service import AssistantService
     from intric.audit.application.audit_service import AuditService
+    from intric.completion_models.application import CompletionModelCRUDService
+    from intric.prompts.prompt_service import PromptService
     from intric.spaces.space_service import SpaceService
+    from intric.users.user_repo import UsersRepository
+
+
+logger = get_logger(__name__)
 
 
 class OrgSpaceAssistantRoleService:
@@ -56,6 +69,10 @@ class OrgSpaceAssistantRoleService:
         role_repo: OrgSpaceAssistantRoleRepo,
         history_repo: HelpAssistantAssignmentHistoryRepo,
         assistant_service: "AssistantService",
+        assistant_repo: "AssistantRepository",
+        prompt_service: "PromptService",
+        users_repo: "UsersRepository",
+        completion_model_crud_service: "CompletionModelCRUDService",
         space_service: "SpaceService",
         audit_service: "AuditService",
         factory: HelperAssistantsFactory,
@@ -64,6 +81,10 @@ class OrgSpaceAssistantRoleService:
         self.role_repo = role_repo
         self.history_repo = history_repo
         self.assistant_service = assistant_service
+        self.assistant_repo = assistant_repo
+        self.prompt_service = prompt_service
+        self.users_repo = users_repo
+        self.completion_model_crud_service = completion_model_crud_service
         self.space_service = space_service
         self.audit_service = audit_service
         self.factory = factory
@@ -285,12 +306,193 @@ class OrgSpaceAssistantRoleService:
 
         return assignment
 
+    async def reset_instructions_only(self, kind: HelperKind) -> Assistant:
+        validate_permission(self.user, Permission.ADMIN)
+        org_space_id = await self._resolve_org_space_id()
+
+        current = await self.role_repo.get_by_org_space_and_kind(
+            org_space_id=org_space_id, kind=kind
+        )
+        if current is None:
+            raise BadRequestException(
+                f"No active assignment for role '{kind.value}'."
+            )
+
+        system_user_id = await self._resolve_system_user_id()
+        defaults = get_defaults(kind)
+
+        # Explicit ownership: the new prompt must be attributed to the
+        # tenant's system user (the helper-assistant owner), not the calling
+        # admin — the audit log records the admin separately. ``_add_prompt``
+        # is the same flip-is_selected path that ``assistant_service.update_assistant``
+        # uses internally; we go through the repo directly so we can pass the
+        # prompt we just created instead of letting ``update_assistant``
+        # create a second one (and attribute it via its own owner rules).
+        new_prompt = await self.prompt_service.create_prompt(
+            text=defaults.prompt_text,
+            description="Reset to shipped default",
+            owner_user_id=system_user_id,
+        )
+        assert new_prompt is not None
+        await self.assistant_repo._add_prompt(  # pyright: ignore[reportPrivateUsage]
+            assistant_id=current.assistant_id, prompt=new_prompt
+        )
+
+        assistant = await self._load_assistant(current.assistant_id)
+        assert current.id is not None
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            user=self.user,
+            action=ActionType.HELP_ASSISTANT_RESET_INSTRUCTIONS,
+            entity_type=EntityType.ASSISTANT,
+            entity_id=current.assistant_id,
+            description=(
+                f"Reset instructions to shipped default for help-assistant "
+                f"role '{kind.value}'"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=self.user,
+                target=assistant,
+                extra={
+                    "role_kind": kind.value,
+                    "role_assignment_id": str(current.id),
+                    "org_space_id": str(org_space_id),
+                    "new_prompt_id": str(new_prompt.id),
+                },
+            ),
+        )
+
+        return assistant
+
+    async def reset_to_default(self, kind: HelperKind) -> Assistant:
+        validate_permission(self.user, Permission.ADMIN)
+        org_space_id = await self._resolve_org_space_id()
+
+        current = await self.role_repo.get_by_org_space_and_kind(
+            org_space_id=org_space_id, kind=kind
+        )
+        if current is None:
+            raise BadRequestException(
+                f"No active assignment for role '{kind.value}'."
+            )
+
+        old_assistant_id = current.assistant_id
+        old_assistant = await self._load_assistant(old_assistant_id)
+        old_assistant_name = old_assistant.name
+
+        system_user_id = await self._resolve_system_user_id()
+        defaults = get_defaults(kind)
+
+        completion_model = (
+            await self.completion_model_crud_service.get_default_completion_model()
+        )
+        if completion_model is None:
+            logger.warning(
+                "Tenant %s has no eligible completion model; resetting "
+                "help-assistant role '%s' with completion_model_id=NULL — an "
+                "admin must pick one before the helper can run.",
+                self.user.tenant_id,
+                kind.value,
+            )
+
+        new_prompt = await self.prompt_service.create_prompt(
+            text=defaults.prompt_text,
+            description=defaults.description,
+            owner_user_id=system_user_id,
+        )
+        assert new_prompt is not None
+
+        # Build the entity directly: ``AssistantFactory.create_assistant``
+        # round-trips through ``UserInDB`` → ``UserSparse.model_validate``,
+        # and the system user's reserved-TLD email (``system+<tid>@eneo.local``)
+        # fails that validation. ``model_construct`` skips validators so we
+        # can carry the system_user_id through the entity into the repo
+        # without touching production email validators.
+        new_assistant_id = uuid4()
+        system_user_sparse = UserSparse.model_construct(
+            id=system_user_id,
+            email=f"system+{self.user.tenant_id}@eneo.local",
+            username=f"system+{self.user.tenant_id}",
+        )
+        new_assistant = Assistant(
+            id=new_assistant_id,
+            user=system_user_sparse,
+            space_id=org_space_id,
+            completion_model=completion_model,
+            name=defaults.name,
+            prompt=new_prompt,
+            completion_model_kwargs=ModelKwargs(),
+            logging_enabled=defaults.logging_enabled,
+            websites=[],
+            collections=[],
+            attachments=[],
+            published=False,
+            description=defaults.description,
+            insight_enabled=defaults.insight_enabled,
+            data_retention_days=defaults.data_retention_days,
+        )
+        await self.assistant_repo.add(new_assistant)
+
+        current.reassign_to(
+            assistant_id=new_assistant_id, actor_user_id=self.user.id
+        )
+        assignment = await self.role_repo.update(current)
+        assert assignment.id is not None
+
+        history_entry = self.factory.create_assignment_history_entry(
+            org_space_id=org_space_id,
+            kind=kind,
+            assistant_id=old_assistant_id,
+            assistant_name_snapshot=old_assistant_name,
+            replaced_by_assistant_id=new_assistant_id,
+            reason=AssignmentHistoryReason.RESET_TO_DEFAULT,
+            actor_user_id=self.user.id,
+        )
+        await self.history_repo.add(history_entry)
+
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            user=self.user,
+            action=ActionType.HELP_ASSISTANT_RESET_TO_DEFAULT,
+            entity_type=EntityType.ASSISTANT,
+            entity_id=new_assistant_id,
+            description=(
+                f"Reset help-assistant role '{kind.value}' to shipped "
+                f"default (previous: '{old_assistant_name}')"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=self.user,
+                target=new_assistant,
+                extra={
+                    "role_kind": kind.value,
+                    "role_assignment_id": str(assignment.id),
+                    "org_space_id": str(org_space_id),
+                    "previous_assistant_id": str(old_assistant_id),
+                    "previous_assistant_name": old_assistant_name,
+                    "new_prompt_id": str(new_prompt.id),
+                },
+            ),
+        )
+
+        return new_assistant
+
     async def _resolve_org_space_id(self) -> UUID:
         org_space = await self.space_service.get_or_create_tenant_space()
         assert org_space.id is not None
         return org_space.id
 
-    async def _load_assistant(self, assistant_id: UUID) -> "Assistant":
+    async def _resolve_system_user_id(self) -> UUID:
+        system_user_id = await self.users_repo.get_system_user_id_for_tenant(
+            tenant_id=self.user.tenant_id
+        )
+        if system_user_id is None:
+            raise BadRequestException(
+                "Tenant is missing its system user; the help-assistant seed "
+                "migration has not run for this tenant."
+            )
+        return system_user_id
+
+    async def _load_assistant(self, assistant_id: UUID) -> Assistant:
         assistant, _ = await self.assistant_service.get_assistant(
             assistant_id=assistant_id
         )

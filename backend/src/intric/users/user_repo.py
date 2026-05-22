@@ -82,6 +82,18 @@ class UsersRepository:
         query = sa.select(Users.is_system_user).where(Users.id == user_id)
         return bool(await self.session.scalar(query))
 
+    async def get_system_user_id_for_tenant(self, tenant_id: UUID) -> UUID | None:
+        # Returns the id only: the seeded ``system+<tenant>@eneo.local`` email
+        # is a reserved-TLD form that ``EmailStr`` validation rejects, so a
+        # full ``UserInDB`` round-trip is unsafe for system users.
+        query = (
+            sa.select(Users.id)
+            .where(Users.tenant_id == tenant_id)
+            .where(Users.is_system_user.is_(True))
+            .where(Users.deleted_at.is_(None))
+        )
+        return await self.session.scalar(query)
+
     async def get_user_by_email(
         self, email: EmailStr, with_deleted: bool = False
     ) -> UserInDB | None:
