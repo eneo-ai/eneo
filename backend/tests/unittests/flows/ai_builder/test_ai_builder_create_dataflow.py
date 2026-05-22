@@ -176,7 +176,17 @@ def test_normalize_create_draft_mechanics_restores_audio_source_material_underla
     assert [
         (ref.from_step, ref.label) for ref in normalized.steps[3].uses_previous_outputs
     ] == [(1, "Källmaterial")]
-    assert normalized.steps[4].uses_previous_outputs == []
+    assert [
+        (ref.from_step, ref.label) for ref in normalized.steps[4].uses_previous_outputs
+    ] == [(1, "Transkribera ljud")]
+    assert {
+        (ref.from_step, ref.field_path)
+        for ref in normalized.steps[4].uses_previous_fields
+    } >= {
+        (2, "transcription_text"),
+        (3, "meeting_title"),
+        (4, "protocol_sections"),
+    }
     assert normalized.steps[5].uses_previous_outputs == []
 
 

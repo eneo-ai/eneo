@@ -375,7 +375,8 @@ def test_compile_create_draft_keeps_previous_json_when_output_ref_is_non_adjacen
     third_step = compiled.steps[2]
     assert third_step.input_bindings is not None
     assert third_step.input_bindings["question"] == (
-        "{{ step_b.output.structured }}\n\nSource material: {{ step_a.output.text }}"
+        "Titel.: {{ step_b.output.structured.meeting_title }}\n\n"
+        "Source material: {{ step_a.output.text }}"
     )
 
 
@@ -3254,7 +3255,8 @@ def test_compile_outline_audio_artifact_final_body_step_fans_in_prior_structured
     compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
 
-    body_step = draft.steps[-2]
+    normalized = normalize_create_draft_mechanics(draft)
+    body_step = normalized.steps[-2]
     assert body_step.name == "Bygg dokument med rubriker och innehåll"
     assert body_step.input_source.value == "previous_step"
     assert body_step.input_type.value == "text"
@@ -3266,7 +3268,7 @@ def test_compile_outline_audio_artifact_final_body_step_fans_in_prior_structured
     assert "sections" in field_paths
     assert "overall_summary" in field_paths
     assert compiled.steps[-2].input_contract is None
-    assert draft.steps[-1].output_type.value == final_output_type
+    assert normalized.steps[-1].output_type.value == final_output_type
     assert validation.valid
 
 
@@ -3341,7 +3343,8 @@ def test_compile_outline_audio_docx_four_phase_body_step_fans_in_prior_work() ->
     compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
 
-    body_step = draft.steps[-2]
+    normalized = normalize_create_draft_mechanics(draft)
+    body_step = normalized.steps[-2]
     assert body_step.name == "Bygg DOCX-dokument"
     assert body_step.input_source.value == "previous_step"
     assert body_step.input_type.value == "text"
@@ -3443,7 +3446,8 @@ def test_compile_outline_audio_docx_body_step_auto_authors_targeted_refs_when_js
     compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
 
-    body_step = draft.steps[-2]
+    normalized = normalize_create_draft_mechanics(draft)
+    body_step = normalized.steps[-2]
     assert body_step.name == "Skriv strukturerad rapport"
     assert body_step.output_type.value == "text"
     assert body_step.input_source.value == "previous_step"
@@ -4053,6 +4057,133 @@ def test_auto_bind_targeted_underlag_rewrites_previous_step_composer_with_multip
     )
 
 
+def test_auto_bind_targeted_underlag_caps_and_distributes_declared_fields() -> None:
+    from collections import Counter
+
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        TARGETED_UNDERLAG_FIELDS_PER_JSON_PRIOR_CAP,
+        TARGETED_UNDERLAG_TOTAL_FIELD_CAP,
+        auto_bind_targeted_underlag_for_text_composer,
+    )
+    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+
+    steps_before = [
+        NewStepDraft(
+            name=f"Extrahera område {prior_index}",
+            instructions="x",
+            input_source="flow_input" if prior_index == 1 else "previous_step",
+            input_type="text" if prior_index == 1 else "json",
+            output_type="json",
+            output_fields=[
+                _field(
+                    f"required_{prior_index}_{field_index}",
+                    "string",
+                    description=f"Obligatoriskt {prior_index}.{field_index}.",
+                    required=True,
+                )
+                if field_index < 2
+                else _field(
+                    f"optional_{prior_index}_{field_index}",
+                    "string",
+                    description=f"Valfritt {prior_index}.{field_index}.",
+                    required=False,
+                )
+                for field_index in range(5)
+            ],
+        )
+        for prior_index in range(1, 5)
+    ]
+    first_prior_fields = list(steps_before[0].output_fields or [])
+    steps_before[0] = steps_before[0].model_copy(
+        update={
+            "output_fields": [
+                first_prior_fields[0],
+                _field(
+                    "required_1_0",
+                    "string",
+                    description="Duplicerat namn.",
+                    required=True,
+                ),
+                *first_prior_fields[1:],
+            ]
+        }
+    )
+    steps_before.append(
+        NewStepDraft(
+            name="Skriv sammanfattning",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="text",
+        )
+    )
+
+    result = auto_bind_targeted_underlag_for_text_composer(
+        steps_before,
+        aggregation_intent="linear",
+    )
+
+    composer = result[-1]
+    refs = composer.uses_previous_fields
+    assert len(refs) == TARGETED_UNDERLAG_TOTAL_FIELD_CAP
+    per_prior = Counter(ref.from_step for ref in refs)
+    assert set(per_prior) == {1, 2, 3, 4}
+    assert all(
+        count <= TARGETED_UNDERLAG_FIELDS_PER_JSON_PRIOR_CAP
+        for count in per_prior.values()
+    )
+    assert [(ref.from_step, ref.field_path) for ref in refs[:4]] == [
+        (1, "required_1_0"),
+        (2, "required_2_0"),
+        (3, "required_3_0"),
+        (4, "required_4_0"),
+    ]
+    assert [(ref.from_step, ref.field_path) for ref in refs[4:]] == [
+        (1, "required_1_1"),
+        (2, "required_2_1"),
+        (3, "required_3_1"),
+        (4, "required_4_1"),
+    ]
+
+    spec = compile_create_draft(
+        FlowCreateDraft(
+            flow_name="Fältbegränsad rapport",
+            plan_rationale="Skriv rapport från flera JSON-priorer.",
+            steps=result,
+        )
+    )
+    from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        CRITIC_INVARIANTS,
+        CriticContext,
+        evaluate_critic_invariants,
+    )
+    from intric.flows.ai_builder.ai_builder_framework_policy import (
+        OutputIntentResolution,
+    )
+    from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        PlannerPatternSignals,
+    )
+
+    issue_ids = {
+        issue.id
+        for issue in evaluate_critic_invariants(
+            CriticContext(
+                spec=spec,
+                flow=None,
+                answer_signals={},
+                text="",
+                requirements_text="",
+                signal_text="",
+                planner_patterns=PlannerPatternSignals(),
+                output_intent=OutputIntentResolution(terminal_output="text"),
+                mixed_audio_doc_input=False,
+            ),
+            invariants=CRITIC_INVARIANTS,
+        )
+    }
+    assert "final_text_step_must_reference_relevant_structured_outputs" not in issue_ids
+
+
 def test_normalize_create_draft_mechanics_treats_prebound_targeted_text_composer_as_text_input() -> (
     None
 ):
@@ -4203,6 +4334,85 @@ def test_auto_bind_targeted_underlag_skips_previous_step_composer_with_single_js
     assert composer.uses_previous_fields == []
 
 
+def test_normalize_create_draft_mechanics_is_idempotent_for_targeted_underlag() -> None:
+    ordinary = FlowCreateDraft(
+        flow_name="Enkel sammanfattning",
+        plan_rationale="Sammanfatta text.",
+        steps=[
+            CreateStepDraft(
+                name="Sammanfatta",
+                instructions="Sammanfatta texten.",
+                input_source="flow_input",
+                input_type="text",
+                output_type="text",
+            )
+        ],
+    )
+    multi_json = FlowCreateDraft(
+        flow_name="Flera fält",
+        plan_rationale="Sammanfatta flera JSON-priorer.",
+        steps=[
+            CreateStepDraft(
+                name="Extrahera a",
+                instructions="x",
+                input_source="flow_input",
+                input_type="text",
+                output_type="json",
+                output_fields=[_field("a", "string")],
+            ),
+            CreateStepDraft(
+                name="Extrahera b",
+                instructions="x",
+                input_source="previous_step",
+                input_type="json",
+                output_type="json",
+                output_fields=[_field("b", "string")],
+            ),
+            CreateStepDraft(
+                name="Skriv rapport",
+                instructions="x",
+                input_source="previous_step",
+                input_type="json",
+                output_type="text",
+            ),
+        ],
+    )
+    source_report = FlowCreateDraft(
+        flow_name="Mötesrapport från ljud",
+        plan_rationale="Transkribera ljud och skriv rapport.",
+        steps=[
+            CreateStepDraft(
+                name="Transkribera mötesljud",
+                instructions="Transkribera mötesljudet.",
+                input_source="flow_input",
+                input_type="audio",
+                output_type="text",
+                runtime_upload=True,
+            ),
+            CreateStepDraft(
+                name="Extrahera möteskontext",
+                instructions="Extrahera kontext.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="json",
+                output_fields=[_field("meeting_context", "string")],
+            ),
+            CreateStepDraft(
+                name="Skriv rapport",
+                instructions="Skriv rapport.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="text",
+            ),
+        ],
+    )
+
+    for draft in (ordinary, multi_json, source_report):
+        once = normalize_create_draft_mechanics(draft)
+        twice = normalize_create_draft_mechanics(once)
+        assert twice == once
+
+
 def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() -> None:
     outline = parse_outline_flow_arguments(
         {
@@ -4319,20 +4529,37 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
         "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
     )
 
-    protocol_step = normalized.steps[3]
-    assert protocol_step.name == "Skapa mötesprotokoll med fasta rubriker"
-    assert protocol_step.input_source.value == "previous_step"
-    assert protocol_step.input_type.value == "text"
-    assert protocol_step.uses_previous_fields == []
-    assert [
-        (ref.from_step, ref.label) for ref in protocol_step.uses_previous_outputs
-    ] == [(1, "Källmaterial")]
+    body_step = normalized.steps[4]
+    assert body_step.name == "Förbered DOCX-innehåll"
+    assert body_step.input_source.value == "previous_step"
+    assert body_step.input_type.value == "text"
+    assert {
+        (ref.from_step, ref.field_path) for ref in body_step.uses_previous_fields
+    } >= {
+        (2, "transcription_text"),
+        (3, "meeting_title"),
+        (4, "protocol_sections"),
+    }
+    assert [(ref.from_step, ref.label) for ref in body_step.uses_previous_outputs] == [
+        (1, "Transkribera ljud")
+    ]
 
-    compiled_protocol_step = compiled.steps[3]
-    assert compiled_protocol_step.input_bindings is not None
-    assert compiled_protocol_step.input_bindings["question"] == (
-        "{{ step_c.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+    compiled_body_step = compiled.steps[4]
+    assert compiled_body_step.input_bindings is not None
+    protocol_question = compiled_body_step.input_bindings["question"]
+    assert (
+        "Fullständig transkription.: {{ step_b.output.structured.transcription_text }}"
+        in protocol_question
     )
+    assert (
+        "Mötestitel.: {{ step_c.output.structured.meeting_title }}" in protocol_question
+    )
+    assert (
+        "Innehåll per rubrik.: {{ step_d.output.structured.protocol_sections }}"
+        in protocol_question
+    )
+    assert "Transkribera ljud: {{ step_a.output.text }}" in protocol_question
+    assert "{{ step_d.output.structured }}" not in protocol_question
     assert validation.valid
 
 
@@ -4402,7 +4629,9 @@ def test_compile_create_draft_direct_audio_docx_bad_shape_gets_source_underlag()
         "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
     )
     assert protocol_question == (
-        "{{ step_c.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+        "Beskrivning: {{ step_b.output.structured.transcription_text }}\n\n"
+        "Beskrivning: {{ step_c.output.structured.meeting_title }}\n\n"
+        "Källmaterial: {{ step_a.output.text }}"
     )
     assert docx_question == (
         "{{ step_d.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
@@ -4487,7 +4716,8 @@ def test_compile_create_draft_audio_report_section_extractors_keep_transcript_un
         "{{ step_c.output.structured }}" in compiled.steps[3].input_bindings["question"]
     )
     assert (
-        "{{ step_d.output.structured }}" in compiled.steps[4].input_bindings["question"]
+        "Beskrivning: {{ step_d.output.structured.discussion_notes }}"
+        in compiled.steps[4].input_bindings["question"]
     )
     assert (
         "{{ step_e.output.structured }}" in compiled.steps[5].input_bindings["question"]
@@ -4550,11 +4780,15 @@ def test_compile_create_draft_text_report_keeps_source_and_structured_underlag()
     }
     assert report_step.input_type.value == "text"
     assert report_step.input_contract is None
-    assert report_step.input_bindings == {
-        "question": (
-            "{{ step_c.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
-        )
-    }
+    assert report_step.input_bindings is not None
+    report_question = report_step.input_bindings["question"]
+    assert (
+        "Beskrivning: {{ step_b.output.structured.meeting_context }}" in report_question
+    )
+    assert "Beskrivning: {{ step_c.output.structured.decisions }}" in report_question
+    assert "Källmaterial: {{ step_a.output.text }}" in report_question
+    assert "{{ step_b.output.structured }}" not in report_question
+    assert "{{ step_c.output.structured }}" not in report_question
     assert validate_spec(compiled).valid
 
 
@@ -4635,7 +4869,8 @@ def test_compile_outline_audio_pdf_protocol_step_auto_authors_targeted_underlag(
     compiled = compile_create_draft(draft)
     validation = validate_spec(compiled)
 
-    protocol_step = draft.steps[3]
+    normalized = normalize_create_draft_mechanics(draft)
+    protocol_step = normalized.steps[3]
     assert protocol_step.input_source.value == "previous_step"
     assert protocol_step.input_type.value == "text"
     assert protocol_step.output_type.value == "text"
@@ -4862,7 +5097,7 @@ def test_compile_outline_flow_audio_artifact_aggregate_fan_in_lands_on_terminal(
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = compile_create_draft(draft, aggregation_intent="aggregate")
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [
@@ -5123,7 +5358,7 @@ def test_compile_outline_template_fill_places_fan_in_on_synthesis_step() -> None
         outline,
         context=outline_compile_context_from_planning_state(state),
     )
-    compiled = compile_create_draft(draft)
+    compiled = compile_create_draft(draft, aggregation_intent="compare")
     validation = validate_spec(compiled)
 
     assert [step.name for step in draft.steps] == [

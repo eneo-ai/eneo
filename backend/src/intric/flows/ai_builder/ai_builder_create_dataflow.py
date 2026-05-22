@@ -14,6 +14,7 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     PreviousFieldRef,
     PreviousOutputRef,
+    StructuredFieldDraft,
 )
 from intric.flows.ai_builder.ai_builder_source_material import (
     normalize_create_draft_source_material,
@@ -32,6 +33,8 @@ if TYPE_CHECKING:
 
 _FILE_INPUT_TYPES = {InputType.AUDIO, InputType.DOCUMENT, InputType.FILE}
 _DOCUMENT_OUTPUT_TYPES = {OutputType.DOCX, OutputType.PDF}
+TARGETED_UNDERLAG_FIELDS_PER_JSON_PRIOR_CAP = 3
+TARGETED_UNDERLAG_TOTAL_FIELD_CAP = 8
 
 
 def strip_malformed_previous_field_refs(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -78,7 +81,11 @@ def strip_malformed_previous_field_refs(arguments: dict[str, Any]) -> dict[str, 
     return {**arguments, "steps": updated_steps}
 
 
-def normalize_create_draft_mechanics(draft: FlowCreateDraft) -> FlowCreateDraft:
+def normalize_create_draft_mechanics(
+    draft: FlowCreateDraft,
+    *,
+    aggregation_intent: "AggregationIntent" = "linear",
+) -> FlowCreateDraft:
     """Remove low-level references the backend cannot compile safely.
 
     The model may describe semantic flow intent, but exact structured field
@@ -88,6 +95,21 @@ def normalize_create_draft_mechanics(draft: FlowCreateDraft) -> FlowCreateDraft:
     intent instead of rejecting an otherwise useful plan.
     """
 
+    normalized_draft = _normalize_create_draft_refs(draft)
+    source_normalized_draft = normalize_create_draft_source_material(normalized_draft)
+    rebound_steps = auto_bind_targeted_underlag_for_text_composer(
+        source_normalized_draft.steps,
+        aggregation_intent=aggregation_intent,
+    )
+    rebound_draft = (
+        source_normalized_draft
+        if rebound_steps is source_normalized_draft.steps
+        else source_normalized_draft.model_copy(update={"steps": rebound_steps})
+    )
+    return _normalize_create_draft_refs(rebound_draft)
+
+
+def _normalize_create_draft_refs(draft: FlowCreateDraft) -> FlowCreateDraft:
     mechanically_normalized_steps: list[NewStepDraft] = []
     changed = False
     for step_index, step in enumerate(draft.steps):
@@ -132,10 +154,7 @@ def normalize_create_draft_mechanics(draft: FlowCreateDraft) -> FlowCreateDraft:
             )
         )
 
-    normalized_draft = (
-        draft if not changed else draft.model_copy(update={"steps": updated_steps})
-    )
-    return normalize_create_draft_source_material(normalized_draft)
+    return draft if not changed else draft.model_copy(update={"steps": updated_steps})
 
 
 def _normalize_step_mechanics(
@@ -274,11 +293,11 @@ def auto_bind_targeted_underlag_for_text_composer(
       predecessor and silently lose the earlier extractions. The rewrite
       keeps `previous_step` and populates `uses_previous_fields` across
       every JSON prior. Single-extraction → composer pipelines remain
-      untouched (the floor is two JSON priors).
+      untouched unless source-material normalization has already proved
+      the step is composing structured fields with a separate text source.
 
-    Authoring the refs from the JSON predecessors' contracts at draft
-    time makes the spec satisfy the targeted-underlag policy without
-    depending on the planner.
+    Outline mode strips backend-owned refs, so this pass must synthesize
+    refs from declared contracts instead of asking the model to author them.
 
     Suppression matches the critic invariant: `aggregate`/`compare`
     intents need fan-in for cross-document compositions, prior content
@@ -308,7 +327,7 @@ def auto_bind_targeted_underlag_for_text_composer(
         composer = rewritten_steps[composer_index]
         if (
             composer.input_source == InputSource.PREVIOUS_STEP
-            and composer.output_type == OutputType.TEXT
+            and composer.input_type in {InputType.JSON, InputType.TEXT}
             and not composer.uses_previous_fields
         ):
             updated_steps = _bind_targeted_underlag_for_composer(
@@ -352,24 +371,16 @@ def _bind_targeted_underlag_for_composer(
     ]
     if not json_priors:
         return steps
-    if require_multiple_json_priors and len(json_priors) < 2:
+    if (
+        require_multiple_json_priors
+        and len(json_priors) < 2
+        and not composer.uses_previous_outputs
+    ):
         return steps
 
-    new_field_refs: list[PreviousFieldRef] = []
-    seen_field_keys: set[tuple[int, str]] = set()
-    for predecessor_index, predecessor in json_priors:
-        for field in predecessor.output_fields or []:
-            key = (predecessor_index + 1, field.name)
-            if key in seen_field_keys:
-                continue
-            seen_field_keys.add(key)
-            new_field_refs.append(
-                PreviousFieldRef(
-                    from_step=predecessor_index + 1,
-                    field_path=field.name,
-                    label=(field.description or field.name).strip() or field.name,
-                )
-            )
+    new_field_refs = _select_targeted_underlag_field_refs(json_priors)
+    if not new_field_refs:
+        return steps
 
     new_output_refs: list[PreviousOutputRef] = list(composer.uses_previous_outputs)
     seen_output_steps = {ref.from_step for ref in new_output_refs}
@@ -398,6 +409,86 @@ def _bind_targeted_underlag_for_composer(
     return new_steps
 
 
+def _select_targeted_underlag_field_refs(
+    json_priors: list[tuple[int, NewStepDraft]],
+) -> list[PreviousFieldRef]:
+    ordered_priors = [
+        (
+            predecessor_index,
+            _ordered_targeted_underlag_fields(predecessor)[
+                :TARGETED_UNDERLAG_FIELDS_PER_JSON_PRIOR_CAP
+            ],
+        )
+        for predecessor_index, predecessor in json_priors
+    ]
+    ordered_priors = [(index, fields) for index, fields in ordered_priors if fields]
+    if not ordered_priors:
+        return []
+
+    effective_total_cap = max(
+        TARGETED_UNDERLAG_TOTAL_FIELD_CAP,
+        len(ordered_priors),
+    )
+    selected: list[PreviousFieldRef] = []
+    positions = [0 for _ in ordered_priors]
+
+    for prior_position, (predecessor_index, fields) in enumerate(ordered_priors):
+        selected.append(_field_ref_from_draft_field(predecessor_index, fields[0]))
+        positions[prior_position] = 1
+        if len(selected) >= effective_total_cap:
+            return selected
+
+    while len(selected) < effective_total_cap:
+        advanced = False
+        for prior_position, (predecessor_index, fields) in enumerate(ordered_priors):
+            field_position = positions[prior_position]
+            if field_position >= len(fields):
+                continue
+            selected.append(
+                _field_ref_from_draft_field(
+                    predecessor_index,
+                    fields[field_position],
+                )
+            )
+            positions[prior_position] += 1
+            advanced = True
+            if len(selected) >= effective_total_cap:
+                break
+        if not advanced:
+            break
+
+    return selected
+
+
+def _ordered_targeted_underlag_fields(
+    step: NewStepDraft,
+) -> list[StructuredFieldDraft]:
+    fields = list(step.output_fields or [])
+    fields_by_priority = [
+        *(field for field in fields if field.required),
+        *(field for field in fields if not field.required),
+    ]
+    selected_fields: list[StructuredFieldDraft] = []
+    seen_field_names: set[str] = set()
+    for field in fields_by_priority:
+        if field.name in seen_field_names:
+            continue
+        seen_field_names.add(field.name)
+        selected_fields.append(field)
+    return selected_fields
+
+
+def _field_ref_from_draft_field(
+    predecessor_index: int,
+    field: StructuredFieldDraft,
+) -> PreviousFieldRef:
+    return PreviousFieldRef(
+        from_step=predecessor_index + 1,
+        field_path=field.name,
+        label=(field.description or field.name).strip() or field.name,
+    )
+
+
 def _last_compositional_step_index(steps: list[NewStepDraft]) -> int | None:
     for index in range(len(steps) - 1, -1, -1):
         if not _is_renderer_draft(steps[index]):
@@ -413,6 +504,8 @@ def _is_renderer_draft(step: NewStepDraft) -> bool:
 
 
 __all__ = [
+    "TARGETED_UNDERLAG_FIELDS_PER_JSON_PRIOR_CAP",
+    "TARGETED_UNDERLAG_TOTAL_FIELD_CAP",
     "auto_bind_targeted_underlag_for_text_composer",
     "normalize_create_draft_mechanics",
     "strip_malformed_previous_field_refs",

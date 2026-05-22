@@ -19,9 +19,6 @@ from intric.flows.ai_builder.ai_builder_architecture_derivation import (
 from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
-from intric.flows.ai_builder.ai_builder_create_dataflow import (
-    auto_bind_targeted_underlag_for_text_composer,
-)
 from intric.flows.ai_builder.ai_builder_create_models import (
     CreateFormFieldDraft,
     FlowCreateDraft,
@@ -692,13 +689,6 @@ def compile_outline_to_create_draft(
         field_names=dropped_primary_input_field_names,
         runtime_input_type=runtime_input_type,
     )
-    steps = auto_bind_targeted_underlag_for_text_composer(
-        steps,
-        aggregation_intent=(
-            context.aggregation_intent if context is not None else "linear"
-        ),
-    )
-
     return FlowCreateDraft(
         flow_name=outline.flow_name,
         flow_description=outline.flow_description,

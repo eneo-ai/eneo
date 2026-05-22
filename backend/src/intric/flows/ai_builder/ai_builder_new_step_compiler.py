@@ -193,12 +193,11 @@ def _should_suppress_source_reference(
     ):
         return False
     immediate_previous_order = len(prior_steps)
-    refs = [
-        *(field_ref.from_step for field_ref in step_draft.uses_previous_fields),
-        *(output_ref.from_step for output_ref in step_draft.uses_previous_outputs),
-    ]
-    return bool(refs) and all(
-        from_step == immediate_previous_order for from_step in refs
+    # A targeted field ref to the immediate JSON predecessor is enough to drop
+    # the broad structured source blob.
+    return any(
+        field_ref.from_step == immediate_previous_order
+        for field_ref in step_draft.uses_previous_fields
     )
 
 

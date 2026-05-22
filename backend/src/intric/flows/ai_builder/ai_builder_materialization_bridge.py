@@ -171,11 +171,17 @@ def materialize(
             f"Draft envelope failed strict structural validation: {exc}"
         ) from exc
 
-    draft = normalize_create_draft_mechanics(draft)
+    draft = normalize_create_draft_mechanics(
+        draft,
+        aggregation_intent=architecture_commit.aggregation_intent,
+    )
     _run_create_draft_semantic_validator(draft)
     _validate_pre_compile_tuples(architecture_commit, draft)
 
-    spec = compile_create_draft(draft)
+    spec = compile_create_draft(
+        draft,
+        aggregation_intent=architecture_commit.aggregation_intent,
+    )
 
     _validate_compiled_spec_matches_architecture_envelope(architecture_commit, spec)
     prepared_spec = _run_compiled_spec_validator(spec)

@@ -77,6 +77,7 @@ def _architecture_commit(
     tuples_chain: list[StepTriple] | None = None,
     chosen_patterns: list[str] | None = None,
     required_capabilities: list[str] | None = None,
+    aggregation_intent: str = "linear",
 ) -> ArchitectureCommit:
     """Build an ArchitectureCommit with defaults sensible for a single-step
     summarize_text flow.
@@ -92,6 +93,7 @@ def _architecture_commit(
         ],
         chosen_patterns=chosen_patterns or ["summarize_text"],
         required_capabilities=required_capabilities or ["summarize_text"],
+        aggregation_intent=aggregation_intent,
         committed_at=_FIXED_COMMIT_TIMESTAMP,
         architecture_hash="a" * 64,
     )
@@ -210,6 +212,73 @@ class TestArchitectureEnvelope:
         assert result.spec.steps[0].input_type.value == "document"
         assert result.spec.steps[0].output_type.value == "json"
         assert result.spec.steps[-1].output_type.value == "text"
+
+    def test_aggregate_intent_preserves_broad_fan_in_through_materialization(
+        self,
+    ) -> None:
+        commit = _architecture_commit(
+            tuples_chain=[
+                StepTriple(
+                    input_type="text",
+                    output_type="text",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["multi_step_quality_chain"],
+            required_capabilities=["output_mode_pass_through"],
+            aggregation_intent="aggregate",
+        )
+        envelope = DraftPlanEnvelope(
+            plan_id="plan_1",
+            steps=[
+                {
+                    "name": "Extrahera marknad",
+                    "instructions": "Extrahera marknadssignaler.",
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "market_signals",
+                            "field_type": "string",
+                            "description": "Marknadssignaler.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Extrahera risker",
+                    "instructions": "Extrahera risker.",
+                    "input_source": "previous_step",
+                    "input_type": "json",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "risks",
+                            "field_type": "string",
+                            "description": "Risker.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Syntetisera helheten",
+                    "instructions": "Syntetisera allt underlag.",
+                    "input_source": "all_previous_steps",
+                    "input_type": "text",
+                    "output_type": "text",
+                },
+            ],
+            form_fields=[],
+        )
+
+        result = materialize(
+            architecture_commit=commit,
+            draft_plan=envelope,
+            flow_name="Aggregated report",
+            plan_rationale="Aggregate prior analyses.",
+        )
+
+        assert result.spec.steps[-1].input_source == InputSource.ALL_PREVIOUS_STEPS
+        assert result.spec.steps[-1].input_bindings is None
 
     def test_terminal_output_divergence_raises(self) -> None:
         commit = _architecture_commit()

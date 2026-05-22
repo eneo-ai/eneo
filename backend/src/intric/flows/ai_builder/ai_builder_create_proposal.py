@@ -194,7 +194,10 @@ async def _process_create_draft(
                 failure_kind="validation",
             )
 
-    draft = normalize_create_draft_mechanics(draft)
+    draft = normalize_create_draft_mechanics(
+        draft,
+        aggregation_intent=aggregation_intent,
+    )
     create_validation = validate_create_draft(draft)
     if create_validation.errors:
         logger.info(
@@ -208,7 +211,10 @@ async def _process_create_draft(
         )
 
     try:
-        spec = compile_create_draft(draft)
+        spec = compile_create_draft(
+            draft,
+            aggregation_intent=aggregation_intent,
+        )
     except Exception as error:
         logger.error("Create draft compilation failed: %s", error, exc_info=error)
         return ToolProcessingResult(

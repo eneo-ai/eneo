@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T046
+active_task: T047
 
 scoring_target:
   dimensions:
@@ -50,7 +50,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T042 implementation/post-review: proposal completion provider calls and usage-tracked ProposalCompletionFn construction are owned by the new ai_builder_proposal_completion leaf module. AIBuilderProposalProcessor no longer defines call_proposal_completion, _call_proposal_completion_with_usage, _make_usage_tracked_completion_fn, or raw litellm_client.acompletion calls, and it is down to 1820 LOC from the 1900 LOC T041 baseline. Static ownership tests enforce zero processor acompletion refs, exactly one completion-owner acompletion ref, no completion-to-processor/planner import, and no telemetry-to-completion import. Claude and Antigravity post-review both returned GREEN_LIGHT yes / MIN_SCORE 8. The broader score floor remains 8 because AIBuilderProposalProcessor still owns dispatch, self-correction bridge, structured-question recovery, confirm requirements, create/edit orchestration, and finalization wiring; generated-client determinism, full-source typing/test baseline, and repeated live-eval/output-quality proof remain unresolved."
+  source: "After T046 implementation/post-review: targeted underlag field selection is backend-owned in ai_builder_create_dataflow.py, outline compilation no longer owns an early auto-bind path, aggregation_intent is threaded through normalize/compile/materialize, and audio/transcript -> structured JSON -> text/DOCX create flows now compile selected declared field refs plus source material instead of broad structured JSON blobs where selected refs exist. Claude post-implementation and final hardening gates both returned GREEN_LIGHT yes / MIN_SCORE 8. The broader score floor remains 8 because source-material label unification, generated-client determinism, full-source typing/test baseline, processor topology/readability, broader live-eval runner assertions, and repeated normal-user output-quality proof remain unresolved."
   Maintainability: 8
   Code_Quality: 9
   Clean_Architecture: 8
@@ -72,6 +72,7 @@ current_scorecard:
     - "T042 removed proposal completion ownership from ai_builder_proposal_processor.py, but the processor is still 1820 LOC and remains oversized; structured-question recovery, confirm requirements, dispatcher/retry orchestration, self-correction bridge, create/edit orchestration, and finalization wiring still require broader topology work before maintainability/readability can honestly reach 9."
     - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, partial processor-bound facades, and full-source Pyright baseline failures outside AI Builder."
     - "Both Claude and Antigravity recommended a small future clarification of counts_as_repair semantics in ai_builder_proposal_telemetry.py; it was not added in T038 because that file was outside the approved write scope."
+    - "T046 improved audio/transcript structured-underlag output quality, but source-material labeling differs between source-material normalization and dataflow auto-bind, and the live eval runner still cannot directly assert absence of broad structured JSON bindings."
     - "Overall remains 8 until generated-client tooling determinism, full-source typing/test baseline, consolidation/readability/test-topology tranches, and repeated live-eval evidence prove every dimension is honestly at least 9."
 
 score_floor_completion_gates:
@@ -4788,7 +4789,7 @@ tasks:
   - id: T046
     type: worker
     assignee: Worker
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Implement smart selective underlag field reuse in Flow AI Builder using a red-tests-first workflow: consolidate targeted auto-bind into normalize_create_draft_mechanics, thread aggregation_intent through normalize/compile call chains, delete the early outline auto-bind owner, and replace broad structured JSON underlag with bounded declared-field refs plus source material where appropriate."
     inputs:
@@ -4820,11 +4821,15 @@ tasks:
       - "backend/src/intric/flows/ai_builder/ai_builder_materialization_bridge.py"
       - "backend/src/intric/flows/ai_builder/ai_builder_source_material.py only if the post-normalization signal proves insufficient and a narrow read-only helper is required"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_dataflow.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_materialization_bridge.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
       - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
       - ".codex/artifacts/flow-ai-builder-t046-underlag-implementation-summary.md"
+      - ".codex/artifacts/flow-ai-builder-t046-live-eval.md"
+      - ".codex/artifacts/claude-peer-loop-t046-underlag-implementation-commit-gate-20260522T120506Z.md"
+      - ".codex/artifacts/claude-peer-loop-t046-final-post-green-hardening-check-20260522T121011Z.md"
     acceptance_criteria:
       - "Direct compile path for audio/transcription -> structured JSON fields -> text/DOCX report emits selected declared field refs plus source material and does not emit broad {{ step_x.output.structured }} refs when selected field refs exist."
       - "Outline path emits the same selective shape after the early outline auto-bind call is removed."
@@ -4848,6 +4853,99 @@ tasks:
       - "git diff --check"
       - "Post-implementation Claude review; Antigravity if quota/tooling is available."
       - "Authenticated live AI Builder eval if local service is available."
+    receipt:
+      completed_at: "2026-05-22T12:10:11Z"
+      commit: null
+      summary: "Implemented smart selective underlag field reuse. normalize_create_draft_mechanics now owns the create-draft mechanics pipeline: low-level ref cleanup, source-material normalization, targeted field auto-bind, and final safety cleanup. compile_create_draft, _process_create_draft, and materialize now thread aggregation_intent so aggregate/compare fan-in is not collapsed by the compile path. compile_outline_to_create_draft no longer owns early targeted auto-bind. Dataflow selection now uses declared top-level output_fields only, required fields first, declaration order second, with per-prior/total caps, one-field floor under cap pressure, and per-prior duplicate field-name deduplication."
+      owned_files:
+        - "backend/src/intric/flows/ai_builder/ai_builder_create_dataflow.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_create_compiler.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_create_outline.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_create_proposal.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_materialization_bridge.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_new_step_compiler.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_dataflow.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_materialization_bridge.py"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+        - ".codex/artifacts/flow-ai-builder-t046-underlag-implementation-summary.md"
+        - ".codex/artifacts/flow-ai-builder-t046-live-eval.md"
+        - ".codex/artifacts/claude-peer-loop-t046-underlag-implementation-commit-gate-20260522T120506Z.md"
+        - ".codex/artifacts/claude-peer-loop-t046-final-post-green-hardening-check-20260522T121011Z.md"
+      out_of_scope_dirty_preserved:
+        - ".devcontainer/docker-compose.yml"
+        - ".gitignore"
+        - "AGENTS.md"
+        - ".devcontainer/devcontainer-lock.json"
+        - "PRODUCT.md"
+        - "utvecklingssamtal.mp3"
+      red_tests_first:
+        - "Before implementation, selected-underlag assertions failed on broad structured JSON refs."
+        - "Before implementation, compile_create_draft did not accept aggregation_intent."
+        - "Before implementation, materialization did not prove aggregate intent through normalize/compile."
+      verification:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -> 125 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_dataflow.py -q -> 6 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_materialization_bridge.py -q -> 38 passed, 1 warning"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py -q -> 37 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q -> 105 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2288 passed, 4 skipped, 11 warnings"
+        - "cd backend && uv run ruff check touched T046 source/test files -> passed"
+        - "cd backend && uv run ruff format --check touched T046 source/test files -> passed"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations"
+        - "git diff --check -> clean"
+      live_eval:
+        artifact: ".codex/artifacts/flow-ai-builder-t046-live-eval.md"
+        result: "Authenticated local create eval reached proposed plan status. Automated runner reported fail because expected-term checks inspected requirements-summary wording, but manual plan inspection passed the T046 behavior: writing step used selected structured field refs plus source material and did not use broad step_b.output.structured."
+        raw_artifact_dir: "/tmp/flow-ai-builder-t046-underlag-live-eval/20260522T114431Z/T046_underlag_audio_docx_protocol"
+      peer_review:
+        claude_plan_gate: ".codex/artifacts/claude-peer-loop-t045-underlag-revised-plan-gate-20260522T110424Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity_plan_gate: ".codex/artifacts/antigravity-peer-loop-t045-underlag-plan-synthesis-challenge-20260522T110806Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        claude_commit_gate: ".codex/artifacts/claude-peer-loop-t046-underlag-implementation-commit-gate-20260522T120506Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        claude_final_hardening_gate: ".codex/artifacts/claude-peer-loop-t046-final-post-green-hardening-check-20260522T121011Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity_post_implementation: "SKIPPED_DUE_TO_QUOTA per current heartbeat instruction; not counted as a pass."
+      codex_self_review:
+        verdict: "pass for this tranche; T046 reduces duplicate ownership and broad underlag blobs without exposing raw template mechanics to the outline LLM contract."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      accepted_claude_findings:
+        - "Added per-prior duplicate field-name deduplication and a red test."
+        - "Added a short invariant comment explaining broad structured source suppression when selected immediate field refs exist."
+      deferred_followups:
+        - "Unify source-material labeling between source-material normalization and dataflow auto-bind."
+        - "Add a live-eval runner assertion that directly checks absence of broad step_x.output.structured bindings when selected field refs exist."
+        - "Continue score-floor work on generated-client determinism, full-source typing/test baseline, processor topology/readability, and repeated normal-user live evals."
+      score_impact: "Improves Normal-User Output Quality evidence and Single Source of Truth for create-draft underlag mechanics, but does not raise the strict overall floor above 8."
+
+  - id: T047
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T046. Compare narrow T046 follow-ups (source-material label unification and live-eval runner underlag assertions) against larger score-floor blockers such as generated-client determinism, full-source typing/test baseline, processor topology/readability, and repeated normal-user output-quality proof. Produce a peer-gated plan before any implementation."
+    inputs:
+      - "T046 receipt"
+      - ".codex/artifacts/flow-ai-builder-t046-underlag-implementation-summary.md"
+      - ".codex/artifacts/flow-ai-builder-t046-live-eval.md"
+      - ".codex/artifacts/claude-peer-loop-t046-underlag-implementation-commit-gate-20260522T120506Z.md"
+      - ".codex/artifacts/claude-peer-loop-t046-final-post-green-hardening-check-20260522T121011Z.md"
+    constraints:
+      - "Do not start implementation before a revised plan passes Codex self-review and Claude peer review."
+      - "Skip Antigravity unless quota is explicitly available; record quota skips as missing coverage, not pass."
+      - "Do not resume broad AI Builder observability/DX work until the OpenTelemetry branch is reviewed."
+      - "Keep one active implementation tranche at a time and preserve unrelated dirty files."
+      - "Do not inflate the strict score floor above 8 unless evidence proves the weakest dimensions are 9."
+    acceptance_criteria:
+      - "Identify the next tranche that most plausibly moves the strict score floor toward 9/10."
+      - "Explain what was rejected and why, with source/file evidence."
+      - "Define allowed files, acceptance criteria, verification commands, and live-eval expectations."
+      - "Run Claude plan gate with GREEN_LIGHT yes / MIN_SCORE >= 8 before implementation."
+    verify:
+      - "Inspect current git status and T046 commit state."
+      - "Inspect current board scorecard and blockers."
+      - "Produce .codex/artifacts/flow-ai-builder-t047-next-tranche-ranking.md."
+      - "Run Claude peer-loop plan gate."
     receipt: null
 
 checks:
@@ -4856,13 +4954,18 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T045 completed. The underlag field-reuse plan was reconciled against current source and selected as the next highest-score-moving tranche. Claude first rejected the plan at MIN_SCORE 7 due stale validation path, missing materialization aggregate/compare red test, ambiguous single-JSON source-material eligibility, cap location, critic-clean cap pressure, docstring scope, and anti-slippage command gaps. Codex revised the artifact; Claude returned GREEN_LIGHT yes / MIN_SCORE 8; Antigravity returned GREEN_LIGHT yes / MIN_SCORE 8. T046 is now active as a red-tests-first worker. The broader goal remains active with strict floor 8/10."
-    task: T045
+    result: "T046 completed and ready for scoped commit. Smart selective underlag field reuse now lives in the shared create-draft mechanics pipeline, outline no longer owns early auto-bind, aggregation_intent is threaded through proposal/compile/materialize, and selected field refs plus source material replace broad structured JSON blobs where selected refs exist. Claude post-implementation and final hardening gates both returned GREEN_LIGHT yes / MIN_SCORE 8. Antigravity post-implementation was skipped due quota per instruction. T047 is active as a judge task to re-rank the next highest-score-moving tranche. The broader goal remains active with strict floor 8/10."
+    task: T046
     commands:
-      - "Read .codex/artifacts/flow-ai-builder-underlag-field-reuse-revised-plan.md"
-      - "Inspected ai_builder_create_dataflow.py, ai_builder_create_outline.py, ai_builder_create_compiler.py, ai_builder_create_proposal.py, ai_builder_materialization_bridge.py, ai_builder_source_material.py, ai_builder_critic_invariants.py"
-      - "rg for pinned broad output.structured refs in test_ai_builder_create_compiler.py and source-material/critic tests"
-      - "Produced .codex/artifacts/flow-ai-builder-t045-underlag-next-tranche-ranking.md"
-      - "Claude plan gate iteration 1: .codex/artifacts/claude-peer-loop-t045-underlag-next-tranche-plan-gate-20260522T110106Z.md GREEN_LIGHT no / MIN_SCORE 7"
-      - "Claude plan gate iteration 2: .codex/artifacts/claude-peer-loop-t045-underlag-revised-plan-gate-20260522T110424Z.md GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity plan gate: .codex/artifacts/antigravity-peer-loop-t045-underlag-plan-synthesis-challenge-20260522T110806Z.md GREEN_LIGHT yes / MIN_SCORE 8"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_dataflow.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_materialization_bridge.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check touched T046 source/test files"
+      - "cd backend && uv run ruff format --check touched T046 source/test files"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "git diff --check"
+      - "Claude commit gate iteration 3: .codex/artifacts/claude-peer-loop-t046-underlag-implementation-commit-gate-20260522T120506Z.md GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Claude final hardening gate iteration 4: .codex/artifacts/claude-peer-loop-t046-final-post-green-hardening-check-20260522T121011Z.md GREEN_LIGHT yes / MIN_SCORE 8"
