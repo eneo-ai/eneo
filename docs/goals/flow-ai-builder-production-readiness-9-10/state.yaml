@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T047
+active_task: T048
 
 scoring_target:
   dimensions:
@@ -50,7 +50,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T046 implementation/post-review: targeted underlag field selection is backend-owned in ai_builder_create_dataflow.py, outline compilation no longer owns an early auto-bind path, aggregation_intent is threaded through normalize/compile/materialize, and audio/transcript -> structured JSON -> text/DOCX create flows now compile selected declared field refs plus source material instead of broad structured JSON blobs where selected refs exist. Claude post-implementation and final hardening gates both returned GREEN_LIGHT yes / MIN_SCORE 8. The broader score floor remains 8 because source-material label unification, generated-client determinism, full-source typing/test baseline, processor topology/readability, broader live-eval runner assertions, and repeated normal-user output-quality proof remain unresolved."
+  source: "After T047 planning gate: T046 targeted underlag field selection remains the latest source implementation tranche, and T047 selected a Claude-green T048 confirm-requirements ownership slice as the next highest-score-moving processor topology/readability tranche. The broader score floor remains 8 because source-material label unification, generated-client determinism, full-source typing/test baseline, processor topology/readability, broader live-eval runner assertions, and repeated normal-user output-quality proof remain unresolved."
   Maintainability: 8
   Code_Quality: 9
   Clean_Architecture: 8
@@ -4921,7 +4921,7 @@ tasks:
   - id: T047
     type: judge
     assignee: Judge
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T046. Compare narrow T046 follow-ups (source-material label unification and live-eval runner underlag assertions) against larger score-floor blockers such as generated-client determinism, full-source typing/test baseline, processor topology/readability, and repeated normal-user output-quality proof. Produce a peer-gated plan before any implementation."
     inputs:
@@ -4946,6 +4946,85 @@ tasks:
       - "Inspect current board scorecard and blockers."
       - "Produce .codex/artifacts/flow-ai-builder-t047-next-tranche-ranking.md."
       - "Run Claude peer-loop plan gate."
+    receipt:
+      completed_at: "2026-05-22T12:27:34Z"
+      summary: "Re-ranked the next highest-score-moving Flow AI Builder tranche after T046. Selected T048 confirm-requirements processing/retry ownership because maintainability, clean architecture, separation of concerns, human readability, and AI slop/comment/naming remain the strict floor at 8, and the processor still owns too much of the confirm-requirements lifecycle. Narrow T046 follow-ups, generated-client determinism, full-source Pyright baseline, repeated live eval, and larger processor rewrite were rejected or deferred with evidence."
+      selected_next_task: T048
+      artifacts:
+        plan: ".codex/artifacts/flow-ai-builder-t047-next-tranche-ranking.md"
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t047-next-tranche-ranking-after-underlag-20260522T122333Z.md -> GREEN_LIGHT no / MIN_SCORE 7"
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t047-revised-next-tranche-ranking-after-underlag-20260522T122734Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      evidence:
+        - "AIBuilderProposalProcessor remains 1570 LOC and owns confirm-requirements parsing, discovery validation, metadata persistence, event construction, validation follow-up, and retry config."
+        - "backend/src/intric/flows/ai_builder contains 147 Python files; file count alone is not the target, but a coherent lifecycle still belongs outside the proposal processor."
+        - "Full-source Pyright baseline remains too broad for this AI Builder tranche: cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src -> 112 errors, mostly outside AI Builder."
+        - "AI Builder package Pyright passed in T046 and remains the relevant strict-type gate for the selected tranche."
+      rejected_alternatives:
+        - "T046 source-material label/live-eval-runner follow-ups are real but too narrow to move the processor topology/readability floor."
+        - "Generated-client determinism is real debt but requires a separate tooling determinism plan; API Contract Quality is already scored 9 while maintainability/readability remain 8."
+        - "Full-source Pyright baseline is important but cross-domain and not the highest Flow AI Builder score-moving slice."
+        - "Large processor rewrite is too broad; T048 is a smaller ownership move with AST guards and behavior tests."
+        - "Outline/edit handler extraction is larger and more coupled; confirm requirements is the safer proving slice."
+      peer_review:
+        claude_plan_gate: ".codex/artifacts/claude-peer-loop-t047-revised-next-tranche-ranking-after-underlag-20260522T122734Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity_plan_gate: "SKIPPED_DUE_TO_QUOTA per current heartbeat instruction; not counted as a pass."
+      codex_self_review:
+        verdict: "pass; this is a bounded ownership move rather than a LOC-only split."
+        broader_goal_complete: false
+        score_floor: 8
+      score_impact: "Planning-only tranche. Does not change source code or raise score floor. T048 is expected to improve maintainability/readability evidence if implementation actually deletes processor-owned lifecycle methods and avoids facade/callback-bag design."
+
+  - id: T048
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Move confirm-requirements processing, validation follow-up, metadata persistence, event construction, and retry config ownership out of AIBuilderProposalProcessor into a narrow confirm-requirements owner that returns ToolProcessingResult and avoids facade/callback-bag design."
+    inputs:
+      - "T047 receipt"
+      - ".codex/artifacts/flow-ai-builder-t047-next-tranche-ranking.md"
+      - ".codex/artifacts/claude-peer-loop-t047-revised-next-tranche-ranking-after-underlag-20260522T122734Z.md"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_requirements_state.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_discovery_followup.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py"
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_confirm_requirements.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_confirm_requirements.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    constraints:
+      - "Write the new owner tests first and observe the expected failures before implementation."
+      - "Use free functions with explicit dependencies; do not add a service class, processor dependency, broad dependency bag, Callable[..., Any], **kwargs: Any, or a parallel ConfirmRequirementsOutcome."
+      - "Reuse ToolProcessingResult, ToolRetryInvocation, and ToolRetryConfig as the outcome/retry contracts."
+      - "Do not move generic tool dispatch, generic self-correction, outline/edit finalization, proposal completion, frontend/API/generated-client, DB schema, or live-eval runner behavior in this tranche."
+      - "Do not add tutorial comments or phase/plan vocabulary; only short why-comments for non-obvious invariants such as the synthetic ask-question tool-call metadata stub."
+      - "Do not raise the scorecard above 8 unless implementation, validation, and peer review prove the weakest dimensions moved."
+    acceptance_criteria:
+      - "AIBuilderProposalProcessor no longer defines _process_confirm_requirements_arguments or _confirm_requirements_retry_config."
+      - "Confirm-requirements parsing, normalization, requirements versioning, metadata persistence, event construction, validation follow-up, and retry config construction have one canonical owner."
+      - "The new owner does not import ai_builder_proposal_processor, does not receive a processor dependency, does not define a *Processor class/function, and does not define ConfirmRequirementsOutcome."
+      - "The validation-follow-up branch uses emit_discovery_followup_if_needed and preserves the synthetic tool_calls=[{\"name\": ASK_STRUCTURED_QUESTION_TOOL_NAME}] assistant metadata convention."
+      - "The processor yields owner-returned follow-up events without self-correction, and routes validation feedback without events through the existing generic self-correction bridge."
+      - "Retry config invokes the confirm owner with the invocation context and carries litellm_model, litellm_kwargs, flow, turn, conversation, assistant metadata, and tenant context correctly."
+      - "Processor LOC and confirm-specific public/internal surface decrease by real ownership movement, not wrappers."
+    tests:
+      - "New test_ai_builder_confirm_requirements.py covers success, parse failure, validation follow-up events, validation feedback without follow-up, retry config context, metadata conversion, and stable requirements versioning."
+      - "Processor tests cover parse-failure self-correction, owner-events suppressing self-correction, owner-feedback triggering self-correction, and retry behavior through the new owner rather than private methods."
+      - "Import/ownership tests guard that the processor does not define the moved methods, does not import/call parse_confirm_requirements directly, the new owner does not import the processor, the new owner does not define ConfirmRequirementsOutcome, and the synthetic metadata stub is owned by the confirm module."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_confirm_requirements.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check touched T048 source/test files"
+      - "cd backend && uv run ruff format --check touched T048 source/test files"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "git diff --check"
+      - "scripts/gate-local/anti_slippage.sh after staging"
+      - "Claude post-implementation review for the non-trivial diff."
+    live_eval: "Not required unless implementation changes prompt/output behavior or tests reveal behavior drift."
     receipt: null
 
 checks:
@@ -4954,18 +5033,12 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T046 completed and ready for scoped commit. Smart selective underlag field reuse now lives in the shared create-draft mechanics pipeline, outline no longer owns early auto-bind, aggregation_intent is threaded through proposal/compile/materialize, and selected field refs plus source material replace broad structured JSON blobs where selected refs exist. Claude post-implementation and final hardening gates both returned GREEN_LIGHT yes / MIN_SCORE 8. Antigravity post-implementation was skipped due quota per instruction. T047 is active as a judge task to re-rank the next highest-score-moving tranche. The broader goal remains active with strict floor 8/10."
-    task: T046
+    result: "T047 completed as a planning/judge tranche. Claude iteration 1 rejected the initial plan with GREEN_LIGHT no / MIN_SCORE 7; Codex revised around free functions, ToolProcessingResult as the only outcome, sharper behavior tests, ownership guards, and comment discipline; Claude iteration 2 approved with GREEN_LIGHT yes / MIN_SCORE 8. T048 is now active as the bounded confirm-requirements ownership worker. Antigravity is skipped due quota per current instruction. Broader goal remains active with strict floor 8/10."
+    task: T047
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_dataflow.py -q"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_materialization_bridge.py -q"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py -q"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
-      - "cd backend && uv run ruff check touched T046 source/test files"
-      - "cd backend && uv run ruff format --check touched T046 source/test files"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
-      - "git diff --check"
-      - "Claude commit gate iteration 3: .codex/artifacts/claude-peer-loop-t046-underlag-implementation-commit-gate-20260522T120506Z.md GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Claude final hardening gate iteration 4: .codex/artifacts/claude-peer-loop-t046-final-post-green-hardening-check-20260522T121011Z.md GREEN_LIGHT yes / MIN_SCORE 8"
+      - "git status --short --branch"
+      - "git log --oneline --decorate -8"
+      - "rg -n \"active_task:|T047|T048|scorecard|Overall|strict\" docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src -> 112 errors, used only to classify full-source baseline as broad/out-of-scope for T048."
+      - "Claude plan gate iteration 1: .codex/artifacts/claude-peer-loop-t047-next-tranche-ranking-after-underlag-20260522T122333Z.md GREEN_LIGHT no / MIN_SCORE 7"
+      - "Claude plan gate iteration 2: .codex/artifacts/claude-peer-loop-t047-revised-next-tranche-ranking-after-underlag-20260522T122734Z.md GREEN_LIGHT yes / MIN_SCORE 8"
