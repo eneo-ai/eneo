@@ -13,7 +13,7 @@ import json
 import re
 import time
 from types import TracebackType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from uuid import UUID
 
 from intric.main.config import get_settings
@@ -55,6 +55,7 @@ class MCPProxySession:
         auth_credentials_map: dict[UUID, dict[str, str]] | None = None,
         chat_session_id: UUID | None = None,
         db_session: "AsyncSession | None" = None,
+        token_provider_map: dict[UUID, "Callable[[], Awaitable[str]]"] | None = None,
     ):
         """
         Initialize proxy session.
@@ -74,6 +75,7 @@ class MCPProxySession:
         super().__init__()
         self.mcp_servers = mcp_servers
         self.auth_credentials_map = auth_credentials_map or {}
+        self.token_provider_map = token_provider_map or {}
         self.chat_session_id = chat_session_id
         self._mcp_state_repo: ChatSessionMcpStateRepo | None = (
             ChatSessionMcpStateRepo(db_session)
@@ -348,7 +350,13 @@ class MCPProxySession:
 
             # Create new connection with timing
             auth_creds = self.auth_credentials_map.get(server_id, {})
-            client = MCPClient(server, auth_creds, resume_mcp_session_id=resume_id)
+            dynamic_provider = self.token_provider_map.get(server_id)
+            client = MCPClient(
+                server,
+                auth_creds,
+                resume_mcp_session_id=resume_id,
+                dynamic_token_provider=dynamic_provider,
+            )
 
             logger.debug(f"[MCPProxy] Connecting to '{server.name}'...")
             start_time = time.perf_counter()

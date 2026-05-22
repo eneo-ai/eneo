@@ -34,9 +34,11 @@ if TYPE_CHECKING:
     from intric.completion_models.infrastructure.web_search import WebSearchResult
     from intric.database.database import AsyncSession
     from intric.main.container.container import Container
+    from intric.mcp_servers.application.mcp_token_broker import MCPTokenBroker
     from intric.mcp_servers.domain.entities.mcp_server import MCPServer
     from intric.settings.encryption_service import EncryptionService
     from intric.tenants.tenant import TenantInDB
+    from intric.users.user import UserInDB
 
 logger = get_logger(__name__)
 
@@ -56,6 +58,8 @@ class CompletionService:
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
         redis_client: Optional[aioredis.Redis] = None,
+        user: Optional["UserInDB"] = None,
+        mcp_token_broker: Optional["MCPTokenBroker"] = None,
     ):
         self.context_builder = context_builder
         self.tenant = tenant
@@ -68,10 +72,50 @@ class CompletionService:
         self.encryption_service = encryption_service
         self.session = session
         self.redis_client = redis_client
+        self.user = user
+        self.mcp_token_broker = mcp_token_broker
         self._mcp_proxy_factory = MCPProxySessionFactory(
             encryption_service=self.encryption_service
         )
         super().__init__()
+
+    def _build_token_provider_map(
+        self, mcp_servers: list["MCPServer"]
+    ) -> dict[Any, Any]:
+        """Return a per-server async token resolver for non-static_bearer servers.
+
+        Returns an empty dict when the broker / user / tenant context is not
+        available (e.g. anonymous batch jobs). The proxy treats an empty map
+        as "use the legacy static-bearer path for every server".
+        """
+        if self.mcp_token_broker is None or self.user is None or self.tenant is None:
+            return {}
+
+        from intric.mcp_servers.application.mcp_token_broker import (
+            UserPrincipal,
+        )
+
+        broker = self.mcp_token_broker
+        user = self.user
+        federation_config = dict(getattr(self.tenant, "federation_config", {}) or {})
+        principal = UserPrincipal(user=user)
+
+        def _make_provider(server: "MCPServer"):
+            async def _provider() -> str:
+                return await broker.get_token(
+                    mcp_server=server,
+                    tenant_federation_config=federation_config,
+                    principal=principal,
+                )
+
+            return _provider
+
+        provider_map: dict[Any, Any] = {}
+        for server in mcp_servers:
+            if server.auth_scope == "static_bearer":
+                continue
+            provider_map[server.id] = _make_provider(server)
+        return provider_map
 
     async def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
         """
@@ -289,10 +333,12 @@ class CompletionService:
         # server — no per-server-kind branching.
         mcp_proxy: MCPProxySession | None = None
         if mcp_servers:
+            token_provider_map = self._build_token_provider_map(mcp_servers)
             mcp_proxy = self._mcp_proxy_factory.create(
                 mcp_servers,
                 chat_session_id=session.id if session is not None else None,
                 db_session=self.session,
+                token_provider_map=token_provider_map,
             )
             logger.debug(
                 f"[MCP] Proxy created with {mcp_proxy.get_tool_count()} tools from {len(mcp_servers)} server(s)"

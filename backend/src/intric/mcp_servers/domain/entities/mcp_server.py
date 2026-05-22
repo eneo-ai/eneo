@@ -1,8 +1,10 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 from uuid import UUID
 
 from intric.base.base_entity import Entity
+
+MCPAuthScope = Literal["per_user", "per_tenant", "static_bearer"]
 
 if TYPE_CHECKING:
     from intric.security_classifications.domain.entities.security_classification import (
@@ -63,6 +65,9 @@ class MCPServer(Entity):
         documentation_url: Optional[str] = None,
         tools: Optional[list[MCPServerTool]] = None,
         security_classification: Optional["SecurityClassification"] = None,
+        auth_scope: MCPAuthScope = "static_bearer",
+        expected_idp_issuer: Optional[str] = None,
+        target_resource_or_scope: Optional[str] = None,
         id: Optional[UUID] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
@@ -82,6 +87,9 @@ class MCPServer(Entity):
         self.documentation_url = documentation_url
         self.tools = tools or []
         self.security_classification = security_classification
+        self.auth_scope: MCPAuthScope = auth_scope
+        self.expected_idp_issuer = expected_idp_issuer
+        self.target_resource_or_scope = target_resource_or_scope
 
 
 class MCPServerSettings(Entity):

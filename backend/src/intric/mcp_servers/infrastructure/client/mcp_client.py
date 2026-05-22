@@ -3,7 +3,7 @@
 import asyncio
 from datetime import timedelta
 from types import TracebackType
-from typing import Any, Optional, cast
+from typing import Any, Awaitable, Callable, Optional, cast
 
 import httpx
 from mcp import ClientSession
@@ -137,6 +137,7 @@ class MCPClient:
         list_tools_timeout: int | None = None,
         tool_call_timeout: int | None = None,
         resume_mcp_session_id: str | None = None,
+        dynamic_token_provider: Optional[Callable[[], Awaitable[str]]] = None,
     ):
         """
         Initialize MCP client.
@@ -149,6 +150,10 @@ class MCPClient:
                 header so the server resumes the prior logical session for state
                 that outlives a single transport connection (eg file-workbench's
                 per-session ephemeral storage).
+            dynamic_token_provider: Optional async callable returning a fresh
+                Bearer token. Used by the same-IdP MCP OAuth broker (Phase 3):
+                when set, replaces the ``auth_credentials`` token at request
+                time. ``static_bearer`` servers leave this ``None``.
         """
         super().__init__()
         self.mcp_server = mcp_server
@@ -157,6 +162,7 @@ class MCPClient:
         self.list_tools_timeout = list_tools_timeout or MCP_LIST_TOOLS_TIMEOUT_DEFAULT
         self.tool_call_timeout = tool_call_timeout or MCP_TOOL_CALL_TIMEOUT_DEFAULT
         self.resume_mcp_session_id = resume_mcp_session_id
+        self._dynamic_token_provider = dynamic_token_provider
         self.session: Optional[ClientSession] = None
         self._streams_context = None
         self._session_context = None
@@ -171,20 +177,29 @@ class MCPClient:
         # returns the session id the SDK captured from the server response.
         self._get_session_id_callable: Optional[Any] = None
 
-    def _build_auth_headers(self) -> dict[str, str]:
+    async def _build_auth_headers(self) -> dict[str, str]:
         """Build authentication + session-resume headers for this connection.
 
         ``Mcp-Session-Id`` is the MCP-protocol session id. Sending a previously
         stored value asks the server to resume that logical session — the SDK
         will then propagate the server's response value (which may be the same
         or a fresh one) on every subsequent request automatically.
+
+        When ``dynamic_token_provider`` is set (Phase 3 same-IdP MCP OAuth)
+        the resulting token replaces any static credentials, regardless of
+        ``http_auth_type``. This is how the broker injects per-user /
+        per-tenant audience-bound tokens.
         """
         headers: dict[str, str] = {}
 
-        if self.mcp_server.http_auth_type == "bearer":
+        token: Optional[str] = None
+        if self._dynamic_token_provider is not None:
+            token = await self._dynamic_token_provider()
+        elif self.mcp_server.http_auth_type == "bearer":
             token = self.auth_credentials.get("token")
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
+
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
 
         if self.resume_mcp_session_id:
             headers["Mcp-Session-Id"] = self.resume_mcp_session_id
@@ -208,8 +223,14 @@ class MCPClient:
             if not error_msg:
                 # Cancel scope or other unhelpful error — do a direct HTTP
                 # request to surface the real issue (e.g. 401).
+                try:
+                    diagnostic_headers = await self._build_auth_headers()
+                except Exception:
+                    # If the token provider itself failed we still want to
+                    # produce a diagnostic; fall back to a plain probe.
+                    diagnostic_headers = {}
                 error_msg = await _diagnose_http(
-                    self.mcp_server.http_url, self._build_auth_headers()
+                    self.mcp_server.http_url, diagnostic_headers
                 )
             logger.error(
                 f"Failed to connect to MCP server {self.mcp_server.name}: {error_msg}"
@@ -256,7 +277,7 @@ class MCPClient:
              file-workbench ingest rows). See the cross-turn contract in
              ``ChatSessionMcpStateRepo``.
         """
-        headers = self._build_auth_headers()
+        headers = await self._build_auth_headers()
 
         # terminate_on_close=False: the SDK otherwise sends DELETE /mcp on
         # transport teardown, which evicts the server-side session and breaks

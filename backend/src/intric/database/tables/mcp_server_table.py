@@ -58,6 +58,27 @@ class MCPServers(BasePublic):
     )
     http_auth_config_schema: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
 
+    # OAuth / token-exchange discriminator. ``static_bearer`` preserves the
+    # legacy ``http_auth_config_schema`` path. ``per_user`` and ``per_tenant``
+    # drive the same-IdP token-exchange broker (Phase 3); they are gated by
+    # the ``MCP_OAUTH_ENABLED`` setting at the API layer until the broker ships.
+    auth_scope: Mapped[str] = mapped_column(
+        String, nullable=False, server_default="static_bearer"
+    )
+    # Same-IdP assertion gate: the broker requires the user's IdP issuer and
+    # the MCP server's published authorization-server issuer both equal this.
+    expected_idp_issuer: Mapped[Optional[str]] = mapped_column(Text)
+    # Identity used to populate the tool catalog (``MCPServerTools``). The
+    # catalog describes the server's surface, not what a specific user can
+    # do, so the discovery principal is decoupled from ``auth_scope``.
+    tool_discovery_principal: Mapped[str] = mapped_column(
+        String, nullable=False, server_default="anonymous"
+    )
+    # Strategy-target hint. Keycloak (RFC 8693) uses this as the ``resource``
+    # / ``audience`` value; Entra (OBO) uses it as the target API ``scope``
+    # (e.g. ``api://<mcp-app-id>/.default``).
+    target_resource_or_scope: Mapped[Optional[str]] = mapped_column(Text)
+
     # Tenant enablement and credentials
     is_enabled: Mapped[bool] = mapped_column(
         Boolean, server_default="True", nullable=False

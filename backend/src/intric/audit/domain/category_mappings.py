@@ -9,6 +9,7 @@ CATEGORY_DESCRIPTIONS = {
     "security_events": "Security classification lifecycle events",
     "file_operations": "File uploads and deletions",
     "integration_events": "Integration connections, knowledge sources, website crawling, MCP servers",
+    "authentication_events": "OIDC / SSO session token lifecycle (store, refresh, revoke)",
     "system_actions": "Retention policies, encryption, maintenance",
     "audit_access": "Viewing and exporting audit logs",
 }
@@ -102,6 +103,15 @@ CATEGORY_MAPPINGS = {
     ActionType.MCP_SERVER_DISABLED.value: "integration_events",
     ActionType.MCP_SERVER_TOOL_ENABLED.value: "integration_events",
     ActionType.MCP_SERVER_TOOL_DISABLED.value: "integration_events",
+    ActionType.OIDC_TOKEN_STORED.value: "authentication_events",
+    ActionType.OIDC_TOKEN_REFRESHED.value: "authentication_events",
+    ActionType.OIDC_TOKEN_REVOKED.value: "authentication_events",
+    ActionType.MCP_TOKEN_EXCHANGED.value: "integration_events",
+    ActionType.MCP_TOKEN_EXCHANGE_DENIED.value: "integration_events",
+    ActionType.MCP_SERVICE_ACCOUNT_SET.value: "authentication_events",
+    ActionType.MCP_SERVICE_ACCOUNT_CLEARED.value: "authentication_events",
+    ActionType.MCP_SSO_DEFAULT_TARGET_SET.value: "authentication_events",
+    ActionType.MCP_SSO_DEFAULT_TARGET_CLEARED.value: "authentication_events",
     # System Actions (3 actions)
     ActionType.RETENTION_POLICY_APPLIED.value: "system_actions",
     ActionType.ENCRYPTION_KEY_ROTATED.value: "system_actions",

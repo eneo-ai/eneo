@@ -1,7 +1,7 @@
 """Factory for creating MCPProxySession instances with proper auth."""
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from uuid import UUID
 
 from intric.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 
     from intric.mcp_servers.domain.entities.mcp_server import MCPServer
     from intric.settings.encryption_service import EncryptionService
+
+    TokenProviderMap = dict[UUID, Callable[[], Awaitable[str]]]
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,7 @@ class MCPProxySessionFactory:
         mcp_servers: list["MCPServer"],
         chat_session_id: UUID | None = None,
         db_session: "AsyncSession | None" = None,
+        token_provider_map: "TokenProviderMap | None" = None,
     ) -> MCPProxySession:
         """
         Create a new MCPProxySession for the given servers.
@@ -96,4 +99,5 @@ class MCPProxySessionFactory:
             auth_credentials_map=auth_map,
             chat_session_id=chat_session_id,
             db_session=db_session,
+            token_provider_map=token_provider_map,
         )

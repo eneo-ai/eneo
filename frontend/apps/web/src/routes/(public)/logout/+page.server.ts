@@ -6,6 +6,7 @@ import {
   type LogoutStateParam
 } from "$lib/features/auth/auth.server";
 import { env } from "$env/dynamic/private";
+import { getBackendUrl } from "$lib/core/environment.server";
 
 /**
  * Get the configured public origin for OIDC redirect URIs.
@@ -37,7 +38,34 @@ function getPublicOrigin(): string {
   return publicOrigin.replace(/\/$/, "");
 }
 
+async function revokeBackendOidcTokens(event: Parameters<typeof load>[0]) {
+  // Tell the backend to zero the user's persisted IdP refresh/access tokens
+  // before we drop the local session cookies. Failure is non-fatal; the
+  // refresh token will still age out on its own, but we surface the error
+  // in the server log so operators notice if revocation is misconfigured.
+  const accessToken = event.locals.access_token ?? event.locals.id_token;
+  if (!accessToken) {
+    return;
+  }
+  const backendOrigin = getBackendUrl();
+  if (!backendOrigin) {
+    return;
+  }
+  try {
+    await event.fetch(`${backendOrigin.replace(/\/$/, "")}/api/v1/auth/oidc/logout`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+  } catch (e) {
+    console.warn("[auth] Failed to revoke backend OIDC tokens at logout", e);
+  }
+}
+
 export const load = async (event) => {
+  // Revoke backend-stored IdP tokens BEFORE the cookies are dropped so the
+  // bearer header is still available for the call.
+  await revokeBackendOidcTokens(event);
+
   // always delete cookies
   clearFrontendCookies(event);
 

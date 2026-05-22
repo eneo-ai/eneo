@@ -98,6 +98,9 @@ class MCPServerMapper:
             documentation_url=db_model.documentation_url,
             tools=tools,
             security_classification=security_classification,
+            auth_scope=db_model.auth_scope,  # type: ignore[arg-type]
+            expected_idp_issuer=db_model.expected_idp_issuer,
+            target_resource_or_scope=db_model.target_resource_or_scope,
         )
 
     @staticmethod
@@ -127,4 +130,7 @@ class MCPServerMapper:
                 if entity.security_classification
                 else None
             ),
+            "auth_scope": entity.auth_scope,
+            "expected_idp_issuer": entity.expected_idp_issuer,
+            "target_resource_or_scope": entity.target_resource_or_scope,
         }

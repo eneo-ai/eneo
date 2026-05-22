@@ -265,6 +265,76 @@ async def _jit_provision_user(
         )
 
 
+async def _persist_idp_tokens(
+    *,
+    container: Container,
+    user: UserInDB,
+    payload: dict[str, Any],
+    token_response: dict[str, Any],
+    correlation_id: str,
+) -> None:
+    """Hand the IdP token bundle to the ``OidcTokenStore``.
+
+    Tolerates IdPs that do not return a refresh token (the store skips
+    those silently) and refuses to fail the login if persistence errors —
+    Phase 3 will recover via the per-request silent flow when the row is
+    missing. Failures here are logged for ops to investigate.
+    """
+    refresh_token = token_response.get("refresh_token")
+    access_token = token_response.get("access_token")
+    expires_in_raw = token_response.get("expires_in")
+    scope_raw = token_response.get("scope")
+    issuer = payload.get("iss")
+    subject = payload.get("sub")
+
+    if not issuer or not isinstance(issuer, str):
+        logger.warning(
+            "Skipping IdP token persistence: missing iss claim in ID token",
+            extra={
+                "user_id": str(user.id),
+                "correlation_id": correlation_id,
+            },
+        )
+        return
+
+    access_token_expires_at: Optional[datetime] = None
+    if isinstance(expires_in_raw, (int, float)) or (
+        isinstance(expires_in_raw, str) and expires_in_raw.isdigit()
+    ):
+        from datetime import timedelta
+
+        access_token_expires_at = datetime.now(timezone.utc) + timedelta(
+            seconds=int(expires_in_raw)
+        )
+
+    scopes_granted: Optional[list[str]] = None
+    if isinstance(scope_raw, str) and scope_raw:
+        scopes_granted = scope_raw.split()
+
+    try:
+        await container.oidc_token_store().upsert(
+            user=user,
+            idp_issuer=issuer,
+            idp_subject=subject if isinstance(subject, str) else None,
+            refresh_token=refresh_token if isinstance(refresh_token, str) else None,
+            access_token=access_token if isinstance(access_token, str) else None,
+            access_token_expires_at=access_token_expires_at,
+            scopes_granted=scopes_granted,
+            correlation_id=correlation_id,
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed to persist IdP tokens after federated login",
+            extra={
+                "user_id": str(user.id),
+                "idp_issuer": issuer,
+                "correlation_id": correlation_id,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+
+
 async def _log_jit_user_created(
     container: Container,
     tenant_id: UUID,
@@ -1836,6 +1906,20 @@ async def auth_callback(
                     headers={"X-Correlation-ID": correlation_id},
                 )
 
+            # Persist the IdP refresh + access tokens so the MCP OAuth
+            # broker (Phase 3) can mint MCP-audience tokens later via
+            # RFC 8693 / OBO without a second user consent. The store
+            # no-ops when refresh_token is absent — for IdPs that do not
+            # issue offline_access, we will fall back to per-request
+            # silent flows in a later phase.
+            await _persist_idp_tokens(
+                container=container,
+                user=user,
+                payload=payload,
+                token_response=token_response,
+                correlation_id=correlation_id,
+            )
+
             # Create JWT token for existing user
             access_token_response = auth_service.create_access_token_for_user(user)
 
@@ -1886,3 +1970,23 @@ async def auth_callback(
             detail="An unexpected error occurred during authentication. Please try again.",
             headers={"X-Correlation-ID": correlation_id},
         )
+
+
+@router.post(
+    "/oidc/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Revoke the caller's persisted IdP tokens",
+    description=(
+        "Called by the SvelteKit /logout flow before the local session "
+        "cookies are cleared. Zeroes the user's refresh + access token "
+        "ciphertext, stamps revoked_at, and audit-logs the event. "
+        "Safe to call repeatedly; rows already revoked are skipped."
+    ),
+    responses={401: {"description": "Missing or invalid eneo JWT"}},
+)
+async def revoke_oidc_tokens(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    """Revoke every IdP token row for the authenticated user."""
+    user = container.user()
+    await container.oidc_token_store().revoke(user=user)

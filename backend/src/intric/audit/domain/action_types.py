@@ -94,6 +94,23 @@ class ActionType(str, Enum):
     MCP_SERVER_TOOL_ENABLED = "mcp_server_tool_enabled"
     MCP_SERVER_TOOL_DISABLED = "mcp_server_tool_disabled"
 
+    # OIDC delegated-identity token lifecycle (Phase 2 of same-IdP MCP OAuth)
+    OIDC_TOKEN_STORED = "oidc_token_stored"
+    OIDC_TOKEN_REFRESHED = "oidc_token_refreshed"
+    OIDC_TOKEN_REVOKED = "oidc_token_revoked"
+
+    # MCP token-exchange broker (Phase 3 of same-IdP MCP OAuth)
+    MCP_TOKEN_EXCHANGED = "mcp_token_exchanged"
+    MCP_TOKEN_EXCHANGE_DENIED = "mcp_token_exchange_denied"
+
+    # MCP tenant service-account credential lifecycle (Phase 4)
+    MCP_SERVICE_ACCOUNT_SET = "mcp_service_account_set"
+    MCP_SERVICE_ACCOUNT_CLEARED = "mcp_service_account_cleared"
+
+    # MCP tenant default audience/scope (shared across SSO MCP servers)
+    MCP_SSO_DEFAULT_TARGET_SET = "mcp_sso_default_target_set"
+    MCP_SSO_DEFAULT_TARGET_CLEARED = "mcp_sso_default_target_cleared"
+
     # System Actions
     RETENTION_POLICY_APPLIED = "retention_policy_applied"
     ENCRYPTION_KEY_ROTATED = "encryption_key_rotated"

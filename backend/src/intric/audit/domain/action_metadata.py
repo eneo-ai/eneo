@@ -335,6 +335,74 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "MCP-verktyg inaktiverat",
         "description_sv": "Loggar när ett MCP-verktyg inaktiveras",
     },
+    # OIDC / SSO session-token lifecycle (3)
+    ActionType.OIDC_TOKEN_STORED.value: {
+        "name_sv": "OIDC-token lagrad",
+        "description_sv": (
+            "Loggar när användarens refresh- och access-token från SSO-leverantören "
+            "krypteras och lagras för senare token-utbyte till MCP-servrar"
+        ),
+    },
+    ActionType.OIDC_TOKEN_REFRESHED.value: {
+        "name_sv": "OIDC-token uppdaterad",
+        "description_sv": (
+            "Loggar när användarens IdP-access-token förnyas via refresh-token mot "
+            "SSO-leverantören"
+        ),
+    },
+    ActionType.OIDC_TOKEN_REVOKED.value: {
+        "name_sv": "OIDC-token återkallad",
+        "description_sv": (
+            "Loggar när användarens lagrade IdP-token nollställs vid utloggning "
+            "eller säkerhetshändelse"
+        ),
+    },
+    # MCP token-exchange broker (2)
+    ActionType.MCP_TOKEN_EXCHANGED.value: {
+        "name_sv": "MCP-token utbytt",
+        "description_sv": (
+            "Loggar när en MCP-publik-token utfärdas via token-utbyte (RFC 8693) "
+            "eller On-Behalf-Of mot SSO-leverantören"
+        ),
+    },
+    ActionType.MCP_TOKEN_EXCHANGE_DENIED.value: {
+        "name_sv": "MCP-token-utbyte nekat",
+        "description_sv": (
+            "Loggar när token-utbyte avvisas, t.ex. IdP-issuer-felmatchning, "
+            "service-nyckel mot per-användar-server, eller invalid_grant"
+        ),
+    },
+    # MCP tenant service-account credential lifecycle (2)
+    ActionType.MCP_SERVICE_ACCOUNT_SET.value: {
+        "name_sv": "MCP-tjänstkonto uppdaterat",
+        "description_sv": (
+            "Loggar när en administratör konfigurerar eller roterar tjänstkontots "
+            "client_id / client_secret för per_tenant-MCP-flöden"
+        ),
+    },
+    ActionType.MCP_SERVICE_ACCOUNT_CLEARED.value: {
+        "name_sv": "MCP-tjänstkonto rensat",
+        "description_sv": (
+            "Loggar när en administratör tar bort tjänstkontot, vilket inaktiverar "
+            "per_tenant-MCP-flöden för organisationen"
+        ),
+    },
+    # Default audience/scope shared across SSO MCP servers (2)
+    ActionType.MCP_SSO_DEFAULT_TARGET_SET.value: {
+        "name_sv": "MCP standard audience/scope uppdaterad",
+        "description_sv": (
+            "Loggar när en administratör sätter eller ändrar det förvalda värdet för "
+            "audience (Keycloak) eller scope (Entra) som ärvs av SSO-MCP-servrar utan "
+            "egen override"
+        ),
+    },
+    ActionType.MCP_SSO_DEFAULT_TARGET_CLEARED.value: {
+        "name_sv": "MCP standard audience/scope rensad",
+        "description_sv": (
+            "Loggar när det förvalda värdet tas bort. SSO-servrar utan egen override "
+            "faller då tillbaka till sin egen URL (Keycloak) eller misslyckas (Entra)"
+        ),
+    },
     # System Actions (3)
     ActionType.RETENTION_POLICY_APPLIED.value: {
         "name_sv": "Retentionspolicy tillämpades",

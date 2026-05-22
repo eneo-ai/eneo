@@ -62,6 +62,9 @@ from intric.jobs.job_router import router as jobs_router
 from intric.limits.limit_router import router as limit_router
 from intric.logging.logging_router import router as logging_router
 from intric.main.config import get_settings
+from intric.mcp_servers.presentation.mcp_connections_router import (
+    router as mcp_connections_router,
+)
 from intric.mcp_servers.presentation.mcp_server_router import (
     router as mcp_server_router,
 )
@@ -496,6 +499,13 @@ router.include_router(
     prefix="/mcp-servers",
     tags=["mcp-servers"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+# User-facing MCP connection state (per-user, not admin-only). Mounted
+# under /me to match REST convention for caller-scoped resources.
+router.include_router(
+    mcp_connections_router,
+    prefix="/me",
+    tags=["mcp-connections"],
 )
 router.include_router(
     sharepoint_webhook_router, prefix="/integrations", tags=["integrations"]

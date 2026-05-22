@@ -2,13 +2,13 @@
   import { IconAssistant } from "@intric/icons/assistant";
   import { IconKey } from "@intric/icons/key";
   import { IconLink } from "@intric/icons/link";
+  import { IconServices } from "@intric/icons/services";
   import { page } from "$app/stores";
   import type { ComponentType } from "svelte";
   import { Navigation } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
 
-  let currentRoute = "";
-  $: currentRoute = $page.url.pathname;
+  const currentRoute = $derived($page.url.pathname);
 
   const menuItems: {
     icon: ComponentType;
@@ -29,6 +29,11 @@
       icon: IconKey,
       label: m.api_keys(),
       url: "/account/api-keys"
+    },
+    {
+      icon: IconServices,
+      label: "MCP-anslutningar",
+      url: "/account/mcp-connections"
     }
   ];
 </script>

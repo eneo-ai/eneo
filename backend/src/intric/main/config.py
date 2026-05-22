@@ -256,6 +256,10 @@ class Settings(BaseSettings):
     mcp_tool_output_max_chars: int = 10000
     mcp_circuit_breaker_failure_threshold: int = 5
     mcp_circuit_breaker_cooldown_seconds: int = 60
+    # Same-IdP MCP OAuth (token exchange / OBO). When False, the API rejects
+    # auth_scope=per_user or per_tenant with 501 so the schema can land
+    # ahead of the broker (Phase 3).
+    mcp_oauth_enabled: bool = False
 
     # Database connection pool configuration
     # Why: Controls PostgreSQL connection pooling behavior for SQLAlchemy async engine

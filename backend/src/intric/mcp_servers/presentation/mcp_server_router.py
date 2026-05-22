@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 if TYPE_CHECKING:
@@ -8,11 +8,12 @@ if TYPE_CHECKING:
         SecurityClassification,
     )
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.exceptions import BadRequestException
 from intric.main.models import NOT_PROVIDED, NotProvided, PaginatedResponse
@@ -30,10 +31,14 @@ from intric.mcp_servers.presentation.models import (
     MCPServerToolSyncResponse,
     MCPServerToolUpdate,
     MCPServerUpdate,
+    MCPServiceAccountPublic,
+    MCPServiceAccountUpdate,
+    MCPSsoDefaultTargetUpdate,
     ToolChangePublic,
     ToolReviewRequest,
     ToolReviewResponse,
 )
+from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 
@@ -41,6 +46,30 @@ router = APIRouter()
 
 _WITH_USER = Depends(get_container(with_user=True))
 _TAGS_QUERY = Query(None)
+
+
+def _require_oauth_enabled_for(auth_scope: str | None) -> None:
+    """Reject per_user / per_tenant until the token-exchange broker ships.
+
+    Phase 1 lands the schema and DTOs; the broker that actually runs the
+    token exchange lives in Phase 3. Until then, the API must refuse to
+    persist the new modes so we cannot end up with rows the runtime
+    cannot serve. ``static_bearer`` (the existing behavior) is unaffected.
+    """
+    if auth_scope is None or auth_scope == "static_bearer":
+        return
+    if not get_settings().mcp_oauth_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={
+                "code": "mcp_oauth_not_enabled",
+                "message": (
+                    "auth_scope=per_user and per_tenant require the token-exchange "
+                    "broker, which is not yet enabled in this deployment. Set "
+                    "MCP_OAUTH_ENABLED=true once the broker is deployed."
+                ),
+            },
+        )
 
 
 # ============================================================================
@@ -229,6 +258,280 @@ async def update_tenant_tool_enabled(
 
 
 # ============================================================================
+# Tenant MCP Service-Account Endpoints (per_tenant flow credentials)
+# ============================================================================
+
+
+def _mask_service_account_secret(secret: str) -> str:
+    """Mask the service-account client_secret for read-out (last 4 chars visible)."""
+    if not secret:
+        return ""
+    if len(secret) <= 4:
+        return "*" * len(secret)
+    return "*" * (len(secret) - 4) + secret[-4:]
+
+
+@router.get(
+    "/service-account/",
+    response_model=MCPServiceAccountPublic,
+    summary="Read tenant MCP service-account credentials (masked)",
+)
+async def get_mcp_service_account(
+    container: Container = _WITH_USER,
+) -> MCPServiceAccountPublic:
+    """Return the tenant's MCP service-account client_id + masked secret status.
+
+    The plaintext ``client_secret`` is never returned. The broker (Phase 3)
+    decrypts it on demand for ``per_tenant`` exchanges; this endpoint is a
+    read-only health-check for administrators verifying configuration.
+    """
+    user = container.user()
+    validate_permission(user, Permission.ADMIN)
+    tenant_service = container.tenant_service()
+    encryption_service = container.encryption_service()
+
+    tenant = await tenant_service.get_tenant_by_id(user.tenant_id)
+    assert tenant is not None
+    federation_config: dict[str, Any] = dict(tenant.federation_config or {})
+    sa_config_raw = federation_config.get("mcp_service_account")
+    sa_config: dict[str, Any] = (
+        cast("dict[str, Any]", sa_config_raw) if isinstance(sa_config_raw, dict) else {}
+    )
+    client_id = sa_config.get("client_id")
+    cipher = sa_config.get("client_secret_ciphertext")
+
+    default_target_raw = federation_config.get("mcp_default_target")
+    default_target = default_target_raw if isinstance(default_target_raw, str) else None
+
+    if not isinstance(client_id, str) or not isinstance(cipher, str) or not cipher:
+        return MCPServiceAccountPublic(
+            configured=False,
+            default_target=default_target,
+        )
+
+    # Decrypt only to compute the masked preview; never leak plaintext.
+    try:
+        plaintext_secret = encryption_service.decrypt(cipher)
+    except Exception:
+        plaintext_secret = ""
+    return MCPServiceAccountPublic(
+        configured=True,
+        client_id=client_id,
+        client_secret_preview=_mask_service_account_secret(plaintext_secret),
+        default_target=default_target,
+    )
+
+
+@router.put(
+    "/service-account/",
+    response_model=MCPServiceAccountPublic,
+    summary="Set or rotate tenant MCP service-account credentials",
+)
+async def set_mcp_service_account(
+    data: MCPServiceAccountUpdate,
+    container: Container = _WITH_USER,
+) -> MCPServiceAccountPublic:
+    """Persist client_id + (encrypted) client_secret on ``tenant.federation_config``.
+
+    Replaces any prior values. Audit-logged as ``mcp_service_account_set``.
+    The broker (Phase 3) reads these on every ``per_tenant`` exchange and
+    treats them as the OAuth client-credentials subject.
+    """
+    if not data.client_id.strip():
+        raise BadRequestException("client_id is required")
+    if not data.client_secret.strip():
+        raise BadRequestException("client_secret is required")
+
+    user = container.user()
+    validate_permission(user, Permission.ADMIN)
+    tenant_service = container.tenant_service()
+    tenant_repo = container.tenant_repo()
+    encryption_service = container.encryption_service()
+    audit_service = container.audit_service()
+
+    tenant = await tenant_service.get_tenant_by_id(user.tenant_id)
+    assert tenant is not None
+    federation_config = dict(tenant.federation_config or {})
+
+    federation_config["mcp_service_account"] = {
+        "client_id": data.client_id,
+        "client_secret_ciphertext": encryption_service.encrypt(data.client_secret),
+    }
+    await tenant_repo.update_federation_config(
+        tenant_id=tenant.id,
+        federation_config=federation_config,
+    )
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.MCP_SERVICE_ACCOUNT_SET,
+        entity_type=EntityType.FEDERATION_CONFIG,
+        entity_id=tenant.id,
+        description=(
+            f"Set MCP tenant service-account for tenant '{tenant.name}' "
+            f"(client_id={data.client_id})"
+        ),
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=tenant,
+            extra={"client_id": data.client_id},
+        ),
+    )
+
+    return MCPServiceAccountPublic(
+        configured=True,
+        client_id=data.client_id,
+        client_secret_preview=_mask_service_account_secret(data.client_secret),
+    )
+
+
+@router.delete(
+    "/service-account/",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Clear the tenant MCP service-account credentials",
+)
+async def clear_mcp_service_account(
+    container: Container = _WITH_USER,
+):
+    """Remove the ``mcp_service_account`` key from ``federation_config``.
+
+    Audit-logged as ``mcp_service_account_cleared``. After this call the
+    broker will refuse ``per_tenant`` exchanges with a configuration
+    error; any active assistant referencing such a server stops working
+    until credentials are re-provided.
+    """
+    user = container.user()
+    validate_permission(user, Permission.ADMIN)
+    tenant_service = container.tenant_service()
+    tenant_repo = container.tenant_repo()
+    audit_service = container.audit_service()
+
+    tenant = await tenant_service.get_tenant_by_id(user.tenant_id)
+    assert tenant is not None
+    federation_config = dict(tenant.federation_config or {})
+
+    if "mcp_service_account" not in federation_config:
+        return  # 204, idempotent
+
+    federation_config.pop("mcp_service_account", None)
+    await tenant_repo.update_federation_config(
+        tenant_id=tenant.id,
+        federation_config=federation_config,
+    )
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.MCP_SERVICE_ACCOUNT_CLEARED,
+        entity_type=EntityType.FEDERATION_CONFIG,
+        entity_id=tenant.id,
+        description=(f"Cleared MCP tenant service-account for tenant '{tenant.name}'"),
+        metadata=AuditMetadata.standard(actor=user, target=tenant),
+    )
+
+
+@router.put(
+    "/sso-defaults/",
+    response_model=MCPServiceAccountPublic,
+    summary="Set the tenant-wide default audience/scope for SSO MCP servers",
+)
+async def set_mcp_sso_default_target(
+    data: MCPSsoDefaultTargetUpdate,
+    container: Container = _WITH_USER,
+) -> MCPServiceAccountPublic:
+    """Persist ``federation_config.mcp_default_target`` for the tenant.
+
+    Every SSO MCP server in the tenant inherits this value as its
+    ``target.resource_or_scope`` unless the server carries its own
+    explicit override. Use this to configure a shared audience
+    (Keycloak) or a shared API scope (Entra) once instead of per server.
+    """
+    if not data.default_target.strip():
+        raise BadRequestException("default_target is required")
+
+    user = container.user()
+    validate_permission(user, Permission.ADMIN)
+    tenant_service = container.tenant_service()
+    tenant_repo = container.tenant_repo()
+    audit_service = container.audit_service()
+
+    tenant = await tenant_service.get_tenant_by_id(user.tenant_id)
+    assert tenant is not None
+    federation_config = dict(tenant.federation_config or {})
+    federation_config["mcp_default_target"] = data.default_target.strip()
+    await tenant_repo.update_federation_config(
+        tenant_id=tenant.id,
+        federation_config=federation_config,
+    )
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.MCP_SSO_DEFAULT_TARGET_SET,
+        entity_type=EntityType.FEDERATION_CONFIG,
+        entity_id=tenant.id,
+        description=(
+            f"Set MCP default audience/scope for tenant '{tenant.name}' "
+            f"to {data.default_target.strip()}"
+        ),
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=tenant,
+            extra={"default_target": data.default_target.strip()},
+        ),
+    )
+
+    # Return the unified read-out so the panel can refresh both knobs.
+    return await get_mcp_service_account(container=container)
+
+
+@router.delete(
+    "/sso-defaults/",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Clear the tenant-wide default audience/scope",
+)
+async def clear_mcp_sso_default_target(
+    container: Container = _WITH_USER,
+):
+    """Remove ``federation_config.mcp_default_target``.
+
+    After this call, SSO MCP servers without their own
+    ``target_resource_or_scope`` fall back to the per-server URL
+    (Keycloak RFC 8707 default) or fail at exchange time (Entra, which
+    requires an explicit scope).
+    """
+    user = container.user()
+    validate_permission(user, Permission.ADMIN)
+    tenant_service = container.tenant_service()
+    tenant_repo = container.tenant_repo()
+    audit_service = container.audit_service()
+
+    tenant = await tenant_service.get_tenant_by_id(user.tenant_id)
+    assert tenant is not None
+    federation_config = dict(tenant.federation_config or {})
+
+    if "mcp_default_target" not in federation_config:
+        return  # idempotent
+
+    federation_config.pop("mcp_default_target", None)
+    await tenant_repo.update_federation_config(
+        tenant_id=tenant.id,
+        federation_config=federation_config,
+    )
+
+    await audit_service.log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.MCP_SSO_DEFAULT_TARGET_CLEARED,
+        entity_type=EntityType.FEDERATION_CONFIG,
+        entity_id=tenant.id,
+        description=f"Cleared MCP default audience/scope for tenant '{tenant.name}'",
+        metadata=AuditMetadata.standard(actor=user, target=tenant),
+    )
+
+
+# ============================================================================
 # Global MCP Server Catalog Endpoints - Specific ID routes (MUST come after /settings/)
 # ============================================================================
 
@@ -263,6 +566,8 @@ async def create_mcp_server(
 
     Validates connection before saving. Returns 400 if connection fails.
     """
+    _require_oauth_enabled_for(data.auth_scope)
+
     service = container.mcp_server_service()
     assembler = container.mcp_server_assembler()
 
@@ -286,6 +591,9 @@ async def create_mcp_server(
         if data.documentation_url
         else None,
         security_classification=security_classification,
+        auth_scope=data.auth_scope,
+        expected_idp_issuer=data.expected_idp_issuer,
+        target_resource_or_scope=data.target_resource_or_scope,
     )
 
     # If connection failed, return 400 error with message
@@ -328,6 +636,8 @@ async def update_mcp_server(
     container: Container = _WITH_USER,
 ):
     """Update an MCP server in global catalog (admin only)."""
+    _require_oauth_enabled_for(data.auth_scope)
+
     service = container.mcp_server_service()
     assembler = container.mcp_server_assembler()
 
@@ -359,6 +669,9 @@ async def update_mcp_server(
         if data.documentation_url
         else None,
         security_classification=security_classification,
+        auth_scope=data.auth_scope,
+        expected_idp_issuer=data.expected_idp_issuer,
+        target_resource_or_scope=data.target_resource_or_scope,
     )
 
     # If connection validation failed, return 400 error with message

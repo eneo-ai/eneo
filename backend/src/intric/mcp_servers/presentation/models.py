@@ -19,6 +19,9 @@ class BaseListModel(BaseModel, Generic[T]):
         return len(self.items)
 
 
+MCPAuthScopeLiteral = Literal["per_user", "per_tenant", "static_bearer"]
+
+
 class MCPServerPublic(BaseModel):
     """Public DTO for MCP server (HTTP-only, uses Streamable HTTP transport).
 
@@ -40,6 +43,9 @@ class MCPServerPublic(BaseModel):
     icon_url: Optional[str]
     documentation_url: Optional[str]
     security_classification: Optional[SecurityClassificationPublic] = None
+    auth_scope: MCPAuthScopeLiteral = "static_bearer"
+    expected_idp_issuer: Optional[str] = None
+    target_resource_or_scope: Optional[str] = None
 
 
 class MCPServerList(BaseListModel[MCPServerPublic]):
@@ -58,6 +64,9 @@ class MCPServerCreate(BaseModel):
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None
     security_classification: Optional[ModelId] = None
+    auth_scope: MCPAuthScopeLiteral = "static_bearer"
+    expected_idp_issuer: Optional[str] = None
+    target_resource_or_scope: Optional[str] = None
 
 
 class MCPServerUpdate(BaseModel):
@@ -72,6 +81,9 @@ class MCPServerUpdate(BaseModel):
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None
     security_classification: Union[ModelId, None, NotProvided] = NOT_PROVIDED
+    auth_scope: Optional[MCPAuthScopeLiteral] = None
+    expected_idp_issuer: Union[str, None, NotProvided] = NOT_PROVIDED
+    target_resource_or_scope: Union[str, None, NotProvided] = NOT_PROVIDED
 
 
 class MCPServerSettingsPublic(MCPServerPublic):
@@ -144,6 +156,37 @@ class MCPServerToolPublic(BaseModel):
 
 class MCPServerToolList(BaseListModel[MCPServerToolPublic]):
     pass
+
+
+class MCPServiceAccountPublic(BaseModel):
+    """DTO for the tenant MCP service-account read-out (masked).
+
+    Also surfaces the tenant-wide default audience/scope so the panel
+    can render both knobs from a single GET; they are written via
+    separate PUT endpoints because the concerns are independent.
+    """
+
+    configured: bool
+    client_id: Optional[str] = None
+    client_secret_preview: Optional[str] = None  # e.g. "********4f3c"
+    default_target: Optional[str] = None
+
+
+class MCPServiceAccountUpdate(BaseModel):
+    """DTO for setting / rotating the tenant MCP service-account credentials."""
+
+    client_id: str
+    client_secret: str
+
+
+class MCPSsoDefaultTargetUpdate(BaseModel):
+    """DTO for setting the tenant-wide default audience/scope.
+
+    Used as the fallback ``target.resource_or_scope`` in the broker for
+    every SSO MCP server that does not carry its own override.
+    """
+
+    default_target: str
 
 
 class MCPServerToolUpdate(BaseModel):

@@ -29,12 +29,24 @@
   let name = $state("");
   let description = $state("");
   let http_url = $state("");
-  let http_auth_type = $state<"none" | "bearer">("none");
   let documentation_url = $state("");
   let security_classification = $state<SecurityClassification | null>(null);
 
   // Authentication credentials
   let bearer_token = $state("");
+
+  // Top-level authentication mode is a single flat choice. ``auth_mode``
+  // collapses the backend's two-axis model (http_auth_type × auth_scope)
+  // into one selector so administrators don't have to reason about both:
+  //   public  → http_auth_type=none,   auth_scope=static_bearer
+  //   bearer  → http_auth_type=bearer, auth_scope=static_bearer
+  //   sso     → http_auth_type=bearer, auth_scope=per_user | per_tenant
+  let auth_mode = $state<"public" | "bearer" | "sso">("public");
+  // Sub-choice that only matters when ``auth_mode === "sso"``. Holds
+  // ``per_user`` or ``per_tenant``; rolls up into auth_scope at submit.
+  let sso_scope = $state<"per_user" | "per_tenant">("per_user");
+  let expected_idp_issuer = $state("");
+  let target_resource_or_scope = $state("");
 
   let submitting = $state(false);
   let errorMessage = $state("");
@@ -45,16 +57,39 @@
       name = mcpServer.name || "";
       description = mcpServer.description || "";
       http_url = mcpServer.http_url || "";
-      http_auth_type = (mcpServer.http_auth_type as "none" | "bearer") || "none";
+      const existingAuthType = (mcpServer.http_auth_type as "none" | "bearer") || "none";
+      const existingScope =
+        ((mcpServer as { auth_scope?: string }).auth_scope as
+          | "static_bearer"
+          | "per_user"
+          | "per_tenant"
+          | undefined) ?? "static_bearer";
+      if (existingScope === "per_user" || existingScope === "per_tenant") {
+        auth_mode = "sso";
+        sso_scope = existingScope;
+      } else if (existingAuthType === "bearer") {
+        auth_mode = "bearer";
+        sso_scope = "per_user";
+      } else {
+        auth_mode = "public";
+        sso_scope = "per_user";
+      }
       documentation_url = mcpServer.documentation_url || "";
       security_classification = mcpServer.security_classification ?? null;
+      expected_idp_issuer =
+        (mcpServer as { expected_idp_issuer?: string | null }).expected_idp_issuer ?? "";
+      target_resource_or_scope =
+        (mcpServer as { target_resource_or_scope?: string | null }).target_resource_or_scope ?? "";
     } else {
       name = "";
       description = "";
       http_url = "";
-      http_auth_type = "none";
+      auth_mode = "public";
+      sso_scope = "per_user";
       documentation_url = "";
       security_classification = null;
+      expected_idp_issuer = "";
+      target_resource_or_scope = "";
     }
     // Always clear auth credentials (they're stored securely, not shown)
     bearer_token = "";
@@ -64,6 +99,11 @@
   async function handleSubmit() {
     submitting = true;
     errorMessage = "";
+
+    // Roll the flat auth_mode UI back up to the backend's two-axis model.
+    const http_auth_type: "none" | "bearer" = auth_mode === "public" ? "none" : "bearer";
+    const auth_scope: "static_bearer" | "per_user" | "per_tenant" =
+      auth_mode === "sso" ? sso_scope : "static_bearer";
 
     try {
       const data: Record<string, unknown> = { name };
@@ -87,8 +127,22 @@
         : null;
 
       // Add auth config if provided
-      if (http_auth_type === "bearer" && bearer_token) {
+      if (auth_mode === "bearer" && bearer_token) {
         data.http_auth_config_schema = { token: bearer_token };
+      }
+
+      // OAuth scope and same-IdP fields. Only send when they meaningfully
+      // differ from the current state (avoid touching unrelated rows).
+      if (!isEditMode || auth_scope !== (mcpServer as { auth_scope?: string })?.auth_scope) {
+        data.auth_scope = auth_scope;
+      }
+      if (auth_mode === "sso") {
+        data.expected_idp_issuer = expected_idp_issuer || null;
+        data.target_resource_or_scope = target_resource_or_scope || null;
+      } else if (isEditMode) {
+        // Switched away from SSO — clear the OAuth-only fields.
+        data.expected_idp_issuer = null;
+        data.target_resource_or_scope = null;
       }
 
       await onSubmit(data, mcpServer?.mcp_server_id);
@@ -98,10 +152,13 @@
         name = "";
         description = "";
         http_url = "";
-        http_auth_type = "none";
+        auth_mode = "public";
+        sso_scope = "per_user";
         documentation_url = "";
         bearer_token = "";
         security_classification = null;
+        expected_idp_issuer = "";
+        target_resource_or_scope = "";
       }
 
       $openController = false;
@@ -311,15 +368,95 @@
 
           <Select.Simple
             options={[
-              { value: "none", label: "Publik (ingen autentisering)" },
-              { value: "bearer", label: "Bearer Token" }
+              { value: "public", label: "Publik (ingen autentisering)" },
+              { value: "bearer", label: "Bearer Token (statisk)" },
+              { value: "sso", label: "SSO (zero-trust via samma IdP)" }
             ]}
-            bind:value={http_auth_type}
+            bind:value={auth_mode}
           >
             {m.authentication_type()}
           </Select.Simple>
 
-          {#if http_auth_type === "bearer"}
+          {#if auth_mode === "sso"}
+            <div>
+              <label for="mcp-sso-scope" class="text-default mb-1.5 block text-sm font-medium">
+                SSO-omfattning
+              </label>
+              <select
+                id="mcp-sso-scope"
+                bind:value={sso_scope}
+                aria-describedby="mcp-sso-scope-hint"
+                class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+              >
+                <option value="per_user">Per användare</option>
+                <option value="per_tenant">Delad tjänst</option>
+              </select>
+              <p id="mcp-sso-scope-hint" class="text-muted mt-1.5 text-xs">
+                SSO-utbyte använder samma IdP som eneo. Kräver MCP_OAUTH_ENABLED på servern och
+                konfigurerad federation_config för organisationen.
+              </p>
+            </div>
+          {/if}
+
+          {#if auth_mode === "sso"}
+            <p class="text-muted text-xs">
+              IdP-issuer ärvs från organisationens
+              <span class="font-mono">federation_config</span>. För Keycloak räcker det. För Entra
+              ID behöver du sätta API-scope nedan.
+            </p>
+
+            <details class="border-default bg-secondary/30 rounded-lg border px-3 py-2">
+              <summary class="text-default cursor-pointer text-sm font-medium">
+                Avancerat (krävs för Entra ID)
+              </summary>
+              <div class="mt-3 space-y-3">
+                <div>
+                  <label for="mcp-target-aud" class="text-default mb-1.5 block text-sm font-medium">
+                    Audience / scope (mål-URI)
+                    <span class="text-muted ml-1 text-xs font-normal">(valfritt)</span>
+                  </label>
+                  <input
+                    id="mcp-target-aud"
+                    type="text"
+                    bind:value={target_resource_or_scope}
+                    aria-describedby="mcp-target-aud-hint"
+                    placeholder="https://mcp.exempel.se/srv  eller  api://abc/.default"
+                    class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                  />
+                  <p id="mcp-target-aud-hint" class="text-muted mt-1.5 text-xs">
+                    Keycloak: lämna tomt — broker använder MCP-serverns URL som RFC 8707 resource.
+                    Entra: API-scope krävs (t.ex. <span class="font-mono"
+                      >api://&lt;app-id&gt;/.default</span
+                    >).
+                  </p>
+                </div>
+
+                <div>
+                  <label
+                    for="mcp-expected-idp"
+                    class="text-default mb-1.5 block text-sm font-medium"
+                  >
+                    Override för IdP-issuer
+                    <span class="text-muted ml-1 text-xs font-normal">(valfritt)</span>
+                  </label>
+                  <input
+                    id="mcp-expected-idp"
+                    type="url"
+                    bind:value={expected_idp_issuer}
+                    aria-describedby="mcp-expected-idp-hint"
+                    placeholder="https://keycloak.exempel.se/realms/eneo"
+                    class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                  />
+                  <p id="mcp-expected-idp-hint" class="text-muted mt-1.5 text-xs">
+                    Lämna tomt för att använda organisationens vanliga IdP. Sätt enbart om denna
+                    MCP-server federerar mot en annan IdP än resten av eneo.
+                  </p>
+                </div>
+              </div>
+            </details>
+          {/if}
+
+          {#if auth_mode === "bearer"}
             <div>
               <label for="mcp-bearer_token" class="text-default mb-1.5 block text-sm font-medium"
                 >{m.bearer_token()}</label

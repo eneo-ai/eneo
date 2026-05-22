@@ -52,6 +52,7 @@ from intric.authentication.api_key_resolver import ApiKeyAuthResolver
 from intric.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_service import AuthService
+from intric.authentication.oidc_token_store import OidcTokenStore
 from intric.collections.application.collection_crud_service import CollectionCRUDService
 from intric.completion_models.application import CompletionModelCRUDService
 from intric.completion_models.application.completion_model_migration_history_service import (
@@ -237,6 +238,7 @@ from intric.mcp_servers.application.mcp_server_service import MCPServerService
 from intric.mcp_servers.application.mcp_server_settings_service import (
     MCPServerSettingsService,
 )
+from intric.mcp_servers.application.mcp_token_broker import MCPTokenBroker
 from intric.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
     MCPServerMapper,
     MCPServerToolMapper,
@@ -737,6 +739,33 @@ class Container(containers.DeclarativeContainer):
         AuditSessionService,
     )
 
+    # Feature flag service for audit logging and other toggles.
+    # Declared early because completion_service (below) needs the MCP token
+    # broker, which transitively depends on this and audit_service.
+    feature_flag_service = providers.Factory(
+        FeatureFlagService,
+        feature_flag_repo=feature_flag_repo,
+    )
+    audit_service = providers.Factory(
+        AuditService,
+        repository=audit_log_repo,
+        audit_config_service=audit_config_service,
+        feature_flag_service=feature_flag_service,
+    )
+    oidc_token_store = providers.Factory(
+        OidcTokenStore,
+        session=session,
+        encryption_service=encryption_service,
+        audit_service=audit_service,
+    )
+    mcp_token_broker = providers.Factory(
+        MCPTokenBroker,
+        session=session,
+        encryption_service=encryption_service,
+        audit_service=audit_service,
+        oidc_token_store=oidc_token_store,
+    )
+
     # Completion model adapters
     context_builder = providers.Factory(ContextBuilder)
     completion_service = providers.Factory(
@@ -747,6 +776,8 @@ class Container(containers.DeclarativeContainer):
         encryption_service=encryption_service,
         session=session,
         redis_client=redis_client,
+        user=user,
+        mcp_token_broker=mcp_token_broker,
     )
 
     # Datastore
@@ -824,17 +855,6 @@ class Container(containers.DeclarativeContainer):
         AuthService,
         api_key_repo=api_key_repo,
         api_key_v2_repo=api_key_v2_repo,
-    )
-    # Feature flag service for audit logging and other toggles
-    feature_flag_service = providers.Factory(
-        FeatureFlagService,
-        feature_flag_repo=feature_flag_repo,
-    )
-    audit_service = providers.Factory(
-        AuditService,
-        repository=audit_log_repo,
-        audit_config_service=audit_config_service,
-        feature_flag_service=feature_flag_service,
     )
     tenant_service = providers.Factory(
         TenantService,

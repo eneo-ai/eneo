@@ -13,6 +13,7 @@
   import { setSecurityContext } from "$lib/features/security-classifications/SecurityContext.js";
   import MCPServerDialog from "./MCPServerDialog.svelte";
   import MCPServersTable from "./MCPServersTable.svelte";
+  import MCPServiceAccountPanel from "./MCPServiceAccountPanel.svelte";
   import { writable } from "svelte/store";
   import { untrack } from "svelte";
 
@@ -71,6 +72,10 @@
             </Button>
           </div>
         {/if}
+      </Settings.Group>
+
+      <Settings.Group title="SSO-tjänstkonto för MCP">
+        <MCPServiceAccountPanel />
       </Settings.Group>
 
       <Settings.Group title={m.what_are_mcp_servers()}>

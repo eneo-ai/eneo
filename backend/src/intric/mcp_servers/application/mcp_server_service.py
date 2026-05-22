@@ -5,7 +5,11 @@ from uuid import UUID
 
 from intric.main.exceptions import UnauthorizedException
 from intric.main.models import NOT_PROVIDED, NotProvided
-from intric.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from intric.mcp_servers.domain.entities.mcp_server import (
+    MCPAuthScope,
+    MCPServer,
+    MCPServerTool,
+)
 from intric.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
@@ -193,6 +197,9 @@ class MCPServerService:
         icon_url: str | None = None,
         documentation_url: str | None = None,
         security_classification: "SecurityClassification | None" = None,
+        auth_scope: MCPAuthScope = "static_bearer",
+        expected_idp_issuer: str | None = None,
+        target_resource_or_scope: str | None = None,
     ) -> MCPServerCreateResult:
         """Create a new MCP server for the tenant (admin only, uses Streamable HTTP transport).
 
@@ -216,6 +223,9 @@ class MCPServerService:
             icon_url=icon_url,
             documentation_url=documentation_url,
             security_classification=security_classification,
+            auth_scope=auth_scope,
+            expected_idp_issuer=expected_idp_issuer,
+            target_resource_or_scope=target_resource_or_scope,
         )
 
         # Test connection FIRST with plaintext credentials before saving to database
@@ -269,6 +279,9 @@ class MCPServerService:
         icon_url: str | None = None,
         documentation_url: str | None = None,
         security_classification: "SecurityClassification | NotProvided | None" = NOT_PROVIDED,
+        auth_scope: MCPAuthScope | None = None,
+        expected_idp_issuer: "str | NotProvided | None" = NOT_PROVIDED,
+        target_resource_or_scope: "str | NotProvided | None" = NOT_PROVIDED,
     ) -> MCPServerUpdateResult:
         """Update an MCP server in global catalog (admin only, uses Streamable HTTP transport).
 
@@ -304,6 +317,12 @@ class MCPServerService:
             mcp_server.documentation_url = str(documentation_url)
         if not isinstance(security_classification, NotProvided):
             mcp_server.security_classification = security_classification
+        if auth_scope is not None:
+            mcp_server.auth_scope = auth_scope
+        if not isinstance(expected_idp_issuer, NotProvided):
+            mcp_server.expected_idp_issuer = expected_idp_issuer
+        if not isinstance(target_resource_or_scope, NotProvided):
+            mcp_server.target_resource_or_scope = target_resource_or_scope
 
         # Validate connection before saving when connection config changes
         if url_changed or auth_type_changed or credentials_changed:
