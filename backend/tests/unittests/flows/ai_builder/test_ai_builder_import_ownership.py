@@ -78,6 +78,20 @@ FINALIZATION_REPAIR_IMPORT_NAMES = frozenset(
 FINALIZATION_REQUEST_REPAIR_FIELD_NAMES = frozenset(
     {"litellm_model", "litellm_kwargs", "max_output_tokens"}
 )
+QUESTION_RECOVERY_METHODS = frozenset(
+    {"request_non_question_continuation", "_handle_structured_question"}
+)
+QUESTION_RECOVERY_ALLOWED_ANY_NAMES = frozenset(
+    {
+        "assistant_metadata",
+        "litellm_client",
+        "litellm_kwargs",
+        "llm_messages",
+        "tool_call",
+        "tool_calls",
+        "tool_schemas",
+    }
+)
 
 BANNED_DOMAIN_MODEL_IMPORTS = frozenset(
     {
@@ -408,6 +422,120 @@ def test_proposal_completion_dependency_direction_stays_leaf_owned() -> None:
             violations.append(f"{telemetry_path}:{node.lineno} imports {node.module}")
 
     assert violations == []
+
+
+def test_question_recovery_has_single_owner_and_typed_boundary() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    processor_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+    )
+    question_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_question_recovery.py"
+    )
+    processor_tree = ast.parse(processor_path.read_text(), filename=str(processor_path))
+    question_text = question_path.read_text()
+    question_tree = ast.parse(question_text, filename=str(question_path))
+    violations: list[str] = []
+
+    processor_class = next(
+        node
+        for node in ast.walk(processor_tree)
+        if isinstance(node, ast.ClassDef) and node.name == "AIBuilderProposalProcessor"
+    )
+    for node in processor_class.body:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in QUESTION_RECOVERY_METHODS
+        ):
+            violations.append(f"{processor_path}:{node.lineno} defines {node.name}")
+
+    request_class = next(
+        node
+        for node in ast.walk(question_tree)
+        if isinstance(node, ast.ClassDef)
+        and node.name == "StructuredQuestionRecoveryRequest"
+    )
+    request_fields = [
+        stmt.target.id
+        for stmt in request_class.body
+        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)
+    ]
+    if len(request_fields) > 12:
+        violations.append(
+            f"{question_path}:{request_class.lineno} fields {request_fields}"
+        )
+
+    completion_import_count = 0
+    direct_completion_import_count = 0
+    for node in ast.walk(question_tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.module in BANNED_PROPOSAL_PROCESSOR_IMPORTS:
+                violations.append(
+                    f"{question_path}:{node.lineno} imports {node.module}"
+                )
+            if node.module == "intric.flows.ai_builder.ai_builder_proposal_completion":
+                for alias in node.names:
+                    if alias.name == "call_proposal_completion_with_usage":
+                        completion_import_count += 1
+                    if alias.name == "call_proposal_completion":
+                        direct_completion_import_count += 1
+
+        if isinstance(node, ast.ClassDef) and node.name.endswith(
+            ("Processor", "Service", "Manager")
+        ):
+            violations.append(f"{question_path}:{node.lineno} defines {node.name}")
+
+        if isinstance(node, ast.Attribute) and node.attr == "acompletion":
+            violations.append(f"{question_path}:{node.lineno} calls acompletion")
+
+        if isinstance(node, ast.Name) and node.id in {
+            "AIBuilderProposalProcessor",
+            "ProposalContext",
+            "handle_tool_call",
+            "from_context",
+        }:
+            violations.append(f"{question_path}:{node.lineno} uses {node.id}")
+
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.args.kwarg is not None:
+                annotation = node.args.kwarg.annotation
+                if annotation is not None and ast.unparse(annotation) == "Any":
+                    violations.append(
+                        f"{question_path}:{node.lineno} defines **kwargs: Any"
+                    )
+            for arg in [*node.args.args, *node.args.kwonlyargs]:
+                if _annotation_uses_any(arg.annotation) and (
+                    arg.arg not in QUESTION_RECOVERY_ALLOWED_ANY_NAMES
+                ):
+                    violations.append(
+                        f"{question_path}:{node.lineno} arg {arg.arg} uses Any"
+                    )
+
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if _annotation_uses_any(node.annotation) and (
+                node.target.id not in QUESTION_RECOVERY_ALLOWED_ANY_NAMES
+            ):
+                violations.append(
+                    f"{question_path}:{node.lineno} field {node.target.id} uses Any"
+                )
+
+    if completion_import_count != 1:
+        violations.append(
+            f"{question_path}: call_proposal_completion_with_usage imports "
+            f"{completion_import_count}"
+        )
+    if direct_completion_import_count:
+        violations.append(f"{question_path}: imports call_proposal_completion")
+    if question_text.count('"question-recovery"') != 1:
+        violations.append(f"{question_path}: question-recovery literal count changed")
+
+    assert violations == []
+
+
+def _annotation_uses_any(annotation: ast.expr | None) -> bool:
+    return annotation is not None and any(
+        isinstance(node, ast.Name) and node.id == "Any" for node in ast.walk(annotation)
+    )
 
 
 def _python_files() -> list[Path]:

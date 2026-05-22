@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T043
+active_task: T045
 
 scoring_target:
   dimensions:
@@ -4602,7 +4602,7 @@ tasks:
   - id: T043
     type: pm
     assignee: PM
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Re-rank the next highest-score-moving tranche after T042, deciding whether to continue processor topology/readability, migrate remaining provider-coupled tests, address generated-client determinism, or repeat live-eval/output-quality proof."
     inputs:
@@ -4622,6 +4622,147 @@ tasks:
     verify:
       - "Review T042 receipt and current scorecard"
       - "Produce a T043 next-tranche ranking artifact under .codex/artifacts/"
+    receipt:
+      summary: "Re-ranked the next highest-score-moving tranche after T042. The first Codex plan selected structured-question recovery ownership but Claude iteration 1 rejected the buffered result boundary because it would delay the repairing stream event until after the recovery completion. Codex revised the plan to a streaming AsyncGenerator boundary with a 12-field decision request, inline terminal recovered-tool dispatch, no from_context shortcut, an Any allowlist, a field-count guard, and a pinned question-recovery request-id constant. Claude iteration 2 and Antigravity both returned GREEN_LIGHT yes / MIN_SCORE 8. Selected T044 as the next worker."
+      artifact: ".codex/artifacts/flow-ai-builder-t043-next-tranche-ranking.md"
+      selected_next_tranche: T044
+      selected_reason: "T042 moved completion ownership out of the processor, so structured-question recovery can now move without completion callbacks, self-correction callbacks, or processor imports. This directly addresses the largest remaining processor method and a normal-user clarification path while keeping general dispatch processor-owned."
+      peer_reviews:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t043-next-flow-ai-builder-tranche-ranking-20260522T091114Z.md: VERDICT changes_required / GREEN_LIGHT no / MIN_SCORE 7; P1 buffered streaming regression accepted."
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t043-next-flow-ai-builder-tranche-ranking-iteration-2-20260522T091627Z.md: VERDICT green / GREEN_LIGHT yes / MIN_SCORE 8."
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t043-next-tranche-ranking-challenge-20260522T091911Z.md: VERDICT green / GREEN_LIGHT yes / MIN_SCORE 8."
+      rejected_alternatives:
+        - "Self-correction/forced-retry typed repair boundary: real debt, but deferred because question recovery does not call self-correction and this would not move the largest normal-user recovery path out of the processor."
+        - "Confirm-requirements lifecycle owner: deferred because parse/validation failure still needs self-correction and discovery followup branching."
+        - "Larger processor topology refactor: rejected as too broad to review safely."
+        - "Generated-client determinism: still a 9/10 blocker, but lower immediate topology/readability leverage."
+        - "Narrow stream diagnostics: deferred under the OpenTelemetry pause and lower score impact."
+        - "Live eval/output-quality proof: deferred until behavior-affecting changes or a dedicated output-quality gate."
+      scorecard_after_t043:
+        Overall: 8
+      residual_risks:
+        - "T044 is approved but not implemented yet."
+        - "AIBuilderProposalProcessor remains oversized until structured-question recovery and later topology slices are completed."
+        - "Generated-client determinism, full-source typing/test baseline, self-correction/repair callable cleanup, confirm-requirements ownership, and repeated live eval remain unresolved."
+
+  - id: T044
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Implement the peer-approved structured-question recovery owner using a streaming async-generator boundary, deleting the processor-owned question recovery methods without introducing a facade, callback bag, or buffered stream behavior."
+    inputs:
+      - "T043 receipt and peer-gated ranking artifact"
+      - ".codex/artifacts/flow-ai-builder-t043-next-tranche-ranking.md"
+      - ".codex/artifacts/claude-peer-loop-t043-next-flow-ai-builder-tranche-ranking-iteration-2-20260522T091627Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t043-next-tranche-ranking-challenge-20260522T091911Z.md"
+      - "Current scorecard floor 8/10"
+    constraints:
+      - "Implement only the approved T044 plan; do not broaden into confirm-requirements extraction, self-correction extraction, repair signature cleanup, generated-client determinism, stream diagnostics, frontend, public API, DB, Celery, OpenTelemetry, planner prompts, or live-eval changes."
+      - "Use a streaming AsyncGenerator[QuestionRecoveryItem, None] boundary; do not buffer stream events."
+      - "Construct StructuredQuestionRecoveryRequest explicitly at the processor call site; do not add from_context or import ProposalContext into the question owner."
+      - "Keep general tool dispatch in AIBuilderProposalProcessor; the question owner may only emit a terminal RecoveredToolDispatchRequest."
+      - "Preserve unrelated dirty files."
+      - "Overall score remains 8 unless post-implementation evidence and peer review prove the weakest dimension moved."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t044-implementation-summary.md"
+    acceptance_criteria:
+      - "AIBuilderProposalProcessor no longer defines request_non_question_continuation or _handle_structured_question."
+      - "ai_builder_question_recovery.py owns structured-question parsing/fallback, backend-owned question persistence, repeated-question recovery, recovery completion, and terminal recovered-tool dispatch item emission."
+      - "The question owner streams build_status_event('repairing') before awaiting the recovery completion."
+      - "Recovered real tool dispatch remains inline in AIBuilderProposalProcessor.handle_tool_call or its current structured-question branch; no adapter method or callback bag is introduced."
+      - "StructuredQuestionRecoveryRequest has at most 12 dataclass fields and does not carry dispatch pass-through fields that the processor already owns."
+      - "The new owner does not import ai_builder_proposal_processor, does not receive processor=, does not define Processor/Service/Manager classes, and does not call litellm_client.acompletion directly."
+      - "The new owner imports call_proposal_completion_with_usage exactly once and does not import call_proposal_completion."
+      - "The question-recovery request id string is defined once as a module-level constant."
+      - "No new Callable[..., Any], **kwargs: Any, broad dependency bag, Pyright ignore, phase/tranche comments, or tutorial comments."
+      - "Every moved behavior has a concrete behavior-focused test, including a barrier test that proves repairing streams before completion resolves."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check changed T044 backend files/tests"
+      - "cd backend && uv run ruff format --check changed T044 backend files/tests"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "AST ownership guard: processor no moved question methods; question owner no processor import; field count <= 12; request id string single source; Any allowlist enforced."
+      - "Anti-slippage grep for T044/tranche/phase language in changed source/tests."
+      - "git diff --check"
+      - "Post-implementation Claude review; Antigravity if quota/tooling is available."
+    receipt:
+      summary: "Implemented the peer-approved structured-question recovery owner. Structured question parsing/fallback, backend-owned question persistence, unsupported repeated-question recovery, recovery completion, and terminal recovered-tool dispatch item emission now live in ai_builder_question_recovery.py. AIBuilderProposalProcessor no longer defines request_non_question_continuation or _handle_structured_question; it keeps general dispatch ownership via a private _handle_question_recovery_dispatch method that consumes the streaming question owner and re-enters handle_tool_call only for typed RecoveredToolDispatchRequest items. Claude first flagged an inline-closure readability issue; Codex accepted it and moved the branch to _handle_question_recovery_dispatch. Claude then returned parser-compliant GREEN_LIGHT yes / MIN_SCORE 8. Antigravity returned GREEN_LIGHT yes / MIN_SCORE 9. The broader goal remains active and score floor remains 8/10."
+      artifact: ".codex/artifacts/flow-ai-builder-t044-implementation-summary.md"
+      implemented_files:
+        - "backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      peer_reviews:
+        claude_initial: ".codex/artifacts/claude-peer-loop-t044-structured-question-recovery-implementation-review-20260522T094249Z.md: substantive GREEN_LIGHT yes / MIN_SCORE 8 but wrapper parse failed on bold final lines; P2 inline closure readability finding accepted."
+        claude_network_retry: ".codex/artifacts/claude-peer-loop-t044-structured-question-recovery-revised-implementation-review-20260522T104541Z.md: socket/network failure; no pass recorded."
+        claude_revised: ".codex/artifacts/claude-peer-loop-t044-structured-question-recovery-revised-implementation-review-20260522T104725Z.md: substantive GREEN_LIGHT yes / MIN_SCORE 8 but wrapper parse failed on bold final lines."
+        claude_parser_green: ".codex/artifacts/claude-peer-loop-t044-parser-compliant-final-green-20260522T104828Z.md: VERDICT green / GREEN_LIGHT yes / MIN_SCORE 8."
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t044-question-recovery-implementation-challenge-20260522T105025Z.md: VERDICT green / GREEN_LIGHT yes / MIN_SCORE 9."
+      verification:
+        - "cd backend && uv run ruff check changed T044 backend files/tests: passed"
+        - "cd backend && uv run ruff format --check changed T044 backend files/tests: passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q: 65 passed"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder: 0 errors"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2285 passed, 4 skipped"
+        - "AST ownership guard: passed; processor no moved question methods; question owner no processor import; no ProposalContext/from_context usage"
+        - "Anti-slippage grep for T044/tranche/phase/callback-bag/facade language in changed T044 source/tests: passed"
+        - "ruby YAML parse of state.yaml: yaml ok"
+        - "git diff --check: passed"
+      scorecard_after_t044:
+        Overall: 8
+      residual_risks:
+        - "AIBuilderProposalProcessor remains large at roughly 1570 LOC and still owns broad dispatch/orchestration."
+        - "Duplicate _active_submission_tool_name remains in ai_builder_proposal_processor.py and ai_builder_question_recovery.py; both Claude and Antigravity marked it as a non-blocking follow-up."
+        - "Confirm-requirements lifecycle, self-correction/forced-retry typing, generated-client determinism, full-source typing/test topology, and live-eval output quality still block the broader 9/10 goal."
+        - "New user-provided underlag field reuse plan must be peer-gated and re-ranked before implementation; it was not mixed into T044."
+
+  - id: T045
+    type: pm
+    assignee: PM
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank and prepare the next Flow AI Builder tranche around smart selective reuse of existing Underlag till steget / Underlag till text mechanics, using the peer-reviewed plan artifact as input without mixing it into T044."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-underlag-field-reuse-revised-plan.md"
+      - "User direction on selective typed underlag reuse for audio/transcription -> structured JSON fields -> DOCX/text report flows"
+      - "T044 receipt and current score floor 8/10"
+    constraints:
+      - "Do not implement until the plan is checked against current source and red tests are written first."
+      - "Keep raw template strings out of the outline LLM contract; ai_builder_create_outline.py remains semantic outline owner."
+      - "ai_builder_create_dataflow.py should own targeted-underlag field selection and rewrite."
+      - "ai_builder_source_material.py should own source-material/transcription logic; dataflow may only depend on a narrow read-only helper if needed."
+      - "Hoist targeted auto-bind into normalize_create_draft_mechanics after normalize_create_draft_source_material and remove the separate early auto-bind call from compile_outline_to_create_draft if implementation proceeds."
+      - "Thread aggregation_intent through normalize_create_draft_mechanics and compile_create_draft before any implementation is accepted."
+      - "No token matching, keyword matching, fuzzy NLP, new LLM pass, or hallucinated field paths in the first slice."
+      - "Field selection must be deterministic: declared output_fields only, required fields first, then declaration order; per-JSON cap 3, total cap 8, but at least one field per JSON prior when JSON priors exceed the total cap."
+      - "Run Claude plan gate before implementation; run Antigravity only if quota is available and record quota failures as missing coverage, not pass."
+    allowed_files:
+      - ".codex/artifacts/flow-ai-builder-underlag-field-reuse-revised-plan.md"
+      - ".codex/artifacts/flow-ai-builder-t045-underlag-next-tranche-ranking.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - "read-only source/test inspection until red-test worker is approved"
+    acceptance_criteria:
+      - "Inspect the current source and verify the peer-reviewed underlag plan is still valid against current ai_builder_create_outline.py, ai_builder_create_dataflow.py, ai_builder_source_material.py, and compiler tests."
+      - "Decide whether underlag field reuse is the highest-score-moving next tranche versus remaining topology, generated-client determinism, full-source typing, stream diagnostics, or live-eval proof."
+      - "Produce a T045 ranking artifact with source evidence, rejected alternatives, red-test plan, allowed files, acceptance criteria, validation commands, and residual risks."
+      - "If selected, define a worker tranche that starts with red tests for direct path, outline path, single-JSON no-op, multi-JSON targeted rewrite, cap/distribution, idempotency, and aggregate/compare suppression through both normalize and compile paths."
+      - "Do not mark the broader goal complete; score floor remains evidence-based."
+    verify:
+      - "Read .codex/artifacts/flow-ai-builder-underlag-field-reuse-revised-plan.md"
+      - "rg -n \"output\\.structured \\}\\}\" backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "Inspect current source owner boundaries before writing tests or code"
+      - "Claude plan gate GREEN_LIGHT yes / MIN_SCORE >= 8 before any implementation worker"
+      - "Antigravity if quota/tooling is available; otherwise record exact quota/tooling failure"
     receipt: null
 
 checks:
@@ -4630,18 +4771,17 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T042 completed. Proposal completion provider calls and usage-tracked ProposalCompletionFn construction are now owned by ai_builder_proposal_completion.py. AIBuilderProposalProcessor no longer defines completion methods or raw litellm_client.acompletion calls, and AST guards enforce the new ownership boundary. Claude and Antigravity post-review both returned GREEN_LIGHT yes / MIN_SCORE 8. The broader goal remains active with strict floor 8/10 because the processor is still an 1820 LOC multi-concern orchestration file and generated-client determinism, full-source baseline, OpenTelemetry-coordinated DX boundaries, and repeated live-eval proof remain unresolved."
-    task: T042
+    result: "T044 completed. Structured-question recovery is now owned by ai_builder_question_recovery.py with a streaming AsyncGenerator boundary and typed RecoveredToolDispatchRequest terminal item. AIBuilderProposalProcessor no longer defines request_non_question_continuation or _handle_structured_question, keeps general dispatch ownership through _handle_question_recovery_dispatch, and the focused/full AI Builder unit suite plus strict pyright/ruff pass. Claude returned parser-compliant GREEN_LIGHT yes / MIN_SCORE 8 after the readability fix, and Antigravity returned GREEN_LIGHT yes / MIN_SCORE 9. The broader goal remains active with strict floor 8/10 because processor topology, generated-client determinism, full-source typing/test topology, live-eval output quality, and the newly queued underlag field-reuse plan remain unresolved."
+    task: T044
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q: 10 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q: 53 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2279 passed, 4 skipped"
-      - "cd backend && uv run ruff check changed T042 backend files/tests: passed"
-      - "cd backend && uv run ruff format --check changed T042 backend files/tests: passed"
+      - "cd backend && uv run ruff check changed T044 backend files/tests: passed"
+      - "cd backend && uv run ruff format --check changed T044 backend files/tests: passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q: 65 passed"
       - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder: 0 errors"
-      - "Moved-ownership grep for old processor methods/raw acompletion: passed"
-      - "Anti-slippage grep for T042 in backend/src and backend/tests: passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q: 2285 passed, 4 skipped"
+      - "AST ownership guard for question recovery owner: passed"
+      - "Anti-slippage grep for T044/tranche/phase/callback-bag/facade language in changed T044 source/tests: passed"
       - "ruby YAML parse of state.yaml: yaml ok"
       - "git diff --check: passed"
-      - "Claude post-review: .codex/artifacts/claude-peer-loop-t042-completion-owner-post-implementation-review-after-p2-cleanup-20260522T085103Z.md GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity post-review: .codex/artifacts/antigravity-peer-loop-t042-completion-owner-post-implementation-review-20260522T085315Z.md GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Claude post-review: .codex/artifacts/claude-peer-loop-t044-parser-compliant-final-green-20260522T104828Z.md GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity post-review: .codex/artifacts/antigravity-peer-loop-t044-question-recovery-implementation-challenge-20260522T105025Z.md GREEN_LIGHT yes / MIN_SCORE 9"

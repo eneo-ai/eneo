@@ -22,9 +22,6 @@ from intric.flows.ai_builder.ai_builder_create_proposal import (
     OUTLINE_FLOW_FORCED_TOOL_PROMPT,
     process_outline_arguments,
 )
-from intric.flows.ai_builder.ai_builder_discovery import (
-    build_registry_question_followup,
-)
 from intric.flows.ai_builder.ai_builder_discovery_followup import (
     BackendQuestionPersistenceResult,
     emit_discovery_followup_if_needed,
@@ -59,17 +56,13 @@ from intric.flows.ai_builder.ai_builder_event_models import (
 )
 from intric.flows.ai_builder.ai_builder_events import (
     build_requirements_summary_event,
-    build_status_event,
     build_text_event,
 )
 from intric.flows.ai_builder.ai_builder_framework_policy import (
-    is_supported_structured_question_id,
     normalize_requirements_summary_for_flow,
-    normalize_structured_question_payload,
 )
 from intric.flows.ai_builder.ai_builder_interaction_utils import (
     analyze_discovery_ready,
-    build_question_fallback_text,
 )
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     build_mcp_resource_selection_question,
@@ -114,9 +107,12 @@ from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolRetryConfig,
     ToolRetryInvocation,
 )
+from intric.flows.ai_builder.ai_builder_question_recovery import (
+    RecoveredToolDispatchRequest,
+    StructuredQuestionRecoveryRequest,
+    stream_structured_question_tool_call,
+)
 from intric.flows.ai_builder.ai_builder_repair_transport import (
-    append_tool_retry_feedback_turn,
-    build_tool_retry_messages,
     persist_tool_turn,
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
@@ -132,10 +128,8 @@ from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
     OUTLINE_FLOW_TOOL_NAME,
-    build_discovery_complete_tool_schemas,
     build_outline_flow_tool_schema,
     parse_confirm_requirements,
-    parse_structured_question,
 )
 from intric.flows.ai_builder.planning_state import PlanningState
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
@@ -691,7 +685,7 @@ class AIBuilderProposalProcessor:
     ) -> AsyncGenerator[dict[str, str], None] | None:
         tool_name = tool_call.function.name
         if tool_name == ASK_STRUCTURED_QUESTION_TOOL_NAME:
-            return self._handle_structured_question(
+            return self._handle_question_recovery_dispatch(
                 ctx=ctx,
                 tool_call=tool_call,
             )
@@ -711,6 +705,60 @@ class AIBuilderProposalProcessor:
                 tool_call=tool_call,
             )
         return None
+
+    async def _handle_question_recovery_dispatch(
+        self,
+        *,
+        ctx: ProposalContext,
+        tool_call: Any,
+    ) -> AsyncGenerator[dict[str, str], None]:
+        request = StructuredQuestionRecoveryRequest(
+            turn=ctx.turn,
+            conversation=ctx.conversation,
+            new_messages_start=ctx.new_messages_start,
+            llm_messages=ctx.llm_messages,
+            tool_call=tool_call,
+            tool_schemas=ctx.tool_schemas,
+            litellm_model=ctx.litellm_model,
+            litellm_kwargs=ctx.litellm_kwargs,
+            max_output_tokens=ctx.max_output_tokens,
+            flow=ctx.flow,
+            assistant_metadata=ctx.assistant_metadata,
+            usage_tracker=ctx.usage_tracker,
+        )
+        async for item in stream_structured_question_tool_call(
+            repo=self.repo,
+            litellm_client=self.litellm_client,
+            self_correction_temperature=self.self_correction_temperature,
+            request=request,
+        ):
+            if isinstance(item, RecoveredToolDispatchRequest):
+                async for event in self.handle_tool_call(
+                    turn=ctx.turn,
+                    conversation=ctx.conversation,
+                    new_messages_start=ctx.new_messages_start,
+                    tool_calls=item.tool_calls,
+                    text_content=item.text_content,
+                    llm_messages=item.llm_messages,
+                    tool_schemas=item.tool_schemas,
+                    litellm_model=ctx.litellm_model,
+                    litellm_kwargs=ctx.litellm_kwargs,
+                    available_model_refs=ctx.available_model_refs,
+                    available_kb_refs=ctx.available_kb_refs,
+                    resource_catalog=ctx.resource_catalog,
+                    max_output_tokens=ctx.max_output_tokens,
+                    request_id=item.request_id,
+                    assistant_metadata=ctx.assistant_metadata,
+                    flow=ctx.flow,
+                    assistant_snapshots=ctx.assistant_snapshots,
+                    planning_state=ctx.planning_state,
+                    plan_edit_context=ctx.plan_edit_context,
+                    prior_plan_for_revision=ctx.prior_plan_for_revision,
+                    usage_tracker=ctx.usage_tracker,
+                ):
+                    yield event
+                return
+            yield item
 
     async def _mcp_preflight_events_if_needed(
         self,
@@ -1181,304 +1229,6 @@ class AIBuilderProposalProcessor:
             ),
         )
         return outcome.events
-
-    async def request_non_question_continuation(
-        self,
-        *,
-        turn: SessionSendTurn,
-        conversation: list[ConversationMessage],
-        new_messages_start: int,
-        llm_messages: list[dict[str, Any]],
-        tool_call: Any,
-        tool_schemas: list[dict[str, Any]],
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        available_model_refs: set[str] | None,
-        available_kb_refs: set[str] | None,
-        max_output_tokens: int,
-        resource_catalog: AIBuilderResourceCatalog | None = None,
-        flow: "Flow | None" = None,
-        original_question_id: str | None = None,
-        assistant_snapshots: AssistantAuthoringSnapshots | None = None,
-        usage_tracker: ProposalTurnTelemetry | None = None,
-    ) -> AsyncGenerator[dict[str, str], None]:
-        submission_tool_name = _active_submission_tool_name(flow)
-        filtered_tool_schemas = [
-            schema
-            for schema in tool_schemas
-            if schema.get("function", {}).get("name")
-            != ASK_STRUCTURED_QUESTION_TOOL_NAME
-        ]
-        discovery_ready = analyze_discovery_ready(conversation, flow=flow)
-        if not filtered_tool_schemas:
-            followup_result = await emit_discovery_followup_if_needed(
-                repo=self.repo,
-                turn=turn,
-                conversation=conversation,
-                new_messages_start=new_messages_start,
-                flow=flow,
-                litellm_client=self.litellm_client,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                assistant_metadata=assistant_metadata_with_usage(
-                    conversation=conversation,
-                    base_metadata=None,
-                    usage_tracker=usage_tracker,
-                    tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
-                ),
-            )
-            if followup_result is not None:
-                for event in followup_result.events:
-                    yield event
-                return
-
-            if discovery_ready:
-                filtered_tool_schemas = build_discovery_complete_tool_schemas()
-            if not filtered_tool_schemas:
-                yield build_ai_builder_error_event(
-                    message=(
-                        "The AI planner lost track of the next clarification step. "
-                        "Please try again."
-                    ),
-                    code=AIBuilderErrorCode.QUESTION_RECOVERY_UNAVAILABLE,
-                    phase=AIBuilderErrorPhase.QUESTION_RECOVERY,
-                )
-                return
-
-        yield build_status_event("repairing")
-        forced_tool_choice = (
-            {"type": "function", "function": {"name": CONFIRM_REQUIREMENTS_TOOL_NAME}}
-            if discovery_ready
-            else None
-        )
-        correction_messages = build_tool_retry_messages(
-            llm_messages=llm_messages,
-            tool_call=tool_call,
-            tool_feedback=(
-                "Structured discovery questions are backend-owned. "
-                f"Do not call {ASK_STRUCTURED_QUESTION_TOOL_NAME} again"
-                + (
-                    f" for question_id '{original_question_id}'."
-                    if original_question_id
-                    else "."
-                )
-                + " Continue without inventing a new user-facing question. "
-                "If enough information exists, call confirm_requirements. "
-                f"If requirements are already confirmed, call {submission_tool_name}. "
-                "Otherwise ask for clarification in concise free text only."
-            ),
-        )
-
-        retries_remaining = 1
-        active_messages = correction_messages
-        while True:
-            try:
-                response = await call_proposal_completion_with_usage(
-                    litellm_client=self.litellm_client,
-                    messages=active_messages,
-                    tool_schemas=filtered_tool_schemas,
-                    litellm_model=litellm_model,
-                    litellm_kwargs=litellm_kwargs,
-                    max_output_tokens=max_output_tokens,
-                    temperature=self.self_correction_temperature,
-                    usage_tracker=usage_tracker,
-                    tool_choice=forced_tool_choice,
-                    counts_as_repair=True,
-                )
-            except Exception as error:
-                logger.error(
-                    "Unexpected structured-question continuation retry failed",
-                    exc_info=error,
-                )
-                yield build_ai_builder_error_event(
-                    message="The AI planner failed. Please try again.",
-                    code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
-                    phase=AIBuilderErrorPhase.QUESTION_RECOVERY,
-                )
-                return
-
-            message = response.choices[0].message
-            tool_calls = message.tool_calls if hasattr(message, "tool_calls") else None
-            if tool_calls:
-                repeated_question_call = next(
-                    (
-                        tc
-                        for tc in tool_calls
-                        if tc.function.name == ASK_STRUCTURED_QUESTION_TOOL_NAME
-                    ),
-                    None,
-                )
-                if repeated_question_call is not None:
-                    if retries_remaining <= 0:
-                        yield build_ai_builder_error_event(
-                            message="The AI planner kept proposing unsupported discovery questions.",
-                            code=AIBuilderErrorCode.QUESTION_RECOVERY_EXHAUSTED,
-                            phase=AIBuilderErrorPhase.QUESTION_RECOVERY,
-                        )
-                        return
-                    retries_remaining -= 1
-                    active_messages = append_tool_retry_feedback_turn(
-                        llm_messages=active_messages,
-                        tool_call=repeated_question_call,
-                        assistant_content=message.content,
-                        tool_feedback=(
-                            "Structured discovery questions remain backend-owned. "
-                            "Do not call ask_structured_question. "
-                            f"Continue with confirm_requirements, {submission_tool_name}, or concise free text only."
-                        ),
-                    )
-                    continue
-
-                async for event in self.handle_tool_call(
-                    turn=turn,
-                    conversation=conversation,
-                    new_messages_start=new_messages_start,
-                    tool_calls=tool_calls,
-                    text_content=message.content,
-                    llm_messages=active_messages,
-                    tool_schemas=filtered_tool_schemas,
-                    litellm_model=litellm_model,
-                    litellm_kwargs=litellm_kwargs,
-                    available_model_refs=available_model_refs,
-                    available_kb_refs=available_kb_refs,
-                    resource_catalog=resource_catalog,
-                    max_output_tokens=max_output_tokens,
-                    request_id="question-recovery",
-                    flow=flow,
-                    assistant_snapshots=assistant_snapshots,
-                    usage_tracker=usage_tracker,
-                ):
-                    yield event
-                return
-
-            if message.content:
-                yield build_text_event(message.content)
-            return
-
-    async def _handle_structured_question(
-        self,
-        *,
-        ctx: ProposalContext,
-        tool_call: Any,
-    ) -> AsyncGenerator[dict[str, str], None]:
-        followup_result = await emit_discovery_followup_if_needed(
-            repo=self.repo,
-            turn=ctx.turn,
-            conversation=ctx.conversation,
-            new_messages_start=ctx.new_messages_start,
-            flow=ctx.flow,
-            litellm_client=self.litellm_client,
-            litellm_model=ctx.litellm_model,
-            litellm_kwargs=ctx.litellm_kwargs,
-            assistant_metadata=assistant_metadata_with_usage(
-                conversation=ctx.conversation,
-                base_metadata=ctx.assistant_metadata,
-                usage_tracker=ctx.usage_tracker,
-                tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
-            ),
-        )
-        if followup_result is not None:
-            for event in followup_result.events:
-                yield event
-            return
-
-        try:
-            arguments = json.loads(tool_call.function.arguments)
-        except json.JSONDecodeError as error:
-            yield build_ai_builder_error_event(
-                message=f"Invalid question: {error}",
-                code=AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD,
-                phase=AIBuilderErrorPhase.QUESTION,
-            )
-            return
-
-        try:
-            question_data = parse_structured_question(arguments)
-        except ValueError:
-            fallback_text = build_question_fallback_text(arguments)
-            if not fallback_text:
-                yield build_ai_builder_error_event(
-                    message="Invalid question: could not build fallback prompt",
-                    code=AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD,
-                    phase=AIBuilderErrorPhase.QUESTION,
-                )
-                return
-
-            await persist_tool_turn(
-                repo=self.repo,
-                turn=ctx.turn,
-                conversation=ctx.conversation,
-                new_messages_start=ctx.new_messages_start,
-                tool_call=tool_call,
-                arguments=arguments,
-                tool_content=(
-                    "Structured question payload was invalid; rendered fallback text question."
-                ),
-                assistant_metadata=assistant_metadata_with_usage(
-                    conversation=ctx.conversation,
-                    base_metadata=ctx.assistant_metadata,
-                    usage_tracker=ctx.usage_tracker,
-                    tool_calls=[tool_call],
-                ),
-                flow=ctx.flow,
-            )
-            yield build_text_event(fallback_text)
-            return
-
-        question_data = normalize_structured_question_payload(question_data)
-        question_id = question_data["question_id"]
-        registry_followup = (
-            build_registry_question_followup(
-                question_id,
-                ctx.conversation,
-                flow=ctx.flow,
-            )
-            if is_supported_structured_question_id(question_id)
-            else None
-        )
-        if registry_followup is not None:
-            backend_question_data, assistant_text = registry_followup
-            persisted_question = await persist_backend_question(
-                repo=self.repo,
-                turn=ctx.turn,
-                conversation=ctx.conversation,
-                new_messages_start=ctx.new_messages_start,
-                question_data=backend_question_data,
-                assistant_text=assistant_text,
-                assistant_metadata=assistant_metadata_with_usage(
-                    conversation=ctx.conversation,
-                    base_metadata=ctx.assistant_metadata,
-                    usage_tracker=ctx.usage_tracker,
-                    tool_calls=[tool_call],
-                ),
-                tool_content=(
-                    "Backend-owned discovery question presented to user after model signal."
-                ),
-                flow=ctx.flow,
-            )
-            for event in persisted_question.events:
-                yield event
-            return
-
-        async for event in self.request_non_question_continuation(
-            turn=ctx.turn,
-            conversation=ctx.conversation,
-            new_messages_start=ctx.new_messages_start,
-            llm_messages=ctx.llm_messages,
-            tool_call=tool_call,
-            tool_schemas=ctx.tool_schemas,
-            litellm_model=ctx.litellm_model,
-            litellm_kwargs=ctx.litellm_kwargs,
-            available_model_refs=ctx.available_model_refs,
-            available_kb_refs=ctx.available_kb_refs,
-            resource_catalog=ctx.resource_catalog,
-            max_output_tokens=ctx.max_output_tokens,
-            flow=ctx.flow,
-            original_question_id=question_id,
-            assistant_snapshots=ctx.assistant_snapshots,
-            usage_tracker=ctx.usage_tracker,
-        ):
-            yield event
 
     async def _process_confirm_requirements_arguments(
         self,

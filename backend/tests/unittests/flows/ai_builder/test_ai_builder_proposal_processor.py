@@ -57,6 +57,9 @@ from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolRetryConfig,
     ToolRetryInvocation,
 )
+from intric.flows.ai_builder.ai_builder_question_recovery import (
+    RecoveredToolDispatchRequest,
+)
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AssistantSnapshotResourceUnavailableError,
     build_ai_builder_resource_catalog,
@@ -473,272 +476,60 @@ def test_proposal_turn_telemetry_counts_only_explicit_repair_calls() -> None:
 
 
 @pytest.mark.asyncio
-async def test_request_non_question_continuation_uses_backend_followup_when_only_question_tool_available() -> (
-    None
-):
-    repo = AsyncMock()
-    processor = _make_processor(repo=repo)
-    repeated_question = _make_tool_call(
-        ASK_STRUCTURED_QUESTION_TOOL_NAME,
-        {
-            "question_id": "final_output_mode",
-            "question": "Vad ska flödet producera som slutresultat?",
-            "options": [
-                {"id": "structured_text", "label": "Text"},
-                {"id": "pdf_document", "label": "PDF"},
-            ],
-            "selection_mode": "single",
-            "allow_custom": True,
-        },
-    )
-    followup_events = [
-        {"event": "text", "data": '{"text":"Jag behöver förstå indata bättre."}'},
-        {
-            "event": "question",
-            "data": (
-                '{"question_id":"input_material_mode","question":"Vilken typ av underlag ska flödet ta emot?"}'
-            ),
-        },
-    ]
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.emit_discovery_followup_if_needed",
-            new=AsyncMock(return_value=SimpleNamespace(events=followup_events)),
-        ) as emit_followup,
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.call_proposal_completion_with_usage",
-            new=AsyncMock(),
-        ) as proposal_completion,
-    ):
-        events = [
-            event
-            async for event in processor.request_non_question_continuation(
-                turn=_make_turn(),
-                conversation=[
-                    ConversationMessage(role="user", content="Skapa ett flöde"),
-                    ConversationMessage(
-                        role="user",
-                        content="PDF-dokument",
-                        metadata={
-                            "question_answer": {
-                                "question_id": "final_output_mode",
-                                "selected_option_id": "pdf_document",
-                                "answer": "pdf_document",
-                            }
-                        },
-                    ),
-                ],
-                new_messages_start=2,
-                llm_messages=[],
-                tool_call=repeated_question,
-                tool_schemas=[
-                    {"function": {"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}}
-                ],
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
-                available_model_refs=None,
-                available_kb_refs=None,
-                resource_catalog=None,
-                max_output_tokens=4096,
-                flow=None,
-                original_question_id="final_output_mode",
-            )
-        ]
-
-    assert events == followup_events
-    emit_followup.assert_awaited_once()
-    proposal_completion.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_request_non_question_continuation_recovers_with_requirements_summary_when_discovery_ready() -> (
+async def test_dispatch_known_tool_call_routes_question_recovery_dispatch_result() -> (
     None
 ):
     processor = _make_processor()
-    repeated_question = _make_tool_call(
-        ASK_STRUCTURED_QUESTION_TOOL_NAME,
-        {
-            "question_id": "final_output_mode",
-            "question": "Vad ska flödet producera som slutresultat?",
-            "options": [
-                {"id": "structured_text", "label": "Text"},
-                {"id": "pdf_document", "label": "PDF"},
-            ],
-            "selection_mode": "single",
-            "allow_custom": True,
-        },
+    tool_call = MagicMock()
+    tool_call.function.name = ASK_STRUCTURED_QUESTION_TOOL_NAME
+    ctx = _make_context(
+        available_model_refs={"model-a"},
+        available_kb_refs={"kb-a"},
+        resource_catalog=MagicMock(),
+        assistant_snapshots=MagicMock(),
     )
-    summary_call = _make_tool_call(
+    recovered_call = _make_tool_call(
         CONFIRM_REQUIREMENTS_TOOL_NAME,
-        {
-            "summary": "Ett ljudbaserat transkriberingsflöde som levererar PDF.",
-            "key_decisions": [
-                {"topic": "Input", "decision": "Ljudfil"},
-                {"topic": "Output", "decision": "PDF"},
-            ],
-            "input_description": "Användaren laddar upp en ljudfil.",
-            "output_description": "Flödet producerar en PDF-sammanfattning.",
-        },
+        {"summary": "Ready", "key_decisions": []},
+    )
+    recovered_dispatch = RecoveredToolDispatchRequest(
+        tool_calls=[recovered_call],
+        text_content=None,
+        llm_messages=[{"role": "system", "content": "Recovered"}],
+        tool_schemas=[{"function": {"name": CONFIRM_REQUIREMENTS_TOOL_NAME}}],
+        request_id="question-recovery",
     )
 
-    async def _handled_events():
+    async def _question_items(**_kwargs):
+        yield {"event": "status", "data": '{"status":"repairing"}'}
+        yield recovered_dispatch
+
+    async def _handled_events(**_kwargs):
         yield {"event": "requirements_summary", "data": "{}"}
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.emit_discovery_followup_if_needed",
-            new=AsyncMock(return_value=None),
-        ) as emit_followup,
+            "intric.flows.ai_builder.ai_builder_proposal_processor.stream_structured_question_tool_call",
+            side_effect=_question_items,
+        ) as stream_question,
         patch.object(
             processor,
             "handle_tool_call",
-            return_value=_handled_events(),
+            side_effect=_handled_events,
         ) as handle_tool_call,
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.call_proposal_completion_with_usage",
-            new=AsyncMock(return_value=_make_response_with_tool_calls(summary_call)),
-        ) as proposal_completion,
     ):
-        events = [
-            event
-            async for event in processor.request_non_question_continuation(
-                turn=_make_turn(),
-                conversation=[
-                    ConversationMessage(
-                        role="user",
-                        content="Skapa en ljudfil transkriberare samt sammanfattare",
-                        metadata={"ui_language": "sv"},
-                    ),
-                    ConversationMessage(
-                        role="user",
-                        content="PDF-dokument",
-                        metadata={
-                            "question_answer": {
-                                "question_id": "final_output_mode",
-                                "selected_option_id": "pdf_document",
-                                "answer": "pdf_document",
-                            },
-                            "ui_language": "sv",
-                        },
-                    ),
-                ],
-                new_messages_start=2,
-                llm_messages=[],
-                tool_call=repeated_question,
-                tool_schemas=[
-                    {"function": {"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}}
-                ],
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
-                available_model_refs=None,
-                available_kb_refs=None,
-                resource_catalog=None,
-                max_output_tokens=4096,
-                flow=None,
-                original_question_id="final_output_mode",
-            )
-        ]
-
-    assert [event["event"] for event in events] == ["status", "requirements_summary"]
-    assert events[0]["data"] == '{"status":"repairing"}'
-    emit_followup.assert_awaited_once()
-    handle_tool_call.assert_called_once()
-    assert proposal_completion.await_args.kwargs["tool_choice"] == {
-        "type": "function",
-        "function": {"name": CONFIRM_REQUIREMENTS_TOOL_NAME},
-    }
-    assert [
-        schema["function"]["name"]
-        for schema in proposal_completion.await_args.kwargs["tool_schemas"]
-    ] == [CONFIRM_REQUIREMENTS_TOOL_NAME]
-
-
-@pytest.mark.asyncio
-async def test_request_non_question_continuation_returns_typed_error_when_no_followup_exists() -> (
-    None
-):
-    processor = _make_processor()
-    repeated_question = _make_tool_call(
-        ASK_STRUCTURED_QUESTION_TOOL_NAME,
-        {
-            "question_id": "processing_scope",
-            "question": "Hur ska flödet arbeta?",
-            "options": [
-                {"id": "single_case", "label": "Ett ärende åt gången"},
-                {"id": "batch_cases", "label": "Många ärenden"},
-            ],
-            "selection_mode": "single",
-            "allow_custom": True,
-        },
-    )
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.emit_discovery_followup_if_needed",
-            new=AsyncMock(return_value=None),
-        ) as emit_followup,
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.analyze_discovery_ready",
-            return_value=False,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.call_proposal_completion_with_usage",
-            new=AsyncMock(),
-        ) as proposal_completion,
-    ):
-        events = [
-            event
-            async for event in processor.request_non_question_continuation(
-                turn=_make_turn(),
-                conversation=[
-                    ConversationMessage(role="user", content="Bygg ett flöde")
-                ],
-                new_messages_start=1,
-                llm_messages=[],
-                tool_call=repeated_question,
-                tool_schemas=[
-                    {"function": {"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}}
-                ],
-                litellm_model="openai/gpt-5.4",
-                litellm_kwargs={},
-                available_model_refs=None,
-                available_kb_refs=None,
-                resource_catalog=None,
-                max_output_tokens=4096,
-                flow=None,
-                original_question_id="processing_scope",
-            )
-        ]
-
-    assert [event["event"] for event in events] == ["error"]
-    payload = json.loads(events[0]["data"])
-    assert payload["code"] == "question_recovery_unavailable"
-    emit_followup.assert_awaited_once()
-    proposal_completion.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_dispatch_known_tool_call_routes_structured_question_handler() -> None:
-    processor = _make_processor()
-    tool_call = MagicMock()
-    tool_call.function.name = ASK_STRUCTURED_QUESTION_TOOL_NAME
-    ctx = _make_context()
-
-    async def _events():
-        yield {"event": "question", "data": "{}"}
-
-    with patch.object(
-        processor,
-        "_handle_structured_question",
-        return_value=_events(),
-    ) as handle_structured_question:
         dispatched = processor._dispatch_known_tool_call(ctx=ctx, tool_call=tool_call)
         assert dispatched is not None
         events = [event async for event in dispatched]
 
-    assert events == [{"event": "question", "data": "{}"}]
-    handle_structured_question.assert_called_once_with(ctx=ctx, tool_call=tool_call)
+    assert [event["event"] for event in events] == ["status", "requirements_summary"]
+    request = stream_question.call_args.kwargs["request"]
+    assert request.tool_call is tool_call
+    assert handle_tool_call.call_args.kwargs["tool_calls"] == [recovered_call]
+    assert handle_tool_call.call_args.kwargs["request_id"] == "question-recovery"
+    assert handle_tool_call.call_args.kwargs["available_model_refs"] == {"model-a"}
+    assert handle_tool_call.call_args.kwargs["available_kb_refs"] == {"kb-a"}
+    assert handle_tool_call.call_args.kwargs["resource_catalog"] is ctx.resource_catalog
 
 
 @pytest.mark.asyncio
@@ -2529,16 +2320,12 @@ async def test_handle_tool_call_preserves_text_when_tool_is_clarification_only()
         {"question": "Vilket format?", "options": ["pdf", "docx"]},
     )
 
-    def _question_handler(*, ctx: ProposalContext, tool_call: MagicMock):
-        async def _events():
-            yield {"event": "done", "data": ""}
+    async def _question_items(**_kwargs):
+        yield {"event": "done", "data": ""}
 
-        return _events()
-
-    with patch.object(
-        processor,
-        "_handle_structured_question",
-        side_effect=_question_handler,
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_processor.stream_structured_question_tool_call",
+        side_effect=_question_items,
     ):
         events = [
             event
