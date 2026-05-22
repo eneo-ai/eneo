@@ -2899,44 +2899,6 @@ async def test_edit_description_repair_without_provider_usage_records_estimate()
 
 
 @pytest.mark.asyncio
-async def test_confirm_requirements_retry_config_carries_litellm_context() -> None:
-    processor = _make_processor()
-    flow = MagicMock()
-    ctx = _make_context(
-        flow=flow,
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={"timeout": 30},
-    )
-    config = processor._confirm_requirements_retry_config(ctx)
-    invocation = _make_retry_invocation(
-        flow=flow,
-        assistant_metadata={"planner_telemetry": {"request_id": "req"}},
-        arguments={"confirmed": True, "summary": "Ready"},
-    )
-
-    process_confirm = AsyncMock(
-        return_value=ToolProcessingResult(event={"event": "requirements", "data": "{}"})
-    )
-    with patch.object(
-        processor,
-        "_process_confirm_requirements_arguments",
-        new=process_confirm,
-    ):
-        result = await config.process_tool_invocation(invocation)
-
-    assert result.event == {"event": "requirements", "data": "{}"}
-    process_confirm.assert_awaited_once()
-    assert process_confirm.await_args.kwargs["turn"] is invocation.turn
-    assert process_confirm.await_args.kwargs["conversation"] is invocation.conversation
-    assert process_confirm.await_args.kwargs["flow"] is flow
-    assert process_confirm.await_args.kwargs["litellm_model"] == "openai/gpt-5.4"
-    assert process_confirm.await_args.kwargs["litellm_kwargs"] == {"timeout": 30}
-    assert process_confirm.await_args.kwargs["assistant_metadata"] == {
-        "planner_telemetry": {"request_id": "req"}
-    }
-
-
-@pytest.mark.asyncio
 async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mode() -> (
     None
 ):
@@ -3050,3 +3012,101 @@ async def test_handle_confirm_requirements_parse_failure_triggers_self_correctio
         repair.call_args.kwargs["retry_config"].target_tool_name
         == CONFIRM_REQUIREMENTS_TOOL_NAME
     )
+
+
+@pytest.mark.asyncio
+async def test_handle_confirm_requirements_owner_events_skip_self_correction() -> None:
+    processor = _make_processor()
+    tool_call = _make_tool_call(
+        CONFIRM_REQUIREMENTS_TOOL_NAME,
+        {
+            "summary": "Redo att bygga.",
+            "key_decisions": [{"topic": "Indata", "decision": "Text"}],
+            "input_description": "Text",
+            "output_description": "Rapport",
+        },
+        tool_call_id="call_confirm",
+    )
+    ctx = _make_context()
+    followup_events = (
+        {"event": "text", "data": '{"text":"Vilken indatakälla?"}'},
+        {"event": "question", "data": "{}"},
+    )
+
+    async def _repair_events():
+        yield {"event": "status", "data": '{"status":"repairing"}'}
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor."
+            "process_confirm_requirements",
+            create=True,
+            new=AsyncMock(return_value=ToolProcessingResult(events=followup_events)),
+        ) as process_confirm,
+        patch.object(
+            processor,
+            "_request_tool_self_correction",
+            return_value=_repair_events(),
+        ) as repair,
+    ):
+        events = [
+            event
+            async for event in processor._handle_confirm_requirements(
+                ctx=ctx, tool_call=tool_call
+            )
+        ]
+
+    assert events == list(followup_events)
+    process_confirm.assert_awaited_once()
+    repair.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_confirm_requirements_owner_feedback_triggers_self_correction() -> (
+    None
+):
+    processor = _make_processor()
+    tool_call = _make_tool_call(
+        CONFIRM_REQUIREMENTS_TOOL_NAME,
+        {
+            "summary": "Redo att bygga.",
+            "key_decisions": [{"topic": "Indata", "decision": "Text"}],
+            "input_description": "Text",
+            "output_description": "Rapport",
+        },
+        tool_call_id="call_confirm",
+    )
+    ctx = _make_context()
+
+    async def _repair_events():
+        yield {"event": "status", "data": '{"status":"repairing"}'}
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_processor."
+            "process_confirm_requirements",
+            create=True,
+            new=AsyncMock(
+                return_value=ToolProcessingResult(
+                    feedback="Missing source material.",
+                    failure_kind="validation",
+                )
+            ),
+        ) as process_confirm,
+        patch.object(
+            processor,
+            "_request_tool_self_correction",
+            return_value=_repair_events(),
+        ) as repair,
+    ):
+        events = [
+            event
+            async for event in processor._handle_confirm_requirements(
+                ctx=ctx, tool_call=tool_call
+            )
+        ]
+
+    assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
+    process_confirm.assert_awaited_once()
+    repair.assert_called_once()
+    assert repair.call_args.kwargs["error_message"] == "Missing source material."

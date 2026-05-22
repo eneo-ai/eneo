@@ -14,9 +14,11 @@ from uuid import UUID
 from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
-from intric.flows.ai_builder.ai_builder_conversation_metadata import (
-    make_persisted_assistant_tool_call,
-    requirements_summary_to_metadata,
+from intric.flows.ai_builder.ai_builder_confirm_requirements import (
+    ConfirmRequirementsProcessingRequest,
+    ConfirmRequirementsRetryConfigRequest,
+    build_confirm_requirements_retry_config,
+    process_confirm_requirements,
 )
 from intric.flows.ai_builder.ai_builder_create_proposal import (
     OUTLINE_FLOW_FORCED_TOOL_PROMPT,
@@ -26,9 +28,6 @@ from intric.flows.ai_builder.ai_builder_discovery_followup import (
     BackendQuestionPersistenceResult,
     emit_discovery_followup_if_needed,
     persist_backend_question,
-)
-from intric.flows.ai_builder.ai_builder_discovery_runtime import (
-    build_discovery_block_message_runtime,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -51,15 +50,8 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
     build_ai_builder_error_event,
     coerce_ai_builder_error_code,
 )
-from intric.flows.ai_builder.ai_builder_event_models import (
-    RequirementsSummaryPayload,
-)
 from intric.flows.ai_builder.ai_builder_events import (
-    build_requirements_summary_event,
     build_text_event,
-)
-from intric.flows.ai_builder.ai_builder_framework_policy import (
-    normalize_requirements_summary_for_flow,
 )
 from intric.flows.ai_builder.ai_builder_interaction_utils import (
     analyze_discovery_ready,
@@ -112,12 +104,8 @@ from intric.flows.ai_builder.ai_builder_question_recovery import (
     StructuredQuestionRecoveryRequest,
     stream_structured_question_tool_call,
 )
-from intric.flows.ai_builder.ai_builder_repair_transport import (
-    persist_tool_turn,
-)
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_requirements_state import (
-    build_requirements_version,
     resolve_requirements_state,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
@@ -129,7 +117,6 @@ from intric.flows.ai_builder.ai_builder_tools import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
     OUTLINE_FLOW_TOOL_NAME,
     build_outline_flow_tool_schema,
-    parse_confirm_requirements,
 )
 from intric.flows.ai_builder.planning_state import PlanningState
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
@@ -1230,103 +1217,21 @@ class AIBuilderProposalProcessor:
         )
         return outcome.events
 
-    async def _process_confirm_requirements_arguments(
-        self,
-        *,
-        turn: SessionSendTurn,
-        conversation: list[ConversationMessage],
-        new_messages_start: int,
-        arguments: dict[str, Any],
-        assistant_content: str,
-        tool_call_id: str,
-        available_model_refs: set[str] | None,
-        available_kb_refs: set[str] | None,
-        flow: "Flow | None" = None,
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        assistant_metadata: dict[str, Any] | None = None,
-    ) -> ToolProcessingResult:
-        del assistant_content, available_model_refs, available_kb_refs
-
-        try:
-            requirements_data = parse_confirm_requirements(arguments)
-        except ValueError as error:
-            return ToolProcessingResult(
-                feedback=f"Invalid requirements summary: {error}",
-                failure_kind="parse",
-            )
-
-        (
-            discovery_block_message,
-            discovery_analysis,
-            _planning_state,
-        ) = await build_discovery_block_message_runtime(
-            conversation,
-            flow=flow,
-            litellm_client=self.litellm_client,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            tenant_id=self.user.tenant_id,
-        )
-        if discovery_block_message is not None:
-            return ToolProcessingResult(
-                feedback=discovery_block_message,
-                failure_kind="validation",
-            )
-
-        merged_assumptions = list(
-            dict.fromkeys(
-                [
-                    *discovery_analysis.assumptions,
-                    *requirements_data.get("assumptions", []),
-                ]
-            )
-        )
-        requirements_data["assumptions"] = merged_assumptions
-        requirements_data = normalize_requirements_summary_for_flow(
-            requirements_data,
-            conversation=conversation,
-            flow=flow,
-            language=resolve_ui_language(conversation),
-        )
-
-        requirements_payload_model = RequirementsSummaryPayload.model_validate(
-            requirements_data
-        )
-        requirements_version = build_requirements_version(requirements_payload_model)
-        requirements_payload = {
-            **requirements_data,
-            "requirements_version": requirements_version,
-        }
-
-        tool_call = make_persisted_assistant_tool_call(
-            tool_call_id=tool_call_id,
-            tool_name=CONFIRM_REQUIREMENTS_TOOL_NAME,
-            arguments=arguments,
-        )
-        new_version = await persist_tool_turn(
-            repo=self.repo,
-            turn=turn,
-            conversation=conversation,
-            new_messages_start=new_messages_start,
-            tool_call=tool_call,
-            arguments=arguments,
-            tool_content="Requirements presented to user. Awaiting confirmation.",
-            metadata=requirements_summary_to_metadata(requirements_payload),
-            assistant_metadata=assistant_metadata,
-            flow=flow,
-        )
-        return ToolProcessingResult(
-            event=build_requirements_summary_event(requirements_payload),
-            new_planning_state_version=new_version,
-        )
-
     async def _handle_confirm_requirements(
         self,
         *,
         ctx: ProposalContext,
         tool_call: Any,
     ) -> AsyncGenerator[dict[str, str], None]:
+        retry_config = build_confirm_requirements_retry_config(
+            ConfirmRequirementsRetryConfigRequest(
+                repo=self.repo,
+                litellm_client=self.litellm_client,
+                tenant_id=self.user.tenant_id,
+                litellm_model=ctx.litellm_model,
+                litellm_kwargs=ctx.litellm_kwargs,
+            )
+        )
         try:
             arguments = json.loads(tool_call.function.arguments)
         except json.JSONDecodeError as error:
@@ -1334,64 +1239,46 @@ class AIBuilderProposalProcessor:
                 ctx=ctx,
                 error_message=f"Invalid requirements summary: {error}",
                 tool_call=tool_call,
-                retry_config=self._confirm_requirements_retry_config(ctx),
+                retry_config=retry_config,
             ):
                 yield event
             return
 
-        confirm_result = await self._process_confirm_requirements_arguments(
-            turn=ctx.turn,
-            conversation=ctx.conversation,
-            new_messages_start=ctx.new_messages_start,
-            arguments=arguments,
-            assistant_content=ctx.text_content or "",
-            assistant_metadata=assistant_metadata_with_usage(
+        confirm_result = await process_confirm_requirements(
+            ConfirmRequirementsProcessingRequest(
+                repo=self.repo,
+                turn=ctx.turn,
                 conversation=ctx.conversation,
-                base_metadata=ctx.assistant_metadata,
-                usage_tracker=ctx.usage_tracker,
-                tool_calls=[tool_call],
-            ),
-            tool_call_id=tool_call.id,
-            available_model_refs=ctx.available_model_refs,
-            available_kb_refs=ctx.available_kb_refs,
-            flow=ctx.flow,
-            litellm_model=ctx.litellm_model,
-            litellm_kwargs=ctx.litellm_kwargs,
-        )
-        if confirm_result.event is None:
-            if confirm_result.failure_kind == "validation":
-                followup_result = await emit_discovery_followup_if_needed(
-                    repo=self.repo,
-                    turn=ctx.turn,
+                new_messages_start=ctx.new_messages_start,
+                arguments=arguments,
+                tool_call_id=tool_call.id,
+                flow=ctx.flow,
+                litellm_client=self.litellm_client,
+                litellm_model=ctx.litellm_model,
+                litellm_kwargs=ctx.litellm_kwargs,
+                tenant_id=self.user.tenant_id,
+                assistant_metadata=assistant_metadata_with_usage(
                     conversation=ctx.conversation,
-                    new_messages_start=ctx.new_messages_start,
-                    flow=ctx.flow,
-                    litellm_client=self.litellm_client,
-                    litellm_model=ctx.litellm_model,
-                    litellm_kwargs=ctx.litellm_kwargs,
-                    assistant_metadata=assistant_metadata_with_usage(
-                        conversation=ctx.conversation,
-                        base_metadata=ctx.assistant_metadata,
-                        usage_tracker=ctx.usage_tracker,
-                        tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
-                    ),
-                )
-                if followup_result is not None:
-                    for event in followup_result.events:
-                        yield event
-                    return
-
-            async for event in self._request_tool_self_correction(
-                ctx=ctx,
-                error_message=confirm_result.feedback
-                or "Invalid requirements summary.",
-                tool_call=tool_call,
-                retry_config=self._confirm_requirements_retry_config(ctx),
-            ):
+                    base_metadata=ctx.assistant_metadata,
+                    usage_tracker=ctx.usage_tracker,
+                    tool_calls=[tool_call],
+                ),
+                usage_tracker=ctx.usage_tracker,
+                allow_discovery_followup=True,
+            )
+        )
+        if confirm_result.has_events:
+            for event in confirm_result.iter_events():
                 yield event
             return
 
-        yield confirm_result.event
+        async for event in self._request_tool_self_correction(
+            ctx=ctx,
+            error_message=confirm_result.feedback or "Invalid requirements summary.",
+            tool_call=tool_call,
+            retry_config=retry_config,
+        ):
+            yield event
 
     async def _handle_edit_flow(
         self,
@@ -1506,36 +1393,6 @@ class AIBuilderProposalProcessor:
             return
 
         yield edit_result.event
-
-    def _confirm_requirements_retry_config(
-        self, ctx: ProposalContext
-    ) -> ToolRetryConfig:
-        async def _process_tool_invocation(
-            invocation: ToolRetryInvocation,
-        ) -> ToolProcessingResult:
-            return await self._process_confirm_requirements_arguments(
-                turn=invocation.turn,
-                conversation=invocation.conversation,
-                new_messages_start=invocation.new_messages_start,
-                arguments=invocation.arguments,
-                assistant_content=invocation.assistant_content,
-                assistant_metadata=invocation.assistant_metadata,
-                tool_call_id=invocation.tool_call_id,
-                available_model_refs=invocation.available_model_refs,
-                available_kb_refs=invocation.available_kb_refs,
-                flow=invocation.flow,
-                litellm_model=ctx.litellm_model,
-                litellm_kwargs=ctx.litellm_kwargs,
-            )
-
-        return ToolRetryConfig(
-            target_tool_name=CONFIRM_REQUIREMENTS_TOOL_NAME,
-            forced_tool_prompt=(
-                "Return one valid confirm_requirements tool call. "
-                "Do not answer with prose."
-            ),
-            process_tool_invocation=_process_tool_invocation,
-        )
 
 
 def _active_submission_tool_name(flow: "Flow | None") -> str:

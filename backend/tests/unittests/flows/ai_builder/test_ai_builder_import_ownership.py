@@ -81,6 +81,9 @@ FINALIZATION_REQUEST_REPAIR_FIELD_NAMES = frozenset(
 QUESTION_RECOVERY_METHODS = frozenset(
     {"request_non_question_continuation", "_handle_structured_question"}
 )
+CONFIRM_REQUIREMENTS_METHODS = frozenset(
+    {"_process_confirm_requirements_arguments", "_confirm_requirements_retry_config"}
+)
 QUESTION_RECOVERY_ALLOWED_ANY_NAMES = frozenset(
     {
         "assistant_metadata",
@@ -90,6 +93,14 @@ QUESTION_RECOVERY_ALLOWED_ANY_NAMES = frozenset(
         "tool_call",
         "tool_calls",
         "tool_schemas",
+    }
+)
+CONFIRM_REQUIREMENTS_ALLOWED_ANY_NAMES = frozenset(
+    {
+        "arguments",
+        "assistant_metadata",
+        "litellm_client",
+        "litellm_kwargs",
     }
 )
 
@@ -528,6 +539,86 @@ def test_question_recovery_has_single_owner_and_typed_boundary() -> None:
         violations.append(f"{question_path}: imports call_proposal_completion")
     if question_text.count('"question-recovery"') != 1:
         violations.append(f"{question_path}: question-recovery literal count changed")
+
+    assert violations == []
+
+
+def test_confirm_requirements_has_single_owner_and_typed_boundary() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    processor_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+    )
+    confirm_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_confirm_requirements.py"
+    )
+    processor_text = processor_path.read_text()
+    confirm_text = confirm_path.read_text()
+    processor_tree = ast.parse(processor_text, filename=str(processor_path))
+    confirm_tree = ast.parse(confirm_text, filename=str(confirm_path))
+    violations: list[str] = []
+
+    processor_class = next(
+        node
+        for node in ast.walk(processor_tree)
+        if isinstance(node, ast.ClassDef) and node.name == "AIBuilderProposalProcessor"
+    )
+    for node in processor_class.body:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in CONFIRM_REQUIREMENTS_METHODS
+        ):
+            violations.append(f"{processor_path}:{node.lineno} defines {node.name}")
+        if (
+            isinstance(node, ast.AsyncFunctionDef)
+            and node.name == "_handle_confirm_requirements"
+        ):
+            source = ast.get_source_segment(processor_text, node) or ""
+            if "ASK_STRUCTURED_QUESTION_TOOL_NAME" in source:
+                violations.append(
+                    f"{processor_path}:{node.lineno} confirm handler owns ask stub"
+                )
+
+    for node in ast.walk(processor_tree):
+        if isinstance(node, ast.Name) and node.id == "parse_confirm_requirements":
+            violations.append(f"{processor_path}:{node.lineno} parses requirements")
+
+    for node in ast.walk(confirm_tree):
+        if isinstance(node, ast.ImportFrom) and (
+            node.module in BANNED_PROPOSAL_PROCESSOR_IMPORTS
+        ):
+            violations.append(f"{confirm_path}:{node.lineno} imports {node.module}")
+
+        if isinstance(node, ast.ClassDef):
+            if node.name == "ConfirmRequirementsOutcome":
+                violations.append(f"{confirm_path}:{node.lineno} defines {node.name}")
+            if node.name.endswith(("Processor", "Service", "Manager")):
+                violations.append(f"{confirm_path}:{node.lineno} defines {node.name}")
+
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.args.kwarg is not None:
+                annotation = node.args.kwarg.annotation
+                if annotation is not None and ast.unparse(annotation) == "Any":
+                    violations.append(
+                        f"{confirm_path}:{node.lineno} defines **kwargs: Any"
+                    )
+            for arg in [*node.args.args, *node.args.kwonlyargs]:
+                if _annotation_uses_any(arg.annotation) and (
+                    arg.arg not in CONFIRM_REQUIREMENTS_ALLOWED_ANY_NAMES
+                ):
+                    violations.append(
+                        f"{confirm_path}:{node.lineno} arg {arg.arg} uses Any"
+                    )
+
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if _annotation_uses_any(node.annotation) and (
+                node.target.id not in CONFIRM_REQUIREMENTS_ALLOWED_ANY_NAMES
+            ):
+                violations.append(
+                    f"{confirm_path}:{node.lineno} field {node.target.id} uses Any"
+                )
+
+    if 'tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}]' not in confirm_text:
+        violations.append(f"{confirm_path}: missing synthetic ask-question stub")
 
     assert violations == []
 
