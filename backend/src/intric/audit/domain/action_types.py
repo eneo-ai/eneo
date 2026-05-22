@@ -107,6 +107,7 @@ class ActionType(str, Enum):
     HELP_ASSISTANT_ROLE_TOGGLED_VISIBLE = "help_assistant_role_toggled_visible"
     HELP_ASSISTANT_RESET_INSTRUCTIONS = "help_assistant_reset_instructions"
     HELP_ASSISTANT_RESET_TO_DEFAULT = "help_assistant_reset_to_default"
+    HELP_ASSISTANT_ARCHIVED = "help_assistant_archived"
 
     # System Actions
     RETENTION_POLICY_APPLIED = "retention_policy_applied"

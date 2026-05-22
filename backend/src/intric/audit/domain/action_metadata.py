@@ -363,7 +363,7 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "MCP-verktyg inaktiverat",
         "description_sv": "Loggar när ett MCP-verktyg inaktiveras",
     },
-    # Help Assistant Actions (6)
+    # Help Assistant Actions (7)
     ActionType.HELP_ASSISTANT_ROLE_ASSIGNED.value: {
         "name_sv": "Hjälpassistent tilldelad",
         "description_sv": (
@@ -401,6 +401,13 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "description_sv": (
             "Loggar när en administratör återställer en hjälpassistent helt "
             "till standardvärdet"
+        ),
+    },
+    ActionType.HELP_ASSISTANT_ARCHIVED.value: {
+        "name_sv": "Hjälpassistent arkiverad",
+        "description_sv": (
+            "Loggar när en administratör arkiverar en ersatt hjälpassistent "
+            "som inte längre fyller någon roll"
         ),
     },
     # System Actions (3)

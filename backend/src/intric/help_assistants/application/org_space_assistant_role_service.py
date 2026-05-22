@@ -17,7 +17,11 @@ The two reset paths consume :mod:`intric.help_assistants.defaults` — the
 single runtime source of truth for shipped Help Assistant config — so the
 admin UI cannot drift from what the team ships.
 
-Archive-replaced helpers (PRD §3, §9) lands in step 017.
+Archive-replaced helpers (PRD §3, §9) routes hard-deletion through
+``assistant_service.delete_assistant`` so existing cleanup paths
+(e.g. the API-key scope revoker) run; the FK on
+``help_assistant_assignment_history.assistant_id`` is ``ON DELETE SET NULL``,
+so history rows survive with ``assistant_name_snapshot`` intact.
 """
 
 from __future__ import annotations
@@ -475,6 +479,80 @@ class OrgSpaceAssistantRoleService:
         )
 
         return new_assistant
+
+    async def list_archivable_helpers(
+        self, kind: HelperKind
+    ) -> list[Assistant]:
+        validate_permission(self.user, Permission.ADMIN)
+        org_space_id = await self._resolve_org_space_id()
+
+        replaced_ids = (
+            await self.history_repo.list_replaced_assistant_ids_by_org_space(
+                org_space_id=org_space_id
+            )
+        )
+        active_assignments = await self.role_repo.list_for_org_space(
+            org_space_id=org_space_id
+        )
+        active_ids = {
+            a.assistant_id for a in active_assignments if a.kind == kind
+        }
+        archivable_ids = replaced_ids - active_ids
+
+        assistants: list[Assistant] = []
+        for assistant_id in archivable_ids:
+            assistant = await self._load_assistant(assistant_id)
+            assistants.append(assistant)
+        return assistants
+
+    async def archive_helper(self, assistant_id: UUID) -> None:
+        validate_permission(self.user, Permission.ADMIN)
+        org_space_id = await self._resolve_org_space_id()
+
+        replaced_ids = (
+            await self.history_repo.list_replaced_assistant_ids_by_org_space(
+                org_space_id=org_space_id
+            )
+        )
+        if assistant_id not in replaced_ids:
+            raise BadRequestException(
+                "Assistant is not an archivable helper for this org-space."
+            )
+
+        active_assignments = await self.role_repo.list_for_org_space(
+            org_space_id=org_space_id
+        )
+        if assistant_id in {a.assistant_id for a in active_assignments}:
+            raise BadRequestException(
+                "Assistant is currently assigned to a help-assistant role; "
+                "reassign or unassign the role before archiving."
+            )
+
+        # Capture the name before the row is gone so the audit entry stays
+        # meaningful once ``assistant_id`` is NULL on every history row.
+        assistant = await self._load_assistant(assistant_id)
+        assistant_name_snapshot = assistant.name
+
+        await self.assistant_service.delete_assistant(assistant_id)
+
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            user=self.user,
+            action=ActionType.HELP_ASSISTANT_ARCHIVED,
+            entity_type=EntityType.ASSISTANT,
+            entity_id=assistant_id,
+            description=(
+                f"Archived helper assistant '{assistant_name_snapshot}'"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=self.user,
+                target=assistant,
+                extra={
+                    "assistant_name_snapshot": assistant_name_snapshot,
+                    "org_space_id": str(org_space_id),
+                },
+            ),
+        )
 
     async def _resolve_org_space_id(self) -> UUID:
         org_space = await self.space_service.get_or_create_tenant_space()
