@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T059
+active_task: T060
 
 interruptions:
   - id: I001
@@ -212,7 +212,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T058 implementation/post-review: source-material underlag label SSoT and C3 live-eval binding-shape assertions are closed by reusing ai_builder_source_material.primary_source_material_ref from dataflow and adding typed ExpectedQuestionBinding checks. The broader score floor remains 8 because full-source typing/test baseline, remaining topology/readability/test-fixture coupling, and repeated authenticated live-eval evidence still block a defensible 9."
+  source: "After T059 read-only ranking/post-review: T058 source-material underlag label SSoT and C3 live-eval binding-shape assertions remain closed, and the next work is re-ranked to T060 authenticated live-eval/scorecard honesty with independent T061 test-topology fallback if T060 is blocked by environment. The broader score floor remains 8 because full-source typing/test baseline, remaining topology/readability/test-fixture coupling, and repeated authenticated live-eval evidence still block a defensible 9."
   Maintainability: 8
   Code_Quality: 9
   Clean_Architecture: 8
@@ -235,6 +235,7 @@ current_scorecard:
     - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, partial processor-bound facades, and full-source Pyright baseline failures outside AI Builder."
     - "Both Claude and Antigravity recommended a small future clarification of counts_as_repair semantics in ai_builder_proposal_telemetry.py; it was not added in T038 because that file was outside the approved write scope."
     - "T058 closed the source-material label drift and gave C3 typed live-eval binding-shape assertions, but authenticated live eval still needs to be repeated against a backend confirmed to run the current branch after later planner/runtime changes."
+    - "T059 closed the next-tranche ranking with Claude and Antigravity green: run T060 live eval first if local service/current-code/credentials are available; if blocked, activate independent T061 direct ProposalSubmissionOwner test-topology cleanup without treating T060 as passed."
     - "Overall remains 8 until full-source typing/test baseline, consolidation/readability/test-topology tranches, and repeated authenticated live-eval evidence prove every dimension is honestly at least 9."
 
 score_floor_completion_gates:
@@ -5948,7 +5949,7 @@ tasks:
   - id: T059
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T058. Compare authenticated live eval/output-quality proof, remaining processor/proposal topology and human-readability blockers, full-source typing/test baseline, API/SSE/client contract issues, data/schema ownership, diagnostics/OpenTelemetry compatibility, and any remaining source-material underlag risks."
     inputs:
@@ -5965,6 +5966,134 @@ tasks:
       - "Evidence-backed next-tranche ranking artifact under .codex/artifacts/."
       - "Clear selected next worker or explicit blocker."
       - "Claude and Antigravity plan gates if a non-trivial implementation tranche is selected."
+    receipt:
+      completed_at: "2026-05-23T03:15:00+02:00"
+      summary: "Completed the read-only next-tranche ranking after T058. The first draft over-ranked ProposalSubmissionOwner topology; Claude rejected it because authenticated live-eval evidence could cheaply falsify the scorecard. Codex revised to select T060 live-eval/scorecard honesty first, measured full-source Pyright at 112 errors, and queued T061 direct ProposalSubmissionOwner test-topology cleanup plus T062 cohesion/DI/orchestration spike. Antigravity then caught a false dependency: T061 is test-only and must not wait on environment-dependent T060. Codex revised the artifact so T060 runs first if available, but T061 activates immediately if T060 is blocked. Claude and Antigravity both passed the final revised ranking."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t059-next-tranche-ranking.md"
+        - ".codex/artifacts/claude-peer-loop-t059-next-flow-ai-builder-tranche-ranking-20260523T010239Z.md"
+        - ".codex/artifacts/claude-peer-loop-t059-revised-next-flow-ai-builder-tranche-ranking-20260523T010618Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t059-final-next-tranche-ranking-synthesis-20260523T010842Z.md"
+        - ".codex/artifacts/claude-peer-loop-t059-final-revised-next-flow-ai-builder-tranche-ranking-20260523T011139Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t059-final-next-tranche-ranking-after-claude-green-20260523T011427Z.md"
+      evidence:
+        - "Full-source Pyright scoping: cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src -> 112 errors, 0 warnings, 0 informations at HEAD ea2411e65."
+        - "T060 selected because state.yaml already says the five-case authenticated live eval must be repeated after later planner/runtime changes, and T058 made C3 underlag binding assertions meaningful."
+        - "T061 is independent because it is test-only and targets private `_proposal_submission` reach-through in test_ai_builder_proposal_submission.py."
+        - "T062 is a read-only 1-2h spike because split orchestration and constructor-time owner creation need evidence before production topology changes."
+      peer_gates:
+        claude_iteration_1: "GREEN_LIGHT no / MIN_SCORE 6; rejected topology-first ranking and required live-eval evidence, Pyright scoping, test reach-through peel-off, and create/edit shared-spine protection."
+        claude_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 8 after T060-first revision, full-source Pyright baseline, T061 metric, and T062 time-box were added."
+        antigravity_iteration_1: "GREEN_LIGHT no / MIN_SCORE 7; required T061 to be independent from T060 environment readiness, direct ProposalSubmissionOwner construction, and T062 split-orchestration/DI focus."
+        claude_iteration_3: "GREEN_LIGHT yes / MIN_SCORE 8 after Codex incorporated Antigravity's objections."
+        antigravity_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 9 final synthesis; quota available. Confirmed T060/T061/T062 risk surfaces are decoupled and the ranking is implementation-ready."
+      selected_next:
+        active_task: T060
+        fallback: "If T060 cannot be run within a short current-code/service/credential check, record the exact blocker and activate T061 without marking T060 passed."
+      score_impact:
+        score_floor: 8
+        reason: "Planning and ranking quality improved, but no product/runtime/test behavior changed in T059. Overall remains 8 until repeated live-eval proof, test-topology cleanup, and topology/readability evidence move the weakest dimensions."
+
+  - id: T060
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: medium
+    objective: "Run authenticated Flow AI Builder five-case live eval against a backend confirmed to be running the current branch, then update the scorecard honestly from the result. If the local backend/current-code/credential state blocks this quickly, record the exact blocker and activate T061 instead of stalling the board."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t059-next-tranche-ranking.md"
+      - "backend/scripts/flow_ai_builder_live_eval.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    constraints:
+      - "No source/product code changes in T060 unless a live eval reveals a small emergency bug and the board opens a separate interruption task."
+      - "Use local API key env vars only; do not write secrets to repo files or artifacts."
+      - "Verify or honestly block on whether the backend/API process is running current branch code."
+      - "Sanitize live-eval artifacts: no raw prompt, full conversation, full plan JSON, file contents, LLM payloads, or secrets."
+      - "Do not inflate Normal-User Output Quality if any case fails or if the eval cannot run."
+      - "If local service/current-code/credentials are not ready within a short check, leave T060 blocked/pending with exact evidence and activate T061."
+    expected_output:
+      - "Backend current-code status recorded."
+      - "Credential/env status recorded without leaking secret values."
+      - "Five-case live eval result appended to .codex/artifacts/flow-ai-builder-live-eval.md, or exact blocker recorded."
+      - "C3 source-material underlag result includes source text ref, selected structured field refs, and no broad structured JSON refs on the target writing/materialization step."
+      - "Scorecard updated from evidence."
+    verify:
+      - "Inspect local service process/current-code signal before eval."
+      - "Run backend/scripts/flow_ai_builder_live_eval.py with ENEO_API_KEY and ENEO_FLOW_TEST_SPACE_ID set in shell env only, if service and credentials are available."
+      - "git diff --check if state/artifact updates are made."
+    stop_if:
+      - "Backend cannot be proven to run the current branch quickly."
+      - "Required local credentials/space id are unavailable in the environment."
+      - "Live eval failure points to a product bug that needs source changes; open an interruption task instead of patching inside T060."
+    receipt: null
+
+  - id: T061
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Clean up ProposalSubmissionOwner submission tests so they instantiate ProposalSubmissionOwner directly instead of constructing AIBuilderProposalProcessor and reaching through private `_proposal_submission`."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t059-next-tranche-ranking.md"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
+    constraints:
+      - "Test-only slice; no production source topology changes."
+      - "Do not create mock-only production interfaces, protocols, or fake seams."
+      - "Do not weaken proposal/repair behavior assertions."
+      - "Do not turn setup into a broad fixture dump; use direct construction to clarify the real owner under test."
+      - "Keep T061 independent from T060; if T060 is blocked by environment, T061 may activate immediately."
+    expected_output:
+      - "`test_ai_builder_proposal_submission.py` constructs `ProposalSubmissionOwner` directly through a narrow `_make_submission()` or equivalent builder."
+      - "Private `_proposal_submission` reach-through call sites in `test_ai_builder_proposal_submission.py` drop from at least 8 to 0."
+      - "Processor tests are not broadened into a production topology refactor."
+      - "Focused proposal submission/processor tests still protect behavior."
+    verify:
+      - "Red static/search guard for `_make_processor()._proposal_submission` in test_ai_builder_proposal_submission.py before cleanup."
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run ruff check touched T061 files"
+      - "cd backend && uv run ruff format --check touched T061 files"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "git diff --check"
+    stop_if:
+      - "Direct construction requires production source changes beyond test-only setup."
+      - "Behavior assertions are replaced by mock choreography."
+      - "The cleanup reveals a real production seam problem that belongs in T062 instead."
+    receipt: null
+
+  - id: T062
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Produce a 1-2h read-only ProposalSubmissionOwner cohesion / dependency-injection / split-orchestration verdict before any production topology refactor."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t059-next-tranche-ranking.md"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+    constraints:
+      - "Read-only spike; do not implement production topology changes."
+      - "Do not recommend splitting outline/edit just because there are two tool names; protect the create/edit shared-spine invariant unless evidence proves a real lifecycle split."
+      - "Reject dependency injection if it creates a fake seam, one-implementation protocol, or mock-only abstraction."
+      - "Accept dependency injection only if it removes private reach-through, clarifies a concrete owner, or crosses a real boundary without broadening the public surface."
+      - "If the time-box expires, publish a partial verdict with named open questions instead of silently expanding scope."
+    expected_output:
+      - "Concept table: current owner, proposed canonical owner, what moves, what gets deleted, why locality improves."
+      - "Verdict on whether `call_proposal_completion_with_usage` belongs in ProposalSubmissionOwner or stays in AIBuilderProposalProcessor."
+      - "Verdict on whether constructor-time ProposalSubmissionOwner creation should become explicit concrete dependency injection."
+      - "Verdict on whether a production topology tranche is higher-score-moving than live-eval/output fixes, test cleanup, or full-source typing."
+      - "Acceptance criteria, files, tests, and non-goals for any proposed follow-up implementation."
+    verify:
+      - "Claude plan review required before implementing any topology changes that T062 recommends."
+      - "Antigravity review required if available for any production topology tranche selected from T062."
+    stop_if:
+      - "The spike cannot identify a cleaner owner boundary with file:line evidence."
+      - "The proposed next step is only LOC reduction or a facade/callback bag."
     receipt: null
 
 checks:
@@ -5973,18 +6102,12 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T058 source-material underlag proof and label SSoT completed, validated, and peer-gated. T059 read-only next-tranche ranking is active. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T058
+    result: "T059 read-only next-tranche ranking completed and peer-gated. T060 live-eval/scorecard honesty is active, with T061 test-topology cleanup as the explicit fallback if T060 is blocked by environment. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T059
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -> 125 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_dataflow.py -q -> 7 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py -q -> 37 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_flow_ai_builder_live_eval.py -q -> 3 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q -> 105 passed"
-      - "cd backend && uv run ruff check T058 touched files -> passed"
-      - "cd backend && uv run ruff format --check T058 touched files -> passed"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder scripts/flow_ai_builder_live_eval.py -> 0 errors"
-      - "git diff --check -> passed"
-      - "Claude implementation gate iteration 1: .codex/artifacts/claude-peer-loop-t058-underlag-proof-implementation-review-20260523T004608Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Claude implementation gate iteration 2: .codex/artifacts/claude-peer-loop-t058-underlag-proof-implementation-review-iteration-2-20260523T005100Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity implementation synthesis: .codex/artifacts/antigravity-peer-loop-t058-underlag-proof-implementation-synthesis-20260523T005355Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src -> 112 errors, 0 warnings, 0 informations; recorded as full-source typing baseline, not a pass."
+      - "Claude T059 iteration 1: .codex/artifacts/claude-peer-loop-t059-next-flow-ai-builder-tranche-ranking-20260523T010239Z.md -> GREEN_LIGHT no / MIN_SCORE 6"
+      - "Claude T059 iteration 2: .codex/artifacts/claude-peer-loop-t059-revised-next-flow-ai-builder-tranche-ranking-20260523T010618Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity T059 iteration 1: .codex/artifacts/antigravity-peer-loop-t059-final-next-tranche-ranking-synthesis-20260523T010842Z.md -> GREEN_LIGHT no / MIN_SCORE 7"
+      - "Claude T059 iteration 3: .codex/artifacts/claude-peer-loop-t059-final-revised-next-flow-ai-builder-tranche-ranking-20260523T011139Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity T059 iteration 2: .codex/artifacts/antigravity-peer-loop-t059-final-next-tranche-ranking-after-claude-green-20260523T011427Z.md -> final GREEN_LIGHT yes / MIN_SCORE 9"
