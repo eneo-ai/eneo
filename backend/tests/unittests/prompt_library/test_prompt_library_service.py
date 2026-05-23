@@ -137,7 +137,9 @@ async def test_delete_blocked_when_policy_uses_prompt():
     policy_repo = AsyncMock()
     policy_repo.get_by_prompt_library_id.return_value = object()  # any non-None
     service = PromptLibraryService(
-        user=_admin_user(tenant_id), repo=repo, personal_chat_policy_repo=policy_repo
+        user=_admin_user(tenant_id),
+        repo=repo,
+        personal_assistant_policy_repo=policy_repo,
     )
 
     with pytest.raises(NameCollisionException):

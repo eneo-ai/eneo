@@ -18,8 +18,8 @@ from intric.roles.permissions import Permission, validate_permission
 from intric.users.user import UserInDB
 
 if TYPE_CHECKING:
-    from intric.personal_chat_policy.domain.personal_chat_policy_repo import (
-        PersonalChatPolicyRepo,
+    from intric.personal_assistant_policy.domain.personal_assistant_policy_repo import (
+        PersonalAssistantPolicyRepo,
     )
 
 
@@ -28,13 +28,13 @@ class PromptLibraryService:
         self,
         user: UserInDB,
         repo: PromptLibraryRepo,
-        personal_chat_policy_repo: Optional["PersonalChatPolicyRepo"] = None,
+        personal_assistant_policy_repo: Optional["PersonalAssistantPolicyRepo"] = None,
     ) -> None:
         self.user = user
         self.repo = repo
         # Optional dependency: when Phase 2 is in place, deletes consult the
         # policy repo so we can give a friendly 409 instead of a raw FK violation.
-        self.personal_chat_policy_repo = personal_chat_policy_repo
+        self.personal_assistant_policy_repo = personal_assistant_policy_repo
 
     async def list_entries(self) -> list[PromptLibraryEntry]:
         validate_permission(self.user, Permission.ADMIN)
@@ -101,8 +101,8 @@ class PromptLibraryService:
         # Belt-and-suspenders: the FK has ON DELETE RESTRICT so the DB will
         # refuse the delete anyway, but consulting the policy repo first lets
         # us give a friendly error with context instead of a 500.
-        if self.personal_chat_policy_repo is not None:
-            policy = await self.personal_chat_policy_repo.get_by_prompt_library_id(
+        if self.personal_assistant_policy_repo is not None:
+            policy = await self.personal_assistant_policy_repo.get_by_prompt_library_id(
                 tenant_id=self.user.tenant_id, prompt_library_id=id
             )
             if policy is not None:

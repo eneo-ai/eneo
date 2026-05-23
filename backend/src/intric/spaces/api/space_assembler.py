@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     from intric.assistants.assistant import Assistant
     from intric.completion_models.presentation import CompletionModelAssembler
     from intric.group_chat.domain.entities.group_chat import GroupChat
-    from intric.personal_chat_policy.domain.policy_resolver import EffectiveConfig
+    from intric.personal_assistant_policy.domain.policy_resolver import EffectiveConfig
 
 
 class SpaceAssembler:

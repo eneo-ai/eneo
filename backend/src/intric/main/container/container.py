@@ -252,18 +252,21 @@ from intric.mcp_servers.presentation.assemblers.mcp_server_assembler import (
 from intric.mcp_servers.presentation.assemblers.mcp_server_tool_assembler import (
     MCPServerToolAssembler,
 )
+from intric.model_providers.infrastructure.model_provider_repository import (
+    ModelProviderRepository,
+)
 from intric.modules.module_repo import ModuleRepository
-from intric.personal_chat_policy.application.effective_config_service import (
+from intric.personal_assistant_policy.application.effective_config_service import (
     EffectiveConfigService,
 )
-from intric.personal_chat_policy.application.personal_chat_policy_service import (
-    PersonalChatPolicyService,
+from intric.personal_assistant_policy.application.personal_assistant_policy_service import (
+    PersonalAssistantPolicyService,
 )
-from intric.personal_chat_policy.infrastructure.personal_chat_policy_repo_impl import (
-    PersonalChatPolicyRepoImpl,
+from intric.personal_assistant_policy.infrastructure.personal_assistant_policy_repo_impl import (
+    PersonalAssistantPolicyRepoImpl,
 )
-from intric.personal_chat_policy.presentation.personal_chat_policy_assembler import (
-    PersonalChatPolicyAssembler,
+from intric.personal_assistant_policy.presentation.personal_assistant_policy_assembler import (
+    PersonalAssistantPolicyAssembler,
 )
 from intric.prompt_library.application.prompt_library_service import (
     PromptLibraryService,
@@ -599,10 +602,15 @@ class Container(containers.DeclarativeContainer):
     )
     prompt_library_repo = providers.Factory(PromptLibraryRepoImpl, session=session)
     prompt_library_assembler = providers.Factory(PromptLibraryAssembler)
-    personal_chat_policy_repo = providers.Factory(
-        PersonalChatPolicyRepoImpl, session=session
+    personal_assistant_policy_repo = providers.Factory(
+        PersonalAssistantPolicyRepoImpl, session=session
     )
-    personal_chat_policy_assembler = providers.Factory(PersonalChatPolicyAssembler)
+    personal_assistant_policy_assembler = providers.Factory(
+        PersonalAssistantPolicyAssembler
+    )
+    model_provider_repository = providers.Factory(
+        ModelProviderRepository, session=session, tenant_id=user.provided.tenant_id
+    )
 
     api_key_repo = providers.Factory(ApiKeysRepository, session=session)
     api_key_v2_repo = providers.Factory(ApiKeysV2Repository, session=session)
@@ -1039,7 +1047,7 @@ class Container(containers.DeclarativeContainer):
         PromptLibraryService,
         user=user,
         repo=prompt_library_repo,
-        personal_chat_policy_repo=personal_chat_policy_repo,
+        personal_assistant_policy_repo=personal_assistant_policy_repo,
     )
     file_protocol = providers.Factory(
         FileProtocol,
@@ -1083,18 +1091,19 @@ class Container(containers.DeclarativeContainer):
         user=user,
         encryption_service=encryption_service,
     )
-    personal_chat_policy_service = providers.Factory(
-        PersonalChatPolicyService,
+    personal_assistant_policy_service = providers.Factory(
+        PersonalAssistantPolicyService,
         user=user,
-        repo=personal_chat_policy_repo,
+        repo=personal_assistant_policy_repo,
         completion_model_crud_service=completion_model_crud_service,
         mcp_server_settings_service=mcp_server_settings_service,
         prompt_library_service=prompt_library_service,
+        model_provider_repository=model_provider_repository,
     )
     effective_config_service = providers.Factory(
         EffectiveConfigService,
         user=user,
-        policy_repo=personal_chat_policy_repo,
+        policy_repo=personal_assistant_policy_repo,
         prompt_library_repo=prompt_library_repo,
         completion_model_crud_service=completion_model_crud_service,
         mcp_server_settings_service=mcp_server_settings_service,

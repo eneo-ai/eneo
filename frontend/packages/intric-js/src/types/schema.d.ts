@@ -5520,17 +5520,17 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/admin/personal-chat-policy/": {
+  "/api/v1/admin/personal-assistant-policy/": {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** Get Personal Chat Policy */
-    get: operations["get_personal_chat_policy_api_v1_admin_personal_chat_policy__get"];
-    /** Update Personal Chat Policy */
-    put: operations["update_personal_chat_policy_api_v1_admin_personal_chat_policy__put"];
+    /** Get Personal Assistant Policy */
+    get: operations["get_personal_assistant_policy_api_v1_admin_personal_assistant_policy__get"];
+    /** Update Personal Assistant Policy */
+    put: operations["update_personal_assistant_policy_api_v1_admin_personal_assistant_policy__put"];
     post?: never;
     delete?: never;
     options?: never;
@@ -9986,7 +9986,7 @@ export interface components {
     };
     /**
      * EffectiveConfigPublic
-     * @description Frontend hint surface for personal-chat governance.
+     * @description Frontend hint surface for personal-assistant governance.
      *
      *     Only meaningful on default assistants. `prompt_locked` is exposed as a
      *     boolean — we never leak the admin-prompt text to the user-facing API.
@@ -12162,6 +12162,11 @@ export interface components {
        * @default []
        */
       models?: components["schemas"]["PolicyCompletionModelInput"][];
+      /**
+       * Provider Ids
+       * @default []
+       */
+      provider_ids?: string[];
     };
     /** ModelsRestrictionPublic */
     ModelsRestrictionPublic: {
@@ -12169,6 +12174,8 @@ export interface components {
       enabled: boolean;
       /** Models */
       models: components["schemas"]["PolicyCompletionModelPublic"][];
+      /** Provider Ids */
+      provider_ids: string[];
     };
     /** ModuleBase */
     ModuleBase: {
@@ -13250,8 +13257,8 @@ export interface components {
       /** Description */
       description: string;
     };
-    /** PersonalChatPolicyPublic */
-    PersonalChatPolicyPublic: {
+    /** PersonalAssistantPolicyPublic */
+    PersonalAssistantPolicyPublic: {
       models_restriction: components["schemas"]["ModelsRestrictionPublic"];
       mcp_restriction: components["schemas"]["McpRestrictionPublic"];
       prompt_enforcement: components["schemas"]["PromptEnforcementPublic"];
@@ -13260,8 +13267,8 @@ export interface components {
       /** Updated By User Id */
       updated_by_user_id: string | null;
     };
-    /** PersonalChatPolicyUpdate */
-    PersonalChatPolicyUpdate: {
+    /** PersonalAssistantPolicyUpdate */
+    PersonalAssistantPolicyUpdate: {
       models_restriction?: components["schemas"]["ModelsRestrictionInput"] | null;
       mcp_restriction?: components["schemas"]["McpRestrictionInput"] | null;
       prompt_enforcement?: components["schemas"]["PromptEnforcementInput"] | null;
@@ -33134,7 +33141,7 @@ export interface operations {
       };
     };
   };
-  get_personal_chat_policy_api_v1_admin_personal_chat_policy__get: {
+  get_personal_assistant_policy_api_v1_admin_personal_assistant_policy__get: {
     parameters: {
       query?: never;
       header?: never;
@@ -33149,7 +33156,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PersonalChatPolicyPublic"];
+          "application/json": components["schemas"]["PersonalAssistantPolicyPublic"];
         };
       };
       /** @description Forbidden */
@@ -33163,7 +33170,7 @@ export interface operations {
       };
     };
   };
-  update_personal_chat_policy_api_v1_admin_personal_chat_policy__put: {
+  update_personal_assistant_policy_api_v1_admin_personal_assistant_policy__put: {
     parameters: {
       query?: never;
       header?: never;
@@ -33172,7 +33179,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["PersonalChatPolicyUpdate"];
+        "application/json": components["schemas"]["PersonalAssistantPolicyUpdate"];
       };
     };
     responses: {
@@ -33182,7 +33189,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PersonalChatPolicyPublic"];
+          "application/json": components["schemas"]["PersonalAssistantPolicyPublic"];
         };
       };
       /** @description Bad Request */

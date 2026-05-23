@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     )
     from intric.completion_models.domain.completion_model import CompletionModel
     from intric.main.models import ResourcePermission
-    from intric.personal_chat_policy.domain.policy_resolver import EffectiveConfig
+    from intric.personal_assistant_policy.domain.policy_resolver import EffectiveConfig
 
 
 class AssistantAssembler:

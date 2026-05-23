@@ -1482,7 +1482,16 @@ async def get_personal_space(
 
     space = await service.get_personal_space()
 
-    return assembler.from_space_to_model(space)
+    effective_config = None
+    if space.default_assistant is not None and space.default_assistant.is_default:
+        effective_config_service = container.effective_config_service()
+        effective_config = await effective_config_service.resolve_for(
+            space.default_assistant
+        )
+
+    return assembler.from_space_to_model(
+        space, default_assistant_effective_config=effective_config
+    )
 
 
 @router.get(
@@ -1498,4 +1507,13 @@ async def get_organization_space(
 
     space = await service.get_or_create_tenant_space()
 
-    return assembler.from_space_to_model(space)
+    effective_config = None
+    if space.default_assistant is not None and space.default_assistant.is_default:
+        effective_config_service = container.effective_config_service()
+        effective_config = await effective_config_service.resolve_for(
+            space.default_assistant
+        )
+
+    return assembler.from_space_to_model(
+        space, default_assistant_effective_config=effective_config
+    )

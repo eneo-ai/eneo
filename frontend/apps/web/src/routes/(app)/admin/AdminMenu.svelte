@@ -12,9 +12,10 @@
   import { IconCPU } from "@intric/icons/CPU";
   import { IconBulb } from "@intric/icons/bulb";
   import { IconHistory } from "@intric/icons/history";
+  import { IconSpeechBubble } from "@intric/icons/speech-bubble";
   import { page } from "$app/stores";
   import { Navigation } from "$lib/components/layout";
-  import { ChartPie, LayoutTemplate, Cloud, Plug, ShieldCheck, MessageSquare } from "lucide-svelte";
+  import { ChartPie, LayoutTemplate, Cloud, Plug, ShieldCheck } from "lucide-svelte";
   import { IconKey } from "@intric/icons/key";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
@@ -41,10 +42,10 @@
     label={m.organisation()}
   />
   <Navigation.Link
-    href={localizeHref("/admin/personal-chat")}
-    isActive={isSelected("/admin/personal-chat", currentRoute)}
-    icon={MessageSquare}
-    label="Personlig chatt"
+    href={localizeHref("/admin/personal-assistant")}
+    isActive={isSelected("/admin/personal-assistant", currentRoute)}
+    icon={IconSpeechBubble}
+    label="Personlig assistent"
   />
 
   <div class="border-default my-2 border-b-[0.5px]"></div>

@@ -104,7 +104,7 @@ def _empty_mcp_tool_setting_list() -> list[MCPToolSetting]:
 
 
 class EffectiveConfigPublic(BaseModel):
-    """Frontend hint surface for personal-chat governance.
+    """Frontend hint surface for personal-assistant governance.
 
     Only meaningful on default assistants. `prompt_locked` is exposed as a
     boolean — we never leak the admin-prompt text to the user-facing API.

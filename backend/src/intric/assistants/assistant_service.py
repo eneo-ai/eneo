@@ -69,7 +69,7 @@ if TYPE_CHECKING:
         IntegrationKnowledgeRepository,
     )
     from intric.mcp_servers.domain.entities.mcp_server import MCPServer
-    from intric.personal_chat_policy.application.effective_config_service import (
+    from intric.personal_assistant_policy.application.effective_config_service import (
         EffectiveConfigService,
     )
     from intric.sessions.session import SessionInDB
@@ -1038,7 +1038,7 @@ class AssistantService:
             web_search_results = []
 
         # Personal-chat policy runtime enforcement.
-        # If the assistant is a default (personal-chat) one and the tenant
+        # If the assistant is a default (personal-assistant) one and the tenant
         # has policy enforcement active, override model / MCP / prompt at
         # ask-time. UI filtering alone is not enough — stale entity state
         # or direct API callers could otherwise bypass the policy.
@@ -1064,7 +1064,7 @@ class AssistantService:
                     )
                     if fallback is None:
                         raise BadRequestException(
-                            "Personal chat policy has no allowed models — "
+                            "Personal assistant policy has no allowed models — "
                             "contact admin",
                         )
                     completion_model_override = fallback  # type: ignore[assignment]

@@ -68,8 +68,8 @@ from intric.model_providers.presentation.model_provider_router import (
     router as model_providers_router,
 )
 from intric.modules.module_router import router as module_router
-from intric.personal_chat_policy.presentation.personal_chat_policy_router import (
-    router as personal_chat_policy_router,
+from intric.personal_assistant_policy.presentation.personal_assistant_policy_router import (
+    router as personal_assistant_policy_router,
 )
 from intric.prompt_library.presentation.prompt_library_router import (
     router as prompt_library_router,
@@ -492,9 +492,9 @@ router.include_router(
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
-    personal_chat_policy_router,
-    prefix="/admin/personal-chat-policy",
-    tags=["admin", "personal-chat-policy"],
+    personal_assistant_policy_router,
+    prefix="/admin/personal-assistant-policy",
+    tags=["admin", "personal-assistant-policy"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(

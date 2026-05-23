@@ -87,7 +87,7 @@
           bind:value={name}
           required
           maxlength={200}
-          placeholder="t.ex. Standard personlig chatt"
+          placeholder="t.ex. Standard personlig assistent"
         />
       </div>
 

@@ -34,7 +34,7 @@
     selectedMCPTools?: Array<{ tool_id: string; is_enabled: boolean }>;
     /** Optional: Currently selected completion model to check tool calling support */
     selectedModel?: { supports_tool_calling?: boolean } | null;
-    /** Optional policy-filtered server list for personal chat governance */
+    /** Optional policy-filtered server list for personal assistant governance */
     allowedMCPServers?: { [key: string]: unknown }[] | undefined;
   };
 

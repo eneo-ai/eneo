@@ -1,7 +1,7 @@
 """create prompt_library table
 
-Admin-managed prompt templates shared across personal chat assistants
-(personal-chat governance, Phase 1).
+Admin-managed prompt templates shared across personal assistants
+(personal-assistant governance, Phase 1).
 
 Held deliberately separate from ``prompts`` because that table follows an
 immutable-history pattern (each update inserts a new row). Mixing both

@@ -291,7 +291,7 @@ async def update_assistant(
         completion_model_id = assistant.completion_model.id
 
     # Personal-chat policy guard: if the assistant is a default
-    # (personal-chat) one and the tenant has model-restriction enforced,
+    # (personal-assistant) one and the tenant has model-restriction enforced,
     # the new model_id must be in the whitelist. Otherwise the chat could
     # silently keep working with a forbidden model via UI bypass.
     if (
@@ -312,7 +312,7 @@ async def update_assistant(
                 from intric.main.exceptions import BadRequestException
 
                 raise BadRequestException(
-                    "Model not allowed by personal chat policy",
+                    "Model not allowed by personal assistant policy",
                 )
 
     # MCP whitelist guard on the bulk-update path.
@@ -326,7 +326,7 @@ async def update_assistant(
                 from intric.main.exceptions import BadRequestException
 
                 raise BadRequestException(
-                    "MCP servers not allowed by personal chat policy",
+                    "MCP servers not allowed by personal assistant policy",
                 )
 
     completion_model_kwargs = None
@@ -1320,7 +1320,7 @@ async def add_mcp_to_assistant(
                 from intric.main.exceptions import BadRequestException
 
                 raise BadRequestException(
-                    "MCP server not allowed by personal chat policy",
+                    "MCP server not allowed by personal assistant policy",
                 )
 
     assistant, _permissions = await service.add_mcp_to_assistant(
