@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T072
+active_task: T074
 
 interruptions:
   - id: I001
@@ -212,7 +212,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T069 proposal-submission test-locality cleanup and T068 authenticated live eval: the five-case live eval passed after active-submission runtime ownership changes, ProposalSubmissionOwner behavior tests now live on the owner test surface, and processor tests no longer reach through the private `_proposal_submission` attribute. Normal-User Output Quality stays 9 for the current evidence set, with API freshness qualified by process/source-mtime evidence rather than a clean service restart. The broader score floor remains 8 because full-source typing/test baseline, remaining topology/readability work outside this seam, stale baseline tests, and AI slop/comment/naming cleanup still block a defensible all-dimensions 9."
+  source: "After T073 planner-turn context contract cleanup, T071a stale baseline cleanup, T069 proposal-submission test-locality cleanup, and T068 authenticated live eval: production OrchestrationContext turn assembly now has one orchestrator-owned constructor, PlannerPreparedRequest.requirements_state is typed as RequirementsState, the five-case live eval passed after active-submission runtime ownership changes, ProposalSubmissionOwner behavior tests live on the owner test surface, processor tests no longer reach through the private `_proposal_submission` attribute, and stale plan-edit-context/API regression baselines are green against current public contracts. Normal-User Output Quality stays 9 for the current evidence set, with API freshness qualified by process/source-mtime evidence rather than a clean service restart. The broader score floor remains 8 because full-source typing outside AI Builder, remaining planner/topology/readability work, and AI slop/comment/naming cleanup still block a defensible all-dimensions 9."
   Maintainability: 8
   Code_Quality: 9
   Clean_Architecture: 8
@@ -231,14 +231,15 @@ current_scorecard:
   blockers:
     - "Generated-client regeneration determinism is now closed by T054: update.js supports --schema-file review snapshots, URL mode fetches OpenAPI once into a temp snapshot, openapi-typescript uses argv-array spawn, and schema.d.ts diff stats were inspected with no generated churn."
     - "The T068 five-case authenticated live eval refreshed proof after T065/T066 active-submission runtime ownership changes: C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX with selected structured-field underlag plus source text, C4 runtime form fields, and C5 revise/edit all passed through the public API. The eval used qualified API freshness evidence, not a clean service restart, and the gate must be repeated after later planner/runtime changes rather than treated as permanent output-quality proof."
-    - "T042/T044/T048/T050/T052 removed proposal completion, structured-question recovery, confirm-requirements ownership, repair-runtime ownership, and active create/edit proposal-submission ownership from ai_builder_proposal_processor.py. T069 then removed processor-test private reach-through into ProposalSubmissionOwner and moved owner behavior tests to the submission-owner test surface. Maintainability/readability remain 8 at the subsystem level because larger topology/readability blockers, stale baseline tests, and full-source Pyright failures remain outside this seam."
-    - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, partial processor-bound facades, and full-source Pyright baseline failures outside AI Builder."
+    - "T042/T044/T048/T050/T052 removed proposal completion, structured-question recovery, confirm-requirements ownership, repair-runtime ownership, and active create/edit proposal-submission ownership from ai_builder_proposal_processor.py. T069 then removed processor-test private reach-through into ProposalSubmissionOwner and moved owner behavior tests to the submission-owner test surface. T071a closed stale plan-edit-context and API regression baselines against current contracts. Maintainability/readability remain 8 at the subsystem level because larger planner/topology/readability blockers and full-source Pyright failures remain outside this seam."
+    - "The fake model-owner seams are deleted and stale baseline tests are green, but remaining readability/module/test topology work still includes large orchestration files, pre-existing compatibility comments, partial processor-bound facades, and full-source Pyright baseline failures outside AI Builder."
     - "Both Claude and Antigravity recommended a small future clarification of counts_as_repair semantics in ai_builder_proposal_telemetry.py; it was not added in T038 because that file was outside the approved write scope."
     - "T058 closed the source-material label drift and gave C3 typed live-eval binding-shape assertions; T064 then fixed the C3 failure and reran authenticated live eval successfully twice after the final dispatch-boundary fix."
     - "T062 closed the ProposalSubmissionOwner cohesion/DI/orchestration spike with Claude iteration 3 and Antigravity green. T065 is approved as the next worker only because it deepens the existing active-submission owner, reuses ProposalTurnContext instead of adding a parallel request shape, and has hard stop conditions against callbacks, facades, finalizer DI, and generic dispatch creep."
     - "T064 fixed the T060 C3 failure by using existing rich-workflow/structured-analysis owners, preventing classifier override, and routing server-selected planner-internal questions through typed discovery follow-up dispatch."
-    - "T069 exposed stale baseline tests outside its scope: tests/unit/test_ai_builder_plan_edit_context.py imports removed terminal_output_type_for_conversation, and tests/integration/flows/test_ai_builder_session_api_regressions.py still patches removed processor symbols, passes removed processor= kwargs, and calls update_session_status without the required lease."
-    - "Overall remains 8 until full-source typing/test baseline, consolidation/readability/test-topology tranches, AI slop/comment/naming cleanup, and repeated authenticated live-eval evidence prove every dimension is honestly at least 9."
+    - "T071a closed the stale baseline tests exposed by T069: tests/unit/test_ai_builder_plan_edit_context.py was deleted after valuable pure coverage moved to the structured unittest owner, and tests/integration/flows/test_ai_builder_session_api_regressions.py now targets current request discriminators, lease ownership, owner-module patch bindings, and public dispatch behavior."
+    - "T073 closed one concrete planner topology seam by moving duplicate production OrchestrationContext assembly into OrchestrationContext.for_turn and replacing PlannerPreparedRequest.requirements_state Any with RequirementsState. This improves maintainability/readability inside planner turns but does not by itself raise Maintainability or Human Readability above 8 because ai_builder_planner.py and related orchestration topology still need broader consolidation/readability work."
+    - "Overall remains 8 until full-source typing outside AI Builder, planner/source consolidation/readability tranches, AI slop/comment/naming cleanup, and repeated authenticated live-eval evidence prove every dimension is honestly at least 9."
 
 score_floor_completion_gates:
   source: "2026-05-21 user review: the board must prevent 'plan executed' from being confused with '9/10 achieved'."
@@ -6920,7 +6921,7 @@ tasks:
   - id: T072
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     target_review_by: "2026-05-24"
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T071a, using current evidence rather than defaulting to LOC reduction or local test cleanup."
@@ -6940,6 +6941,211 @@ tasks:
       - "Explicit self-review answering whether the selected tranche is truly better or only different."
       - "Claude plan gate and Antigravity plan gate if available; missing Antigravity coverage must be recorded as missing, not pass."
       - "No score increase from planning alone."
+    receipt:
+      result: done
+      summary: "Re-ranked the next Flow AI Builder tranche after T071a from current source, scorecard, live-eval, test-topology, and typing evidence. Selected T073 planner-turn context contract cleanup rather than LOC-driven file splitting: centralize duplicated OrchestrationContext construction on the orchestrator contract, keep question-history parsing in ai_builder_question_state.py, and replace PlannerPreparedRequest.requirements_state Any with RequirementsState."
+      artifact: ".codex/artifacts/flow-ai-builder-t072-next-tranche-ranking.md"
+      repo_reality:
+        branch: "feature/refactor-flows-flowai"
+        head: "f8fcda0da Repair Flow AI Builder stale baseline tests"
+        dirty_unrelated_preserved:
+          - ".devcontainer/docker-compose.yml"
+          - ".gitignore"
+          - "AGENTS.md"
+          - ".devcontainer/devcontainer-lock.json"
+          - "PRODUCT.md"
+          - "utvecklingssamtal.mp3"
+      evidence:
+        - "AI Builder source has 150 Python files; 46 over 400 LOC and 14 over 800 LOC. This is a review signal, not a LOC-only refactor trigger."
+        - "ai_builder_planner.py is 1815 LOC, and send_message spans backend/src/intric/flows/ai_builder/ai_builder_planner.py:1069-1660 with lease lifecycle, message metadata, planner request preparation, branch dispatch, SSE error translation, metrics, and final event emission."
+        - "Two production OrchestrationContext construction sites remain in ai_builder_planner.py:938-949 and :1319-1330."
+        - "PlannerPreparedRequest.requirements_state is Any at ai_builder_planner.py:248 despite existing RequirementsState at ai_builder_requirements_state.py:69-81."
+        - "Live eval C3 already asserts selected structured field refs and rejects broad output.structured refs in backend/scripts/flow_ai_builder_live_eval.py:56-75, :437-500, and :909-929, so immediate live-eval assertion work does not outrank the planner-turn contract cleanup."
+        - "Full-source pyright remains 112 errors, but current failures are mostly outside src/intric/flows/ai_builder; AI Builder source pyright passed in T071a."
+      peer_review:
+        claude_iteration_1:
+          artifact: ".codex/artifacts/claude-peer-loop-t072-next-flow-ai-builder-tranche-ranking-20260523T072847Z.md"
+          verdict: "GREEN_LIGHT no / MIN_SCORE 7"
+          accepted_changes:
+            - "Make unresolved_architectural_choices an explicit constructor input; do not import planner-private _compute_unresolved_core_slots into orchestrator."
+            - "Handle confirmed RequirementsState tests with a real RequirementsSummaryPayload helper because confirmed is derived."
+            - "Pin defensive resolved-slot subtraction even when action_policy incorrectly includes a resolved slot."
+            - "Require both send_message and _dispatch_chained_server_action_after_commit coverage."
+        claude_iteration_2:
+          artifact: ".codex/artifacts/claude-peer-loop-t072-revised-next-flow-ai-builder-tranche-ranking-20260523T073335Z.md"
+          verdict: "GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity_iteration_1:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t072-next-flow-ai-builder-tranche-ranking-20260523T073638Z.md"
+          verdict: "GREEN_LIGHT yes / MIN_SCORE 8"
+          accepted_change: "Pass AskedQuestionState into OrchestrationContext.for_turn instead of raw conversation, preserving ai_builder_question_state.py as conversation-history parsing owner."
+        claude_iteration_3_after_antigravity:
+          artifact: ".codex/artifacts/claude-peer-loop-t072-final-flow-ai-builder-tranche-ranking-after-antigravity-20260523T073953Z.md"
+          verdict: "GREEN_LIGHT yes / MIN_SCORE 8"
+      decision:
+        selected: "T073 planner-turn context contract cleanup"
+        rationale: "This is the highest-score-moving safe next slice because it improves central planner-turn SSoT, typed contract quality, and human readability without broad planner decomposition or LOC-driven splitting."
+        rejected:
+          - "Broad ai_builder_planner.py split: rejected until one real contract boundary is extracted and proven."
+          - "Immediate live eval: rejected because C3 field-ref assertions already exist and latest authenticated proof passed; rerun after behavior-affecting planner/runtime changes."
+          - "Full-source Pyright sweep: rejected as broader platform typing work mostly outside AI Builder."
+          - "AI slop/comment/naming pass: rejected until scoped inventory prevents cosmetic cleanup."
+          - "Proposal processor LOC reduction: rejected because ai_builder_proposal_processor.py is now 466 LOC and no longer the immediate owner blocker."
+      score_impact:
+        score_floor: 8
+        rationale: "Planning-only tranche. No score increase until T073 is implemented, validated, and post-reviewed; even then overall likely remains 8 until larger topology/readability and AI-slop blockers are closed."
+      residual_risks:
+        - "T073 is a narrow first production topology slice and will not by itself make planner topology 9/10."
+        - "Full-source Pyright baseline outside AI Builder remains red with 112 errors."
+        - "AI slop/comment/naming and broader planner/source readability remain future blockers."
+
+  - id: T073
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    target_review_by: "2026-05-24"
+    objective: "Implement the peer-gated planner-turn context contract cleanup: add OrchestrationContext.for_turn as the canonical guard-context constructor, keep question-history parsing in ai_builder_question_state.py, replace duplicate planner context construction, and type PlannerPreparedRequest.requirements_state as RequirementsState."
+    inputs:
+      - "T072 receipt and artifact"
+      - ".codex/artifacts/flow-ai-builder-t072-next-tranche-ranking.md"
+      - ".codex/artifacts/claude-peer-loop-t072-final-flow-ai-builder-tranche-ranking-after-antigravity-20260523T073953Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t072-next-flow-ai-builder-tranche-ranking-20260523T073638Z.md"
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_orchestrator.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_orchestrator_guardrails.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - ".codex/artifacts/flow-ai-builder-t073-planner-turn-context-contract.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    constraints:
+      - "Do not split ai_builder_planner.py broadly, move _prepare_planner_request, add a planner service/factory/manager, or create a broad dependency bag."
+      - "Do not change public API/SSE contracts, prompts, live-eval scripts, DB schema, generated clients, OpenTelemetry/DX contracts, proposal logic, or source-material logic."
+      - "Do not import AIBuilderPlanner, AIBuilderService, repo classes, routers, proposal processor/submission, or planner-private helpers into ai_builder_orchestrator.py."
+      - "Keep derive_asked_question_state owned by ai_builder_question_state.py; OrchestrationContext.for_turn receives AskedQuestionState, not raw conversation."
+      - "Do not edit existing PlannerPreparedRequest field comments except the requirements_state type annotation line."
+      - "Do not add broad Any, new type ignores, new pyright ignores, or mock-heavy tests."
+      - "Do not raise score floor from this tranche unless post-implementation peer review proves the weakest dimensions moved."
+    acceptance_criteria:
+      - "Add OrchestrationContext.for_turn with keyword-only arguments and non-optional action_policy: PlannerActionPolicy."
+      - "OrchestrationContext.for_turn takes unresolved_architectural_choices and asked_question_state as explicit inputs."
+      - "Replace both production inline OrchestrationContext construction sites in ai_builder_planner.py."
+      - "The required_slot_names rule stays: action_policy.allowed_ask_question_targets - unresolved_architectural_choices - resolved_slot_names."
+      - "The defensive resolved-slot subtraction rationale currently near ai_builder_planner.py:1311-1312 migrates into for_turn as one short why-comment/docstring, not tutorial prose."
+      - "Tests construct AskedQuestionState directly with named frozensets for for_turn tests; do not fake conversation unless testing derive_asked_question_state."
+      - "Type PlannerPreparedRequest.requirements_state as RequirementsState."
+      - "Replace SimpleNamespace requirements-state stand-ins with RequirementsState; confirmed=True cases use a narrow helper that builds a real RequirementsSummaryPayload with matching latest_version and confirmed_version."
+      - "Add or update tests so they fail if resolved slots are not subtracted, unresolved core slots are not subtracted, defensive resolved-slot subtraction is removed, or asked-question evidence is not threaded."
+      - "Both send_message and _dispatch_chained_server_action_after_commit paths have at least one focused test exercising OrchestrationContext.for_turn."
+      - "Source rg after implementation has no OrchestrationContext(...) construction outside ai_builder_orchestrator.py within backend/src/intric/flows/ai_builder."
+    verify:
+      - "git status --short --branch"
+      - "rg -n \"OrchestrationContext\\(\" backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder before and after implementation"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_orchestrator_guardrails.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check touched files"
+      - "cd backend && uv run ruff format --check touched files"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright touched tests if path resolution works"
+      - "git diff --check"
+      - "Claude implementation gate; Antigravity implementation gate if available"
+    stop_if:
+      - "Implementation needs production files outside allowed_files."
+      - "for_turn needs broad dependency bags, Any, planner/service imports, or repo/router/proposal dependencies."
+      - "Implementation imports derive_asked_question_state into ai_builder_orchestrator.py instead of passing AskedQuestionState."
+      - "Implementation imports _compute_unresolved_core_slots into ai_builder_orchestrator.py."
+      - "Tests weaken behavior assertions or replace behavior checks with mock-call choreography."
+      - "Confirmed RequirementsState helper becomes a fixture dump or needs unrelated prompt/planner helper rewrites."
+      - "Focused tests fail for a real planner/runtime bug that needs re-ranking."
+    receipt:
+      result: done
+      summary: "Implemented the peer-gated planner-turn context contract cleanup. Production planner paths now call OrchestrationContext.for_turn instead of building guard context inline; the constructor derives required_slot_names from action_policy, unresolved architectural choices, and resolved slots while receiving AskedQuestionState from the existing question-state owner. PlannerPreparedRequest.requirements_state is now RequirementsState instead of Any, and planner tests use real RequirementsState helpers instead of SimpleNamespace stand-ins. Claude and Antigravity both green-lit the implemented diff; Codex accepted their small cleanup findings before commit."
+      artifact: ".codex/artifacts/flow-ai-builder-t073-planner-turn-context-contract.md"
+      files_changed:
+        - "backend/src/intric/flows/ai_builder/ai_builder_orchestrator.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_planner.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_orchestrator_guardrails.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      preserved_unrelated_dirty_files:
+        - ".devcontainer/docker-compose.yml"
+        - ".gitignore"
+        - "AGENTS.md"
+        - ".devcontainer/devcontainer-lock.json"
+        - "PRODUCT.md"
+        - "utvecklingssamtal.mp3"
+      ownership_result:
+        - "OrchestrationContext now owns production guard-context derivation through OrchestrationContext.for_turn."
+        - "ai_builder_question_state.py still owns conversation-history question parsing; the new constructor receives AskedQuestionState rather than raw conversation."
+        - "ai_builder_planner.py still owns unresolved core-slot computation and planner turn orchestration."
+        - "ai_builder_requirements_state.py owns the prepared-request requirements-state shape."
+      complexity_assessment:
+        result: "No added asymptotic cost. The refactor preserves the existing one derive_asked_question_state call per path and adds only set construction/subtraction over the already-small slot/action-policy surface; no DB, LLM, prompt-history, or token traversal work was added."
+      validation:
+        red_first:
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_orchestrator_guardrails.py::TestOrchestrationContextConstruction -q -> failed before source change because OrchestrationContext.for_turn did not exist."
+        commands:
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_orchestrator_guardrails.py::TestOrchestrationContextConstruction tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py -q -> 39 passed"
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py -q -> 32 passed"
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2373 passed, 4 skipped"
+          - "cd backend && uv run ruff check touched files -> clean"
+          - "cd backend && uv run ruff format --check touched files -> clean"
+          - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations"
+          - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright touched planner tests -> 0 errors, 0 warnings, 0 informations"
+          - "git diff --check -> clean"
+      peer_review:
+        claude:
+          artifact: ".codex/artifacts/claude-peer-loop-t073-planner-turn-context-contract-implementation-gate-20260523T075850Z.md"
+          verdict: "GREEN_LIGHT yes / MIN_SCORE 8"
+          accepted_changes:
+            - "Tightened stale OrchestrationContext docstring wording so production callers are documented as using for_turn and deriving required_slot_names."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t073-planner-turn-context-contract-implementation-gate-20260523T080224Z.md"
+          verdict: "GREEN_LIGHT yes / MIN_SCORE 9"
+          accepted_changes:
+            - "Changed _turn_telemetry outcome_kind from str to PlannerTurnOutcomeKind and removed the old type ignore."
+      self_review:
+        actually_simpler: "Yes. Two production copies of guard-context assembly became one orchestrator-owned constructor."
+        easier_to_understand: "A reviewer now inspects OrchestrationContext.for_turn for required-slot and asked-question evidence wiring."
+        easier_to_test: "The context rule is tested directly without driving send_message, while existing planner tests still exercise production call sites."
+        easier_to_debug: "Planner-turn rejection context construction has one source of truth."
+        deleted_or_merged: "Duplicate required_slot_names derivation was deleted from both production planner paths; fake requirements-state test objects were replaced with real typed state."
+        parallel_path_created: "No production parallel path. Direct OrchestrationContext constructors remain only in low-level tests."
+        production_ready_for_tranche: true
+      score_impact:
+        strict_floor: 8
+        rationale: "T073 improves Single Source of Truth, typed planner boundary quality, and local planner-turn readability, but it is intentionally too narrow to raise Maintainability/Human Readability/Clean Architecture above 8 for the whole subsystem."
+      remaining_blockers_to_9:
+        - "Broader planner/source orchestration topology and readability still need deeper consolidation or deletion work."
+        - "Full-source Pyright outside AI Builder remains a platform blocker."
+        - "AI slop/comment/naming cleanup still needs a scoped inventory and implementation tranche."
+        - "Authenticated live eval should be repeated after later behavior-affecting planner/runtime changes."
+
+  - id: T074
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    target_review_by: "2026-05-24"
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T073 using current evidence, the strict score floor, and the latest user steering against LOC-driven refactors."
+    inputs:
+      - "T073 receipt and implementation artifact"
+      - "current_scorecard and remaining blockers"
+      - "latest dirty worktree and commit history"
+      - "latest Claude and Antigravity implementation-gate artifacts"
+    constraints:
+      - "Read-only planning task; do not implement during T074."
+      - "Do not default to breaking down large files unless the refactor removes real complexity, clarifies canonical ownership, improves tests/debugging/reviewability, or improves normal-user output quality."
+      - "Use Claude for the plan gate and Antigravity if available; missing Antigravity coverage is not a pass."
+      - "Preserve unrelated dirty files and keep one active task."
+    expected_output:
+      - "Evidence-backed ranking with file:line citations."
+      - "For each candidate: canonical owner, what gets deleted/merged/moved/renamed, complexity removed, test impact, debug/review impact, score-floor impact, and normal-user output impact."
+      - "Selected worker only if it is clearly the highest-score-moving next slice."
+      - "Acceptance criteria, tests, non-goals, stop conditions, allowed files, validation commands, peer-gate requirements, and honest score impact."
     receipt: null
 
 checks:
@@ -6948,16 +7154,16 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T071a completed, validated, and peer-gated. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T071a
+    result: "T073 completed, validated, and peer-gated. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T073
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py -q -> 30 passed"
-      - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py -q -> 49 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2371 passed, 4 skipped"
-      - "cd backend && uv run ruff check touched test files -> clean"
-      - "cd backend && uv run ruff format --check touched test files -> clean"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_orchestrator_guardrails.py::TestOrchestrationContextConstruction tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py -q -> 39 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py -q -> 32 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2373 passed, 4 skipped"
+      - "cd backend && uv run ruff check touched files -> clean"
+      - "cd backend && uv run ruff format --check touched files -> clean"
       - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright touched test files -> 0 errors"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright touched planner tests -> 0 errors"
       - "git diff --check -> clean"
-      - "Claude T071a iteration 6 -> GREEN_LIGHT yes / MIN_SCORE 9"
-      - "Antigravity T071a iteration 1 -> GREEN_LIGHT yes / MIN_SCORE 9"
+      - "Claude T073 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity T073 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 9"

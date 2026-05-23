@@ -46,7 +46,10 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
     TargetKind,
 )
-from intric.flows.ai_builder.ai_builder_event_models import KeyDecisionPayload
+from intric.flows.ai_builder.ai_builder_event_models import (
+    KeyDecisionPayload,
+    RequirementsSummaryPayload,
+)
 from intric.flows.ai_builder.ai_builder_orchestrator import (
     AskQuestionAction,
     AskQuestionPayload,
@@ -63,10 +66,12 @@ from intric.flows.ai_builder.ai_builder_planner import (
     PlannerPreparedRequest,
 )
 from intric.flows.ai_builder.ai_builder_planner_turn import (
+    PlannerTurnOutcomeKind,
     PlannerTurnResult,
     TurnTelemetry,
 )
 from intric.flows.ai_builder.ai_builder_repair import CompletionMetadata
+from intric.flows.ai_builder.ai_builder_requirements_state import RequirementsState
 from intric.flows.ai_builder.ai_builder_response_format import (
     build_planner_request_response_format,
 )
@@ -118,13 +123,39 @@ def _make_prepared_request(
     slot_classification_metadata: SlotClassificationMetadata | None = None,
 ) -> PlannerPreparedRequest:
     return PlannerPreparedRequest(
-        requirements_state=SimpleNamespace(latest_summary=None, confirmed=False),
+        requirements_state=_requirements_state_unconfirmed(),
         ui_language="en",
         discovery_block_message=None,
         llm_messages=[{"role": "system", "content": "system"}],
         should_emit_forced_followup=should_emit_forced_followup,
         base_planning_state_version=0,
         slot_classification_metadata=slot_classification_metadata,
+    )
+
+
+def _requirements_summary(version: str) -> RequirementsSummaryPayload:
+    return RequirementsSummaryPayload(
+        requirements_version=version,
+        summary="Confirmed requirements.",
+        key_decisions=[KeyDecisionPayload(topic="Input", decision="Use text input")],
+        input_description="Text input.",
+        output_description="Text output.",
+        assumptions=[],
+        manual_setup_notes=[],
+    )
+
+
+def _requirements_state_unconfirmed() -> RequirementsState:
+    return RequirementsState()
+
+
+def _requirements_state_confirmed(
+    version: str = "requirements-v1",
+) -> RequirementsState:
+    return RequirementsState(
+        latest_summary=_requirements_summary(version),
+        latest_version=version,
+        confirmed_version=version,
     )
 
 
@@ -155,11 +186,15 @@ def _make_turn(*, base_version: int = 0) -> SessionSendTurn:
     )
 
 
-def _turn_telemetry(outcome_kind: str, *, populated: bool = False) -> TurnTelemetry:
+def _turn_telemetry(
+    outcome_kind: PlannerTurnOutcomeKind,
+    *,
+    populated: bool = False,
+) -> TurnTelemetry:
     return TurnTelemetry(
         request_id=None,
         model="openai/gpt-4o-mini",
-        outcome_kind=outcome_kind,  # type: ignore[arg-type]
+        outcome_kind=outcome_kind,
         wall_clock_ms=5,
         llm_calls_made=1,
         repair_attempts=0,
@@ -865,7 +900,7 @@ async def test_send_message_orchestration_context_uses_rebuilt_state() -> None:
         },
     )
     prepared = PlannerPreparedRequest(
-        requirements_state=SimpleNamespace(latest_summary=None, confirmed=False),
+        requirements_state=_requirements_state_unconfirmed(),
         ui_language="en",
         discovery_block_message=None,
         llm_messages=[{"role": "system", "content": "system"}],
@@ -961,7 +996,7 @@ async def test_send_message_orchestration_context_blocks_commit_until_core_slots
         },
     )
     prepared = PlannerPreparedRequest(
-        requirements_state=SimpleNamespace(latest_summary=None, confirmed=False),
+        requirements_state=_requirements_state_unconfirmed(),
         ui_language="en",
         discovery_block_message=None,
         llm_messages=[{"role": "system", "content": "system"}],
@@ -1023,7 +1058,7 @@ async def test_send_message_uses_discovery_selected_questions_as_non_core_ask_su
 ):
     planner = _make_planner()
     prepared = PlannerPreparedRequest(
-        requirements_state=SimpleNamespace(latest_summary=None, confirmed=False),
+        requirements_state=_requirements_state_unconfirmed(),
         ui_language="en",
         discovery_block_message=None,
         llm_messages=[{"role": "system", "content": "system"}],
@@ -1116,7 +1151,7 @@ async def test_send_message_passes_server_precomputed_commit_to_turn_runner() ->
         selected_discovery_question_ids=frozenset(),
     )
     prepared = PlannerPreparedRequest(
-        requirements_state=SimpleNamespace(latest_summary=None, confirmed=False),
+        requirements_state=_requirements_state_unconfirmed(),
         ui_language="en",
         discovery_block_message=None,
         llm_messages=[],
@@ -1223,7 +1258,7 @@ async def test_send_message_auto_advances_server_commit_to_requirements_summary(
     assert server_output is not None
     assert server_output.planner_action.kind == "commit_architecture"
     prepared = PlannerPreparedRequest(
-        requirements_state=SimpleNamespace(latest_summary=None, confirmed=False),
+        requirements_state=_requirements_state_unconfirmed(),
         ui_language="en",
         discovery_block_message=None,
         llm_messages=[],
@@ -1296,7 +1331,7 @@ async def test_send_message_auto_advances_server_commit_to_requirements_summary(
 async def test_send_message_routes_proposal_mode_to_task_specific_proposer() -> None:
     planner = _make_planner()
     prepared = PlannerPreparedRequest(
-        requirements_state=SimpleNamespace(latest_summary=None, confirmed=True),
+        requirements_state=_requirements_state_confirmed(),
         ui_language="en",
         discovery_block_message=None,
         llm_messages=[{"role": "system", "content": "proposal task"}],

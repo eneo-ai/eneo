@@ -122,6 +122,7 @@ from intric.flows.ai_builder.ai_builder_question_state import (
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_requirements_state import (
+    RequirementsState,
     build_requirements_version,
     latest_confirmed_requirements,
     resolve_requirements_state,
@@ -245,7 +246,7 @@ class PlannerMetadataResolution:
 
 @dataclass(frozen=True)
 class PlannerPreparedRequest:
-    requirements_state: Any
+    requirements_state: RequirementsState
     ui_language: str | None
     discovery_block_message: str | None
     llm_messages: list[dict[str, Any]]
@@ -928,23 +929,12 @@ class AIBuilderPlanner:
         ):
             return None
 
-        resolved_slot_names = frozenset(session_state.resolved_slots.keys())
-        required_slot_names = (
-            frozenset(action_policy.allowed_ask_question_targets)
-            - unresolved_core_slots
-            - resolved_slot_names
-        )
         asked_question_state = derive_asked_question_state(conversation)
-        orchestration_context = OrchestrationContext(
+        orchestration_context = OrchestrationContext.for_turn(
             current_version=turn.base_planning_state_version,
             session_state=session_state,
+            asked_question_state=asked_question_state,
             unresolved_architectural_choices=unresolved_core_slots,
-            required_slot_names=required_slot_names,
-            asked_question_ids=asked_question_state.asked_question_ids,
-            has_new_evidence=asked_question_state.has_new_evidence,
-            question_ids_with_new_evidence=(
-                asked_question_state.question_ids_with_new_evidence
-            ),
             action_policy=action_policy,
         )
 
@@ -1298,7 +1288,6 @@ class AIBuilderPlanner:
                 or persisted_planning_state
                 or PlanningState.empty()
             )
-            resolved_slot_names = frozenset(session_state.resolved_slots.keys())
             unresolved_core_slots = _compute_unresolved_core_slots(session_state)
             action_policy = prepared_request.action_policy
             if action_policy is None:
@@ -1308,24 +1297,12 @@ class AIBuilderPlanner:
                     selected_discovery_question_ids=frozenset(),
                     requirements_confirmed=requirements_state.confirmed,
                 )
-            # Compatibility surface for older tests/callers; the action
-            # policy is authoritative and already excludes resolved slots.
-            required_slot_names = (
-                frozenset(action_policy.allowed_ask_question_targets)
-                - unresolved_core_slots
-                - resolved_slot_names
-            )
             asked_question_state = derive_asked_question_state(conversation)
-            orchestration_context = OrchestrationContext(
+            orchestration_context = OrchestrationContext.for_turn(
                 current_version=turn.base_planning_state_version,
                 session_state=session_state,
+                asked_question_state=asked_question_state,
                 unresolved_architectural_choices=unresolved_core_slots,
-                required_slot_names=required_slot_names,
-                asked_question_ids=asked_question_state.asked_question_ids,
-                has_new_evidence=asked_question_state.has_new_evidence,
-                question_ids_with_new_evidence=(
-                    asked_question_state.question_ids_with_new_evidence
-                ),
                 action_policy=action_policy,
             )
 

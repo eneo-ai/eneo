@@ -22,6 +22,7 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     evaluate_planner_output,
     parse_planner_output,
 )
+from intric.flows.ai_builder.ai_builder_question_state import AskedQuestionState
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
@@ -163,6 +164,19 @@ def _session_state_with_commit(*, step_count: int = 1) -> PlanningState:
     return state
 
 
+def _asked_question_state(
+    *,
+    asked_question_ids: frozenset[str] = frozenset(),
+    question_ids_with_new_evidence: frozenset[str] = frozenset(),
+    has_new_evidence: bool = False,
+) -> AskedQuestionState:
+    return AskedQuestionState(
+        asked_question_ids=asked_question_ids,
+        question_ids_with_new_evidence=question_ids_with_new_evidence,
+        has_new_evidence=has_new_evidence,
+    )
+
+
 def _ctx(
     *,
     session_state: PlanningState | None = None,
@@ -184,6 +198,82 @@ def _ctx(
         required_slot_names=required_slot_names,
         action_policy=action_policy,
     )
+
+
+# ---------------------------------------------------------------------------
+# Context construction
+# ---------------------------------------------------------------------------
+
+
+class TestOrchestrationContextConstruction:
+    def test_for_turn_derives_required_slots_and_question_evidence(self) -> None:
+        state = PlanningState.empty()
+        state.resolved_slots = {
+            "terminal_output": ResolvedSlot(
+                name="terminal_output",
+                value="text",
+                source="structured_answer",
+                confidence="high",
+            )
+        }
+        asked_state = _asked_question_state(
+            asked_question_ids=frozenset({"final_output_mode"}),
+            question_ids_with_new_evidence=frozenset({"final_output_mode"}),
+            has_new_evidence=True,
+        )
+
+        context = OrchestrationContext.for_turn(
+            current_version=7,
+            session_state=state,
+            action_policy=PlannerActionPolicy(
+                allowed_action_kinds=("ask_question",),
+                allowed_ask_question_targets=(
+                    "document_material_scope",
+                    "primary_runtime_input",
+                    "terminal_output",
+                ),
+            ),
+            asked_question_state=asked_state,
+            unresolved_architectural_choices=frozenset({"primary_runtime_input"}),
+        )
+
+        assert context.current_version == 7
+        assert context.session_state is state
+        assert context.unresolved_architectural_choices == frozenset(
+            {"primary_runtime_input"}
+        )
+        assert context.required_slot_names == frozenset({"document_material_scope"})
+        assert context.asked_question_ids == frozenset({"final_output_mode"})
+        assert context.question_ids_with_new_evidence == frozenset(
+            {"final_output_mode"}
+        )
+        assert context.has_new_evidence is True
+
+    def test_for_turn_defensively_excludes_resolved_slots_from_required_surface(
+        self,
+    ) -> None:
+        state = PlanningState.empty()
+        state.resolved_slots = {
+            "terminal_output": ResolvedSlot(
+                name="terminal_output",
+                value="text",
+                source="structured_answer",
+                confidence="high",
+            )
+        }
+
+        context = OrchestrationContext.for_turn(
+            current_version=1,
+            session_state=state,
+            action_policy=PlannerActionPolicy(
+                allowed_action_kinds=("ask_question",),
+                allowed_ask_question_targets=("terminal_output",),
+            ),
+            asked_question_state=_asked_question_state(),
+            unresolved_architectural_choices=frozenset(),
+        )
+
+        assert context.required_slot_names == frozenset()
 
 
 # ---------------------------------------------------------------------------

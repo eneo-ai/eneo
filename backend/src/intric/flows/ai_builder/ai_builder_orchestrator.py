@@ -41,6 +41,7 @@ from intric.flows.ai_builder.ai_builder_commit_invariance import (
     assert_architecture_commit_draft_matches_pinned,
 )
 from intric.flows.ai_builder.ai_builder_event_models import KeyDecisionPayload
+from intric.flows.ai_builder.ai_builder_question_state import AskedQuestionState
 from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
@@ -285,9 +286,9 @@ class OrchestrationContext:
     - `required_slot_names` is the union of slot names required by the
       current pattern candidates. A question resolving neither an
       unresolved choice nor a required slot is off-topic.
-    - `action_policy` is the preferred server-owned legal action menu
-      for this turn. `required_slot_names` remains as a compatibility
-      input for tests and older callers.
+    - `action_policy` is the server-owned legal action menu for this turn.
+      Production callers use `for_turn` so `required_slot_names` is derived
+      from the same policy instead of passed separately.
     """
 
     current_version: int
@@ -302,6 +303,37 @@ class OrchestrationContext:
     )
     required_slot_names: frozenset[str] = field(default_factory=frozenset[str])
     action_policy: PlannerActionPolicy | None = None
+
+    @classmethod
+    def for_turn(
+        cls,
+        *,
+        current_version: int,
+        session_state: PlanningState,
+        action_policy: PlannerActionPolicy,
+        asked_question_state: AskedQuestionState,
+        unresolved_architectural_choices: frozenset[str],
+    ) -> "OrchestrationContext":
+        resolved_slot_names = frozenset(session_state.resolved_slots.keys())
+        # Server action policy normally excludes resolved slots; this subtraction
+        # keeps guardrails correct if a future policy builder regresses.
+        required_slot_names = (
+            frozenset(action_policy.allowed_ask_question_targets)
+            - unresolved_architectural_choices
+            - resolved_slot_names
+        )
+        return cls(
+            current_version=current_version,
+            session_state=session_state,
+            asked_question_ids=asked_question_state.asked_question_ids,
+            has_new_evidence=asked_question_state.has_new_evidence,
+            question_ids_with_new_evidence=(
+                asked_question_state.question_ids_with_new_evidence
+            ),
+            unresolved_architectural_choices=unresolved_architectural_choices,
+            required_slot_names=required_slot_names,
+            action_policy=action_policy,
+        )
 
 
 def evaluate_planner_output(

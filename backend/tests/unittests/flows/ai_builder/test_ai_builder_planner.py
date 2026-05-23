@@ -28,6 +28,7 @@ from intric.flows.ai_builder.ai_builder_planner import (
     PlannerMetadataResolution,
     PlannerPreparedRequest,
 )
+from intric.flows.ai_builder.ai_builder_requirements_state import RequirementsState
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
@@ -95,6 +96,32 @@ def _runtime_result(
         discovery_block_message=discovery_block_message,
         discovery_analysis=cast(DiscoveryAnalysis, discovery_analysis),
         planning_state=planning_state,
+    )
+
+
+def _requirements_summary(version: str) -> RequirementsSummaryPayload:
+    return RequirementsSummaryPayload(
+        requirements_version=version,
+        summary="Build a report flow.",
+        key_decisions=[KeyDecisionPayload(topic="Input", decision="Use text input")],
+        input_description="Text input.",
+        output_description="Text output.",
+        assumptions=[],
+        manual_setup_notes=[],
+    )
+
+
+def _requirements_state_unconfirmed() -> RequirementsState:
+    return RequirementsState()
+
+
+def _requirements_state_confirmed(
+    version: str = "requirements-v1",
+) -> RequirementsState:
+    return RequirementsState(
+        latest_summary=_requirements_summary(version),
+        latest_version=version,
+        confirmed_version=version,
     )
 
 
@@ -337,7 +364,7 @@ async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_he
 ):
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a flow")]
-    requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
+    requirements_state = _requirements_state_unconfirmed()
     discovery_analysis = DiscoveryAnalysis(issues=())
 
     with (
@@ -422,7 +449,7 @@ async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_he
 async def test_prepare_planner_request_skips_prompt_for_server_owned_action() -> None:
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a flow")]
-    requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
+    requirements_state = _requirements_state_unconfirmed()
     discovery_analysis = SimpleNamespace(mvs_met=True, selected_question_ids=())
 
     with (
@@ -485,7 +512,7 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
             ),
         )
     ]
-    requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
+    requirements_state = _requirements_state_unconfirmed()
     discovery_analysis = SimpleNamespace(
         mvs_met=False,
         selected_question_ids=("input_material_mode",),
@@ -545,7 +572,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_system_pro
 ):
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build from this file")]
-    requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
+    requirements_state = _requirements_state_unconfirmed()
     discovery_analysis = DiscoveryAnalysis(issues=())
 
     with (
@@ -622,7 +649,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_system_pro
 async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -> None:
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a report flow")]
-    requirements_state = SimpleNamespace(latest_summary=None, confirmed=True)
+    requirements_state = _requirements_state_confirmed()
     discovery_analysis = SimpleNamespace(mvs_met=True, selected_question_ids=())
     state = PlanningState.empty()
     state.architecture_commit = ArchitectureCommit(
@@ -710,7 +737,7 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
 ):
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a flow")]
-    requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
+    requirements_state = _requirements_state_unconfirmed()
     discovery_analysis = DiscoveryAnalysis(issues=())
 
     with (
@@ -775,7 +802,7 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
 async def test_prepare_planner_request_logs_prompt_metrics() -> None:
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a flow")]
-    requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
+    requirements_state = _requirements_state_unconfirmed()
     discovery_analysis = DiscoveryAnalysis(issues=())
 
     with (
@@ -844,7 +871,7 @@ async def test_prepare_planner_request_projects_pre_commit_into_system_prompt() 
     """Pre-commit projection reaches the system prompt as a rendered block."""
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a flow")]
-    requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
+    requirements_state = _requirements_state_unconfirmed()
     discovery_analysis = DiscoveryAnalysis(issues=())
 
     with (
@@ -930,7 +957,7 @@ async def test_prepare_planner_request_threads_unresolved_core_slots_into_system
     """
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a flow")]
-    requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
+    requirements_state = _requirements_state_unconfirmed()
     discovery_analysis = DiscoveryAnalysis(issues=())
 
     with (
@@ -1009,7 +1036,7 @@ async def test_prepare_planner_request_carries_forward_persisted_commit_into_pro
     """
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Refine step 1")]
-    requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
+    requirements_state = _requirements_state_unconfirmed()
     discovery_analysis = DiscoveryAnalysis(issues=())
     committed_hash = "b" * 64
     persisted = PlanningState.empty()
@@ -1152,7 +1179,7 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
 
     async def fake_prepare(**_: object) -> PlannerPreparedRequest:
         return PlannerPreparedRequest(
-            requirements_state=SimpleNamespace(confirmed=True),
+            requirements_state=_requirements_state_confirmed(),
             ui_language="sv",
             discovery_block_message=None,
             llm_messages=[{"role": "system", "content": "proposal"}],
