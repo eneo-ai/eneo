@@ -5911,7 +5911,7 @@ tasks:
       - "Focused validation fails for unrelated reasons that require a broader tranche."
     receipt:
       completed_at: "2026-05-23T00:56:00+02:00"
-      commit: "pending"
+      commit: "45981d41b"
       summary: "Implemented the peer-gated source-material underlag proof and label SSoT slice. `ai_builder_source_material.primary_source_material_ref` is now the canonical draft owner for primary source-material refs/labels, and dataflow targeted auto-bind consumes the full draft so primary transcript/source text keeps the same `Källmaterial` label used by source-material normalization. Non-primary text predecessors keep their step-name fallback labels. The live-eval runner now has typed `ExpectedQuestionBinding` assertions using `analyze_template` to require source text refs, selected structured field refs, and no broad structured JSON refs on the C3 writing/materialization target step."
       artifacts:
         - ".codex/artifacts/flow-ai-builder-t058-underlag-proof-and-label-ssot.md"
