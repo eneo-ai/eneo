@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T060
+active_task: T063
 
 interruptions:
   - id: I001
@@ -212,7 +212,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T059 read-only ranking/post-review: T058 source-material underlag label SSoT and C3 live-eval binding-shape assertions remain closed, and the next work is re-ranked to T060 authenticated live-eval/scorecard honesty with independent T061 test-topology fallback if T060 is blocked by environment. The broader score floor remains 8 because full-source typing/test baseline, remaining topology/readability/test-fixture coupling, and repeated authenticated live-eval evidence still block a defensible 9."
+  source: "After T060 authenticated live eval against backend container HEAD f164f2ede: C1, C2, C4, and C5 passed, but C3 audio-to-DOCX failed the new binding-shape assertion because the generated plan produced a DOCX flow without the required source-text plus selected structured-field underlag on the writing/materialization target. Normal-User Output Quality is downgraded to 8. The broader score floor remains 8 because C3 output quality, full-source typing/test baseline, and remaining topology/readability/test-fixture coupling still block a defensible 9."
   Maintainability: 8
   Code_Quality: 9
   Clean_Architecture: 8
@@ -226,7 +226,7 @@ current_scorecard:
   Test_Coverage_Quality: 9
   Developer_Diagnostic_Experience: 9
   AI_Slop_Comment_Naming_Quality: 8
-  Normal_User_Output_Quality: 9
+  Normal_User_Output_Quality: 8
   Overall: 8
   blockers:
     - "Generated-client regeneration determinism is now closed by T054: update.js supports --schema-file review snapshots, URL mode fetches OpenAPI once into a temp snapshot, openapi-typescript uses argv-array spawn, and schema.d.ts diff stats were inspected with no generated churn."
@@ -236,7 +236,8 @@ current_scorecard:
     - "Both Claude and Antigravity recommended a small future clarification of counts_as_repair semantics in ai_builder_proposal_telemetry.py; it was not added in T038 because that file was outside the approved write scope."
     - "T058 closed the source-material label drift and gave C3 typed live-eval binding-shape assertions, but authenticated live eval still needs to be repeated against a backend confirmed to run the current branch after later planner/runtime changes."
     - "T059 closed the next-tranche ranking with Claude and Antigravity green: run T060 live eval first if local service/current-code/credentials are available; if blocked, activate independent T061 direct ProposalSubmissionOwner test-topology cleanup without treating T060 as passed."
-    - "Overall remains 8 until full-source typing/test baseline, consolidation/readability/test-topology tranches, and repeated authenticated live-eval evidence prove every dimension is honestly at least 9."
+    - "T060 repeated the authenticated five-case live eval on backend container HEAD f164f2ede. C3 failed because the generated audio-to-DOCX plan lacked required source-text and selected structured-field bindings on the writing/materialization target. This is now the highest score-moving blocker before test-topology cleanup."
+    - "Overall remains 8 until the C3 normal-user output failure, full-source typing/test baseline, consolidation/readability/test-topology tranches, and repeated authenticated live-eval evidence prove every dimension is honestly at least 9."
 
 score_floor_completion_gates:
   source: "2026-05-21 user review: the board must prevent 'plan executed' from being confused with '9/10 achieved'."
@@ -5997,7 +5998,7 @@ tasks:
   - id: T060
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Run authenticated Flow AI Builder five-case live eval against a backend confirmed to be running the current branch, then update the scorecard honestly from the result. If the local backend/current-code/credential state blocks this quickly, record the exact blocker and activate T061 instead of stalling the board."
     inputs:
@@ -6025,6 +6026,73 @@ tasks:
       - "Backend cannot be proven to run the current branch quickly."
       - "Required local credentials/space id are unavailable in the environment."
       - "Live eval failure points to a product bug that needs source changes; open an interruption task instead of patching inside T060."
+    receipt:
+      completed_at: "2026-05-23T03:22:00+02:00"
+      summary: "Ran the authenticated five-case Flow AI Builder live eval against the devcontainer backend mounted at /workspace, verified at git HEAD f164f2ede. The runner completed with exit code 1 because C3_audio_to_docx_report failed. C1 vague meeting notes, C2 JSON-with-document-words, C4 runtime form fields, and C5 revise/edit flow passed. C3 produced a proposed docx_document plan with audio/text input, but the new ExpectedQuestionBinding assertion found no source-text plus selected structured-field underlag on the target writing/materialization step."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-live-eval.md"
+        - "/tmp/flow-ai-builder-t026-live-eval/20260523T011751Z"
+      environment:
+        branch: "feature/refactor-flows-flowai"
+        host_head: "f164f2ede"
+        backend_container: "eneo-41ae93-eneo-1"
+        backend_container_head: "f164f2ede"
+        base_url: "http://127.0.0.1:8123"
+        credentials: "Supplied via process environment only; no secret values written to repo files or artifacts."
+      validation:
+        - "docker exec eneo backend container: cd /workspace && git rev-parse --short HEAD -> f164f2ede"
+        - "cd backend && uv run python scripts/flow_ai_builder_live_eval.py --base-url http://127.0.0.1:8123 --timeout-seconds 240 --inter-case-delay-seconds 1 -> exit 1"
+        - "Sanitized ledger appended to .codex/artifacts/flow-ai-builder-live-eval.md."
+      results:
+        C1_vague_meeting_notes: "pass; proposed structured_text flow with text input."
+        C2_json_with_document_words: "pass; proposed structured_json flow with document/json/text inputs and no DOCX/PDF output."
+        C3_audio_to_docx_report: "fail; proposed docx_document flow with audio/text inputs, but missing required source text and selected structured field refs in writing_or_materialization question binding."
+        C4_runtime_form_fields: "pass; proposed structured_text flow with document/json/text inputs and customer_name + analysis_request form fields."
+        C5_revise_edit_flow: "pass; revise returned a replacement proposed plan."
+      score_impact:
+        score_floor: 8
+        normal_user_output_quality: 8
+        reason: "The live eval disproves a current 9 for Normal-User Output Quality. The C3 failure is a real normal-user output-shape issue and must drive the next planning slice before topology/test cleanup."
+      next: "Open T063 as the active diagnosis/plan task for the C3 audio-to-DOCX underlag/structured extraction failure. Keep T061/T062 queued."
+
+  - id: T063
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Diagnose the T060 C3 audio-to-DOCX live-eval failure and produce a peer-gated implementation plan before product code changes. Decide the canonical owner for making normal-user audio -> structured sections -> DOCX flows produce source-text plus selected structured-field underlag without exposing raw templates to the LLM contract."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-live-eval.md"
+      - ".codex/artifacts/flow-ai-builder-t059-next-tranche-ranking.md"
+      - "/tmp/flow-ai-builder-t026-live-eval/20260523T011751Z/C3_audio_to_docx_report/result.json"
+      - "/tmp/flow-ai-builder-t026-live-eval/20260523T011751Z/C3_audio_to_docx_report/plan-fetched.json"
+      - "backend/scripts/flow_ai_builder_live_eval.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_outline.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_dataflow.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_source_material.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_compiler.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_quality_critic.py"
+    constraints:
+      - "Read-only until the diagnosis and implementation plan pass Claude; use Antigravity if available."
+      - "Do not implement inside T063 unless the board is explicitly revised to a worker after peer gates."
+      - "Do not expose raw `input_bindings`, `uses_previous_fields`, `uses_previous_outputs`, or template variables to the outline LLM contract unless a peer-reviewed architecture decision proves this is cleaner."
+      - "Do not use token/keyword/fuzzy matching or add a new LLM pass without evidence that deterministic typed mechanics cannot solve the failure."
+      - "Preserve source-material ownership in ai_builder_source_material.py and targeted-underlag mechanics ownership in ai_builder_create_dataflow.py unless the diagnosis proves a better canonical owner."
+      - "Do not count a live-eval harness assertion tweak as fixing the product unless the generated plan behavior is also correct for normal users."
+    expected_output:
+      - "Evidence-backed root cause for why C3 generated text-only section analysis instead of selected structured fields feeding the DOCX writing/materialization target."
+      - "Canonical owner decision: outline semantics vs dataflow targeted field selection vs compiler normalization vs critic repair."
+      - "Explicit rejected alternatives, especially LLM raw-template exposure, keyword matching, broad JSON fallback, and cosmetic harness-only changes."
+      - "Implementation tranche with allowed files, acceptance criteria, red tests, validation commands, live-eval re-run requirements, and score impact."
+      - "Claude review artifact with GREEN_LIGHT yes / MIN_SCORE >= 8 before implementation. Antigravity artifact if quota/tooling allows; missing coverage must be recorded as missing, not pass."
+    verify:
+      - "Read sanitized T060 C3 result plus bounded shape fields from plan-fetched.json; do not paste raw prompts, full plan JSON, file contents, or secrets into artifacts."
+      - "Run focused source/test inventory with file:line evidence before choosing a fix."
+      - "Run Claude plan review; run Antigravity synthesis if available."
+    stop_if:
+      - "The clean fix would require a broader product decision about per-step output schema, DOCX generation semantics, or exposing template syntax to LLMs."
+      - "The plan would only satisfy the harness while leaving normal-user output quality ambiguous."
+      - "Peer review says T061/T062 or another blocker outranks the C3 output failure despite the failed live eval."
     receipt: null
 
   - id: T061
