@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T063
+active_task: T064
 
 interruptions:
   - id: I001
@@ -6058,7 +6058,7 @@ tasks:
   - id: T063
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Diagnose the T060 C3 audio-to-DOCX live-eval failure and produce a peer-gated implementation plan before product code changes. Decide the canonical owner for making normal-user audio -> structured sections -> DOCX flows produce source-text plus selected structured-field underlag without exposing raw templates to the LLM contract."
     inputs:
@@ -6093,6 +6093,89 @@ tasks:
       - "The clean fix would require a broader product decision about per-step output schema, DOCX generation semantics, or exposing template syntax to LLMs."
       - "The plan would only satisfy the harness while leaving normal-user output quality ambiguous."
       - "Peer review says T061/T062 or another blocker outranks the C3 output failure despite the failed live eval."
+    receipt:
+      completed_at: "2026-05-23T03:56:00+02:00"
+      summary: "Closed the peer-gated diagnosis/plan task for the T060 C3 audio-to-DOCX live-eval failure. The final plan identifies the root cause as runtime classifier ownership of `structured_analysis_need=text_only_analysis` before discovery can ask the structured-analysis question, combined with audio-to-artifact rich-workflow gating that does not yet reuse the existing JSON-contract critic. T064 is activated as the implementation worker."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t063-c3-live-eval-failure-plan.md"
+        - ".codex/artifacts/claude-peer-loop-t063-c3-live-eval-failure-diagnosis-20260523T013140Z.md"
+        - ".codex/artifacts/claude-peer-loop-t063-c3-live-eval-revised-plan-20260523T014341Z.md"
+        - ".codex/artifacts/claude-peer-loop-t063-c3-live-eval-final-revised-plan-20260523T014842Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t063-c3-live-eval-final-plan-synthesis-20260523T015100Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t063-c3-live-eval-final-plan-synthesis-iteration-2-20260523T015249Z.md"
+        - ".codex/artifacts/claude-peer-loop-t063-c3-live-eval-final-plan-after-antigravity-20260523T015512Z.md"
+      peer_review:
+        claude_iteration_1: "GREEN_LIGHT no / MIN_SCORE 6; required exact writer trace, ask-vs-assume decision, critic enforcement gap closure, false-positive tests, and discovery-to-summary integration test."
+        claude_iteration_2: "GREEN_LIGHT no / MIN_SCORE 6; required reconciling with the existing rich-workflow JSON-contract critic, choosing classifier-guard placement, making deterministic predicate widening concrete, preserving existing critic behavior, and adding ask-path tests."
+        claude_iteration_3: "GREEN_LIGHT yes / MIN_SCORE 8 after Codex chose existing critic reuse, classifier allowed-values pre-narrowing at runtime boundary, no merge-time profile leak, and ask-not-assume for C3."
+        antigravity_iteration_1: "GREEN_LIGHT no / MIN_SCORE 7; found profile-level audio consistency gap, missing explicit audio markers, and missing direct unit coverage for `prefer_structured_intermediate`. Codex verified Antigravity's C3-specific claim was too strong because the force-hint path already returns true for `extracts`, but accepted the broader consistency fix."
+        antigravity_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 9 after plan added profile predicate widening, bounded audio marker/pattern widening, `structured_analysis_need_is_vague` widening, profile tests, rich-workflow side-effect tests, and C3 live-eval answer/turn updates."
+        claude_iteration_4: "GREEN_LIGHT yes / MIN_SCORE 8 after Antigravity revisions; no remaining plan blockers."
+      selected_worker:
+        id: T064
+        reason: "T060 proved the highest current score-floor blocker is Normal-User Output Quality, not processor LOC or test topology. T064 fixes the canonical discovery/question/critic path that caused C3 to produce a text-only DOCX plan without selected structured-field underlag."
+      score_impact: "No score increase yet. T063 is a judge/plan task; Normal-User Output Quality remains 8 until T064 is implemented, validated, and the authenticated live eval shows C3 recovery."
+
+  - id: T064
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Fix the T060 C3 audio-to-DOCX normal-user output failure by preventing runtime classifier `text_only_analysis` from suppressing the structured-analysis question, widening audio-to-artifact rich-workflow detection to reuse the existing JSON-contract critic, and proving C3 produces source-text plus selected structured-field underlag without exposing raw templates to the outline LLM contract."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t063-c3-live-eval-failure-plan.md"
+      - ".codex/artifacts/claude-peer-loop-t063-c3-live-eval-final-plan-after-antigravity-20260523T015512Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t063-c3-live-eval-final-plan-synthesis-iteration-2-20260523T015249Z.md"
+      - "/tmp/flow-ai-builder-t026-live-eval/20260523T011751Z/C3_audio_to_docx_report/result.json"
+      - "/tmp/flow-ai-builder-t026-live-eval/20260523T011751Z/C3_audio_to_docx_report/requirements-summary.json"
+      - "/tmp/flow-ai-builder-t026-live-eval/20260523T011751Z/C3_audio_to_docx_report/plan-fetched.json"
+    constraints:
+      - "Implement only the final peer-gated plan. Do not broaden into processor topology, dataflow field selection, raw template exposure, a new critic owner, or an audio structured skeleton unless red tests prove the approved path cannot work."
+      - "Preserve `planning_state_builder.merge_llm_resolved_slots` as a pure merge of accepted classifier output; do not pass freeform text or `DiscoveryProfile` into it."
+      - "Classifier allowed-values pre-narrowing must be a named, strict-typed helper, not an inline dictionary mutation hidden in runtime discovery."
+      - "Reuse the existing rich-workflow JSON-contract critic. Do not add a parallel slot-driven critic in this worker."
+      - "Keep the C3 live-eval prompt unchanged; only add the structured-analysis answer and enough turns to exercise the ask path."
+      - "Do not inflate the scorecard until tests and live eval prove the product behavior improved."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_discovery_profile_builder.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_discovery_issue_rules.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_discovery_runtime.py"
+      - "backend/src/intric/flows/ai_builder/planning_state_builder.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_critic_invariants.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_quality_critic.py"
+      - "backend/scripts/flow_ai_builder_live_eval.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_discovery_profile.py"
+      - "backend/tests/unittests/flows/ai_builder/test_discovery_flow.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "backend/tests/unittests/flows/ai_builder/test_flow_ai_builder_live_eval.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    acceptance:
+      - "C3-style `transcribes meeting audio, extracts ten topic sections, and produces a DOCX meeting report` cannot be resolved to `structured_analysis_need=text_only_analysis` by the slot classifier."
+      - "C3-style extraction-to-DOCX first asks the existing `structured_analysis_need` question when the user did not explicitly choose structured/plain-text."
+      - "After answering `use_structured_analysis`, requirements confirmation records structured analysis as use, not text-only."
+      - "`should_prefer_structured_intermediate` supports audio-like input paired with structured/quality pressure and artifact/report output, while simple audio transcription/verbatim DOCX remains out of structured mode."
+      - "`structured_analysis_need_is_vague` selects the structured-analysis question for rich workflows with `prefers_structured_intermediate`."
+      - "The existing rich-workflow JSON-contract critic fires for audio-to-artifact extraction plans without a non-terminal JSON contract step and still fires for the existing document-to-DOCX case."
+      - "The widened rich-workflow predicate does not make form-field or multiple-step invariants over-fire on simple audio-to-DOCX prompts; it does reject too-short audio quality/review plans where intended."
+      - "The C3 live-eval prompt remains unchanged, with only `structured_analysis_need=(\"use_structured_analysis\",)` and turn budget updated."
+    verify:
+      - "Red tests first for classifier narrowing, ask path, structured summary after answer, profile predicate, critic reuse, false-positive guards, and live-eval C3 answer/turn behavior."
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_discovery_profile.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_discovery_flow.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_flow_ai_builder_live_eval.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q"
+      - "cd backend && uv run ruff check touched T064 files"
+      - "cd backend && uv run ruff format --check touched T064 files"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder scripts/flow_ai_builder_live_eval.py"
+      - "git diff --check"
+      - "Authenticated five-case live eval against backend confirmed to run current branch after implementation/restart; C3 must pass or produce a precise follow-up blocker."
+    stop_if:
+      - "The approved predicate/critic path cannot make C3 pass without a new audio structured skeleton or raw template exposure; stop and re-plan before broadening."
+      - "Classifier narrowing requires changing `merge_llm_resolved_slots` to understand freeform text or discovery profiles."
+      - "The widened audio markers cause broad false positives that make simple audio transcription/DOCX ask unnecessary structured-analysis questions."
+      - "Peer implementation gate finds blockers after validation."
     receipt: null
 
   - id: T061
