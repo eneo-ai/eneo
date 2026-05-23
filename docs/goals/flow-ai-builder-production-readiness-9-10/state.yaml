@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T067
+active_task: T068
 
 interruptions:
   - id: I001
@@ -6529,7 +6529,7 @@ tasks:
   - id: T067
     type: judge
     assignee: Judge
-    status: active
+    status: completed
     reasoning_hint: high
     target_review_by: "2026-05-24"
     objective: "Re-rank the next highest-score-moving tranche after T066 with explicit evidence, avoiding LOC-only processor splitting and selecting work that most improves the strict 8/10 floor toward a defensible 9/10."
@@ -6555,6 +6555,70 @@ tasks:
       - "Inspect current state.yaml, latest receipts, and relevant .codex/artifacts."
       - "Run Claude plan loop until GREEN_LIGHT yes / MIN_SCORE >= 8 or document evidence-based disagreement."
       - "Run Antigravity final plan review if available."
+    receipt:
+      completed_at: "2026-05-23T05:00:00+02:00"
+      summary: "Re-ranked the next tranche after T066 from current source, board, and validation evidence. Selected T068 authenticated five-case live-eval proof before further code refactoring because T065/T066 changed active-submission runtime ownership and the board explicitly says live-eval proof must be repeated after planner/runtime changes. Queued T069 proposal-submission test-locality cleanup as the immediate code follow-up if T068 passes or is blocked by environment. Rejected broad source splitting because current evidence shows remaining private processor-test reach-through and live-proof staleness are clearer blockers than LOC."
+      score_impact: "Planning-only tranche. No score increase. Strict overall floor remains 8/10 because T068 has not run and maintainability/readability/test-locality, AI slop/comment/naming, and full-source typing/test baseline blockers remain."
+      selected_next_task: T068
+      artifacts:
+        ranking: ".codex/artifacts/flow-ai-builder-t067-next-tranche-ranking.md"
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t067-next-flow-ai-builder-tranche-ranking-20260523T044917Z.md -> GREEN_LIGHT yes / MIN_SCORE 8 with required tightenings"
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t067-revised-next-flow-ai-builder-tranche-ranking-20260523T045350Z.md -> GREEN_LIGHT no / MIN_SCORE 7 because the backend freshness proof used the wrong service and a non-falsifying bind-mounted git check"
+        claude_iteration_3: ".codex/artifacts/claude-peer-loop-t067-final-revised-next-flow-ai-builder-tranche-ranking-20260523T045553Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity_iteration_1: ".codex/artifacts/antigravity-peer-loop-t067-final-next-flow-ai-builder-tranche-ranking-20260523T045740Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      validation:
+        - "git status --short --branch -> branch feature/refactor-flows-flowai ahead 14; unrelated dirty files only after T066 commit"
+        - "git log --oneline --decorate -5 -> HEAD 94012d7d8 Centralize AI Builder submission tool names"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src -> 112 errors, mostly outside AI Builder; retained as broader typing blocker, not mixed into T068/T069"
+        - "AI Builder source inventory: 150 top-level backend Python files under backend/src/intric/flows/ai_builder; 27 under 100 LOC; 11 under 50 LOC"
+        - "Remaining processor-test private owner reach-through: test_ai_builder_proposal_processor.py still references processor._proposal_submission at lines 256, 1173, 1936, 2055, 2117, 2180, 2238"
+      accepted_peer_changes:
+        - "T068 must use a real API freshness proof: restart the devcontainer `eneo` service before eval, use process-freshness evidence, or record API freshness as unproven. Do not use a bind-mounted git rev-parse check as proof."
+        - "T068 flake policy: if any case fails, rerun the five-case eval once. Same case_id failing twice downgrades/blocks Normal-User Output Quality. A first-run failure followed by pass is flaky/inconclusive and blocks 9/10 proof rather than passing."
+        - "The live-eval blocker is recurring. A passing T068 refreshes evidence but does not retire the rule that live eval must repeat after later planner/runtime changes."
+        - "T069 should use AST guards against `_proposal_submission` reach-through in processor tests and prefer class-level ProposalSubmissionOwner.dispatch_submission_tool_call patching over constructor DI."
+      residual_risks:
+        - "T068 may be blocked by local service/current-code/credential state. If blocked, record the exact blocker and activate T069 rather than stalling."
+        - "If T068 fails or flakes, open a focused product-fix/investigation interruption and do not proceed as if Normal-User Output Quality proof is current."
+        - "T069 remains queued but not implemented; broader goal remains incomplete."
+
+  - id: T068
+    type: qa
+    assignee: Worker
+    status: active
+    reasoning_hint: medium
+    target_review_by: "2026-05-24"
+    objective: "Run authenticated five-case Flow AI Builder live eval after T065/T066 against a backend with proven or explicitly qualified freshness, then update the scorecard honestly before further refactoring."
+    inputs:
+      - "backend/scripts/flow_ai_builder_live_eval.py"
+      - ".codex/artifacts/flow-ai-builder-t067-next-tranche-ranking.md"
+      - "T065/T066 receipts"
+      - "Local API key env vars only"
+    constraints:
+      - "No source/product code changes unless the eval exposes a live session-breaking bug and the board opens a separate interruption task."
+      - "Do not write secrets to artifacts, board, shell history, or source files."
+      - "Do not stage unrelated dirty files."
+      - "Do not claim API freshness if restart/process freshness proof is unavailable."
+      - "Do not treat a flaky first-run failure followed by pass as a 9/10 pass; record flaky/inconclusive and open follow-up."
+    acceptance_criteria:
+      - "Record git status and HEAD before running."
+      - "Restart the devcontainer `eneo` service before eval and record restart timestamp, or record process freshness evidence, or explicitly qualify the eval as API freshness not proven."
+      - "Run the authenticated five-case eval with ENEO_API_KEY/API_KEY/ENEO_FLOW_TEST_SPACE_ID from shell env only."
+      - "If a case fails, rerun the five-case eval once with a fresh output root."
+      - "Same case_id failing twice downgrades or blocks Normal-User Output Quality and opens a focused interruption."
+      - "First-run failure followed by pass is recorded as flaky/inconclusive, does not refresh 9/10 proof, and opens investigation/follow-up."
+      - "If all cases pass on a fresh/current backend, append sanitized results to .codex/artifacts/flow-ai-builder-live-eval.md and update current_scorecard evidence without retiring the recurring live-eval-after-runtime-change rule."
+      - "Activate T069 after a clean pass or if T068 is blocked by environment; do not activate T069 after product failure/flakiness without recording the interruption decision."
+    verify:
+      - "git status --short --branch"
+      - "git log --oneline --decorate -6"
+      - "git rev-parse HEAD"
+      - "docker compose -f .devcontainer/docker-compose.yml restart eneo, or process-freshness fallback, or exact API-freshness-not-proven blocker"
+      - "curl -fsS http://127.0.0.1:8123/version as liveness/version context only"
+      - "cd backend && ENEO_API_KEY=$ENEO_LOCAL_API_KEY API_KEY=$ENEO_LOCAL_API_KEY ENEO_FLOW_TEST_SPACE_ID=$ENEO_FLOW_TEST_SPACE_ID uv run python scripts/flow_ai_builder_live_eval.py --base-url http://127.0.0.1:8123 --timeout-seconds 240 --inter-case-delay-seconds 1"
+      - "If first eval fails, rerun the same command once with a distinct --output-root"
+      - "git diff --check"
+      - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
     receipt: null
 
 checks:
@@ -6563,14 +6627,11 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T066 active-submission tool-name SSoT cleanup completed and peer-gated. T067 is now active as a read-only judge item to re-rank the next highest-score-moving tranche. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T066
+    result: "T067 next-tranche ranking completed and peer-gated. T068 authenticated five-case live-eval proof is now active before further code refactoring. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T067
     commands:
-      - "T066 red tests were added and confirmed failing before production changes."
-      - "T066 focused tests: cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_tools.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py tests/unittests/flows/ai_builder/test_ai_builder_prompts.py tests/unittests/flows/ai_builder/test_ai_builder_knowledge_pack.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q -> 183 passed"
-      - "Full AI Builder backend suite: cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2354 passed, 4 skipped, 11 warnings"
-      - "Ruff check/format touched T066 files -> passed"
-      - "Pyright src/intric/flows/ai_builder -> 0 errors"
-      - "git diff --check -> passed"
-      - "Claude T066 implementation gate: .codex/artifacts/claude-peer-loop-t066-active-submission-tool-name-ssot-implementation-review-20260523T043556Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity T066 implementation gate: .codex/artifacts/antigravity-peer-loop-t066-active-submission-tool-name-ssot-implementation-review-20260523T043752Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "T067 ranking artifact: .codex/artifacts/flow-ai-builder-t067-next-tranche-ranking.md"
+      - "Claude T067 iteration 1: .codex/artifacts/claude-peer-loop-t067-next-flow-ai-builder-tranche-ranking-20260523T044917Z.md -> GREEN_LIGHT yes / MIN_SCORE 8 with tightenings"
+      - "Claude T067 iteration 2: .codex/artifacts/claude-peer-loop-t067-revised-next-flow-ai-builder-tranche-ranking-20260523T045350Z.md -> GREEN_LIGHT no / MIN_SCORE 7"
+      - "Claude T067 iteration 3: .codex/artifacts/claude-peer-loop-t067-final-revised-next-flow-ai-builder-tranche-ranking-20260523T045553Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity T067 iteration 1: .codex/artifacts/antigravity-peer-loop-t067-final-next-flow-ai-builder-tranche-ranking-20260523T045740Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
