@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T065
+active_task: T066
 
 interruptions:
   - id: I001
@@ -6368,7 +6368,7 @@ tasks:
   - id: T065
     type: worker
     assignee: Worker
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Deepen ProposalSubmissionOwner into the forced active-submission attempt owner by moving first-attempt active-submission orchestration out of AIBuilderProposalProcessor without callbacks, facade layers, outline/edit splits, finalizer DI, or generic dispatch creep."
     inputs:
@@ -6423,6 +6423,69 @@ tasks:
       - "The owner cannot preserve the existing first-attempt upstream error event contract."
       - "Tests become mock choreography instead of proposal behavior coverage."
       - "The diff needs files outside the allowed scope."
+    receipt:
+      completed_at: "2026-05-23T04:10:00+02:00"
+      summary: "Deepened ProposalSubmissionOwner into the active create/edit submission attempt owner. AIBuilderProposalProcessor.propose_plan now delegates active-submission attempt orchestration to ProposalSubmissionOwner.run_active_submission_attempt(...). The processor no longer imports or calls call_proposal_completion_with_usage, no longer sequences active submission tool/schema selection, scoped model preflight, first-attempt forced completion, first-attempt response validation, or forced retry. The owner now validates first-attempt forced responses through a typed LiteLLMProposalMessage Protocol and frozen ForcedSubmissionResponse, accepts exactly one active submission tool call, and routes missing/multiple/non-submission responses through the existing forced retry path."
+      score_impact: "Improves Maintainability, Clean Architecture, Separation of Concerns, Single Source of Truth, Human Readability, Human Reviewability, Runtime Reliability, and Test Quality inside the active submission path. Strict overall floor remains 8/10 because T066 question-recovery SSoT, broader processor topology/readability, full-source typing/test baseline, and repeated live-output proof still block a defensible 9/10."
+      scope_variance:
+        - "The original T065 constraints said not to add Protocols. Antigravity identified message: object/getattr as a blocker after Claude green; Codex added LiteLLMProposalMessage Protocol as a narrow boundary type for the external LiteLLM message shape. This is recorded as an intentional peer-reviewed exception, not a new fake seam."
+      changed_files:
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      artifacts:
+        implementation_summary: ".codex/artifacts/flow-ai-builder-t065-implementation-summary.md"
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t065-active-submission-owner-implementation-review-20260523T034921Z.md -> GREEN_LIGHT no / MIN_SCORE 7"
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t065-active-submission-owner-implementation-review-iteration-2-20260523T035715Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity_iteration_1: ".codex/artifacts/antigravity-peer-loop-t065-active-submission-owner-final-review-20260523T035909Z.md -> GREEN_LIGHT no / MIN_SCORE 7"
+        claude_iteration_3: ".codex/artifacts/claude-peer-loop-t065-active-submission-owner-implementation-review-iteration-3-20260523T040733Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity_iteration_2: ".codex/artifacts/antigravity-peer-loop-t065-active-submission-owner-final-review-iteration-2-20260523T040841Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 75 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py -q -> 25 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2352 passed, 4 skipped, 11 warnings"
+        - "cd backend && uv run ruff check touched T065 backend files/tests -> passed"
+        - "cd backend && uv run ruff format --check touched T065 backend files/tests -> passed after final formatting"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
+        - "git diff --check -> passed"
+        - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"' -> yaml ok"
+        - "git grep -n \"_tool_calls_contain_submission\" -- backend -> zero results"
+        - "git grep -n \"SUBMISSION_TOOL_NAMES\" -- backend/src backend/tests -> only owner-internal references and static guard"
+      residual_risks:
+        - "T066 must resolve or explicitly justify the remaining active submission tool-name helper split in ai_builder_question_recovery.py."
+        - "AIBuilderProposalProcessor.handle_tool_call still accepts tool_calls as list[Any]; tightening to Sequence[RuntimeToolCall] is a future type-topology cleanup."
+        - "run_active_submission_attempt remains a wide keyword-only method by approved T065 constraint; a later topology tranche may replace duplicated wide signatures if it removes complexity rather than adding a parallel request shape."
+        - "Broader goal remains incomplete; do not raise the score floor above 8 from T065 alone."
+
+  - id: T066
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: medium
+    target_review_by: "2026-05-24"
+    objective: "Resolve the remaining active submission tool-name single-source-of-truth split between ProposalSubmissionOwner and ai_builder_question_recovery without broadening T065, adding fake seams, or moving question-recovery ownership prematurely."
+    inputs:
+      - "T065 implementation and post-implementation peer receipts"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+    constraints:
+      - "Do not implement as part of T065 unless a peer-review blocker proves T065 cannot be committed without it."
+      - "Prefer one canonical owner/helper for active submission tool-name selection only if it reduces coupling and does not make question recovery depend on ProposalSubmissionOwner construction."
+      - "Do not add a broad utilities/common module."
+      - "Do not move structured-question recovery or confirm-requirements lifecycle without a separate peer-gated plan."
+    acceptance_criteria:
+      - "The board records whether the duplicate helper is merged, moved to a narrow existing contract owner, or explicitly justified with a deletion trigger."
+      - "If merged, static ownership tests prevent a second active submission tool-name helper from reappearing."
+      - "If deferred, the reason names the cycle/coupling risk and the next owner candidate."
+      - "No score increase unless peer-reviewed evidence shows a real SSoT/readability floor movement."
+    verify:
+      - "Re-rank after T065 and decide whether T066 outranks processor topology/readability, full-source typing/test baseline, and live-eval proof."
+      - "Run Claude plan review if implementation is selected."
+      - "Run Antigravity if quota/tooling is available."
     receipt: null
 
 checks:
@@ -6431,12 +6494,14 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T062 read-only ProposalSubmissionOwner cohesion/DI/orchestration verdict completed and peer-gated. T065 active-submission owner-deepening worker is active. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T062
+    result: "T065 active-submission owner-deepening worker completed and peer-gated. T066 is now active as the next judge item to resolve or explicitly justify the remaining question-recovery active submission tool-name SSoT split. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T065
     commands:
-      - "Claude T062 iteration 1: .codex/artifacts/claude-peer-loop-t062-proposalsubmissionowner-cohesion-verdict-plan-gate-20260523T032017Z.md -> GREEN_LIGHT no / MIN_SCORE 6"
-      - "Claude T062 iteration 2: .codex/artifacts/claude-peer-loop-t062-proposalsubmissionowner-cohesion-verdict-plan-gate-iteration-2-20260523T032438Z.md -> GREEN_LIGHT no / MIN_SCORE 7"
-      - "Claude T062 iteration 3: .codex/artifacts/claude-peer-loop-t062-proposalsubmissionowner-cohesion-verdict-plan-gate-iteration-3-20260523T032733Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity T062 synthesis: .codex/artifacts/antigravity-peer-loop-t062-proposalsubmissionowner-cohesion-final-synthesis-20260523T032945Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Claude T059 iteration 3: .codex/artifacts/claude-peer-loop-t059-final-revised-next-flow-ai-builder-tranche-ranking-20260523T011139Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity T059 iteration 2: .codex/artifacts/antigravity-peer-loop-t059-final-next-tranche-ranking-after-claude-green-20260523T011427Z.md -> final GREEN_LIGHT yes / MIN_SCORE 9"
+      - "T065 focused owner tests: cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 75 passed"
+      - "T065 repair tests: cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py -q -> 25 passed"
+      - "Full AI Builder backend suite: cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2352 passed, 4 skipped, 11 warnings"
+      - "Ruff check/format touched T065 files -> passed"
+      - "Pyright src/intric/flows/ai_builder -> 0 errors"
+      - "git diff --check -> passed"
+      - "Claude T065 iteration 3: .codex/artifacts/claude-peer-loop-t065-active-submission-owner-implementation-review-iteration-3-20260523T040733Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity T065 iteration 2: .codex/artifacts/antigravity-peer-loop-t065-active-submission-owner-final-review-iteration-2-20260523T040841Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"

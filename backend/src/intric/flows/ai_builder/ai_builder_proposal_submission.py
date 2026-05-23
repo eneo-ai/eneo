@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator
-from typing import TYPE_CHECKING, Any
+from collections.abc import AsyncGenerator, Sequence
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any, Protocol
 
 from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
@@ -12,6 +13,7 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
     record_proposal_architecture_failure,
 )
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    RuntimeToolCall,
     make_provider_safe_server_tool_call_id,
 )
 from intric.flows.ai_builder.ai_builder_create_proposal import (
@@ -50,6 +52,7 @@ from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
 from intric.flows.ai_builder.ai_builder_proposal_completion import (
+    call_proposal_completion_with_usage,
     make_usage_tracked_proposal_completion,
 )
 from intric.flows.ai_builder.ai_builder_proposal_finalization import (
@@ -92,12 +95,48 @@ from intric.flows.ai_builder.ai_builder_tools import (
 )
 from intric.flows.ai_builder.planning_state import PlanningState
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
+from intric.main.logging import get_logger
 
 if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
 
+logger = get_logger(__name__)
+
 EventBatch = tuple[dict[str, str], ...]
 SUBMISSION_TOOL_NAMES = frozenset({OUTLINE_FLOW_TOOL_NAME, EDIT_FLOW_TOOL_NAME})
+
+
+@dataclass(frozen=True)
+class ForcedSubmissionResponse:
+    text_content: str | None
+    tool_call: RuntimeToolCall
+
+
+class LiteLLMProposalMessage(Protocol):
+    tool_calls: Sequence[RuntimeToolCall] | None
+    content: str | None
+
+
+def _forced_submission_response(
+    *,
+    message: LiteLLMProposalMessage,
+    submission_tool_name: str,
+) -> ForcedSubmissionResponse | None:
+    if submission_tool_name not in SUBMISSION_TOOL_NAMES:
+        return None
+
+    tool_calls = tuple(message.tool_calls or ())
+    if len(tool_calls) != 1:
+        return None
+
+    tool_call = tool_calls[0]
+    if tool_call.function.name != submission_tool_name:
+        return None
+
+    return ForcedSubmissionResponse(
+        text_content=message.content,
+        tool_call=tool_call,
+    )
 
 
 class ProposalSubmissionOwner:
@@ -123,10 +162,10 @@ class ProposalSubmissionOwner:
             quality_retry_warning_codes=quality_retry_warning_codes,
         )
 
-    def active_submission_tool_name(self, flow: "Flow | None") -> str:
+    def _active_submission_tool_name(self, flow: "Flow | None") -> str:
         return EDIT_FLOW_TOOL_NAME if flow is not None else OUTLINE_FLOW_TOOL_NAME
 
-    def active_submission_tool_schemas(
+    def _active_submission_tool_schemas(
         self,
         *,
         flow: "Flow | None",
@@ -154,7 +193,175 @@ class ProposalSubmissionOwner:
             )
         ]
 
-    async def preflight_scoped_model_revision_if_requested(
+    def dispatch_submission_tool_call(
+        self,
+        *,
+        ctx: ProposalTurnContext,
+        tool_call: Any,
+    ) -> AsyncGenerator[dict[str, str], None] | None:
+        tool_name = tool_call.function.name
+        if tool_name == OUTLINE_FLOW_TOOL_NAME:
+            return self._handle_outline_flow_tool_call(ctx=ctx, tool_call=tool_call)
+        if tool_name == EDIT_FLOW_TOOL_NAME:
+            return self._handle_edit_flow_tool_call(ctx=ctx, tool_call=tool_call)
+        return None
+
+    def contains_submission_tool_call(
+        self,
+        tool_calls: Sequence[RuntimeToolCall],
+    ) -> bool:
+        return any(call.function.name in SUBMISSION_TOOL_NAMES for call in tool_calls)
+
+    async def run_active_submission_attempt(
+        self,
+        *,
+        turn: SessionSendTurn,
+        conversation: list[ConversationMessage],
+        new_messages_start: int,
+        llm_messages: list[dict[str, Any]],
+        litellm_model: str,
+        litellm_kwargs: dict[str, Any],
+        available_models: list[dict[str, Any]] | None,
+        available_kbs: list[dict[str, Any]] | None,
+        available_mcps: AIBuilderMCPResourceInput,
+        available_model_refs: set[str] | None,
+        available_kb_refs: set[str] | None,
+        resource_catalog: AIBuilderResourceCatalog | None,
+        max_output_tokens: int,
+        proposal_temperature: float,
+        request_id: str,
+        flow: "Flow | None" = None,
+        assistant_snapshots: AssistantAuthoringSnapshots | None = None,
+        assistant_metadata: dict[str, Any] | None = None,
+        planning_state: PlanningState | None = None,
+        plan_edit_context: AIBuilderPlanEditContext | None = None,
+        prior_plan_for_revision: BuilderPlan | None = None,
+    ) -> AsyncGenerator[dict[str, str], None]:
+        submission_tool_name = self._active_submission_tool_name(flow)
+        tool_schemas = self._active_submission_tool_schemas(
+            flow=flow,
+            available_models=available_models,
+            available_kbs=available_kbs,
+            available_mcps=available_mcps,
+            resource_catalog=resource_catalog,
+        )
+        usage_tracker = ProposalTurnTelemetry(
+            request_id=request_id,
+            model=litellm_model,
+        )
+        ctx = ProposalTurnContext(
+            turn=turn,
+            conversation=conversation,
+            new_messages_start=new_messages_start,
+            llm_messages=llm_messages,
+            tool_schemas=tool_schemas,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            available_model_refs=available_model_refs,
+            available_kb_refs=available_kb_refs,
+            resource_catalog=resource_catalog,
+            max_output_tokens=max_output_tokens,
+            request_id=request_id,
+            flow=flow,
+            assistant_snapshots=assistant_snapshots,
+            assistant_metadata=assistant_metadata,
+            planning_state=planning_state,
+            usage_tracker=usage_tracker,
+            plan_edit_context=plan_edit_context,
+            prior_plan_for_revision=prior_plan_for_revision,
+        )
+        scoped_model_preflight_result = (
+            await self._preflight_scoped_model_revision_if_requested(ctx=ctx)
+        )
+        if scoped_model_preflight_result is not None:
+            if scoped_model_preflight_result.user_message is not None:
+                yield build_text_event(scoped_model_preflight_result.user_message)
+                return
+            if scoped_model_preflight_result.has_events:
+                for event in scoped_model_preflight_result.iter_events():
+                    yield event
+                return
+
+        try:
+            response = await call_proposal_completion_with_usage(
+                litellm_client=self.litellm_client,
+                messages=llm_messages,
+                tool_schemas=tool_schemas,
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                max_output_tokens=max_output_tokens,
+                temperature=proposal_temperature,
+                usage_tracker=usage_tracker,
+                tool_choice={
+                    "type": "function",
+                    "function": {"name": submission_tool_name},
+                },
+            )
+        except Exception as error:
+            logger.error("AI Builder proposal task failed", exc_info=error)
+            yield build_ai_builder_error_event(
+                message="The AI planner failed. Please try again.",
+                code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
+                phase=AIBuilderErrorPhase.PLANNER,
+                request_id=request_id,
+            )
+            return
+
+        message = response.choices[0].message
+        forced_response = _forced_submission_response(
+            message=message,
+            submission_tool_name=submission_tool_name,
+        )
+        if forced_response is not None:
+            dispatch = self.dispatch_submission_tool_call(
+                ctx=replace(ctx, text_content=forced_response.text_content),
+                tool_call=forced_response.tool_call,
+            )
+            if dispatch is not None:
+                yielded = False
+                async for event in dispatch:
+                    yielded = True
+                    yield event
+                if yielded:
+                    return
+
+        forced_events = await self._retry_forced_proposal_after_text(
+            correction_messages=llm_messages,
+            assistant_text=message.content or "",
+            tool_schemas=tool_schemas,
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            turn=turn,
+            conversation=conversation,
+            new_messages_start=new_messages_start,
+            available_model_refs=available_model_refs,
+            available_kb_refs=available_kb_refs,
+            resource_catalog=resource_catalog,
+            max_output_tokens=max_output_tokens,
+            flow=flow,
+            assistant_snapshots=assistant_snapshots,
+            planning_state=planning_state,
+            plan_edit_context=plan_edit_context,
+            prior_plan_for_revision=prior_plan_for_revision,
+            usage_tracker=usage_tracker,
+            assistant_metadata=assistant_metadata,
+        )
+        if forced_events is not None:
+            for event in forced_events:
+                yield event
+            return
+
+        yield build_ai_builder_error_event(
+            message=(
+                "The AI planner did not return a valid flow proposal. "
+                "Please try again or use a more capable model."
+            ),
+            code=AIBuilderErrorCode.PROPOSAL_TOOL_MISSING,
+            phase=AIBuilderErrorPhase.PROPOSAL,
+            request_id=request_id,
+        )
+
+    async def _preflight_scoped_model_revision_if_requested(
         self,
         *,
         ctx: ProposalTurnContext,
@@ -394,7 +601,7 @@ class ProposalSubmissionOwner:
             )
         ]
 
-    async def handle_outline_flow_tool_call(
+    async def _handle_outline_flow_tool_call(
         self,
         *,
         ctx: ProposalTurnContext,
@@ -528,7 +735,7 @@ class ProposalSubmissionOwner:
         for event in outline_result.iter_events():
             yield event
 
-    async def retry_forced_proposal_after_text(
+    async def _retry_forced_proposal_after_text(
         self,
         *,
         correction_messages: list[dict[str, Any]],
@@ -548,11 +755,11 @@ class ProposalSubmissionOwner:
         planning_state: PlanningState | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
-        usage_tracker: ProposalTurnTelemetry | None = None,
+        usage_tracker: ProposalTurnTelemetry,
         assistant_metadata: dict[str, Any] | None = None,
     ) -> EventBatch | None:
-        request_id = usage_tracker.request_id if usage_tracker is not None else ""
-        target_tool_name = self.active_submission_tool_name(flow)
+        request_id = usage_tracker.request_id
+        target_tool_name = self._active_submission_tool_name(flow)
         record_proposal_first_attempt(
             usage_tracker,
             request_id=request_id,
@@ -621,7 +828,7 @@ class ProposalSubmissionOwner:
         )
         return outcome.events
 
-    async def handle_edit_flow_tool_call(
+    async def _handle_edit_flow_tool_call(
         self,
         *,
         ctx: ProposalTurnContext,

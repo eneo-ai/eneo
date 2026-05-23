@@ -30,6 +30,9 @@ from intric.flows.ai_builder.ai_builder_proposal_finalization import (
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     ForcedToolRetryOutcome,
 )
+from intric.flows.ai_builder.ai_builder_proposal_submission import (
+    _forced_submission_response,
+)
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
@@ -59,7 +62,7 @@ from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
 
 
 def test_create_submission_schema_keeps_mcp_refs_free_form() -> None:
-    schemas = _make_submission().active_submission_tool_schemas(
+    schemas = _make_submission()._active_submission_tool_schemas(
         flow=None,
         available_models=[],
         available_kbs=[],
@@ -79,12 +82,68 @@ def test_create_submission_schema_keeps_mcp_refs_free_form() -> None:
     assert "enum" not in step_props["mcp_tool_refs"]["items"]
 
 
+@pytest.mark.parametrize(
+    ("message", "submission_tool_name"),
+    [
+        (SimpleNamespace(tool_calls=None, content="text"), OUTLINE_FLOW_TOOL_NAME),
+        (SimpleNamespace(tool_calls=[], content="text"), OUTLINE_FLOW_TOOL_NAME),
+        (
+            SimpleNamespace(
+                tool_calls=[
+                    _make_tool_call(OUTLINE_FLOW_TOOL_NAME, {}),
+                    _make_tool_call(EDIT_FLOW_TOOL_NAME, {}),
+                ],
+                content="text",
+            ),
+            OUTLINE_FLOW_TOOL_NAME,
+        ),
+        (
+            SimpleNamespace(
+                tool_calls=[_make_tool_call(EDIT_FLOW_TOOL_NAME, {})],
+                content="text",
+            ),
+            OUTLINE_FLOW_TOOL_NAME,
+        ),
+        (
+            SimpleNamespace(
+                tool_calls=[_make_tool_call(OUTLINE_FLOW_TOOL_NAME, {})],
+                content="text",
+            ),
+            "confirm_requirements",
+        ),
+    ],
+)
+def test_forced_submission_response_rejects_missing_parallel_wrong_or_unsupported_tools(
+    message: SimpleNamespace, submission_tool_name: str
+) -> None:
+    assert (
+        _forced_submission_response(
+            message=message,
+            submission_tool_name=submission_tool_name,
+        )
+        is None
+    )
+
+
+def test_forced_submission_response_accepts_one_active_submission_tool() -> None:
+    tool_call = _make_tool_call(OUTLINE_FLOW_TOOL_NAME, {})
+
+    response = _forced_submission_response(
+        message=SimpleNamespace(tool_calls=[tool_call], content="Här är planen."),
+        submission_tool_name=OUTLINE_FLOW_TOOL_NAME,
+    )
+
+    assert response is not None
+    assert response.tool_call is tool_call
+    assert response.text_content == "Här är planen."
+
+
 @pytest.mark.asyncio
 async def test_scoped_model_preflight_skips_existing_flow_edit_context() -> None:
     submission = _make_submission()
     ctx = _make_context(flow=SimpleNamespace(id=uuid4()))
 
-    result = await submission.preflight_scoped_model_revision_if_requested(
+    result = await submission._preflight_scoped_model_revision_if_requested(
         ctx=ctx,
     )
 
@@ -107,7 +166,7 @@ async def test_scoped_model_preflight_returns_error_event_for_deterministic_fail
         "process_scoped_step_model_revision_if_requested",
         return_value=deterministic_failure,
     ):
-        result = await submission.preflight_scoped_model_revision_if_requested(
+        result = await submission._preflight_scoped_model_revision_if_requested(
             ctx=ctx,
         )
 
@@ -152,7 +211,7 @@ async def test_scoped_model_preflight_uses_bounded_server_tool_call_id() -> None
     with patch.object(
         CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
     ):
-        result = await submission.preflight_scoped_model_revision_if_requested(
+        result = await submission._preflight_scoped_model_revision_if_requested(
             ctx=ctx,
         )
 
@@ -229,13 +288,11 @@ async def test_outline_quality_failure_records_failed_first_attempt() -> None:
             side_effect=_repair_events,
         ),
     ):
-        events = [
-            event
-            async for event in submission.handle_outline_flow_tool_call(
-                ctx=ctx,
-                tool_call=tool_call,
-            )
-        ]
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=ctx, tool_call=tool_call
+        )
+        assert dispatched is not None
+        events = [event async for event in dispatched]
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     telemetry = tracker.build_planner_telemetry()
@@ -292,13 +349,11 @@ async def test_handle_outline_flow_tool_call_returns_architecture_error_without_
             new=process_outline,
         ),
     ):
-        events = [
-            event
-            async for event in submission.handle_outline_flow_tool_call(
-                ctx=ctx,
-                tool_call=tool_call,
-            )
-        ]
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=ctx, tool_call=tool_call
+        )
+        assert dispatched is not None
+        events = [event async for event in dispatched]
 
     repair.assert_not_called()
     process_outline.assert_awaited_once()
@@ -340,13 +395,11 @@ async def test_edit_flow_parse_failure_records_proposal_repair_reason() -> None:
         "run_tool_self_correction",
         side_effect=_repair_events,
     ):
-        events = [
-            event
-            async for event in submission.handle_edit_flow_tool_call(
-                ctx=ctx,
-                tool_call=tool_call,
-            )
-        ]
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=ctx, tool_call=tool_call
+        )
+        assert dispatched is not None
+        events = [event async for event in dispatched]
 
     assert events == [{"event": "error", "data": "{}"}]
     telemetry = tracker.build_planner_telemetry()
@@ -459,12 +512,11 @@ async def test_handle_edit_flow_repairs_compiled_edit_before_finalization() -> N
             CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
         ),
     ):
-        events = [
-            event
-            async for event in submission.handle_edit_flow_tool_call(
-                ctx=ctx, tool_call=tool_call
-            )
-        ]
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=ctx, tool_call=tool_call
+        )
+        assert dispatched is not None
+        events = [event async for event in dispatched]
 
     assert events == [{"event": "plan", "data": "{}"}]
     repair.assert_awaited_once()
@@ -530,12 +582,11 @@ async def test_handle_edit_flow_description_repair_records_tokens_without_repair
             CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
         ),
     ):
-        events = [
-            event
-            async for event in submission.handle_edit_flow_tool_call(
-                ctx=ctx, tool_call=tool_call
-            )
-        ]
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=ctx, tool_call=tool_call
+        )
+        assert dispatched is not None
+        events = [event async for event in dispatched]
 
     assert events == [{"event": "plan", "data": "{}"}]
     telemetry = tracker.build_planner_telemetry(tool_call_count=1)
@@ -547,10 +598,14 @@ async def test_handle_edit_flow_description_repair_records_tokens_without_repair
 
 
 @pytest.mark.asyncio
-async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mode() -> (
+async def test__retry_forced_proposal_after_text_uses_outline_flow_for_create_mode() -> (
     None
 ):
     submission = _make_submission()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-forced-retry-create",
+        model="openai/gpt-5.4",
+    )
 
     with patch(
         "intric.flows.ai_builder.ai_builder_proposal_submission.run_forced_tool_retry_after_text",
@@ -560,7 +615,7 @@ async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mod
             )
         ),
     ) as retry_forced_tool:
-        result = await submission.retry_forced_proposal_after_text(
+        result = await submission._retry_forced_proposal_after_text(
             correction_messages=[{"role": "system", "content": "Prompt"}],
             assistant_text="Här är planen.",
             tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
@@ -574,6 +629,7 @@ async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mod
             resource_catalog=None,
             max_output_tokens=4096,
             flow=None,
+            usage_tracker=tracker,
         )
 
     assert result == ({"event": "plan", "data": "{}"},)
@@ -583,6 +639,44 @@ async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mod
     assert list(process_signature.parameters) == ["invocation"]
     assert isinstance(request.turn, SessionSendTurn)
     assert "Now call outline_flow" in request.retry_config.forced_tool_prompt
+
+
+@pytest.mark.asyncio
+async def test__retry_forced_proposal_after_text_uses_edit_flow_for_edit_mode() -> None:
+    submission = _make_submission()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-forced-retry-edit",
+        model="openai/gpt-5.4",
+    )
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_submission.run_forced_tool_retry_after_text",
+        new=AsyncMock(
+            return_value=ForcedToolRetryOutcome(
+                events=({"event": "plan", "data": "{}"},)
+            )
+        ),
+    ) as retry_forced_tool:
+        result = await submission._retry_forced_proposal_after_text(
+            correction_messages=[{"role": "system", "content": "Prompt"}],
+            assistant_text="Här är planen.",
+            tool_schemas=[{"function": {"name": EDIT_FLOW_TOOL_NAME}}],
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            turn=_make_turn(),
+            conversation=[ConversationMessage(role="user", content="Redigera flödet")],
+            new_messages_start=1,
+            available_model_refs=None,
+            available_kb_refs=None,
+            resource_catalog=None,
+            max_output_tokens=4096,
+            flow=SimpleNamespace(steps=[]),
+            usage_tracker=tracker,
+        )
+
+    assert result == ({"event": "plan", "data": "{}"},)
+    request = retry_forced_tool.await_args.args[0]
+    assert request.retry_config.target_tool_name == EDIT_FLOW_TOOL_NAME
 
 
 @pytest.mark.asyncio
@@ -614,12 +708,11 @@ async def test_handle_edit_flow_parse_failure_triggers_self_correction() -> None
         "run_tool_self_correction",
         return_value=_events(),
     ) as repair:
-        events = [
-            event
-            async for event in submission.handle_edit_flow_tool_call(
-                ctx=ctx, tool_call=tool_call
-            )
-        ]
+        dispatched = submission.dispatch_submission_tool_call(
+            ctx=ctx, tool_call=tool_call
+        )
+        assert dispatched is not None
+        events = [event async for event in dispatched]
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     request = repair.call_args.args[0]

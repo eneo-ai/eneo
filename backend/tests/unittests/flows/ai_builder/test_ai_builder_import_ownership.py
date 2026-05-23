@@ -131,10 +131,13 @@ PROPOSAL_REPAIR_RUNTIME_ALLOWED_ANY_NAMES = frozenset(
 )
 PROPOSAL_SUBMISSION_METHODS = frozenset(
     {
+        "active_submission_tool_name",
+        "active_submission_tool_schemas",
         "_outline_flow_retry_config",
         "_edit_flow_retry_config",
         "_handle_outline_flow_tool_call",
         "_handle_edit_flow",
+        "preflight_scoped_model_revision_if_requested",
         "retry_forced_proposal_after_text",
         "_active_submission_tool_name",
         "_active_submission_tool_schemas",
@@ -142,12 +145,9 @@ PROPOSAL_SUBMISSION_METHODS = frozenset(
 )
 PROPOSAL_SUBMISSION_PUBLIC_METHODS = frozenset(
     {
-        "active_submission_tool_name",
-        "active_submission_tool_schemas",
-        "handle_outline_flow_tool_call",
-        "handle_edit_flow_tool_call",
-        "preflight_scoped_model_revision_if_requested",
-        "retry_forced_proposal_after_text",
+        "contains_submission_tool_call",
+        "dispatch_submission_tool_call",
+        "run_active_submission_attempt",
     }
 )
 PROPOSAL_SUBMISSION_ALLOWED_ANY_NAMES = frozenset(
@@ -159,6 +159,7 @@ PROPOSAL_SUBMISSION_ALLOWED_ANY_NAMES = frozenset(
         "correction_messages",
         "litellm_client",
         "litellm_kwargs",
+        "llm_messages",
         "tool_call",
         "tool_schemas",
     }
@@ -859,11 +860,22 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
         "build_edit_flow_tool_schema",
         "OUTLINE_FLOW_FORCED_TOOL_PROMPT",
         "EDIT_FLOW_FORCED_TOOL_PROMPT",
+        "SUBMISSION_TOOL_NAMES",
     }:
         if banned_import in processor_text:
             violations.append(
                 f"{processor_path}: imports or references {banned_import}"
             )
+
+    for banned_reference in {
+        "call_proposal_completion_with_usage",
+        "active_submission_tool_name(",
+        "active_submission_tool_schemas(",
+        "preflight_scoped_model_revision_if_requested(",
+        "retry_forced_proposal_after_text(",
+    }:
+        if banned_reference in processor_text:
+            violations.append(f"{processor_path}: references {banned_reference}")
 
     submission_classes = [
         node

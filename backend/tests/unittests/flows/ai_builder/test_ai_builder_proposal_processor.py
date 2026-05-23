@@ -254,7 +254,7 @@ async def test_dispatch_known_tool_call_routes_outline_flow_handler() -> None:
 
     with patch.object(
         processor._proposal_submission,
-        "handle_outline_flow_tool_call",
+        "dispatch_submission_tool_call",
         return_value=_events(),
     ) as handle_outline_flow:
         dispatched = processor._dispatch_known_tool_call(ctx=ctx, tool_call=tool_call)
@@ -279,17 +279,24 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
         },
     )
 
-    async def _handled_events(**_kwargs):
-        yield {"event": "plan", "data": "{}"}
+    async def process_outline(**kwargs) -> ToolProcessingResult:
+        return ToolProcessingResult(compiled_proposal=_compiled_outline_proposal())
 
     with (
-        patch.object(
-            processor,
-            "handle_tool_call",
-            side_effect=_handled_events,
-        ) as handle_tool_call,
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.call_proposal_completion_with_usage",
+            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state",
+            return_value=SimpleNamespace(confirmed=True),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_outline_arguments",
+            new=process_outline,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+            new=_store_compiled_plan,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion_with_usage",
             new=AsyncMock(return_value=_make_response_with_tool_calls(outline_call)),
         ) as call_completion,
     ):
@@ -323,11 +330,44 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
         schema["function"]["name"]
         for schema in call_completion.await_args.kwargs["tool_schemas"]
     ] == [OUTLINE_FLOW_TOOL_NAME]
-    assert handle_tool_call.call_args.kwargs["tool_calls"] == [outline_call]
-    assert [
-        schema["function"]["name"]
-        for schema in handle_tool_call.call_args.kwargs["tool_schemas"]
-    ] == [OUTLINE_FLOW_TOOL_NAME]
+
+
+@pytest.mark.asyncio
+async def test_propose_plan_provider_error_still_yields_planner_upstream_error() -> (
+    None
+):
+    processor = _make_processor()
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion_with_usage",
+        new=AsyncMock(side_effect=RuntimeError("provider unavailable")),
+    ):
+        events = [
+            event
+            async for event in processor.propose_plan(
+                turn=_make_turn(),
+                conversation=[ConversationMessage(role="user", content="Build a flow")],
+                new_messages_start=1,
+                llm_messages=[{"role": "system", "content": "Prompt"}],
+                litellm_model="openai/gpt-5.4",
+                litellm_kwargs={},
+                available_models=None,
+                available_kbs=None,
+                available_model_refs=None,
+                available_kb_refs=None,
+                resource_catalog=None,
+                max_output_tokens=4096,
+                proposal_temperature=0.2,
+                request_id="req-first-attempt-provider-error",
+                flow=None,
+            )
+        ]
+
+    assert [event["event"] for event in events] == ["error"]
+    payload = json.loads(events[0]["data"])
+    assert payload["code"] == "planner_upstream_error"
+    assert payload["phase"] == "planner"
+    assert payload["request_id"] == "req-first-attempt-provider-error"
 
 
 @pytest.mark.asyncio
@@ -379,7 +419,7 @@ async def test_propose_plan_preflights_scoped_model_change_on_ai_step_without_ll
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.call_proposal_completion_with_usage",
+            "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion_with_usage",
             new=AsyncMock(),
         ) as call_completion,
         patch(
@@ -463,7 +503,7 @@ async def test_propose_plan_preflights_transcription_step_model_notice_without_l
     prior_plan = _builder_plan(prior_spec)
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_processor.call_proposal_completion_with_usage",
+        "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion_with_usage",
         new=AsyncMock(),
     ) as call_completion:
         events = [
@@ -657,11 +697,30 @@ async def test_propose_plan_continues_after_user_declines_mcp_usage() -> None:
         ),
     ]
 
-    with patch.object(
-        processor,
-        "handle_tool_call",
-        side_effect=_single_plan_event,
-    ) as handle_tool_call:
+    async def process_outline(**kwargs) -> ToolProcessingResult:
+        return ToolProcessingResult(compiled_proposal=_compiled_outline_proposal())
+
+    finalize = AsyncMock(
+        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.resolve_requirements_state",
+            return_value=SimpleNamespace(confirmed=True),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission.process_outline_arguments",
+            new=process_outline,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+            new=_store_compiled_plan,
+        ),
+        patch.object(
+            CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
+        ),
+    ):
         events = [
             event
             async for event in processor.propose_plan(
@@ -688,7 +747,6 @@ async def test_propose_plan_continues_after_user_declines_mcp_usage() -> None:
     assert "response_format" not in (
         processor.litellm_client.acompletion.await_args.kwargs
     )
-    assert handle_tool_call.call_args.kwargs["tool_calls"] == [outline_call]
 
 
 @pytest.mark.asyncio
@@ -960,6 +1018,11 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
     None
 ):
     processor = _make_processor()
+    parallel_tool_call = _make_tool_call(
+        CONFIRM_REQUIREMENTS_TOOL_NAME,
+        {"summary": "Unexpected requirements confirmation."},
+        tool_call_id="call-unexpected-confirm",
+    )
     repaired_tool_call = _make_tool_call(
         OUTLINE_FLOW_TOOL_NAME,
         {
@@ -970,8 +1033,17 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
         tool_call_id="call-outline-recovered",
     )
     processor.litellm_client.acompletion.side_effect = [
-        _make_response_with_text(
-            "Här är ett förslag i text.",
+        _make_response_with_tool_calls(
+            _make_tool_call(
+                OUTLINE_FLOW_TOOL_NAME,
+                {
+                    "flow_name": "Unexpected first flow",
+                    "plan_rationale": "This should be retried because tool calls were parallel.",
+                    "steps": [{"name": "Classify", "task": "Classify the request."}],
+                },
+                tool_call_id="call-outline-unexpected-parallel",
+            ),
+            parallel_tool_call,
             prompt_tokens=11,
             completion_tokens=5,
             total_tokens=16,
@@ -1098,7 +1170,7 @@ async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> No
     ):
         events = [
             event
-            async for event in processor._proposal_submission.handle_outline_flow_tool_call(
+            async for event in processor._proposal_submission.dispatch_submission_tool_call(
                 ctx=ctx,
                 tool_call=tool_call,
             )
@@ -1862,7 +1934,7 @@ async def test_handle_tool_call_builds_proposal_context_for_edit_handler() -> No
 
     with patch.object(
         processor._proposal_submission,
-        "handle_edit_flow_tool_call",
+        "dispatch_submission_tool_call",
         side_effect=_edit_handler,
     ) as handle_edit:
         events = [
@@ -1959,6 +2031,7 @@ async def test_outline_self_correction_returns_typed_error_when_completion_raise
     processor = _make_processor()
     tool_call = MagicMock()
     tool_call.id = "call_retry"
+    tool_call.function.name = OUTLINE_FLOW_TOOL_NAME
     tool_call.function.arguments = "{"
     ctx = _make_context(
         conversation=[ConversationMessage(role="user", content="Bygg ett flöde")],
@@ -1979,7 +2052,7 @@ async def test_outline_self_correction_returns_typed_error_when_completion_raise
         )
         events = [
             event
-            async for event in processor._proposal_submission.handle_outline_flow_tool_call(
+            async for event in processor._proposal_submission.dispatch_submission_tool_call(
                 ctx=ctx,
                 tool_call=tool_call,
             )
@@ -2041,7 +2114,7 @@ async def test_edit_description_repair_rejection_still_records_spent_tokens() ->
     ):
         events = [
             event
-            async for event in processor._proposal_submission.handle_edit_flow_tool_call(
+            async for event in processor._proposal_submission.dispatch_submission_tool_call(
                 ctx=ctx, tool_call=tool_call
             )
         ]
@@ -2104,7 +2177,7 @@ async def test_ineligible_edit_description_repair_does_not_record_completion_usa
     ):
         events = [
             event
-            async for event in processor._proposal_submission.handle_edit_flow_tool_call(
+            async for event in processor._proposal_submission.dispatch_submission_tool_call(
                 ctx=ctx, tool_call=tool_call
             )
         ]
@@ -2162,7 +2235,7 @@ async def test_edit_description_repair_without_provider_usage_records_estimate()
     ):
         events = [
             event
-            async for event in processor._proposal_submission.handle_edit_flow_tool_call(
+            async for event in processor._proposal_submission.dispatch_submission_tool_call(
                 ctx=ctx, tool_call=tool_call
             )
         ]
