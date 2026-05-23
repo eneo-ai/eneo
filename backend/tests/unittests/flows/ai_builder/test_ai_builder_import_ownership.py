@@ -1164,6 +1164,23 @@ def test_proposal_submission_tests_construct_submission_owner_directly() -> None
     assert violations == []
 
 
+def test_proposal_processor_tests_do_not_reach_into_submission_owner() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    processor_test_path = backend_root / Path(
+        "tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+    )
+    tree = ast.parse(processor_test_path.read_text(), filename=str(processor_test_path))
+    violations: list[str] = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr == "_proposal_submission":
+            violations.append(
+                f"{processor_test_path}:{node.lineno} reaches {_attribute_chain(node)}"
+            )
+
+    assert violations == []
+
+
 def test_proposal_turn_test_setup_modules_keep_their_contracts() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     builder_path = backend_root / PROPOSAL_TURN_BUILDER_TEST_MODULE

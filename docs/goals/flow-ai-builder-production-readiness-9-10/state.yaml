@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T069
+active_task: T070
 
 interruptions:
   - id: I001
@@ -212,7 +212,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T068 authenticated live eval against the local API and T061/T065/T066 topology work: the five-case live eval passed after active-submission runtime ownership changes, and ProposalSubmissionOwner submission tests now instantiate their canonical owner directly. Normal-User Output Quality stays 9 for the current evidence set, with API freshness qualified by process/source-mtime evidence rather than a clean service restart. The broader score floor remains 8 because full-source typing/test baseline, remaining topology/readability/test-fixture coupling, and AI slop/comment/naming cleanup still block a defensible all-dimensions 9."
+  source: "After T069 proposal-submission test-locality cleanup and T068 authenticated live eval: the five-case live eval passed after active-submission runtime ownership changes, ProposalSubmissionOwner behavior tests now live on the owner test surface, and processor tests no longer reach through the private `_proposal_submission` attribute. Normal-User Output Quality stays 9 for the current evidence set, with API freshness qualified by process/source-mtime evidence rather than a clean service restart. The broader score floor remains 8 because full-source typing/test baseline, remaining topology/readability work outside this seam, stale baseline tests, and AI slop/comment/naming cleanup still block a defensible all-dimensions 9."
   Maintainability: 8
   Code_Quality: 9
   Clean_Architecture: 8
@@ -231,12 +231,13 @@ current_scorecard:
   blockers:
     - "Generated-client regeneration determinism is now closed by T054: update.js supports --schema-file review snapshots, URL mode fetches OpenAPI once into a temp snapshot, openapi-typescript uses argv-array spawn, and schema.d.ts diff stats were inspected with no generated churn."
     - "The T068 five-case authenticated live eval refreshed proof after T065/T066 active-submission runtime ownership changes: C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX with selected structured-field underlag plus source text, C4 runtime form fields, and C5 revise/edit all passed through the public API. The eval used qualified API freshness evidence, not a clean service restart, and the gate must be repeated after later planner/runtime changes rather than treated as permanent output-quality proof."
-    - "T042/T044/T048/T050/T052 removed proposal completion, structured-question recovery, confirm-requirements ownership, repair-runtime ownership, and active create/edit proposal-submission ownership from ai_builder_proposal_processor.py. The processor is now 592 LOC after the scoped-model-edit hotfix, but maintainability/readability remain 8 because ProposalSubmissionOwner is still a 760 LOC concentrated owner, submission tests retain topology coupling, and the next score-moving tranche must prove whether topology/readability or repeated live-eval proof is now the highest blocker."
+    - "T042/T044/T048/T050/T052 removed proposal completion, structured-question recovery, confirm-requirements ownership, repair-runtime ownership, and active create/edit proposal-submission ownership from ai_builder_proposal_processor.py. T069 then removed processor-test private reach-through into ProposalSubmissionOwner and moved owner behavior tests to the submission-owner test surface. Maintainability/readability remain 8 at the subsystem level because larger topology/readability blockers, stale baseline tests, and full-source Pyright failures remain outside this seam."
     - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, partial processor-bound facades, and full-source Pyright baseline failures outside AI Builder."
     - "Both Claude and Antigravity recommended a small future clarification of counts_as_repair semantics in ai_builder_proposal_telemetry.py; it was not added in T038 because that file was outside the approved write scope."
     - "T058 closed the source-material label drift and gave C3 typed live-eval binding-shape assertions; T064 then fixed the C3 failure and reran authenticated live eval successfully twice after the final dispatch-boundary fix."
     - "T062 closed the ProposalSubmissionOwner cohesion/DI/orchestration spike with Claude iteration 3 and Antigravity green. T065 is approved as the next worker only because it deepens the existing active-submission owner, reuses ProposalTurnContext instead of adding a parallel request shape, and has hard stop conditions against callbacks, facades, finalizer DI, and generic dispatch creep."
     - "T064 fixed the T060 C3 failure by using existing rich-workflow/structured-analysis owners, preventing classifier override, and routing server-selected planner-internal questions through typed discovery follow-up dispatch."
+    - "T069 exposed stale baseline tests outside its scope: tests/unit/test_ai_builder_plan_edit_context.py imports removed terminal_output_type_for_conversation, and tests/integration/flows/test_ai_builder_session_api_regressions.py still patches removed processor symbols, passes removed processor= kwargs, and calls update_session_status without the required lease."
     - "Overall remains 8 until full-source typing/test baseline, consolidation/readability/test-topology tranches, AI slop/comment/naming cleanup, and repeated authenticated live-eval evidence prove every dimension is honestly at least 9."
 
 score_floor_completion_gates:
@@ -6657,7 +6658,7 @@ tasks:
   - id: T069
     type: refactor
     assignee: Worker
-    status: active
+    status: completed
     reasoning_hint: high
     target_review_by: "2026-05-24"
     objective: "Improve proposal-submission test locality by moving submission-owner behavior tests to the ProposalSubmissionOwner test surface and removing private `_proposal_submission` reach-through from processor tests where it is not the processor's responsibility."
@@ -6669,7 +6670,7 @@ tasks:
       - "backend/tests/unittests/flows/ai_builder/proposal_turn_builders.py"
       - "backend/tests/unittests/flows/ai_builder/proposal_turn_test_doubles.py"
     constraints:
-      - "No production source changes unless a peer-reviewed plan revision proves the test topology cannot be improved without a small production ownership cleanup."
+      - "Peer-reviewed revision allowed one narrow production source change: optional concrete ProposalSubmissionOwner constructor injection on AIBuilderProposalProcessor. No Protocol, ABC, factory, helper module, planner construction change, public attribute widening, or comment/docstring."
       - "Do not split files for LOC or create a new fixture/helper module."
       - "Do not weaken behavior assertions or replace behavior tests with mock-only assertions."
       - "Reuse existing proposal turn builders and test doubles."
@@ -6682,8 +6683,10 @@ tasks:
       - "If this cannot remove real coupling, stop and re-rank rather than doing cosmetic test movement."
     acceptance_criteria:
       - "Red/static guard first: processor tests fail a new ownership guard that bans `_proposal_submission` attribute reach-through in `test_ai_builder_proposal_processor.py`."
+      - "AIBuilderProposalProcessor accepts a keyword-only concrete `proposal_submission: ProposalSubmissionOwner | None = None`; production default construction remains equivalent and keeps `frozenset(quality_retry_warning_codes)`."
       - "Owner-behavior tests currently calling `_proposal_submission.dispatch_submission_tool_call` move to `test_ai_builder_proposal_submission.py` and instantiate the existing `_make_submission()` owner directly."
-      - "Processor tests keep only processor routing or public processor behavior; any remaining private-owner exemption must be explicit, line-bounded, and justified, with a target of zero exemptions."
+      - "Processor tests keep only processor routing or public processor behavior and use a spec-backed injected ProposalSubmissionOwner double where needed."
+      - "No private-owner exemptions remain in processor tests."
       - "Existing behavior assertions for outline self-correction, edit-description repair usage, upstream-error handling, and recovered edit dispatch remain equivalent."
       - "Static ownership tests record both negative and positive invariants: processor tests do not reach through `_proposal_submission`, and submission tests cover ProposalSubmissionOwner behavior through its canonical test surface."
       - "No new broad helper, fixture dump, pass-through abstraction, or production source split."
@@ -6696,6 +6699,75 @@ tasks:
       - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
       - "git diff --check"
       - "Claude implementation gate before commit; Antigravity if available, otherwise record missing coverage."
+    receipt:
+      completed_at: "2026-05-23T05:39:34Z"
+      summary: "Completed proposal-submission test locality cleanup using the revised peer-gated constructor-DI plan. AIBuilderProposalProcessor now exposes its existing ProposalSubmissionOwner collaborator as a keyword-only concrete optional constructor dependency while preserving production default construction. Processor tests no longer reach through private `_proposal_submission`; submission-owner behavior tests now live in test_ai_builder_proposal_submission.py."
+      implementation:
+        - "Added `proposal_submission: ProposalSubmissionOwner | None = None` to AIBuilderProposalProcessor.__init__ with explicit None fallback and unchanged default ProposalSubmissionOwner construction."
+        - "Added zero-exemption AST guard `test_proposal_processor_tests_do_not_reach_into_submission_owner`."
+        - "Red proof: the new guard failed before the rewrites with seven private reach-through violations."
+        - "Rewrote two processor routing/context tests to inject `MagicMock(spec=ProposalSubmissionOwner)` through existing `_make_processor(**overrides)`."
+        - "Moved five owner-behavior tests to `test_ai_builder_proposal_submission.py` using `_make_submission()` and explicit litellm_client injection where needed."
+      peer_review:
+        claude_plan_iteration_1: ".codex/artifacts/claude-peer-loop-t069-proposal-submission-test-locality-plan-20260523T051132Z.md -> GREEN_LIGHT yes / MIN_SCORE 8 for test-only plan with tightenings"
+        antigravity_plan_iteration_1: ".codex/artifacts/antigravity-peer-loop-t069-proposal-submission-test-locality-final-plan-20260523T051454Z.md -> GREEN_LIGHT no / MIN_SCORE 8; challenged test-only plan and required constructor DI"
+        claude_revised_plan_iteration_2: ".codex/artifacts/claude-peer-loop-t069-proposal-submission-test-locality-revised-di-plan-20260523T051937Z.md -> GREEN_LIGHT yes / MIN_SCORE 9"
+        antigravity_revised_plan_iteration_2: ".codex/artifacts/antigravity-peer-loop-t069-proposal-submission-test-locality-revised-di-plan-20260523T052045Z.md -> GREEN_LIGHT yes / MIN_SCORE 9"
+        claude_implementation_gate: ".codex/artifacts/claude-peer-loop-t069-proposal-submission-test-locality-implementation-20260523T053752Z.md -> GREEN_LIGHT yes / MIN_SCORE 9"
+        antigravity_implementation_gate: ".codex/artifacts/antigravity-peer-loop-t069-proposal-submission-test-locality-implementation-20260523T053917Z.md -> GREEN_LIGHT yes / MIN_SCORE 9"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_processor_tests_do_not_reach_into_submission_owner -q -> failed before rewrites with seven violations; passed after rewrites"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 77 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py -q -> 25 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_discovery_flow.py tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py -q -> 94 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2355 passed, 4 skipped, 11 warnings"
+        - "cd backend && uv run ruff check touched T069 files -> passed after one import-order fix"
+        - "cd backend && uv run ruff format --check touched T069 files -> passed after formatting"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
+        - "git diff --check -> passed"
+      out_of_scope_baseline_failures:
+        - "cd backend && uv run pytest tests/unit/test_ai_builder_plan_edit_context.py -q -> collection failure because the stale test imports removed `terminal_output_type_for_conversation` from ai_builder_proposal_processor.py"
+        - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py -q -> 38 passed, 11 failed on stale assumptions unrelated to T069, including removed processor patch targets, removed `processor=` kwarg to process_edit_arguments, and update_session_status calls missing `lease`"
+      scorecard_impact:
+        score_floor: 8
+        local_t069_score: 9
+        rationale: "T069 is a real maintainability/readability/test-locality improvement for the proposal-submission seam, but the subsystem-wide floor stays 8 until stale baseline tests, full-source typing, broader topology/readability, and AI-slop/comment/naming blockers are closed."
+      residual_risks:
+        - "Full-source Pyright baseline remains 112 errors from the T067 measurement, mostly outside AI Builder."
+        - "Stale unit/integration tests still hide useful runtime coverage and should be ranked promptly."
+        - "Broader Flow AI Builder goal remains incomplete."
+
+  - id: T070
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    target_review_by: "2026-05-24"
+    objective: "Re-rank the next highest-score-moving tranche after T069, explicitly considering stale baseline test cleanup, full-source typing baseline, remaining topology/readability work, AI slop/comment/naming cleanup, and whether another live-eval proof is needed."
+    inputs:
+      - "T069 receipt"
+      - "Current scorecard blockers"
+      - "tests/unit/test_ai_builder_plan_edit_context.py collection failure"
+      - "tests/integration/flows/test_ai_builder_session_api_regressions.py stale failures"
+      - "T067 full-source pyright baseline: 112 errors"
+      - "Current git diff/status"
+    constraints:
+      - "Read-only ranking unless the board opens a peer-gated Worker task."
+      - "Do not default to LOC reduction or broad source splitting."
+      - "Do not claim T069 moved the broader subsystem floor above 8."
+      - "Use Claude for plan review; use Antigravity if quota/tooling allows."
+    acceptance_criteria:
+      - "Produce evidence-backed candidate ranking with file:line evidence."
+      - "State canonical owners, what would be deleted/merged/moved/renamed/simplified, and what complexity disappears."
+      - "Include stale baseline test cleanup as a candidate and decide whether it outranks topology/readability or typing work."
+      - "Define one next implementation tranche with allowed files, acceptance criteria, tests, non-goals, stop conditions, score impact, and peer-gate requirements."
+      - "Keep the score floor strict and explain what still blocks all-dimensions 9/10."
+    verify:
+      - "git status --short --branch"
+      - "git log --oneline --decorate -6"
+      - "rg/file evidence for each ranked candidate"
+      - "Claude plan gate GREEN_LIGHT yes / MIN_SCORE >= 8, or documented disagreement"
+      - "Antigravity plan gate if available, or exact missing-coverage note"
     receipt: null
 
 checks:
@@ -6704,10 +6776,10 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T068 authenticated five-case live eval passed all cases on a qualified-current local API. T069 proposal-submission test-locality cleanup is now active. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T068
+    result: "T069 proposal-submission test-locality cleanup passed Claude and Antigravity implementation gates. T070 next-tranche ranking is active. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T069
     commands:
-      - "T068 ledger: .codex/artifacts/flow-ai-builder-live-eval.md"
-      - "T068 output root: .codex/artifacts/flow-ai-builder-live-eval-t068-run1/20260523T050259Z"
-      - "T068 eval command exited 0 and appended five pass verdicts"
-      - "T068 API freshness: qualified process/source-mtime evidence, not clean restart"
+      - "Claude T069 implementation gate: .codex/artifacts/claude-peer-loop-t069-proposal-submission-test-locality-implementation-20260523T053752Z.md -> GREEN_LIGHT yes / MIN_SCORE 9"
+      - "Antigravity T069 implementation gate: .codex/artifacts/antigravity-peer-loop-t069-proposal-submission-test-locality-implementation-20260523T053917Z.md -> GREEN_LIGHT yes / MIN_SCORE 9"
+      - "T069 focused tests: 77 passed, 25 passed, 94 passed; full AI Builder unittests: 2355 passed, 4 skipped; Ruff/format/Pyright/diff-check passed"
+      - "Stale baseline failures recorded for T070 ranking"

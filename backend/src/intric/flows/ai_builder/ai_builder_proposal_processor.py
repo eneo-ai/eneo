@@ -99,6 +99,7 @@ class AIBuilderProposalProcessor:
         self_correction_bumped_temperature: float,
         forced_proposal_temperature: float,
         quality_retry_warning_codes: set[str],
+        proposal_submission: ProposalSubmissionOwner | None = None,
     ) -> None:
         self.user = user
         self.repo = repo
@@ -106,14 +107,16 @@ class AIBuilderProposalProcessor:
         self.self_correction_temperature = self_correction_temperature
         self.self_correction_bumped_temperature = self_correction_bumped_temperature
         self.forced_proposal_temperature = forced_proposal_temperature
-        self._proposal_submission = ProposalSubmissionOwner(
-            repo=repo,
-            litellm_client=litellm_client,
-            self_correction_temperature=self_correction_temperature,
-            self_correction_bumped_temperature=self_correction_bumped_temperature,
-            forced_proposal_temperature=forced_proposal_temperature,
-            quality_retry_warning_codes=frozenset(quality_retry_warning_codes),
-        )
+        if proposal_submission is None:
+            proposal_submission = ProposalSubmissionOwner(
+                repo=repo,
+                litellm_client=litellm_client,
+                self_correction_temperature=self_correction_temperature,
+                self_correction_bumped_temperature=self_correction_bumped_temperature,
+                forced_proposal_temperature=forced_proposal_temperature,
+                quality_retry_warning_codes=frozenset(quality_retry_warning_codes),
+            )
+        self._proposal_submission = proposal_submission
 
     async def handle_tool_call(
         self,
