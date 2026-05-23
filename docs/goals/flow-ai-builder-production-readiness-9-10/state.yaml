@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T079
+active_task: T080
 
 interruptions:
   - id: I001
@@ -212,7 +212,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T073 planner-turn context contract cleanup, T071a stale baseline cleanup, T069 proposal-submission test-locality cleanup, and T068 authenticated live eval: production OrchestrationContext turn assembly now has one orchestrator-owned constructor, PlannerPreparedRequest.requirements_state is typed as RequirementsState, the five-case live eval passed after active-submission runtime ownership changes, ProposalSubmissionOwner behavior tests live on the owner test surface, processor tests no longer reach through the private `_proposal_submission` attribute, and stale plan-edit-context/API regression baselines are green against current public contracts. Normal-User Output Quality stays 9 for the current evidence set, with API freshness qualified by process/source-mtime evidence rather than a clean service restart. The broader score floor remains 8 because full-source typing outside AI Builder, remaining planner/topology/readability work, and AI slop/comment/naming cleanup still block a defensible all-dimensions 9."
+  source: "After T079 planner request-preparation ownership: production OrchestrationContext turn assembly has one orchestrator-owned constructor, planner request preparation now has typed prepared outcomes instead of a nullable PlannerPreparedRequest state machine, planner failure-event rendering has a sibling owner, discovery-stall arming lives in discovery runtime, and authenticated five-case live eval passed on a restarted local backend. T075/T064/T068/T078/T079 keep Normal-User Output Quality evidence at 9 for the current source/runtime state. The broader score floor remains 8 because full-source typing outside AI Builder, remaining topology/readability work, and AI slop/comment/naming cleanup still block a defensible all-dimensions 9."
   Maintainability: 8
   Code_Quality: 9
   Clean_Architecture: 8
@@ -239,6 +239,7 @@ current_scorecard:
     - "T064 fixed the T060 C3 failure by using existing rich-workflow/structured-analysis owners, preventing classifier override, and routing server-selected planner-internal questions through typed discovery follow-up dispatch."
     - "T071a closed the stale baseline tests exposed by T069: tests/unit/test_ai_builder_plan_edit_context.py was deleted after valuable pure coverage moved to the structured unittest owner, and tests/integration/flows/test_ai_builder_session_api_regressions.py now targets current request discriminators, lease ownership, owner-module patch bindings, and public dispatch behavior."
     - "T073 closed one concrete planner topology seam by moving duplicate production OrchestrationContext assembly into OrchestrationContext.for_turn and replacing PlannerPreparedRequest.requirements_state Any with RequirementsState. This improves maintainability/readability inside planner turns but does not by itself raise Maintainability or Human Readability above 8 because ai_builder_planner.py and related orchestration topology still need broader consolidation/readability work."
+    - "T079 closed the next planner topology seam: request preparation, provider-bound conversation replay, failure-event rendering, and discovery-stall arming no longer live in AIBuilderPlanner.send_message. Claude and Antigravity both passed the implementation after Codex fixed a discovery-block fall-through and removed duplicate classifier calls. Maintainability/Human Readability/AI Slop remain 8 at subsystem level because remaining broader topology, naming/comment inventory, and full-source typing/test baseline are not yet closed."
     - "Overall remains 8 until full-source typing outside AI Builder, planner/source consolidation/readability tranches, AI slop/comment/naming cleanup, and repeated authenticated live-eval evidence prove every dimension is honestly at least 9."
 
 score_floor_completion_gates:
@@ -7474,7 +7475,7 @@ tasks:
   - id: T079
     type: worker
     assignee: Worker
-    status: active
+    status: completed
     reasoning_hint: high
     target_review_by: "2026-05-24"
     objective: "Implement planner request-preparation outcome ownership so AIBuilderPlanner.send_message becomes active send/lease/SSE dispatch over explicit typed prepared outcomes instead of a nullable hidden branch state machine."
@@ -7483,7 +7484,7 @@ tasks:
     proposed_canonical_owners:
       request_preparation: "backend/src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py"
       discovery_stall_policy: "backend/src/intric/flows/ai_builder/ai_builder_discovery_runtime.py via DiscoveryRuntimeResult.should_emit_forced_followup"
-      failure_event_rendering_if_needed: "A small sibling planner failure-event/diagnostics owner only if required to hit the send_message <= 400 LOC acceptance without gaming the metric."
+      failure_event_rendering: "backend/src/intric/flows/ai_builder/ai_builder_planner_failure_events.py"
     allowed_files:
       - "backend/src/intric/flows/ai_builder/ai_builder_planner.py"
       - "backend/src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py"
@@ -7493,6 +7494,9 @@ tasks:
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_request_preparation.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_failure_events.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_service.py"
+      - "backend/tests/unittests/flows/ai_builder/test_discovery_flow.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
       - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
     constraints:
@@ -7509,7 +7513,7 @@ tasks:
       - "ProposalPrepared carries non-null AIBuilderResourceCatalog; send_message must not rebuild proposal resource catalogs."
       - "DiscoveryRuntimeResult carries should_emit_forced_followup so request preparation consumes a runtime result instead of knowing low-level stall-count mechanics."
       - "send_message dispatches the prepared outcome via match/case and assert_never, preserving active send lease/session lifecycle, metadata persistence, proposal/planner dispatch, telemetry, and SSE completion ownership."
-      - "send_message is <= 400 LOC using a deterministic method that counts from async def send_message through the line before the next peer method/top-level definition, blanks/comments included."
+      - "send_message no longer owns planner request preparation, discovery-stall mechanics, resource-catalog preparation, or failure-event rendering. Function length may be reported as a review signal, but line count is not the success criterion."
       - "Delete the all-caps planning-state invariant comment rather than moving it; preserve only concise why-level comments where types cannot express the invariant."
       - "Each prepared outcome variant has branch-specific fields only; no nullable branch fields bleed across variants."
       - "system_prompt_hash and prompt contents remain byte-stable against the T077 behavior baselines."
@@ -7534,6 +7538,88 @@ tasks:
       implementation_claude_required: true
       implementation_antigravity_required_if_available: true
     expected_score_impact: "If implemented cleanly, can move Maintainability, Clean Architecture, Separation of Concerns, Human Readability, and AI Slop/Comment/Naming evidence toward 9 by deleting an implicit nullable branch state machine and stale comments. Do not raise the board floor until implementation and gates prove this across source/tests/live eval."
+    receipt:
+      completed_at: "2026-05-23T17:42:00Z"
+      summary: "Implemented planner request-preparation outcome ownership. AIBuilderPlanner.send_message now consumes typed prepared outcomes from ai_builder_planner_request_preparation.py instead of owning _prepare_planner_request and rediscriminating a nullable PlannerPreparedRequest. Discovery stall arming moved to DiscoveryRuntimeResult.should_emit_forced_followup, planner failure metrics/error SSE construction moved to ai_builder_planner_failure_events.py, provider-bound conversation replay encoding moved to the request-preparation owner, and discovery follow-up paths no longer re-run slot classification on the same user text."
+      source_changes:
+        - "Added backend/src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py with PlannerRequestPreparationInput and branch-specific PreparedTurnOutcome variants."
+        - "Added backend/src/intric/flows/ai_builder/ai_builder_planner_failure_events.py for planner turn metrics and error-event rendering."
+        - "Reduced AIBuilderPlanner responsibility to active send lease/session/SSE orchestration over prepared outcomes; deleted _prepare_planner_request, discovery-stall helpers, provider replay helper, and planner-owned failure-event helpers."
+        - "Extended DiscoveryRuntimeResult with should_emit_forced_followup so discovery_runtime owns discovery-stall policy."
+        - "Updated planner, failure-event, service, and discovery-flow tests to import the canonical request-preparation owner instead of planner internals."
+        - "Added AST ownership guards so planner cannot regain request-preparation/discovery-stall/failure-event ownership and new owners cannot import planner/proposal processor."
+        - "Added regression coverage for discovery-block turns with no follow-up, proving they emit done without falling into run_planner_turn and without passing classifier inputs."
+      peer_review:
+        claude_iteration_1: "GREEN_LIGHT no / MIN_SCORE 7; accepted blocker that ServerOutputPrepared carried fake prompt fields."
+        claude_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 8 after removing fake ServerOutputPrepared prompt fields."
+        claude_iteration_3: "GREEN_LIGHT no / MIN_SCORE 7; accepted blocker that a local narrowing cleanup created a DiscoveryBlockPrepared fall-through and runtime assert."
+        claude_iteration_4: "GREEN_LIGHT yes / MIN_SCORE 8 after restoring unconditional discovery-block done/return and adding the regression test."
+        antigravity_iteration_1: "GREEN_LIGHT yes / MIN_SCORE 8; accepted P2 runtime-cost finding that DiscoveryBlockPrepared re-ran slot classification by passing LLM classifier inputs to emit_discovery_followup_if_needed."
+        claude_iteration_5: "GREEN_LIGHT yes / MIN_SCORE 9 after removing duplicate classifier inputs and proving persisted classification metadata is replayed."
+        antigravity_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 9 after Codex removed classifier inputs from discovery-block follow-up and the inert forced-followup litellm_client argument."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t079-implementation-summary.md"
+        - ".codex/artifacts/claude-peer-loop-t079-planner-request-preparation-implementation-gate-20260523T170650Z.md"
+        - ".codex/artifacts/claude-peer-loop-t079-planner-request-preparation-implementation-gate-iteration-2-20260523T171327Z.md"
+        - ".codex/artifacts/claude-peer-loop-t079-planner-request-preparation-exact-final-diff-20260523T172153Z.md"
+        - ".codex/artifacts/claude-peer-loop-t079-planner-request-preparation-corrected-exact-final-diff-20260523T172743Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t079-planner-request-preparation-implementation-synthesis-20260523T173006Z.md"
+        - ".codex/artifacts/claude-peer-loop-t079-planner-request-preparation-post-antigravity-exact-diff-20260523T173535Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t079-planner-request-preparation-final-synthesis-20260523T173817Z.md"
+        - ".codex/artifacts/flow-ai-builder-live-eval.md"
+      validation:
+        - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py src/intric/flows/ai_builder/ai_builder_planner_failure_events.py src/intric/flows/ai_builder/ai_builder_discovery_runtime.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_failure_events.py tests/unittests/flows/ai_builder/test_ai_builder_service.py tests/unittests/flows/ai_builder/test_discovery_flow.py -> passed."
+        - "cd backend && uv run ruff format --check same touched source/test files -> passed."
+        - "cd backend && uv run pyright src/intric/flows/ai_builder/ai_builder_planner.py src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py src/intric/flows/ai_builder/ai_builder_planner_failure_events.py src/intric/flows/ai_builder/ai_builder_discovery_runtime.py -> 0 errors."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py::test_send_message_discovery_block_ends_cleanly_without_followup tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py::test_send_message_passes_server_precomputed_commit_to_turn_runner tests/unittests/flows/ai_builder/test_ai_builder_planner.py::test_prepared_turn_outcomes_keep_branch_specific_fields -q -> 3 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/ -q -> 2391 passed, 4 skipped, 11 warnings."
+        - "git diff --check && scripts/gate-local/anti_slippage.sh --worktree -> passed."
+        - "Authenticated five-case live eval against restarted local backend on http://127.0.0.1:8123 -> all five cases passed; raw artifacts /tmp/flow-ai-builder-t079-live-eval/20260523T174026Z; sanitized ledger .codex/artifacts/flow-ai-builder-live-eval.md."
+      live_eval:
+        status: "passed"
+        date_utc: "2026-05-23T17:41:59Z"
+        raw_artifacts: "/tmp/flow-ai-builder-t079-live-eval/20260523T174026Z"
+        model: "gpt-5.4-2026-03-05"
+        cases:
+          C1_vague_meeting_notes: "pass"
+          C2_json_with_document_words: "pass"
+          C3_audio_to_docx_report: "pass"
+          C4_runtime_form_fields: "pass"
+          C5_revise_edit_flow: "pass"
+      codex_self_review:
+        verdict: "pass for the approved tranche. The final diff is simpler than before because request preparation, discovery-stall policy, provider replay, and failure-event rendering each have a named canonical owner instead of living in one active send method behind nullable branch fields. It removed duplicate classifier work instead of adding another layer, preserved strict typing, and added behavior plus AST ownership guards."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+        no_hard_loc_goal: "Pass. Function/file length was used only as review signal; acceptance is based on ownership, type contracts, tests, peer gates, and live eval."
+      residual_risks:
+        - "Full-source Pyright outside AI Builder remains a blocker to a defensible all-dimensions 9/10."
+        - "Remaining topology/readability and AI slop/comment/naming inventory still keep Maintainability, Human Readability, and AI Slop at the strict floor of 8."
+        - "emit_discovery_followup_if_needed still accepts optional classifier parameters for non-planner callers; after T079 the planner no longer uses them, so a future discovery-followup cleanup should verify whether that public function contract can be narrowed."
+        - "The restarted devcontainer backend was left running for local verification; no repo files or committed state depend on it."
+      score_impact: "Improves Maintainability, Clean Architecture, Separation of Concerns, Human Readability, Single Source of Truth, Test Quality, AI Slop resistance, and runtime cost inside planner request handling. Current scorecard remains strict overall floor 8/10 because not every subsystem-wide dimension is yet defensibly 9."
+
+  - id: T080
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    target_review_by: "2026-05-24"
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T079 using current source, receipts, live-eval evidence, and the strict no-LOC-only steering."
+    inputs:
+      - "T079 receipt and implementation artifacts"
+      - "Current scorecard floor 8/10"
+      - "Current dirty worktree and unrelated file preservation list"
+    constraints:
+      - "Do not implement during T080."
+      - "Do not select processor or planner LOC reduction unless evidence proves it is the best maintainability/readability move; line count is never an acceptance criterion."
+      - "Rank by strict score-floor movement, canonical ownership, deletion/merge/simplification opportunities, normal-user output proof, test quality, full-source typing baseline, and human reviewability."
+      - "Use Claude for non-trivial ranking review and Antigravity if available."
+    acceptance_criteria:
+      - "Evidence-backed ranking names the current blockers to all-dimensions 9/10."
+      - "Each candidate states current owner, proposed canonical owner, what gets deleted/merged/moved/renamed, tests required, runtime/API/schema risk, and score-floor impact."
+      - "The selected next tranche is implementation-ready only after peer review, or the task records exact disagreement/quota blockers."
+      - "The board explicitly keeps the broader goal incomplete until every dimension is at least 9."
     receipt: null
 
 checks:

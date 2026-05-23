@@ -210,11 +210,23 @@ ACCEPTED_ACTION_RENDERING_MODULE = ".".join(
 PLANNER_ACTION_DISPATCH_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_planner_action_dispatch")
 )
+PLANNER_REQUEST_PREPARATION_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_planner_request_preparation")
+)
+PLANNER_FAILURE_EVENTS_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_planner_failure_events")
+)
 ACCEPTED_ACTION_RENDERING_PATH = Path(
     "src/intric/flows/ai_builder/ai_builder_accepted_action_rendering.py"
 )
 PLANNER_ACTION_DISPATCH_PATH = Path(
     "src/intric/flows/ai_builder/ai_builder_planner_action_dispatch.py"
+)
+PLANNER_REQUEST_PREPARATION_PATH = Path(
+    "src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py"
+)
+PLANNER_FAILURE_EVENTS_PATH = Path(
+    "src/intric/flows/ai_builder/ai_builder_planner_failure_events.py"
 )
 PLANNER_PATH = Path("src/intric/flows/ai_builder/ai_builder_planner.py")
 ACCEPTED_ACTION_RENDERING_PUBLIC_NAMES = frozenset(
@@ -231,6 +243,27 @@ PLANNER_ACTION_DISPATCH_PUBLIC_NAMES = frozenset(
         "DispatchedActionEventRequest",
         "build_dispatched_action_events",
         "dispatch_backend_selected_question_if_any",
+    }
+)
+PLANNER_REQUEST_PREPARATION_PUBLIC_NAMES = frozenset(
+    {
+        "DiscoveryBlockPrepared",
+        "NormalPlannerPrepared",
+        "PlannerRequestPreparationInput",
+        "PreparedPromptMessages",
+        "ProposalPrepared",
+        "ServerOutputPrepared",
+        "conversation_message_to_llm_dict",
+        "prepare_planner_request",
+    }
+)
+PLANNER_FAILURE_EVENTS_PUBLIC_NAMES = frozenset(
+    {
+        "PlannerTurnResultEventRequest",
+        "build_planner_turn_error_event",
+        "build_planner_upstream_error_event",
+        "build_session_send_lease_lost_event",
+        "record_planner_turn_result",
     }
 )
 PLANNER_ACTION_CLASSES = frozenset(
@@ -1382,6 +1415,123 @@ def test_planner_action_rendering_and_dispatch_have_canonical_owners() -> None:
     assert violations == []
 
 
+def test_planner_request_preparation_has_canonical_owner() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    planner_path = backend_root / PLANNER_PATH
+    preparation_path = backend_root / PLANNER_REQUEST_PREPARATION_PATH
+    violations: list[str] = []
+
+    if not preparation_path.is_file():
+        violations.append(f"{preparation_path}: missing planner request owner module")
+
+    planner_tree = ast.parse(planner_path.read_text(), filename=str(planner_path))
+    planner_class = next(
+        node
+        for node in ast.walk(planner_tree)
+        if isinstance(node, ast.ClassDef) and node.name == "AIBuilderPlanner"
+    )
+    planner_methods = {
+        node.name
+        for node in planner_class.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    for method_name in {
+        "_prepare_planner_request",
+        "_should_emit_forced_followup",
+    }:
+        if method_name in planner_methods:
+            violations.append(f"{planner_path}: AIBuilderPlanner defines {method_name}")
+    for helper_name in {
+        "_count_free_discovery_turns",
+        "_emit_planner_failure_event",
+        "_extract_first_validation_loc",
+        "_get_mvs_forced_followup",
+    }:
+        if helper_name in _top_level_names(planner_tree):
+            violations.append(f"{planner_path}: defines {helper_name}")
+
+    if preparation_path.is_file():
+        preparation_tree = ast.parse(
+            preparation_path.read_text(),
+            filename=str(preparation_path),
+        )
+        public_names = _top_level_public_names(preparation_tree)
+        if public_names != PLANNER_REQUEST_PREPARATION_PUBLIC_NAMES:
+            violations.append(
+                f"{preparation_path}: public names {sorted(public_names)}"
+            )
+        for module in _imported_modules(preparation_tree):
+            if module in {
+                AI_BUILDER_PLANNER_MODULE,
+                AI_BUILDER_PROPOSAL_PROCESSOR_MODULE,
+            }:
+                violations.append(f"{preparation_path}: imports {module}")
+        for node in ast.walk(preparation_tree):
+            if isinstance(node, ast.ClassDef) and node.name.endswith(
+                ("Processor", "Manager", "Handler", "Service")
+            ):
+                violations.append(
+                    f"{preparation_path}:{node.lineno} defines {node.name}"
+                )
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "prepare_planner_request"
+                and _annotation_uses_any(node.returns)
+            ):
+                violations.append(f"{preparation_path}:{node.lineno} returns Any")
+
+    assert violations == []
+
+
+def test_planner_failure_events_has_canonical_owner() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    planner_path = backend_root / PLANNER_PATH
+    failure_events_path = backend_root / PLANNER_FAILURE_EVENTS_PATH
+    violations: list[str] = []
+
+    if not failure_events_path.is_file():
+        violations.append(
+            f"{failure_events_path}: missing planner failure owner module"
+        )
+
+    planner_tree = ast.parse(planner_path.read_text(), filename=str(planner_path))
+    for helper_name in {
+        "_emit_planner_failure_event",
+        "_extract_first_validation_loc",
+    }:
+        if helper_name in _top_level_names(planner_tree):
+            violations.append(f"{planner_path}: defines {helper_name}")
+
+    if failure_events_path.is_file():
+        failure_events_tree = ast.parse(
+            failure_events_path.read_text(),
+            filename=str(failure_events_path),
+        )
+        public_names = _top_level_public_names(failure_events_tree)
+        if public_names != PLANNER_FAILURE_EVENTS_PUBLIC_NAMES:
+            violations.append(
+                f"{failure_events_path}: public names {sorted(public_names)}"
+            )
+        for module in _imported_modules(failure_events_tree):
+            if module == AI_BUILDER_PLANNER_MODULE:
+                violations.append(f"{failure_events_path}: imports {module}")
+        for node in ast.walk(failure_events_tree):
+            if isinstance(node, ast.ClassDef) and node.name.endswith(
+                ("Processor", "Manager", "Handler", "Service")
+            ):
+                violations.append(
+                    f"{failure_events_path}:{node.lineno} defines {node.name}"
+                )
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and not node.name.startswith("_")
+                and _annotation_uses_any(node.returns)
+            ):
+                violations.append(f"{failure_events_path}:{node.lineno} returns Any")
+
+    assert violations == []
+
+
 def _annotation_uses_any(annotation: ast.expr | None) -> bool:
     return annotation is not None and any(
         isinstance(node, ast.Name) and node.id == "Any" for node in ast.walk(annotation)
@@ -1412,7 +1562,6 @@ def _top_level_names(tree: ast.Module) -> frozenset[str]:
         node.name
         for node in tree.body
         if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
-        and not node.name.startswith("_")
     )
 
 

@@ -7,10 +7,10 @@ orchestrator's structured-JSON planner pipeline. This suite pins the
 parse_failed with finish_reason=="length", and rejected — to specific
 SSE event sequences.
 
-Every test stubs `_prepare_planner_request` so the test owns the
-downstream `PlannerPreparedRequest` shape without re-driving the
-discovery runtime, and patches `run_planner_turn` at the planner's
-import site to hand back a caller-crafted `PlannerTurnResult`. The
+Every test stubs the planner module's `prepare_planner_request` binding so
+the test owns the prepared outcome without re-driving the discovery runtime,
+and patches `run_planner_turn` at the planner's import site to hand back a
+caller-crafted `PlannerTurnResult`. The
 suite is therefore a contract test on the SSE emits alone, not on the
 pipeline internals (those are exhaustively covered in
 `test_ai_builder_planner_turn.py` and `test_ai_builder_orchestrator_v2.py`).
@@ -34,13 +34,13 @@ from intric.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputMode,
 )
 from intric.flows.ai_builder.ai_builder_action_policy import (
-    PlannerActionPolicy,
     build_planner_action_policy,
 )
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
     slot_classification_metadata_from_result,
 )
+from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderSession,
     SessionStatus,
@@ -57,13 +57,17 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     CommitArchitecturePayload,
     ConfirmRequirementsAction,
     ConfirmRequirementsPayload,
+    OrchestrationContext,
     PlannerOutput,
     PlanningStateDelta,
     RejectionReason,
 )
-from intric.flows.ai_builder.ai_builder_planner import (
-    AIBuilderPlanner,
-    PlannerPreparedRequest,
+from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
+from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
+    DiscoveryBlockPrepared,
+    NormalPlannerPrepared,
+    ProposalPrepared,
+    ServerOutputPrepared,
 )
 from intric.flows.ai_builder.ai_builder_planner_turn import (
     PlannerTurnOutcomeKind,
@@ -72,6 +76,9 @@ from intric.flows.ai_builder.ai_builder_planner_turn import (
 )
 from intric.flows.ai_builder.ai_builder_repair import CompletionMetadata
 from intric.flows.ai_builder.ai_builder_requirements_state import RequirementsState
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
+)
 from intric.flows.ai_builder.ai_builder_response_format import (
     build_planner_request_response_format,
 )
@@ -121,15 +128,25 @@ def _make_prepared_request(
     *,
     should_emit_forced_followup: bool = False,
     slot_classification_metadata: SlotClassificationMetadata | None = None,
-) -> PlannerPreparedRequest:
-    return PlannerPreparedRequest(
+    orchestration_context: OrchestrationContext | None = None,
+) -> NormalPlannerPrepared:
+    return NormalPlannerPrepared(
         requirements_state=_requirements_state_unconfirmed(),
         ui_language="en",
-        discovery_block_message=None,
         llm_messages=[{"role": "system", "content": "system"}],
+        system_prompt_hash="system-hash",
         should_emit_forced_followup=should_emit_forced_followup,
-        base_planning_state_version=0,
         slot_classification_metadata=slot_classification_metadata,
+        orchestration_context=orchestration_context or _make_orchestration_context(),
+    )
+
+
+def _make_orchestration_context(
+    state: PlanningState | None = None,
+) -> OrchestrationContext:
+    return OrchestrationContext(
+        current_version=0,
+        session_state=state or PlanningState.empty(),
     )
 
 
@@ -319,7 +336,15 @@ async def test_send_message_dispatched_ask_question_emits_text_plus_done() -> No
     while the structured-question adapter is a follow-up change.
     """
     planner = _make_planner()
-    prepared = _make_prepared_request()
+    prepared = _make_prepared_request(
+        orchestration_context=OrchestrationContext(
+            current_version=0,
+            session_state=PlanningState.empty(),
+            asked_question_ids=frozenset({"primary_runtime_input"}),
+            has_new_evidence=True,
+            question_ids_with_new_evidence=frozenset({"primary_runtime_input"}),
+        )
+    )
     action = AskQuestionAction(
         kind="ask_question",
         payload=AskQuestionPayload(
@@ -343,9 +368,8 @@ async def test_send_message_dispatched_ask_question_emits_text_plus_done() -> No
                 )
             ),
         ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
             new=AsyncMock(return_value=prepared),
         ),
         _patched_send(turn_result),
@@ -361,7 +385,15 @@ async def test_send_message_downgrades_strict_capability_to_json_object_for_plan
     None
 ):
     planner = _make_planner()
-    prepared = _make_prepared_request()
+    prepared = _make_prepared_request(
+        orchestration_context=OrchestrationContext(
+            current_version=0,
+            session_state=PlanningState.empty(),
+            asked_question_ids=frozenset({"primary_runtime_input"}),
+            has_new_evidence=True,
+            question_ids_with_new_evidence=frozenset({"primary_runtime_input"}),
+        )
+    )
     output = _planner_output(
         AskQuestionAction(
             kind="ask_question",
@@ -390,9 +422,8 @@ async def test_send_message_downgrades_strict_capability_to_json_object_for_plan
                 )
             ),
         ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
             new=AsyncMock(return_value=prepared),
         ),
         _patched_send(turn_result) as patched,
@@ -409,7 +440,15 @@ async def test_send_message_omits_response_format_when_provider_has_no_support()
     None
 ):
     planner = _make_planner()
-    prepared = _make_prepared_request()
+    prepared = _make_prepared_request(
+        orchestration_context=OrchestrationContext(
+            current_version=0,
+            session_state=PlanningState.empty(),
+            asked_question_ids=frozenset({"primary_runtime_input"}),
+            has_new_evidence=True,
+            question_ids_with_new_evidence=frozenset({"primary_runtime_input"}),
+        )
+    )
     output = _planner_output(
         AskQuestionAction(
             kind="ask_question",
@@ -438,9 +477,8 @@ async def test_send_message_omits_response_format_when_provider_has_no_support()
                 )
             ),
         ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
             new=AsyncMock(return_value=prepared),
         ),
         _patched_send(turn_result) as patched,
@@ -457,7 +495,15 @@ async def test_send_message_reuses_one_planner_response_format_selection_for_cha
     None
 ):
     planner = _make_planner()
-    prepared = _make_prepared_request()
+    prepared = _make_prepared_request(
+        orchestration_context=OrchestrationContext(
+            current_version=0,
+            session_state=PlanningState.empty(),
+            asked_question_ids=frozenset({"primary_runtime_input"}),
+            has_new_evidence=True,
+            question_ids_with_new_evidence=frozenset({"primary_runtime_input"}),
+        )
+    )
     output = _planner_output(
         CommitArchitectureAction(
             kind="commit_architecture",
@@ -486,9 +532,8 @@ async def test_send_message_reuses_one_planner_response_format_selection_for_cha
                 )
             ),
         ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
             new=AsyncMock(return_value=prepared),
         ),
         patch(
@@ -526,7 +571,15 @@ async def test_send_message_dispatched_commit_architecture_emits_status_plus_don
     text.
     """
     planner = _make_planner()
-    prepared = _make_prepared_request()
+    prepared = _make_prepared_request(
+        orchestration_context=OrchestrationContext(
+            current_version=0,
+            session_state=PlanningState.empty(),
+            asked_question_ids=frozenset({"primary_runtime_input"}),
+            has_new_evidence=True,
+            question_ids_with_new_evidence=frozenset({"primary_runtime_input"}),
+        )
+    )
     action = CommitArchitectureAction(
         kind="commit_architecture",
         payload=CommitArchitecturePayload(note="All clear."),
@@ -550,9 +603,8 @@ async def test_send_message_dispatched_commit_architecture_emits_status_plus_don
                 )
             ),
         ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
             new=AsyncMock(return_value=prepared),
         ),
         _patched_send(turn_result),
@@ -604,9 +656,8 @@ async def test_send_message_does_not_persist_internal_commit_note_as_assistant_t
                 )
             ),
         ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
             new=AsyncMock(return_value=prepared),
         ),
         _patched_send(run_and_capture),
@@ -638,7 +689,15 @@ async def test_send_message_dispatched_confirm_requirements_emits_versioned_summ
     conversation state, racing against turn-compaction.
     """
     planner = _make_planner()
-    prepared = _make_prepared_request()
+    prepared = _make_prepared_request(
+        orchestration_context=OrchestrationContext(
+            current_version=0,
+            session_state=PlanningState.empty(),
+            asked_question_ids=frozenset({"primary_runtime_input"}),
+            has_new_evidence=True,
+            question_ids_with_new_evidence=frozenset({"primary_runtime_input"}),
+        )
+    )
     action = ConfirmRequirementsAction(
         kind="confirm_requirements",
         payload=ConfirmRequirementsPayload(
@@ -670,9 +729,8 @@ async def test_send_message_dispatched_confirm_requirements_emits_versioned_summ
                 )
             ),
         ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
             new=AsyncMock(return_value=prepared),
         ),
         _patched_send(turn_result),
@@ -733,9 +791,8 @@ async def test_send_message_parse_failed_with_length_finish_reason_emits_output_
                 )
             ),
         ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
             new=AsyncMock(return_value=prepared),
         ),
         _patched_send(truncated_turn),
@@ -783,9 +840,8 @@ async def test_send_message_rejected_emits_planner_rejected_error() -> None:
                 )
             ),
         ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
             new=AsyncMock(return_value=prepared),
         ),
         _patched_send(rejected_turn),
@@ -851,14 +907,18 @@ async def test_send_message_orchestration_context_uses_rebuilt_state() -> None:
             "terminal_output": _slot("terminal_output", "text"),
         },
     )
-    prepared = PlannerPreparedRequest(
+    prepared = NormalPlannerPrepared(
         requirements_state=_requirements_state_unconfirmed(),
         ui_language="en",
-        discovery_block_message=None,
         llm_messages=[{"role": "system", "content": "system"}],
+        system_prompt_hash="system-hash",
+        slot_classification_metadata=None,
         should_emit_forced_followup=False,
-        base_planning_state_version=0,
-        rebuilt_planning_state=rebuilt_both_resolved,
+        orchestration_context=OrchestrationContext(
+            current_version=0,
+            session_state=rebuilt_both_resolved,
+            unresolved_architectural_choices=frozenset(),
+        ),
     )
 
     action = ConfirmRequirementsAction(
@@ -888,9 +948,8 @@ async def test_send_message_orchestration_context_uses_rebuilt_state() -> None:
                 )
             ),
         ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
             new=AsyncMock(return_value=prepared),
         ),
         patch(
@@ -947,14 +1006,18 @@ async def test_send_message_orchestration_context_blocks_commit_until_core_slots
             ),
         },
     )
-    prepared = PlannerPreparedRequest(
+    prepared = NormalPlannerPrepared(
         requirements_state=_requirements_state_unconfirmed(),
         ui_language="en",
-        discovery_block_message=None,
         llm_messages=[{"role": "system", "content": "system"}],
+        system_prompt_hash="system-hash",
+        slot_classification_metadata=None,
         should_emit_forced_followup=False,
-        base_planning_state_version=0,
-        rebuilt_planning_state=partial,
+        orchestration_context=OrchestrationContext(
+            current_version=0,
+            session_state=partial,
+            unresolved_architectural_choices=frozenset({"terminal_output"}),
+        ),
     )
 
     action = AskQuestionAction(
@@ -986,9 +1049,8 @@ async def test_send_message_orchestration_context_blocks_commit_until_core_slots
                 )
             ),
         ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
             new=AsyncMock(return_value=prepared),
         ),
         patch(
@@ -1009,20 +1071,20 @@ async def test_send_message_uses_discovery_selected_questions_as_non_core_ask_su
     None
 ):
     planner = _make_planner()
-    prepared = PlannerPreparedRequest(
+    prepared = NormalPlannerPrepared(
         requirements_state=_requirements_state_unconfirmed(),
         ui_language="en",
-        discovery_block_message=None,
         llm_messages=[{"role": "system", "content": "system"}],
+        system_prompt_hash="system-hash",
+        slot_classification_metadata=None,
         should_emit_forced_followup=False,
-        base_planning_state_version=0,
-        rebuilt_planning_state=PlanningState.empty(),
-        action_policy=build_planner_action_policy(
+        orchestration_context=OrchestrationContext(
+            current_version=0,
             session_state=PlanningState.empty(),
             unresolved_architectural_choices=frozenset(
                 {"primary_runtime_input", "terminal_output"}
             ),
-            selected_discovery_question_ids=frozenset(
+            required_slot_names=frozenset(
                 {"document_material_scope", "runtime_metadata_fields"}
             ),
         ),
@@ -1057,9 +1119,8 @@ async def test_send_message_uses_discovery_selected_questions_as_non_core_ask_su
                 )
             ),
         ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
             new=AsyncMock(return_value=prepared),
         ),
         patch(
@@ -1073,6 +1134,51 @@ async def test_send_message_uses_discovery_selected_questions_as_non_core_ask_su
     assert ctx.required_slot_names == frozenset(
         {"document_material_scope", "runtime_metadata_fields"}
     )
+
+
+@pytest.mark.asyncio
+async def test_send_message_discovery_block_ends_cleanly_without_followup() -> None:
+    planner = _make_planner()
+    prepared = DiscoveryBlockPrepared(
+        requirements_state=_requirements_state_unconfirmed(),
+        ui_language="en",
+        slot_classification_metadata=None,
+        discovery_block_message="Need more information.",
+    )
+
+    with (
+        patch.object(
+            planner,
+            "_resolve_message_metadata",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    metadata=None,
+                    is_requirements_confirmation=False,
+                    used_auxiliary_llm=False,
+                )
+            ),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
+            new=AsyncMock(return_value=prepared),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.emit_discovery_followup_if_needed",
+            new=AsyncMock(return_value=None),
+        ) as followup_mock,
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.run_planner_turn",
+            new=AsyncMock(side_effect=AssertionError("planner turn should not run")),
+        ),
+    ):
+        events = await _collect_events(planner, **_send_kwargs())
+
+    assert [event["event"] for event in events] == ["done"]
+    call_kwargs = followup_mock.await_args.kwargs
+    assert "litellm_client" not in call_kwargs
+    assert "litellm_model" not in call_kwargs
+    assert "litellm_kwargs" not in call_kwargs
+    assert "ui_language" not in call_kwargs
 
 
 @pytest.mark.asyncio
@@ -1102,15 +1208,12 @@ async def test_send_message_passes_server_precomputed_commit_to_turn_runner() ->
         unresolved_architectural_choices=frozenset(),
         selected_discovery_question_ids=frozenset(),
     )
-    prepared = PlannerPreparedRequest(
+    prepared = ServerOutputPrepared(
         requirements_state=_requirements_state_unconfirmed(),
         ui_language="en",
-        discovery_block_message=None,
-        llm_messages=[],
-        should_emit_forced_followup=False,
-        base_planning_state_version=0,
-        rebuilt_planning_state=state,
-        action_policy=action_policy,
+        slot_classification_metadata=None,
+        discovery_analysis=DiscoveryAnalysis(issues=()),
+        orchestration_context=_make_orchestration_context(state),
         server_output=build_server_planner_output(
             action_policy=action_policy,
             session_state=state,
@@ -1131,7 +1234,11 @@ async def test_send_message_passes_server_precomputed_commit_to_turn_runner() ->
 
     async def _capture_turn(**kwargs: Any) -> PlannerTurnResult:
         captured["precomputed_output"] = kwargs["precomputed_output"]
+        captured["base_messages"] = kwargs["base_messages"]
         return turn_result
+
+    def _capture_metrics(request: Any) -> None:
+        captured["planner_prompt_hash"] = request.planner_prompt_hash
 
     with (
         patch.object(
@@ -1145,14 +1252,17 @@ async def test_send_message_passes_server_precomputed_commit_to_turn_runner() ->
                 )
             ),
         ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
             new=AsyncMock(return_value=prepared),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_planner.run_planner_turn",
             new=AsyncMock(side_effect=_capture_turn),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.record_planner_turn_result",
+            side_effect=_capture_metrics,
         ),
     ):
         await _collect_events(planner, **_send_kwargs())
@@ -1161,6 +1271,8 @@ async def test_send_message_passes_server_precomputed_commit_to_turn_runner() ->
     assert precomputed is not None
     assert precomputed.planner_action.kind == "commit_architecture"
     assert precomputed.planning_state_delta.architecture_commit is not None
+    assert captured["base_messages"] == []
+    assert captured["planner_prompt_hash"] is None
 
 
 @pytest.mark.asyncio
@@ -1209,15 +1321,11 @@ async def test_send_message_auto_advances_server_commit_to_requirements_summary(
     )
     assert server_output is not None
     assert server_output.planner_action.kind == "commit_architecture"
-    prepared = PlannerPreparedRequest(
+    prepared = ServerOutputPrepared(
         requirements_state=_requirements_state_unconfirmed(),
         ui_language="en",
-        discovery_block_message=None,
-        llm_messages=[],
-        should_emit_forced_followup=False,
-        base_planning_state_version=0,
-        rebuilt_planning_state=state,
-        action_policy=action_policy,
+        discovery_analysis=DiscoveryAnalysis(issues=()),
+        orchestration_context=_make_orchestration_context(state),
         server_output=server_output,
         slot_classification_metadata=_slot_classification_metadata(),
     )
@@ -1252,9 +1360,8 @@ async def test_send_message_auto_advances_server_commit_to_requirements_summary(
                 )
             ),
         ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
             new=AsyncMock(return_value=prepared),
         ),
     ):
@@ -1282,17 +1389,19 @@ async def test_send_message_auto_advances_server_commit_to_requirements_summary(
 @pytest.mark.asyncio
 async def test_send_message_routes_proposal_mode_to_task_specific_proposer() -> None:
     planner = _make_planner()
-    prepared = PlannerPreparedRequest(
+    prepared = ProposalPrepared(
         requirements_state=_requirements_state_confirmed(),
         ui_language="en",
-        discovery_block_message=None,
         llm_messages=[{"role": "system", "content": "proposal task"}],
-        should_emit_forced_followup=False,
-        base_planning_state_version=0,
-        rebuilt_planning_state=PlanningState.empty(),
-        action_policy=PlannerActionPolicy(allowed_action_kinds=("propose_plan",)),
-        proposal_mode=True,
+        system_prompt_hash="proposal-hash",
         slot_classification_metadata=_slot_classification_metadata(),
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[],
+        ),
+        orchestration_context=_make_orchestration_context(),
     )
     captured: dict[str, Any] = {}
 
@@ -1312,9 +1421,8 @@ async def test_send_message_routes_proposal_mode_to_task_specific_proposer() -> 
                 )
             ),
         ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
             new=AsyncMock(return_value=prepared),
         ),
         patch.object(planner.proposal_processor, "propose_plan", new=_proposal),
@@ -1378,7 +1486,15 @@ async def test_send_message_derives_asked_question_ids_and_new_evidence() -> Non
         conversation=conversation,
         planning_state_version=0,
     )
-    prepared = _make_prepared_request()
+    prepared = _make_prepared_request(
+        orchestration_context=OrchestrationContext(
+            current_version=0,
+            session_state=PlanningState.empty(),
+            asked_question_ids=frozenset({"primary_runtime_input"}),
+            has_new_evidence=True,
+            question_ids_with_new_evidence=frozenset({"primary_runtime_input"}),
+        )
+    )
     action = AskQuestionAction(
         kind="ask_question",
         payload=AskQuestionPayload(
@@ -1412,9 +1528,8 @@ async def test_send_message_derives_asked_question_ids_and_new_evidence() -> Non
                 )
             ),
         ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
             new=AsyncMock(return_value=prepared),
         ),
         patch(
@@ -1465,7 +1580,15 @@ async def test_send_message_counts_plain_reply_after_v2_question_as_new_evidence
         conversation=conversation,
         planning_state_version=0,
     )
-    prepared = _make_prepared_request()
+    prepared = _make_prepared_request(
+        orchestration_context=OrchestrationContext(
+            current_version=0,
+            session_state=PlanningState.empty(),
+            asked_question_ids=frozenset({"primary_runtime_input"}),
+            has_new_evidence=True,
+            question_ids_with_new_evidence=frozenset({"primary_runtime_input"}),
+        )
+    )
     turn_result = _dispatched_result(
         action_kind="ask_question",
         planner_output=_planner_output(
@@ -1498,9 +1621,8 @@ async def test_send_message_counts_plain_reply_after_v2_question_as_new_evidence
                 )
             ),
         ),
-        patch.object(
-            planner,
-            "_prepare_planner_request",
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.prepare_planner_request",
             new=AsyncMock(return_value=prepared),
         ),
         patch(

@@ -6,6 +6,7 @@ from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
+    metadata_has_question_answer,
     slot_classification_metadata_from_result,
 )
 from intric.flows.ai_builder.ai_builder_discovery import (
@@ -48,6 +49,7 @@ class DiscoveryRuntimeResult:
     discovery_analysis: DiscoveryAnalysis
     planning_state: PlanningState
     slot_classification_metadata: SlotClassificationMetadata | None = None
+    should_emit_forced_followup: bool = False
 
 
 def _narrow_structured_analysis_need_from_classifier(
@@ -224,6 +226,8 @@ async def build_discovery_runtime_result(
     ui_language: str | None = None,
     allow_semantic_adjudication: bool = True,
     tenant_id: UUID,
+    requirements_confirmed: bool = False,
+    is_requirements_confirmation: bool = False,
 ) -> DiscoveryRuntimeResult:
     context = await build_runtime_discovery_context(
         conversation,
@@ -241,11 +245,20 @@ async def build_discovery_runtime_result(
         planning_state=context.planning_state,
         slot_classification_result=context.slot_classification_result,
     )
+    discovery_block_message = build_discovery_block_message(
+        conversation,
+        flow=flow,
+        analysis=analysis,
+    )
     return DiscoveryRuntimeResult(
-        discovery_block_message=build_discovery_block_message(
+        discovery_block_message=discovery_block_message,
+        should_emit_forced_followup=_should_emit_forced_followup(
             conversation,
+            requirements_confirmed=requirements_confirmed,
+            is_requirements_confirmation=is_requirements_confirmation,
+            discovery_block_message=discovery_block_message,
+            discovery_analysis=analysis,
             flow=flow,
-            analysis=analysis,
         ),
         discovery_analysis=analysis,
         planning_state=context.planning_state,
@@ -289,3 +302,47 @@ async def build_discovery_followup_runtime(
         analysis,
         context.planning_state,
     )
+
+
+def _should_emit_forced_followup(
+    conversation: list[ConversationMessage],
+    *,
+    requirements_confirmed: bool,
+    is_requirements_confirmation: bool,
+    discovery_block_message: str | None,
+    discovery_analysis: DiscoveryAnalysis,
+    flow: Flow | None,
+) -> bool:
+    # Two unanswered discovery turns are enough evidence of a stalled freeform loop.
+    is_free_discovery = (
+        not requirements_confirmed
+        and not is_requirements_confirmation
+        and not discovery_analysis.mvs_met
+        and discovery_block_message is None
+    )
+    if not is_free_discovery:
+        return False
+    if _count_free_discovery_turns(conversation) < 2:
+        return False
+    return _get_mvs_forced_followup(conversation, flow=flow) is not None
+
+
+def _count_free_discovery_turns(conversation: list[ConversationMessage]) -> int:
+    count = 0
+    for msg in reversed(conversation):
+        if msg.role == "assistant" and msg.content and not msg.tool_calls:
+            count += 1
+        elif msg.role == "user" and metadata_has_question_answer(msg.metadata):
+            break
+    return count
+
+
+def _get_mvs_forced_followup(
+    conversation: list[ConversationMessage],
+    *,
+    flow: Flow | None = None,
+) -> str | None:
+    followup = build_discovery_followup(conversation, flow=flow)
+    if followup is not None:
+        return followup[2]
+    return None

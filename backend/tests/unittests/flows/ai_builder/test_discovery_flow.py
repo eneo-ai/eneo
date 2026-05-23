@@ -37,6 +37,9 @@ from intric.flows.ai_builder.ai_builder_planner_action_dispatch import (
     BackendSelectedQuestionDispatchRequest,
     dispatch_backend_selected_question_if_any,
 )
+from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
+    conversation_message_to_llm_dict,
+)
 from intric.flows.ai_builder.ai_builder_prompts import (
     build_clarification_hints,
     build_system_prompt,
@@ -2448,7 +2451,7 @@ class TestExtendedClarificationHints:
 
 class TestPlannerConversationEncoding:
     def test_structured_answer_metadata_is_included_for_llm_context(self) -> None:
-        payload = AIBuilderPlanner.conversation_msg_to_llm_dict(
+        payload = conversation_message_to_llm_dict(
             ConversationMessage(
                 role="user",
                 content="Documents",

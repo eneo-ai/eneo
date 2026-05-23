@@ -16,9 +16,11 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder import ai_builder_planner
+from intric.flows.ai_builder import ai_builder_planner_failure_events
 from intric.flows.ai_builder.ai_builder_orchestrator import RejectionReason
-from intric.flows.ai_builder.ai_builder_planner import _emit_planner_failure_event
+from intric.flows.ai_builder.ai_builder_planner_failure_events import (
+    _emit_planner_failure_event,
+)
 
 
 class _FakeTurnResult:
@@ -34,7 +36,7 @@ class _FakeTurnResult:
 
 @pytest.fixture
 def captured() -> Iterator[tuple[logging.Logger, list[logging.LogRecord]]]:
-    planner_logger: logging.Logger = ai_builder_planner.logger
+    planner_logger: logging.Logger = ai_builder_planner_failure_events.logger
     records: list[logging.LogRecord] = []
 
     class _Capture(logging.Handler):
@@ -115,7 +117,7 @@ class TestParseFailedFailureEvent:
         _, records = captured
         _emit_planner_failure_event(
             turn_result=_FakeTurnResult(kind="parse_failed"),
-            request_id=None,
+            request_id="req-replay",
             session_id=uuid4(),
             tenant_id=uuid4(),
             planning_state_version=12,
@@ -138,7 +140,7 @@ class TestParseFailedFailureEvent:
         _, records = captured
         _emit_planner_failure_event(
             turn_result=_FakeTurnResult(kind="parse_failed"),
-            request_id=None,
+            request_id="req-detail",
             session_id=uuid4(),
             tenant_id=uuid4(),
             planning_state_version=1,
@@ -197,7 +199,7 @@ class TestRejectedFailureEvent:
         for _ in range(2):
             _emit_planner_failure_event(
                 turn_result=_FakeTurnResult(kind="rejected", rejection=rejection),
-                request_id=None,
+                request_id="req-fingerprint",
                 session_id=uuid4(),
                 tenant_id=uuid4(),
                 planning_state_version=5,
