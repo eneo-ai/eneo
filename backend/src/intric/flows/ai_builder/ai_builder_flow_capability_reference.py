@@ -12,6 +12,7 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_output_type_values,
     document_delivery_mode_values,
 )
+from intric.flows.ai_builder.ai_builder_tools import active_submission_tool_name
 from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY
 
 
@@ -24,7 +25,7 @@ def build_structured_reference_payload(*, is_edit_mode: bool) -> dict[str, Any]:
     """
     payload: dict[str, Any] = {
         "tool_protocol": {
-            "submission_tool": "edit_flow" if is_edit_mode else "outline_flow",
+            "submission_tool": active_submission_tool_name(is_edit_mode=is_edit_mode),
             "question_action_kind": "ask_question",
         },
         "flow_capability_source": "AI Builder schema values + Flow Capability Manifest",

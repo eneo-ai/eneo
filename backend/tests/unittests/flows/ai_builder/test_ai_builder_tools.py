@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+from typing import get_args
+
 import pytest
 
+from intric.flows.ai_builder import ai_builder_tools
 from intric.flows.ai_builder.ai_builder_create_outline import (
     OUTLINE_FLOW_TOOL_NAME,
     build_outline_flow_tool_schema,
 )
+from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
+    ActiveSubmissionToolName,
+    active_submission_tool_name,
     build_all_tool_schemas,
     build_ask_structured_question_tool_schema,
     extract_assumptions,
@@ -21,6 +27,17 @@ from intric.flows.ai_builder.ai_builder_tools import (
 
 
 class TestBuildToolSchema:
+    def test_active_submission_tool_name_uses_create_and_edit_tool_constants(
+        self,
+    ) -> None:
+        assert active_submission_tool_name(is_edit_mode=False) == OUTLINE_FLOW_TOOL_NAME
+        assert active_submission_tool_name(is_edit_mode=True) == EDIT_FLOW_TOOL_NAME
+        assert set(get_args(ActiveSubmissionToolName)) == {
+            OUTLINE_FLOW_TOOL_NAME,
+            EDIT_FLOW_TOOL_NAME,
+        }
+        assert "active_submission_tool_name" in ai_builder_tools.__all__
+
     def test_all_tools_expose_only_active_create_contract(self) -> None:
         names = {schema["function"]["name"] for schema in build_all_tool_schemas()}
 

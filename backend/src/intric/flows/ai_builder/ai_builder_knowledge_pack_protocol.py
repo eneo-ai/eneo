@@ -3,10 +3,11 @@ from __future__ import annotations
 from intric.flows.ai_builder.ai_builder_flow_capability_reference import (
     render_structured_reference_block,
 )
+from intric.flows.ai_builder.ai_builder_tools import active_submission_tool_name
 
 
 def build_role_and_protocol(*, is_edit_mode: bool) -> str:
-    submission_tool = "edit_flow" if is_edit_mode else "outline_flow"
+    submission_tool = active_submission_tool_name(is_edit_mode=is_edit_mode)
     draft_noun = "ändringsplan" if is_edit_mode else "typed draft"
     plan_phrase = "ändringarna" if is_edit_mode else "planen"
 

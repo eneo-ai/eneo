@@ -18,7 +18,6 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     question_answer_from_metadata,
     question_answer_question_id,
 )
-from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_discovery import (
     build_discovery_guidance,
 )
@@ -70,6 +69,7 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
     resolve_requirements_state,
 )
+from intric.flows.ai_builder.ai_builder_tools import active_submission_tool_name
 from intric.flows.domain.flow import Flow
 
 __all__ = [
@@ -310,7 +310,7 @@ def build_clarification_hints(
     resolved_output = output_intent.terminal_output
     resolved_docx_mode = output_intent.docx_output_mode
     resolved_pdf_mode = output_intent.pdf_generation_mode
-    submission_tool = "edit_flow" if flow is not None else OUTLINE_FLOW_TOOL_NAME
+    submission_tool = active_submission_tool_name(is_edit_mode=flow is not None)
     json_contract_term = "output_contract" if flow is not None else "output_fields"
 
     if _needs_pdf_scope_question(text, answered_ids):

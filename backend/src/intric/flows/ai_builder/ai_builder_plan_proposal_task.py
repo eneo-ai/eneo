@@ -26,6 +26,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
     build_ai_builder_resource_reference_material,
 )
+from intric.flows.ai_builder.ai_builder_tools import active_submission_tool_name
 from intric.flows.ai_builder.planning_state import PlanningState
 
 
@@ -45,7 +46,7 @@ def build_plan_proposal_system_prompt(
 ) -> str:
     """Build a compact task prompt for create/edit flow proposal."""
 
-    submission_tool = "edit_flow" if is_edit_mode else "outline_flow"
+    submission_tool = active_submission_tool_name(is_edit_mode=is_edit_mode)
     selected_mcp_server_refs = mcp_selected_server_refs_from_values(
         set(mcp_selection_values or ())
     )

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, TypeAlias
 
 from intric.flows.ai_builder.ai_builder_create_outline import (
     OUTLINE_FLOW_TOOL_NAME,
     build_outline_flow_tool_schema,
     parse_outline_flow_arguments,
 )
+from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     supported_structured_question_ids,
 )
@@ -21,6 +22,15 @@ from intric.flows.ai_builder.ai_builder_tool_parsing import (
 )
 
 ASK_STRUCTURED_QUESTION_TOOL_NAME = "ask_structured_question"
+ActiveSubmissionToolName: TypeAlias = Literal["outline_flow", "edit_flow"]
+
+
+def active_submission_tool_name(
+    *,
+    is_edit_mode: bool,
+) -> ActiveSubmissionToolName:
+    return EDIT_FLOW_TOOL_NAME if is_edit_mode else OUTLINE_FLOW_TOOL_NAME
+
 
 ASK_STRUCTURED_QUESTION_DESCRIPTION = (
     "Ask the user a question with clickable options instead of free text. "
@@ -190,9 +200,11 @@ def build_free_discovery_tool_schemas() -> list[dict[str, Any]]:
 __all__ = [
     "ASK_STRUCTURED_QUESTION_DESCRIPTION",
     "ASK_STRUCTURED_QUESTION_TOOL_NAME",
+    "ActiveSubmissionToolName",
     "CONFIRM_REQUIREMENTS_DESCRIPTION",
     "CONFIRM_REQUIREMENTS_TOOL_NAME",
     "OUTLINE_FLOW_TOOL_NAME",
+    "active_submission_tool_name",
     "build_all_tool_schemas",
     "build_ask_structured_question_tool_schema",
     "build_confirm_requirements_tool_schema",

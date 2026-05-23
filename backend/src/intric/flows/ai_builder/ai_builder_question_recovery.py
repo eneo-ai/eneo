@@ -12,7 +12,6 @@ from intric.flows.ai_builder.ai_builder_discovery_followup import (
     persist_backend_question,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
-from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
     AIBuilderErrorPhase,
@@ -47,7 +46,7 @@ from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
-    OUTLINE_FLOW_TOOL_NAME,
+    active_submission_tool_name,
     build_discovery_complete_tool_schemas,
     parse_structured_question,
 )
@@ -212,7 +211,9 @@ async def _stream_non_question_continuation(
     request: StructuredQuestionRecoveryRequest,
     original_question_id: str | None,
 ) -> AsyncGenerator[QuestionRecoveryItem, None]:
-    submission_tool_name = _active_submission_tool_name(request.flow)
+    submission_tool_name = active_submission_tool_name(
+        is_edit_mode=request.flow is not None
+    )
     filtered_tool_schemas = [
         schema
         for schema in request.tool_schemas
@@ -354,7 +355,3 @@ async def _stream_non_question_continuation(
         if message.content:
             yield build_text_event(message.content)
         return
-
-
-def _active_submission_tool_name(flow: Flow | None) -> str:
-    return EDIT_FLOW_TOOL_NAME if flow is not None else OUTLINE_FLOW_TOOL_NAME

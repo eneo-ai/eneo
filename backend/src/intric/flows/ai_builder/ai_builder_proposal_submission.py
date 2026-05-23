@@ -1,4 +1,4 @@
-"""Own active create/edit proposal submission and its submission tool names."""
+"""Own active create/edit proposal submission behavior."""
 
 from __future__ import annotations
 
@@ -91,6 +91,7 @@ from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     OUTLINE_FLOW_TOOL_NAME,
+    active_submission_tool_name,
     build_outline_flow_tool_schema,
 )
 from intric.flows.ai_builder.planning_state import PlanningState
@@ -161,9 +162,6 @@ class ProposalSubmissionOwner:
             repo=repo,
             quality_retry_warning_codes=quality_retry_warning_codes,
         )
-
-    def _active_submission_tool_name(self, flow: "Flow | None") -> str:
-        return EDIT_FLOW_TOOL_NAME if flow is not None else OUTLINE_FLOW_TOOL_NAME
 
     def _active_submission_tool_schemas(
         self,
@@ -237,7 +235,9 @@ class ProposalSubmissionOwner:
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
-        submission_tool_name = self._active_submission_tool_name(flow)
+        submission_tool_name = active_submission_tool_name(
+            is_edit_mode=flow is not None
+        )
         tool_schemas = self._active_submission_tool_schemas(
             flow=flow,
             available_models=available_models,
@@ -759,7 +759,7 @@ class ProposalSubmissionOwner:
         assistant_metadata: dict[str, Any] | None = None,
     ) -> EventBatch | None:
         request_id = usage_tracker.request_id
-        target_tool_name = self._active_submission_tool_name(flow)
+        target_tool_name = active_submission_tool_name(is_edit_mode=flow is not None)
         record_proposal_first_attempt(
             usage_tracker,
             request_id=request_id,
