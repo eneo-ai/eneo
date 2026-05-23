@@ -4,10 +4,10 @@ Phase 3 of the same-IdP MCP OAuth work. Lands the per-server columns the
 broker needs (``tool_discovery_principal`` + ``target_resource_or_scope``)
 and the short-lived audience-bound-token cache the broker writes through.
 
-Tenant-level config (``idp_kind``, ``mcp_service_account.*``) lives in
-the existing ``tenants.federation_config`` JSONB so we don't have to
-migrate the tenants table for what is effectively additional OIDC
-configuration. Strategy resolution reads from there at request time.
+Tenant-level config (``exchange_protocol``, ``mcp_service_account.*``)
+lives in the existing ``tenants.federation_config`` JSONB so we don't
+have to migrate the tenants table for what is effectively additional
+OIDC configuration. Strategy resolution reads from there at request time.
 
 ``mcp_exchanged_tokens`` is a cache — safe to truncate, no FK from
 ``idp_user_tokens`` (cross-tenant rows live independently). Cascades

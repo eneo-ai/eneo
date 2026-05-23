@@ -1,20 +1,17 @@
-"""Token-exchange strategies for the same-IdP MCP OAuth broker.
+"""Token-exchange strategy for the same-IdP MCP OAuth broker.
 
 The MCP 2025-11-25 spec mandates ``Authorization: Bearer <token>`` audienced
 via RFC 8707 to the target MCP server. To get that token without a second
 user consent, the broker performs a delegated grant against the user's
-existing IdP. Only two wire formats are in play:
+existing IdP. Eneo standardises on RFC 8693 token-exchange
+(``grant_type=urn:ietf:params:oauth:grant-type:token-exchange``); any
+OIDC + RFC 8693 conformant IdP works without additional code.
 
-- **RFC 8693 token-exchange** (``grant_type=urn:ietf:params:oauth:grant-type:token-exchange``).
-  Covers Keycloak and any conformant IdP. The strategy sends both
-  ``audience`` and ``resource`` per RFC 8693 + RFC 8707.
-- **Entra ID On-Behalf-Of** (``grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer``
-  + ``requested_token_use=on_behalf_of``). Entra does not implement
-  RFC 8693 directly.
-
-The :class:`TokenExchangeStrategy` interface hides the wire format from
-the broker. ``IdpKind`` discriminates which implementation to dispatch
-based on the tenant's ``federation_config.idp_kind``.
+A single-value ``ExchangeProtocol`` literal is preserved so that adding a
+second wire format later (e.g. legacy Entra OBO via ``jwt-bearer``) is
+purely additive: implement another :class:`TokenExchangeStrategy`, add a
+literal value, branch in :func:`resolve_strategy`. No structural refactor
+required at the call sites.
 """
 
 from __future__ import annotations
@@ -27,21 +24,24 @@ from typing import Any, Literal, Optional
 
 import aiohttp
 
-IdpKind = Literal["keycloak", "entra"]
+# Wire-format discriminator. Currently single-valued; future protocols
+# (e.g. ``"jwt_bearer_obo"`` for legacy Entra OBO) extend this literal and
+# add a branch in :func:`resolve_strategy`.
+ExchangeProtocol = Literal["rfc8693"]
 
 
 @dataclass(frozen=True)
 class TokenExchangeTarget:
-    """What the broker is exchanging for: audience + scope hint."""
+    """What the broker is exchanging for: audience + optional override.
 
-    # Canonical URI of the MCP server (RFC 8707). Keycloak uses this as
-    # both ``audience`` and ``resource``; Entra ignores it in favour of
-    # ``scope``.
+    ``audience`` is the canonical URI of the MCP server (RFC 8707) and
+    becomes both the ``audience`` and ``resource`` parameters in the
+    RFC 8693 form. ``resource_or_scope`` overrides both when set, for
+    operators who federate a single MCP server under a shared audience
+    or scope.
+    """
+
     audience: str
-    # Strategy-specific override. For Keycloak this becomes ``resource``;
-    # for Entra it becomes the API ``scope`` (e.g.
-    # ``api://<mcp-app-id>/.default``). When ``None`` the strategy falls
-    # back to ``audience`` (Keycloak) or refuses (Entra).
     resource_or_scope: Optional[str] = None
 
 
@@ -68,7 +68,7 @@ class TokenExchangeUserActionRequired(Exception):
 class TokenExchangeStrategy(ABC):
     """Strategy interface. One concrete subclass per IdP wire format."""
 
-    idp_kind: IdpKind
+    exchange_protocol: ExchangeProtocol
 
     @abstractmethod
     async def exchange(
@@ -131,13 +131,11 @@ def classify_error(status_code: int, payload: dict[str, Any]) -> Exception:
     )
 
 
-from intric.mcp_servers.application.token_exchange.entra import EntraOboStrategy
 from intric.mcp_servers.application.token_exchange.rfc8693 import Rfc8693Strategy
 
 __all__ = [
-    "EntraOboStrategy",
+    "ExchangeProtocol",
     "ExchangedToken",
-    "IdpKind",
     "Rfc8693Strategy",
     "TokenExchangeError",
     "TokenExchangeStrategy",
@@ -150,15 +148,13 @@ __all__ = [
 ]
 
 
-def resolve_strategy(idp_kind: IdpKind) -> TokenExchangeStrategy:
-    """Look up the strategy for a tenant's configured ``idp_kind``.
+def resolve_strategy(protocol: ExchangeProtocol) -> TokenExchangeStrategy:
+    """Look up the strategy for the configured exchange protocol.
 
-    Only two wire formats exist in practice: RFC 8693 (Keycloak and any
-    conformant IdP) and Entra OBO. The ``keycloak`` value is the spelling
-    operators recognise; it maps to the generic RFC 8693 implementation.
+    Today RFC 8693 is the only supported wire format. The branch shape is
+    preserved so that adding a second protocol (e.g. legacy Entra OBO) is
+    a one-line change here plus a new strategy file.
     """
-    if idp_kind == "keycloak":
+    if protocol == "rfc8693":
         return Rfc8693Strategy()
-    if idp_kind == "entra":
-        return EntraOboStrategy()
-    raise ValueError(f"Unsupported idp_kind: {idp_kind}")
+    raise ValueError(f"Unsupported exchange_protocol: {protocol}")

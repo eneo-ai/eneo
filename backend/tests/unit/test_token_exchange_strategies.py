@@ -1,8 +1,8 @@
-"""Strategy unit tests — verifies each IdP's wire format.
+"""Strategy unit tests — pin the wire format Eneo sends to the IdP.
 
 The broker invariants live in the integration suite; here we pin the
-shape of the form payload each strategy sends so a regression in the
-Keycloak/Entra/Generic translation surfaces immediately.
+shape of the form payload the RFC 8693 strategy sends so a regression
+in the wire translation surfaces immediately.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ import pytest
 
 from intric.mcp_servers.application import token_exchange as te_mod
 from intric.mcp_servers.application.token_exchange import (
-    EntraOboStrategy,
     Rfc8693Strategy,
     TokenExchangeError,
     TokenExchangeTarget,
@@ -72,48 +71,6 @@ async def test_keycloak_strategy_emits_rfc8693_form(patch_post):
     assert form["client_secret"] == "s3cret"
     assert result.access_token == "mcp-aud-token"
     assert result.scope == "mcp:tools"
-
-
-@pytest.mark.asyncio
-async def test_entra_strategy_emits_obo_form(patch_post):
-    patch_post["response"] = (
-        200,
-        {"access_token": "obo-token", "expires_in": 3599},
-    )
-
-    strat = EntraOboStrategy()
-    target = TokenExchangeTarget(
-        audience="api://abc-mcp",
-        resource_or_scope="api://abc-mcp/.default",
-    )
-    await strat.exchange(
-        subject_access_token="user-at-entra",
-        target=target,
-        token_endpoint="https://login.microsoftonline.com/tenant/oauth2/v2.0/token",
-        client_id="eneo-app-id",
-        client_secret="confidential",
-    )
-
-    form = patch_post["form"]
-    assert form["grant_type"] == "urn:ietf:params:oauth:grant-type:jwt-bearer"
-    assert form["assertion"] == "user-at-entra"
-    assert form["requested_token_use"] == "on_behalf_of"
-    assert form["scope"] == "api://abc-mcp/.default"
-    assert form["client_id"] == "eneo-app-id"
-
-
-@pytest.mark.asyncio
-async def test_entra_strategy_requires_scope():
-    strat = EntraOboStrategy()
-    target = TokenExchangeTarget(audience="api://abc-mcp", resource_or_scope=None)
-    with pytest.raises(TokenExchangeError, match="target_resource_or_scope"):
-        await strat.exchange(
-            subject_access_token="x",
-            target=target,
-            token_endpoint="https://login.microsoftonline.com/x/oauth2/v2.0/token",
-            client_id="x",
-            client_secret=None,
-        )
 
 
 @pytest.mark.asyncio

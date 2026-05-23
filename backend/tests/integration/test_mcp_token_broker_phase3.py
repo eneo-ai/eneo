@@ -139,7 +139,7 @@ async def test_same_idp_mismatch_denies_exchange_without_idp_call(
             await broker.get_token(
                 mcp_server=server,
                 tenant_federation_config={
-                    "idp_kind": "keycloak",
+                    "exchange_protocol": "rfc8693",
                     "token_endpoint": f"{issuer}/protocol/openid-connect/token",
                     "client_id": "eneo-broker",
                     "client_secret": "s3cret",
@@ -186,7 +186,7 @@ async def test_per_user_happy_path_caches_token_for_subsequent_calls(
         )
 
     federation_config = {
-        "idp_kind": "keycloak",
+        "exchange_protocol": "rfc8693",
         "token_endpoint": f"{issuer}/protocol/openid-connect/token",
         "client_id": "eneo-broker",
         "client_secret": "s3cret",
@@ -257,7 +257,7 @@ async def test_service_key_on_per_user_server_refuses_before_idp_touch(
         with pytest.raises(MCPRequiresUserIdentityError):
             await broker.get_token(
                 mcp_server=server,
-                tenant_federation_config={"idp_kind": "keycloak"},
+                tenant_federation_config={"exchange_protocol": "rfc8693"},
                 principal=UserPrincipal(user=service_user),
             )
     assert patch_idp_post["call_count"] == 0

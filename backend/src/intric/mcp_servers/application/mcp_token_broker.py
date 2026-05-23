@@ -34,7 +34,7 @@ from intric.database.tables.mcp_exchanged_tokens_table import MCPExchangedTokens
 from intric.main.logging import get_logger
 from intric.mcp_servers.application.token_exchange import (
     ExchangedToken,
-    IdpKind,
+    ExchangeProtocol,
     TokenExchangeError,
     TokenExchangeTarget,
     TokenExchangeUserActionRequired,
@@ -101,8 +101,9 @@ class MCPNotAuthenticatedError(Exception):
 
 class MCPBrokerConfigurationError(Exception):
     """Operator misconfiguration — tenant federation_config is missing
-    ``idp_kind`` or the per-tenant service-account credentials. Surfaces
-    as 500 to keep the caller honest."""
+    required fields (e.g. ``client_id``, ``token_endpoint``) or the
+    per-tenant service-account credentials. Surfaces as 500 to keep
+    the caller honest."""
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +268,7 @@ class MCPTokenBroker:
             audience=prm.resource,
             resource_or_scope=target_override,
         )
-        idp_kind, token_endpoint, client_id, client_secret = (
+        exchange_protocol, token_endpoint, client_id, client_secret = (
             self._resolve_strategy_inputs(
                 idp_issuer=idp_issuer,
                 tenant_federation_config=tenant_federation_config,
@@ -280,7 +281,7 @@ class MCPTokenBroker:
                     exchanged = await self._exchange_as_user(
                         user=principal.user,
                         idp_issuer=idp_issuer,
-                        idp_kind=idp_kind,
+                        exchange_protocol=exchange_protocol,
                         target=target,
                         token_endpoint=token_endpoint,
                         client_id=client_id,
@@ -449,30 +450,39 @@ class MCPTokenBroker:
         *,
         idp_issuer: str,
         tenant_federation_config: dict[str, Any],
-    ) -> tuple[IdpKind, str, str, Optional[str]]:
-        """Translate tenant federation_config into (idp_kind, token_endpoint,
-        client_id, client_secret).
+    ) -> tuple[ExchangeProtocol, str, str, Optional[str]]:
+        """Translate tenant federation_config into (exchange_protocol,
+        token_endpoint, client_id, client_secret).
 
-        token_endpoint is derived from ``token_endpoint`` if present, else
-        from ``{idp_issuer}/protocol/openid-connect/token`` (Keycloak
-        convention). Operators with non-Keycloak IdPs must set it.
+        ``exchange_protocol`` defaults to ``"rfc8693"`` — Eneo requires
+        OIDC + RFC 8693 conformant IdPs. The field is preserved as a
+        single-element literal so a second wire format (e.g. legacy Entra
+        OBO) can be added without touching call sites.
+
+        ``token_endpoint`` is read from the config when present, otherwise
+        derived from ``{idp_issuer}/protocol/openid-connect/token``
+        (Keycloak convention). Operators on non-Keycloak IdPs must set it
+        explicitly until we wire automatic OIDC discovery.
         """
-        idp_kind_raw = tenant_federation_config.get("idp_kind")
-        if idp_kind_raw not in ("keycloak", "entra"):
+        protocol_raw = tenant_federation_config.get("exchange_protocol", "rfc8693")
+        if protocol_raw != "rfc8693":
             raise MCPBrokerConfigurationError(
-                f"tenant.federation_config.idp_kind must be either "
-                f"'keycloak' (or any RFC 8693 conformant IdP) or 'entra'; "
-                f"got {idp_kind_raw!r}"
+                f"tenant.federation_config.exchange_protocol must be 'rfc8693'; "
+                f"got {protocol_raw!r}"
             )
-        idp_kind: IdpKind = idp_kind_raw  # type: ignore[assignment]
+        exchange_protocol: ExchangeProtocol = "rfc8693"
 
         token_endpoint = tenant_federation_config.get("token_endpoint")
-        if not token_endpoint and idp_kind == "keycloak":
+        if not token_endpoint:
+            # Keycloak / spec-conformant convention. Other IdPs (Okta, Auth0,
+            # Zitadel) expose the token endpoint via OIDC discovery; setting
+            # it explicitly in federation_config is the supported workaround
+            # until the broker reads discovery itself.
             token_endpoint = f"{idp_issuer.rstrip('/')}/protocol/openid-connect/token"
         if not isinstance(token_endpoint, str) or not token_endpoint:
             raise MCPBrokerConfigurationError(
                 "tenant.federation_config.token_endpoint required for "
-                f"idp_kind={idp_kind}; not present"
+                "the broker; not present and could not be derived from issuer"
             )
 
         client_id = tenant_federation_config.get("client_id")
@@ -484,7 +494,7 @@ class MCPTokenBroker:
         # client_secret is stored as a Fernet envelope (enc:fernet:v1:...) in
         # the JSONB column; decrypt before posting to the IdP. CredentialResolver
         # does the same on the login path; the broker bypasses it because it
-        # needs additional fields (issuer, idp_kind, token_endpoint) that
+        # needs additional fields (issuer, token_endpoint) that
         # CredentialResolver does not surface today.
         if (
             isinstance(client_secret, str)
@@ -494,7 +504,7 @@ class MCPTokenBroker:
             client_secret = self._encryption.decrypt(client_secret)
 
         return (
-            idp_kind,
+            exchange_protocol,
             token_endpoint,
             client_id,
             client_secret if isinstance(client_secret, str) else None,
@@ -509,7 +519,7 @@ class MCPTokenBroker:
         *,
         user: "UserInDB",
         idp_issuer: str,
-        idp_kind: IdpKind,
+        exchange_protocol: ExchangeProtocol,
         target: TokenExchangeTarget,
         token_endpoint: str,
         client_id: str,
@@ -548,7 +558,7 @@ class MCPTokenBroker:
                     "IdP refresh returned no access_token; user must re-authenticate"
                 )
 
-        strategy = resolve_strategy(idp_kind)
+        strategy = resolve_strategy(exchange_protocol)
         return await strategy.exchange(
             subject_access_token=subject_token,
             target=target,

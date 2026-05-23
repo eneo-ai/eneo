@@ -9,7 +9,7 @@
 
 When an MCP server is registered with `auth_scope=per_user`, every tool call carries an audience-bound JWT minted *for that specific user* by the same IdP they logged in to. The user authenticates once at login; from that point on Eneo's broker performs the token exchange behind the scenes, with no second consent screen, no shared service account, and no static credentials living in the database.
 
-This is the same trust model as [Microsoft On-Behalf-Of](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-on-behalf-of-flow) and [Keycloak's Standard Token Exchange](https://www.keycloak.org/securing-apps/token-exchange), generalised to "any RFC 8693 conformant IdP".
+This is the same trust model as [Keycloak's Standard Token Exchange](https://www.keycloak.org/securing-apps/token-exchange), generalised to any OIDC + RFC 8693 conformant IdP. Eneo's contract is "OIDC for login, RFC 8693 for exchange" — IdPs that only speak older delegated grants (e.g. legacy Entra On-Behalf-Of via `jwt-bearer`) are out of scope today, though the strategy interface is structured so a second wire format can be added without disturbing the rest of the broker.
 
 ---
 
@@ -22,7 +22,7 @@ The broker speaks several specs cooperatively. The first time you debug a failur
 | [RFC 6749](https://datatracker.ietf.org/doc/html/rfc6749) | OAuth 2.0 Authorization Framework — the authorization-code login that gets the user in |
 | [RFC 6750](https://datatracker.ietf.org/doc/html/rfc6750) | Bearer Token Usage — `Authorization: Bearer <jwt>` on every MCP call |
 | [RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693) | OAuth 2.0 Token Exchange — the broker's grant type; how a subject access token becomes an audience-bound token |
-| [RFC 8707](https://datatracker.ietf.org/doc/html/rfc8707) | Resource Indicators — the `resource` parameter sent alongside `audience`; Keycloak ignores one and Entra ignores the other, so the broker sends both |
+| [RFC 8707](https://datatracker.ietf.org/doc/html/rfc8707) | Resource Indicators — the `resource` parameter sent alongside `audience`; different IdPs honour one or the other, so the broker sends both |
 | [RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728) | OAuth 2.0 Protected Resource Metadata — the `.well-known/oauth-protected-resource` document the MCP server uses to advertise its expected IdP |
 | [OIDC Core](https://openid.net/specs/openid-connect-core-1_0.html), [OIDC Discovery](https://openid.net/specs/openid-connect-discovery-1_0.html) | The identity layer on top of OAuth 2.0 |
 
@@ -96,7 +96,7 @@ When something fails, walk this list top-to-bottom. Each line is something the b
 
 - [ ] The MCP server publishes a valid RFC 9728 document at `<base>/.well-known/oauth-protected-resource`
 - [ ] The document's `authorization_servers` includes the canonical issuer string the IdP emits in tokens (with Keycloak this is whatever `KC_HOSTNAME` resolves to; see §7)
-- [ ] Eneo's `tenant.federation_config` carries `issuer`, `idp_kind` (`keycloak` or `entra`), `token_endpoint`, `client_id`, and `client_secret` (Fernet-encrypted)
+- [ ] Eneo's `tenant.federation_config` carries `issuer`, `token_endpoint`, `client_id`, and `client_secret` (Fernet-encrypted). `exchange_protocol` defaults to `"rfc8693"`; set it explicitly only if you ever need a non-default protocol
 - [ ] The IdP client that performs the exchange (the `eneo` client) has client authentication on AND the equivalent of Keycloak's "Standard token exchange" capability on
 - [ ] For Keycloak: server started with `--features=token-exchange-standard-v2` (only required in 26.2; later versions may move the gate)
 - [ ] The `audience` value the broker sends corresponds to a registered `client_id` in the IdP. For Keycloak that's a client in the same realm. The audience is set via `mcp_servers.target_resource_or_scope` (per-server override) or, falling back, via PRM's `resource` field
@@ -247,7 +247,7 @@ Frontend `.env` mirrors the OIDC trio plus its own `PUBLIC_ORIGIN`. See `fronten
 
 ### 8.5 Populate `tenant.federation_config`
 
-> **The broker requires DB-resident federation config.** The `OIDC_*` environment variables are the **legacy** single-tenant path — they get a user logged in, but they do not populate the fields the token broker needs (`issuer`, `idp_kind`, `token_endpoint`, encrypted `client_secret`). Any deployment that uses per-user MCP authentication MUST configure the tenant's `federation_config` row, regardless of `FEDERATION_PER_TENANT_ENABLED`.
+> **The broker requires DB-resident federation config.** The `OIDC_*` environment variables are the **legacy** single-tenant path — they get a user logged in, but they do not populate the fields the token broker needs (`issuer`, `token_endpoint`, encrypted `client_secret`). Any deployment that uses per-user MCP authentication MUST configure the tenant's `federation_config` row, regardless of `FEDERATION_PER_TENANT_ENABLED`.
 >
 > In production the recommended path is the sysadmin federation API ([Multi-Tenant OIDC Setup Guide](./MULTITENANT_OIDC_SETUP_GUIDE.md)). For local dev, the script below populates the row directly. See §13 for the architectural cleanup that would let env-based deployments derive these fields automatically.
 
@@ -267,7 +267,7 @@ async def m():
     backchannel = \"http://keycloak.orb.local:8080/realms/local\"
     fc = {
         \"provider\": \"keycloak\",
-        \"idp_kind\": \"keycloak\",
+        \"exchange_protocol\": \"rfc8693\",
         \"issuer\": issuer,
         \"token_endpoint\": f\"{backchannel}/protocol/openid-connect/token\",
         \"discovery_endpoint\": f\"{backchannel}/.well-known/openid-configuration\",
@@ -293,7 +293,7 @@ Via the admin UI:
 2. Name: `Grounding` (or your MCP server name)
 3. HTTP URL: the MCP server's URL (e.g., `http://host.docker.internal:3001/mcp/grounding`)
 4. Authentication: **SSO (zero-trust via samma IdP)** → **Per användare**
-5. Advanced (required for Entra ID — also used here): **Audience / scope (target URI)** = `ladan` (the Keycloak client_id from step 8.3)
+5. Advanced: **Audience / scope (target URI)** = `ladan` (the Keycloak client_id from step 8.3). The field name in the UI is generic; for Keycloak it sets both `audience` and `resource` on the RFC 8693 form
 6. Save.
 
 ### 8.7 Log in (re-login if you were already signed in)
@@ -440,9 +440,8 @@ A condensed list, mapped to the broker's error vocabulary.
 
 | Concern | File |
 |---------|------|
-| Broker entrypoint, RFC 8693 / OBO dispatch | `backend/src/intric/mcp_servers/application/mcp_token_broker.py` |
-| Strategy: Keycloak (RFC 8693) | `backend/src/intric/mcp_servers/application/token_exchange/rfc8693.py` |
-| Strategy: Entra ID (OBO) | `backend/src/intric/mcp_servers/application/token_exchange/entra.py` |
+| Broker entrypoint, RFC 8693 dispatch | `backend/src/intric/mcp_servers/application/mcp_token_broker.py` |
+| Strategy: RFC 8693 token exchange | `backend/src/intric/mcp_servers/application/token_exchange/rfc8693.py` |
 | Token storage (encryption + refresh) | `backend/src/intric/authentication/oidc_token_store.py` |
 | Token cache table | `backend/src/intric/database/tables/mcp_exchanged_tokens_table.py` |
 | User-token table | `backend/src/intric/database/tables/idp_user_tokens_table.py` |
@@ -460,7 +459,7 @@ A condensed list, mapped to the broker's error vocabulary.
 Two cleaner futures, pick one if/when this gets prioritised:
 
 - Lift the `federation_enabled` gate in `federation_startup_migration.py` so env-OIDC is mirrored into `federation_config` regardless of mode.
-- Or have `CredentialResolver.get_federation_config()` derive `issuer` / `idp_kind` / `token_endpoint` from `OIDC_DISCOVERY_ENDPOINT` in its single-tenant branch, and have the broker call the resolver instead of reading the JSONB column directly.
+- Or have `CredentialResolver.get_federation_config()` derive `issuer` and `token_endpoint` from `OIDC_DISCOVERY_ENDPOINT` in its single-tenant branch, and have the broker call the resolver instead of reading the JSONB column directly.
 
 The second is the cleaner architectural move — single source of truth for "which IdP does this tenant use", consulted by both login and broker.
 

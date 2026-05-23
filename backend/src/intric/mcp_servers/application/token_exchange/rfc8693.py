@@ -31,7 +31,7 @@ from typing import Optional
 
 from intric.mcp_servers.application.token_exchange import (
     ExchangedToken,
-    IdpKind,
+    ExchangeProtocol,
     TokenExchangeError,
     TokenExchangeStrategy,
     TokenExchangeTarget,
@@ -42,9 +42,9 @@ from intric.mcp_servers.application.token_exchange import (
 
 
 class Rfc8693Strategy(TokenExchangeStrategy):
-    """RFC 8693 token exchange — works with Keycloak and any conformant IdP."""
+    """RFC 8693 token exchange — works with any OIDC + RFC 8693 conformant IdP."""
 
-    idp_kind: IdpKind = "keycloak"
+    exchange_protocol: ExchangeProtocol = "rfc8693"
 
     async def exchange(
         self,
