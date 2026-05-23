@@ -23,6 +23,10 @@ from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
 from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.ai_builder.planning_state import PlanningState
 
+CORE_ARCHITECTURAL_SLOTS: frozenset[str] = frozenset(
+    {"primary_runtime_input", "terminal_output"}
+)
+
 PlannerActionKind = Literal[
     "ask_question",
     "confirm_requirements",
@@ -125,6 +129,15 @@ def build_planner_action_policy(
     )
 
 
+def compute_unresolved_core_slots(
+    planning_state: PlanningState,
+) -> frozenset[str]:
+    """One predicate for prompt policy and orchestrator commit rejection."""
+
+    resolved = frozenset(planning_state.resolved_slots.keys())
+    return CORE_ARCHITECTURAL_SLOTS - resolved
+
+
 def _phase_priority(candidates: list[PlannerActionKind]) -> list[PlannerActionKind]:
     """Expose one deterministic phase instead of a broad LLM action menu."""
 
@@ -166,7 +179,7 @@ def _missing_core_architecture_slots(
     is missing, ask for it instead of falling through to an unsafe default.
     """
 
-    return frozenset({"primary_runtime_input", "terminal_output"} - resolved_slot_names)
+    return CORE_ARCHITECTURAL_SLOTS - resolved_slot_names
 
 
 def _unresolved_slots_for_derived_commit(
@@ -216,8 +229,10 @@ def render_action_policy_prompt_block(policy: PlannerActionPolicy) -> str:
 
 
 __all__ = [
+    "CORE_ARCHITECTURAL_SLOTS",
     "PlannerActionKind",
     "PlannerActionPolicy",
     "build_planner_action_policy",
+    "compute_unresolved_core_slots",
     "render_action_policy_prompt_block",
 ]

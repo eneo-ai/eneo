@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T076
+active_task: T078
 
 interruptions:
   - id: I001
@@ -7259,7 +7259,7 @@ tasks:
   - id: T076
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     target_review_by: "2026-05-24"
     objective: "Run a read-only planner/source topology scoping spike after T075 to decide the next highest-score-moving tranche without defaulting to LOC-driven file splitting."
@@ -7278,6 +7278,156 @@ tasks:
       - "Evidence-backed ranking of next tranche candidates with file:line citations."
       - "Explicit decision on whether planner topology, AI slop/comment/naming, full-source typing baseline, live eval, or another slice most improves the strict floor."
       - "If a planner topology worker is selected: canonical owner, what moves/deletes/merges, red tests, allowed files, stop conditions, validation, and honest score impact."
+    receipt:
+      result: done
+      summary: "Completed the read-only planner/source topology scoping spike after T075. Selected T077 planner action rendering and dispatch ownership as the next highest-score-moving tranche, not for LOC reduction but because AIBuilderPlanner.send_message still owns accepted-action rendering, SSE event mapping, backend-selected ask-question dispatch, and post-commit confirm chaining. Claude iteration 3 passed after the pure/impure two-owner split; Antigravity final synthesis also passed and added dispatch-chain ownership plus named event-builder constraints."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t076-planner-topology-scope.md"
+        - ".codex/artifacts/claude-peer-loop-t076-planner-topology-ranking-iteration-3-20260523T154019Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t076-planner-topology-final-synthesis-20260523T154309Z.md"
+      peer_review:
+        claude_iteration_1: "GREEN_LIGHT no / MIN_SCORE 6; original two-method move was too shallow."
+        claude_iteration_2: "GREEN_LIGHT no / MIN_SCORE 7; required explicit pure/impure owner split, unconditional requirements-summary owner, precise test split, anti-slippage validation, and AST guard details."
+        claude_iteration_3: "GREEN_LIGHT yes / MIN_SCORE 8 after Codex revised the plan to use ai_builder_accepted_action_rendering.py and ai_builder_planner_action_dispatch.py."
+        antigravity_final_synthesis: "GREEN_LIGHT yes / MIN_SCORE 8; required dispatch owner to own the full commit-to-confirm chain, helper relocation before extraction, thin renderer inputs, and named SSE event builders."
+      selected_next_task: T077
+      score_impact: "Planning-only tranche. No score increase yet. Strict overall floor remains 8/10 until T077 is implemented, validated, peer-reviewed, and shown to reduce planner/action ownership complexity without adding a facade."
+      remaining_blockers_to_9:
+        - "T077 planner action rendering and dispatch ownership is not implemented yet."
+        - "AI slop/comment/naming cleanup still needs a scoped inventory and implementation tranche."
+        - "Full-source Pyright outside AI Builder remains red."
+        - "Authenticated live eval should rerun after behavior-affecting topology changes when local service is available."
+
+  - id: T077
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Implement planner action rendering and dispatch ownership so AIBuilderPlanner.send_message remains the active-send transport/lease boundary instead of owning accepted-action message rendering, SSE event mapping, backend-selected ask-question dispatch, and post-commit confirm chaining."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t076-planner-topology-scope.md"
+      - ".codex/artifacts/claude-peer-loop-t076-planner-topology-ranking-iteration-3-20260523T154019Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t076-planner-topology-final-synthesis-20260523T154309Z.md"
+      - "Current AIBuilderPlanner.send_message topology"
+      - "Current scorecard and remaining blockers"
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_accepted_action_rendering.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner_action_dispatch.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_action_policy.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner_turn.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_accepted_action_rendering.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_action_dispatch.py"
+      - ".codex/artifacts/flow-ai-builder-t077-planner-action-ownership.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    constraints:
+      - "Do not optimize for LOC. The diff must improve ownership, debugging, tests, and reviewability."
+      - "Implement red/static guards first."
+      - "Keep AIBuilderPlanner active-send transport/lease ownership explicit."
+      - "Do not move planner request preparation, proposal mode, discovery runtime, public error contract, generated client, DB schema, frontend, or OpenTelemetry work."
+      - "Preserve unrelated dirty files and keep one active task."
+    acceptance:
+      - "AIBuilderPlanner no longer defines _dispatch_server_question or _dispatch_chained_server_action_after_commit."
+      - "AIBuilderPlanner.send_message no longer defines an inline _build_new_messages accepted-action renderer."
+      - "AIBuilderPlanner.send_message no longer directly pattern-matches AskQuestionAction, CommitArchitectureAction, or ConfirmRequirementsAction to build public SSE events."
+      - "AIBuilderPlanner.send_message no longer directly pattern-matches CommitArchitectureAction to trigger chained confirm dispatch."
+      - "ai_builder_accepted_action_rendering.py owns accepted planner action message and SSE event rendering, uses assert_never for exhaustive action matching, uses named event builders, and does not import repo/runtime dispatch dependencies."
+      - "ai_builder_planner_action_dispatch.py owns backend-selected ask-question dispatch and the full commit-to-confirm chain."
+      - "Neither new owner imports AIBuilderPlanner, AIBuilderProposalProcessor, or anything from ai_builder_planner.py."
+      - "_requirements_summary_data is moved out of ai_builder_planner.py and has one canonical owner."
+      - "Chained-confirm and non-chained confirm requirements-summary payloads are behavior-tested as identical for the shared payload."
+      - "_compute_unresolved_core_slots and _build_planner_litellm_kwargs no longer force new owners to import planner-private helpers."
+      - "No new Any, cast, type: ignore, pyright ignore, Callable[..., Any], **kwargs: Any, broad mutable dependency bag, fake interface, Manager/Processor/Handler/Service class, or tutorial/comment slop."
+    verify:
+      - "Red/guard-first: add static ownership guards and confirm they fail before implementation where practical."
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_server_actions.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_discovery_flow.py -q -k \"server_question or send_message\""
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_accepted_action_rendering.py tests/unittests/flows/ai_builder/test_ai_builder_planner_action_dispatch.py -q"
+      - "cd backend && uv run ruff check touched files"
+      - "cd backend && uv run ruff format --check touched files"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "scripts/gate-local/anti_slippage.sh"
+      - "git diff --check"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q if focused tests pass"
+      - "Claude post-implementation gate with GREEN_LIGHT yes / MIN_SCORE >= 8"
+      - "Antigravity post-implementation gate if quota/tooling remains available; missing coverage is not a pass."
+    stop_if:
+      - "The new owners need a broad mutable dependency bag."
+      - "Either new owner imports AIBuilderPlanner, AIBuilderProposalProcessor, or anything from ai_builder_planner.py."
+      - "The pure rendering owner imports repository/runtime dispatch dependencies."
+      - "Shared helper relocation requires a generic helpers/utils module."
+      - "send_message still owns accepted-action rendering, SSE event construction, or commit-to-confirm chaining decisions after the move."
+      - "Public SSE behavior tests are weakened or deleted."
+      - "The diff needs production files outside allowed_files."
+      - "The implementation becomes a facade that merely forwards back to planner internals."
+      - "Peer review says another tranche now outranks T077."
+    receipt:
+      result: done
+      completed_at: "2026-05-23T16:10:00Z"
+      summary: "Implemented the reviewed planner action-ownership tranche. AIBuilderPlanner.send_message remains the active-send transport/lease/SSE boundary, while accepted planner-action message/SSE rendering now lives in ai_builder_accepted_action_rendering.py and backend-selected question dispatch plus post-commit confirm chaining live in ai_builder_planner_action_dispatch.py. Deleted planner ownership of _dispatch_server_question, _dispatch_chained_server_action_after_commit, _requirements_summary_data, _compute_unresolved_core_slots, _build_planner_litellm_kwargs, and the inline _build_new_messages closure. Moved core-slot policy to ai_builder_action_policy.py and planner LiteLLM kwargs composition to ai_builder_planner_turn.py."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t077-planner-action-ownership.md"
+        - ".codex/artifacts/claude-peer-loop-t077-planner-action-ownership-implementation-gate-20260523T160458Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t077-planner-action-ownership-implementation-synthesis-20260523T160855Z.md"
+      peer_review:
+        claude_resume_failure: "The older T076 Claude session title could not be resumed after the CLI/tool upgrade: `--resume requires a valid session ID or session title when used with --print`. This was recorded as a tool continuity failure, not a pass."
+        claude_commit_gate: "Fresh T077 session with T076 Claude and Antigravity plan artifacts attached returned VERDICT green / GREEN_LIGHT yes / MIN_SCORE 8. Claude found only P3 follow-ups."
+        codex_after_claude: "Applied Claude's P3 consistency cleanup by replacing the chained-confirm local message-builder closure with partial(build_accepted_action_messages, ...) and removed a stale test comment that referenced the deleted _build_new_messages closure."
+        antigravity_commit_gate: "Quota was available. Antigravity returned VERDICT green / GREEN_LIGHT yes / MIN_SCORE 9 against the final diff and Claude artifact. Its only finding was non-blocking future typing of litellm_client; Codex did not add a one-off protocol because that would create a fake seam unless the broader LiteLLM boundary is typed consistently."
+      validation:
+        - "Red/static guard first: test_planner_action_rendering_and_dispatch_have_canonical_owners initially failed because the new owners were missing and planner still owned action branches."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_accepted_action_rendering.py tests/unittests/flows/ai_builder/test_ai_builder_planner_action_dispatch.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_discovery_flow.py::TestPlannerDiscoveryQuestionDispatch::test_server_question_dispatch_uses_typed_discovery_followup_for_planner_internal_question tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_planner_action_rendering_and_dispatch_have_canonical_owners -q -> 24 passed before Claude; 23 passed after Claude P3 cleanup for the rendering/dispatch/send/guard subset."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_action_policy.py tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py -q -> 65 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_discovery_flow.py -q -> 80 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/ -q -> 2387 passed, 4 skipped, 11 warnings."
+        - "cd backend && uv run ruff check touched source/test files -> passed."
+        - "cd backend && uv run ruff format --check touched source/test files -> passed."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder touched tests -> 0 errors, 0 warnings, 0 informations."
+        - "git diff --check -> passed."
+        - "scripts/gate-local/anti_slippage.sh --worktree -> passed."
+        - "rg -n '\\b(_dispatch_server_question|_dispatch_chained_server_action_after_commit|_requirements_summary_data|_build_planner_litellm_kwargs|_compute_unresolved_core_slots)\\b' backend/tests backend/src/intric/flows/ai_builder -g '*.py' -g '!test_ai_builder_import_ownership.py' -> no hits."
+      codex_self_review:
+        verdict: "pass for the approved tranche. This is simpler than before because send_message no longer has accepted-action rendering, public event mapping, backend-question persistence, or post-commit chaining branches. The new owners are not facades: the pure owner has no repo/runtime dispatch imports, the impure owner owns the repo/state-touching action effects, and static guards prevent importing planner/proposal processor back into either owner."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+        why_not_9_floor: "T077 improves planner action topology, but the subsystem-wide floor remains 8 because remaining blockers still include larger planner/source topology and naming/comment cleanup, full-source Pyright outside AI Builder, and live eval proof after behavior-affecting changes."
+      score_impact: "Improves Maintainability, Clean Architecture, Separation of Concerns, Human Readability, Human Reviewability, Single Source of Truth, Test Quality, and AI Slop resistance inside planner action handling. Does not raise the strict overall score floor above 8 because this is one topology seam, not proof that every 8-scored dimension is now 9 across the subsystem."
+      remaining_blockers_to_9:
+        - "Re-rank next after T077: candidates include remaining planner/source topology, AI slop/comment/naming inventory, full-source Pyright outside AI Builder, and repeated authenticated live eval after topology changes."
+        - "AIBuilderPlanner is still a large orchestration file at roughly 1477 LOC; T077 removed one action-effect seam but did not finish planner/source topology."
+        - "Full-source Pyright outside AI Builder remains red per prior T060/T076 evidence and needs an explicit scoped tranche or documented blocker."
+        - "Authenticated live eval should rerun when local service is available after this behavior-adjacent topology change."
+
+  - id: T078
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    target_review_by: "2026-05-24"
+    objective: "Re-rank the next highest-score-moving tranche after T077, using current repo evidence and the strict score floor rather than defaulting to LOC reduction or easy cleanup."
+    inputs:
+      - "T077 receipt and implementation artifacts"
+      - "Current scorecard and remaining blockers"
+      - "Current source after planner action rendering/dispatch ownership"
+      - "Latest user steering: broader 9/10, no LOC-only splits, use Claude and Antigravity seriously, preserve unrelated dirty files, commit coherent intervals."
+    constraints:
+      - "Read-only planning task unless it activates a reviewed Worker in a later board update."
+      - "Do not mark the broader goal complete."
+      - "Do not assume planner LOC is the next blocker without evidence."
+      - "Consider remaining planner/source topology, AI slop/comment/naming cleanup, full-source typing/test baseline, live eval proof, developer diagnostics, and normal-user output quality."
+      - "Use Claude plan gate and Antigravity if available before any next implementation tranche."
+    expected_output:
+      - "Evidence-backed ranking of next tranche candidates with file:line evidence."
+      - "Current owner and proposed canonical owner for any touched concept."
+      - "What would be deleted, merged, moved, renamed, or simplified."
+      - "Acceptance criteria, tests, non-goals, stop conditions, score impact, and residual risks for the selected next worker."
+      - "Honest decision on whether the strict floor can move from 8 to 9 with the next slice."
     receipt: null
 
 checks:

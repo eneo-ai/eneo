@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from typing import TYPE_CHECKING, Any, AsyncGenerator, cast
 from uuid import UUID, uuid4
 
@@ -12,9 +13,14 @@ from intric.completion_models.infrastructure.tenant_model_capabilities import (
     unsupported_structured_output_decision,
 )
 from intric.files.file_models import File
+from intric.flows.ai_builder.ai_builder_accepted_action_rendering import (
+    RequirementsSummaryRenderContext,
+    build_accepted_action_messages,
+)
 from intric.flows.ai_builder.ai_builder_action_policy import (
     PlannerActionPolicy,
     build_planner_action_policy,
+    compute_unresolved_core_slots,
 )
 from intric.flows.ai_builder.ai_builder_attachment_context import (
     build_ai_builder_attachment_context,
@@ -37,13 +43,8 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     ui_language_from_metadata,
     ui_language_from_question_answer,
 )
-from intric.flows.ai_builder.ai_builder_discovery import (
-    build_discovery_followup,
-    build_registry_question_followup,
-)
 from intric.flows.ai_builder.ai_builder_discovery_followup import (
     emit_discovery_followup_if_needed,
-    persist_backend_question,
 )
 from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
@@ -63,19 +64,12 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorPhase,
     build_ai_builder_error_event,
 )
-from intric.flows.ai_builder.ai_builder_event_models import (
-    RequirementsSummaryPayload,
-)
 from intric.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_DONE,
-    build_requirements_summary_event,
-    build_status_event,
-    build_text_event,
 )
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     infer_question_answer_from_freeform,
     latest_pending_structured_question,
-    normalize_requirements_summary_for_flow,
 )
 from intric.flows.ai_builder.ai_builder_interaction_utils import (
     looks_like_information_request,
@@ -85,9 +79,6 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
 )
 from intric.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
 from intric.flows.ai_builder.ai_builder_orchestrator import (
-    AskQuestionAction,
-    CommitArchitectureAction,
-    ConfirmRequirementsAction,
     OrchestrationContext,
     PlannerOutput,
 )
@@ -99,9 +90,14 @@ from intric.flows.ai_builder.ai_builder_plan_edit_context import (
 from intric.flows.ai_builder.ai_builder_plan_proposal_task import (
     build_plan_proposal_system_prompt,
 )
+from intric.flows.ai_builder.ai_builder_planner_action_dispatch import (
+    BackendSelectedQuestionDispatchRequest,
+    DispatchedActionEventRequest,
+    build_dispatched_action_events,
+    dispatch_backend_selected_question_if_any,
+)
 from intric.flows.ai_builder.ai_builder_planner_turn import (
-    PlannerTurnResult,
-    TurnTelemetry,
+    build_planner_litellm_kwargs,
     run_planner_turn,
 )
 from intric.flows.ai_builder.ai_builder_prompts import (
@@ -123,7 +119,6 @@ from intric.flows.ai_builder.ai_builder_question_state import (
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
-    build_requirements_version,
     latest_confirmed_requirements,
     resolve_requirements_state,
 )
@@ -151,7 +146,6 @@ from intric.flows.ai_builder.ai_builder_settings import (
 )
 from intric.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
-    build_planner_telemetry_from_turn,
 )
 from intric.flows.ai_builder.pattern_registry import (
     PATTERN_REGISTRY,
@@ -197,44 +191,12 @@ _MESSAGE_ACCEPTING_SESSION_STATUSES = {
 # a diff against an older deploy.
 _PLANNER_OUTPUT_SCHEMA_HASH: str = schema_fingerprint(PlannerOutput.model_json_schema())
 
-# Core architectural slots that MUST resolve before `commit_architecture`
-# can land. The stricter pattern-specific gate runs inside the orchestrator
-# against `commit.chosen_patterns.required_architectural_slots` once the
-# planner has declared which patterns it's committing to.
-_CORE_ARCHITECTURAL_SLOTS: frozenset[str] = frozenset(
-    {"primary_runtime_input", "terminal_output"}
-)
-
-_SERVER_SLOT_TO_DISCOVERY_QUESTION_ID: dict[str, str] = {
-    "primary_runtime_input": "input_material_mode",
-    "terminal_output": "final_output_mode",
-}
-
 
 def _session_status_value(status: object) -> str:
     value = getattr(status, "value", None)
     if isinstance(value, str):
         return value
     return str(status)
-
-
-def _compute_unresolved_core_slots(
-    planning_state: PlanningState,
-) -> frozenset[str]:
-    """Conservative commit gate: which core slots are still unresolved.
-
-    Both the prompt-side phase lock (rendered into the system prompt by
-    `build_system_prompt`) and the orchestrator-side rejection
-    (`_check_commit_architecture`) consume this same predicate, so the
-    surface the LLM sees and the surface that rejects it can never
-    disagree on which slots block commit.
-    """
-    resolved = frozenset(planning_state.resolved_slots.keys())
-    return _CORE_ARCHITECTURAL_SLOTS - resolved
-
-
-def _discovery_question_id_for_server_slot(slot_name: str) -> str:
-    return _SERVER_SLOT_TO_DISCOVERY_QUESTION_ID.get(slot_name, slot_name)
 
 
 @dataclass(frozen=True)
@@ -298,22 +260,6 @@ class PlannerPreparedRequest:
 
 def _default_structured_output_decision() -> StructuredOutputCapabilityDecision:
     return unsupported_structured_output_decision()
-
-
-def _build_planner_litellm_kwargs(
-    *,
-    litellm_kwargs: dict[str, Any],
-    max_tokens: int,
-    temperature: float,
-    response_format_selection: PlannerResponseFormatSelection,
-) -> dict[str, Any]:
-    return {
-        **litellm_kwargs,
-        **response_format_selection.litellm_kwargs,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "drop_params": True,
-    }
 
 
 def _structured_output_log_fields(
@@ -657,7 +603,7 @@ class AIBuilderPlanner:
         carry_forward_persisted_planner_state(
             rebuilt_planning_state, persisted_planning_state
         )
-        unresolved_architectural_choices = _compute_unresolved_core_slots(
+        unresolved_architectural_choices = compute_unresolved_core_slots(
             rebuilt_planning_state
         )
         selected_discovery_question_ids: frozenset[str] = frozenset(
@@ -884,177 +830,6 @@ class AIBuilderPlanner:
             system_prompt_hash=stable_hash(system_prompt),
             slot_classification_metadata=discovery_runtime.slot_classification_metadata,
         )
-
-    async def _dispatch_chained_server_action_after_commit(
-        self,
-        *,
-        turn: SessionSendTurn,
-        conversation: list[ConversationMessage],
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        response_format_selection: PlannerResponseFormatSelection,
-        flow: "Flow | None",
-        requirements_confirmed: bool,
-        ui_language: str | None,
-    ) -> PlannerTurnResult | None:
-        """Advance one deterministic post-commit server action.
-
-        `commit_architecture` is a backend state transition, not a useful
-        terminal user-facing response. After that transition persists, the
-        next legal deterministic phase is usually `confirm_requirements`;
-        dispatch it in the same request so the UI lands on an actionable
-        review checkpoint instead of a bare commit status.
-        """
-
-        persisted_state = await self.repo.load_planning_state(
-            session_id=turn.session_id,
-            tenant_id=turn.tenant_id,
-        )
-        session_state = persisted_state or PlanningState.empty()
-        unresolved_core_slots = _compute_unresolved_core_slots(session_state)
-        action_policy = build_planner_action_policy(
-            session_state=session_state,
-            unresolved_architectural_choices=unresolved_core_slots,
-            selected_discovery_question_ids=frozenset(),
-            requirements_confirmed=requirements_confirmed,
-        )
-        server_output = build_server_planner_output(
-            action_policy=action_policy,
-            session_state=session_state,
-            base_planning_state_version=turn.base_planning_state_version,
-            ui_language=ui_language,
-        )
-        if server_output is None or not isinstance(
-            server_output.planner_action, ConfirmRequirementsAction
-        ):
-            return None
-
-        asked_question_state = derive_asked_question_state(conversation)
-        orchestration_context = OrchestrationContext.for_turn(
-            current_version=turn.base_planning_state_version,
-            session_state=session_state,
-            asked_question_state=asked_question_state,
-            unresolved_architectural_choices=unresolved_core_slots,
-            action_policy=action_policy,
-        )
-
-        def _build_chained_messages(
-            accepted: PlannerOutput,
-            telemetry: TurnTelemetry,
-        ) -> list[ConversationMessage]:
-            action = accepted.planner_action
-            if not isinstance(action, ConfirmRequirementsAction):
-                raise AssertionError(
-                    "post-commit chained server action must be confirm_requirements"
-                )
-            requirements_payload = _requirements_summary_data(
-                action.payload,
-                conversation=conversation,
-                flow=flow,
-                ui_language=ui_language,
-            )
-            base_metadata = {
-                "requirements_summary": requirements_payload,
-                "requirements_version": requirements_payload["requirements_version"],
-            }
-            planner_telemetry = build_planner_telemetry_from_turn(
-                telemetry,
-                used_auxiliary_llm=False,
-            )
-            return [
-                ConversationMessage(
-                    role="assistant",
-                    content=action.payload.summary,
-                    metadata=build_assistant_message_metadata(
-                        conversation,
-                        planner_telemetry=planner_telemetry,
-                        base_metadata=base_metadata,
-                    ),
-                )
-            ]
-
-        return await run_planner_turn(
-            repo=self.repo,
-            litellm_client=self.litellm_client,
-            litellm_model=litellm_model,
-            litellm_kwargs=_build_planner_litellm_kwargs(
-                litellm_kwargs=litellm_kwargs,
-                max_tokens=1,
-                temperature=self.planner_temperature,
-                response_format_selection=response_format_selection,
-            ),
-            turn=turn,
-            flow=flow,
-            base_messages=[],
-            orchestration_context=orchestration_context,
-            build_new_messages=_build_chained_messages,
-            precomputed_output=server_output,
-        )
-
-    async def _dispatch_server_question(
-        self,
-        *,
-        action: AskQuestionAction,
-        turn: SessionSendTurn,
-        conversation: list[ConversationMessage],
-        new_messages_start: int,
-        flow: "Flow | None",
-        discovery_analysis: DiscoveryAnalysis | None = None,
-    ) -> list[dict[str, str]]:
-        """Persist deterministic questions through the structured-question path.
-
-        Server-selected questions must look exactly like discovery follow-ups to
-        the UI and to the conversation replay layer. Emitting only a text event
-        leaves the user without an actionable card and prevents free-form answer
-        inference from seeing the pending question.
-        """
-
-        question_id = _discovery_question_id_for_server_slot(action.payload.slot_name)
-        followup = build_registry_question_followup(
-            question_id,
-            conversation,
-            flow=flow,
-        )
-        if followup is None:
-            discovery_followup = build_discovery_followup(
-                conversation,
-                flow=flow,
-                analysis=discovery_analysis,
-            )
-            if discovery_followup is not None:
-                _, question_data, assistant_text = discovery_followup
-                # Planner-internal discovery questions are not public registry
-                # requirements, but server-selected questions must still reach
-                # the same typed UI/conversation persistence path.
-                if question_data.get("question_id") == question_id:
-                    followup = question_data, assistant_text
-                else:
-                    logger.warning(
-                        "AI Builder server question fallback selected a different discovery question.",
-                        extra={
-                            "requested_question_id": question_id,
-                            "fallback_question_id": question_data.get("question_id"),
-                        },
-                    )
-
-        if followup is None:
-            return [build_text_event(action.payload.prompt)]
-
-        question_data, assistant_text = followup
-        persisted = await persist_backend_question(
-            repo=self.repo,
-            turn=turn,
-            conversation=conversation,
-            new_messages_start=new_messages_start,
-            question_data=question_data,
-            assistant_text=assistant_text,
-            flow=flow,
-            assistant_metadata=build_assistant_message_metadata(
-                conversation,
-                tool_calls=[{"name": "ask_structured_question"}],
-            ),
-        )
-        return persisted.events
 
     async def send_message(
         self,
@@ -1288,7 +1063,7 @@ class AIBuilderPlanner:
                 or persisted_planning_state
                 or PlanningState.empty()
             )
-            unresolved_core_slots = _compute_unresolved_core_slots(session_state)
+            unresolved_core_slots = compute_unresolved_core_slots(session_state)
             action_policy = prepared_request.action_policy
             if action_policy is None:
                 action_policy = build_planner_action_policy(
@@ -1306,19 +1081,19 @@ class AIBuilderPlanner:
                 action_policy=action_policy,
             )
 
-            if prepared_request.server_output is not None and isinstance(
-                prepared_request.server_output.planner_action,
-                AskQuestionAction,
-            ):
-                events = await self._dispatch_server_question(
-                    action=prepared_request.server_output.planner_action,
+            server_question_events = await dispatch_backend_selected_question_if_any(
+                BackendSelectedQuestionDispatchRequest(
+                    repo=self.repo,
                     turn=turn,
+                    server_output=prepared_request.server_output,
                     conversation=conversation,
                     new_messages_start=new_messages_start,
                     flow=flow,
                     discovery_analysis=prepared_request.discovery_analysis,
                 )
-                for event in events:
+            )
+            if server_question_events is not None:
+                for event in server_question_events:
                     yield event
                 yield {"event": SSE_EVENT_DONE, "data": ""}
                 return
@@ -1359,51 +1134,11 @@ class AIBuilderPlanner:
                 yield {"event": SSE_EVENT_DONE, "data": ""}
                 return
 
-            def _build_new_messages(
-                accepted: PlannerOutput,
-                telemetry: TurnTelemetry,
-            ) -> list[ConversationMessage]:
-                action = accepted.planner_action
-                base_metadata: dict[str, Any] | None = None
-                if isinstance(action, AskQuestionAction):
-                    assistant_content = action.payload.prompt
-                    # Persist the question_id so a future turn's
-                    # OrchestrationContext can derive asked_question_ids
-                    # and block the LLM from repeating the same question
-                    # without new evidence.
-                    base_metadata = {"question_id": action.payload.question_id}
-                elif isinstance(action, CommitArchitectureAction):
-                    return [*conversation[new_messages_start:]]
-                else:
-                    assistant_content = action.payload.summary
-                    requirements_payload = _requirements_summary_data(
-                        action.payload,
-                        conversation=conversation,
-                        flow=flow,
-                        ui_language=ui_language,
-                    )
-                    base_metadata = {
-                        "requirements_summary": requirements_payload,
-                        "requirements_version": requirements_payload[
-                            "requirements_version"
-                        ],
-                    }
-                planner_telemetry = build_planner_telemetry_from_turn(
-                    telemetry,
-                    used_auxiliary_llm=metadata_resolution.used_auxiliary_llm,
-                )
-                return [
-                    *conversation[new_messages_start:],
-                    ConversationMessage(
-                        role="assistant",
-                        content=assistant_content,
-                        metadata=build_assistant_message_metadata(
-                            conversation,
-                            planner_telemetry=planner_telemetry,
-                            base_metadata=base_metadata,
-                        ),
-                    ),
-                ]
+            render_context = RequirementsSummaryRenderContext(
+                conversation=conversation,
+                flow=flow,
+                ui_language=ui_language,
+            )
 
             precomputed_output = prepared_request.server_output
 
@@ -1412,7 +1147,7 @@ class AIBuilderPlanner:
                     repo=self.repo,
                     litellm_client=self.litellm_client,
                     litellm_model=litellm_model,
-                    litellm_kwargs=_build_planner_litellm_kwargs(
+                    litellm_kwargs=build_planner_litellm_kwargs(
                         litellm_kwargs=litellm_kwargs,
                         max_tokens=max_output_tokens,
                         temperature=(
@@ -1426,7 +1161,12 @@ class AIBuilderPlanner:
                     flow=flow,
                     base_messages=prepared_request.llm_messages,
                     orchestration_context=orchestration_context,
-                    build_new_messages=_build_new_messages,
+                    build_new_messages=partial(
+                        build_accepted_action_messages,
+                        context=render_context,
+                        new_messages_start=new_messages_start,
+                        used_auxiliary_llm=metadata_resolution.used_auxiliary_llm,
+                    ),
                     precomputed_output=precomputed_output,
                 )
             except AIBuilderBadRequestException as error:
@@ -1564,58 +1304,24 @@ class AIBuilderPlanner:
                     request_id=request_id,
                 )
             elif turn_result.kind == "dispatched":
-                assert turn_result.accepted_output is not None
-                action = turn_result.accepted_output.planner_action
-                if isinstance(action, AskQuestionAction):
-                    yield build_text_event(action.payload.prompt)
-                elif isinstance(action, CommitArchitectureAction):
-                    yield build_status_event("architecture_committed")
-                    if turn_result.dispatch_result is not None:
-                        chained_turn = replace(
-                            turn,
-                            base_planning_state_version=(
-                                turn_result.dispatch_result.new_planning_state_version
-                            ),
-                        )
-                        chained_result = (
-                            await self._dispatch_chained_server_action_after_commit(
-                                turn=chained_turn,
-                                conversation=conversation,
-                                litellm_model=litellm_model,
-                                litellm_kwargs=litellm_kwargs,
-                                response_format_selection=response_format_selection,
-                                flow=flow,
-                                requirements_confirmed=requirements_state.confirmed,
-                                ui_language=ui_language,
-                            )
-                        )
-                        if (
-                            chained_result is not None
-                            and chained_result.kind == "dispatched"
-                            and chained_result.accepted_output is not None
-                            and isinstance(
-                                chained_result.accepted_output.planner_action,
-                                ConfirmRequirementsAction,
-                            )
-                        ):
-                            chained_action = (
-                                chained_result.accepted_output.planner_action
-                            )
-                            confirmed_data = _requirements_summary_data(
-                                chained_action.payload,
-                                conversation=conversation,
-                                flow=flow,
-                                ui_language=ui_language,
-                            )
-                            yield build_requirements_summary_event(confirmed_data)
-                else:
-                    confirmed_data = _requirements_summary_data(
-                        action.payload,
+                events = await build_dispatched_action_events(
+                    DispatchedActionEventRequest(
+                        repo=self.repo,
+                        litellm_client=self.litellm_client,
+                        turn=turn,
+                        turn_result=turn_result,
                         conversation=conversation,
+                        litellm_model=litellm_model,
+                        litellm_kwargs=litellm_kwargs,
+                        response_format_selection=response_format_selection,
                         flow=flow,
+                        requirements_confirmed=requirements_state.confirmed,
                         ui_language=ui_language,
+                        planner_temperature=self.planner_temperature,
                     )
-                    yield build_requirements_summary_event(confirmed_data)
+                )
+                for event in events:
+                    yield event
 
             yield {"event": SSE_EVENT_DONE, "data": ""}
         finally:
@@ -1735,27 +1441,6 @@ def _resolve_ui_language(conversation: list[ConversationMessage]) -> str | None:
         if ui_language is not None:
             return ui_language
     return None
-
-
-def _requirements_summary_data(
-    payload: Any,
-    *,
-    conversation: list[ConversationMessage],
-    flow: "Flow | None",
-    ui_language: str | None,
-) -> dict[str, Any]:
-    normalized = normalize_requirements_summary_for_flow(
-        payload.model_dump(),
-        conversation=conversation,
-        flow=flow,
-        language=ui_language,
-    )
-    requirements_payload = RequirementsSummaryPayload.model_validate(normalized)
-    requirements_data = requirements_payload.model_dump(mode="json")
-    requirements_data["requirements_version"] = build_requirements_version(
-        requirements_payload
-    )
-    return requirements_data
 
 
 def _count_free_discovery_turns(conversation: list[ConversationMessage]) -> int:

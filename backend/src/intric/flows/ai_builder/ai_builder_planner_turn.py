@@ -44,6 +44,9 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     evaluate_planner_output,
 )
 from intric.flows.ai_builder.ai_builder_repair import CompletionMetadata
+from intric.flows.ai_builder.ai_builder_response_format import (
+    PlannerResponseFormatSelection,
+)
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 
 if TYPE_CHECKING:
@@ -129,6 +132,22 @@ class PlannerTurnResult:
     llm_calls_made: int = 0
     repair_attempts: int = 0
     parse_repair_attempts: int = 0
+
+
+def build_planner_litellm_kwargs(
+    *,
+    litellm_kwargs: dict[str, Any],
+    max_tokens: int,
+    temperature: float,
+    response_format_selection: PlannerResponseFormatSelection,
+) -> dict[str, Any]:
+    return {
+        **litellm_kwargs,
+        **response_format_selection.litellm_kwargs,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "drop_params": True,
+    }
 
 
 async def run_planner_turn(
@@ -312,5 +331,6 @@ __all__ = [
     "PlannerTurnOutcomeKind",
     "PlannerTurnResult",
     "TurnTelemetry",
+    "build_planner_litellm_kwargs",
     "run_planner_turn",
 ]

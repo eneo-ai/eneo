@@ -29,8 +29,14 @@ from intric.flows.ai_builder.ai_builder_event_models import (
 from intric.flows.ai_builder.ai_builder_orchestrator import (
     AskQuestionAction,
     AskQuestionPayload,
+    PlannerOutput,
+    PlanningStateDelta,
 )
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
+from intric.flows.ai_builder.ai_builder_planner_action_dispatch import (
+    BackendSelectedQuestionDispatchRequest,
+    dispatch_backend_selected_question_if_any,
+)
 from intric.flows.ai_builder.ai_builder_prompts import (
     build_clarification_hints,
     build_system_prompt,
@@ -2467,15 +2473,7 @@ class TestPlannerDiscoveryQuestionDispatch:
         self,
     ) -> None:
         repo = AsyncMock()
-        planner = AIBuilderPlanner(
-            user=MagicMock(tenant_id=uuid4()),
-            repo=repo,
-            litellm_client=AsyncMock(),
-            planner_temperature=0.1,
-            self_correction_temperature=0.1,
-            forced_proposal_temperature=0.1,
-            quality_retry_warning_codes=set(),
-        )
+        repo.commit_turn.return_value = 1
         conversation = [
             ConversationMessage(
                 role="user",
@@ -2493,15 +2491,23 @@ class TestPlannerDiscoveryQuestionDispatch:
                 prompt="Should the flow use structured analysis?",
             ),
         )
-
-        events = await planner._dispatch_server_question(
-            action=action,
-            turn=_make_turn(),
-            conversation=conversation,
-            new_messages_start=len(conversation),
-            flow=None,
+        server_output = PlannerOutput(
+            planner_action=action,
+            planning_state_delta=PlanningStateDelta(base_planning_state_version=0),
         )
 
+        events = await dispatch_backend_selected_question_if_any(
+            BackendSelectedQuestionDispatchRequest(
+                repo=repo,
+                turn=_make_turn(),
+                server_output=server_output,
+                conversation=conversation,
+                new_messages_start=len(conversation),
+                flow=None,
+            )
+        )
+
+        assert events is not None
         assert [event["event"] for event in events] == ["text", "question"]
         question_payload = json.loads(events[1]["data"])
         assert question_payload["question_id"] == "structured_analysis_need"

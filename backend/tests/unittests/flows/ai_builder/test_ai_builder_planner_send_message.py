@@ -499,21 +499,18 @@ async def test_send_message_reuses_one_planner_response_format_selection_for_cha
             "intric.flows.ai_builder.ai_builder_planner.run_planner_turn",
             new=AsyncMock(return_value=turn_result),
         ) as run_turn,
-        patch.object(
-            planner,
-            "_dispatch_chained_server_action_after_commit",
-            new=AsyncMock(return_value=None),
-        ) as chained_dispatch,
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner.build_dispatched_action_events",
+            new=AsyncMock(return_value=[]),
+        ) as dispatch_events,
     ):
         await _collect_events(planner, **send_kwargs)
 
     build_selection.assert_called_once_with(decision)
     primary_kwargs = run_turn.await_args.kwargs["litellm_kwargs"]
     assert primary_kwargs["response_format"] == {"type": "json_object"}
-    assert (
-        chained_dispatch.await_args.kwargs["response_format_selection"]
-        is response_format_selection
-    )
+    dispatch_request = dispatch_events.await_args.args[0]
+    assert dispatch_request.response_format_selection is response_format_selection
 
 
 @pytest.mark.asyncio
@@ -564,51 +561,6 @@ async def test_send_message_dispatched_commit_architecture_emits_status_plus_don
 
     assert [event["event"] for event in events] == ["status", "done"]
     assert json.loads(events[0]["data"])["status"] == "architecture_committed"
-
-
-@pytest.mark.asyncio
-async def test_chained_server_action_uses_planner_response_format_selection() -> None:
-    planner = _make_planner()
-    server_output = _planner_output(
-        ConfirmRequirementsAction(
-            kind="confirm_requirements",
-            payload=ConfirmRequirementsPayload(summary="Ready", key_decisions=[]),
-        )
-    )
-    turn_result = _dispatched_result(
-        action_kind="confirm_requirements",
-        planner_output=server_output,
-    )
-    response_format_selection = build_planner_request_response_format(
-        _structured_decision(StructuredOutputMode.STRICT_JSON_SCHEMA)
-    )
-
-    with (
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner.build_server_planner_output",
-            return_value=server_output,
-        ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_planner.run_planner_turn",
-            new=AsyncMock(return_value=turn_result),
-        ) as run_turn,
-    ):
-        result = await planner._dispatch_chained_server_action_after_commit(
-            turn=_make_turn(base_version=1),
-            conversation=[],
-            litellm_model="openai/gpt-4o-mini",
-            litellm_kwargs={"api_key": "sk-test"},
-            response_format_selection=response_format_selection,
-            flow=None,
-            requirements_confirmed=False,
-            ui_language="en",
-        )
-
-    assert result is turn_result
-    call_kwargs = run_turn.await_args.kwargs
-    assert call_kwargs["litellm_kwargs"]["api_key"] == "sk-test"
-    assert call_kwargs["litellm_kwargs"]["response_format"] == {"type": "json_object"}
-    assert call_kwargs["litellm_kwargs"]["drop_params"] is True
 
 
 @pytest.mark.asyncio
@@ -1393,8 +1345,8 @@ async def test_send_message_derives_asked_question_ids_and_new_evidence() -> Non
     persisted conversation before instantiating the context:
 
     - `asked_question_ids` = union of `question_id` metadata on prior
-      assistant messages (persisted by `_build_new_messages` whenever
-      an `ask_question` action lands).
+      assistant messages (persisted by the accepted-action rendering
+      owner whenever an `ask_question` action lands).
     - `has_new_evidence` = True if the latest user message (the one
       being processed this turn) carries answer evidence.
     - `question_ids_with_new_evidence` = question IDs that have a user

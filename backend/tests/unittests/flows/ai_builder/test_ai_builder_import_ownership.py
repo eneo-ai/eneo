@@ -201,6 +201,41 @@ PROPOSAL_TURN_BUILDER_TEST_MODULE = Path(
 PROPOSAL_TURN_TEST_DOUBLES_MODULE = Path(
     "tests/unittests/flows/ai_builder/proposal_turn_test_doubles.py"
 )
+AI_BUILDER_PLANNER_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_planner")
+)
+ACCEPTED_ACTION_RENDERING_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_accepted_action_rendering")
+)
+PLANNER_ACTION_DISPATCH_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_planner_action_dispatch")
+)
+ACCEPTED_ACTION_RENDERING_PATH = Path(
+    "src/intric/flows/ai_builder/ai_builder_accepted_action_rendering.py"
+)
+PLANNER_ACTION_DISPATCH_PATH = Path(
+    "src/intric/flows/ai_builder/ai_builder_planner_action_dispatch.py"
+)
+PLANNER_PATH = Path("src/intric/flows/ai_builder/ai_builder_planner.py")
+ACCEPTED_ACTION_RENDERING_PUBLIC_NAMES = frozenset(
+    {
+        "RequirementsSummaryRenderContext",
+        "build_accepted_action_events",
+        "build_accepted_action_messages",
+        "build_requirements_summary_data",
+    }
+)
+PLANNER_ACTION_DISPATCH_PUBLIC_NAMES = frozenset(
+    {
+        "BackendSelectedQuestionDispatchRequest",
+        "DispatchedActionEventRequest",
+        "build_dispatched_action_events",
+        "dispatch_backend_selected_question_if_any",
+    }
+)
+PLANNER_ACTION_CLASSES = frozenset(
+    {"AskQuestionAction", "CommitArchitectureAction", "ConfirmRequirementsAction"}
+)
 PURE_PROPOSAL_TURN_BUILDER_BANNED_IMPORTS = frozenset(
     {
         "pytest",
@@ -1227,6 +1262,126 @@ def test_proposal_turn_test_setup_modules_keep_their_contracts() -> None:
     assert violations == []
 
 
+def test_planner_action_rendering_and_dispatch_have_canonical_owners() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    planner_path = backend_root / PLANNER_PATH
+    rendering_path = backend_root / ACCEPTED_ACTION_RENDERING_PATH
+    dispatch_path = backend_root / PLANNER_ACTION_DISPATCH_PATH
+    violations: list[str] = []
+
+    for path in (rendering_path, dispatch_path):
+        if not path.is_file():
+            violations.append(f"{path}: missing planner action owner module")
+
+    planner_tree = ast.parse(planner_path.read_text(), filename=str(planner_path))
+    planner_class = next(
+        node
+        for node in ast.walk(planner_tree)
+        if isinstance(node, ast.ClassDef) and node.name == "AIBuilderPlanner"
+    )
+    planner_methods = {
+        node.name
+        for node in planner_class.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    for method_name in {
+        "_dispatch_server_question",
+        "_dispatch_chained_server_action_after_commit",
+    }:
+        if method_name in planner_methods:
+            violations.append(f"{planner_path}: AIBuilderPlanner defines {method_name}")
+    if "_requirements_summary_data" in _top_level_names(planner_tree):
+        violations.append(f"{planner_path}: defines _requirements_summary_data")
+
+    send_message = next(
+        node
+        for node in planner_class.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "send_message"
+    )
+    for node in ast.walk(send_message):
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "_build_new_messages"
+        ):
+            violations.append(
+                f"{planner_path}:{node.lineno} defines _build_new_messages"
+            )
+        if _isinstance_matches_planner_action(node):
+            violations.append(
+                f"{planner_path}:{node.lineno} directly checks planner action type"
+            )
+
+    if rendering_path.is_file():
+        rendering_text = rendering_path.read_text()
+        rendering_tree = ast.parse(rendering_text, filename=str(rendering_path))
+        public_names = _top_level_public_names(rendering_tree)
+        if public_names != ACCEPTED_ACTION_RENDERING_PUBLIC_NAMES:
+            violations.append(f"{rendering_path}: public names {sorted(public_names)}")
+        for module in _imported_modules(rendering_tree):
+            if module in {
+                AI_BUILDER_PLANNER_MODULE,
+                AI_BUILDER_PROPOSAL_PROCESSOR_MODULE,
+                "intric.flows.ai_builder.ai_builder_repo",
+                "intric.flows.ai_builder.ai_builder_discovery_followup",
+            }:
+                violations.append(f"{rendering_path}: imports {module}")
+        for node in ast.walk(rendering_tree):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module == "intric.flows.ai_builder.ai_builder_planner_turn"
+            ):
+                banned_names = sorted(
+                    alias.name for alias in node.names if alias.name != "TurnTelemetry"
+                )
+                if banned_names:
+                    names = ", ".join(banned_names)
+                    violations.append(f"{rendering_path}:{node.lineno} imports {names}")
+        for node in ast.walk(rendering_tree):
+            if (
+                isinstance(node, ast.Dict)
+                and node.keys
+                and all(isinstance(key, ast.Constant) for key in node.keys)
+                and {"event", "data"} <= {key.value for key in node.keys}
+            ):
+                violations.append(f"{rendering_path}:{node.lineno} builds SSE dict")
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                docstring = ast.get_docstring(node)
+                if docstring is not None and len(docstring.splitlines()) > 6:
+                    violations.append(f"{rendering_path}:{node.lineno} long docstring")
+
+    if dispatch_path.is_file():
+        dispatch_tree = ast.parse(
+            dispatch_path.read_text(), filename=str(dispatch_path)
+        )
+        public_names = _top_level_public_names(dispatch_tree)
+        if public_names != PLANNER_ACTION_DISPATCH_PUBLIC_NAMES:
+            violations.append(f"{dispatch_path}: public names {sorted(public_names)}")
+        for module in _imported_modules(dispatch_tree):
+            if module in {
+                AI_BUILDER_PLANNER_MODULE,
+                AI_BUILDER_PROPOSAL_PROCESSOR_MODULE,
+            }:
+                violations.append(f"{dispatch_path}: imports {module}")
+        for node in ast.walk(dispatch_tree):
+            if isinstance(node, ast.ClassDef) and node.name.endswith(
+                ("Processor", "Manager", "Handler", "Service")
+            ):
+                violations.append(f"{dispatch_path}:{node.lineno} defines {node.name}")
+            if isinstance(node, ast.ClassDef) and node.name.endswith("Request"):
+                request_fields = [
+                    stmt.target.id
+                    for stmt in node.body
+                    if isinstance(stmt, ast.AnnAssign)
+                    and isinstance(stmt.target, ast.Name)
+                ]
+                if len(request_fields) > 12:
+                    violations.append(
+                        f"{dispatch_path}:{node.lineno} has {len(request_fields)} fields"
+                    )
+
+    assert violations == []
+
+
 def _annotation_uses_any(annotation: ast.expr | None) -> bool:
     return annotation is not None and any(
         isinstance(node, ast.Name) and node.id == "Any" for node in ast.walk(annotation)
@@ -1244,6 +1399,49 @@ def _attribute_chain(node: ast.Attribute) -> str:
     else:
         parts.append(ast.unparse(current))
     return ".".join(reversed(parts))
+
+
+def _top_level_public_names(tree: ast.Module) -> frozenset[str]:
+    return frozenset(
+        name for name in _top_level_names(tree) if not name.startswith("_")
+    )
+
+
+def _top_level_names(tree: ast.Module) -> frozenset[str]:
+    return frozenset(
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        and not node.name.startswith("_")
+    )
+
+
+def _imported_modules(tree: ast.Module) -> frozenset[str]:
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module is not None:
+            modules.add(node.module)
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+    return frozenset(modules)
+
+
+def _isinstance_matches_planner_action(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    if not isinstance(node.func, ast.Name) or node.func.id != "isinstance":
+        return False
+    if len(node.args) < 2:
+        return False
+    checked = node.args[1]
+    if isinstance(checked, ast.Name):
+        return checked.id in PLANNER_ACTION_CLASSES
+    if isinstance(checked, ast.Tuple):
+        return any(
+            isinstance(element, ast.Name) and element.id in PLANNER_ACTION_CLASSES
+            for element in checked.elts
+        )
+    return False
 
 
 def _python_files() -> list[Path]:
