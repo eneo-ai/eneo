@@ -38,12 +38,14 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     ui_language_from_question_answer,
 )
 from intric.flows.ai_builder.ai_builder_discovery import (
+    build_discovery_followup,
     build_registry_question_followup,
 )
 from intric.flows.ai_builder.ai_builder_discovery_followup import (
     emit_discovery_followup_if_needed,
     persist_backend_question,
 )
+from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
 )
@@ -255,6 +257,7 @@ class PlannerPreparedRequest:
     # other prompt-context signals.
     should_emit_forced_followup: bool
     base_planning_state_version: int
+    discovery_analysis: DiscoveryAnalysis | None = None
     # Rebuilt-from-current-conversation planning state — the same one
     # the capability projection rendered into the system prompt.
     # `send_message` derives the `OrchestrationContext` slot sets from
@@ -656,8 +659,8 @@ class AIBuilderPlanner:
         unresolved_architectural_choices = _compute_unresolved_core_slots(
             rebuilt_planning_state
         )
-        selected_discovery_question_ids = frozenset(
-            getattr(discovery_analysis, "selected_question_ids", ())
+        selected_discovery_question_ids: frozenset[str] = frozenset(
+            discovery_analysis.selected_question_ids
         )
         action_policy = build_planner_action_policy(
             session_state=rebuilt_planning_state,
@@ -690,6 +693,7 @@ class AIBuilderPlanner:
                 discovery_block_message=None,
                 llm_messages=[],
                 should_emit_forced_followup=False,
+                discovery_analysis=discovery_analysis,
                 base_planning_state_version=base_planning_state_version,
                 rebuilt_planning_state=rebuilt_planning_state,
                 action_policy=action_policy,
@@ -1005,6 +1009,7 @@ class AIBuilderPlanner:
         conversation: list[ConversationMessage],
         new_messages_start: int,
         flow: "Flow | None",
+        discovery_analysis: DiscoveryAnalysis | None = None,
     ) -> list[dict[str, str]]:
         """Persist deterministic questions through the structured-question path.
 
@@ -1020,6 +1025,28 @@ class AIBuilderPlanner:
             conversation,
             flow=flow,
         )
+        if followup is None:
+            discovery_followup = build_discovery_followup(
+                conversation,
+                flow=flow,
+                analysis=discovery_analysis,
+            )
+            if discovery_followup is not None:
+                _, question_data, assistant_text = discovery_followup
+                # Planner-internal discovery questions are not public registry
+                # requirements, but server-selected questions must still reach
+                # the same typed UI/conversation persistence path.
+                if question_data.get("question_id") == question_id:
+                    followup = question_data, assistant_text
+                else:
+                    logger.warning(
+                        "AI Builder server question fallback selected a different discovery question.",
+                        extra={
+                            "requested_question_id": question_id,
+                            "fallback_question_id": question_data.get("question_id"),
+                        },
+                    )
+
         if followup is None:
             return [build_text_event(action.payload.prompt)]
 
@@ -1312,6 +1339,7 @@ class AIBuilderPlanner:
                     conversation=conversation,
                     new_messages_start=new_messages_start,
                     flow=flow,
+                    discovery_analysis=prepared_request.discovery_analysis,
                 )
                 for event in events:
                     yield event

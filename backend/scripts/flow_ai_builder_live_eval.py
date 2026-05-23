@@ -932,6 +932,7 @@ def _cases() -> list[LiveEvalCase]:
                 "input_material_mode": ("audio",),
                 "final_output_mode": ("docx_document",),
                 "docx_output_mode": ("generated_docx",),
+                "structured_analysis_need": ("use_structured_analysis",),
             },
         ),
         LiveEvalCase(

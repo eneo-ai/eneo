@@ -3,6 +3,7 @@ from scripts.flow_ai_builder_live_eval import (
     ExpectedQuestionBinding,
     JsonObject,
     LiveEvalCase,
+    _cases,
     _evaluate_plan_case,
 )
 
@@ -113,3 +114,18 @@ def test_live_eval_requires_underlag_refs_on_same_target_step() -> None:
 
     assert verdict == "fail"
     assert any("Missing required source text" in reason for reason in reasons)
+
+
+def test_live_eval_c3_answers_structured_analysis_question_without_rewriting_prompt() -> (
+    None
+):
+    c3 = next(case for case in _cases() if case.case_id == "C3_audio_to_docx_report")
+
+    assert c3.prompt == (
+        "Create a flow that transcribes meeting audio, extracts ten topic "
+        "sections, and produces a DOCX meeting report."
+    )
+    assert c3.question_answers["structured_analysis_need"] == (
+        "use_structured_analysis",
+    )
+    assert c3.max_turns >= 3

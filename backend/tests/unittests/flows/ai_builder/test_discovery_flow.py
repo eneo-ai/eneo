@@ -16,12 +16,19 @@ from intric.flows.ai_builder.ai_builder_discovery import (
     build_discovery_followup,
     build_discovery_followup_text,
 )
+from intric.flows.ai_builder.ai_builder_discovery_runtime import (
+    build_runtime_discovery_context,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     SessionStatus,
 )
 from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
+)
+from intric.flows.ai_builder.ai_builder_orchestrator import (
+    AskQuestionAction,
+    AskQuestionPayload,
 )
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_prompts import (
@@ -38,6 +45,10 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
 from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
+)
+from intric.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedSlot,
+    SlotClassificationResult,
 )
 from intric.flows.ai_builder.ai_builder_tools import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
@@ -1461,6 +1472,157 @@ class TestExtendedClarificationHints:
         assert "document_kind" not in question_ids
         assert "docx_output_mode" not in question_ids
 
+    def test_structured_analysis_question_is_asked_for_audio_docx_extraction(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Create a flow that transcribes meeting audio, extracts ten "
+                    "topic sections, and produces a DOCX meeting report."
+                ),
+                metadata={"ui_language": "en"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "structured_analysis_need"
+        assert analysis.next_issue.suggestion is not None
+        assert analysis.next_issue.suggestion.question_id == "structured_analysis_need"
+
+    def test_structured_analysis_plain_text_optout_wins_for_audio_docx_extraction(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Create a flow that transcribes meeting audio, extracts ten "
+                    "topic sections, and produces a DOCX meeting report, but keep "
+                    "the analysis as plain text."
+                ),
+                metadata={"ui_language": "en"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+        assert "structured_analysis_need" not in question_ids
+
+    def test_simple_audio_docx_transcript_does_not_force_structured_analysis_question(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Create a flow that transcribes meeting audio and produces "
+                    "a DOCX file with the transcription."
+                ),
+                metadata={"ui_language": "en"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+        assert "structured_analysis_need" not in question_ids
+
+    def test_structured_analysis_answer_resolves_audio_docx_extraction_question(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Create a flow that transcribes meeting audio, extracts ten "
+                    "topic sections, and produces a DOCX meeting report."
+                ),
+                metadata={"ui_language": "en"},
+            ),
+            ConversationMessage(
+                role="user",
+                content="Use structured analysis.",
+                metadata={
+                    "question_answer": {
+                        "question_id": "structured_analysis_need",
+                        "selected_option_id": "use_structured_analysis",
+                        "selected_values": ["use_structured_analysis"],
+                        "answer": "use_structured_analysis",
+                    },
+                    "ui_language": "en",
+                },
+            ),
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+        assert "structured_analysis_need" not in question_ids
+
+    @pytest.mark.asyncio
+    async def test_classifier_text_only_does_not_override_audio_docx_extraction_intent(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Create a flow that transcribes meeting audio, extracts ten "
+                    "topic sections, and produces a DOCX meeting report."
+                ),
+                metadata={"ui_language": "en"},
+            )
+        ]
+        captured_allowed_values: dict[str, object] = {}
+
+        async def fake_classify_slots(**kwargs: Any) -> SlotClassificationResult:
+            captured_allowed_values.update(kwargs["allowed_slot_values"])
+            return SlotClassificationResult(
+                slots=(
+                    ClassifiedSlot(
+                        slot_name="runtime_metadata_fields",
+                        value="no_runtime_metadata",
+                        confidence="high",
+                        reason="No separate runtime metadata requested.",
+                    ),
+                )
+            )
+
+        with patch(
+            "intric.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            side_effect=fake_classify_slots,
+        ):
+            context = await build_runtime_discovery_context(
+                conversation,
+                litellm_client=object(),
+                litellm_model="test-model",
+                tenant_id=uuid4(),
+            )
+
+        assert "structured_analysis_need" not in captured_allowed_values
+        assert "runtime_metadata_fields" in captured_allowed_values
+        assert (
+            context.planning_state.resolved_slots.get("structured_analysis_need")
+            is None
+        )
+
     def test_complex_multi_document_compare_prompt_skips_document_kind_and_comparison_scope(
         self,
     ) -> None:
@@ -2299,7 +2461,52 @@ class TestPlannerConversationEncoding:
         assert "input_material_mode" in payload["content"]
 
 
-class TestPlannerDiscoveryShortCircuit:
+class TestPlannerDiscoveryQuestionDispatch:
+    @pytest.mark.asyncio
+    async def test_server_question_dispatch_uses_typed_discovery_followup_for_planner_internal_question(
+        self,
+    ) -> None:
+        repo = AsyncMock()
+        planner = AIBuilderPlanner(
+            user=MagicMock(tenant_id=uuid4()),
+            repo=repo,
+            litellm_client=AsyncMock(),
+            planner_temperature=0.1,
+            self_correction_temperature=0.1,
+            forced_proposal_temperature=0.1,
+            quality_retry_warning_codes=set(),
+        )
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Create a flow that transcribes meeting audio, extracts ten "
+                    "topic sections, and produces a DOCX meeting report."
+                ),
+            )
+        ]
+        action = AskQuestionAction(
+            kind="ask_question",
+            payload=AskQuestionPayload(
+                question_id="structured_analysis_need",
+                slot_name="structured_analysis_need",
+                prompt="Should the flow use structured analysis?",
+            ),
+        )
+
+        events = await planner._dispatch_server_question(
+            action=action,
+            turn=_make_turn(),
+            conversation=conversation,
+            new_messages_start=len(conversation),
+            flow=None,
+        )
+
+        assert [event["event"] for event in events] == ["text", "question"]
+        question_payload = json.loads(events[1]["data"])
+        assert question_payload["question_id"] == "structured_analysis_need"
+        repo.commit_turn.assert_awaited_once()
+
     @pytest.mark.asyncio
     async def test_uses_backend_followup_after_llm_slot_classification_for_blocking_discovery(
         self,
@@ -2343,6 +2550,56 @@ class TestPlannerDiscoveryShortCircuit:
 
         assert [event["event"] for event in events] == ["text", "question", "done"]
         assert planner.litellm_client.acompletion.await_count == 1
+        repo.commit_turn.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_audio_docx_extraction_structured_question_emits_typed_event_before_proposal(
+        self,
+    ) -> None:
+        repo = AsyncMock()
+        session_id = uuid4()
+        repo.get_session.return_value = MagicMock(
+            id=session_id,
+            status=SessionStatus.CHATTING,
+            conversation=[],
+            planning_state_version=0,
+        )
+        repo.load_planning_state.return_value = None
+
+        planner = AIBuilderPlanner(
+            user=MagicMock(tenant_id=uuid4()),
+            repo=repo,
+            litellm_client=AsyncMock(),
+            planner_temperature=0.1,
+            self_correction_temperature=0.1,
+            forced_proposal_temperature=0.1,
+            quality_retry_warning_codes=set(),
+        )
+
+        events: list[dict[str, str]] = []
+        with patch(
+            "intric.flows.ai_builder.ai_builder_planner.lookup_model_defaults",
+            return_value=MagicMock(max_input_tokens=128000),
+        ):
+            async for event in planner.send_message(
+                session_id=session_id,
+                message=(
+                    "Create a flow that transcribes meeting audio, extracts ten "
+                    "topic sections, and produces a DOCX meeting report."
+                ),
+                ui_language="en",
+                litellm_model="openai/gpt-5.4",
+                litellm_kwargs={},
+                available_models=None,
+                available_kbs=None,
+                max_input_tokens=128000,
+                max_output_tokens=4096,
+            ):
+                events.append(event)
+
+        assert [event["event"] for event in events] == ["text", "question", "done"]
+        question_payload = json.loads(events[1]["data"])
+        assert question_payload["question_id"] == "structured_analysis_need"
         repo.commit_turn.assert_awaited_once()
 
 

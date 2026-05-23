@@ -7,6 +7,9 @@ from typing import Any, Mapping
 from intric.flows.ai_builder.ai_builder_form_intake_signals import (
     mentions_form_field_needs,
 )
+from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
+    resolve_input_intent,
+)
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     user_relevant_requirement_notes,
     user_relevant_requirement_text,
@@ -218,7 +221,9 @@ def detect_planner_pattern_signals(text: str) -> PlannerPatternSignals:
     if not normalized:
         return PlannerPatternSignals()
 
+    input_intent = resolve_input_intent(normalized, {})
     document_like_input = _contains_any(normalized, _DOCUMENT_INPUT_MARKERS)
+    audio_like_input = input_intent.audio_requested
     document_like_output = _contains_any(normalized, _DOCUMENT_OUTPUT_MARKERS)
     prefers_structured_intermediate = _contains_any(
         normalized, _STRUCTURED_INTERMEDIATE_MARKERS
@@ -239,6 +244,7 @@ def detect_planner_pattern_signals(text: str) -> PlannerPatternSignals:
     is_simple_text_transform = (
         _contains_direct_text_transform_marker(normalized)
         and not document_like_input
+        and not audio_like_input
         and not document_like_output
         and not prefers_structured_intermediate
         and not prefers_quality_step
@@ -246,8 +252,11 @@ def detect_planner_pattern_signals(text: str) -> PlannerPatternSignals:
         and not _contains_any(normalized, _FORM_COMPLEMENT_MARKERS)
         and not _contains_any(normalized, _FORM_FIELD_GUARD_MARKERS)
     )
+    source_material_like_input = document_like_input or audio_like_input
+    # Audio becomes source material after transcription; keep the rich-workflow
+    # critic owner shared instead of adding an audio-specific parallel rule.
     rich_document_workflow = (
-        document_like_input
+        source_material_like_input
         and document_like_output
         and (
             needs_form_fields or prefers_structured_intermediate or prefers_quality_step

@@ -4148,6 +4148,131 @@ class TestRichWorkflowInvariants:
             "output_contract" in issue or "JSON-steg" in issue for issue in issues
         )
 
+    def test_rich_workflow_critic_rejects_audio_docx_extraction_without_json_contract_step(
+        self,
+    ) -> None:
+        conversation = [
+            {
+                "role": "user",
+                "content": (
+                    "Create a flow that transcribes meeting audio, extracts ten "
+                    "topic sections, and produces a DOCX meeting report."
+                ),
+            }
+        ]
+        spec = FlowDraftSpecCore(
+            flow_name="Meeting report",
+            steps=[
+                _step(
+                    "step_a",
+                    "Transcribe audio",
+                    "Transcribe the meeting audio.",
+                    input_type=InputType.AUDIO,
+                    output_mode=OutputMode.TRANSCRIBE_ONLY,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_b",
+                    "Write DOCX",
+                    "Write the meeting report from the transcript.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.DOCX,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(
+            build_conversation_critic_context(conversation, spec)
+        )
+
+        assert "rich_workflow_requires_json_contract_step" in {
+            issue.id for issue in issues
+        }
+
+    def test_rich_workflow_audio_widening_keeps_simple_audio_docx_out_of_json_contract_critic(
+        self,
+    ) -> None:
+        conversation = [
+            {
+                "role": "user",
+                "content": (
+                    "Create a flow that transcribes meeting audio and produces "
+                    "a DOCX file with the transcription."
+                ),
+            }
+        ]
+        spec = FlowDraftSpecCore(
+            flow_name="Meeting transcript",
+            steps=[
+                _step(
+                    "step_a",
+                    "Transcribe audio",
+                    "Transcribe the meeting audio.",
+                    input_type=InputType.AUDIO,
+                    output_mode=OutputMode.TRANSCRIBE_ONLY,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_b",
+                    "Create DOCX transcript",
+                    "Create a DOCX transcript from the transcription.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.DOCX,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(
+            build_conversation_critic_context(conversation, spec)
+        )
+        issue_ids = {issue.id for issue in issues}
+
+        assert "rich_workflow_requires_json_contract_step" not in issue_ids
+        assert "rich_workflow_requires_form_fields" not in issue_ids
+        assert "rich_workflow_requires_multiple_steps" not in issue_ids
+
+    def test_rich_workflow_audio_quality_request_still_requires_multiple_steps(
+        self,
+    ) -> None:
+        conversation = [
+            {
+                "role": "user",
+                "content": (
+                    "Create a flow that transcribes meeting audio, reviews the "
+                    "analysis quality, and produces a DOCX meeting report."
+                ),
+            }
+        ]
+        spec = FlowDraftSpecCore(
+            flow_name="Reviewed meeting report",
+            steps=[
+                _step(
+                    "step_a",
+                    "Transcribe audio",
+                    "Transcribe the meeting audio.",
+                    input_type=InputType.AUDIO,
+                    output_mode=OutputMode.TRANSCRIBE_ONLY,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_b",
+                    "Write DOCX",
+                    "Write the report.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.DOCX,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(
+            build_conversation_critic_context(conversation, spec)
+        )
+
+        assert "rich_workflow_requires_multiple_steps" in {issue.id for issue in issues}
+
     def test_rich_workflow_requires_json_contract_step_silent_for_generated_docx_without_structure(
         self,
     ) -> None:

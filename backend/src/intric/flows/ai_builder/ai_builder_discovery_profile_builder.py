@@ -415,7 +415,11 @@ def should_prefer_structured_intermediate(
             set(),
         )
     )
-    if not document_like_input:
+    audio_like_input = input_intent.audio_requested or "audio" in flow_defaults.get(
+        "input_material_mode",
+        set(),
+    )
+    if not (document_like_input or audio_like_input):
         return False
 
     structured_deliverable = (

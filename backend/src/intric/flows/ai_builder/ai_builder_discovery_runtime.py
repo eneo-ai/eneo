@@ -50,6 +50,29 @@ class DiscoveryRuntimeResult:
     slot_classification_metadata: SlotClassificationMetadata | None = None
 
 
+def _narrow_structured_analysis_need_from_classifier(
+    conversation: list[ConversationMessage],
+    *,
+    flow: Flow | None,
+    planning_state: PlanningState,
+    allowed_values: dict[str, frozenset[str]],
+) -> dict[str, frozenset[str]]:
+    if "structured_analysis_need" not in allowed_values:
+        return allowed_values
+
+    pre_classifier_analysis = analyze_discovery(
+        conversation,
+        flow=flow,
+        planning_state=planning_state,
+    )
+    if "structured_analysis_need" not in pre_classifier_analysis.selected_question_ids:
+        return allowed_values
+
+    narrowed_values = dict(allowed_values)
+    narrowed_values.pop("structured_analysis_need", None)
+    return narrowed_values
+
+
 async def analyze_discovery_runtime(
     conversation: list[ConversationMessage],
     *,
@@ -99,6 +122,14 @@ async def build_runtime_discovery_context(
         return RuntimeDiscoveryContext(planning_state=state)
 
     allowed_values = llm_resolvable_slot_values_for_state(state)
+    if not allowed_values:
+        return RuntimeDiscoveryContext(planning_state=state)
+    allowed_values = _narrow_structured_analysis_need_from_classifier(
+        conversation,
+        flow=flow,
+        planning_state=state,
+        allowed_values=allowed_values,
+    )
     if not allowed_values:
         return RuntimeDiscoveryContext(planning_state=state)
 

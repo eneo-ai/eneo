@@ -528,18 +528,24 @@ def looks_like_case_document_family(text: str) -> bool:
 
 
 def explicit_structured_reuse_preference(text: str) -> bool:
-    pattern = detect_planner_pattern_signals(text)
-    if pattern.rich_document_workflow and pattern.prefers_structured_intermediate:
-        return True
     return mentions_any(
         text,
         (
             "strukturerad data används där det förbättrar kvaliteten",
+            "strukturerad data ska användas",
+            "mellanliggande strukturerad data",
             "structured data where it improves quality",
+            "structured data should be used",
+            "intermediate structured data",
+            "strukturerad analys",
             "structured analysis",
             "json",
             "output contract",
             "output_contract",
+            "strukturerad pdf-rapport",
+            "strukturerad docx-rapport",
+            "structured pdf report",
+            "structured docx report",
         ),
     )
 

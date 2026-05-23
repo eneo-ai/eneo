@@ -619,7 +619,9 @@ def structured_analysis_need_is_vague(profile: DiscoveryProfile) -> bool:
     ):
         return True
     if planner_patterns.rich_document_workflow and (
-        planner_patterns.needs_form_fields or planner_patterns.prefers_quality_step
+        planner_patterns.needs_form_fields
+        or planner_patterns.prefers_structured_intermediate
+        or planner_patterns.prefers_quality_step
     ):
         return True
     return False

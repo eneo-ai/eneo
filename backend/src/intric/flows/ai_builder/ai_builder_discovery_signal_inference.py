@@ -376,7 +376,14 @@ def _infer_processing_scope(text: str) -> str | None:
 
 def _infer_structured_analysis_need(text: str) -> str | None:
     pattern = detect_planner_pattern_signals(text)
-    if pattern.rich_document_workflow and pattern.prefers_structured_intermediate:
+    input_intent = resolve_input_intent(text, {})
+    if (
+        pattern.rich_document_workflow
+        and pattern.prefers_structured_intermediate
+        # Audio can mean transcript-only or transcript-plus-extraction; ask the
+        # user instead of silently forcing a hidden JSON step.
+        and not input_intent.audio_requested
+    ):
         return "use_structured_analysis"
     if "strukturerad data" in text and "förbättrar kvaliteten" in text:
         return "use_structured_analysis"
