@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T080
+active_task: T081
 
 interruptions:
   - id: I001
@@ -7602,7 +7602,7 @@ tasks:
   - id: T080
     type: judge
     assignee: Judge
-    status: active
+    status: completed
     reasoning_hint: high
     target_review_by: "2026-05-24"
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T079 using current source, receipts, live-eval evidence, and the strict no-LOC-only steering."
@@ -7620,6 +7620,103 @@ tasks:
       - "Each candidate states current owner, proposed canonical owner, what gets deleted/merged/moved/renamed, tests required, runtime/API/schema risk, and score-floor impact."
       - "The selected next tranche is implementation-ready only after peer review, or the task records exact disagreement/quota blockers."
       - "The board explicitly keeps the broader goal incomplete until every dimension is at least 9."
+    receipt:
+      completed_at: "2026-05-23T18:07:00Z"
+      summary: "Re-ranked the next Flow AI Builder tranche after T079 from current repo reality. Selected T081 Discovery Follow-Up Runtime Contract Cleanup as the highest current score-moving implementation slice, explicitly rejecting LOC-only refactors, broad topology splits, public-event typing, proposal-completion typing, full-source Pyright, and broad AI-slop cleanup as the immediate next worker."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t080-next-tranche-ranking.md"
+        - ".codex/artifacts/claude-peer-loop-t080-next-tranche-ranking-after-planner-request-prep-20260523T175331Z.md"
+        - ".codex/artifacts/claude-peer-loop-t080-next-tranche-ranking-revised-20260523T175728Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t080-next-tranche-ranking-final-synthesis-20260523T180049Z.md"
+        - ".codex/artifacts/claude-peer-loop-t080-next-tranche-ranking-after-antigravity-20260523T180526Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t080-next-tranche-final-revised-plan-20260523T180644Z.md"
+      peer_review:
+        claude_iteration_1: "GREEN_LIGHT no / MIN_SCORE 7; accepted blockers around caller policy ambiguity, typed runtime result shape, wrapper deletion, AST guard location, red-test commitment, and honest score-floor framing."
+        claude_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 8 after Codex revised the plan to delete emit_discovery_followup_if_needed, extend DiscoveryRuntimeResult.followup, replace tuple follow-up payloads with BackendQuestion, name the persistence signature, name wrapper-patching tests, and state T081 alone will not raise the strict floor to 9."
+        antigravity_iteration_1: "GREEN_LIGHT yes / MIN_SCORE 8; accepted finding that planner execution should receive precomputed BackendQuestion on prepared outcomes because prepare_planner_request already runs discovery runtime."
+        claude_iteration_3: "GREEN_LIGHT yes / MIN_SCORE 8 after Codex added the Antigravity planner-prepared-followup revision; accepted P2 that NormalPlannerPrepared.followup must remain gated by existing stall-escape semantics."
+        antigravity_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 8 after final revision; confirmed implementation readiness and recommended followup = discovery_runtime.followup if discovery_runtime.should_emit_forced_followup else None."
+      evidence:
+        - "cd backend && uv run pyright src/intric/flows/ai_builder -> 0 errors"
+        - "cd backend && uv run pyright src/intric/flows -> 0 errors"
+        - "cd backend && uv run pyright src -> 112 errors outside Flow AI Builder/Flow-heavy paths; recorded as repo-wide debt, not the immediate Flow AI Builder worker."
+        - "backend/src/intric/flows/ai_builder/ai_builder_confirm_requirements.py:91-122 proves confirm-requirements can currently classify and then call the follow-up wrapper with classifier inputs again."
+        - "backend/src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py already runs build_discovery_runtime_result before planner execution."
+      codex_self_review:
+        verdict: "pass. T081 is selected because it removes a hidden runtime/persistence/provider coupling and redundant discovery analysis, not because it reduces line count. It clarifies canonical ownership: discovery runtime decides, prepared outcomes carry the decision, backend-question persistence writes."
+        no_hard_loc_goal: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "T081 alone is not expected to raise the overall strict floor from 8 to 9; T082 bounded AI-slop/comment/naming cleanup and T084 LiteLLM/proposal-completion boundary typing remain likely required unless post-T081 evidence re-ranks them."
+        - "Full-source Pyright still reports 112 errors outside Flow AI Builder/Flow-heavy paths and remains a repo-wide quality blocker."
+        - "Large source topology files remain review signals only; no hard LOC target was set."
+
+  - id: T081
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Implement discovery follow-up runtime contract cleanup so discovery runtime decides once, prepared outcomes carry BackendQuestion, and persistence only commits typed backend questions."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_discovery.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_discovery_models.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_discovery_runtime.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_discovery_followup.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_backend_question_persistence.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_confirm_requirements.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner_action_dispatch.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_finalization.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_discovery_followup.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_backend_question_persistence.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_confirm_requirements.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - ".codex/artifacts/flow-ai-builder-t081-implementation-summary.md"
+      - ".codex/artifacts/flow-ai-builder-live-eval.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    constraints:
+      - "Do not split files or set hard LOC targets. This tranche is about canonical runtime/persistence ownership, not file size."
+      - "Delete emit_discovery_followup_if_needed rather than narrowing it."
+      - "BackendQuestion lives in ai_builder_discovery_models.py unless implementation proves a circular import; question_data stays dict[str, object] by deliberate boundary choice."
+      - "Rename persistence-only ai_builder_discovery_followup.py to ai_builder_backend_question_persistence.py unless implementation evidence proves the old name still owns follow-up decisions."
+      - "NormalPlannerPrepared.followup must be assigned only when discovery_runtime.should_emit_forced_followup is true; never set it directly to any follow-up candidate without stall gating."
+      - "No public API/SSE schema changes, prompt rewrites, diagnostics framework, global Pyright cleanup, callback bags, manager/processor/helper abstractions, broad Any, pyright ignores, or phase/plan comments."
+      - "Preserve unrelated dirty files and do not push."
+    acceptance_criteria:
+      - "DiscoveryRuntimeResult has followup: BackendQuestion | None."
+      - "build_discovery_followup returns BackendQuestion | None instead of a tuple."
+      - "DiscoveryBlockPrepared and NormalPlannerPrepared carry followup: BackendQuestion | None; NormalPlannerPrepared no longer exposes should_emit_forced_followup."
+      - "AIBuilderPlanner.send_message persists precomputed prepared follow-ups only and does not import/call discovery runtime or follow-up decision helpers."
+      - "Persistence owner accepts question: BackendQuestion and no LiteLLM/provider/classifier parameters."
+      - "Confirm-requirements follow-up reuses the already computed discovery analysis and the classifier spy red test proves exactly one classify_slots call for the affected turn."
+      - "Proposal submission and question recovery explicitly compose runtime analysis and persistence; no wrapper remains."
+      - "AST/import guard enforces the runtime/persistence/planner ownership boundaries."
+      - "Stale planner stall-escape comment is deleted."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_discovery_followup.py tests/unittests/flows/ai_builder/test_ai_builder_backend_question_persistence.py tests/unittests/flows/ai_builder/test_ai_builder_confirm_requirements.py tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/ -q"
+      - "cd backend && uv run ruff check <touched T081 files>"
+      - "cd backend && uv run ruff format --check <touched T081 files>"
+      - "cd backend && uv run pyright src/intric/flows/ai_builder"
+      - "git diff --check"
+      - "Authenticated five-case live eval after backend restart if local service is available."
+      - "Claude implementation gate GREEN_LIGHT yes / MIN_SCORE >= 8; Antigravity implementation gate if quota/tooling available."
+    stop_if:
+      - "Need files outside allowed_files other than mechanical import path fallout from the persistence module rename."
+      - "BackendQuestion home creates circular imports that require a broader model-layer redesign."
+      - "NormalPlannerPrepared followup cannot preserve current stall gating semantics."
+      - "Tests reveal user-visible discovery/follow-up behavior changes outside the approved ownership cleanup."
+      - "Peer implementation gate finds blockers that cannot be fixed within the approved tranche."
     receipt: null
 
 checks:
