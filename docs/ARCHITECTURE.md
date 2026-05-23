@@ -516,6 +516,7 @@ Configure via: `PUT /api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}`
 - [Federation Per Tenant](./FEDERATION_PER_TENANT.md) - IdP architecture
 - [AI Providers](https://docs.eneo.ai/guides/ai-providers) - Provider configuration & credential management
 - [Multi-Tenant OIDC Setup](./MULTITENANT_OIDC_SETUP_GUIDE.md) - Provisioning guide
+- [MCP OAuth Setup](./MCP_OAUTH_SETUP.md) - Same-IdP token broker for per-user MCP server authentication (RFC 8693)
 
 ### Observability & Debugging
 

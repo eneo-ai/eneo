@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 from sqlalchemy import Boolean, ForeignKey, Index, String, Text, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -63,7 +64,15 @@ class MCPServers(BasePublic):
     # drive the same-IdP token-exchange broker (Phase 3); they are gated by
     # the ``MCP_OAUTH_ENABLED`` setting at the API layer until the broker ships.
     auth_scope: Mapped[str] = mapped_column(
-        String, nullable=False, server_default="static_bearer"
+        PgEnum(
+            "per_user",
+            "per_tenant",
+            "static_bearer",
+            name="mcp_auth_scope",
+            create_type=False,
+        ),
+        nullable=False,
+        server_default="static_bearer",
     )
     # Same-IdP assertion gate: the broker requires the user's IdP issuer and
     # the MCP server's published authorization-server issuer both equal this.
@@ -72,7 +81,15 @@ class MCPServers(BasePublic):
     # catalog describes the server's surface, not what a specific user can
     # do, so the discovery principal is decoupled from ``auth_scope``.
     tool_discovery_principal: Mapped[str] = mapped_column(
-        String, nullable=False, server_default="anonymous"
+        PgEnum(
+            "anonymous",
+            "tenant_service_account",
+            "admin_user",
+            name="mcp_discovery_principal",
+            create_type=False,
+        ),
+        nullable=False,
+        server_default="anonymous",
     )
     # Strategy-target hint. Keycloak (RFC 8693) uses this as the ``resource``
     # / ``audience`` value; Entra (OBO) uses it as the target API ``scope``

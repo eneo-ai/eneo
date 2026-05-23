@@ -110,6 +110,9 @@ class MCPServerAssembler:
             security_classification=SecurityClassificationPublic.from_domain(
                 mcp_server.security_classification,
             ),
+            auth_scope=mcp_server.auth_scope,
+            expected_idp_issuer=mcp_server.expected_idp_issuer,
+            target_resource_or_scope=mcp_server.target_resource_or_scope,
         )
 
     def to_paginated_response(self, mcp_servers: list[MCPServer]) -> MCPServerList:
@@ -167,6 +170,9 @@ class MCPServerSettingsAssembler:
             security_classification=SecurityClassificationPublic.from_domain(
                 mcp_server.security_classification,
             ),
+            auth_scope=mcp_server.auth_scope,
+            expected_idp_issuer=mcp_server.expected_idp_issuer,
+            target_resource_or_scope=mcp_server.target_resource_or_scope,
         )
 
     def to_paginated_response(

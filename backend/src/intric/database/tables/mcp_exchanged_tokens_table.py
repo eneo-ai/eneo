@@ -2,6 +2,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import ForeignKey, Index, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -38,7 +39,15 @@ class MCPExchangedTokens(BasePublic):
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=False
     )
-    subject_type: Mapped[str] = mapped_column(Text, nullable=False)
+    subject_type: Mapped[str] = mapped_column(
+        PgEnum(
+            "user",
+            "tenant",
+            name="mcp_exchanged_token_subject_type",
+            create_type=False,
+        ),
+        nullable=False,
+    )
     subject_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     token_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(

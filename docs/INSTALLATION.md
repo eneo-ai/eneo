@@ -243,6 +243,7 @@ uv run alembic upgrade head
 ## Additional Resources
 
 - **[Deployment Guide](./DEPLOYMENT.md)** - Production setup
+- **[MCP OAuth Setup](./MCP_OAUTH_SETUP.md)** - Wiring per-user SSO for MCP servers (RFC 8693 token exchange)
 - **[API Documentation](http://localhost:8123/docs)** - Interactive API explorer
 - **[GitHub Issues](https://github.com/eneo-ai/eneo/issues)** - Report problems
 - **[Discussions](https://github.com/eneo-ai/eneo/discussions)** - Get help

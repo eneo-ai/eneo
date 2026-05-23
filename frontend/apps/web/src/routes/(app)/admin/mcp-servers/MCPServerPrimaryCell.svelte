@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Globe, Shield, ShieldCheck } from "lucide-svelte";
+  import { Globe, Shield, ShieldCheck, KeyRound } from "lucide-svelte";
 
   type Props = {
     mcpServer: {
@@ -14,6 +14,7 @@
       description?: string | null;
       http_url: string;
       http_auth_type: string;
+      auth_scope?: string | null;
       security_classification?: { name: string } | null;
     };
   };
@@ -21,7 +22,14 @@
   const { mcpServer }: Props = $props();
 
   // Nordic-inspired muted colors with better contrast for accessibility
-  function getAuthConfig(type: string) {
+  function getAuthConfig(type: string, scope: string | null | undefined) {
+    if (scope === "per_user" || scope === "per_tenant") {
+      return {
+        label: scope === "per_user" ? "SSO (per user)" : "SSO (delad)",
+        icon: KeyRound,
+        classes: "bg-amethyst-100 text-amethyst-700 dark:bg-amethyst-900/50 dark:text-amethyst-300"
+      };
+    }
     switch (type) {
       case "none":
         return {
@@ -44,7 +52,7 @@
     }
   }
 
-  const authConfig = $derived(getAuthConfig(mcpServer.http_auth_type));
+  const authConfig = $derived(getAuthConfig(mcpServer.http_auth_type, mcpServer.auth_scope));
   const AuthIcon = $derived(authConfig.icon);
 </script>
 

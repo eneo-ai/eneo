@@ -379,19 +379,16 @@
 
           {#if auth_mode === "sso"}
             <div>
-              <label for="mcp-sso-scope" class="text-default mb-1.5 block text-sm font-medium">
-                SSO-omfattning
-              </label>
-              <select
-                id="mcp-sso-scope"
+              <Select.Simple
+                options={[
+                  { value: "per_user", label: "Per användare" },
+                  { value: "per_tenant", label: "Delad tjänst" }
+                ]}
                 bind:value={sso_scope}
-                aria-describedby="mcp-sso-scope-hint"
-                class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
               >
-                <option value="per_user">Per användare</option>
-                <option value="per_tenant">Delad tjänst</option>
-              </select>
-              <p id="mcp-sso-scope-hint" class="text-muted mt-1.5 text-xs">
+                SSO-omfattning
+              </Select.Simple>
+              <p class="text-muted mt-1.5 text-xs">
                 SSO-utbyte använder samma IdP som eneo. Kräver MCP_OAUTH_ENABLED på servern och
                 konfigurerad federation_config för organisationen.
               </p>

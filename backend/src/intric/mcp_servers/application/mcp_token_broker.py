@@ -16,9 +16,10 @@ one ``get_token`` call; the cache row writes ciphertext.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, AsyncIterator, Optional, Union, cast
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -192,6 +193,19 @@ class MCPTokenBroker:
         self._audit = audit_service
         self._oidc_token_store = oidc_token_store
 
+    @asynccontextmanager
+    async def _tx(self) -> AsyncIterator[None]:
+        # eneo's sessionmaker has autobegin=False. The broker is invoked
+        # lazily during SSE streaming, by which time FastAPI has torn down
+        # the request-level transaction even though the session is still
+        # alive. Mirror ChatSessionMcpStateRepo._tx: reuse the outer tx
+        # if present, else open a short one for this call.
+        if self._session.in_transaction():
+            yield
+            return
+        async with self._session.begin():
+            yield
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -221,11 +235,12 @@ class MCPTokenBroker:
             mcp_server=mcp_server, principal=principal
         )
 
-        cached_token = await self._cache_lookup(
-            mcp_server_id=mcp_server.id,
-            subject_type=subject_type,
-            subject_id=subject_id,
-        )
+        async with self._tx():
+            cached_token = await self._cache_lookup(
+                mcp_server_id=mcp_server.id,
+                subject_type=subject_type,
+                subject_id=subject_id,
+            )
         if cached_token is not None:
             return cached_token
 
@@ -261,15 +276,16 @@ class MCPTokenBroker:
 
         try:
             if isinstance(principal, UserPrincipal):
-                exchanged = await self._exchange_as_user(
-                    user=principal.user,
-                    idp_issuer=idp_issuer,
-                    idp_kind=idp_kind,
-                    target=target,
-                    token_endpoint=token_endpoint,
-                    client_id=client_id,
-                    client_secret=client_secret,
-                )
+                async with self._tx():
+                    exchanged = await self._exchange_as_user(
+                        user=principal.user,
+                        idp_issuer=idp_issuer,
+                        idp_kind=idp_kind,
+                        target=target,
+                        token_endpoint=token_endpoint,
+                        client_id=client_id,
+                        client_secret=client_secret,
+                    )
             else:
                 exchanged = await self._exchange_as_tenant(
                     tenant_federation_config=tenant_federation_config,
@@ -280,29 +296,31 @@ class MCPTokenBroker:
             TokenExchangeError,
             TokenExchangeUserActionRequired,
         ) as exc:
-            await self._audit_exchange_denied(
-                principal=principal,
-                mcp_server=mcp_server,
-                reason="exchange_failed",
-                detail=str(exc),
-            )
+            async with self._tx():
+                await self._audit_exchange_denied(
+                    principal=principal,
+                    mcp_server=mcp_server,
+                    reason="exchange_failed",
+                    detail=str(exc),
+                )
             raise
 
-        await self._cache_persist(
-            mcp_server=mcp_server,
-            subject_type=subject_type,
-            subject_id=subject_id,
-            audience=target.audience,
-            idp_issuer=idp_issuer,
-            exchanged=exchanged,
-        )
-        await self._audit_exchange_succeeded(
-            principal=principal,
-            mcp_server=mcp_server,
-            audience=target.audience,
-            idp_issuer=idp_issuer,
-            expires_at=exchanged.expires_at,
-        )
+        async with self._tx():
+            await self._cache_persist(
+                mcp_server=mcp_server,
+                subject_type=subject_type,
+                subject_id=subject_id,
+                audience=target.audience,
+                idp_issuer=idp_issuer,
+                exchanged=exchanged,
+            )
+            await self._audit_exchange_succeeded(
+                principal=principal,
+                mcp_server=mcp_server,
+                audience=target.audience,
+                idp_issuer=idp_issuer,
+                expires_at=exchanged.expires_at,
+            )
         return exchanged.access_token
 
     async def purge_cache_for_server(self, mcp_server_id: UUID) -> int:
@@ -312,21 +330,23 @@ class MCPTokenBroker:
         or ``http_url`` changes — the cached audience is no longer
         guaranteed to match.
         """
-        result = await self._session.execute(
-            sa.delete(MCPExchangedTokens).where(
-                MCPExchangedTokens.mcp_server_id == mcp_server_id
+        async with self._tx():
+            result = await self._session.execute(
+                sa.delete(MCPExchangedTokens).where(
+                    MCPExchangedTokens.mcp_server_id == mcp_server_id
+                )
             )
-        )
         return result.rowcount or 0
 
     async def purge_cache_for_user(self, user_id: UUID) -> int:
         """Drop cached tokens for a user (logout / revocation)."""
-        result = await self._session.execute(
-            sa.delete(MCPExchangedTokens).where(
-                MCPExchangedTokens.subject_type == "user",
-                MCPExchangedTokens.subject_id == user_id,
+        async with self._tx():
+            result = await self._session.execute(
+                sa.delete(MCPExchangedTokens).where(
+                    MCPExchangedTokens.subject_type == "user",
+                    MCPExchangedTokens.subject_id == user_id,
+                )
             )
-        )
         return result.rowcount or 0
 
     # ------------------------------------------------------------------
@@ -461,6 +481,17 @@ class MCPTokenBroker:
             raise MCPBrokerConfigurationError(
                 "tenant.federation_config.client_id required for the broker"
             )
+        # client_secret is stored as a Fernet envelope (enc:fernet:v1:...) in
+        # the JSONB column; decrypt before posting to the IdP. CredentialResolver
+        # does the same on the login path; the broker bypasses it because it
+        # needs additional fields (issuer, idp_kind, token_endpoint) that
+        # CredentialResolver does not surface today.
+        if (
+            isinstance(client_secret, str)
+            and self._encryption.is_active()
+            and self._encryption.is_encrypted(client_secret)
+        ):
+            client_secret = self._encryption.decrypt(client_secret)
 
         return (
             idp_kind,

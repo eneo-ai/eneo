@@ -82,6 +82,9 @@ export function initMCPServers(client) {
      * @param {string} [params.icon_url] URL to icon image
      * @param {string} [params.documentation_url] URL to documentation
      * @param {{id: string} | null} [params.security_classification] Security classification
+     * @param {"static_bearer" | "per_user" | "per_tenant"} [params.auth_scope] OAuth scope discriminator
+     * @param {string | null} [params.expected_idp_issuer] Same-IdP assertion gate
+     * @param {string | null} [params.target_resource_or_scope] Audience/scope for token-exchange
      * @throws {IntricError}
      * */
     create: async ({
@@ -95,7 +98,10 @@ export function initMCPServers(client) {
       tags,
       icon_url,
       documentation_url,
-      security_classification
+      security_classification,
+      auth_scope,
+      expected_idp_issuer,
+      target_resource_or_scope
     }) => {
       /** @type {any} */
       const body = {
@@ -109,7 +115,10 @@ export function initMCPServers(client) {
         tags,
         icon_url,
         documentation_url,
-        security_classification
+        security_classification,
+        auth_scope,
+        expected_idp_issuer,
+        target_resource_or_scope
       };
       const res = await client.fetch("/api/v1/mcp-servers/", {
         method: "post",
@@ -135,6 +144,9 @@ export function initMCPServers(client) {
      * @param {string} [params.icon_url] URL to icon image
      * @param {string} [params.documentation_url] URL to documentation
      * @param {{id: string} | null} [params.security_classification] Security classification
+     * @param {"static_bearer" | "per_user" | "per_tenant"} [params.auth_scope] OAuth scope discriminator
+     * @param {string | null} [params.expected_idp_issuer] Same-IdP assertion gate
+     * @param {string | null} [params.target_resource_or_scope] Audience/scope for token-exchange
      * @throws {IntricError}
      * */
     update: async ({
@@ -149,7 +161,10 @@ export function initMCPServers(client) {
       tags,
       icon_url,
       documentation_url,
-      security_classification
+      security_classification,
+      auth_scope,
+      expected_idp_issuer,
+      target_resource_or_scope
     }) => {
       /** @type {any} */
       const body = {
@@ -163,7 +178,10 @@ export function initMCPServers(client) {
         tags,
         icon_url,
         documentation_url,
-        security_classification
+        security_classification,
+        auth_scope,
+        expected_idp_issuer,
+        target_resource_or_scope
       };
       const res = await client.fetch("/api/v1/mcp-servers/{id}/", {
         method: "post",

@@ -318,14 +318,27 @@ class MCPServerService:
         if not isinstance(security_classification, NotProvided):
             mcp_server.security_classification = security_classification
         if auth_scope is not None:
+            previous_scope = mcp_server.auth_scope
             mcp_server.auth_scope = auth_scope
+            # SSO scopes (per_user / per_tenant) authenticate via token-exchange
+            # at call time; any previously stored static bearer is dead weight
+            # and a stale-secret risk. Clear it on transition into SSO.
+            if (
+                auth_scope in ("per_user", "per_tenant")
+                and previous_scope == "static_bearer"
+            ):
+                mcp_server.http_auth_config_schema = None
         if not isinstance(expected_idp_issuer, NotProvided):
             mcp_server.expected_idp_issuer = expected_idp_issuer
         if not isinstance(target_resource_or_scope, NotProvided):
             mcp_server.target_resource_or_scope = target_resource_or_scope
 
-        # Validate connection before saving when connection config changes
-        if url_changed or auth_type_changed or credentials_changed:
+        # Validate connection before saving when connection config changes.
+        # SSO scopes are excluded: the broker exchanges a fresh token per user
+        # at call time, so there are no admin-time credentials to test with.
+        if (
+            url_changed or auth_type_changed or credentials_changed
+        ) and mcp_server.auth_scope not in ("per_user", "per_tenant"):
             if mcp_server.http_auth_type == "none":
                 test_credentials = None
             elif http_auth_config_schema is not None:
