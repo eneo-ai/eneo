@@ -4189,29 +4189,29 @@ export interface paths {
      * Proxy a request to the Ladan collection backing this knowledge source
      * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on Ladan. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
      */
-    get: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete"];
+    get: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__get"];
     /**
      * Proxy a request to the Ladan collection backing this knowledge source
      * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on Ladan. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
      */
-    put: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete"];
+    put: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__get"];
     /**
      * Proxy a request to the Ladan collection backing this knowledge source
      * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on Ladan. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
      */
-    post: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete"];
+    post: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__get"];
     /**
      * Proxy a request to the Ladan collection backing this knowledge source
      * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on Ladan. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
      */
-    delete: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete"];
+    delete: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__get"];
     options?: never;
     head?: never;
     /**
      * Proxy a request to the Ladan collection backing this knowledge source
      * @description Generic passthrough to `/api/collections/{slug}/{upstream_path}` on Ladan. The eneo backend authenticates the user, resolves the upstream slug from the ownership table (tenant + space gated), injects the shared admin bearer, and relays the response verbatim. Use this for any pure-passthrough operation; endpoints that need eneo-side persistence (creating a knowledge source, listing ownership rows, ...) keep their own explicit routes.
      */
-    patch: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete"];
+    patch: operations["proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__get"];
     trace?: never;
   };
   "/api/v1/dashboard/": {
@@ -5468,6 +5468,81 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/mcp-servers/service-account/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read tenant MCP service-account credentials (masked)
+     * @description Return the tenant's MCP service-account client_id + masked secret status.
+     *
+     *     The plaintext ``client_secret`` is never returned. The broker (Phase 3)
+     *     decrypts it on demand for ``per_tenant`` exchanges; this endpoint is a
+     *     read-only health-check for administrators verifying configuration.
+     */
+    get: operations["get_mcp_service_account_api_v1_mcp_servers_service_account__get"];
+    /**
+     * Set or rotate tenant MCP service-account credentials
+     * @description Persist client_id + (encrypted) client_secret on ``tenant.federation_config``.
+     *
+     *     Replaces any prior values. Audit-logged as ``mcp_service_account_set``.
+     *     The broker (Phase 3) reads these on every ``per_tenant`` exchange and
+     *     treats them as the OAuth client-credentials subject.
+     */
+    put: operations["set_mcp_service_account_api_v1_mcp_servers_service_account__put"];
+    post?: never;
+    /**
+     * Clear the tenant MCP service-account credentials
+     * @description Remove the ``mcp_service_account`` key from ``federation_config``.
+     *
+     *     Audit-logged as ``mcp_service_account_cleared``. After this call the
+     *     broker will refuse ``per_tenant`` exchanges with a configuration
+     *     error; any active assistant referencing such a server stops working
+     *     until credentials are re-provided.
+     */
+    delete: operations["clear_mcp_service_account_api_v1_mcp_servers_service_account__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-servers/sso-defaults/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Set the tenant-wide default audience/scope for SSO MCP servers
+     * @description Persist ``federation_config.mcp_default_target`` for the tenant.
+     *
+     *     Every SSO MCP server in the tenant inherits this value as its
+     *     ``target.resource_or_scope`` unless the server carries its own
+     *     explicit override. Use this to configure a shared audience
+     *     (Keycloak) or a shared API scope (Entra) once instead of per server.
+     */
+    put: operations["set_mcp_sso_default_target_api_v1_mcp_servers_sso_defaults__put"];
+    post?: never;
+    /**
+     * Clear the tenant-wide default audience/scope
+     * @description Remove ``federation_config.mcp_default_target``.
+     *
+     *     After this call, SSO MCP servers without their own
+     *     ``target_resource_or_scope`` fall back to the per-server URL
+     *     (Keycloak RFC 8707 default) or fail at exchange time (Entra, which
+     *     requires an explicit scope).
+     */
+    delete: operations["clear_mcp_sso_default_target_api_v1_mcp_servers_sso_defaults__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/mcp-servers/{id}/": {
     parameters: {
       query?: never;
@@ -5622,6 +5697,23 @@ export interface paths {
      * @description Update global default enabled status for a tool (admin only).
      */
     put: operations["update_tool_default_enabled_api_v1_mcp_servers__id__tools__tool_id___put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/me/mcp-connections": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Per-user MCP server connection state */
+    get: operations["get_my_mcp_connections_api_v1_me_mcp_connections_get"];
+    put?: never;
     post?: never;
     delete?: never;
     options?: never;
@@ -6604,6 +6696,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/auth/oidc/logout": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Revoke the caller's persisted IdP tokens
+     * @description Called by the SvelteKit /logout flow before the local session cookies are cleared. Zeroes the user's refresh + access token ciphertext, stamps revoked_at, and audit-logs the event. Safe to call repeatedly; rows already revoked are skipped.
+     */
+    post: operations["revoke_oidc_tokens_api_v1_auth_oidc_logout_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/api-docs": {
     parameters: {
       query?: never;
@@ -7076,6 +7188,15 @@ export interface components {
       | "mcp_server_disabled"
       | "mcp_server_tool_enabled"
       | "mcp_server_tool_disabled"
+      | "oidc_token_stored"
+      | "oidc_token_refreshed"
+      | "oidc_token_revoked"
+      | "mcp_token_exchanged"
+      | "mcp_token_exchange_denied"
+      | "mcp_service_account_set"
+      | "mcp_service_account_cleared"
+      | "mcp_sso_default_target_set"
+      | "mcp_sso_default_target_cleared"
       | "retention_policy_applied"
       | "encryption_key_rotated"
       | "system_maintenance"
@@ -10422,7 +10543,8 @@ export interface components {
       | "audit_log"
       | "session"
       | "mcp_server"
-      | "mcp_server_tool";
+      | "mcp_server_tool"
+      | "idp_user_token";
     /**
      * ErrorCodes
      * @enum {integer}
@@ -11458,6 +11580,32 @@ export interface components {
       /** Error Message */
       error_message?: string | null;
     };
+    /** MCPConnectionStatusList */
+    MCPConnectionStatusList: {
+      /** Items */
+      items: components["schemas"]["MCPConnectionStatusPublic"][];
+    };
+    /** MCPConnectionStatusPublic */
+    MCPConnectionStatusPublic: {
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       */
+      mcp_server_id: string;
+      /** Name */
+      name: string;
+      /** Auth Scope */
+      auth_scope: string;
+      /** Expected Idp Issuer */
+      expected_idp_issuer?: string | null;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "connected" | "expired" | "not_authenticated" | "idp_mismatch" | "not_applicable";
+      /** Expires At */
+      expires_at?: string | null;
+    };
     /**
      * MCPServerCreate
      * @description DTO for creating an MCP server (admin only, uses Streamable HTTP transport).
@@ -11489,6 +11637,16 @@ export interface components {
       /** Documentation Url */
       documentation_url?: string | null;
       security_classification?: components["schemas"]["ModelId"] | null;
+      /**
+       * Auth Scope
+       * @default static_bearer
+       * @enum {string}
+       */
+      auth_scope?: "per_user" | "per_tenant" | "static_bearer";
+      /** Expected Idp Issuer */
+      expected_idp_issuer?: string | null;
+      /** Target Resource Or Scope */
+      target_resource_or_scope?: string | null;
     };
     /**
      * MCPServerCreateResponse
@@ -11534,6 +11692,16 @@ export interface components {
       /** Documentation Url */
       documentation_url: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /**
+       * Auth Scope
+       * @default static_bearer
+       * @enum {string}
+       */
+      auth_scope?: "per_user" | "per_tenant" | "static_bearer";
+      /** Expected Idp Issuer */
+      expected_idp_issuer?: string | null;
+      /** Target Resource Or Scope */
+      target_resource_or_scope?: string | null;
     };
     /** MCPServerPublicDict */
     MCPServerPublicDict: {
@@ -11603,6 +11771,16 @@ export interface components {
       /** Documentation Url */
       documentation_url: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /**
+       * Auth Scope
+       * @default static_bearer
+       * @enum {string}
+       */
+      auth_scope?: "per_user" | "per_tenant" | "static_bearer";
+      /** Expected Idp Issuer */
+      expected_idp_issuer?: string | null;
+      /** Target Resource Or Scope */
+      target_resource_or_scope?: string | null;
       /**
        * Mcp Server Id
        * Format: uuid
@@ -11749,6 +11927,51 @@ export interface components {
       documentation_url?: string | null;
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
+      /** Auth Scope */
+      auth_scope?: ("per_user" | "per_tenant" | "static_bearer") | null;
+      /** Expected Idp Issuer */
+      expected_idp_issuer?: string | null;
+      /** Target Resource Or Scope */
+      target_resource_or_scope?: string | null;
+    };
+    /**
+     * MCPServiceAccountPublic
+     * @description DTO for the tenant MCP service-account read-out (masked).
+     *
+     *     Also surfaces the tenant-wide default audience/scope so the panel
+     *     can render both knobs from a single GET; they are written via
+     *     separate PUT endpoints because the concerns are independent.
+     */
+    MCPServiceAccountPublic: {
+      /** Configured */
+      configured: boolean;
+      /** Client Id */
+      client_id?: string | null;
+      /** Client Secret Preview */
+      client_secret_preview?: string | null;
+      /** Default Target */
+      default_target?: string | null;
+    };
+    /**
+     * MCPServiceAccountUpdate
+     * @description DTO for setting / rotating the tenant MCP service-account credentials.
+     */
+    MCPServiceAccountUpdate: {
+      /** Client Id */
+      client_id: string;
+      /** Client Secret */
+      client_secret: string;
+    };
+    /**
+     * MCPSsoDefaultTargetUpdate
+     * @description DTO for setting the tenant-wide default audience/scope.
+     *
+     *     Used as the fallback ``target.resource_or_scope`` in the broker for
+     *     every SSO MCP server that does not carry its own override.
+     */
+    MCPSsoDefaultTargetUpdate: {
+      /** Default Target */
+      default_target: string;
     };
     /**
      * MCPToolSetting
@@ -30595,7 +30818,7 @@ export interface operations {
       };
     };
   };
-  proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete: {
+  proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__get: {
     parameters: {
       query?: never;
       header?: never;
@@ -30655,7 +30878,7 @@ export interface operations {
       };
     };
   };
-  proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete: {
+  proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__get: {
     parameters: {
       query?: never;
       header?: never;
@@ -30715,7 +30938,7 @@ export interface operations {
       };
     };
   };
-  proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete: {
+  proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__get: {
     parameters: {
       query?: never;
       header?: never;
@@ -30775,7 +30998,7 @@ export interface operations {
       };
     };
   };
-  proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete: {
+  proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__get: {
     parameters: {
       query?: never;
       header?: never;
@@ -30835,7 +31058,7 @@ export interface operations {
       };
     };
   };
-  proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__delete: {
+  proxy_knowledge_source_request_api_v1_spaces__id__knowledge_sources__knowledge_source_id__upstream__upstream_path__get: {
     parameters: {
       query?: never;
       header?: never;
@@ -33276,6 +33499,128 @@ export interface operations {
       };
     };
   };
+  get_mcp_service_account_api_v1_mcp_servers_service_account__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServiceAccountPublic"];
+        };
+      };
+    };
+  };
+  set_mcp_service_account_api_v1_mcp_servers_service_account__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServiceAccountUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServiceAccountPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  clear_mcp_service_account_api_v1_mcp_servers_service_account__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  set_mcp_sso_default_target_api_v1_mcp_servers_sso_defaults__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPSsoDefaultTargetUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServiceAccountPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  clear_mcp_sso_default_target_api_v1_mcp_servers_sso_defaults__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
   get_mcp_server_api_v1_mcp_servers__id___get: {
     parameters: {
       query?: never;
@@ -33755,6 +34100,26 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_my_mcp_connections_api_v1_me_mcp_connections_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPConnectionStatusList"];
         };
       };
     };
@@ -36152,6 +36517,31 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
+      };
+    };
+  };
+  revoke_oidc_tokens_api_v1_auth_oidc_logout_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Missing or invalid eneo JWT */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };
