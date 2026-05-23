@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T070
+active_task: T072
 
 interruptions:
   - id: I001
@@ -6740,7 +6740,7 @@ tasks:
   - id: T070
     type: judge
     assignee: Judge
-    status: active
+    status: completed
     reasoning_hint: high
     target_review_by: "2026-05-24"
     objective: "Re-rank the next highest-score-moving tranche after T069, explicitly considering stale baseline test cleanup, full-source typing baseline, remaining topology/readability work, AI slop/comment/naming cleanup, and whether another live-eval proof is needed."
@@ -6768,6 +6768,178 @@ tasks:
       - "rg/file evidence for each ranked candidate"
       - "Claude plan gate GREEN_LIGHT yes / MIN_SCORE >= 8, or documented disagreement"
       - "Antigravity plan gate if available, or exact missing-coverage note"
+    receipt:
+      completed_at: "2026-05-23T06:17:00Z"
+      summary: "Re-ranked the next highest-score-moving tranche after T069. Selected T071a stale baseline triage, pure plan-edit-context test port, and public-contract cleanup before any further topology refactor. The final plan explicitly avoids LOC-driven work: it fixes failing validation, preserves non-duplicate test coverage before deleting the stale test file, and forbids cross-module proxy monkeypatches that point tests at old owner modules."
+      artifact: ".codex/artifacts/flow-ai-builder-t070-next-tranche-ranking.md"
+      selected_next_task: T071a
+      peer_review:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t070-next-flow-ai-builder-tranche-ranking-20260523T054955Z.md -> GREEN_LIGHT no / MIN_SCORE 7; ranking defensible but missing triage gates, anti-coupling rules, create/edit test fate, and scope cap"
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t070-next-flow-ai-builder-tranche-ranking-iteration-2-20260523T060144Z.md -> GREEN_LIGHT no / MIN_SCORE 8; required owner-module patching nuance, legacy-metadata compatibility classification, touched-test Pyright, and post-fix reclassification"
+        claude_iteration_3: ".codex/artifacts/claude-peer-loop-t070-next-flow-ai-builder-tranche-ranking-iteration-3-20260523T060359Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity_iteration_1: ".codex/artifacts/antigravity-peer-loop-t070-t071a-stale-baseline-plan-final-review-20260523T061149Z.md -> GREEN_LIGHT no / MIN_SCORE 7; caught coverage-loss risk if the stale plan-edit-context file were deleted without porting non-duplicate pure tests"
+        claude_iteration_4_after_antigravity: ".codex/artifacts/claude-peer-loop-t070-next-flow-ai-builder-tranche-ranking-iteration-4-after-antigravity-20260523T061514Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity_iteration_2: ".codex/artifacts/antigravity-peer-loop-t070-t071a-stale-baseline-plan-final-review-iteration-2-20260523T061626Z.md -> final verdict GREEN_LIGHT yes / MIN_SCORE 8 after earlier repeated blocked text in tool output"
+      decision:
+        selected: "T071a stale baseline triage, pure test port, and public-contract cleanup"
+        rationale: "Current Flow AI Builder baseline tests fail at collection or on stale public/test seams, which blocks Test Quality and Human Reviewability more concretely than another processor/topology refactor. T071a removes stale owner assumptions and preserves real behavior coverage without changing production source."
+        rejected:
+          - "Immediate processor/topology split: rejected because current failing tests are the more concrete floor blocker and LOC alone is not a goal."
+          - "Full-source Pyright sweep: rejected for this tranche because the 112 errors are broad and mostly outside Flow AI Builder."
+          - "Another live eval immediately: rejected because T068 already passed five cases after latest runtime ownership changes; repeat after future runtime/planner source changes."
+      scorecard_impact:
+        score_floor: 8
+        rationale: "Planning-only tranche. No score increase until T071a is implemented, validated, and post-reviewed."
+      residual_risks:
+        - "Full-source Pyright baseline remains 112 errors from T067 measurement."
+        - "T071b may still be needed for the old private create/edit path tests at backend/tests/unit/test_ai_builder_plan_edit_context.py:405-611."
+        - "Type-loose test scaffolding and Pydantic serialization warnings remain future type-quality debt."
+
+  - id: T071a
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    target_review_by: "2026-05-24"
+    objective: "Implement the peer-gated stale Flow AI Builder baseline cleanup: port valuable pure plan-edit-context tests into the structured unittest file, delete the stale collection-failing unit file only after coverage is preserved, and update integration regressions to current public contracts and owner-module import bindings."
+    inputs:
+      - "T070 receipt and final plan artifact"
+      - ".codex/artifacts/flow-ai-builder-t070-next-tranche-ranking.md"
+      - "backend/tests/unit/test_ai_builder_plan_edit_context.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py"
+      - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+    allowed_files:
+      - "backend/tests/unit/test_ai_builder_plan_edit_context.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py"
+      - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    constraints:
+      - "No production source changes unless the stale cleanup exposes a real product/runtime bug and the task is re-ranked or interrupted."
+      - "Touch at most four test files plus the board."
+      - "Do not reintroduce removed helpers or compatibility shims into ai_builder_proposal_processor.py."
+      - "Do not patch cross-module proxy paths such as ai_builder_proposal_processor.symbol_owned_elsewhere."
+      - "Owner-module import-binding patching is allowed when the patched binding is part of the tested runtime path and avoids real LLM/discovery work."
+      - "Keep legacy persisted-metadata compatibility coverage untagged where the test intentionally verifies tolerance."
+    acceptance_criteria:
+      - "Record a before/after classification table for all 11 integration failures and the stale unit file."
+      - "Port pure tests from backend/tests/unit/test_ai_builder_plan_edit_context.py:35-403 and :612-652 into backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py before deleting the old file."
+      - "Delete backend/tests/unit/test_ai_builder_plan_edit_context.py only after the structured port passes and the :405-611 private create/edit block has a disposition: moved-to-T071b, covered-elsewhere, or obsolete-private-layout."
+      - "Update old public API question_answer payloads with the required request discriminator kind, except for legacy persisted metadata compatibility tests."
+      - "Use update_session_status_without_send_lease for out-of-band apply setup instead of fabricating a send lease."
+      - "Update process_edit_arguments calls to the current typed turn contract and remove removed processor= kwargs."
+      - "Redirect lost-lease LLM/discovery patches to tested owner-module import bindings: ai_builder_confirm_requirements.build_discovery_block_message_runtime and ai_builder_question_recovery.emit_discovery_followup_if_needed."
+      - "After stale-only fixes, re-run integration failures and classify any remaining red as real-bug or ambiguous before proceeding."
+      - "Do not raise the broader score floor above 8 from this tranche unless post-implementation peer review proves all current blockers moved."
+    verify:
+      - "git status --short --branch"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py -q"
+      - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py --lf --tb=short -q"
+      - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check touched test files"
+      - "cd backend && uv run ruff format --check touched test files"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright touched test files, or record exact path-resolution/tool limitation"
+      - "git diff --check"
+      - "Claude implementation gate; Antigravity implementation gate if available"
+    receipt:
+      result: done
+      summary: "Completed the stale Flow AI Builder baseline cleanup as a test-only tranche. Ported valuable pure plan-edit-context coverage into the structured unittest file, deleted the stale collection-failing unit file, and updated API regression tests to current request discriminators, lease ownership, owner-module patch bindings, and public dispatch/persistence behavior."
+      files_changed:
+        - "backend/tests/unit/test_ai_builder_plan_edit_context.py deleted"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py"
+        - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      stale_test_disposition:
+        - source: "backend/tests/unit/test_ai_builder_plan_edit_context.py:35-403"
+          result: "ported"
+          target: "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py"
+        - source: "backend/tests/unit/test_ai_builder_plan_edit_context.py:612-652"
+          result: "ported"
+          target: "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py"
+        - source: "backend/tests/unit/test_ai_builder_plan_edit_context.py:405-611"
+          result: "deferred-or-obsolete-private-layout"
+          rationale: "These tests depended on removed private processor/edit-proposal seams. Current scoped-revision behavior is covered through current pure/context and API/integration paths; any missing create/edit scoped-revision edge must be reintroduced as T071b through current public owners, not by resurrecting the old private harness."
+      stale_failure_classification:
+        - failure: "stale unit file collection/import failures"
+          fix: "Port pure plan-edit-context behavior coverage into the structured unittest file and delete the stale duplicate file."
+        - failure: "question_answer request payloads missing kind discriminator"
+          fix: "Add _request_question_answer happy-path helper that injects the current request discriminator while preserving explicitly supplied legacy metadata in persisted-conversation tests."
+        - failure: "direct test user and API bearer user mismatch"
+          fix: "Use the function-scoped default admin user for bearer token and add AI Builder/Flow/Assistant permissions to the same actor used by direct DB setup."
+        - failure: "tests patched removed processor proxy imports"
+          fix: "Patch current owner-module bindings: ai_builder_confirm_requirements.build_discovery_block_message_runtime and ai_builder_question_recovery.emit_discovery_followup_if_needed."
+        - failure: "confirm-requirements lost-lease test called removed private processor method"
+          fix: "Call process_confirm_requirements with ConfirmRequirementsProcessingRequest through the current confirm-requirements owner."
+        - failure: "edit lost-lease test used parse-only process_edit_arguments seam"
+          fix: "Exercise AIBuilderProposalProcessor.handle_tool_call so the test covers the runtime dispatch/persistence boundary where the lease is enforced."
+        - failure: "out-of-band apply setup used active-send status update path"
+          fix: "Use update_session_status_without_send_lease for lifecycle setup."
+        - failure: "direct conversation seeding skipped active-turn lease"
+          fix: "Claim and release a send lease around update_session_conversation."
+        - failure: "legacy question-recovery test conflated slot-classifier completion probes with recovery dispatch"
+          fix: "Patch stream_structured_question_tool_call at the processor import binding with a failing async generator, so the test now fails only if the legacy recovery dispatch path runs."
+        - failure: "edit proposal mocks exhausted because slot classification consumed fixed side effects"
+          fix: "Mock only the edit_flow proposal response for edit sessions; deterministic planner requirements remain on the real path."
+        - failure: "create/apply smoke expected stale 3-step audio/PDF shape"
+          fix: "Pin the deterministic current 4-step shape exactly and keep positional assertions for transcription, intermediate text steps, and terminal PDF."
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py -q -> 30 passed"
+        - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py --lf --tb=short -q -> last-failed set passed after fixes"
+        - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_ai_builder_api_resolved_architecture_skips_legacy_question_recovery_loop tests/integration/flows/test_ai_builder_session_api_regressions.py::test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow -q -> 2 passed after Claude iteration-5 corrections"
+        - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py -q -> 49 passed, 18 warnings"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2371 passed, 4 skipped, 11 warnings"
+        - "cd backend && uv run ruff check tests/integration/flows/test_ai_builder_session_api_regressions.py tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py -> clean"
+        - "cd backend && uv run ruff format --check tests/integration/flows/test_ai_builder_session_api_regressions.py tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py -> clean"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py tests/integration/flows/test_ai_builder_session_api_regressions.py -> 0 errors"
+        - "git diff --check -> clean"
+      peer_review:
+        claude:
+          artifact: ".codex/artifacts/claude-peer-loop-t071a-stale-baseline-cleanup-implementation-gate-iteration-6-20260523T070819Z.md"
+          verdict: "GREEN_LIGHT yes / MIN_SCORE 9"
+          notes: "Iteration 5 rejected loose assertions; Codex tightened recovery-dispatch and create/apply assertions before iteration 6 passed."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t071a-stale-baseline-cleanup-implementation-gate-20260523T071639Z.md"
+          verdict: "GREEN_LIGHT yes / MIN_SCORE 9"
+          notes: "Ran with --spend-mode auto and completed successfully; some suggestions about unrelated AGENTS/.gitignore changes were intentionally not included in the tranche."
+      self_review:
+        simpler_than_before: true
+        what_became_easier: "One current plan-edit-context unittest owner replaces a collection-failing duplicate, and integration tests now target current public request/lease/dispatch contracts."
+        new_parallel_path: false
+        production_source_changed: false
+        broader_goal_complete: false
+      score_impact:
+        score_floor: 8
+        rationale: "Improves Test Quality and Human Reviewability evidence for the stale baseline, but does not move the broader strict floor above 8 because remaining blockers still include production topology/readability, full-source typing baseline, AI slop/comment/naming cleanup, and repeated live-output proof after future runtime changes."
+      residual_risks:
+        - "T071b may still be warranted if a current public-owner test gap is found for the deleted private create/edit scoped-revision scenarios."
+        - "Full-source Pyright baseline remains a broader-goal blocker."
+        - "This tranche is test-only and does not simplify remaining production topology."
+
+  - id: T072
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    target_review_by: "2026-05-24"
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T071a, using current evidence rather than defaulting to LOC reduction or local test cleanup."
+    inputs:
+      - "T071a receipt and commit"
+      - "current_scorecard and remaining score-floor blockers"
+      - "latest live-eval artifacts"
+      - "current dirty worktree state"
+    constraints:
+      - "Read-only planning task; do not implement during T072."
+      - "Do not default to processor LOC reduction unless evidence proves it is the highest score-floor blocker."
+      - "Rank candidates by strict score-floor movement, normal-user output quality, ownership simplification, runtime/API/schema risk, and human reviewability."
+      - "Preserve unrelated dirty files."
+    expected_output:
+      - "Evidence-backed candidate ranking with file:line evidence."
+      - "Selected next worker with allowed_files, acceptance criteria, validation commands, non-goals, stop_if, and expected score impact."
+      - "Explicit self-review answering whether the selected tranche is truly better or only different."
+      - "Claude plan gate and Antigravity plan gate if available; missing Antigravity coverage must be recorded as missing, not pass."
+      - "No score increase from planning alone."
     receipt: null
 
 checks:
@@ -6776,10 +6948,16 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T069 proposal-submission test-locality cleanup passed Claude and Antigravity implementation gates. T070 next-tranche ranking is active. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T069
+    result: "T071a completed, validated, and peer-gated. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T071a
     commands:
-      - "Claude T069 implementation gate: .codex/artifacts/claude-peer-loop-t069-proposal-submission-test-locality-implementation-20260523T053752Z.md -> GREEN_LIGHT yes / MIN_SCORE 9"
-      - "Antigravity T069 implementation gate: .codex/artifacts/antigravity-peer-loop-t069-proposal-submission-test-locality-implementation-20260523T053917Z.md -> GREEN_LIGHT yes / MIN_SCORE 9"
-      - "T069 focused tests: 77 passed, 25 passed, 94 passed; full AI Builder unittests: 2355 passed, 4 skipped; Ruff/format/Pyright/diff-check passed"
-      - "Stale baseline failures recorded for T070 ranking"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py -q -> 30 passed"
+      - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py -q -> 49 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2371 passed, 4 skipped"
+      - "cd backend && uv run ruff check touched test files -> clean"
+      - "cd backend && uv run ruff format --check touched test files -> clean"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright touched test files -> 0 errors"
+      - "git diff --check -> clean"
+      - "Claude T071a iteration 6 -> GREEN_LIGHT yes / MIN_SCORE 9"
+      - "Antigravity T071a iteration 1 -> GREEN_LIGHT yes / MIN_SCORE 9"

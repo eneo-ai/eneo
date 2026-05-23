@@ -4,7 +4,7 @@ import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from typing import cast
+from typing import AsyncGenerator, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -62,7 +62,7 @@ from intric.main.models import ModelId
 from intric.prompts.api.prompt_models import PromptCreate
 from intric.roles.permissions import Permission
 from intric.roles.role import RoleCreate
-from intric.users.user import UserAdd, UserState
+from intric.users.user import UserUpdate
 
 
 @pytest.fixture
@@ -72,6 +72,7 @@ async def bearer_token(db_container, patch_auth_service_jwt, admin_user):
             RoleCreate(
                 name=f"ai-builder-regression-{uuid4().hex[:8]}",
                 permissions=[
+                    Permission.ASSISTANTS,
                     Permission.SHARED_SPACES,
                     Permission.FLOWS_MANAGE,
                     Permission.FLOWS_AI_BUILDER,
@@ -79,15 +80,13 @@ async def bearer_token(db_container, patch_auth_service_jwt, admin_user):
                 tenant_id=admin_user.tenant_id,
             )
         )
-        user = await container.user_repo().add(
-            UserAdd(
-                email=f"ai-builder-regression-{uuid4().hex[:8]}@example.com",
-                username=f"ai_builder_regression_{uuid4().hex[:8]}",
-                state=UserState.ACTIVE,
-                tenant_id=admin_user.tenant_id,
+        user = await container.user_repo().update(
+            UserUpdate(
+                id=admin_user.id,
                 roles=[ModelId(id=role.id)],
             )
         )
+        assert user is not None
         auth_service = container.auth_service()
         token = auth_service.create_access_token_for_user(user)
     return token
@@ -345,7 +344,7 @@ async def _send_builder_message(
     if file_ids is not None:
         payload["file_ids"] = file_ids
     if question_answer is not None:
-        payload["question_answer"] = question_answer
+        payload["question_answer"] = _request_question_answer(question_answer)
 
     response = await client.post(
         f"/api/v1/flows/ai-builder/sessions/{session_id}/messages",
@@ -357,6 +356,20 @@ async def _send_builder_message(
     )
     assert response.status_code == 200, response.text
     return _parse_sse_payload(response.text)
+
+
+def _request_question_answer(
+    question_answer: dict[str, object],
+) -> dict[str, object]:
+    payload = dict(question_answer)
+    if "kind" in payload:
+        return payload
+    # Happy-path API helpers use the current discriminator; invalid-payload tests should post directly.
+    if payload.get("requirements_confirmed") is True:
+        payload["kind"] = "requirements_confirmation"
+    else:
+        payload["kind"] = "structured_question_answer"
+    return payload
 
 
 async def _upload_reference_file(
@@ -2314,8 +2327,9 @@ async def test_handle_confirm_requirements_with_lost_lease_rolls_back(
     db_container,
 ):
     """Confirm-requirements persistence must reject a stale active-turn lease."""
-    from intric.flows.ai_builder.ai_builder_proposal_processor import (
-        AIBuilderProposalProcessor,
+    from intric.flows.ai_builder.ai_builder_confirm_requirements import (
+        ConfirmRequirementsProcessingRequest,
+        process_confirm_requirements,
     )
 
     space_id = await _create_space_with_planner_model(
@@ -2345,23 +2359,13 @@ async def test_handle_confirm_requirements_with_lost_lease_rolls_back(
 
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
-        user = container.user()
-        processor = AIBuilderProposalProcessor(
-            user=user,
-            repo=repo,
-            litellm_client=AsyncMock(),
-            self_correction_temperature=0.2,
-            self_correction_bumped_temperature=0.5,
-            forced_proposal_temperature=0.3,
-            quality_retry_warning_codes=set(),
-        )
         stale_turn = _make_session_send_turn(
             session_id=session_id,
             tenant_id=tenant_id,
             base_planning_state_version=0,
         )
         with patch(
-            "intric.flows.ai_builder.ai_builder_proposal_processor.build_discovery_block_message_runtime",
+            "intric.flows.ai_builder.ai_builder_confirm_requirements.build_discovery_block_message_runtime",
             new=AsyncMock(
                 return_value=(
                     None,
@@ -2371,26 +2375,28 @@ async def test_handle_confirm_requirements_with_lost_lease_rolls_back(
             ),
         ):
             with pytest.raises(BadRequestException) as exc:
-                await processor._process_confirm_requirements_arguments(
-                    turn=stale_turn,
-                    conversation=[],
-                    new_messages_start=0,
-                    arguments={
-                        "summary": "Bygg ett textflöde.",
-                        "key_decisions": [
-                            {"topic": "Input", "decision": "Text"},
-                            {"topic": "Output", "decision": "Text"},
-                        ],
-                        "input_description": "Användaren skriver text.",
-                        "output_description": "Flödet svarar med text.",
-                    },
-                    assistant_content="requirements",
-                    tool_call_id="call-requirements-lost-lease",
-                    available_model_refs=None,
-                    available_kb_refs=None,
-                    flow=None,
-                    litellm_model="openai/gpt-4o-mini",
-                    litellm_kwargs={"api_key": "sk-test"},
+                await process_confirm_requirements(
+                    ConfirmRequirementsProcessingRequest(
+                        repo=repo,
+                        turn=stale_turn,
+                        conversation=[],
+                        new_messages_start=0,
+                        arguments={
+                            "summary": "Bygg ett textflöde.",
+                            "key_decisions": [
+                                {"topic": "Input", "decision": "Text"},
+                                {"topic": "Output", "decision": "Text"},
+                            ],
+                            "input_description": "Användaren skriver text.",
+                            "output_description": "Flödet svarar med text.",
+                        },
+                        tool_call_id="call-requirements-lost-lease",
+                        flow=None,
+                        litellm_client=AsyncMock(),
+                        litellm_model="openai/gpt-4o-mini",
+                        litellm_kwargs={"api_key": "sk-test"},
+                        tenant_id=tenant_id,
+                    )
                 )
 
     assert exc.value.code == "session_send_lease_lost"
@@ -2471,7 +2477,7 @@ async def test_handle_structured_question_recovery_with_lost_lease_rolls_back(
         )
         with (
             patch(
-                "intric.flows.ai_builder.ai_builder_proposal_processor.emit_discovery_followup_if_needed",
+                "intric.flows.ai_builder.ai_builder_question_recovery.emit_discovery_followup_if_needed",
                 new=AsyncMock(return_value=None),
             ),
             pytest.raises(BadRequestException) as exc,
@@ -2521,9 +2527,6 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
     admin_user,
 ):
     """Edit proposal storage must roll back if the active send lease is stale."""
-    from intric.flows.ai_builder.ai_builder_edit_proposal import (
-        process_edit_arguments,
-    )
     from intric.flows.ai_builder.ai_builder_proposal_processor import (
         AIBuilderProposalProcessor,
     )
@@ -2577,38 +2580,48 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
             tenant_id=tenant_id,
             base_planning_state_version=0,
         )
+        edit_flow_call = _make_tool_call(
+            tool_call_id="call-edit-lost-lease",
+            name="edit_flow",
+            arguments={
+                "plan_rationale": "Lägg till ett textsammanfattningssteg.",
+                "operations": [
+                    {
+                        "op": "add",
+                        "placement": {"position": "append"},
+                        "add_payload": {
+                            "name": "Sammanfatta text",
+                            "instructions": "Sammanfatta användarens text.",
+                            "input_source": "flow_input",
+                            "input_type": "text",
+                            "output_type": "text",
+                        },
+                    }
+                ],
+            },
+        )
         with pytest.raises(BadRequestException) as exc:
-            await process_edit_arguments(
-                processor=processor,
-                turn=stale_turn,
-                conversation=[],
-                new_messages_start=0,
-                arguments={
-                    "plan_rationale": "Lägg till ett textsammanfattningssteg.",
-                    "operations": [
-                        {
-                            "op": "add",
-                            "placement": {"position": "append"},
-                            "add_payload": {
-                                "name": "Sammanfatta text",
-                                "instructions": "Sammanfatta användarens text.",
-                                "input_source": "flow_input",
-                                "input_type": "text",
-                                "output_type": "text",
-                            },
-                        }
-                    ],
-                },
-                assistant_content="edit plan",
-                tool_call_id="call-edit-lost-lease",
-                available_model_refs=None,
-                available_kb_refs=None,
-                flow=flow,
-                assistant_snapshots=None,
-                litellm_model="openai/gpt-4o-mini",
-                litellm_kwargs={"api_key": "sk-test"},
-                max_output_tokens=512,
-            )
+            _ = [
+                event
+                async for event in processor.handle_tool_call(
+                    turn=stale_turn,
+                    conversation=[],
+                    new_messages_start=0,
+                    tool_calls=[edit_flow_call],
+                    text_content=None,
+                    llm_messages=[],
+                    tool_schemas=[],
+                    litellm_model="openai/gpt-4o-mini",
+                    litellm_kwargs={"api_key": "sk-test"},
+                    available_model_refs=None,
+                    available_kb_refs=None,
+                    resource_catalog=None,
+                    max_output_tokens=512,
+                    request_id="req-edit-lost-lease",
+                    flow=flow,
+                    assistant_snapshots=None,
+                )
+            ]
 
     assert exc.value.code == "session_send_lease_lost"
 
@@ -3502,11 +3515,15 @@ async def test_ai_builder_api_resolved_architecture_skips_legacy_question_recove
         space_name="AI Builder API recovery exhaustion",
     )
 
-    mock_completion = AsyncMock(side_effect=AssertionError("LLM should not be called"))
+    async def fail_question_recovery(
+        **_kwargs: object,
+    ) -> AsyncGenerator[dict[str, str], None]:
+        raise AssertionError("Question recovery should not run for resolved state")
+        yield {}
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_service.litellm.acompletion",
-        new=mock_completion,
+        "intric.flows.ai_builder.ai_builder_proposal_processor.stream_structured_question_tool_call",
+        new=fail_question_recovery,
     ):
         with patch(
             "intric.flows.ai_builder.ai_builder_router._resolve_litellm_params",
@@ -3522,6 +3539,11 @@ async def test_ai_builder_api_resolved_architecture_skips_legacy_question_recove
                 session = await repo.get_session(
                     session_id=UUID(session_id),
                     tenant_id=container.user().tenant_id,
+                )
+                turn = await _claim_session_send_turn(
+                    repo=repo,
+                    session_id=session.id,
+                    tenant_id=session.tenant_id,
                 )
                 await repo.update_session_conversation(
                     session_id=session.id,
@@ -3605,6 +3627,12 @@ async def test_ai_builder_api_resolved_architecture_skips_legacy_question_recove
                             },
                         ),
                     ],
+                    lease=turn.lease,
+                )
+                await repo.release_session_send(
+                    session_id=session.id,
+                    tenant_id=session.tenant_id,
+                    lease=turn.lease,
                 )
             second_events = await _send_builder_message(
                 client=client,
@@ -3615,7 +3643,6 @@ async def test_ai_builder_api_resolved_architecture_skips_legacy_question_recove
 
     assert not any(event["event"] == "error" for event in second_events)
     assert any(event["event"] == "requirements_summary" for event in second_events)
-    mock_completion.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -3766,7 +3793,6 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
     )
     assert apply_response.status_code == 200, apply_response.text
     apply_payload = apply_response.json()
-    assert apply_payload["steps_created"] == 3
     assert apply_payload["steps_updated"] == 0
     assert apply_payload["steps_removed"] == 0
 
@@ -3778,11 +3804,13 @@ async def test_ai_builder_api_create_mode_can_generate_approve_and_apply_a_flow(
     assert flow_response.status_code == 200, flow_response.text
     flow_payload = flow_response.json()
     assert flow_payload["name"] == "Ljudtranskribering till PDF"
-    assert len(flow_payload["steps"]) == 3
+    assert apply_payload["steps_created"] == 4
+    assert len(flow_payload["steps"]) == 4
     assert flow_payload["steps"][0]["input_type"] == "audio"
     assert flow_payload["steps"][0]["output_mode"] == "transcribe_only"
     assert flow_payload["steps"][1]["output_type"] == "text"
-    assert flow_payload["steps"][2]["output_type"] == "pdf"
+    assert flow_payload["steps"][2]["output_type"] == "text"
+    assert flow_payload["steps"][-1]["output_type"] == "pdf"
 
 
 @pytest.mark.asyncio
@@ -3792,25 +3820,22 @@ async def test_ai_builder_api_edit_mode_output_only_change_updates_description_a
     bearer_token,
     completion_model_factory,
     db_container,
-    space_factory,
-    admin_user,
 ):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder API edit output-only",
+    )
     async with db_container() as container:
-        session = container.session()
-        model = await completion_model_factory(session, "gpt-4o-mini")
-        space = await space_factory(
-            session,
-            "AI Builder API edit output-only",
-            [model.id],
-            user_id=admin_user.id,
-        )
         flow_service = container.flow_service()
         original_description = (
             "Tar emot uppladdade ärendedokument vid körning och skapar ett kort "
             "svenskt beslutsunderlag i textformat."
         )
         flow = await flow_service.create_flow(
-            space_id=space.id,
+            space_id=UUID(space_id),
             name="Beslutsunderlag",
             description=original_description,
             steps=[],
@@ -3839,23 +3864,9 @@ async def test_ai_builder_api_edit_mode_output_only_change_updates_description_a
                 ),
             ],
         )
-        space_id = str(space.id)
         flow_id = flow.id
         flow_revision = flow.draft_revision
 
-    requirements_summary = _make_tool_call(
-        tool_call_id="call_requirements",
-        name="confirm_requirements",
-        arguments={
-            "summary": "Behåll dokumentflödet men byt slutresultatet till DOCX.",
-            "key_decisions": [
-                {"topic": "Input", "decision": "Samma dokumentindata som idag"},
-                {"topic": "Output", "decision": "DOCX-dokument"},
-            ],
-            "input_description": "Användaren laddar upp samma ärendedokument som tidigare.",
-            "output_description": "Flödet producerar ett DOCX-beslutsunderlag.",
-        },
-    )
     edit_flow = _make_tool_call(
         tool_call_id="call_edit",
         name="edit_flow",
@@ -3872,12 +3883,7 @@ async def test_ai_builder_api_edit_mode_output_only_change_updates_description_a
             ],
         },
     )
-    mock_completion = AsyncMock(
-        side_effect=[
-            _make_llm_response(tool_calls=[requirements_summary]),
-            _make_llm_response(tool_calls=[edit_flow]),
-        ]
-    )
+    mock_completion = AsyncMock(return_value=_make_llm_response(tool_calls=[edit_flow]))
 
     with patch(
         "intric.flows.ai_builder.ai_builder_service.litellm.acompletion",
@@ -3931,7 +3937,7 @@ async def test_ai_builder_api_edit_mode_output_only_change_updates_description_a
         "Tar emot uppladdade ärendedokument vid körning och skapar ett kort "
         "svenskt beslutsunderlag i DOCX-format."
     )
-    assert updated_snapshots[updated.steps[0].assistant_id]["instructions"] == (
+    assert updated_snapshots[updated.steps[0].assistant_id].instructions == (
         "Skriv ett kort beslutsunderlag i textformat."
     )
 
@@ -3943,21 +3949,18 @@ async def test_ai_builder_api_edit_mode_invalid_existing_step_ref_returns_typed_
     bearer_token,
     completion_model_factory,
     db_container,
-    space_factory,
-    admin_user,
 ):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder API invalid edit existing ref",
+    )
     async with db_container() as container:
-        session = container.session()
-        model = await completion_model_factory(session, "gpt-4o-mini")
-        space = await space_factory(
-            session,
-            "AI Builder API invalid edit existing ref",
-            [model.id],
-            user_id=admin_user.id,
-        )
         flow_service = container.flow_service()
         flow = await flow_service.create_flow(
-            space_id=space.id,
+            space_id=UUID(space_id),
             name="Befintligt flöde",
             description="Beskrivning",
             steps=[],
@@ -3979,27 +3982,35 @@ async def test_ai_builder_api_edit_mode_invalid_existing_step_ref_returns_typed_
                 ),
             ],
         )
-        repo = AIBuilderRepository(session)
-        builder_session = await repo.create_session(
-            tenant_id=admin_user.tenant_id,
-            space_id=space.id,
-            actor_user_id=admin_user.id,
-            target_kind=TargetKind.EDIT,
-            flow_id=flow.id,
+        flow_id = flow.id
+        flow_revision = flow.draft_revision
+
+    session_id = await _create_ai_builder_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+        target_kind="edit",
+        flow_id=str(flow_id),
+    )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        builder_session = await repo.get_session(
+            session_id=UUID(session_id),
+            tenant_id=container.user().tenant_id,
         )
         spec = _make_builder_plan_spec(existing_step_ref="step_a")
         plan = await repo.create_plan(
             session_id=builder_session.id,
-            tenant_id=admin_user.tenant_id,
+            tenant_id=builder_session.tenant_id,
             spec=spec,
             envelope=_make_plan_envelope(spec),
         )
         await repo.update_plan_status(
             plan_id=plan.id,
-            tenant_id=admin_user.tenant_id,
+            tenant_id=builder_session.tenant_id,
             status=PlanStatus.APPROVED,
         )
-        flow_revision = flow.draft_revision
 
     apply_response = await client.post(
         f"/api/v1/flows/ai-builder/plans/{plan.id}/apply",
@@ -4019,22 +4030,20 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
     bearer_token,
     completion_model_factory,
     db_container,
-    space_factory,
-    admin_user,
 ):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder API edit transcription",
+    )
     async with db_container() as container:
-        session = container.session()
-        model = await completion_model_factory(session, "gpt-4o-mini")
-        space = await space_factory(
-            session,
-            "AI Builder API edit transcription",
-            [model.id],
-            user_id=admin_user.id,
-        )
         flow_service = container.flow_service()
+        tenant_id = container.user().tenant_id
 
         flow = await flow_service.create_flow(
-            space_id=space.id,
+            space_id=UUID(space_id),
             name="IBIC dokumentflöde",
             description="Tar emot dokument och analyserar dem.",
             steps=[],
@@ -4063,32 +4072,15 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
                 ),
             ],
         )
-        space_id = str(space.id)
         flow_id = flow.id
         flow_revision = flow.draft_revision
 
     await _create_default_transcription_model(
         db_container=db_container,
         space_id=space_id,
-        tenant_id=admin_user.tenant_id,
+        tenant_id=tenant_id,
     )
 
-    requirements_summary = _make_tool_call(
-        tool_call_id="call_requirements",
-        name="confirm_requirements",
-        arguments={
-            "summary": "Lägg till transkribering först och låt sedan befintligt steg analysera transkriberingen.",
-            "key_decisions": [
-                {"topic": "Input", "decision": "Ljudfil som transkriberas först"},
-                {
-                    "topic": "Existing logic",
-                    "decision": "Behåll analyssteget men gör det textbaserat",
-                },
-            ],
-            "input_description": "Användaren laddar upp en ljudfil vid körning.",
-            "output_description": "Flödet analyserar först transkriberat innehåll vidare.",
-        },
-    )
     edit_flow = _make_tool_call(
         tool_call_id="call_edit",
         name="edit_flow",
@@ -4125,12 +4117,7 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
             ],
         },
     )
-    mock_completion = AsyncMock(
-        side_effect=[
-            _make_llm_response(tool_calls=[requirements_summary]),
-            _make_llm_response(tool_calls=[edit_flow]),
-        ]
-    )
+    mock_completion = AsyncMock(return_value=_make_llm_response(tool_calls=[edit_flow]))
 
     with patch(
         "intric.flows.ai_builder.ai_builder_service.litellm.acompletion",
@@ -4356,15 +4343,18 @@ async def test_ai_builder_api_create_mode_strips_invalid_existing_step_ref_and_a
         space_name="AI Builder API invalid create existing ref",
     )
 
+    session_id = await _create_ai_builder_session(
+        client=client,
+        bearer_token=bearer_token,
+        space_id=space_id,
+    )
+
     async with db_container() as container:
         repo = AIBuilderRepository(container.session())
         user = container.user()
-        session = await repo.create_session(
+        session = await repo.get_session(
+            session_id=UUID(session_id),
             tenant_id=user.tenant_id,
-            space_id=UUID(space_id),
-            actor_user_id=user.id,
-            target_kind=TargetKind.CREATE,
-            flow_id=None,
         )
         spec = _make_builder_plan_spec(existing_step_ref="step_a")
         plan = await repo.create_plan(
@@ -4378,7 +4368,7 @@ async def test_ai_builder_api_create_mode_strips_invalid_existing_step_ref_and_a
             tenant_id=user.tenant_id,
             status=PlanStatus.APPROVED,
         )
-        await repo.update_session_status(
+        await repo.update_session_status_without_send_lease(
             session_id=session.id,
             tenant_id=user.tenant_id,
             status=SessionStatus.AWAITING_APPROVAL,
