@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T068
+active_task: T069
 
 interruptions:
   - id: I001
@@ -212,7 +212,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T064 authenticated live eval against the local API and T061 test-topology cleanup: the C3 audio-to-DOCX failure is fixed, the five-case live eval passed twice after the typed-question dispatch-boundary fix, and ProposalSubmissionOwner submission tests now instantiate their canonical owner directly. Normal-User Output Quality stays 9 for the current evidence set. The broader score floor remains 8 because full-source typing/test baseline, remaining topology/readability/test-fixture coupling, and AI slop/comment/naming cleanup still block a defensible all-dimensions 9."
+  source: "After T068 authenticated live eval against the local API and T061/T065/T066 topology work: the five-case live eval passed after active-submission runtime ownership changes, and ProposalSubmissionOwner submission tests now instantiate their canonical owner directly. Normal-User Output Quality stays 9 for the current evidence set, with API freshness qualified by process/source-mtime evidence rather than a clean service restart. The broader score floor remains 8 because full-source typing/test baseline, remaining topology/readability/test-fixture coupling, and AI slop/comment/naming cleanup still block a defensible all-dimensions 9."
   Maintainability: 8
   Code_Quality: 9
   Clean_Architecture: 8
@@ -230,7 +230,7 @@ current_scorecard:
   Overall: 8
   blockers:
     - "Generated-client regeneration determinism is now closed by T054: update.js supports --schema-file review snapshots, URL mode fetches OpenAPI once into a temp snapshot, openapi-typescript uses argv-array spawn, and schema.d.ts diff stats were inspected with no generated churn."
-    - "The T064 five-case authenticated live eval now proves C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX with selected structured-field underlag plus source text, C4 runtime form fields, and C5 revise/edit through the public API, but this gate must be repeated after later planner/runtime changes rather than treated as permanent output-quality proof."
+    - "The T068 five-case authenticated live eval refreshed proof after T065/T066 active-submission runtime ownership changes: C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX with selected structured-field underlag plus source text, C4 runtime form fields, and C5 revise/edit all passed through the public API. The eval used qualified API freshness evidence, not a clean service restart, and the gate must be repeated after later planner/runtime changes rather than treated as permanent output-quality proof."
     - "T042/T044/T048/T050/T052 removed proposal completion, structured-question recovery, confirm-requirements ownership, repair-runtime ownership, and active create/edit proposal-submission ownership from ai_builder_proposal_processor.py. The processor is now 592 LOC after the scoped-model-edit hotfix, but maintainability/readability remain 8 because ProposalSubmissionOwner is still a 760 LOC concentrated owner, submission tests retain topology coupling, and the next score-moving tranche must prove whether topology/readability or repeated live-eval proof is now the highest blocker."
     - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, partial processor-bound facades, and full-source Pyright baseline failures outside AI Builder."
     - "Both Claude and Antigravity recommended a small future clarification of counts_as_repair semantics in ai_builder_proposal_telemetry.py; it was not added in T038 because that file was outside the approved write scope."
@@ -6585,7 +6585,7 @@ tasks:
   - id: T068
     type: qa
     assignee: Worker
-    status: active
+    status: completed
     reasoning_hint: medium
     target_review_by: "2026-05-24"
     objective: "Run authenticated five-case Flow AI Builder live eval after T065/T066 against a backend with proven or explicitly qualified freshness, then update the scorecard honestly before further refactoring."
@@ -6619,6 +6619,83 @@ tasks:
       - "If first eval fails, rerun the same command once with a distinct --output-root"
       - "git diff --check"
       - "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml\"); puts \"yaml ok\"'"
+    receipt:
+      completed_at: "2026-05-23T05:04:27Z"
+      summary: "Ran authenticated five-case Flow AI Builder live eval after T065/T066. All five cases passed on the first run through the public API. The result refreshes Normal-User Output Quality evidence for the current source/runtime ownership state, but does not move the overall score floor above 8 because readability/test-topology, full-source typing baseline, and AI-slop/comment/naming blockers remain."
+      freshness:
+        status: "qualified_process_freshness_not_clean_restart"
+        evidence:
+          - "git rev-parse HEAD -> 383222f4f7ec14c38529f6f39b03b7d743d1d9ac"
+          - "Backend /version liveness returned 200 DEV from http://127.0.0.1:8123/version."
+          - "Docker service `eneo` is a long-lived devcontainer service; Compose restart was not used because it would not restart the manually launched backend process."
+          - "Backend worker child process PID 494672 started at 2026-05-23T04:28:47Z; the latest T066 source file mtime was backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py at 2026-05-23T04:28:47Z. This is useful freshness evidence, but not the same as a clean restart after commit 383222f4f."
+      eval:
+        ledger: ".codex/artifacts/flow-ai-builder-live-eval.md"
+        output_root: ".codex/artifacts/flow-ai-builder-live-eval-t068-run1/20260523T050259Z"
+        model: "gpt-5.4-2026-03-05"
+        verdict: "pass"
+        cases:
+          - "C1_vague_meeting_notes -> pass, terminal output structured_text"
+          - "C2_json_with_document_words -> pass, terminal output structured_json"
+          - "C3_audio_to_docx_report -> pass, terminal output docx_document"
+          - "C4_runtime_form_fields -> pass, terminal output structured_text, form fields customer_name and analysis_request"
+          - "C5_revise_edit_flow -> pass, revise returned a replacement plan"
+      validation:
+        - "git status --short --branch -> branch feature/refactor-flows-flowai ahead 15; unrelated dirty files only before board update"
+        - "git log --oneline --decorate -6 -> HEAD 383222f4f Select AI Builder live eval proof gate"
+        - "python3 urllib request to http://127.0.0.1:8123/version -> 200 DEV"
+        - "cd backend && ENEO_API_KEY=<env only> API_KEY=<env only> ENEO_FLOW_TEST_SPACE_ID=<env only> uv run python scripts/flow_ai_builder_live_eval.py --base-url http://127.0.0.1:8123 --timeout-seconds 240 --inter-case-delay-seconds 1 --output-root ../.codex/artifacts/flow-ai-builder-live-eval-t068-run1 --ledger ../.codex/artifacts/flow-ai-builder-live-eval.md -> exit 0"
+      scorecard_impact:
+        score_floor: 8
+        normal_user_output_quality: 9
+        rationale: "All five public-API eval cases passed, so Normal-User Output Quality remains current at 9 for this source/runtime evidence set. The score floor stays 8 because this proof gate did not address remaining readability/test-topology, full-source typing baseline, or AI-slop/comment/naming blockers."
+      residual_risks:
+        - "API freshness was qualified with process/source evidence rather than proven by a clean restart; future evals should prefer a clean restart or a dev-server endpoint that reports source revision."
+        - "Live-eval proof remains recurring after future planner/runtime changes."
+        - "T069 proposal-submission test-locality cleanup is now active; broader Flow AI Builder goal remains incomplete."
+
+  - id: T069
+    type: refactor
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    target_review_by: "2026-05-24"
+    objective: "Improve proposal-submission test locality by moving submission-owner behavior tests to the ProposalSubmissionOwner test surface and removing private `_proposal_submission` reach-through from processor tests where it is not the processor's responsibility."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t067-next-tranche-ranking.md"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "backend/tests/unittests/flows/ai_builder/proposal_turn_builders.py"
+      - "backend/tests/unittests/flows/ai_builder/proposal_turn_test_doubles.py"
+    constraints:
+      - "No production source changes unless a peer-reviewed plan revision proves the test topology cannot be improved without a small production ownership cleanup."
+      - "Do not split files for LOC or create a new fixture/helper module."
+      - "Do not weaken behavior assertions or replace behavior tests with mock-only assertions."
+      - "Reuse existing proposal turn builders and test doubles."
+      - "Keep unrelated dirty files out of the diff and commit."
+    architecture_questions:
+      - "Is this truly better, or only different?"
+      - "Does this remove private object-layout coupling from tests, or merely move it?"
+      - "Will a reviewer understand ProposalSubmissionOwner behavior from its canonical test file without scanning processor tests?"
+      - "Does the static guard encode ownership without freezing incidental line layout?"
+      - "If this cannot remove real coupling, stop and re-rank rather than doing cosmetic test movement."
+    acceptance_criteria:
+      - "Red/static guard first: processor tests fail a new ownership guard that bans `_proposal_submission` attribute reach-through in `test_ai_builder_proposal_processor.py`."
+      - "Owner-behavior tests currently calling `_proposal_submission.dispatch_submission_tool_call` move to `test_ai_builder_proposal_submission.py` and instantiate the existing `_make_submission()` owner directly."
+      - "Processor tests keep only processor routing or public processor behavior; any remaining private-owner exemption must be explicit, line-bounded, and justified, with a target of zero exemptions."
+      - "Existing behavior assertions for outline self-correction, edit-description repair usage, upstream-error handling, and recovered edit dispatch remain equivalent."
+      - "Static ownership tests record both negative and positive invariants: processor tests do not reach through `_proposal_submission`, and submission tests cover ProposalSubmissionOwner behavior through its canonical test surface."
+      - "No new broad helper, fixture dump, pass-through abstraction, or production source split."
+    verify:
+      - "Red guard for current private `_proposal_submission` reach-through."
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py -q"
+      - "cd backend && uv run ruff check tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "cd backend && uv run ruff format --check tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "git diff --check"
+      - "Claude implementation gate before commit; Antigravity if available, otherwise record missing coverage."
     receipt: null
 
 checks:
@@ -6627,11 +6704,10 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T067 next-tranche ranking completed and peer-gated. T068 authenticated five-case live-eval proof is now active before further code refactoring. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T067
+    result: "T068 authenticated five-case live eval passed all cases on a qualified-current local API. T069 proposal-submission test-locality cleanup is now active. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T068
     commands:
-      - "T067 ranking artifact: .codex/artifacts/flow-ai-builder-t067-next-tranche-ranking.md"
-      - "Claude T067 iteration 1: .codex/artifacts/claude-peer-loop-t067-next-flow-ai-builder-tranche-ranking-20260523T044917Z.md -> GREEN_LIGHT yes / MIN_SCORE 8 with tightenings"
-      - "Claude T067 iteration 2: .codex/artifacts/claude-peer-loop-t067-revised-next-flow-ai-builder-tranche-ranking-20260523T045350Z.md -> GREEN_LIGHT no / MIN_SCORE 7"
-      - "Claude T067 iteration 3: .codex/artifacts/claude-peer-loop-t067-final-revised-next-flow-ai-builder-tranche-ranking-20260523T045553Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity T067 iteration 1: .codex/artifacts/antigravity-peer-loop-t067-final-next-flow-ai-builder-tranche-ranking-20260523T045740Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "T068 ledger: .codex/artifacts/flow-ai-builder-live-eval.md"
+      - "T068 output root: .codex/artifacts/flow-ai-builder-live-eval-t068-run1/20260523T050259Z"
+      - "T068 eval command exited 0 and appended five pass verdicts"
+      - "T068 API freshness: qualified process/source-mtime evidence, not clean restart"
