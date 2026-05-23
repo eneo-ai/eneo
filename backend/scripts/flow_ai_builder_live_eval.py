@@ -23,6 +23,12 @@ from typing import Literal, TypeAlias, cast
 
 import httpx
 
+from intric.flows.template_reference_analyzer import (
+    TemplateReference,
+    TemplateReferenceKind,
+    analyze_template,
+)
+
 JsonScalar: TypeAlias = str | int | float | bool | None
 JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 JsonObject: TypeAlias = dict[str, JsonValue]
@@ -33,6 +39,7 @@ TerminalOutput: TypeAlias = Literal[
     "pdf_document",
 ]
 Verdict: TypeAlias = Literal["pass", "fail", "incomplete"]
+QuestionBindingRole: TypeAlias = Literal["any", "writing_or_materialization"]
 
 API_PREFIX = "/api/v1"
 AI_BUILDER_PREFIX = f"{API_PREFIX}/flows/ai-builder"
@@ -47,6 +54,14 @@ DEFAULT_LEDGER_PATH = (
 
 
 @dataclass(frozen=True, slots=True)
+class ExpectedQuestionBinding:
+    step_role: QuestionBindingRole = "any"
+    require_text_ref: bool = False
+    require_structured_field_ref: bool = False
+    forbid_broad_structured_ref: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class ExpectedOutcome:
     terminal_output: TerminalOutput | None = None
     required_input_types: tuple[str, ...] = ()
@@ -57,6 +72,7 @@ class ExpectedOutcome:
     forbidden_input_summary_terms: tuple[str, ...] = ()
     forbidden_output_summary_terms: tuple[str, ...] = ()
     allowed_question_ids_without_plan: tuple[str, ...] = ()
+    expected_question_bindings: tuple[ExpectedQuestionBinding, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -361,6 +377,129 @@ def _form_fields(plan: JsonObject | None) -> list[str]:
     return fields
 
 
+def _step_ref_indexes(plan: JsonObject) -> dict[str, int]:
+    refs: dict[str, int] = {}
+    for index, step in enumerate(_steps(plan), start=1):
+        plan_step_ref = _string(step.get("plan_step_ref"))
+        if plan_step_ref is not None:
+            refs[plan_step_ref] = index
+    return refs
+
+
+def _question_binding_text(step: JsonObject) -> str | None:
+    input_bindings = _object(step.get("input_bindings"))
+    return _string(input_bindings.get("question"))
+
+
+def _question_binding_candidate_steps(
+    plan: JsonObject,
+    *,
+    role: QuestionBindingRole,
+) -> list[JsonObject]:
+    steps = _steps(plan)
+    if role == "any":
+        return steps
+
+    for step in reversed(steps):
+        output_type = _string(step.get("output_type"))
+        if output_type not in {"text", "docx", "pdf"}:
+            continue
+        if _question_binding_text(step) is None:
+            continue
+        return [step]
+    return []
+
+
+def _question_binding_references(
+    *,
+    step: JsonObject,
+    step_refs: dict[str, int],
+) -> list[TemplateReference]:
+    question = _question_binding_text(step)
+    if question is None:
+        return []
+    return analyze_template(
+        question,
+        step_refs=step_refs,
+        form_field_names=set(),
+    )
+
+
+def _has_text_step_ref(references: list[TemplateReference]) -> bool:
+    return any(
+        reference.kind is TemplateReferenceKind.STEP
+        and reference.path_error_code is None
+        and reference.tail == "output.text"
+        for reference in references
+    )
+
+
+def _has_structured_field_ref(references: list[TemplateReference]) -> bool:
+    return any(
+        reference.kind is TemplateReferenceKind.STEP
+        and reference.path_error_code is None
+        and reference.structured_path is not None
+        and len(reference.structured_path) > 0
+        for reference in references
+    )
+
+
+def _has_broad_structured_ref(references: list[TemplateReference]) -> bool:
+    return any(
+        reference.kind is TemplateReferenceKind.STEP
+        and reference.path_error_code is None
+        and (reference.tail == "output.structured" or reference.structured_path == ())
+        for reference in references
+    )
+
+
+def _question_binding_failures(
+    *,
+    plan: JsonObject,
+    expected: ExpectedQuestionBinding,
+) -> list[str]:
+    step_refs = _step_ref_indexes(plan)
+    candidate_references = [
+        _question_binding_references(step=step, step_refs=step_refs)
+        for step in _question_binding_candidate_steps(
+            plan,
+            role=expected.step_role,
+        )
+    ]
+    candidate_references = [refs for refs in candidate_references if refs]
+    if not candidate_references:
+        return [
+            "No input_bindings.question found on a step matching "
+            f"{expected.step_role!r}."
+        ]
+
+    failures: list[str] = []
+    if (expected.require_text_ref or expected.require_structured_field_ref) and not any(
+        (not expected.require_text_ref or _has_text_step_ref(refs))
+        and (
+            not expected.require_structured_field_ref or _has_structured_field_ref(refs)
+        )
+        for refs in candidate_references
+    ):
+        required_labels: list[str] = []
+        if expected.require_text_ref:
+            required_labels.append("source text")
+        if expected.require_structured_field_ref:
+            required_labels.append("selected structured field")
+        failures.append(
+            f"Missing required {' and '.join(required_labels)} refs in "
+            f"{expected.step_role!r} question binding."
+        )
+    if expected.forbid_broad_structured_ref and any(
+        _has_broad_structured_ref(refs) for refs in candidate_references
+    ):
+        failures.append(
+            f"Observed broad structured JSON reference in {expected.step_role!r} "
+            "question binding."
+        )
+    return failures
+
+
 def _requirements_confirm_answer(summary: JsonObject) -> JsonObject:
     answer: JsonObject = {
         "kind": "requirements_confirmation",
@@ -506,6 +645,9 @@ def _evaluate_plan_case(
             reasons.append(
                 f"Output/decision summary mentions forbidden term {forbidden!r}."
             )
+
+    for expected_binding in expected.expected_question_bindings:
+        reasons.extend(_question_binding_failures(plan=plan, expected=expected_binding))
 
     return ("fail" if reasons else "pass"), reasons, terminal, input_types, form_fields
 
@@ -777,6 +919,14 @@ def _cases() -> list[LiveEvalCase]:
                 forbidden_input_types=("document", "file"),
                 required_input_summary_terms=("audio",),
                 forbidden_input_summary_terms=("document", "documents", "dokument"),
+                expected_question_bindings=(
+                    ExpectedQuestionBinding(
+                        step_role="writing_or_materialization",
+                        require_text_ref=True,
+                        require_structured_field_ref=True,
+                        forbid_broad_structured_ref=True,
+                    ),
+                ),
             ),
             question_answers={
                 "input_material_mode": ("audio",),

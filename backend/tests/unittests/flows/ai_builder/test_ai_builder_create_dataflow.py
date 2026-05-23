@@ -178,7 +178,7 @@ def test_normalize_create_draft_mechanics_restores_audio_source_material_underla
     ] == [(1, "Källmaterial")]
     assert [
         (ref.from_step, ref.label) for ref in normalized.steps[4].uses_previous_outputs
-    ] == [(1, "Transkribera ljud")]
+    ] == [(1, "Källmaterial")]
     assert {
         (ref.from_step, ref.field_path)
         for ref in normalized.steps[4].uses_previous_fields
@@ -188,6 +188,51 @@ def test_normalize_create_draft_mechanics_restores_audio_source_material_underla
         (4, "protocol_sections"),
     }
     assert normalized.steps[5].uses_previous_outputs == []
+
+
+def test_normalize_create_draft_mechanics_keeps_non_source_text_step_label() -> None:
+    draft = FlowCreateDraft(
+        flow_name="Textbaserad sammanställning",
+        plan_rationale="Skriv rapport från text och strukturerade fält.",
+        steps=[
+            {
+                "name": "Samla anteckningar",
+                "instructions": "Ta emot manuella anteckningar.",
+                "input_source": "flow_input",
+                "input_type": "text",
+                "output_type": "text",
+            },
+            {
+                "name": "Extrahera kontext",
+                "instructions": "Extrahera kontext.",
+                "input_source": "previous_step",
+                "input_type": "text",
+                "output_type": "json",
+                "output_fields": [_field("context")],
+            },
+            {
+                "name": "Extrahera beslut",
+                "instructions": "Extrahera beslut.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "json",
+                "output_fields": [_field("decisions")],
+            },
+            {
+                "name": "Skriv rapport",
+                "instructions": "Skriv rapport.",
+                "input_source": "previous_step",
+                "input_type": "json",
+                "output_type": "text",
+            },
+        ],
+    )
+
+    normalized = normalize_create_draft_mechanics(draft)
+
+    assert [
+        (ref.from_step, ref.label) for ref in normalized.steps[3].uses_previous_outputs
+    ] == [(1, "Samla anteckningar")]
 
 
 def test_normalize_create_draft_mechanics_prunes_unknown_form_field_refs() -> None:

@@ -35,6 +35,7 @@ from intric.flows.ai_builder.ai_builder_create_validator import validate_create_
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_output_type_values,
 )
+from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
     canonicalize_create_draft_resources,
@@ -83,6 +84,14 @@ def _field(
         required=required,
         fields=fields,
         item_fields=item_fields,
+    )
+
+
+def _draft_with_steps(steps: list[NewStepDraft]) -> FlowCreateDraft:
+    return FlowCreateDraft(
+        flow_name="Auto-bind test",
+        plan_rationale="Exercise targeted underlag mechanics.",
+        steps=steps,
     )
 
 
@@ -3524,11 +3533,13 @@ def test_auto_bind_targeted_underlag_skips_when_aggregation_intent_is_aggregate(
     ]
 
     for intent in ("aggregate", "compare"):
+        draft = _draft_with_steps(steps_before)
         result = auto_bind_targeted_underlag_for_text_composer(
-            steps_before,
+            draft,
             aggregation_intent=cast(AggregationIntent, intent),
         )
-        assert result is steps_before, (
+        assert result is draft.steps
+        assert result == steps_before, (
             f"intent={intent!r} should be a no-op, but the composer was rewritten"
         )
         composer = result[2]
@@ -3567,11 +3578,12 @@ def test_auto_bind_targeted_underlag_two_step_linear_flow_is_unchanged() -> None
         ),
     ]
 
+    draft = _draft_with_steps(steps_before)
     result = auto_bind_targeted_underlag_for_text_composer(
-        steps_before,
-        aggregation_intent="linear",
+        draft, aggregation_intent="linear"
     )
-    assert result is steps_before, "2-step linear flow must be a no-op"
+    assert result is draft.steps
+    assert result == steps_before, "2-step linear flow must be a no-op"
     composer = result[1]
     assert composer.input_source.value == "previous_step"
     assert composer.uses_previous_fields == []
@@ -3616,11 +3628,12 @@ def test_auto_bind_targeted_underlag_skips_when_text_priors_exceed_soft_cap() ->
     )
     steps_before = [*text_priors, json_anchor, composer]
 
+    draft = _draft_with_steps(steps_before)
     result = auto_bind_targeted_underlag_for_text_composer(
-        steps_before,
-        aggregation_intent="linear",
+        draft, aggregation_intent="linear"
     )
-    assert result is steps_before, "over-cap text priors should bail out"
+    assert result is draft.steps
+    assert result == steps_before, "over-cap text priors should bail out"
     assert result[-1].input_source.value == "all_previous_steps"
 
 
@@ -3667,11 +3680,11 @@ def test_auto_bind_targeted_underlag_fires_when_many_json_priors_with_few_text_p
     steps_before = [transcription, *json_extractions, composer]
 
     result = auto_bind_targeted_underlag_for_text_composer(
-        steps_before,
+        _draft_with_steps(steps_before),
         aggregation_intent="linear",
     )
 
-    assert result is not steps_before, (
+    assert result != steps_before, (
         "auto-binder must fire when bulk of priors is JSON+output_fields, "
         "even if total prior count exceeds the text-prior cap"
     )
@@ -3752,11 +3765,11 @@ def test_auto_bind_targeted_underlag_rewrites_nonterminal_all_previous_composer(
     ]
 
     result = auto_bind_targeted_underlag_for_text_composer(
-        steps_before,
+        _draft_with_steps(steps_before),
         aggregation_intent="linear",
     )
 
-    assert result is not steps_before
+    assert result != steps_before
     body_composer = result[3]
     assert body_composer.input_source.value == "previous_step"
     assert body_composer.input_type.value == "text"
@@ -3820,11 +3833,11 @@ def test_auto_bind_targeted_underlag_rewrites_multiple_eligible_composers() -> N
     ]
 
     result = auto_bind_targeted_underlag_for_text_composer(
-        steps_before,
+        _draft_with_steps(steps_before),
         aggregation_intent="linear",
     )
 
-    assert result is not steps_before
+    assert result != steps_before
     first_composer = result[2]
     assert first_composer.input_source.value == "previous_step"
     assert {
@@ -3869,12 +3882,13 @@ def test_auto_bind_targeted_underlag_leaves_text_only_all_previous_composer() ->
         ),
     ]
 
+    draft = _draft_with_steps(steps_before)
     result = auto_bind_targeted_underlag_for_text_composer(
-        steps_before,
-        aggregation_intent="linear",
+        draft, aggregation_intent="linear"
     )
 
-    assert result is steps_before
+    assert result is draft.steps
+    assert result == steps_before
     assert result[-1].input_source.value == "all_previous_steps"
     assert result[-1].uses_previous_fields == []
 
@@ -3943,7 +3957,7 @@ def test_auto_bound_c2_shape_does_not_trigger_targeted_underlag_critic_loop() ->
         ),
     ]
     rebound_steps = auto_bind_targeted_underlag_for_text_composer(
-        steps,
+        _draft_with_steps(steps),
         aggregation_intent="linear",
     )
     spec = compile_create_draft(
@@ -4035,11 +4049,11 @@ def test_auto_bind_targeted_underlag_rewrites_previous_step_composer_with_multip
     ]
 
     result = auto_bind_targeted_underlag_for_text_composer(
-        steps_before,
+        _draft_with_steps(steps_before),
         aggregation_intent="linear",
     )
 
-    assert result is not steps_before, (
+    assert result != steps_before, (
         "composer with previous_step source and ≥2 JSON priors must be rewritten"
     )
     composer = result[-1]
@@ -4121,7 +4135,7 @@ def test_auto_bind_targeted_underlag_caps_and_distributes_declared_fields() -> N
     )
 
     result = auto_bind_targeted_underlag_for_text_composer(
-        steps_before,
+        _draft_with_steps(steps_before),
         aggregation_intent="linear",
     )
 
@@ -4323,12 +4337,13 @@ def test_auto_bind_targeted_underlag_skips_previous_step_composer_with_single_js
         ),
     ]
 
+    draft = _draft_with_steps(steps_before)
     result = auto_bind_targeted_underlag_for_text_composer(
-        steps_before,
-        aggregation_intent="linear",
+        draft, aggregation_intent="linear"
     )
 
-    assert result is steps_before, (
+    assert result is draft.steps
+    assert result == steps_before, (
         "single-JSON-prior + previous_step composer must remain a no-op"
     )
     composer = result[-1]
@@ -4543,7 +4558,7 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
         (4, "protocol_sections"),
     }
     assert [(ref.from_step, ref.label) for ref in body_step.uses_previous_outputs] == [
-        (1, "Transkribera ljud")
+        (1, "Källmaterial")
     ]
 
     compiled_body_step = compiled.steps[4]
@@ -4560,7 +4575,7 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
         "Innehåll per rubrik.: {{ step_d.output.structured.protocol_sections }}"
         in protocol_question
     )
-    assert "Transkribera ljud: {{ step_a.output.text }}" in protocol_question
+    assert "Källmaterial: {{ step_a.output.text }}" in protocol_question
     assert "{{ step_d.output.structured }}" not in protocol_question
     assert validation.valid
 

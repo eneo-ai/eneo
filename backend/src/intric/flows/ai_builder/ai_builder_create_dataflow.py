@@ -18,6 +18,7 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
 )
 from intric.flows.ai_builder.ai_builder_source_material import (
     normalize_create_draft_source_material,
+    primary_source_material_ref,
 )
 from intric.flows.ai_builder.ai_builder_structured_field_paths import (
     missing_draft_field_path,
@@ -98,7 +99,7 @@ def normalize_create_draft_mechanics(
     normalized_draft = _normalize_create_draft_refs(draft)
     source_normalized_draft = normalize_create_draft_source_material(normalized_draft)
     rebound_steps = auto_bind_targeted_underlag_for_text_composer(
-        source_normalized_draft.steps,
+        source_normalized_draft,
         aggregation_intent=aggregation_intent,
     )
     rebound_draft = (
@@ -270,45 +271,24 @@ def _compile_safe_previous_output_refs(
 
 
 def auto_bind_targeted_underlag_for_text_composer(
-    steps: list[NewStepDraft],
+    draft: FlowCreateDraft,
     *,
     aggregation_intent: "AggregationIntent",
 ) -> list[NewStepDraft]:
-    """Rewrite compositional text steps so they read JSON predecessors
-    via explicit field refs instead of `all_previous_steps` or a single
-    daisy-chained predecessor.
+    """Bind composer underlag from backend-owned draft mechanics.
 
-    Two source patterns qualify for the rewrite:
-
-    - `all_previous_steps`: the skeleton's default for document-body
-      composer steps in linear flows with three or more semantic phases.
-      When earlier steps emit structured JSON output_contracts, the
-      `prefer_targeted_underlag_over_all_previous_steps` semantic critic
-      fires and the LLM is asked to switch to `previous_step` plus
-      `uses_previous_fields` references. Those mechanics are backend-owned
-      — stripped from outline_flow before the model ever sees them — so
-      the repair loop spins on the same complaint until it bails.
-    - `previous_step` with two or more prior content steps emitting JSON
-      contracts: the composer would otherwise see only the immediate
-      predecessor and silently lose the earlier extractions. The rewrite
-      keeps `previous_step` and populates `uses_previous_fields` across
-      every JSON prior. Single-extraction → composer pipelines remain
-      untouched unless source-material normalization has already proved
-      the step is composing structured fields with a separate text source.
-
-    Outline mode strips backend-owned refs, so this pass must synthesize
-    refs from declared contracts instead of asking the model to author them.
-
-    Suppression matches the critic invariant: `aggregate`/`compare`
-    intents need fan-in for cross-document compositions, prior content
-    counts above the soft cap make targeted underlag unwieldy, and a
-    composer that already targets fields is left alone.
+    Source-material labeling stays owned by ai_builder_source_material; this
+    pass owns only the targeted field/output refs that keep composers from
+    reading broad structured JSON blobs.
     """
     if aggregation_intent in {"aggregate", "compare"}:
-        return steps
+        return draft.steps
 
-    rewritten_steps = steps
+    rewritten_steps = draft.steps
+    source_ref = primary_source_material_ref(draft)
     changed = False
+    # Outline mode strips backend-owned refs; rebuild targeted bindings from
+    # declared fields instead of depending on LLM-authored mechanics.
     for composer_index in targeted_underlag_all_previous_indexes_for_drafts(
         rewritten_steps,
         aggregation_intent=aggregation_intent,
@@ -317,6 +297,7 @@ def auto_bind_targeted_underlag_for_text_composer(
             rewritten_steps,
             composer_index=composer_index,
             require_multiple_json_priors=False,
+            primary_source_ref=source_ref,
         )
         if updated_steps is not rewritten_steps:
             rewritten_steps = updated_steps
@@ -334,12 +315,13 @@ def auto_bind_targeted_underlag_for_text_composer(
                 rewritten_steps,
                 composer_index=composer_index,
                 require_multiple_json_priors=True,
+                primary_source_ref=source_ref,
             )
             if updated_steps is not rewritten_steps:
                 rewritten_steps = updated_steps
                 changed = True
 
-    return rewritten_steps if changed else steps
+    return rewritten_steps if changed else draft.steps
 
 
 def _bind_targeted_underlag_for_composer(
@@ -347,6 +329,7 @@ def _bind_targeted_underlag_for_composer(
     *,
     composer_index: int,
     require_multiple_json_priors: bool,
+    primary_source_ref: PreviousOutputRef | None,
 ) -> list[NewStepDraft]:
     composer = steps[composer_index]
 
@@ -390,10 +373,16 @@ def _bind_targeted_underlag_for_composer(
         if predecessor_index + 1 in seen_output_steps:
             continue
         seen_output_steps.add(predecessor_index + 1)
+        label = predecessor.name or f"Steg {predecessor_index + 1}"
+        if (
+            primary_source_ref is not None
+            and primary_source_ref.from_step == predecessor_index + 1
+        ):
+            label = primary_source_ref.label
         new_output_refs.append(
             PreviousOutputRef(
                 from_step=predecessor_index + 1,
-                label=predecessor.name or f"Steg {predecessor_index + 1}",
+                label=label,
             )
         )
 

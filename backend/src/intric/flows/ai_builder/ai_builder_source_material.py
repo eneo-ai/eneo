@@ -69,7 +69,7 @@ def normalize_create_draft_source_material(draft: FlowCreateDraft) -> FlowCreate
     if not _draft_returns_material_report(draft):
         return draft
 
-    source_ref = _primary_source_material_ref(draft)
+    source_ref = primary_source_material_ref(draft)
     if source_ref is None:
         return draft
 
@@ -327,7 +327,7 @@ def _compiled_spec_returns_material_report(spec: FlowDraftSpecCore) -> bool:
     return bool(spec.steps) and spec.steps[-1].output_type == OutputType.TEXT
 
 
-def _primary_source_material_ref(
+def primary_source_material_ref(
     draft: FlowCreateDraft,
 ) -> PreviousOutputRef | None:
     source_step = _draft_primary_source_text_step(draft)
@@ -420,6 +420,7 @@ __all__ = [
     "SourceMaterialBindingStatus",
     "iter_compiled_source_material_boundaries",
     "normalize_create_draft_source_material",
+    "primary_source_material_ref",
     "question_binding",
     "source_material_binding_status",
     "source_material_label_for_text",

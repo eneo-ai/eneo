@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T057
+active_task: T059
 
 interruptions:
   - id: I001
@@ -5818,7 +5818,7 @@ tasks:
   - id: T057
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T056 completed test-topology cleanup."
     inputs:
@@ -5839,6 +5839,132 @@ tasks:
       - "Why the choice is the highest-score-moving slice now."
       - "What gets deleted, merged, moved, renamed, or simplified."
       - "Acceptance criteria, validation plan, and score impact."
+    receipt:
+      completed_at: "2026-05-23T00:27:30Z"
+      result: "Selected T058 source-material underlag proof and label SSoT as the next highest-score-moving worker after T056. This is not a processor LOC-reduction tranche; it closes a named source-material/live-eval assertion blocker by unifying primary source-material labeling and turning manual underlag plan inspection into typed live-eval checks."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t057-next-tranche-ranking.md"
+        - ".codex/artifacts/claude-peer-loop-t057-next-flow-ai-builder-tranche-ranking-20260523T002038Z.md"
+        - ".codex/artifacts/claude-peer-loop-t057-revised-t058-underlag-proof-plan-20260523T002343Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t057-final-t058-underlag-proof-ranking-20260523T002623Z.md"
+      peer_gates:
+        claude_iteration_1: "GREEN_LIGHT yes / MIN_SCORE 8; accepted ranking with required refinements for helper signature, typed live-eval binding contract, analyze_template reuse, no-primary-source fallback, and scope limits."
+        claude_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 9; revised artifact implementation-ready."
+        antigravity: "GREEN_LIGHT yes / MIN_SCORE 8; accepted T058 and added implementation refinement to widen auto_bind_targeted_underlag_for_text_composer to accept FlowCreateDraft instead of disjoint steps metadata."
+      selected_next_task: T058
+      score_impact: "Planning-only; no score increase. T058 can close a named source-material/live-eval proof blocker, but the broader floor remains 8 until implementation and later topology/baseline work prove every weak dimension is 9."
+
+  - id: T058
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Implement the peer-gated source-material underlag proof and label SSoT slice: unify primary source-material labels between source-material normalization and dataflow auto-bind, and add typed live-eval binding assertions for selected structured fields/no broad JSON blobs."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t057-next-tranche-ranking.md"
+      - ".codex/artifacts/claude-peer-loop-t057-revised-t058-underlag-proof-plan-20260523T002343Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t057-final-t058-underlag-proof-ranking-20260523T002623Z.md"
+      - "backend/src/intric/flows/ai_builder/ai_builder_source_material.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_dataflow.py"
+      - "backend/scripts/flow_ai_builder_live_eval.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_dataflow.py"
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_source_material.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_dataflow.py"
+      - "backend/scripts/flow_ai_builder_live_eval.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_dataflow.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py"
+      - "backend/tests/unittests/flows/ai_builder/test_flow_ai_builder_live_eval.py"
+      - ".codex/artifacts/flow-ai-builder-t058-underlag-proof-and-label-ssot.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    constraints:
+      - "Red tests first: label SSoT test, live-eval binding-shape test, no-primary-source fallback test."
+      - "Promote `_primary_source_material_ref` to public `primary_source_material_ref(draft: FlowCreateDraft) -> PreviousOutputRef | None`; do not create a new helper module or duplicate source-material rules."
+      - "Widen `auto_bind_targeted_underlag_for_text_composer` to accept `FlowCreateDraft` so source-material label context is canonical and not passed as disjoint metadata."
+      - "Use `analyze_template` for live-eval binding inspection; do not use regex over raw question strings."
+      - "No new Any, cast, type ignore, dict-bag contracts, broad service/helper module, prompt change, frontend change, API/schema change, DB migration, OpenTelemetry, diagnostic schema, or proposal topology work."
+      - "Do not raise the score floor unless implementation, validation, and peer review prove every current 8 dimension moved."
+    expected_output:
+      - "Primary source-material text is labeled consistently as `Källmaterial`/`Source material` in source-material normalization and dataflow auto-bind."
+      - "Non-primary text predecessors keep their step-name fallback labels."
+      - "Live eval C3 has typed `ExpectedQuestionBinding` assertions that require source text refs, selected structured field refs, and forbid broad structured JSON blobs in the target writing/materialization step."
+      - "Stale repair-loop docstring wording is removed without tutorial comments."
+      - "T058 receipt records validation, peer gates, live-eval status, remaining score blockers, and whether the strict floor moved."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_dataflow.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_flow_ai_builder_live_eval.py -q"
+      - "cd backend && uv run ruff check touched T058 files"
+      - "cd backend && uv run ruff format --check touched T058 files"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "Run or explicitly resolve pyright coverage for backend/scripts/flow_ai_builder_live_eval.py."
+      - "git diff --check"
+      - "Authenticated C3 live eval if local service is available after unit validation."
+    stop_if:
+      - "Implementation needs files outside allowed_files."
+      - "The helper change creates circular imports or a broad source-material/dataflow service."
+      - "The live-eval assertion requires regex parsing, arbitrary raw-payload redaction, or a new observability/reporting framework."
+      - "Source-material compiled fallback behavior must change without output-contract red evidence."
+      - "Focused validation fails for unrelated reasons that require a broader tranche."
+    receipt:
+      completed_at: "2026-05-23T00:56:00+02:00"
+      commit: "pending"
+      summary: "Implemented the peer-gated source-material underlag proof and label SSoT slice. `ai_builder_source_material.primary_source_material_ref` is now the canonical draft owner for primary source-material refs/labels, and dataflow targeted auto-bind consumes the full draft so primary transcript/source text keeps the same `Källmaterial` label used by source-material normalization. Non-primary text predecessors keep their step-name fallback labels. The live-eval runner now has typed `ExpectedQuestionBinding` assertions using `analyze_template` to require source text refs, selected structured field refs, and no broad structured JSON refs on the C3 writing/materialization target step."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t058-underlag-proof-and-label-ssot.md"
+        - ".codex/artifacts/claude-peer-loop-t058-underlag-proof-implementation-review-20260523T004608Z.md"
+        - ".codex/artifacts/claude-peer-loop-t058-underlag-proof-implementation-review-iteration-2-20260523T005100Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t058-underlag-proof-implementation-synthesis-20260523T005355Z.md"
+      red_tests:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_flow_ai_builder_live_eval.py -q -> initial collection failed because ExpectedQuestionBinding did not exist."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_dataflow.py::test_normalize_create_draft_mechanics_restores_audio_source_material_underlag tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py::test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag -q -> failed on `Transkribera ljud` vs `Källmaterial` label drift."
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -> 125 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_dataflow.py -q -> 7 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py -q -> 37 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_flow_ai_builder_live_eval.py -q -> 3 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q -> 105 passed"
+        - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_source_material.py src/intric/flows/ai_builder/ai_builder_create_dataflow.py scripts/flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_create_dataflow.py tests/unittests/flows/ai_builder/test_flow_ai_builder_live_eval.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_source_material.py src/intric/flows/ai_builder/ai_builder_create_dataflow.py scripts/flow_ai_builder_live_eval.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_create_dataflow.py tests/unittests/flows/ai_builder/test_flow_ai_builder_live_eval.py -> passed"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder scripts/flow_ai_builder_live_eval.py -> 0 errors"
+        - "git diff --check -> passed"
+      peer_gates:
+        claude_iteration_1: "GREEN_LIGHT yes / MIN_SCORE 8; accepted implementation and flagged non-blocking identity/role/broad-ref/comment follow-ups."
+        claude_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 8 after Codex fixed the identity guard, narrowed the target question role, treated empty structured paths as broad, and restored a concise why-comment."
+        antigravity: "GREEN_LIGHT yes / MIN_SCORE 8; agreed this is safe to commit and noted only future multi-composer live-eval expansion as a P3 follow-up."
+      live_eval_status: "Authenticated C3 live eval not run in this tranche. Local service was listening on 127.0.0.1:8123, but ENEO_API_KEY and ENEO_FLOW_TEST_SPACE_ID were not present in the process environment and the running backend reload state for this uncommitted diff was not proven. This remains a follow-up proof item, not a pass."
+      score_impact:
+        score_floor: 8
+        reason: "Improves Single Source of Truth and Normal-User Output Quality proof for source-material underlag, but does not raise the strict overall floor above 8 because authenticated live eval, proposal topology/readability, full-source typing/test baseline, and broader normal-user output proof still block a defensible 9/10."
+      remaining_blockers_to_9_10:
+        - "Authenticated C3 and repeated five-case live eval proof against a backend confirmed to run the current branch."
+        - "Remaining processor/proposal topology and human-readability work."
+        - "Full-source Pyright/test baseline and broader test-topology cleanup."
+        - "Normal-user output quality beyond the C3 binding shape."
+
+  - id: T059
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T058. Compare authenticated live eval/output-quality proof, remaining processor/proposal topology and human-readability blockers, full-source typing/test baseline, API/SSE/client contract issues, data/schema ownership, diagnostics/OpenTelemetry compatibility, and any remaining source-material underlag risks."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t058-underlag-proof-and-label-ssot.md"
+      - ".codex/artifacts/claude-peer-loop-t058-underlag-proof-implementation-review-iteration-2-20260523T005100Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t058-underlag-proof-implementation-synthesis-20260523T005355Z.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    constraints:
+      - "Read-only ranking task. Do not implement during T059."
+      - "Do not default to processor LOC reduction. Rank by strict score-floor movement, user-output proof, ownership simplification, runtime/API/schema risk, and human reviewability."
+      - "Explicitly decide whether authenticated live eval should come before the next topology/refactor tranche."
+      - "Do not raise the score floor above 8 without live/product evidence and peer-reviewed scorecard reasoning."
+    expected_output:
+      - "Evidence-backed next-tranche ranking artifact under .codex/artifacts/."
+      - "Clear selected next worker or explicit blocker."
+      - "Claude and Antigravity plan gates if a non-trivial implementation tranche is selected."
     receipt: null
 
 checks:
@@ -5847,33 +5973,18 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T056 proposal test-topology cleanup completed, validated, and peer-gated. T057 read-only next-tranche ranking is active. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T056
+    result: "T058 source-material underlag proof and label SSoT completed, validated, and peer-gated. T059 read-only next-tranche ranking is active. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T058
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_submission_tests_do_not_import_processor_test_setup tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_tests_import_canonical_setup_modules tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_tests_do_not_patch_private_submission_finalizer tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_turn_test_setup_modules_keep_their_contracts -q -> 4 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 66 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py -q -> 25 passed"
-      - "cd backend && uv run ruff check touched T056 test files -> passed"
-      - "cd backend && uv run ruff format --check touched T056 test files -> passed"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -> 125 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_dataflow.py -q -> 7 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py -q -> 37 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_flow_ai_builder_live_eval.py -q -> 3 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q -> 105 passed"
+      - "cd backend && uv run ruff check T058 touched files -> passed"
+      - "cd backend && uv run ruff format --check T058 touched files -> passed"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder scripts/flow_ai_builder_live_eval.py -> 0 errors"
       - "git diff --check -> passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2326 passed, 4 skipped, 11 warnings"
-      - "Claude implementation gate: .codex/artifacts/claude-peer-loop-t056-proposal-test-topology-implementation-review-20260523T000430Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity implementation gate: .codex/artifacts/antigravity-peer-loop-t056-proposal-test-topology-implementation-synthesis-20260523T000828Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "I003 live smoke via local API against container commit 48715105f -> valid selected-step model edit plan 081a84a5-4980-43b9-9051-25d6b3d2f74d; follow-up edit plan 700ab844-b8e1-4813-8594-6aa9cd758207; unknown model notice; transcribe_only transcription-model notice"
-      - "Claude challenge: .codex/artifacts/claude-peer-loop-t055-next-flow-ai-builder-tranche-ranking-after-i003-smoke-challenge-20260522T234403Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Claude green check: .codex/artifacts/claude-peer-loop-t055-revised-next-flow-ai-builder-tranche-ranking-after-i003-smoke-20260522T234618Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity synthesis: .codex/artifacts/antigravity-peer-loop-t055-final-next-flow-ai-builder-tranche-ranking-after-claude-green-20260522T234905Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_ai_builder_service.py::TestSendMessageToolCall tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/assistants/test_assistant_router.py tests/unittests/flows/test_flow_capability_manifest.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py -q -> 599 passed, 33 warnings"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2322 passed, 4 skipped, 11 warnings"
-      - "cd backend && uv run pytest tests/unittests/assistants/test_assistant_router.py tests/unittests/flows/test_flow_capability_manifest.py -q -> 370 passed, 33 warnings"
-      - "cd backend && uv run ruff check touched backend source/test files -> passed"
-      - "cd backend && uv run ruff format --check touched backend source/test files -> passed"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder src/intric/flows/flow_authoring_spec.py src/intric/flows/flow_capability_manifest.py src/intric/assistants -> 0 errors"
-      - "git diff --check -> passed"
-      - "cd frontend/apps/web && ../../node_modules/.bin/prettier --check touched frontend files -> passed"
-      - "cd frontend/apps/web && ../../node_modules/.bin/eslint touched AI Builder frontend files -> passed"
-      - "cd frontend/apps/web && bun run check -> fails only on existing non-I002 diagnostics in frontend/packages/intric-js/src/client/stream.js and ExtendExpirationDialog.svelte"
-      - "git diff --check -> passed"
-      - "Claude commit gate: .codex/artifacts/claude-peer-loop-i002-transcribe-only-model-ssot-implementation-review-20260522T183657Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity final implementation gate: .codex/artifacts/antigravity-peer-loop-i002-transcribe-only-model-ssot-final-implementation-review-20260522T184440Z.md -> GREEN_LIGHT yes / MIN_SCORE 9"
+      - "Claude implementation gate iteration 1: .codex/artifacts/claude-peer-loop-t058-underlag-proof-implementation-review-20260523T004608Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Claude implementation gate iteration 2: .codex/artifacts/claude-peer-loop-t058-underlag-proof-implementation-review-iteration-2-20260523T005100Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity implementation synthesis: .codex/artifacts/antigravity-peer-loop-t058-underlag-proof-implementation-synthesis-20260523T005355Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
