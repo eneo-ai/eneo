@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T062
+active_task: T065
 
 interruptions:
   - id: I001
@@ -235,7 +235,7 @@ current_scorecard:
     - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, partial processor-bound facades, and full-source Pyright baseline failures outside AI Builder."
     - "Both Claude and Antigravity recommended a small future clarification of counts_as_repair semantics in ai_builder_proposal_telemetry.py; it was not added in T038 because that file was outside the approved write scope."
     - "T058 closed the source-material label drift and gave C3 typed live-eval binding-shape assertions; T064 then fixed the C3 failure and reran authenticated live eval successfully twice after the final dispatch-boundary fix."
-    - "T061 closed the direct ProposalSubmissionOwner test-topology cleanup with Claude and Antigravity green; submission tests no longer construct AIBuilderProposalProcessor and reach through private `_proposal_submission`, but remaining planner fake doubles and broader topology/readability work still keep the strict floor at 8."
+    - "T062 closed the ProposalSubmissionOwner cohesion/DI/orchestration spike with Claude iteration 3 and Antigravity green. T065 is approved as the next worker only because it deepens the existing active-submission owner, reuses ProposalTurnContext instead of adding a parallel request shape, and has hard stop conditions against callbacks, facades, finalizer DI, and generic dispatch creep."
     - "T064 fixed the T060 C3 failure by using existing rich-workflow/structured-analysis owners, preventing classifier override, and routing server-selected planner-internal questions through typed discovery follow-up dispatch."
     - "Overall remains 8 until full-source typing/test baseline, consolidation/readability/test-topology tranches, AI slop/comment/naming cleanup, and repeated authenticated live-eval evidence prove every dimension is honestly at least 9."
 
@@ -6311,7 +6311,7 @@ tasks:
   - id: T062
     type: judge
     assignee: Judge
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Produce a 1-2h read-only ProposalSubmissionOwner cohesion / dependency-injection / split-orchestration verdict before any production topology refactor."
     inputs:
@@ -6338,6 +6338,91 @@ tasks:
     stop_if:
       - "The spike cannot identify a cleaner owner boundary with file:line evidence."
       - "The proposed next step is only LOC reduction or a facade/callback bag."
+    receipt:
+      completed_at: "2026-05-23T05:31:00+02:00"
+      summary: "Completed the read-only ProposalSubmissionOwner cohesion/dependency-injection/split-orchestration verdict. The spike found a real owner-depth problem rather than a line-count problem: AIBuilderProposalProcessor.propose_plan still sequences active-submission internals across tool schema selection, scoped-model preflight, first-attempt completion, generic dispatch, and forced retry, while ProposalSubmissionOwner owns retry configs, concrete outline/edit processing, self-correction, edit-description repair, and finalization calls. The selected follow-up is T065: deepen ProposalSubmissionOwner into the forced active-submission attempt owner without splitting outline/edit, adding Protocols, introducing finalizer DI, or moving generic question/confirm dispatch."
+      artifact: ".codex/artifacts/flow-ai-builder-t062-proposal-submission-cohesion-verdict.md"
+      selected_next_tranche: T065
+      peer_reviews:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t062-proposalsubmissionowner-cohesion-verdict-plan-gate-20260523T032017Z.md -> GREEN_LIGHT no / MIN_SCORE 6; accepted blockers on implicit forced tool_choice invariant, optional finalizer DI, task ID collision, and unspecified public method surface."
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t062-proposalsubmissionowner-cohesion-verdict-plan-gate-iteration-2-20260523T032438Z.md -> GREEN_LIGHT no / MIN_SCORE 7; accepted blocker on parallel ActiveSubmissionAttemptRequest duplicating ProposalTurnContext."
+        claude_iteration_3: ".codex/artifacts/claude-peer-loop-t062-proposalsubmissionowner-cohesion-verdict-plan-gate-iteration-3-20260523T032733Z.md -> GREEN_LIGHT yes / MIN_SCORE 8."
+        antigravity_synthesis: ".codex/artifacts/antigravity-peer-loop-t062-proposalsubmissionowner-cohesion-final-synthesis-20260523T032945Z.md -> GREEN_LIGHT yes / MIN_SCORE 8; accepted constraints for exactly-one submission tool call validation and preserving planner_upstream_error on provider exceptions."
+      accepted_revisions:
+        - "Renumbered the follow-up worker to T065 because earlier T063/T064 tasks already exist."
+        - "Made the forced tool_choice invariant explicit and testable."
+        - "Removed the parallel ActiveSubmissionAttemptRequest sketch; T065 must reuse ProposalTurnContext as the canonical per-turn state by building it inside the owner after tool schemas and usage tracker exist."
+        - "Defined ForcedSubmissionResponse as the typed no-callback boundary for exactly one active submission tool call."
+        - "Deferred concrete CompiledProposalFinalizer injection to a future task instead of mixing test seam cleanup with owner deepening."
+      rejected_alternatives:
+        - "Split outline and edit submission into separate owners: rejected because the shared retry/self-correction/finalization/telemetry spine would duplicate or require another orchestration owner."
+        - "Add a ProposalSubmission Protocol/interface: rejected as one-implementation ceremony and mock-driven design."
+        - "Move MCP preflight or confirm requirements into ProposalSubmissionOwner: rejected because those concepts are broader than active submission and would recreate a god owner."
+        - "Run full-source Pyright or planner fake-double cleanup next: useful follow-ups, but lower immediate owner-depth impact than removing split active-submission orchestration."
+      score_impact: "Read-only plan gate only; strict overall score remains 8. T065 may improve maintainability/readability if it actually removes lifecycle sequencing from the processor without adding a facade."
+      residual_risks:
+        - "T065 is approved but not implemented yet."
+        - "ProposalSubmissionOwner remains large until T065 proves the owner can become deeper rather than merely larger."
+        - "Remaining planner SimpleNamespace discovery doubles, full-source Pyright baseline failures, and AI slop/comment/naming cleanup still block a strict all-dimensions 9."
+
+  - id: T065
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Deepen ProposalSubmissionOwner into the forced active-submission attempt owner by moving first-attempt active-submission orchestration out of AIBuilderProposalProcessor without callbacks, facade layers, outline/edit splits, finalizer DI, or generic dispatch creep."
+    inputs:
+      - "T062 receipt and artifact"
+      - ".codex/artifacts/flow-ai-builder-t062-proposal-submission-cohesion-verdict.md"
+      - ".codex/artifacts/claude-peer-loop-t062-proposalsubmissionowner-cohesion-verdict-plan-gate-iteration-3-20260523T032733Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t062-proposalsubmissionowner-cohesion-final-synthesis-20260523T032945Z.md"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+    constraints:
+      - "Implement only the peer-approved T065 owner-depth plan."
+      - "Do not add a parallel ActiveSubmissionAttemptRequest or other duplicated request/context shape; ProposalTurnContext remains the canonical per-turn state and should be built inside the owner after active tool schemas and usage tracker exist."
+      - "Do not add Protocols, interfaces, factories, callback bags, **kwargs: Any, Callable[..., Any], finalizer dependency injection, or new production Any surfaces."
+      - "Do not split outline and edit submission owners."
+      - "Do not move MCP preflight, structured-question recovery, confirm requirements, public API, DB, JSONB, frontend, SSE, OpenTelemetry, or live-eval harness code."
+      - "Do not remove make_usage_tracked_proposal_completion from AIBuilderProposalProcessor if confirm-requirements paths still need it; T065 removes only the processor's direct call_proposal_completion_with_usage first-attempt call."
+      - "Preserve unrelated dirty files."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t065-implementation-summary.md"
+    acceptance_criteria:
+      - "AIBuilderProposalProcessor.propose_plan delegates forced active-submission attempt orchestration to ProposalSubmissionOwner.run_active_submission_attempt(...)."
+      - "AIBuilderProposalProcessor no longer imports or calls call_proposal_completion_with_usage."
+      - "AIBuilderProposalProcessor.propose_plan no longer sequences active_submission_tool_name, active_submission_tool_schemas, preflight_scoped_model_revision_if_requested, and retry_forced_proposal_after_text."
+      - "ProposalSubmissionOwner owns active tool schema selection, scoped-model preflight, first-attempt forced proposal completion, submission-only first-attempt tool-call processing, and forced submission retry."
+      - "ProposalSubmissionOwner validates first-attempt tool calls through a frozen ForcedSubmissionResponse-style typed value that accepts exactly one active submission tool call."
+      - "Missing, multiple/parallel, or non-submission first-attempt tool calls follow the existing missing-submission/forced-retry path without a callback into AIBuilderProposalProcessor."
+      - "First-attempt provider exceptions still yield planner_upstream_error with the existing public error contract."
+      - "Generic ASK_STRUCTURED_QUESTION_TOOL_NAME and CONFIRM_REQUIREMENTS_TOOL_NAME dispatch stays in AIBuilderProposalProcessor."
+      - "Public methods on ProposalSubmissionOwner shrink or become deeper; the diff must not create a pass-through facade."
+      - "Static ownership tests prove the processor does not call active-submission internals and the owner does not import AIBuilderProposalProcessor."
+    verify:
+      - "Red static guard first: processor still imports/calls call_proposal_completion_with_usage and sequences active-submission internals before implementation."
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check touched T065 backend files/tests"
+      - "cd backend && uv run ruff format --check touched T065 backend files/tests"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "git diff --check"
+      - "Post-implementation Claude commit gate; Antigravity if quota/tooling is available."
+    stop_if:
+      - "ProposalSubmissionOwner needs a callback into AIBuilderProposalProcessor."
+      - "The worker must move question recovery or confirm requirements into the submission owner."
+      - "The owner interface becomes broader than today."
+      - "The forced tool_choice invariant cannot be preserved and tested."
+      - "The owner cannot preserve the existing first-attempt upstream error event contract."
+      - "Tests become mock choreography instead of proposal behavior coverage."
+      - "The diff needs files outside the allowed scope."
     receipt: null
 
 checks:
@@ -6346,12 +6431,12 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T059 read-only next-tranche ranking completed and peer-gated. T060 live-eval/scorecard honesty is active, with T061 test-topology cleanup as the explicit fallback if T060 is blocked by environment. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T059
+    result: "T062 read-only ProposalSubmissionOwner cohesion/DI/orchestration verdict completed and peer-gated. T065 active-submission owner-deepening worker is active. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T062
     commands:
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src -> 112 errors, 0 warnings, 0 informations; recorded as full-source typing baseline, not a pass."
-      - "Claude T059 iteration 1: .codex/artifacts/claude-peer-loop-t059-next-flow-ai-builder-tranche-ranking-20260523T010239Z.md -> GREEN_LIGHT no / MIN_SCORE 6"
-      - "Claude T059 iteration 2: .codex/artifacts/claude-peer-loop-t059-revised-next-flow-ai-builder-tranche-ranking-20260523T010618Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity T059 iteration 1: .codex/artifacts/antigravity-peer-loop-t059-final-next-tranche-ranking-synthesis-20260523T010842Z.md -> GREEN_LIGHT no / MIN_SCORE 7"
+      - "Claude T062 iteration 1: .codex/artifacts/claude-peer-loop-t062-proposalsubmissionowner-cohesion-verdict-plan-gate-20260523T032017Z.md -> GREEN_LIGHT no / MIN_SCORE 6"
+      - "Claude T062 iteration 2: .codex/artifacts/claude-peer-loop-t062-proposalsubmissionowner-cohesion-verdict-plan-gate-iteration-2-20260523T032438Z.md -> GREEN_LIGHT no / MIN_SCORE 7"
+      - "Claude T062 iteration 3: .codex/artifacts/claude-peer-loop-t062-proposalsubmissionowner-cohesion-verdict-plan-gate-iteration-3-20260523T032733Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity T062 synthesis: .codex/artifacts/antigravity-peer-loop-t062-proposalsubmissionowner-cohesion-final-synthesis-20260523T032945Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
       - "Claude T059 iteration 3: .codex/artifacts/claude-peer-loop-t059-final-revised-next-flow-ai-builder-tranche-ranking-20260523T011139Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
       - "Antigravity T059 iteration 2: .codex/artifacts/antigravity-peer-loop-t059-final-next-tranche-ranking-after-claude-green-20260523T011427Z.md -> final GREEN_LIGHT yes / MIN_SCORE 9"
