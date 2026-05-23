@@ -212,7 +212,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T054 implementation/post-review: generated-client regeneration determinism is closed by making frontend/packages/intric-js/update.js generate client version and schema from one OpenAPI snapshot, with Claude GREEN_LIGHT yes / MIN_SCORE 8. The broader score floor remains 8 because full-source typing/test baseline, remaining topology/readability/test-fixture coupling, source-material/live-eval assertion gaps, and repeated live-eval evidence still block a defensible 9."
+  source: "After T058 implementation/post-review: source-material underlag label SSoT and C3 live-eval binding-shape assertions are closed by reusing ai_builder_source_material.primary_source_material_ref from dataflow and adding typed ExpectedQuestionBinding checks. The broader score floor remains 8 because full-source typing/test baseline, remaining topology/readability/test-fixture coupling, and repeated authenticated live-eval evidence still block a defensible 9."
   Maintainability: 8
   Code_Quality: 9
   Clean_Architecture: 8
@@ -231,11 +231,11 @@ current_scorecard:
   blockers:
     - "Generated-client regeneration determinism is now closed by T054: update.js supports --schema-file review snapshots, URL mode fetches OpenAPI once into a temp snapshot, openapi-typescript uses argv-array spawn, and schema.d.ts diff stats were inspected with no generated churn."
     - "The five-case authenticated live eval now proves C1 vague meeting notes, C2 JSON-with-document-words, C3 audio-to-DOCX, C4 runtime form fields, and C5 revise/edit through the public API, but this gate must be repeated after later planner/runtime changes rather than treated as permanent output-quality proof."
-    - "T042/T044/T048/T050/T052 removed proposal completion, structured-question recovery, confirm-requirements ownership, repair-runtime ownership, and active create/edit proposal-submission ownership from ai_builder_proposal_processor.py. The processor is now 592 LOC after the scoped-model-edit hotfix, but maintainability/readability remain 8 because ProposalSubmissionOwner is still a 754 LOC concentrated owner, submission tests import processor test builders, and the next score-moving tranche must prove whether consolidation/test-topology or live-eval/source-material proof is now the highest blocker."
+    - "T042/T044/T048/T050/T052 removed proposal completion, structured-question recovery, confirm-requirements ownership, repair-runtime ownership, and active create/edit proposal-submission ownership from ai_builder_proposal_processor.py. The processor is now 592 LOC after the scoped-model-edit hotfix, but maintainability/readability remain 8 because ProposalSubmissionOwner is still a 760 LOC concentrated owner, submission tests retain topology coupling, and the next score-moving tranche must prove whether topology/readability or repeated live-eval proof is now the highest blocker."
     - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, partial processor-bound facades, and full-source Pyright baseline failures outside AI Builder."
     - "Both Claude and Antigravity recommended a small future clarification of counts_as_repair semantics in ai_builder_proposal_telemetry.py; it was not added in T038 because that file was outside the approved write scope."
-    - "T046 improved audio/transcript structured-underlag output quality, but source-material labeling differs between source-material normalization and dataflow auto-bind, and the live eval runner still cannot directly assert absence of broad structured JSON bindings."
-    - "Overall remains 8 until full-source typing/test baseline, consolidation/readability/test-topology tranches, source-material/live-eval assertion gaps, and repeated live-eval evidence prove every dimension is honestly at least 9."
+    - "T058 closed the source-material label drift and gave C3 typed live-eval binding-shape assertions, but authenticated live eval still needs to be repeated against a backend confirmed to run the current branch after later planner/runtime changes."
+    - "Overall remains 8 until full-source typing/test baseline, consolidation/readability/test-topology tranches, and repeated authenticated live-eval evidence prove every dimension is honestly at least 9."
 
 score_floor_completion_gates:
   source: "2026-05-21 user review: the board must prevent 'plan executed' from being confused with '9/10 achieved'."
