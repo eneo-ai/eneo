@@ -286,80 +286,90 @@ def auto_bind_targeted_underlag_for_text_composer(
 
     rewritten_steps = draft.steps
     source_ref = primary_source_material_ref(draft)
+    # Capture candidates before rewrites because binding changes input_source.
+    all_previous_candidate_indexes = set(
+        targeted_underlag_all_previous_indexes_for_drafts(
+            rewritten_steps,
+            aggregation_intent=aggregation_intent,
+        )
+    )
     changed = False
-    # Outline mode strips backend-owned refs; rebuild targeted bindings from
-    # declared fields instead of depending on LLM-authored mechanics.
-    for composer_index in targeted_underlag_all_previous_indexes_for_drafts(
-        rewritten_steps,
-        aggregation_intent=aggregation_intent,
-    ):
+    for composer_index in range(len(rewritten_steps)):
+        if not _should_bind_targeted_underlag(
+            steps=rewritten_steps,
+            composer_index=composer_index,
+            all_previous_candidate_indexes=all_previous_candidate_indexes,
+            primary_source_ref=source_ref,
+            aggregation_intent=aggregation_intent,
+        ):
+            continue
         updated_steps = _bind_targeted_underlag_for_composer(
             rewritten_steps,
             composer_index=composer_index,
-            require_multiple_json_priors=False,
             primary_source_ref=source_ref,
         )
         if updated_steps is not rewritten_steps:
             rewritten_steps = updated_steps
             changed = True
 
-    composer_index = _last_compositional_step_index(rewritten_steps)
-    if composer_index is not None:
-        composer = rewritten_steps[composer_index]
-        if (
-            composer.input_source == InputSource.PREVIOUS_STEP
-            and composer.input_type in {InputType.JSON, InputType.TEXT}
-            and not composer.uses_previous_fields
-        ):
-            updated_steps = _bind_targeted_underlag_for_composer(
-                rewritten_steps,
-                composer_index=composer_index,
-                require_multiple_json_priors=True,
-                primary_source_ref=source_ref,
-            )
-            if updated_steps is not rewritten_steps:
-                rewritten_steps = updated_steps
-                changed = True
-
     return rewritten_steps if changed else draft.steps
+
+
+def _should_bind_targeted_underlag(
+    *,
+    steps: list[NewStepDraft],
+    composer_index: int,
+    all_previous_candidate_indexes: set[int],
+    primary_source_ref: PreviousOutputRef | None,
+    aggregation_intent: "AggregationIntent",
+) -> bool:
+    composer = steps[composer_index]
+    if composer.uses_previous_fields:
+        return False
+    if _is_renderer_draft(composer):
+        return False
+    if aggregation_intent in {"aggregate", "compare"}:
+        return False
+
+    priors = _targeted_underlag_prior_steps(steps, composer_index=composer_index)
+    if not priors:
+        return False
+    text_priors_count = sum(
+        1 for _, step in priors if step.output_type == OutputType.TEXT
+    )
+    if text_priors_count > TARGETED_UNDERLAG_SOFT_CAP:
+        return False
+
+    json_priors = _targeted_underlag_json_priors(priors)
+    if not json_priors:
+        return False
+
+    if composer.input_source == InputSource.ALL_PREVIOUS_STEPS:
+        return composer_index in all_previous_candidate_indexes
+    if composer.input_source != InputSource.PREVIOUS_STEP:
+        return False
+    if composer.input_type not in {InputType.JSON, InputType.TEXT}:
+        return False
+    if len(json_priors) >= 2:
+        return True
+    if primary_source_ref is None:
+        return False
+    return any(
+        output_ref.from_step == primary_source_ref.from_step
+        for output_ref in composer.uses_previous_outputs
+    )
 
 
 def _bind_targeted_underlag_for_composer(
     steps: list[NewStepDraft],
     *,
     composer_index: int,
-    require_multiple_json_priors: bool,
     primary_source_ref: PreviousOutputRef | None,
 ) -> list[NewStepDraft]:
     composer = steps[composer_index]
 
-    priors = [
-        (index, step)
-        for index, step in enumerate(steps[:composer_index])
-        if not _is_renderer_draft(step)
-    ]
-    if not priors:
-        return steps
-
-    text_priors_count = sum(
-        1 for _, step in priors if step.output_type == OutputType.TEXT
-    )
-    if text_priors_count > TARGETED_UNDERLAG_SOFT_CAP:
-        return steps
-
-    json_priors = [
-        (index, step)
-        for index, step in priors
-        if step.output_type == OutputType.JSON and step.output_fields
-    ]
-    if not json_priors:
-        return steps
-    if (
-        require_multiple_json_priors
-        and len(json_priors) < 2
-        and not composer.uses_previous_outputs
-    ):
-        return steps
+    priors = _targeted_underlag_prior_steps(steps, composer_index=composer_index)
+    json_priors = _targeted_underlag_json_priors(priors)
 
     new_field_refs = _select_targeted_underlag_field_refs(json_priors)
     if not new_field_refs:
@@ -396,6 +406,28 @@ def _bind_targeted_underlag_for_composer(
     new_steps = list(steps)
     new_steps[composer_index] = rewritten
     return new_steps
+
+
+def _targeted_underlag_prior_steps(
+    steps: list[NewStepDraft],
+    *,
+    composer_index: int,
+) -> list[tuple[int, NewStepDraft]]:
+    return [
+        (index, step)
+        for index, step in enumerate(steps[:composer_index])
+        if not _is_renderer_draft(step)
+    ]
+
+
+def _targeted_underlag_json_priors(
+    priors: list[tuple[int, NewStepDraft]],
+) -> list[tuple[int, NewStepDraft]]:
+    return [
+        (index, step)
+        for index, step in priors
+        if step.output_type == OutputType.JSON and step.output_fields
+    ]
 
 
 def _select_targeted_underlag_field_refs(
@@ -476,13 +508,6 @@ def _field_ref_from_draft_field(
         field_path=field.name,
         label=(field.description or field.name).strip() or field.name,
     )
-
-
-def _last_compositional_step_index(steps: list[NewStepDraft]) -> int | None:
-    for index in range(len(steps) - 1, -1, -1):
-        if not _is_renderer_draft(steps[index]):
-            return index
-    return None
 
 
 def _is_renderer_draft(step: NewStepDraft) -> bool:

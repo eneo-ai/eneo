@@ -4351,6 +4351,386 @@ def test_auto_bind_targeted_underlag_skips_previous_step_composer_with_single_js
     assert composer.uses_previous_fields == []
 
 
+def test_targeted_underlag_predicate_binds_single_json_prior_with_primary_source_ref() -> (
+    None
+):
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        _should_bind_targeted_underlag,
+    )
+    from intric.flows.ai_builder.ai_builder_new_step_models import PreviousOutputRef
+
+    source_ref = PreviousOutputRef(from_step=1, label="Källmaterial")
+    steps = [
+        NewStepDraft(
+            name="Transkribera ljud",
+            instructions="x",
+            input_source="flow_input",
+            input_type="audio",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Extrahera kontext",
+            instructions="x",
+            input_source="previous_step",
+            input_type="text",
+            output_type="json",
+            output_fields=[_field("meeting_context", "string")],
+        ),
+        NewStepDraft(
+            name="Skriv analys",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="text",
+            uses_previous_outputs=[source_ref],
+        ),
+    ]
+
+    assert _should_bind_targeted_underlag(
+        steps=steps,
+        composer_index=2,
+        all_previous_candidate_indexes=set(),
+        primary_source_ref=source_ref,
+        aggregation_intent="linear",
+    )
+
+
+def test_targeted_underlag_predicate_skips_single_json_prior_without_primary_source_ref() -> (
+    None
+):
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        _should_bind_targeted_underlag,
+    )
+
+    steps = [
+        NewStepDraft(
+            name="Extrahera fält",
+            instructions="x",
+            input_source="flow_input",
+            input_type="text",
+            output_type="json",
+            output_fields=[_field("payload", "string")],
+        ),
+        NewStepDraft(
+            name="Skriv kommentar",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="text",
+        ),
+    ]
+
+    assert not _should_bind_targeted_underlag(
+        steps=steps,
+        composer_index=1,
+        all_previous_candidate_indexes=set(),
+        primary_source_ref=None,
+        aggregation_intent="linear",
+    )
+
+
+def test_targeted_underlag_predicate_binds_two_json_priors_without_source_ref() -> None:
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        _should_bind_targeted_underlag,
+    )
+
+    steps = [
+        NewStepDraft(
+            name="Extrahera a",
+            instructions="x",
+            input_source="flow_input",
+            input_type="text",
+            output_type="json",
+            output_fields=[_field("a", "string")],
+        ),
+        NewStepDraft(
+            name="Extrahera b",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="json",
+            output_fields=[_field("b", "string")],
+        ),
+        NewStepDraft(
+            name="Skriv rapport",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="text",
+        ),
+    ]
+
+    assert _should_bind_targeted_underlag(
+        steps=steps,
+        composer_index=2,
+        all_previous_candidate_indexes=set(),
+        primary_source_ref=None,
+        aggregation_intent="linear",
+    )
+
+
+def test_targeted_underlag_predicate_skips_prebound_composer() -> None:
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        _should_bind_targeted_underlag,
+    )
+    from intric.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
+
+    steps = [
+        NewStepDraft(
+            name="Extrahera a",
+            instructions="x",
+            input_source="flow_input",
+            input_type="text",
+            output_type="json",
+            output_fields=[_field("a", "string")],
+        ),
+        NewStepDraft(
+            name="Extrahera b",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="json",
+            output_fields=[_field("b", "string")],
+        ),
+        NewStepDraft(
+            name="Skriv rapport",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="text",
+            uses_previous_fields=[
+                PreviousFieldRef(from_step=1, field_path="a", label="A")
+            ],
+        ),
+    ]
+
+    assert not _should_bind_targeted_underlag(
+        steps=steps,
+        composer_index=2,
+        all_previous_candidate_indexes={2},
+        primary_source_ref=None,
+        aggregation_intent="linear",
+    )
+
+
+def test_targeted_underlag_predicate_skips_renderer() -> None:
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        _should_bind_targeted_underlag,
+    )
+
+    steps = [
+        NewStepDraft(
+            name="Extrahera fält",
+            instructions="x",
+            input_source="flow_input",
+            input_type="text",
+            output_type="json",
+            output_fields=[_field("payload", "string")],
+        ),
+        NewStepDraft(
+            name="Skapa DOCX",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="docx",
+        ),
+    ]
+
+    assert not _should_bind_targeted_underlag(
+        steps=steps,
+        composer_index=1,
+        all_previous_candidate_indexes={1},
+        primary_source_ref=None,
+        aggregation_intent="linear",
+    )
+
+
+@pytest.mark.parametrize("intent", ["aggregate", "compare"])
+def test_targeted_underlag_predicate_skips_aggregate_and_compare_intents(
+    intent: AggregationIntent,
+) -> None:
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        _should_bind_targeted_underlag,
+    )
+
+    steps = [
+        NewStepDraft(
+            name="Extrahera a",
+            instructions="x",
+            input_source="flow_input",
+            input_type="text",
+            output_type="json",
+            output_fields=[_field("a", "string")],
+        ),
+        NewStepDraft(
+            name="Extrahera b",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="json",
+            output_fields=[_field("b", "string")],
+        ),
+        NewStepDraft(
+            name="Skriv rapport",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="text",
+        ),
+    ]
+
+    assert not _should_bind_targeted_underlag(
+        steps=steps,
+        composer_index=2,
+        all_previous_candidate_indexes={2},
+        primary_source_ref=None,
+        aggregation_intent=intent,
+    )
+
+
+def test_auto_bind_is_idempotent_for_all_previous_steps_composer() -> None:
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        auto_bind_targeted_underlag_for_text_composer,
+    )
+
+    steps_before = [
+        NewStepDraft(
+            name="Extrahera a",
+            instructions="x",
+            input_source="flow_input",
+            input_type="text",
+            output_type="json",
+            output_fields=[_field("a", "string")],
+        ),
+        NewStepDraft(
+            name="Extrahera b",
+            instructions="x",
+            input_source="previous_step",
+            input_type="json",
+            output_type="json",
+            output_fields=[_field("b", "string")],
+        ),
+        NewStepDraft(
+            name="Skriv sammanställning",
+            instructions="x",
+            input_source="all_previous_steps",
+            input_type="json",
+            output_type="text",
+        ),
+    ]
+
+    once = auto_bind_targeted_underlag_for_text_composer(
+        _draft_with_steps(steps_before),
+        aggregation_intent="linear",
+    )
+    twice = auto_bind_targeted_underlag_for_text_composer(
+        _draft_with_steps(once),
+        aggregation_intent="linear",
+    )
+
+    assert twice == once
+
+
+def test_source_material_targeted_underlag_converges_between_outline_and_direct_draft() -> (
+    None
+):
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Mötesrapport från ljud",
+            "plan_rationale": "Transkribera ljud och skapa rapport.",
+            "runtime_input": {"input_type": "audio", "required": True},
+            "steps": [
+                {
+                    "name": "Etablera möteskontext",
+                    "task": "Skapa möteskontext.",
+                    "output_fields": [
+                        {
+                            "name": "meeting_context",
+                            "field_type": "string",
+                            "description": "Möteskontext.",
+                            "required": True,
+                        }
+                    ],
+                },
+                {
+                    "name": "Analysera beslut",
+                    "task": "Extrahera beslut.",
+                    "output_fields": [
+                        {
+                            "name": "decisions",
+                            "field_type": "string",
+                            "description": "Beslut.",
+                            "required": True,
+                        }
+                    ],
+                },
+                {
+                    "name": "Skriv rapport",
+                    "task": "Skriv rapporten från underlaget.",
+                },
+            ],
+        }
+    )
+    outline_compiled = compile_create_draft(
+        compile_outline_to_create_draft(
+            outline,
+            context=OutlineCompileContext(ui_language="sv"),
+        )
+    )
+    direct_compiled = compile_create_draft(
+        FlowCreateDraft(
+            flow_name="Mötesrapport från ljud",
+            plan_rationale="Transkribera ljud och skapa rapport.",
+            steps=[
+                CreateStepDraft(
+                    name="Transkribera ljud",
+                    instructions="Transkribera mötesljud.",
+                    input_source="flow_input",
+                    input_type="audio",
+                    output_type="text",
+                    runtime_upload=True,
+                    runtime_required=True,
+                ),
+                CreateStepDraft(
+                    name="Etablera möteskontext",
+                    instructions="Skapa möteskontext.",
+                    input_source="previous_step",
+                    input_type="text",
+                    output_type="json",
+                    output_fields=[_field("meeting_context", "string")],
+                ),
+                CreateStepDraft(
+                    name="Analysera beslut",
+                    instructions="Extrahera beslut.",
+                    input_source="previous_step",
+                    input_type="json",
+                    output_type="json",
+                    output_fields=[_field("decisions", "string")],
+                ),
+                CreateStepDraft(
+                    name="Skriv rapport",
+                    instructions="Skriv rapporten från underlaget.",
+                    input_source="previous_step",
+                    input_type="json",
+                    output_type="text",
+                ),
+            ],
+        )
+    )
+
+    outline_question = outline_compiled.steps[-1].input_bindings["question"]
+    direct_question = direct_compiled.steps[-1].input_bindings["question"]
+
+    assert "Källmaterial: {{ step_a.output.text }}" in outline_question
+    assert "Källmaterial: {{ step_a.output.text }}" in direct_question
+    assert "output.structured." in outline_question
+    assert "output.structured." in direct_question
+    assert "{{ step_b.output.structured }}" not in outline_question
+    assert "{{ step_c.output.structured }}" not in outline_question
+    assert "{{ step_b.output.structured }}" not in direct_question
+    assert "{{ step_c.output.structured }}" not in direct_question
+
+
 def test_normalize_create_draft_mechanics_is_idempotent_for_targeted_underlag() -> None:
     ordinary = FlowCreateDraft(
         flow_name="Enkel sammanfattning",
@@ -4542,9 +4922,17 @@ def test_compile_outline_audio_docx_protocol_step_keeps_transcript_underlag() ->
         (ref.from_step, ref.label) for ref in metadata_step.uses_previous_outputs
     ] == [(1, "Källmaterial")]
     assert compiled.steps[2].input_bindings is not None
-    assert compiled.steps[2].input_bindings["question"] == (
-        "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+    metadata_question = compiled.steps[2].input_bindings["question"]
+    assert (
+        "Fullständig transkription.: "
+        "{{ step_b.output.structured.transcription_text }}" in metadata_question
     )
+    assert (
+        "Talarsegment i ordning.: {{ step_b.output.structured.speaker_turns }}"
+        in metadata_question
+    )
+    assert "Källmaterial: {{ step_a.output.text }}" in metadata_question
+    assert "{{ step_b.output.structured }}" not in metadata_question
 
     body_step = normalized.steps[4]
     assert body_step.name == "Förbered DOCX-innehåll"
@@ -4643,8 +5031,10 @@ def test_compile_create_draft_direct_audio_docx_bad_shape_gets_source_underlag()
     assert compiled.steps[4].input_type.value == "text"
     assert compiled.steps[4].input_contract is None
     assert metadata_question == (
-        "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+        "Beskrivning: {{ step_b.output.structured.transcription_text }}\n\n"
+        "Källmaterial: {{ step_a.output.text }}"
     )
+    assert "{{ step_b.output.structured }}" not in metadata_question
     assert protocol_question == (
         "Beskrivning: {{ step_b.output.structured.transcription_text }}\n\n"
         "Beskrivning: {{ step_c.output.structured.meeting_title }}\n\n"
@@ -4727,10 +5117,20 @@ def test_compile_create_draft_audio_report_section_extractors_keep_transcript_un
         question = step.input_bindings["question"]
         assert "Källmaterial: {{ step_a.output.text }}" in question
     assert (
-        "{{ step_b.output.structured }}" in compiled.steps[2].input_bindings["question"]
+        "Beskrivning: {{ step_b.output.structured.meeting_context }}"
+        in compiled.steps[2].input_bindings["question"]
     )
     assert (
-        "{{ step_c.output.structured }}" in compiled.steps[3].input_bindings["question"]
+        "{{ step_b.output.structured }}"
+        not in compiled.steps[2].input_bindings["question"]
+    )
+    assert (
+        "Beskrivning: {{ step_c.output.structured.background_notes }}"
+        in compiled.steps[3].input_bindings["question"]
+    )
+    assert (
+        "{{ step_c.output.structured }}"
+        not in compiled.steps[3].input_bindings["question"]
     )
     assert (
         "Beskrivning: {{ step_d.output.structured.discussion_notes }}"
@@ -4792,7 +5192,8 @@ def test_compile_create_draft_text_report_keeps_source_and_structured_underlag()
     assert analysis_step.input_contract is None
     assert analysis_step.input_bindings == {
         "question": (
-            "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+            "Beskrivning: {{ step_b.output.structured.meeting_context }}\n\n"
+            "Källmaterial: {{ step_a.output.text }}"
         )
     }
     assert report_step.input_type.value == "text"
@@ -4993,7 +5394,11 @@ def test_compile_outline_audio_document_without_pattern_still_creates_transcript
         for step in compiled.steps
     )
     assert compiled.steps[2].input_bindings == {
-        "question": "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+        "question": (
+            "Gemensam möteskontext.: "
+            "{{ step_b.output.structured.meeting_context }}\n\n"
+            "Källmaterial: {{ step_a.output.text }}"
+        )
     }
     assert compiled.steps[3].input_source == InputSource.PREVIOUS_STEP
     body_field_paths = {

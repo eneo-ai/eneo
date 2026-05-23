@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T074
+active_task: T076
 
 interruptions:
   - id: I001
@@ -7127,7 +7127,7 @@ tasks:
   - id: T074
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     target_review_by: "2026-05-24"
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T073 using current evidence, the strict score floor, and the latest user steering against LOC-driven refactors."
@@ -7146,6 +7146,138 @@ tasks:
       - "For each candidate: canonical owner, what gets deleted/merged/moved/renamed, complexity removed, test impact, debug/review impact, score-floor impact, and normal-user output impact."
       - "Selected worker only if it is clearly the highest-score-moving next slice."
       - "Acceptance criteria, tests, non-goals, stop conditions, allowed files, validation commands, peer-gate requirements, and honest score impact."
+    receipt:
+      completed_at: "2026-05-23T08:36:00Z"
+      summary: "Re-ranked the next Flow AI Builder tranche after T073 from current repo state and strict score-floor evidence. Selected T075 targeted underlag source-material simplification because it can remove the duplicated two-call-site/boolean-flag dataflow eligibility shape while improving normal-user prompt quality for source-material chains. This is not a LOC-reduction task."
+      current_state:
+        branch: "feature/refactor-flows-flowai"
+        head: "3a5bcbe82 Centralize AI Builder turn context assembly"
+        dirty_files_preserved:
+          - ".devcontainer/docker-compose.yml"
+          - ".gitignore"
+          - "AGENTS.md"
+          - ".devcontainer/devcontainer-lock.json"
+          - "PRODUCT.md"
+          - "utvecklingssamtal.mp3"
+        score_floor: 8
+      selected_next_task: T075
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t074-next-tranche-ranking.md"
+        - ".codex/artifacts/flow-ai-builder-t075-targeted-underlag-source-material.md"
+        - ".codex/artifacts/claude-peer-loop-t074-next-flow-ai-builder-tranche-ranking-20260523T081447Z.md"
+        - ".codex/artifacts/claude-peer-loop-t074-next-flow-ai-builder-tranche-ranking-iteration-2-20260523T081946Z.md"
+        - ".codex/artifacts/claude-peer-loop-t075-targeted-underlag-source-material-worker-plan-20260523T082831Z.md"
+        - ".codex/artifacts/claude-peer-loop-t075-targeted-underlag-source-material-worker-plan-iteration-2-20260523T083224Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t075-targeted-underlag-final-plan-synthesis-20260523T083550Z.md"
+      peer_review:
+        claude_t074_iteration_1: "GREEN_LIGHT no / MIN_SCORE 6; first ranking overstated underlag remaining work and risked adding another binder branch."
+        claude_t074_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 8 after narrowing to dataflow eligibility simplification and queuing planner topology as T076."
+        claude_t075_iteration_1: "GREEN_LIGHT no / MIN_SCORE 7; required definitive renderer pins, predicate tests, Pass-A/Pass-B non-overlap coverage, outline/direct convergence coverage, and deletion of require_multiple_json_priors."
+        claude_t075_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 8 on the revised worker artifact."
+        antigravity_t075: "GREEN_LIGHT yes / MIN_SCORE 9; agreed the unified predicate plan is implementation-ready and the best next score-moving slice."
+      score_impact: "Planning-only tranche. No score increase. Strict overall floor remains 8/10 until T075 is implemented, validated, and post-reviewed."
+      remaining_blockers_to_9:
+        - "T075 has not yet implemented the underlag simplification and product-output prompt cleanup."
+        - "Planner/source orchestration topology and readability still need a follow-up scoping spike."
+        - "Full-source Pyright outside AI Builder remains red."
+        - "AI slop/comment/naming cleanup still needs a scoped inventory and implementation tranche."
+        - "Authenticated live eval should be repeated after behavior-affecting changes."
+
+  - id: T075
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    target_review_by: "2026-05-24"
+    objective: "Implement the peer-gated targeted underlag source-material simplification: replace the two-call-site/boolean-flag dataflow binder with one source-order iteration and one predicate, while fixing source-material intermediate prompts to use selected declared field refs instead of broad structured blobs."
+    inputs:
+      - "T074 receipt and ranking artifact"
+      - ".codex/artifacts/flow-ai-builder-t075-targeted-underlag-source-material.md"
+      - ".codex/artifacts/claude-peer-loop-t075-targeted-underlag-source-material-worker-plan-iteration-2-20260523T083224Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t075-targeted-underlag-final-plan-synthesis-20260523T083550Z.md"
+    constraints:
+      - "Red tests first."
+      - "Allowed source scope: backend/src/intric/flows/ai_builder/ai_builder_create_dataflow.py only, plus backend/src/intric/flows/ai_builder/ai_builder_new_step_compiler.py only if red tests prove compiler suppression must change."
+      - "Allowed test scope: backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py."
+      - "No backend/src/intric/flows/ai_builder/ai_builder_source_material.py public helper additions."
+      - "No planner, frontend, SSE, OpenTelemetry, generated-client, DB, migration, prompt, or live-eval-runner changes."
+      - "No new LLM pass, keyword matching, token matching, fuzzy matching, service/manager/helper module, raw LLM-authored templates, or score inflation."
+      - "Preserve unrelated dirty files."
+    expected_output:
+      - "Implementation artifact records red-test failures, final behavior, complexity assessment, per-pin decisions, and validation."
+      - "One module-level pure predicate owns targeted-underlag eligibility inside ai_builder_create_dataflow.py."
+      - "auto_bind_targeted_underlag_for_text_composer has one source-order composer iteration and one _bind_targeted_underlag_for_composer call site."
+      - "require_multiple_json_priors is deleted."
+      - "_last_compositional_step_index is deleted if no longer used."
+      - "Predicate tests cover source-ref, non-source-ref, multi-json, prebound, renderer, aggregate, and compare cases."
+      - "Source-material intermediate prompts use selected declared field refs; renderer pins remain broad with explicit reason."
+      - "Focused tests, Ruff, Pyright, git diff --check, and post-implementation Claude/Antigravity gates run."
+    receipt:
+      completed_at: "2026-05-23T09:01:00Z"
+      summary: "Implemented the targeted underlag source-material simplification. Dataflow auto-bind now has one source-order composer iteration, one module-level predicate, and one _bind_targeted_underlag_for_composer call site. Source-material intermediate prompts now use selected declared field refs instead of broad structured blobs where fields exist; DOCX/PDF renderer pins remain broad by design."
+      changed_files:
+        - "backend/src/intric/flows/ai_builder/ai_builder_create_dataflow.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t075-targeted-underlag-source-material.md"
+        - ".codex/artifacts/flow-ai-builder-t075-implementation-summary.md"
+        - ".codex/artifacts/claude-peer-loop-t075-targeted-underlag-implementation-gate-20260523T084943Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t075-targeted-underlag-implementation-synthesis-20260523T085335Z.md"
+        - ".codex/artifacts/claude-peer-loop-t075-targeted-underlag-final-recheck-after-antigravity-cleanup-20260523T085903Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t075-targeted-underlag-final-recheck-20260523T090005Z.md"
+      red_test_evidence:
+        command: "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -k \"targeted_underlag_predicate or pass_b_does_not_rebind or source_material_targeted_underlag_converges\""
+        result: "Failed before implementation: six predicate tests could not import _should_bind_targeted_underlag, and the outline/direct convergence test showed the direct path still emitted broad {{ step_b.output.structured }}."
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -k \"targeted_underlag_predicate or auto_bind_is_idempotent_for_all_previous_steps_composer or source_material_targeted_underlag_converges\" -> 9 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -> 134 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py -q -> 37 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q -> 108 passed"
+        - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_create_dataflow.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -> passed"
+        - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_create_dataflow.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -> passed"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder/ai_builder_create_dataflow.py -> 0 errors"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
+        - "git diff --check -> passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2382 passed, 4 skipped, 11 warnings"
+      live_eval:
+        status: skipped
+        reason: "Local service unavailable; Python urllib health probe to http://localhost:8000/health returned connection refused."
+        substitute: "Structural prompt-shape checks covered by create compiler fixtures; non-renderer source-material prompts no longer contain broad output.structured blobs when selected field refs exist."
+      peer_review:
+        claude_implementation_gate: "GREEN_LIGHT yes / MIN_SCORE 8."
+        antigravity_implementation_gate: "GREEN_LIGHT yes / MIN_SCORE 8; found a P2 duplicate-validation SSoT risk and P3 test cleanup."
+        claude_final_recheck: "GREEN_LIGHT yes / MIN_SCORE 9 after Codex removed duplicate binder validation and tightened test naming/assertions."
+        antigravity_final_recheck: "GREEN_LIGHT yes / MIN_SCORE 9 after confirming the duplicate-validation and convergence issues were resolved."
+      score_impact: "Raises the T075 targeted-underlag slice to 9/10 by peer evidence, and improves Maintainability, Single Source of Truth, Test Quality, and Normal-User Output Quality evidence. Strict broader Flow AI Builder floor remains 8/10 because planner/source topology, AI slop/comment/naming inventory, full-source Pyright outside AI Builder, and authenticated live eval after behavior changes remain unresolved."
+      remaining_blockers_to_9:
+        - "T076 planner-topology scoping still needs to decide whether AIBuilderPlanner.send_message has a cleaner lifecycle owner."
+        - "AI slop/comment/naming cleanup still needs a scoped inventory and implementation tranche."
+        - "Full-source Pyright outside AI Builder remains red."
+        - "Authenticated live eval should run when local service is available."
+
+  - id: T076
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    target_review_by: "2026-05-24"
+    objective: "Run a read-only planner/source topology scoping spike after T075 to decide the next highest-score-moving tranche without defaulting to LOC-driven file splitting."
+    inputs:
+      - "T075 receipt and implementation artifacts"
+      - "Current AIBuilderPlanner.send_message topology"
+      - "Current scorecard and remaining blockers"
+      - "Latest user steering against splitting for LOC alone"
+    constraints:
+      - "Read-only planning task; do not implement during T076."
+      - "Ask whether any extraction simplifies lifecycle ownership, debugging, tests, and reviewability, or merely moves complexity."
+      - "Consider delete/merge/rename/move before adding files or services."
+      - "Use Claude and Antigravity plan gates before activating any worker."
+      - "Preserve unrelated dirty files and keep one active task."
+    expected_output:
+      - "Evidence-backed ranking of next tranche candidates with file:line citations."
+      - "Explicit decision on whether planner topology, AI slop/comment/naming, full-source typing baseline, live eval, or another slice most improves the strict floor."
+      - "If a planner topology worker is selected: canonical owner, what moves/deletes/merges, red tests, allowed files, stop conditions, validation, and honest score impact."
     receipt: null
 
 checks:
