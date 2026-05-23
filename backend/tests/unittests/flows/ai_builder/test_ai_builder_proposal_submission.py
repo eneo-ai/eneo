@@ -52,14 +52,14 @@ from tests.unittests.flows.ai_builder.proposal_turn_builders import (
 )
 from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
     _flow_with_builder_description,
-    _make_processor,
     _make_response_with_text,
+    _make_submission,
     _make_tool_call,
 )
 
 
 def test_create_submission_schema_keeps_mcp_refs_free_form() -> None:
-    schemas = _make_processor()._proposal_submission.active_submission_tool_schemas(
+    schemas = _make_submission().active_submission_tool_schemas(
         flow=None,
         available_models=[],
         available_kbs=[],
@@ -81,10 +81,10 @@ def test_create_submission_schema_keeps_mcp_refs_free_form() -> None:
 
 @pytest.mark.asyncio
 async def test_scoped_model_preflight_skips_existing_flow_edit_context() -> None:
-    processor = _make_processor()
+    submission = _make_submission()
     ctx = _make_context(flow=SimpleNamespace(id=uuid4()))
 
-    result = await processor._proposal_submission.preflight_scoped_model_revision_if_requested(
+    result = await submission.preflight_scoped_model_revision_if_requested(
         ctx=ctx,
     )
 
@@ -95,7 +95,7 @@ async def test_scoped_model_preflight_skips_existing_flow_edit_context() -> None
 async def test_scoped_model_preflight_returns_error_event_for_deterministic_failure() -> (
     None
 ):
-    processor = _make_processor()
+    submission = _make_submission()
     ctx = _make_context(request_id="req-deterministic-failure")
     deterministic_failure = ToolProcessingResult(
         feedback="Scoped plan edit target `step_a` disappeared.",
@@ -107,7 +107,7 @@ async def test_scoped_model_preflight_returns_error_event_for_deterministic_fail
         "process_scoped_step_model_revision_if_requested",
         return_value=deterministic_failure,
     ):
-        result = await processor._proposal_submission.preflight_scoped_model_revision_if_requested(
+        result = await submission.preflight_scoped_model_revision_if_requested(
             ctx=ctx,
         )
 
@@ -122,7 +122,7 @@ async def test_scoped_model_preflight_returns_error_event_for_deterministic_fail
 
 @pytest.mark.asyncio
 async def test_scoped_model_preflight_uses_bounded_server_tool_call_id() -> None:
-    processor = _make_processor()
+    submission = _make_submission()
     prior_spec = _make_flow_spec(model_ref="model.gpt-4o-mini", knowledge_refs=[])
     prior_plan = _builder_plan(prior_spec)
     catalog = build_ai_builder_resource_catalog(
@@ -152,7 +152,7 @@ async def test_scoped_model_preflight_uses_bounded_server_tool_call_id() -> None
     with patch.object(
         CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
     ):
-        result = await processor._proposal_submission.preflight_scoped_model_revision_if_requested(
+        result = await submission.preflight_scoped_model_revision_if_requested(
             ctx=ctx,
         )
 
@@ -164,7 +164,7 @@ async def test_scoped_model_preflight_uses_bounded_server_tool_call_id() -> None
 
 @pytest.mark.asyncio
 async def test_outline_quality_failure_records_failed_first_attempt() -> None:
-    processor = _make_processor()
+    submission = _make_submission()
     tracker = ProposalTurnTelemetry(
         request_id="req-outline-quality",
         model="openai/gpt-5.4-nano",
@@ -231,7 +231,7 @@ async def test_outline_quality_failure_records_failed_first_attempt() -> None:
     ):
         events = [
             event
-            async for event in processor._proposal_submission.handle_outline_flow_tool_call(
+            async for event in submission.handle_outline_flow_tool_call(
                 ctx=ctx,
                 tool_call=tool_call,
             )
@@ -250,7 +250,7 @@ async def test_outline_quality_failure_records_failed_first_attempt() -> None:
 async def test_handle_outline_flow_tool_call_returns_architecture_error_without_repair() -> (
     None
 ):
-    processor = _make_processor()
+    submission = _make_submission()
     tracker = ProposalTurnTelemetry(
         request_id="req-architecture",
         model="openai/gpt-5.4-nano",
@@ -294,7 +294,7 @@ async def test_handle_outline_flow_tool_call_returns_architecture_error_without_
     ):
         events = [
             event
-            async for event in processor._proposal_submission.handle_outline_flow_tool_call(
+            async for event in submission.handle_outline_flow_tool_call(
                 ctx=ctx,
                 tool_call=tool_call,
             )
@@ -316,7 +316,7 @@ async def test_handle_outline_flow_tool_call_returns_architecture_error_without_
 
 @pytest.mark.asyncio
 async def test_edit_flow_parse_failure_records_proposal_repair_reason() -> None:
-    processor = _make_processor()
+    submission = _make_submission()
     tracker = ProposalTurnTelemetry(
         request_id="req-edit-parse",
         model="openai/gpt-5.4-nano",
@@ -342,7 +342,7 @@ async def test_edit_flow_parse_failure_records_proposal_repair_reason() -> None:
     ):
         events = [
             event
-            async for event in processor._proposal_submission.handle_edit_flow_tool_call(
+            async for event in submission.handle_edit_flow_tool_call(
                 ctx=ctx,
                 tool_call=tool_call,
             )
@@ -359,14 +359,14 @@ async def test_edit_flow_parse_failure_records_proposal_repair_reason() -> None:
 
 @pytest.mark.asyncio
 async def test_edit_flow_retry_config_carries_invocation_context() -> None:
-    processor = _make_processor()
+    submission = _make_submission()
     assistant_snapshots = {uuid4(): {"name": "Analys"}}
     resource_catalog = MagicMock()
     flow = MagicMock()
     plan_edit_context = MagicMock()
     prior_plan_for_revision = MagicMock()
 
-    config = processor._proposal_submission._edit_flow_retry_config(
+    config = submission._edit_flow_retry_config(
         assistant_snapshots=assistant_snapshots,
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={"timeout": 30},
@@ -420,7 +420,7 @@ async def test_edit_flow_retry_config_carries_invocation_context() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_edit_flow_repairs_compiled_edit_before_finalization() -> None:
-    processor = _make_processor()
+    submission = _make_submission()
     flow = MagicMock()
     original = _compiled_edit_proposal()
     repaired = _compiled_edit_proposal(
@@ -461,7 +461,7 @@ async def test_handle_edit_flow_repairs_compiled_edit_before_finalization() -> N
     ):
         events = [
             event
-            async for event in processor._proposal_submission.handle_edit_flow_tool_call(
+            async for event in submission.handle_edit_flow_tool_call(
                 ctx=ctx, tool_call=tool_call
             )
         ]
@@ -480,7 +480,8 @@ async def test_handle_edit_flow_repairs_compiled_edit_before_finalization() -> N
 async def test_handle_edit_flow_description_repair_records_tokens_without_repair_attempt() -> (
     None
 ):
-    processor = _make_processor()
+    litellm_client = AsyncMock()
+    submission = _make_submission(litellm_client=litellm_client)
     tracker = ProposalTurnTelemetry(
         request_id="req-direct-description-repair",
         model="openai/gpt-5.4",
@@ -506,7 +507,7 @@ async def test_handle_edit_flow_description_repair_records_tokens_without_repair
         {"plan_rationale": "Edit", "operations": []},
         tool_call_id="call-edit-description-repair",
     )
-    processor.litellm_client.acompletion = AsyncMock(
+    litellm_client.acompletion = AsyncMock(
         return_value=_make_response_with_text(
             "New generated description",
             prompt_tokens=7,
@@ -531,7 +532,7 @@ async def test_handle_edit_flow_description_repair_records_tokens_without_repair
     ):
         events = [
             event
-            async for event in processor._proposal_submission.handle_edit_flow_tool_call(
+            async for event in submission.handle_edit_flow_tool_call(
                 ctx=ctx, tool_call=tool_call
             )
         ]
@@ -549,7 +550,7 @@ async def test_handle_edit_flow_description_repair_records_tokens_without_repair
 async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mode() -> (
     None
 ):
-    processor = _make_processor()
+    submission = _make_submission()
 
     with patch(
         "intric.flows.ai_builder.ai_builder_proposal_submission.run_forced_tool_retry_after_text",
@@ -559,7 +560,7 @@ async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mod
             )
         ),
     ) as retry_forced_tool:
-        result = await processor._proposal_submission.retry_forced_proposal_after_text(
+        result = await submission.retry_forced_proposal_after_text(
             correction_messages=[{"role": "system", "content": "Prompt"}],
             assistant_text="Här är planen.",
             tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
@@ -586,7 +587,7 @@ async def test_retry_forced_proposal_after_text_uses_outline_flow_for_create_mod
 
 @pytest.mark.asyncio
 async def test_handle_edit_flow_parse_failure_triggers_self_correction() -> None:
-    processor = _make_processor()
+    submission = _make_submission()
     tool_call = MagicMock()
     tool_call.id = "call_edit"
     tool_call.function.name = EDIT_FLOW_TOOL_NAME
@@ -615,7 +616,7 @@ async def test_handle_edit_flow_parse_failure_triggers_self_correction() -> None
     ) as repair:
         events = [
             event
-            async for event in processor._proposal_submission.handle_edit_flow_tool_call(
+            async for event in submission.handle_edit_flow_tool_call(
                 ctx=ctx, tool_call=tool_call
             )
         ]

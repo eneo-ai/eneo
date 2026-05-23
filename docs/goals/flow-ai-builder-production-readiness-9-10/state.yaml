@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T061
+active_task: T062
 
 interruptions:
   - id: I001
@@ -212,7 +212,7 @@ scoring_target:
   overall_score_rule: "minimum dimension score"
 
 current_scorecard:
-  source: "After T064 authenticated live eval against the local API: the C3 audio-to-DOCX failure is fixed, and the five-case live eval passed twice after the typed-question dispatch-boundary fix. Normal-User Output Quality returns to 9 for the current evidence set. The broader score floor remains 8 because full-source typing/test baseline, remaining topology/readability/test-fixture coupling, and AI slop/comment/naming cleanup still block a defensible all-dimensions 9."
+  source: "After T064 authenticated live eval against the local API and T061 test-topology cleanup: the C3 audio-to-DOCX failure is fixed, the five-case live eval passed twice after the typed-question dispatch-boundary fix, and ProposalSubmissionOwner submission tests now instantiate their canonical owner directly. Normal-User Output Quality stays 9 for the current evidence set. The broader score floor remains 8 because full-source typing/test baseline, remaining topology/readability/test-fixture coupling, and AI slop/comment/naming cleanup still block a defensible all-dimensions 9."
   Maintainability: 8
   Code_Quality: 9
   Clean_Architecture: 8
@@ -235,7 +235,7 @@ current_scorecard:
     - "The fake model-owner seams are deleted, but remaining readability/module/test topology work still includes misleading test names, pre-existing compatibility comments, large orchestration files, partial processor-bound facades, and full-source Pyright baseline failures outside AI Builder."
     - "Both Claude and Antigravity recommended a small future clarification of counts_as_repair semantics in ai_builder_proposal_telemetry.py; it was not added in T038 because that file was outside the approved write scope."
     - "T058 closed the source-material label drift and gave C3 typed live-eval binding-shape assertions; T064 then fixed the C3 failure and reran authenticated live eval successfully twice after the final dispatch-boundary fix."
-    - "T059 closed the next-tranche ranking with Claude and Antigravity green; after T064, activate the independent T061 direct ProposalSubmissionOwner test-topology cleanup unless a new live interruption outranks it."
+    - "T061 closed the direct ProposalSubmissionOwner test-topology cleanup with Claude and Antigravity green; submission tests no longer construct AIBuilderProposalProcessor and reach through private `_proposal_submission`, but remaining planner fake doubles and broader topology/readability work still keep the strict floor at 8."
     - "T064 fixed the T060 C3 failure by using existing rich-workflow/structured-analysis owners, preventing classifier override, and routing server-selected planner-internal questions through typed discovery follow-up dispatch."
     - "Overall remains 8 until full-source typing/test baseline, consolidation/readability/test-topology tranches, AI slop/comment/naming cleanup, and repeated authenticated live-eval evidence prove every dimension is honestly at least 9."
 
@@ -6241,7 +6241,7 @@ tasks:
   - id: T061
     type: worker
     assignee: Worker
-    status: active
+    status: completed
     reasoning_hint: medium
     objective: "Clean up ProposalSubmissionOwner submission tests so they instantiate ProposalSubmissionOwner directly instead of constructing AIBuilderProposalProcessor and reaching through private `_proposal_submission`."
     inputs:
@@ -6273,12 +6273,45 @@ tasks:
       - "Direct construction requires production source changes beyond test-only setup."
       - "Behavior assertions are replaced by mock choreography."
       - "The cleanup reveals a real production seam problem that belongs in T062 instead."
-    receipt: null
+    receipt:
+      completed_at: "2026-05-23T05:14:00+02:00"
+      summary: "Cleaned proposal submission test topology so `test_ai_builder_proposal_submission.py` constructs `ProposalSubmissionOwner` directly through `_make_submission()` instead of constructing `AIBuilderProposalProcessor` and reaching through private `_proposal_submission`. Added an AST ownership guard preventing `_proposal_submission` reach-through from returning in the submission test file. While running the full AI Builder suite, fixed stale planner test doubles exposed by T064 by using typed `DiscoveryAnalysis(issues=())` where tests previously relied on `SimpleNamespace(mvs_met=True)`."
+      implementation_artifact: ".codex/artifacts/flow-ai-builder-t061-implementation-summary.md"
+      changed_files:
+        - "backend/tests/unittests/flows/ai_builder/proposal_turn_test_doubles.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      red_evidence:
+        - "Initial guard run failed with 12 `_proposal_submission` reach-through violations in test_ai_builder_proposal_submission.py before the cleanup."
+      verification:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_submission_tests_construct_submission_owner_directly tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py -q -> 13 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 67 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py -q -> 25 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner.py -q -> 19 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2344 passed, 4 skipped, 11 warnings."
+        - "cd backend && uv run ruff check touched T061 backend test files -> passed."
+        - "cd backend && uv run ruff format --check touched T061 backend test files -> passed."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations."
+        - "git diff --check -> passed before board receipt update."
+      peer_reviews:
+        claude_post_implementation: ".codex/artifacts/claude-peer-loop-t061-direct-proposalsubmissionowner-test-topology-implementation-review-20260523T030748Z.md -> GREEN_LIGHT yes / MIN_SCORE 8."
+        antigravity_post_implementation: ".codex/artifacts/antigravity-peer-loop-t061-direct-proposalsubmissionowner-tests-final-review-20260523T031256Z.md -> GREEN_LIGHT yes / MIN_SCORE 8."
+      codex_self_review:
+        verdict: "pass for T061. This is a narrow test-topology cleanup that makes the owner under test explicit and removes private parent-object reach-through without changing production behavior."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "T061 improves test maintainability and reviewability but does not move the strict overall floor above 8."
+        - "Antigravity found four remaining pre-existing planner `SimpleNamespace` discovery doubles at or near test_ai_builder_planner.py lines 327, 426, 489, and 626; keep as follow-up debt unless a later test-topology slice owns them."
+        - "ProposalSubmissionOwner remains a large concentrated owner; T062 must judge cohesion/dependency-injection/split-orchestration before any production topology refactor."
 
   - id: T062
     type: judge
     assignee: Judge
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Produce a 1-2h read-only ProposalSubmissionOwner cohesion / dependency-injection / split-orchestration verdict before any production topology refactor."
     inputs:

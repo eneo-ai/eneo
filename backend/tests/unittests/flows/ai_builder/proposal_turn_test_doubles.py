@@ -15,6 +15,9 @@ from intric.flows.ai_builder.ai_builder_domain_models import PlannerPlanEnvelope
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
 )
+from intric.flows.ai_builder.ai_builder_proposal_submission import (
+    ProposalSubmissionOwner,
+)
 
 
 def _make_processor(**overrides: object) -> AIBuilderProposalProcessor:
@@ -29,6 +32,19 @@ def _make_processor(**overrides: object) -> AIBuilderProposalProcessor:
     }
     defaults.update(overrides)
     return AIBuilderProposalProcessor(**defaults)
+
+
+def _make_submission(**overrides: object) -> ProposalSubmissionOwner:
+    defaults = {
+        "repo": AsyncMock(),
+        "litellm_client": AsyncMock(),
+        "self_correction_temperature": 0.2,
+        "self_correction_bumped_temperature": 0.5,
+        "forced_proposal_temperature": 0.3,
+        "quality_retry_warning_codes": frozenset(),
+    }
+    defaults.update(overrides)
+    return ProposalSubmissionOwner(**defaults)
 
 
 def _stored_plan_result(*, plan: object | None = None, envelope: object | None = None):

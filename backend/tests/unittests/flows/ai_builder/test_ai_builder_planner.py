@@ -338,7 +338,7 @@ async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_he
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a flow")]
     requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
-    discovery_analysis = SimpleNamespace(mvs_met=True)
+    discovery_analysis = DiscoveryAnalysis(issues=())
 
     with (
         patch(
@@ -546,7 +546,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_system_pro
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build from this file")]
     requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
-    discovery_analysis = SimpleNamespace(mvs_met=True)
+    discovery_analysis = DiscoveryAnalysis(issues=())
 
     with (
         patch(
@@ -711,7 +711,7 @@ async def test_prepare_planner_request_disables_discovery_semantic_adjudication_
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a flow")]
     requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
-    discovery_analysis = SimpleNamespace(mvs_met=True)
+    discovery_analysis = DiscoveryAnalysis(issues=())
 
     with (
         patch(
@@ -776,7 +776,7 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a flow")]
     requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
-    discovery_analysis = SimpleNamespace(mvs_met=True)
+    discovery_analysis = DiscoveryAnalysis(issues=())
 
     with (
         patch(
@@ -845,7 +845,7 @@ async def test_prepare_planner_request_projects_pre_commit_into_system_prompt() 
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a flow")]
     requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
-    discovery_analysis = SimpleNamespace(mvs_met=True)
+    discovery_analysis = DiscoveryAnalysis(issues=())
 
     with (
         patch(
@@ -931,7 +931,7 @@ async def test_prepare_planner_request_threads_unresolved_core_slots_into_system
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Build a flow")]
     requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
-    discovery_analysis = SimpleNamespace(mvs_met=True)
+    discovery_analysis = DiscoveryAnalysis(issues=())
 
     with (
         patch(
@@ -1010,7 +1010,7 @@ async def test_prepare_planner_request_carries_forward_persisted_commit_into_pro
     planner = _make_planner()
     conversation = [ConversationMessage(role="user", content="Refine step 1")]
     requirements_state = SimpleNamespace(latest_summary=None, confirmed=False)
-    discovery_analysis = SimpleNamespace(mvs_met=True)
+    discovery_analysis = DiscoveryAnalysis(issues=())
     committed_hash = "b" * 64
     persisted = PlanningState.empty()
     persisted.architecture_commit = ArchitectureCommit(
