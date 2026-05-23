@@ -24,6 +24,9 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
+from intric.flows.ai_builder.ai_builder_proposal_finalization import (
+    CompiledProposalFinalizer,
+)
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     ForcedToolRetryOutcome,
 )
@@ -38,18 +41,20 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
-from tests.unittests.flows.ai_builder.test_ai_builder_proposal_processor import (
+from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _builder_plan,
     _compiled_edit_proposal,
     _description_update_advisory,
-    _flow_with_builder_description,
     _make_context,
     _make_flow_spec,
+    _make_retry_invocation,
+    _make_turn,
+)
+from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
+    _flow_with_builder_description,
     _make_processor,
     _make_response_with_text,
-    _make_retry_invocation,
     _make_tool_call,
-    _make_turn,
 )
 
 
@@ -145,9 +150,7 @@ async def test_scoped_model_preflight_uses_bounded_server_tool_call_id() -> None
     )
 
     with patch.object(
-        processor._proposal_submission._compiled_proposal_finalizer,
-        "finalize_compiled_proposal",
-        new=finalize,
+        CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
     ):
         result = await processor._proposal_submission.preflight_scoped_model_revision_if_requested(
             ctx=ctx,
@@ -453,9 +456,7 @@ async def test_handle_edit_flow_repairs_compiled_edit_before_finalization() -> N
             new=repair,
         ),
         patch.object(
-            processor._proposal_submission._compiled_proposal_finalizer,
-            "finalize_compiled_proposal",
-            new=finalize,
+            CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
         ),
     ):
         events = [
@@ -525,9 +526,7 @@ async def test_handle_edit_flow_description_repair_records_tokens_without_repair
             ),
         ),
         patch.object(
-            processor._proposal_submission._compiled_proposal_finalizer,
-            "finalize_compiled_proposal",
-            new=finalize,
+            CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
         ),
     ):
         events = [

@@ -169,6 +169,46 @@ ARCHITECTURE_ERROR_HELPERS = frozenset(
         "record_proposal_architecture_failure",
     }
 )
+AI_BUILDER_TEST_MODULE = ".".join(("tests", "unittests", "flows", "ai_builder"))
+PROPOSAL_PROCESSOR_TEST_MODULE = ".".join(
+    (AI_BUILDER_TEST_MODULE, "test_ai_builder_proposal_processor")
+)
+PROPOSAL_TURN_BUILDERS_IMPORT_MODULE = ".".join(
+    (AI_BUILDER_TEST_MODULE, "proposal_turn_builders")
+)
+PROPOSAL_TURN_TEST_DOUBLES_IMPORT_MODULE = ".".join(
+    (AI_BUILDER_TEST_MODULE, "proposal_turn_test_doubles")
+)
+PROPOSAL_TEST_TOPOLOGY_FILES = (
+    Path("tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"),
+    Path("tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"),
+)
+PROPOSAL_TURN_BUILDER_TEST_MODULE = Path(
+    "tests/unittests/flows/ai_builder/proposal_turn_builders.py"
+)
+PROPOSAL_TURN_TEST_DOUBLES_MODULE = Path(
+    "tests/unittests/flows/ai_builder/proposal_turn_test_doubles.py"
+)
+PURE_PROPOSAL_TURN_BUILDER_BANNED_IMPORTS = frozenset(
+    {
+        "pytest",
+        "types",
+        "unittest.mock",
+        "intric.flows.ai_builder.ai_builder_proposal_processor",
+        "intric.flows.ai_builder.ai_builder_proposal_submission",
+    }
+)
+PURE_PROPOSAL_TURN_BUILDER_BANNED_NAMES = frozenset(
+    {
+        "AIBuilderProposalProcessor",
+        "ProposalSubmissionOwner",
+        "AsyncMock",
+        "MagicMock",
+        "Mock",
+        "SimpleNamespace",
+    }
+)
+PROPOSAL_TURN_TEST_DOUBLES_BANNED_DECORATORS = frozenset({"fixture", "pytest.fixture"})
 
 BANNED_DOMAIN_MODEL_IMPORTS = frozenset(
     {
@@ -913,10 +953,138 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
     assert violations == []
 
 
+def test_proposal_submission_tests_do_not_import_processor_test_setup() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    submission_test_path = backend_root / Path(
+        "tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
+    )
+    tree = ast.parse(
+        submission_test_path.read_text(), filename=str(submission_test_path)
+    )
+    violations: list[str] = []
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if node.module == PROPOSAL_PROCESSOR_TEST_MODULE:
+            violations.append(
+                f"{submission_test_path}:{node.lineno} imports {node.module}"
+            )
+
+    assert violations == []
+
+
+def test_proposal_tests_import_canonical_setup_modules() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    expected_modules_by_path = {
+        Path(
+            "tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+        ): {
+            PROPOSAL_TURN_BUILDERS_IMPORT_MODULE,
+            PROPOSAL_TURN_TEST_DOUBLES_IMPORT_MODULE,
+        },
+        Path(
+            "tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
+        ): {
+            PROPOSAL_TURN_BUILDERS_IMPORT_MODULE,
+            PROPOSAL_TURN_TEST_DOUBLES_IMPORT_MODULE,
+        },
+    }
+    violations: list[str] = []
+
+    for relative_path, expected_modules in expected_modules_by_path.items():
+        path = backend_root / relative_path
+        tree = ast.parse(path.read_text(), filename=str(path))
+        imported_modules = {
+            node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+        }
+        missing_modules = sorted(expected_modules - imported_modules)
+        if missing_modules:
+            violations.append(f"{path}: missing imports {missing_modules}")
+
+    assert violations == []
+
+
+def test_proposal_tests_do_not_patch_private_submission_finalizer() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    violations: list[str] = []
+
+    for relative_path in PROPOSAL_TEST_TOPOLOGY_FILES:
+        path = backend_root / relative_path
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and (
+                node.attr == "_compiled_proposal_finalizer"
+            ):
+                chain = _attribute_chain(node)
+                violations.append(f"{path}:{node.lineno} reaches {chain}")
+
+    assert violations == []
+
+
+def test_proposal_turn_test_setup_modules_keep_their_contracts() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    builder_path = backend_root / PROPOSAL_TURN_BUILDER_TEST_MODULE
+    doubles_path = backend_root / PROPOSAL_TURN_TEST_DOUBLES_MODULE
+    violations: list[str] = []
+
+    if not builder_path.is_file():
+        violations.append(f"{builder_path}: missing pure builder module")
+    else:
+        builder_tree = ast.parse(builder_path.read_text(), filename=str(builder_path))
+        if not ast.get_docstring(builder_tree):
+            violations.append(f"{builder_path}: missing ownership docstring")
+        for node in ast.walk(builder_tree):
+            if isinstance(node, ast.ImportFrom) and (
+                node.module in PURE_PROPOSAL_TURN_BUILDER_BANNED_IMPORTS
+            ):
+                violations.append(f"{builder_path}:{node.lineno} imports {node.module}")
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name in PURE_PROPOSAL_TURN_BUILDER_BANNED_IMPORTS:
+                        violations.append(
+                            f"{builder_path}:{node.lineno} imports {alias.name}"
+                        )
+            if isinstance(node, ast.Name) and (
+                node.id in PURE_PROPOSAL_TURN_BUILDER_BANNED_NAMES
+            ):
+                violations.append(f"{builder_path}:{node.lineno} uses {node.id}")
+
+    if not doubles_path.is_file():
+        violations.append(f"{doubles_path}: missing test-double module")
+    else:
+        doubles_tree = ast.parse(doubles_path.read_text(), filename=str(doubles_path))
+        if not ast.get_docstring(doubles_tree):
+            violations.append(f"{doubles_path}: missing ownership docstring")
+        for node in ast.walk(doubles_tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for decorator in node.decorator_list:
+                    decorator_name = ast.unparse(decorator)
+                    if decorator_name in PROPOSAL_TURN_TEST_DOUBLES_BANNED_DECORATORS:
+                        violations.append(
+                            f"{doubles_path}:{node.lineno} defines pytest fixture"
+                        )
+
+    assert violations == []
+
+
 def _annotation_uses_any(annotation: ast.expr | None) -> bool:
     return annotation is not None and any(
         isinstance(node, ast.Name) and node.id == "Any" for node in ast.walk(annotation)
     )
+
+
+def _attribute_chain(node: ast.Attribute) -> str:
+    parts: list[str] = []
+    current: ast.expr = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if isinstance(current, ast.Name):
+        parts.append(current.id)
+    else:
+        parts.append(ast.unparse(current))
+    return ".".join(reversed(parts))
 
 
 def _python_files() -> list[Path]:

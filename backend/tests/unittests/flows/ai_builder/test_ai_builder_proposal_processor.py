@@ -12,23 +12,11 @@ from intric.flows.ai_builder import (
     ai_builder_proposal_processor as proposal_processor_module,
 )
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
-from intric.flows.ai_builder.ai_builder_description_semantics import (
-    DescriptionProvenance,
-    description_hash,
-)
 from intric.flows.ai_builder.ai_builder_domain_models import (
-    BuilderPlan,
     ConversationMessage,
-    PlannerPlanEnvelope,
-    PlanStatus,
 )
 from intric.flows.ai_builder.ai_builder_edit_models import (
-    BuilderPlanEditResult,
-    CompiledEditResult,
-    EditAdvisory,
-    FlowEditDiff,
     FlowEditDraft,
-    StepChange,
 )
 from intric.flows.ai_builder.ai_builder_edit_proposal import (
     process_edit_arguments,
@@ -42,6 +30,9 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
+from intric.flows.ai_builder.ai_builder_proposal_finalization import (
+    CompiledProposalFinalizer,
+)
 from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
 )
@@ -52,11 +43,9 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
-    CompiledProposal,
     ProposalTurnContext,
     ToolProcessingResult,
     ToolRetryConfig,
-    ToolRetryInvocation,
 )
 from intric.flows.ai_builder.ai_builder_question_recovery import (
     RecoveredToolDispatchRequest,
@@ -64,10 +53,6 @@ from intric.flows.ai_builder.ai_builder_question_recovery import (
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AssistantSnapshotResourceUnavailableError,
     build_ai_builder_resource_catalog,
-)
-from intric.flows.ai_builder.ai_builder_session_turn import (
-    SessionSendLease,
-    SessionSendTurn,
 )
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
@@ -80,65 +65,28 @@ from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
-    MCPPolicy,
     OutputMode,
     OutputType,
     StepSpec,
 )
-
-
-def _make_processor(**overrides) -> AIBuilderProposalProcessor:
-    defaults = {
-        "user": MagicMock(tenant_id=uuid4()),
-        "repo": AsyncMock(),
-        "litellm_client": AsyncMock(),
-        "self_correction_temperature": 0.2,
-        "self_correction_bumped_temperature": 0.5,
-        "forced_proposal_temperature": 0.3,
-        "quality_retry_warning_codes": set(),
-    }
-    defaults.update(overrides)
-    return AIBuilderProposalProcessor(**defaults)
-
-
-def _make_turn(
-    *,
-    session_id=None,
-    tenant_id=None,
-    base_planning_state_version: int = 0,
-) -> SessionSendTurn:
-    return SessionSendTurn(
-        session_id=session_id or uuid4(),
-        tenant_id=tenant_id or uuid4(),
-        lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
-        base_planning_state_version=base_planning_state_version,
-    )
-
-
-def _make_context(**overrides) -> ProposalTurnContext:
-    turn = overrides.pop("turn", None) or _make_turn(
-        session_id=overrides.pop("session_id", None),
-        base_planning_state_version=overrides.pop("base_planning_state_version", 0),
-    )
-    defaults = {
-        "turn": turn,
-        "conversation": [],
-        "new_messages_start": 0,
-        "llm_messages": [],
-        "tool_schemas": [],
-        "litellm_model": "openai/gpt-5.4",
-        "litellm_kwargs": {},
-        "available_model_refs": None,
-        "available_kb_refs": None,
-        "resource_catalog": None,
-        "max_output_tokens": 4096,
-        "request_id": "req-1",
-        "flow": None,
-        "assistant_snapshots": None,
-        "text_content": None,
-    }
-    defaults.update(overrides)
-    return ProposalTurnContext(**defaults)
+from tests.unittests.flows.ai_builder.proposal_turn_builders import (
+    _builder_plan,
+    _compiled_edit_proposal,
+    _compiled_outline_proposal,
+    _description_update_advisory,
+    _make_compiled_edit_result,
+    _make_context,
+    _make_flow_spec,
+    _make_turn,
+)
+from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
+    _flow_with_builder_description,
+    _make_processor,
+    _make_response_with_text,
+    _make_response_with_tool_calls,
+    _make_tool_call,
+    _store_compiled_plan,
+)
 
 
 def test_proposal_processor_has_no_generic_submission_tool_config() -> None:
@@ -160,194 +108,6 @@ def test_proposal_processor_has_no_generic_submission_tool_config() -> None:
         for name in deleted_processor_methods
         if hasattr(AIBuilderProposalProcessor, name)
     ]
-
-
-def _make_retry_invocation(**overrides) -> ToolRetryInvocation:
-    defaults = {
-        "turn": _make_turn(),
-        "conversation": [],
-        "new_messages_start": 0,
-        "arguments": {"flow_name": "Test", "plan_rationale": "R", "steps": []},
-        "assistant_content": "Här är mitt korrigerade förslag:",
-        "tool_call_id": "call_retry",
-        "available_model_refs": None,
-        "available_kb_refs": None,
-        "resource_catalog": None,
-        "flow": None,
-        "assistant_metadata": None,
-    }
-    defaults.update(overrides)
-    return ToolRetryInvocation(**defaults)
-
-
-def _stored_plan_result(*, plan=None, envelope=None):
-    return SimpleNamespace(
-        plan=plan or MagicMock(id=uuid4()),
-        envelope=envelope or MagicMock(),
-        new_planning_state_version=1,
-    )
-
-
-def _compiled_outline_proposal() -> CompiledProposal:
-    spec = _make_flow_spec(model_ref=None, knowledge_refs=[])
-    return CompiledProposal(
-        spec=spec,
-        assumptions=(),
-        plan_rationale="Classify incoming text.",
-        reasoning=None,
-        validation=SpecValidationResult(),
-    )
-
-
-def _builder_plan(spec: FlowDraftSpecCore) -> BuilderPlan:
-    return BuilderPlan(
-        id=uuid4(),
-        session_id=uuid4(),
-        tenant_id=uuid4(),
-        status=PlanStatus.PROPOSED,
-        spec=spec,
-        spec_hash="hash",
-        envelope=PlannerPlanEnvelope(spec=spec),
-    )
-
-
-def _compiled_outline_proposal_with_validation(
-    validation: SpecValidationResult,
-) -> CompiledProposal:
-    compiled = _compiled_outline_proposal()
-    return CompiledProposal(
-        spec=compiled.spec,
-        assumptions=compiled.assumptions,
-        plan_rationale=compiled.plan_rationale,
-        reasoning=compiled.reasoning,
-        validation=validation,
-        resource_bindings=compiled.resource_bindings,
-        edit_result=compiled.edit_result,
-        aggregation_intent=compiled.aggregation_intent,
-    )
-
-
-def _compiled_edit_proposal(
-    *,
-    spec: FlowDraftSpecCore | None = None,
-    advisories: list[EditAdvisory] | None = None,
-) -> CompiledProposal:
-    compiled_spec = spec or _make_flow_spec(model_ref=None, knowledge_refs=[])
-    compiled_edit = CompiledEditResult(
-        compiled_spec=compiled_spec,
-        diff=FlowEditDiff(
-            step_changes=[StepChange(kind="unchanged", step_name="Analys")]
-        ),
-        original_draft=FlowEditDraft(operations=[]),
-        base_flow_revision=7,
-        advisories=advisories or [],
-    )
-    return CompiledProposal(
-        spec=compiled_spec,
-        assumptions=(),
-        plan_rationale="Update the flow.",
-        reasoning=None,
-        validation=SpecValidationResult(),
-        edit_result=BuilderPlanEditResult(compiled_edit=compiled_edit),
-    )
-
-
-def _description_update_advisory() -> EditAdvisory:
-    return EditAdvisory(
-        code="flow_description_update_required",
-        message="Refresh the flow description.",
-        severity="warning",
-        field="flow_description",
-    )
-
-
-def _flow_with_builder_description(description: str) -> SimpleNamespace:
-    return SimpleNamespace(
-        description=description,
-        metadata_json={
-            "ai_builder": {
-                "description": DescriptionProvenance(
-                    mode="builder_managed",
-                    last_generated_hash=description_hash(description),
-                ).model_dump(mode="json")
-            }
-        },
-    )
-
-
-async def _store_compiled_plan(**kwargs):
-    return _stored_plan_result(
-        envelope=PlannerPlanEnvelope(spec=kwargs["spec"]),
-    )
-
-
-def _make_response_with_tool_calls(
-    *tool_calls: MagicMock,
-    prompt_tokens: int | None = None,
-    completion_tokens: int | None = None,
-    total_tokens: int | None = None,
-) -> SimpleNamespace:
-    usage = (
-        None
-        if prompt_tokens is None and completion_tokens is None and total_tokens is None
-        else SimpleNamespace(
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-        )
-    )
-    return SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                finish_reason="tool_calls",
-                message=SimpleNamespace(
-                    tool_calls=list(tool_calls),
-                    content=None,
-                ),
-            )
-        ],
-        usage=usage,
-    )
-
-
-def _make_response_with_text(
-    content: str,
-    *,
-    prompt_tokens: int | None = None,
-    completion_tokens: int | None = None,
-    total_tokens: int | None = None,
-) -> SimpleNamespace:
-    usage = (
-        None
-        if prompt_tokens is None and completion_tokens is None and total_tokens is None
-        else SimpleNamespace(
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-        )
-    )
-    return SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                finish_reason="stop",
-                message=SimpleNamespace(
-                    tool_calls=None,
-                    content=content,
-                ),
-            )
-        ],
-        usage=usage,
-    )
-
-
-def _make_tool_call(
-    name: str, arguments: dict[str, object], tool_call_id: str | None = None
-) -> MagicMock:
-    tool_call = MagicMock()
-    tool_call.id = tool_call_id or f"call_{uuid4().hex[:8]}"
-    tool_call.function.name = name
-    tool_call.function.arguments = json.dumps(arguments)
-    return tool_call
 
 
 def test_self_correction_error_event_keeps_internal_feedback_out_of_user_message() -> (
@@ -377,48 +137,6 @@ def test_self_correction_parse_error_uses_actionable_user_message() -> None:
     assert payload["code"] == "self_correction_invalid_payload"
     assert "incomplete plan configuration" in payload["message"]
     assert "operations.0" not in payload["message"]
-
-
-def _make_flow_spec(
-    *,
-    model_ref: str | None,
-    knowledge_refs: list[str],
-    mcp_server_refs: list[str] | None = None,
-    mcp_tool_refs: list[str] | None = None,
-) -> FlowDraftSpecCore:
-    return FlowDraftSpecCore(
-        flow_name="Grounded flow",
-        flow_description="Desc",
-        steps=[
-            StepSpec(
-                plan_step_ref="step_a",
-                name="Analys",
-                assistant_spec=AssistantSpec(
-                    instructions="Gör analysen.",
-                    model_ref=model_ref,
-                    knowledge_refs=knowledge_refs,
-                    mcp_server_refs=mcp_server_refs or [],
-                    mcp_tool_refs=mcp_tool_refs or [],
-                ),
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.TEXT,
-                output_mode=OutputMode.PASS_THROUGH,
-                output_type=OutputType.TEXT,
-                mcp_policy=MCPPolicy.INHERIT,
-            )
-        ],
-    )
-
-
-def _make_compiled_edit_result(compiled_spec: FlowDraftSpecCore) -> CompiledEditResult:
-    return CompiledEditResult(
-        compiled_spec=compiled_spec,
-        diff=FlowEditDiff(
-            step_changes=[StepChange(kind="unchanged", step_name="Analys")]
-        ),
-        original_draft=FlowEditDraft(operations=[]),
-        base_flow_revision=7,
-    )
 
 
 async def _single_plan_event(**_kwargs):
@@ -2318,9 +2036,7 @@ async def test_edit_description_repair_rejection_still_records_spent_tokens() ->
             ),
         ),
         patch.object(
-            processor._proposal_submission._compiled_proposal_finalizer,
-            "finalize_compiled_proposal",
-            new=finalize,
+            CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
         ),
     ):
         events = [
@@ -2383,9 +2099,7 @@ async def test_ineligible_edit_description_repair_does_not_record_completion_usa
             ),
         ),
         patch.object(
-            processor._proposal_submission._compiled_proposal_finalizer,
-            "finalize_compiled_proposal",
-            new=finalize,
+            CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
         ),
     ):
         events = [
@@ -2443,9 +2157,7 @@ async def test_edit_description_repair_without_provider_usage_records_estimate()
             ),
         ),
         patch.object(
-            processor._proposal_submission._compiled_proposal_finalizer,
-            "finalize_compiled_proposal",
-            new=finalize,
+            CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
         ),
     ):
         events = [

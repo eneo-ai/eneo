@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T055
+active_task: T057
 
 interruptions:
   - id: I001
@@ -5673,7 +5673,7 @@ tasks:
   - id: T055
     type: judge
     assignee: Judge
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T054 closed generated-client regeneration determinism."
     inputs:
@@ -5700,6 +5700,146 @@ tasks:
       interrupted_at: "2026-05-22T13:32:07Z"
       resumed_at: "2026-05-22T19:56:00Z"
       reason: "Live provider-contract bug I003 preempted the read-only next-tranche ranking after I002. I003 is now validated and peer-gated, so T055 is the active next board task again after the I003 commit."
+      completed_at: "2026-05-22T23:49:05Z"
+      result: "Selected T056 proposal submission test-topology cleanup as the next highest-score-moving safe worker. This is not a LOC-reduction tranche: the binding goal is to delete hidden test setup ownership and private finalizer reach-through that currently make ProposalSubmissionOwner topology hard to review."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t055-next-tranche-ranking.md"
+        - ".codex/artifacts/claude-peer-loop-t055-next-flow-ai-builder-tranche-ranking-after-i003-smoke-challenge-20260522T234403Z.md"
+        - ".codex/artifacts/claude-peer-loop-t055-revised-next-flow-ai-builder-tranche-ranking-after-i003-smoke-20260522T234618Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t055-final-next-flow-ai-builder-tranche-ranking-after-claude-green-20260522T234905Z.md"
+      live_smoke:
+        result: "pass"
+        artifact_dir: "/tmp/flow-ai-builder-i003-live-smoke"
+        evidence:
+          - "Running container was on commit 48715105f before smoke."
+          - "Valid selected completion-step model edit produced plan 081a84a5-4980-43b9-9051-25d6b3d2f74d."
+          - "Follow-up selected-step edit on the latest plan produced plan 700ab844-b8e1-4813-8594-6aa9cd758207 with no OpenAI 400/tool_call_id failure."
+          - "Unknown completion-step model edit 'Ändra modell till gpt 5.5' returned a Swedish notice instead of planner_upstream_error."
+          - "Selected transcribe_only model edit returned a transcription-model ownership notice."
+      peer_gates:
+        claude_challenge: ".codex/artifacts/claude-peer-loop-t055-next-flow-ai-builder-tranche-ranking-after-i003-smoke-challenge-20260522T234403Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        claude_green_check: ".codex/artifacts/claude-peer-loop-t055-revised-next-flow-ai-builder-tranche-ranking-after-i003-smoke-20260522T234618Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity_synthesis: ".codex/artifacts/antigravity-peer-loop-t055-final-next-flow-ai-builder-tranche-ranking-after-claude-green-20260522T234905Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      selected_next_task: T056
+      score_impact: "No score increase. T055 was a judge task. The broader score floor remains 8 until T056 or later implementation evidence actually improves the weakest dimensions."
+
+  - id: T056
+    type: worker
+    assignee: Worker
+    status: completed
+    reasoning_hint: high
+    objective: "Clean proposal submission test topology so tests reflect ProposalSubmissionOwner ownership and do not freeze private object layout."
+    inputs:
+      - ".codex/artifacts/flow-ai-builder-t055-next-tranche-ranking.md"
+      - ".codex/artifacts/claude-peer-loop-t055-revised-next-flow-ai-builder-tranche-ranking-after-i003-smoke-20260522T234618Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t055-final-next-flow-ai-builder-tranche-ranking-after-claude-green-20260522T234905Z.md"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+    allowed_files:
+      - "backend/tests/unittests/flows/ai_builder/proposal_turn_builders.py"
+      - "backend/tests/unittests/flows/ai_builder/proposal_turn_test_doubles.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - ".codex/artifacts/flow-ai-builder-t056-proposal-test-topology.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    constraints:
+      - "No production source changes, API/schema/frontend/generated-client/DB/migration/Celery/prompt/live-eval-runner edits in T056."
+      - "Do not reduce LOC for appearance. The binding outcome is lower cognitive coupling: submission tests stop importing processor tests and tests stop patching processor._proposal_submission._compiled_proposal_finalizer."
+      - "Create proposal_turn_builders.py for pure typed domain/Pydantic/dataclass builders only: no pytest, unittest.mock, MagicMock, AsyncMock, SimpleNamespace, AIBuilderProposalProcessor, or ProposalSubmissionOwner imports."
+      - "Create proposal_turn_test_doubles.py for explicit mock/provider/test-double factories only: no pytest fixtures, no production-like classes, no broad fixture dump."
+      - "Every listed candidate helper either moves to its declared owner or is documented in the T056 artifact/receipt with a concrete reason for staying. 'Not needed' means no consumer outside the source module exists."
+      - "Smoke one class-level CompiledProposalFinalizer.finalize_compiled_proposal patch before replacing all six private reach-through sites. Bare AsyncMock class patches keep request at await_args.args[0]; autospec-style patches bind self and shift request to args[1]. Preserve request assertion parity and document the choice."
+      - "Keep comments sparse; module docstrings may state ownership/purity contracts, but do not add tutorial comments that restate test setup."
+      - "Do not inflate the scorecard unless post-implementation evidence and peer review prove a real floor movement."
+    acceptance:
+      - "test_ai_builder_proposal_submission.py no longer imports test_ai_builder_proposal_processor.py."
+      - "Processor tests no longer own shared proposal submission setup used by submission tests."
+      - "Processor/submission tests use proposal_turn_builders.py for pure setup and proposal_turn_test_doubles.py for mock-dependent setup."
+      - "Touched processor/submission tests contain no _proposal_submission._compiled_proposal_finalizer or _compiled_proposal_finalizer references."
+      - "Finalization interception patches CompiledProposalFinalizer.finalize_compiled_proposal at class/module level and preserves request-payload assertions."
+      - "Existing behavior assertions named in the T055 artifact survive with equivalent names or clear renamed equivalents."
+      - "Static guards in test_ai_builder_import_ownership.py prove the new topology and fail on the old cross-test import/private finalizer patterns."
+      - "New setup modules remain narrow, typed, and within their reviewability caps unless the receipt explains a concrete reason."
+    validation:
+      - "Red/guard-first: add static guards and confirm they fail before moving setup."
+      - "Convert one representative finalizer patch first and prove the request-capture/assertion pattern works before broad replacement."
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py -q"
+      - "cd backend && uv run ruff check tests/unittests/flows/ai_builder/proposal_turn_builders.py tests/unittests/flows/ai_builder/proposal_turn_test_doubles.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "cd backend && uv run ruff format --check tests/unittests/flows/ai_builder/proposal_turn_builders.py tests/unittests/flows/ai_builder/proposal_turn_test_doubles.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "git diff --check"
+      - "Full AI Builder unit suite if focused tests pass and runtime is reasonable: cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+    stop_if:
+      - "T056 requires production source changes."
+      - "Class-level finalizer patching is not clean and the only clean alternative is constructor injection."
+      - "Setup modules become fixture dumps or duplicate behavior logic."
+      - "Behavior assertions are dropped or weakened."
+      - "Focused tests fail for reasons unrelated to the move and require broader source changes."
+      - "Peer review after implementation says the tranche moved complexity rather than reducing coupling."
+    expected_score_impact: "May improve Maintainability, Human Readability, and Test Topology evidence if the diff truly removes hidden setup ownership and private layout coupling. Overall remains 8 unless review proves the strict floor moved."
+    receipt:
+      completed_at: "2026-05-23T00:08:55Z"
+      result: "Completed T056 as a test-topology cleanup only. Proposal submission tests no longer import processor-test setup, shared pure builders and mock-backed doubles have explicit test owners, and proposal processor/submission tests no longer patch processor._proposal_submission._compiled_proposal_finalizer."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t056-proposal-test-topology.md"
+        - ".codex/artifacts/claude-peer-loop-t056-proposal-test-topology-implementation-review-20260523T000430Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t056-proposal-test-topology-implementation-synthesis-20260523T000828Z.md"
+      changed_files:
+        - "backend/tests/unittests/flows/ai_builder/proposal_turn_builders.py"
+        - "backend/tests/unittests/flows/ai_builder/proposal_turn_test_doubles.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      validation:
+        - "Red guard first: the new import/finalizer/setup-module ownership guards failed before the setup move."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_submission_tests_do_not_import_processor_test_setup tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_tests_do_not_patch_private_submission_finalizer tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_turn_test_setup_modules_keep_their_contracts -q -> 3 failed before the move, proving the old topology was caught."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_submission_tests_do_not_import_processor_test_setup tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_tests_import_canonical_setup_modules tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_tests_do_not_patch_private_submission_finalizer tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_turn_test_setup_modules_keep_their_contracts -q -> 4 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 66 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py -q -> 25 passed"
+        - "cd backend && uv run ruff check touched T056 test files -> passed"
+        - "cd backend && uv run ruff format --check touched T056 test files -> passed"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
+        - "git diff --check -> passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2326 passed, 4 skipped, 11 warnings"
+      peer_gates:
+        claude_implementation_gate: ".codex/artifacts/claude-peer-loop-t056-proposal-test-topology-implementation-review-20260523T000430Z.md -> GREEN_LIGHT yes / MIN_SCORE 8. Codex accepted Claude's P2 suggestions and added the positive setup-module import guard, corrected args[0]/args[1] board text, and recorded the non-autospec finalizer patch risk."
+        antigravity_implementation_gate: ".codex/artifacts/antigravity-peer-loop-t056-proposal-test-topology-implementation-synthesis-20260523T000828Z.md -> GREEN_LIGHT yes / MIN_SCORE 8. Antigravity agreed this is not a fixture dump, confirmed T056 should commit, and reinforced staging only allowed files."
+      self_review: "This is simpler than before because proposal submission tests no longer depend on processor-test internals, and finalization assertions patch the finalization owner instead of a nested private processor field. It is still only an 8/10 floor improvement because production topology, output quality, schema/runtime/API, and live-eval blockers remain."
+      score_impact: "No strict score increase. T056 improves maintainability/test-topology evidence but does not by itself move the broader Flow AI Builder floor above 8/10."
+      residual_risks:
+        - "The production processor/proposal topology is still complex."
+        - "Normal-user output quality and underlag/live-eval proof are still below the 9/10 bar."
+        - "Remaining data/schema/runtime/API contract blockers are untouched."
+        - "Bare AsyncMock class-level finalizer patches keep request capture simple at args[0], but autospec or constructor-injected finalizer fakes could harden signature drift in a future production/test topology tranche."
+
+  - id: T057
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T056 completed test-topology cleanup."
+    inputs:
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t055-next-tranche-ranking.md"
+      - ".codex/artifacts/flow-ai-builder-t056-proposal-test-topology.md"
+      - ".codex/artifacts/claude-peer-loop-t056-proposal-test-topology-implementation-review-20260523T000430Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t056-proposal-test-topology-implementation-synthesis-20260523T000828Z.md"
+    constraints:
+      - "Read-only ranking task. Do not implement during T057."
+      - "Do not default to processor LOC reduction. Rank by strict score-floor movement, normal-user output quality, ownership simplification, runtime/API/schema risk, and human reviewability."
+      - "Use current repo reality and preserve unrelated dirty files."
+      - "If recommending implementation, define exact allowed files, acceptance criteria, validation commands, non-goals, stop conditions, and peer gates."
+      - "Use Claude and Antigravity for the selected implementation-ready plan when the next worker is non-trivial."
+    expected_output:
+      - "Evidence-backed next-tranche ranking."
+      - "Selected worker tranche or documented blocker."
+      - "Why the choice is the highest-score-moving slice now."
+      - "What gets deleted, merged, moved, renamed, or simplified."
+      - "Acceptance criteria, validation plan, and score impact."
+    receipt: null
 
 checks:
   dirty_fingerprint:
@@ -5707,9 +5847,23 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "I003 live provider-contract hotfix is validated and peer-gated; T055 read-only next-tranche ranking is active again. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: I003
+    result: "T056 proposal test-topology cleanup completed, validated, and peer-gated. T057 read-only next-tranche ranking is active. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T056
     commands:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_submission_tests_do_not_import_processor_test_setup tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_tests_import_canonical_setup_modules tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_tests_do_not_patch_private_submission_finalizer tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_proposal_turn_test_setup_modules_keep_their_contracts -q -> 4 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 66 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py -q -> 25 passed"
+      - "cd backend && uv run ruff check touched T056 test files -> passed"
+      - "cd backend && uv run ruff format --check touched T056 test files -> passed"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
+      - "git diff --check -> passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2326 passed, 4 skipped, 11 warnings"
+      - "Claude implementation gate: .codex/artifacts/claude-peer-loop-t056-proposal-test-topology-implementation-review-20260523T000430Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity implementation gate: .codex/artifacts/antigravity-peer-loop-t056-proposal-test-topology-implementation-synthesis-20260523T000828Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "I003 live smoke via local API against container commit 48715105f -> valid selected-step model edit plan 081a84a5-4980-43b9-9051-25d6b3d2f74d; follow-up edit plan 700ab844-b8e1-4813-8594-6aa9cd758207; unknown model notice; transcribe_only transcription-model notice"
+      - "Claude challenge: .codex/artifacts/claude-peer-loop-t055-next-flow-ai-builder-tranche-ranking-after-i003-smoke-challenge-20260522T234403Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Claude green check: .codex/artifacts/claude-peer-loop-t055-revised-next-flow-ai-builder-tranche-ranking-after-i003-smoke-20260522T234618Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity synthesis: .codex/artifacts/antigravity-peer-loop-t055-final-next-flow-ai-builder-tranche-ranking-after-claude-green-20260522T234905Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
       - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py tests/unittests/flows/ai_builder/test_ai_builder_service.py::TestSendMessageToolCall tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/assistants/test_assistant_router.py tests/unittests/flows/test_flow_capability_manifest.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py -q -> 599 passed, 33 warnings"
       - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2322 passed, 4 skipped, 11 warnings"
       - "cd backend && uv run pytest tests/unittests/assistants/test_assistant_router.py tests/unittests/flows/test_flow_capability_manifest.py -q -> 370 passed, 33 warnings"
