@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
+from intric.flows.ai_builder.ai_builder_create_compiler import (
+    compile_create_draft,
+    compile_outline_to_create_draft,
+)
 from intric.flows.ai_builder.ai_builder_create_models import (
     CreateFormFieldDraft,
     CreateStepDraft,
@@ -10,7 +13,6 @@ from intric.flows.ai_builder.ai_builder_create_models import (
     StructuredFieldDraft,
 )
 from intric.flows.ai_builder.ai_builder_create_outline import (
-    compile_outline_to_create_draft,
     parse_outline_flow_arguments,
 )
 from intric.flows.ai_builder.ai_builder_critic_invariants import (

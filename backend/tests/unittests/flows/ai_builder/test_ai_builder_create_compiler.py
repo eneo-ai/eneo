@@ -12,7 +12,12 @@ from intric.flows.ai_builder.ai_builder_architecture_commit import (
 from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
-from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
+from intric.flows.ai_builder.ai_builder_create_compiler import (
+    OutlineCompileContext,
+    compile_create_draft,
+    compile_outline_to_create_draft,
+    outline_compile_context_from_planning_state,
+)
 from intric.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_draft_mechanics,
 )
@@ -24,12 +29,9 @@ from intric.flows.ai_builder.ai_builder_create_models import (
 )
 from intric.flows.ai_builder.ai_builder_create_outline import (
     MAX_OUTLINE_STEPS,
-    OutlineCompileContext,
     OutlineFlowArgumentError,
     attach_selected_mcp_refs_to_explicit_outline_steps,
     build_outline_flow_tool_schema,
-    compile_outline_to_create_draft,
-    outline_compile_context_from_planning_state,
     parse_outline_flow_arguments,
 )
 from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
@@ -95,6 +97,160 @@ def _draft_with_steps(steps: list[NewStepDraft]) -> FlowCreateDraft:
         plan_rationale="Exercise targeted underlag mechanics.",
         steps=steps,
     )
+
+
+def _committed_architecture_state(
+    *,
+    input_type: str,
+    output_type: str,
+    output_mode: str,
+    chosen_patterns: list[str],
+    required_capabilities: list[str],
+    aggregation_intent: AggregationIntent = "linear",
+) -> PlanningState:
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type=input_type,
+                    output_type=output_type,
+                    output_mode=output_mode,
+                )
+            ],
+            chosen_patterns=chosen_patterns,
+            required_capabilities=required_capabilities,
+            aggregation_intent=aggregation_intent,
+        )
+    )
+    return state
+
+
+def _structured_field_snapshot(
+    name: str,
+    field_type: str,
+    description: str,
+    *,
+    required: bool = True,
+    fields: list[dict[str, object]] | None = None,
+    item_fields: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    return {
+        "name": name,
+        "field_type": field_type,
+        "description": description,
+        "required": required,
+        "fields": fields,
+        "item_fields": item_fields,
+    }
+
+
+def _form_field_snapshot(
+    variable_name: str,
+    label: str,
+    field_type: str,
+    *,
+    required: bool,
+) -> dict[str, object]:
+    return {
+        "variable_name": variable_name,
+        "label": label,
+        "field_type": field_type,
+        "required": required,
+        "options": [],
+    }
+
+
+def _create_step_snapshot(
+    *,
+    name: str,
+    instructions: str,
+    input_source: str,
+    input_type: str,
+    output_type: str,
+    runtime_upload: bool = False,
+    runtime_required: bool = False,
+    document_delivery_mode: str = "not_applicable",
+    uses_form_fields: list[str] | None = None,
+    review_mode: str | None = None,
+    output_fields: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    return {
+        "name": name,
+        "instructions": instructions,
+        "assistant_spec": None,
+        "input_source": input_source,
+        "input_type": input_type,
+        "output_type": output_type,
+        "model_ref": None,
+        "knowledge_refs": [],
+        "mcp_server_refs": [],
+        "mcp_tool_refs": [],
+        "runtime_upload": runtime_upload,
+        "runtime_required": runtime_required,
+        "runtime_max_files": None,
+        "uses_form_fields": uses_form_fields or [],
+        "uses_previous_fields": [],
+        "uses_previous_outputs": [],
+        "document_delivery_mode": document_delivery_mode,
+        "citations_requested": False,
+        "review_mode": review_mode,
+        "output_fields": output_fields,
+    }
+
+
+def _create_draft_snapshot(
+    *,
+    flow_name: str,
+    plan_rationale: str,
+    steps: list[dict[str, object]],
+    flow_description: str | None = None,
+    form_fields: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    return {
+        "flow_name": flow_name,
+        "flow_description": flow_description,
+        "plan_rationale": plan_rationale,
+        "assumptions": [],
+        "form_fields": form_fields or [],
+        "steps": steps,
+    }
+
+
+def _source_facts_fields_snapshot() -> list[dict[str, object]]:
+    return [
+        _structured_field_snapshot(
+            "source_facts",
+            "array",
+            "Important source facts extracted from the input material.",
+            item_fields=[
+                _structured_field_snapshot(
+                    "fact",
+                    "string",
+                    "A concise source fact.",
+                ),
+                _structured_field_snapshot(
+                    "source_note",
+                    "string",
+                    "Where the fact came from or why it matters.",
+                    required=False,
+                ),
+            ],
+        ),
+        _structured_field_snapshot(
+            "uncertainties",
+            "array",
+            "Missing, ambiguous, or uncertain information.",
+            required=False,
+            item_fields=[
+                _structured_field_snapshot(
+                    "issue",
+                    "string",
+                    "A missing or uncertain point.",
+                )
+            ],
+        ),
+    ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -958,6 +1114,504 @@ def test_compile_outline_flow_sets_review_policy_from_review_mode() -> None:
     assert draft.steps[0].review_mode is FlowStepReviewMode.EDIT
     assert compiled.steps[0].review_policy is not None
     assert compiled.steps[0].review_policy.mode is FlowStepReviewMode.EDIT
+
+
+def test_compile_outline_parity_plain_text_snapshot() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Text summary",
+            "plan_rationale": "Summarize supplied text.",
+            "runtime_input": {"input_type": "text"},
+            "steps": [
+                {
+                    "name": "Summarize text",
+                    "task": "Write a concise summary.",
+                }
+            ],
+        }
+    )
+
+    draft = compile_outline_to_create_draft(outline)
+
+    assert draft.model_dump(mode="json") == _create_draft_snapshot(
+        flow_name="Text summary",
+        plan_rationale="Summarize supplied text.",
+        steps=[
+            _create_step_snapshot(
+                name="Summarize text",
+                instructions="Write a concise summary.",
+                input_source="flow_input",
+                input_type="text",
+                output_type="text",
+            )
+        ],
+    )
+
+
+def test_compile_outline_parity_audio_review_mode_snapshot() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Meeting minutes",
+            "plan_rationale": "Transcribe meeting audio and produce a PDF report.",
+            "steps": [
+                {
+                    "name": "Transkribera ljud",
+                    "task": "Transkribera ljud till text.",
+                    "review_mode": "edit",
+                },
+                {
+                    "name": "Skapa rapport",
+                    "task": "Skriv en rapport från transkriptionen.",
+                    "output_type": "pdf",
+                },
+            ],
+        }
+    )
+    state = _committed_architecture_state(
+        input_type="audio",
+        output_type="pdf",
+        output_mode="pass_through",
+        chosen_patterns=["audio_to_artifact_report"],
+        required_capabilities=["input_audio", "output_mode_pass_through"],
+    )
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+
+    assert draft.model_dump(mode="json") == _create_draft_snapshot(
+        flow_name="Meeting minutes",
+        plan_rationale="Transcribe meeting audio and produce a PDF report.",
+        steps=[
+            _create_step_snapshot(
+                name="Transcribe audio",
+                instructions=(
+                    "Transcribe the uploaded audio into text before downstream "
+                    "analysis or artifact generation."
+                ),
+                input_source="flow_input",
+                input_type="audio",
+                output_type="text",
+                runtime_upload=True,
+                runtime_required=True,
+                review_mode="edit",
+            ),
+            _create_step_snapshot(
+                name="Skapa rapport",
+                instructions="Skriv en rapport från transkriptionen.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+            ),
+            _create_step_snapshot(
+                name="Create PDF",
+                instructions=(
+                    "Create the final output from the previous structured work. "
+                    "Preserve the user's requested scope, ordering, and constraints."
+                ),
+                input_source="previous_step",
+                input_type="text",
+                output_type="pdf",
+                document_delivery_mode="generated",
+            ),
+        ],
+    )
+
+
+def test_compile_outline_parity_docx_template_snapshot() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Template report",
+            "plan_rationale": "Fill a DOCX template from source material.",
+            "steps": [
+                {
+                    "name": "Prepare report content",
+                    "task": "Prepare content for the template.",
+                }
+            ],
+        }
+    )
+    state = _committed_architecture_state(
+        input_type="document",
+        output_type="docx",
+        output_mode="template_fill",
+        chosen_patterns=["document_to_docx_template"],
+        required_capabilities=["input_document", "output_mode_template_fill"],
+    )
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+
+    assert draft.model_dump(mode="json") == _create_draft_snapshot(
+        flow_name="Template report",
+        plan_rationale="Fill a DOCX template from source material.",
+        steps=[
+            _create_step_snapshot(
+                name="Extract template variables",
+                instructions=(
+                    "Extract the stable fields and source facts needed before "
+                    "filling the DOCX template."
+                ),
+                input_source="flow_input",
+                input_type="document",
+                output_type="json",
+                runtime_upload=True,
+                runtime_required=True,
+                output_fields=_source_facts_fields_snapshot(),
+            ),
+            _create_step_snapshot(
+                name="Prepare report content",
+                instructions="Prepare content for the template.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="text",
+            ),
+            _create_step_snapshot(
+                name="Fill DOCX template",
+                instructions=(
+                    "Fill the DOCX template from the prepared content. Preserve "
+                    "the user's requested scope and terminology."
+                ),
+                input_source="previous_step",
+                input_type="text",
+                output_type="docx",
+                document_delivery_mode="template_fill",
+            ),
+        ],
+    )
+
+
+def test_compile_outline_parity_json_intermediate_snapshot() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Customer report",
+            "plan_rationale": "Extract structured facts and write a report.",
+            "runtime_input": {"input_type": "text"},
+            "steps": [
+                {
+                    "name": "Extract facts",
+                    "task": "Extract customer facts.",
+                    "output_type": "json",
+                    "output_fields": [
+                        {
+                            "name": "customer_name",
+                            "field_type": "string",
+                            "description": "Customer name.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report",
+                    "task": "Write a short customer report.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+    state = _committed_architecture_state(
+        input_type="text",
+        output_type="text",
+        output_mode="pass_through",
+        chosen_patterns=[],
+        required_capabilities=["input_text", "output_mode_pass_through"],
+    )
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+
+    assert draft.model_dump(mode="json") == _create_draft_snapshot(
+        flow_name="Customer report",
+        plan_rationale="Extract structured facts and write a report.",
+        steps=[
+            _create_step_snapshot(
+                name="Extract facts",
+                instructions="Extract customer facts.",
+                input_source="flow_input",
+                input_type="text",
+                output_type="json",
+                output_fields=[
+                    _structured_field_snapshot(
+                        "customer_name",
+                        "string",
+                        "Customer name.",
+                    )
+                ],
+            ),
+            _create_step_snapshot(
+                name="Write report",
+                instructions="Write a short customer report.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="text",
+            ),
+        ],
+    )
+
+
+def test_compile_outline_parity_form_field_chain_snapshot() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Audience report",
+            "plan_rationale": "Use requested form fields.",
+            "input_fields": [
+                {
+                    "variable_name": "audience",
+                    "label": "Audience",
+                    "field_type": "text",
+                    "required": True,
+                },
+                {
+                    "variable_name": "tone",
+                    "label": "Tone",
+                    "field_type": "text",
+                    "required": False,
+                },
+            ],
+            "steps": [
+                {
+                    "name": "Draft section",
+                    "task": "Draft for audience.",
+                    "uses_input_fields": ["audience"],
+                },
+                {
+                    "name": "Finalize",
+                    "task": "Finalize the text.",
+                    "uses_input_fields": ["tone"],
+                },
+            ],
+        }
+    )
+    state = _committed_architecture_state(
+        input_type="text",
+        output_type="text",
+        output_mode="pass_through",
+        chosen_patterns=["sectioned_form_intake"],
+        required_capabilities=["input_text", "output_mode_pass_through"],
+    )
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+
+    assert draft.model_dump(mode="json") == _create_draft_snapshot(
+        flow_name="Audience report",
+        plan_rationale="Use requested form fields.",
+        form_fields=[
+            _form_field_snapshot("audience", "Audience", "text", required=True),
+            _form_field_snapshot("tone", "Tone", "text", required=False),
+        ],
+        steps=[
+            _create_step_snapshot(
+                name="Draft section",
+                instructions="Draft for audience.",
+                input_source="flow_input",
+                input_type="text",
+                output_type="text",
+                uses_form_fields=["audience"],
+            ),
+            _create_step_snapshot(
+                name="Finalize",
+                instructions="Finalize the text.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+                uses_form_fields=["tone"],
+            ),
+        ],
+    )
+
+
+def test_compile_outline_parity_single_step_field_attachment_snapshot() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Single field report",
+            "plan_rationale": "One step uses all fields implicitly.",
+            "input_fields": [
+                {
+                    "variable_name": "audience",
+                    "label": "Audience",
+                    "field_type": "text",
+                    "required": True,
+                },
+                {
+                    "variable_name": "deadline",
+                    "label": "Deadline",
+                    "field_type": "date",
+                    "required": False,
+                },
+            ],
+            "steps": [
+                {
+                    "name": "Write report",
+                    "task": "Write report using the provided fields.",
+                }
+            ],
+        }
+    )
+
+    draft = compile_outline_to_create_draft(outline)
+
+    assert draft.model_dump(mode="json") == _create_draft_snapshot(
+        flow_name="Single field report",
+        plan_rationale="One step uses all fields implicitly.",
+        form_fields=[
+            _form_field_snapshot("audience", "Audience", "text", required=True),
+            _form_field_snapshot("deadline", "Deadline", "date", required=False),
+        ],
+        steps=[
+            _create_step_snapshot(
+                name="Write report",
+                instructions="Write report using the provided fields.",
+                input_source="flow_input",
+                input_type="text",
+                output_type="text",
+                uses_form_fields=["audience", "deadline"],
+            )
+        ],
+    )
+
+
+def test_compile_outline_parity_aggregate_context_snapshot() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Aggregate documents",
+            "plan_rationale": "Aggregate multiple documents into a PDF.",
+            "steps": [
+                {
+                    "name": "Extract themes",
+                    "task": "Extract themes from the material.",
+                },
+                {
+                    "name": "Synthesize",
+                    "task": "Synthesize all themes.",
+                    "output_type": "text",
+                },
+            ],
+        }
+    )
+    state = _committed_architecture_state(
+        input_type="document",
+        output_type="pdf",
+        output_mode="pass_through",
+        chosen_patterns=["multi_step_quality_chain"],
+        required_capabilities=["input_document", "output_mode_pass_through"],
+        aggregation_intent="aggregate",
+    )
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+
+    assert draft.model_dump(mode="json") == _create_draft_snapshot(
+        flow_name="Aggregate documents",
+        plan_rationale="Aggregate multiple documents into a PDF.",
+        steps=[
+            _create_step_snapshot(
+                name="Extract structured foundation",
+                instructions=(
+                    "Extract source facts, key points, and uncertainties needed "
+                    "for the downstream analysis."
+                ),
+                input_source="flow_input",
+                input_type="document",
+                output_type="json",
+                runtime_upload=True,
+                runtime_required=True,
+                output_fields=_source_facts_fields_snapshot(),
+            ),
+            _create_step_snapshot(
+                name="Extract themes",
+                instructions="Extract themes from the material.",
+                input_source="previous_step",
+                input_type="json",
+                output_type="text",
+            ),
+            _create_step_snapshot(
+                name="Synthesize",
+                instructions="Synthesize all themes.",
+                input_source="previous_step",
+                input_type="text",
+                output_type="text",
+            ),
+            _create_step_snapshot(
+                name="Review quality and gaps",
+                instructions=(
+                    "Review the analysis for missing information, uncertainty, "
+                    "and quality issues before the final output is created."
+                ),
+                input_source="all_previous_steps",
+                input_type="text",
+                output_type="text",
+            ),
+            _create_step_snapshot(
+                name="Create PDF",
+                instructions=(
+                    "Create the final output from the previous structured work. "
+                    "Preserve the user's requested scope, ordering, and constraints."
+                ),
+                input_source="all_previous_steps",
+                input_type="text",
+                output_type="pdf",
+                document_delivery_mode="generated",
+            ),
+        ],
+    )
+
+
+def test_compile_outline_parity_leading_zero_contract_fold_snapshot() -> None:
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Fold text hop",
+            "plan_rationale": "Avoid zero-contract first step.",
+            "runtime_input": {"input_type": "text"},
+            "final_output_type": "pdf",
+            "steps": [
+                {
+                    "name": "Receive text",
+                    "task": "Read the user text.",
+                },
+                {
+                    "name": "Create PDF",
+                    "task": "Create a PDF report.",
+                    "output_type": "pdf",
+                },
+            ],
+        }
+    )
+
+    draft = compile_outline_to_create_draft(outline)
+
+    assert draft.model_dump(mode="json") == _create_draft_snapshot(
+        flow_name="Fold text hop",
+        plan_rationale="Avoid zero-contract first step.",
+        steps=[
+            _create_step_snapshot(
+                name="Create PDF",
+                instructions="Read the user text.\n\nCreate a PDF report.",
+                input_source="flow_input",
+                input_type="text",
+                output_type="text",
+            ),
+            _create_step_snapshot(
+                name="Create PDF",
+                instructions=(
+                    "Create the final output from the previous structured work. "
+                    "Preserve the user's requested scope, ordering, and constraints."
+                ),
+                input_source="previous_step",
+                input_type="text",
+                output_type="pdf",
+                document_delivery_mode="generated",
+            ),
+        ],
+    )
 
 
 def test_compile_create_draft_derives_template_fill_for_docx_templates() -> None:
@@ -5862,7 +6516,7 @@ def test_compile_outline_wraps_skeleton_materialization_failure(
         raise ValueError("invalid skeleton tuple")
 
     monkeypatch.setattr(
-        "intric.flows.ai_builder.ai_builder_create_outline.materialize_step_skeleton",
+        "intric.flows.ai_builder.ai_builder_create_compiler.materialize_step_skeleton",
         _raise_value_error,
     )
 

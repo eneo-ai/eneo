@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T091
+active_task: T092
 
 interruptions:
   - id: I001
@@ -8381,7 +8381,7 @@ tasks:
   - id: T091
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Consolidate create-mode compiler ownership by making ai_builder_create_compiler.py the single owner of FlowCreateOutline -> FlowCreateDraft -> FlowDraftSpecCore, while keeping ai_builder_create_outline.py focused on the semantic outline LLM contract."
     constraints:
@@ -8436,6 +8436,105 @@ tasks:
       implementation_required: "Run Claude implementation gate after validation; run Antigravity implementation gate with --spend-mode auto if available. Missing Antigravity coverage is a skip, not a pass."
     swagger_openapi_impact: "None expected. T091 is internal backend compiler ownership work and must not change public contracts or examples."
     score_impact: "May improve Maintainability, Clean Architecture, Separation of Concerns, Human Readability, and AI Slop resistance for the create compiler boundary. Do not raise the overall strict floor above 8 unless post-implementation evidence proves every remaining 8-scored dimension is now 9."
+    receipt:
+      completed_at: "2026-05-24T23:50:12Z"
+      summary: "Consolidated create-mode compiler ownership. ai_builder_create_compiler.py now owns the full FlowCreateOutline -> FlowCreateDraft -> FlowDraftSpecCore pipeline, while ai_builder_create_outline.py owns the semantic outline LLM contract, parser/normalizer, selected MCP ref attachment, and outline tool schema. No new compiler module, facade, compatibility re-export, public API change, or prompt/schema behavior change was introduced."
+      repo_reality:
+        branch: "feature/refactor-flows-flowai"
+        head_before_commit: "8b8103274 Select AI Builder create compiler ownership cleanup"
+        unrelated_dirty_files_preserved:
+          - ".devcontainer/docker-compose.yml"
+          - ".gitignore"
+          - "AGENTS.md"
+          - ".devcontainer/devcontainer-lock.json"
+          - "PRODUCT.md"
+          - "utvecklingssamtal.mp3"
+        session_goal_tool: "get_goal is available but still carries older T081 wording; no objective-update tool is exposed in this session, so the durable board remains the source of truth."
+      implementation:
+        production_files:
+          - "backend/src/intric/flows/ai_builder/ai_builder_create_compiler.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_create_outline.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_create_proposal.py"
+        test_files:
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+        artifact: ".codex/artifacts/flow-ai-builder-t091-implementation-summary.md"
+        details:
+          - "Moved OutlineCompileContext, compile_outline_to_create_draft, outline_compile_context_from_planning_state, runtime_metadata_state_from_planning_state, and compiler-only private helpers into ai_builder_create_compiler.py."
+          - "Removed compiler-only imports, constants, public exports, and helper definitions from ai_builder_create_outline.py."
+          - "Updated ai_builder_create_proposal.py and tests so compiler symbols come from ai_builder_create_compiler.py and contract/schema symbols come from ai_builder_create_outline.py."
+          - "Added eight FlowCreateDraft.model_dump(mode=\"json\") parity tests covering plain text, audio transcription review-mode preservation, DOCX template, JSON intermediate fields, form-field chain wiring, single-step unreferenced form field attachment, aggregate document context, and leading zero-contract text folding."
+          - "Added an AST ownership guard proving create_outline no longer owns compiler mechanics, production modules do not import compiler names from create_outline, and create_compiler does not build the outline LLM tool schema."
+      red_green_evidence:
+        red_guard:
+          command: "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_create_outline_no_longer_owns_create_compiler_mechanics -q"
+          result: "1 failed before move; violations showed ai_builder_create_outline.py still defined OutlineCompileContext, imported compiler-only dependencies, and production source imported compiler symbols from outline."
+        parity_before_move:
+          command: "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -k 'compile_outline_parity' -q"
+          result: "8 passed, 149 deselected"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -> 157 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py -q -> 33 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py -q -> 6 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 27 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2392 passed, 4 skipped, 11 warnings"
+        - "cd backend && uv run ruff check touched T091 files -> all checks passed"
+        - "cd backend && uv run ruff format --check touched T091 files -> 7 files already formatted"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations"
+        - "scripts/gate-local/anti_slippage.sh -> anti-slippage: nothing staged (code files)"
+        - "git diff --check -> clean"
+      peer_review:
+        claude: ".codex/artifacts/claude-peer-loop-t091-create-compiler-ownership-implementation-gate-20260524T234703Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t091-create-compiler-ownership-implementation-synthesis-20260524T235000Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        accepted_or_deferred_peer_feedback:
+          - "Claude P3: pre-existing cast(Any, ...) form-field type escapes should be queued as typed-boundary cleanup, not mixed into T091."
+          - "Claude P3 / Antigravity P3: runtime_metadata_state_from_planning_state is called twice and may belong closer to runtime metadata ownership; queue for next ranking."
+          - "Antigravity P2: inconsistent output_type ValueError fallback may be dead defensive slop if Pydantic validation is trusted; queue for next ranking rather than changing behavior inside T091."
+          - "Antigravity P2: unknown uses_input_fields are silently dropped unless they are primary runtime shadow fields; queue for ranking as quality-feedback or compiler diagnostics work."
+      swagger_openapi_impact: "None. T091 is internal backend compiler ownership work. It did not change REST/SSE contracts, OpenAPI schemas, Swagger examples, generated client types, frontend files, database schema or migrations, public request/response models, or API examples."
+      score_impact:
+        strict_floor: 8
+        dimensions_helped:
+          - "Maintainability"
+          - "Clean Architecture"
+          - "Separation of Concerns"
+          - "Human Readability"
+          - "AI Slop / Comment / Naming Quality"
+        rationale: "Improves the create compiler boundary and removes a mixed outline contract/compiler owner, but does not raise the overall Flow AI Builder floor above 8 because peer-reviewed follow-ups remain and this tranche does not close every 8-scored dimension across the subsystem."
+      residual_risks:
+        - "ai_builder_create_compiler.py is intentionally larger because it owns the full create compile pipeline. Future splits should only happen around real independent ownership, not LOC."
+        - "runtime_metadata_state_from_planning_state may deserve a runtime metadata owner if the next ranking proves that reduces coupling."
+        - "Form-field field_type casts remain a typed-boundary weakness."
+        - "Unknown uses_input_fields drop behavior remains a potential quality-feedback gap."
+        - "Final live-output proof and any remaining topology/readability/slop blockers still block a broader 9/10 completion claim."
+      broader_goal_complete: false
+
+  - id: T092
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest score-floor mover after T091 from current repo reality, without implementing during the ranking tranche."
+    constraints:
+      - "Do not move to broader Flows work; stay within Flow AI Builder unless the user explicitly changes scope."
+      - "Start from git status, latest commits, current scorecard, T091 receipt, source evidence, Claude/Antigravity T091 findings, and current dirty diff."
+      - "Consider Antigravity/Claude T091 follow-ups: runtime_metadata_state_from_planning_state ownership, form-field field_type casts, inconsistent output_type fallback, and unknown uses_input_fields drop behavior."
+      - "Also consider repair-transport pass-through deletion/rename, bounded AI-slop/comment/naming cleanup, remaining topology/readability blockers, final live-output proof, AI Builder-scoped typing/test baseline, diagnostics/DX, data/schema/JSONB ownership, frontend/backend contract drift, and the negative dispatch-without-lease integration test."
+      - "Pick the tranche that most improves the strict score floor, not the easiest cleanup."
+      - "Do not implement during T092."
+      - "Do not optimize for LOC, and do not split files unless it removes real complexity or clarifies ownership."
+      - "Run Claude plan review and Antigravity if available. Missing Antigravity coverage must be recorded as missing coverage, not a pass."
+      - "Keep Swagger/OpenAPI/API examples current if the selected plan touches a public contract; otherwise explicitly record no public contract impact."
+    allowed_files:
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t092-next-tranche-ranking.md"
+    expected_output:
+      - "Evidence-backed ranking with file:line evidence."
+      - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, expected score impact, and Swagger/OpenAPI impact."
+      - "Explicit explanation of why the selected tranche moves the strict 9/10 floor more than easier cleanup."
+      - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
     receipt: null
 
 checks:
@@ -8444,10 +8543,14 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T090 completed as a read-only ranking task. T091 is active as the approved create compiler ownership worker. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T090
+    result: "T091 completed, validated, Claude-gated, Antigravity-gated, and ready for scoped commit. T092 is active as a read-only ranking task. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T091
     commands:
-      - "Claude T090 plan iteration 1 -> GREEN_LIGHT no / MIN_SCORE 6"
-      - "Claude T090 plan iteration 2 -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity T090 plan synthesis -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "No implementation performed during T090"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -> 157 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_skeleton.py -q -> 33 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_form_field_lifecycle.py -q -> 6 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 27 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2392 passed, 4 skipped, 11 warnings"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations"
+      - "Claude T091 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity T091 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 8"

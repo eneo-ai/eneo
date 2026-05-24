@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_create_compiler import compile_create_draft
+from intric.flows.ai_builder.ai_builder_create_compiler import (
+    OutlineCompileContext,
+    compile_create_draft,
+    compile_outline_to_create_draft,
+)
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_create_outline import (
-    OutlineCompileContext,
-    compile_outline_to_create_draft,
     parse_outline_flow_arguments,
 )
 from intric.flows.ai_builder.ai_builder_step_skeleton import (

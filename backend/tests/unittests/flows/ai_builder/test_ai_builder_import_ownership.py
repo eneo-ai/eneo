@@ -237,6 +237,37 @@ PLANNER_FAILURE_EVENTS_PATH = Path(
     "src/intric/flows/ai_builder/ai_builder_planner_failure_events.py"
 )
 PLANNER_PATH = Path("src/intric/flows/ai_builder/ai_builder_planner.py")
+CREATE_OUTLINE_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_create_outline")
+)
+CREATE_OUTLINE_PATH = Path("src/intric/flows/ai_builder/ai_builder_create_outline.py")
+CREATE_COMPILER_PATH = Path("src/intric/flows/ai_builder/ai_builder_create_compiler.py")
+CREATE_COMPILER_PUBLIC_NAMES = frozenset(
+    {
+        "OutlineCompileContext",
+        "compile_create_draft",
+        "compile_outline_to_create_draft",
+        "outline_compile_context_from_planning_state",
+        "runtime_metadata_state_from_planning_state",
+    }
+)
+CREATE_OUTLINE_BANNED_COMPILER_NAMES = frozenset(
+    {
+        "ArchitectureCommit",
+        "ArchitectureCommitDraft",
+        "ArchitectureEnvelope",
+        "AIBuilderArchitectureError",
+        "FlowCreateDraft",
+        "OutlineCompileContext",
+        "PlanningState",
+        "compile_outline_to_create_draft",
+        "derive_architecture_commit_draft",
+        "materialize_step_skeleton",
+        "outline_compile_context_from_planning_state",
+        "resolve_step_skeleton_patterns",
+        "runtime_metadata_state_from_planning_state",
+    }
+)
 ACCEPTED_ACTION_RENDERING_PUBLIC_NAMES = frozenset(
     {
         "RequirementsSummaryRenderContext",
@@ -1675,6 +1706,63 @@ def test_planner_failure_events_has_canonical_owner() -> None:
                 and _annotation_uses_any(node.returns)
             ):
                 violations.append(f"{failure_events_path}:{node.lineno} returns Any")
+
+    assert violations == []
+
+
+def test_create_outline_no_longer_owns_create_compiler_mechanics() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    outline_path = backend_root / CREATE_OUTLINE_PATH
+    compiler_path = backend_root / CREATE_COMPILER_PATH
+    outline_tree = ast.parse(outline_path.read_text(), filename=str(outline_path))
+    compiler_tree = ast.parse(compiler_path.read_text(), filename=str(compiler_path))
+    violations: list[str] = []
+
+    outline_top_level = _top_level_names(outline_tree)
+    for name in sorted(outline_top_level & CREATE_COMPILER_PUBLIC_NAMES):
+        violations.append(f"{outline_path}: defines {name}")
+
+    for node in ast.walk(outline_tree):
+        if isinstance(node, ast.ImportFrom):
+            imported_names = {
+                alias.name
+                for alias in node.names
+                if alias.name in CREATE_OUTLINE_BANNED_COMPILER_NAMES
+            }
+            if imported_names:
+                names = ", ".join(sorted(imported_names))
+                violations.append(f"{outline_path}:{node.lineno} imports {names}")
+        if (
+            isinstance(node, ast.Name)
+            and node.id in CREATE_OUTLINE_BANNED_COMPILER_NAMES
+        ):
+            violations.append(f"{outline_path}:{node.lineno} references {node.id}")
+
+    for path in (backend_root / "src").rglob("*.py"):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if (
+                not isinstance(node, ast.ImportFrom)
+                or node.module != CREATE_OUTLINE_MODULE
+            ):
+                continue
+            imported_names = {
+                alias.name
+                for alias in node.names
+                if alias.name in CREATE_COMPILER_PUBLIC_NAMES or alias.name == "*"
+            }
+            if imported_names:
+                names = ", ".join(sorted(imported_names))
+                violations.append(f"{path}:{node.lineno} imports {names} from outline")
+
+    compiler_public = _top_level_public_names(compiler_tree)
+    missing_public = sorted(CREATE_COMPILER_PUBLIC_NAMES - compiler_public)
+    if missing_public:
+        violations.append(f"{compiler_path}: missing public names {missing_public}")
+
+    compiler_text = compiler_path.read_text()
+    if "build_outline_flow_tool_schema" in compiler_text:
+        violations.append(f"{compiler_path}: builds outline LLM tool schema")
 
     assert violations == []
 
