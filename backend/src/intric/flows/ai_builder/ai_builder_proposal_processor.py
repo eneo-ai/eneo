@@ -418,7 +418,6 @@ class AIBuilderProposalProcessor:
                     repair_completion=make_usage_tracked_proposal_completion(
                         litellm_client=self.litellm_client,
                         usage_tracker=ctx.usage_tracker,
-                        counts_as_repair=True,
                     ),
                 )
             ):
@@ -469,7 +468,6 @@ class AIBuilderProposalProcessor:
                 repair_completion=make_usage_tracked_proposal_completion(
                     litellm_client=self.litellm_client,
                     usage_tracker=ctx.usage_tracker,
-                    counts_as_repair=True,
                 ),
             )
         ):

@@ -13,6 +13,9 @@ from intric.flows.ai_builder.ai_builder_proposal_completion import (
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
 )
+from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalCompletionRequest,
+)
 
 
 def _make_response_with_text(
@@ -46,19 +49,22 @@ async def test_call_proposal_completion_strips_planner_response_format_kwargs() 
 
     result = await call_proposal_completion(
         litellm_client=litellm_client,
-        messages=[{"role": "user", "content": "Build a flow"}],
-        tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={
-            "response_format": {"type": "json_object"},
-            "drop_params": False,
-            "api_base": "http://provider.example",
-        },
-        max_output_tokens=1024,
-        temperature=0.2,
+        request=ProposalCompletionRequest(
+            messages=[{"role": "user", "content": "Build a flow"}],
+            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={
+                "response_format": {"type": "json_object"},
+                "drop_params": False,
+                "api_base": "http://provider.example",
+            },
+            max_output_tokens=1024,
+            temperature=0.2,
+        ),
     )
 
-    assert result is response
+    assert result.choices[0].message.content == "ok"
+    assert result.choices[0].message.tool_calls == ()
     call_kwargs = litellm_client.acompletion.await_args.kwargs
     assert call_kwargs["api_base"] == "http://provider.example"
     assert "response_format" not in call_kwargs
@@ -73,16 +79,102 @@ async def test_call_proposal_completion_forces_drop_params_true_on_provider_call
 
     await call_proposal_completion(
         litellm_client=litellm_client,
-        messages=[{"role": "user", "content": "Build a flow"}],
-        tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={"drop_params": False},
-        max_output_tokens=1024,
-        temperature=0.2,
+        request=ProposalCompletionRequest(
+            messages=[{"role": "user", "content": "Build a flow"}],
+            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={"drop_params": False},
+            max_output_tokens=1024,
+            temperature=0.2,
+        ),
     )
 
     call_kwargs = litellm_client.acompletion.await_args.kwargs
     assert call_kwargs["drop_params"] is True
+
+
+@pytest.mark.asyncio
+async def test_call_proposal_completion_passes_string_tool_choice() -> None:
+    response = _make_response_with_text("ok")
+    litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
+
+    await call_proposal_completion(
+        litellm_client=litellm_client,
+        request=ProposalCompletionRequest(
+            messages=[{"role": "user", "content": "Build a flow"}],
+            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            max_output_tokens=1024,
+            temperature=0.2,
+            tool_choice="auto",
+        ),
+    )
+
+    call_kwargs = litellm_client.acompletion.await_args.kwargs
+    assert call_kwargs["tool_choice"] == "auto"
+
+
+@pytest.mark.asyncio
+async def test_call_proposal_completion_ignores_malformed_usage_shape() -> None:
+    response = _make_response_with_text("ok")
+    response.usage = SimpleNamespace(prompt_tokens="5")
+    litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
+
+    result = await call_proposal_completion(
+        litellm_client=litellm_client,
+        request=ProposalCompletionRequest(
+            messages=[{"role": "user", "content": "Build a flow"}],
+            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            max_output_tokens=1024,
+            temperature=0.2,
+        ),
+    )
+
+    assert result.usage is None
+
+
+@pytest.mark.asyncio
+async def test_call_proposal_completion_normalizes_mapping_tool_calls() -> None:
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=None,
+                    tool_calls=[
+                        {
+                            "id": "call_outline",
+                            "function": {
+                                "name": OUTLINE_FLOW_TOOL_NAME,
+                                "arguments": '{"flow_name":"Test"}',
+                            },
+                        }
+                    ],
+                ),
+                finish_reason="tool_calls",
+            )
+        ]
+    )
+    litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
+
+    result = await call_proposal_completion(
+        litellm_client=litellm_client,
+        request=ProposalCompletionRequest(
+            messages=[{"role": "user", "content": "Build a flow"}],
+            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            max_output_tokens=1024,
+            temperature=0.2,
+        ),
+    )
+
+    tool_call = result.choices[0].message.tool_calls[0]
+    assert tool_call.id == "call_outline"
+    assert tool_call.function.name == OUTLINE_FLOW_TOOL_NAME
+    assert tool_call.function.arguments == '{"flow_name":"Test"}'
 
 
 @pytest.mark.asyncio
@@ -101,19 +193,22 @@ async def test_usage_tracked_completion_records_non_repair_usage() -> None:
     completion = make_usage_tracked_proposal_completion(
         litellm_client=litellm_client,
         usage_tracker=tracker,
-        counts_as_repair=False,
     )
 
     result = await completion(
-        messages=[{"role": "user", "content": "Build a flow"}],
-        tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        max_output_tokens=1024,
-        temperature=0.2,
+        ProposalCompletionRequest(
+            messages=[{"role": "user", "content": "Build a flow"}],
+            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            max_output_tokens=1024,
+            temperature=0.2,
+            counts_as_repair=False,
+        )
     )
 
-    assert result is response
+    assert result.usage is not None
+    assert result.usage.total_tokens == 8
     telemetry = tracker.build_planner_telemetry(tool_call_count=0)
     assert telemetry["llm_calls_made"] == 1
     assert telemetry["total_tokens"] == 8
@@ -136,19 +231,22 @@ async def test_usage_tracked_completion_counts_repair_usage() -> None:
     completion = make_usage_tracked_proposal_completion(
         litellm_client=litellm_client,
         usage_tracker=tracker,
-        counts_as_repair=True,
     )
 
     result = await completion(
-        messages=[{"role": "user", "content": "Repair the proposal"}],
-        tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
-        litellm_model="openai/gpt-5.4",
-        litellm_kwargs={},
-        max_output_tokens=1024,
-        temperature=0.2,
+        ProposalCompletionRequest(
+            messages=[{"role": "user", "content": "Repair the proposal"}],
+            tool_schemas=[{"function": {"name": OUTLINE_FLOW_TOOL_NAME}}],
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            max_output_tokens=1024,
+            temperature=0.2,
+            counts_as_repair=True,
+        )
     )
 
-    assert result is response
+    assert result.usage is not None
+    assert result.usage.total_tokens == 10
     telemetry = tracker.build_planner_telemetry(tool_call_count=0)
     assert telemetry["llm_calls_made"] == 1
     assert telemetry["total_tokens"] == 10

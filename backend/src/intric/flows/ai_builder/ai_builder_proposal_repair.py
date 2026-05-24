@@ -28,6 +28,8 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ToolProcessingFailureKind,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalCompletionFn,
+    ProposalCompletionRequest,
     ToolProcessingResult,
     ToolRetryInvocation,
 )
@@ -357,7 +359,7 @@ async def request_self_correction(
     self_correction_bumped_temperature: float,
     max_self_correction_retries: int,
     forced_proposal_temperature: float,
-    call_proposal_completion: Callable[..., Awaitable[Any]],
+    call_proposal_completion: ProposalCompletionFn,
     process_tool_invocation: Callable[
         [ToolRetryInvocation], Awaitable[ToolProcessingResult]
     ],
@@ -382,22 +384,34 @@ async def request_self_correction(
     while True:
         try:
             response = await call_proposal_completion(
-                messages=correction_messages,
-                tool_schemas=tool_schemas,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                max_output_tokens=max_output_tokens,
-                temperature=(
-                    self_correction_bumped_temperature
-                    if retry_state.use_bumped_temperature
-                    else self_correction_temperature
-                ),
+                ProposalCompletionRequest(
+                    messages=correction_messages,
+                    tool_schemas=tool_schemas,
+                    litellm_model=litellm_model,
+                    litellm_kwargs=litellm_kwargs,
+                    max_output_tokens=max_output_tokens,
+                    temperature=(
+                        self_correction_bumped_temperature
+                        if retry_state.use_bumped_temperature
+                        else self_correction_temperature
+                    ),
+                    counts_as_repair=True,
+                )
             )
         except Exception as error:
             logger.error("Self-correction LLM call failed", exc_info=error)
             yield build_ai_builder_error_event(
                 message="The AI planner failed. Please try again.",
                 code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
+                phase=AIBuilderErrorPhase.SELF_CORRECTION,
+                request_id=request_id,
+            )
+            return
+
+        if not response.choices:
+            yield build_ai_builder_error_event(
+                message="The AI planner failed to return a valid repair. Please try again.",
+                code=AIBuilderErrorCode.PLANNER_INVALID_REPAIR_RESPONSE,
                 phase=AIBuilderErrorPhase.SELF_CORRECTION,
                 request_id=request_id,
             )
@@ -580,7 +594,7 @@ async def retry_forced_tool_after_text(
     target_tool_name: str,
     forced_tool_prompt: str,
     forced_proposal_temperature: float,
-    call_proposal_completion: Callable[..., Awaitable[Any]],
+    call_proposal_completion: ProposalCompletionFn,
     process_tool_invocation: Callable[
         [ToolRetryInvocation], Awaitable[ToolProcessingResult]
     ],
@@ -622,16 +636,19 @@ async def retry_forced_tool_after_text(
 
     try:
         response = await call_proposal_completion(
-            messages=forced_messages,
-            tool_schemas=tool_schemas,
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            max_output_tokens=max_output_tokens,
-            temperature=forced_proposal_temperature,
-            tool_choice={
-                "type": "function",
-                "function": {"name": target_tool_name},
-            },
+            ProposalCompletionRequest(
+                messages=forced_messages,
+                tool_schemas=tool_schemas,
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                max_output_tokens=max_output_tokens,
+                temperature=forced_proposal_temperature,
+                tool_choice={
+                    "type": "function",
+                    "function": {"name": target_tool_name},
+                },
+                counts_as_repair=True,
+            )
         )
     except Exception as error:
         logger.error(
@@ -639,6 +656,9 @@ async def retry_forced_tool_after_text(
             exc_info=error,
             extra={"request_id": request_id},
         )
+        return ForcedToolRetryOutcome()
+
+    if not response.choices:
         return ForcedToolRetryOutcome()
 
     choice = response.choices[0]

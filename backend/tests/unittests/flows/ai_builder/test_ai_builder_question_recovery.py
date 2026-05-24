@@ -178,7 +178,7 @@ async def test_question_recovery_uses_backend_followup_when_only_question_tool_a
             new=AsyncMock(return_value=_runtime_result(_backend_question())),
         ) as build_runtime,
         patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion_with_usage",
+            "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion",
             new=AsyncMock(),
         ) as proposal_completion,
     ):
@@ -228,7 +228,7 @@ async def test_question_recovery_recovers_with_requirements_dispatch_when_discov
             return_value=True,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion_with_usage",
+            "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion",
             new=AsyncMock(return_value=_make_response_with_tool_calls(summary_call)),
         ) as proposal_completion,
     ):
@@ -253,7 +253,7 @@ async def test_question_recovery_recovers_with_requirements_dispatch_when_discov
     assert [schema["function"]["name"] for schema in dispatch.tool_schemas] == [
         CONFIRM_REQUIREMENTS_TOOL_NAME
     ]
-    assert proposal_completion.await_args.kwargs["tool_choice"] == {
+    assert proposal_completion.await_args.kwargs["request"].tool_choice == {
         "type": "function",
         "function": {"name": CONFIRM_REQUIREMENTS_TOOL_NAME},
     }
@@ -273,7 +273,7 @@ async def test_question_recovery_returns_typed_error_when_no_followup_exists() -
             return_value=False,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion_with_usage",
+            "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion",
             new=AsyncMock(),
         ) as proposal_completion,
     ):
@@ -297,6 +297,41 @@ async def test_question_recovery_returns_typed_error_when_no_followup_exists() -
 
 
 @pytest.mark.asyncio
+async def test_question_recovery_handles_empty_completion_choices() -> None:
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_question_recovery."
+            "build_discovery_runtime_result",
+            new=AsyncMock(return_value=_runtime_result()),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_question_recovery.analyze_discovery_ready",
+            return_value=True,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion",
+            new=AsyncMock(return_value=SimpleNamespace(choices=())),
+        ),
+    ):
+        events = [
+            item
+            async for item in stream_structured_question_tool_call(
+                repo=AsyncMock(),
+                litellm_client=AsyncMock(),
+                self_correction_temperature=0.2,
+                request=_make_request(
+                    conversation=_conversation_with_answered_final_output_mode()
+                ),
+            )
+        ]
+
+    assert [event["event"] for event in events] == ["status", "error"]
+    payload = json.loads(events[-1]["data"])
+    assert payload["code"] == "planner_invalid_repair_response"
+    assert payload["phase"] == "question_recovery"
+
+
+@pytest.mark.asyncio
 async def test_question_recovery_exhausts_repeated_structured_question_after_retry() -> (
     None
 ):
@@ -316,7 +351,7 @@ async def test_question_recovery_exhausts_repeated_structured_question_after_ret
             return_value=False,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion_with_usage",
+            "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion",
             new=AsyncMock(
                 side_effect=[
                     _make_response_with_tool_calls(repeated_question),
@@ -369,7 +404,7 @@ async def test_question_recovery_streams_repairing_before_completion_resolves() 
             return_value=False,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion_with_usage",
+            "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion",
             new=_completion,
         ),
     ):

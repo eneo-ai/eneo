@@ -32,11 +32,14 @@ from intric.flows.ai_builder.ai_builder_interaction_utils import (
     build_question_fallback_text,
 )
 from intric.flows.ai_builder.ai_builder_proposal_completion import (
-    call_proposal_completion_with_usage,
+    call_proposal_completion,
 )
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
     assistant_metadata_with_usage,
+)
+from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalCompletionRequest,
 )
 from intric.flows.ai_builder.ai_builder_repair_transport import (
     append_tool_retry_feedback_turn,
@@ -299,17 +302,19 @@ async def _stream_non_question_continuation(
     active_messages = correction_messages
     while True:
         try:
-            response = await call_proposal_completion_with_usage(
+            response = await call_proposal_completion(
                 litellm_client=litellm_client,
-                messages=active_messages,
-                tool_schemas=filtered_tool_schemas,
-                litellm_model=request.litellm_model,
-                litellm_kwargs=request.litellm_kwargs,
-                max_output_tokens=request.max_output_tokens,
-                temperature=self_correction_temperature,
                 usage_tracker=request.usage_tracker,
-                tool_choice=forced_tool_choice,
-                counts_as_repair=True,
+                request=ProposalCompletionRequest(
+                    messages=active_messages,
+                    tool_schemas=filtered_tool_schemas,
+                    litellm_model=request.litellm_model,
+                    litellm_kwargs=request.litellm_kwargs,
+                    max_output_tokens=request.max_output_tokens,
+                    temperature=self_correction_temperature,
+                    tool_choice=forced_tool_choice,
+                    counts_as_repair=True,
+                ),
             )
         except Exception as error:
             logger.error(
@@ -319,6 +324,17 @@ async def _stream_non_question_continuation(
             yield build_ai_builder_error_event(
                 message="The AI planner failed. Please try again.",
                 code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
+                phase=AIBuilderErrorPhase.QUESTION_RECOVERY,
+            )
+            return
+
+        if not response.choices:
+            yield build_ai_builder_error_event(
+                message=(
+                    "The AI planner failed to return a valid clarification "
+                    "repair. Please try again."
+                ),
+                code=AIBuilderErrorCode.PLANNER_INVALID_REPAIR_RESPONSE,
                 phase=AIBuilderErrorPhase.QUESTION_RECOVERY,
             )
             return

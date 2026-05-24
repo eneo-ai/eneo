@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T083
+active_task: T084
 
 interruptions:
   - id: I001
@@ -7796,7 +7796,7 @@ tasks:
   - id: T083
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Implement the proposal-completion typed boundary: ProposalTurnContext owns turn-stable fields, ProposalCompletionRequest owns one provider call, call_proposal_completion is the single provider entry point, and response/usage contracts are typed."
     allowed_files:
@@ -7814,6 +7814,7 @@ tasks:
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py"
       - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
       - ".codex/artifacts/flow-ai-builder-t083-implementation-summary.md"
       - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
@@ -7853,6 +7854,73 @@ tasks:
       - "Response typing leaks Any into more files than today or cannot be represented by a narrow Protocol."
       - "Tests cannot prove repair/non-repair usage semantics and tool_choice behavior stayed stable."
       - "Need public API/SSE/schema/prompt behavior changes."
+    receipt:
+      completed_at: "2026-05-24T21:03:25Z"
+      summary: "Implemented the proposal-completion typed boundary. ProposalCompletionRequest is now the single internal provider-call request shape, ProposalCompletionFn accepts exactly one request object, call_proposal_completion is the only proposal provider execution/usage-recording entry point, and repair/non-repair usage semantics travel on request.counts_as_repair instead of closure state. LiteLLM responses are normalized into typed internal views at the provider edge, call_proposal_completion_with_usage and the local LiteLLMProposalMessage shadow Protocol are deleted, and empty provider choices now map to typed phase-specific AI Builder errors."
+      files_changed:
+        - "backend/src/intric/flows/ai_builder/ai_builder_edit_repair.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_completion.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py"
+      artifact: ".codex/artifacts/flow-ai-builder-t083-implementation-summary.md"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py::test_attempt_description_repair_uses_completion_boundary_only_for_description -q -> 99 passed."
+        - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_confirm_requirements_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_structured_question_recovery_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_edit_flow_with_lost_lease_rolls_back -q -> 3 passed, 16 warnings."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2404 passed, 4 skipped, 11 warnings."
+        - "cd backend && uv run ruff format --check <touched T083 files> -> passed."
+        - "cd backend && uv run ruff check <touched T083 files> -> passed."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors."
+        - "git diff --check -> passed."
+        - "Final current-diff recheck on 2026-05-24: focused T083 tests -> 99 passed; Ruff format/check, Pyright, and git diff --check -> passed."
+      peer_review:
+        claude_iteration_1: "GREEN_LIGHT yes / MIN_SCORE 8; accepted follow-ups around empty choices, usage validation, tool_choice string coverage, and forced submission response typing."
+        claude_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 9 after Codex fixed request/usage/tool_choice findings."
+        claude_iteration_3: "GREEN_LIGHT yes / MIN_SCORE 9 after Codex addressed Antigravity P1/P2 findings by normalizing raw provider tool calls into frozen views and deleting LiteLLMProposalMessage."
+        antigravity_iteration_1: "GREEN_LIGHT yes / MIN_SCORE 8; Codex accepted the P1/P2 recommendations to eliminate raw tool-call casts and the shadow Protocol before commit."
+        antigravity_iteration_2: "GREEN_LIGHT yes; no blockers. Artifact parsed green with MIN_SCORE >= 8 and final text reported MIN_SCORE 9."
+      swagger_openapi_impact: "None. T083 is internal backend proposal-completion ownership work and does not change public REST/SSE contracts, OpenAPI schemas, Swagger examples, generated TypeScript, request/response models, or API examples."
+      session_goal_tool_status: "get_goal works but still reports stale T081 objective text; no set_goal/update-objective primitive is available in this session. Durable board remains the source of truth."
+      codex_self_review:
+        verdict: "pass for T083 scope. The change is simpler for maintainers because proposal provider kwargs, response normalization, and usage recording now have one owner; old duplicate completion functions and hidden repair-counting closure state are gone; callers inspect one typed request object; static ownership guards block the old path."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "ProposalTurnContext.completion_request currently has a narrow call surface; keep it only while it continues to centralize turn-stable defaults."
+        - "Some ownership guards still use string/substr checks; future test-hardening can convert them to deeper AST sweeps."
+        - "No live eval was run for T083 because the tranche is an internal proposal-completion boundary cleanup with no intentional user-visible behavior or public API change."
+        - "Broader topology/readability, bounded AI-slop/comment/naming cleanup, full-source typing/test baseline, and repeated live-output proof still block a defensible subsystem-wide 9/10."
+      score_impact: "Improves Maintainability, Clean Architecture, Separation of Concerns, Single Source of Truth, Human Readability, Human Reviewability, Test Quality, and AI Slop resistance inside the proposal-completion provider boundary. Does not raise the strict overall score floor above 8 because this is one provider seam, not proof that every subsystem-wide dimension is now 9."
+      broader_goal_complete: false
+
+  - id: T084
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest score-floor mover after T083 from current repo reality, without implementing during the ranking tranche."
+    constraints:
+      - "Start from git status, latest commits, current scorecard, T083 receipt, and source evidence."
+      - "Do not implement during T084."
+      - "Do not switch to broader Flows work."
+      - "Do not select LOC reduction or file splitting unless evidence proves it removes real complexity, reduces coupling, or clarifies canonical ownership."
+      - "Consider bounded AI-slop/comment/naming cleanup, deletion of stale compatibility wrappers, planner/source topology and readability blockers, full-source typing/test baseline, live eval replay, diagnostics/DX and future OpenTelemetry compatibility, data/schema/JSONB ownership, and frontend/backend contract or generated-client drift."
+      - "If a candidate changes public API/SSE/schema/generated-client-visible contracts, include Swagger/OpenAPI docs, examples, and generated client updates in that candidate scope."
+      - "Use Claude for the plan gate and Antigravity if available. Missing Antigravity coverage is a skip, not a pass."
+    expected_output:
+      - "Ranked candidate table with file:line evidence."
+      - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, and expected score impact."
+      - "Explicit explanation of why the selected tranche moves the strict 9/10 floor more than easier cleanup."
+      - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
     receipt: null
 
 checks:
@@ -7861,14 +7929,14 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T081 completed, validated, Claude-gated, Antigravity-gated, and ready for scoped commit. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T081
+    result: "T083 completed, validated, Claude-gated, Antigravity-gated, and ready for scoped commit. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T083
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_backend_question_persistence.py tests/unittests/flows/ai_builder/test_ai_builder_confirm_requirements.py tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_confirm_requirements_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_structured_question_recovery_with_lost_lease_rolls_back -q -> 21 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2397 passed, 4 skipped"
-      - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_confirm_requirements_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_structured_question_recovery_with_lost_lease_rolls_back -q -> 2 passed"
-      - "cd backend && ruff check/format --check touched T081 files -> clean"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py::test_attempt_description_repair_uses_completion_boundary_only_for_description -q -> 99 passed"
+      - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_confirm_requirements_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_structured_question_recovery_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_edit_flow_with_lost_lease_rolls_back -q -> 3 passed, 16 warnings"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2404 passed, 4 skipped, 11 warnings"
+      - "cd backend && ruff check/format --check touched T083 files -> clean"
       - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
       - "git diff --check -> clean"
-      - "Claude T081 final implementation gate -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity T081 final implementation gate -> GREEN_LIGHT yes / MIN_SCORE 9"
+      - "Claude T083 final implementation gate -> GREEN_LIGHT yes / MIN_SCORE 9"
+      - "Antigravity T083 final implementation gate -> GREEN_LIGHT yes / MIN_SCORE >= 8"

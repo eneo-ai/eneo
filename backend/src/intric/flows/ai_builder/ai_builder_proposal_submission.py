@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
@@ -56,7 +56,7 @@ from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
 from intric.flows.ai_builder.ai_builder_proposal_completion import (
-    call_proposal_completion_with_usage,
+    call_proposal_completion,
     make_usage_tracked_proposal_completion,
 )
 from intric.flows.ai_builder.ai_builder_proposal_finalization import (
@@ -79,6 +79,8 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     record_proposal_first_attempt,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalCompletionMessage,
+    ProposalCompletionToolCall,
     ProposalTurnContext,
     ToolProcessingResult,
     ToolRetryConfig,
@@ -114,17 +116,12 @@ SUBMISSION_TOOL_NAMES = frozenset({OUTLINE_FLOW_TOOL_NAME, EDIT_FLOW_TOOL_NAME})
 @dataclass(frozen=True)
 class ForcedSubmissionResponse:
     text_content: str | None
-    tool_call: RuntimeToolCall
-
-
-class LiteLLMProposalMessage(Protocol):
-    tool_calls: Sequence[RuntimeToolCall] | None
-    content: str | None
+    tool_call: ProposalCompletionToolCall
 
 
 def _forced_submission_response(
     *,
-    message: LiteLLMProposalMessage,
+    message: ProposalCompletionMessage,
     submission_tool_name: str,
 ) -> ForcedSubmissionResponse | None:
     if submission_tool_name not in SUBMISSION_TOOL_NAMES:
@@ -289,19 +286,16 @@ class ProposalSubmissionOwner:
                 return
 
         try:
-            response = await call_proposal_completion_with_usage(
+            response = await call_proposal_completion(
                 litellm_client=self.litellm_client,
-                messages=llm_messages,
-                tool_schemas=tool_schemas,
-                litellm_model=litellm_model,
-                litellm_kwargs=litellm_kwargs,
-                max_output_tokens=max_output_tokens,
-                temperature=proposal_temperature,
                 usage_tracker=usage_tracker,
-                tool_choice={
-                    "type": "function",
-                    "function": {"name": submission_tool_name},
-                },
+                request=ctx.completion_request(
+                    temperature=proposal_temperature,
+                    tool_choice={
+                        "type": "function",
+                        "function": {"name": submission_tool_name},
+                    },
+                ),
             )
         except Exception as error:
             logger.error("AI Builder proposal task failed", exc_info=error)
@@ -309,6 +303,18 @@ class ProposalSubmissionOwner:
                 message="The AI planner failed. Please try again.",
                 code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
                 phase=AIBuilderErrorPhase.PLANNER,
+                request_id=request_id,
+            )
+            return
+
+        if not response.choices:
+            yield build_ai_builder_error_event(
+                message=(
+                    "The AI planner did not return a valid flow proposal. "
+                    "Please try again or use a more capable model."
+                ),
+                code=AIBuilderErrorCode.PROPOSAL_TOOL_MISSING,
+                phase=AIBuilderErrorPhase.PROPOSAL,
                 request_id=request_id,
             )
             return
@@ -514,7 +520,6 @@ class ProposalSubmissionOwner:
                 call_proposal_completion=make_usage_tracked_proposal_completion(
                     litellm_client=self.litellm_client,
                     usage_tracker=usage_tracker,
-                    counts_as_repair=False,
                 ),
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs,
@@ -564,7 +569,6 @@ class ProposalSubmissionOwner:
             repair_completion=make_usage_tracked_proposal_completion(
                 litellm_client=self.litellm_client,
                 usage_tracker=ctx.usage_tracker,
-                counts_as_repair=True,
             ),
         )
 
@@ -827,7 +831,6 @@ class ProposalSubmissionOwner:
                 repair_completion=make_usage_tracked_proposal_completion(
                     litellm_client=self.litellm_client,
                     usage_tracker=usage_tracker,
-                    counts_as_repair=True,
                 ),
                 resource_catalog=resource_catalog,
                 flow=flow,
@@ -908,7 +911,6 @@ class ProposalSubmissionOwner:
                 call_proposal_completion=make_usage_tracked_proposal_completion(
                     litellm_client=self.litellm_client,
                     usage_tracker=ctx.usage_tracker,
-                    counts_as_repair=False,
                 ),
                 litellm_model=ctx.litellm_model,
                 litellm_kwargs=ctx.litellm_kwargs,

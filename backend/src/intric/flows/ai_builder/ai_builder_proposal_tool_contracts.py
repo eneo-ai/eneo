@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
@@ -35,15 +35,71 @@ if TYPE_CHECKING:
 class ProposalCompletionFn(Protocol):
     def __call__(
         self,
-        *,
-        messages: list[dict[str, Any]],
-        tool_schemas: list[dict[str, Any]],
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        max_output_tokens: int,
-        temperature: float,
-        tool_choice: dict[str, Any] | None = None,
-    ) -> Awaitable[Any]: ...
+        request: "ProposalCompletionRequest",
+    ) -> Awaitable["ProposalCompletionResponse"]: ...
+
+
+class ProposalCompletionUsage(Protocol):
+    @property
+    def prompt_tokens(self) -> int: ...
+
+    @property
+    def completion_tokens(self) -> int: ...
+
+    @property
+    def total_tokens(self) -> int: ...
+
+
+class ProposalCompletionToolCallFunction(Protocol):
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def arguments(self) -> str: ...
+
+
+class ProposalCompletionToolCall(Protocol):
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def function(self) -> ProposalCompletionToolCallFunction: ...
+
+
+class ProposalCompletionMessage(Protocol):
+    @property
+    def content(self) -> str | None: ...
+
+    @property
+    def tool_calls(self) -> Sequence[ProposalCompletionToolCall]: ...
+
+
+class ProposalCompletionChoice(Protocol):
+    @property
+    def message(self) -> ProposalCompletionMessage: ...
+
+    @property
+    def finish_reason(self) -> str | None: ...
+
+
+class ProposalCompletionResponse(Protocol):
+    @property
+    def choices(self) -> Sequence[ProposalCompletionChoice]: ...
+
+    @property
+    def usage(self) -> ProposalCompletionUsage | None: ...
+
+
+@dataclass(frozen=True)
+class ProposalCompletionRequest:
+    messages: list[dict[str, Any]]
+    tool_schemas: list[dict[str, Any]]
+    litellm_model: str
+    litellm_kwargs: dict[str, Any]
+    max_output_tokens: int
+    temperature: float
+    tool_choice: dict[str, Any] | str | None = None
+    counts_as_repair: bool = False
 
 
 @dataclass(frozen=True)
@@ -134,3 +190,23 @@ class ProposalTurnContext:
     @property
     def base_planning_state_version(self) -> int:
         return self.turn.base_planning_state_version
+
+    def completion_request(
+        self,
+        *,
+        temperature: float,
+        messages: list[dict[str, Any]] | None = None,
+        tool_schemas: list[dict[str, Any]] | None = None,
+        tool_choice: dict[str, Any] | str | None = None,
+        counts_as_repair: bool = False,
+    ) -> ProposalCompletionRequest:
+        return ProposalCompletionRequest(
+            messages=self.llm_messages if messages is None else messages,
+            tool_schemas=self.tool_schemas if tool_schemas is None else tool_schemas,
+            litellm_model=self.litellm_model,
+            litellm_kwargs=self.litellm_kwargs,
+            max_output_tokens=self.max_output_tokens,
+            temperature=temperature,
+            tool_choice=tool_choice,
+            counts_as_repair=counts_as_repair,
+        )

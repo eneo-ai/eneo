@@ -292,7 +292,7 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
             new=_store_compiled_plan,
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion_with_usage",
+            "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
             new=AsyncMock(return_value=_make_response_with_tool_calls(outline_call)),
         ) as call_completion,
     ):
@@ -318,13 +318,13 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
         ]
 
     assert [event["event"] for event in events] == ["plan"]
-    assert call_completion.await_args.kwargs["tool_choice"] == {
+    assert call_completion.await_args.kwargs["request"].tool_choice == {
         "type": "function",
         "function": {"name": OUTLINE_FLOW_TOOL_NAME},
     }
     assert [
         schema["function"]["name"]
-        for schema in call_completion.await_args.kwargs["tool_schemas"]
+        for schema in call_completion.await_args.kwargs["request"].tool_schemas
     ] == [OUTLINE_FLOW_TOOL_NAME]
 
 
@@ -335,7 +335,7 @@ async def test_propose_plan_provider_error_still_yields_planner_upstream_error()
     processor = _make_processor()
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion_with_usage",
+        "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
         new=AsyncMock(side_effect=RuntimeError("provider unavailable")),
     ):
         events = [
@@ -364,6 +364,44 @@ async def test_propose_plan_provider_error_still_yields_planner_upstream_error()
     assert payload["code"] == "planner_upstream_error"
     assert payload["phase"] == "planner"
     assert payload["request_id"] == "req-first-attempt-provider-error"
+
+
+@pytest.mark.asyncio
+async def test_propose_plan_empty_completion_choices_yields_missing_tool_error() -> (
+    None
+):
+    processor = _make_processor()
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
+        new=AsyncMock(return_value=SimpleNamespace(choices=())),
+    ):
+        events = [
+            event
+            async for event in processor.propose_plan(
+                turn=_make_turn(),
+                conversation=[ConversationMessage(role="user", content="Build a flow")],
+                new_messages_start=1,
+                llm_messages=[{"role": "system", "content": "Prompt"}],
+                litellm_model="openai/gpt-5.4",
+                litellm_kwargs={},
+                available_models=None,
+                available_kbs=None,
+                available_model_refs=None,
+                available_kb_refs=None,
+                resource_catalog=None,
+                max_output_tokens=4096,
+                proposal_temperature=0.2,
+                request_id="req-empty-first-attempt",
+                flow=None,
+            )
+        ]
+
+    assert [event["event"] for event in events] == ["error"]
+    payload = json.loads(events[0]["data"])
+    assert payload["code"] == "proposal_tool_missing"
+    assert payload["phase"] == "proposal"
+    assert payload["request_id"] == "req-empty-first-attempt"
 
 
 @pytest.mark.asyncio
@@ -415,7 +453,7 @@ async def test_propose_plan_preflights_scoped_model_change_on_ai_step_without_ll
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion_with_usage",
+            "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
             new=AsyncMock(),
         ) as call_completion,
         patch(
@@ -499,7 +537,7 @@ async def test_propose_plan_preflights_transcription_step_model_notice_without_l
     prior_plan = _builder_plan(prior_spec)
 
     with patch(
-        "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion_with_usage",
+        "intric.flows.ai_builder.ai_builder_proposal_submission.call_proposal_completion",
         new=AsyncMock(),
     ) as call_completion:
         events = [

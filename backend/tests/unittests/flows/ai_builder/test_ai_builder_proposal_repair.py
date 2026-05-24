@@ -18,6 +18,7 @@ from intric.flows.ai_builder.ai_builder_proposal_repair_runtime import (
     MAX_SELF_CORRECTION_RETRIES,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ProposalCompletionRequest,
     ToolProcessingResult,
     ToolRetryInvocation,
 )
@@ -382,16 +383,10 @@ async def _run_repair_capturing(
     observed_retry_feedback: list[str] = []
 
     async def call_proposal_completion(
-        *,
-        messages: list[dict[str, Any]],
-        tool_schemas: list[dict[str, Any]],
-        litellm_model: str,
-        litellm_kwargs: dict[str, Any],
-        max_output_tokens: int,
-        temperature: float,
+        request: ProposalCompletionRequest,
     ) -> SimpleNamespace:
-        observed_temperatures.append(temperature)
-        for msg in reversed(messages):
+        observed_temperatures.append(request.temperature)
+        for msg in reversed(request.messages):
             if msg.get("role") == "tool":
                 observed_retry_feedback.append(str(msg.get("content", "")))
                 break
@@ -540,7 +535,9 @@ async def test_request_self_correction_emits_error_event_when_planner_bails_to_c
         ]
     )
 
-    async def call_proposal_completion(**_: Any) -> SimpleNamespace:
+    async def call_proposal_completion(
+        _: ProposalCompletionRequest,
+    ) -> SimpleNamespace:
         return text_response
 
     async def process_invocation(
@@ -619,7 +616,9 @@ async def test_request_self_correction_uses_request_id_on_forced_retry_validatio
     )
     responses = [text_response, tool_response]
 
-    async def call_proposal_completion(**_: Any) -> SimpleNamespace:
+    async def call_proposal_completion(
+        _: ProposalCompletionRequest,
+    ) -> SimpleNamespace:
         return responses.pop(0)
 
     async def process_invocation(
@@ -665,6 +664,46 @@ async def test_request_self_correction_uses_request_id_on_forced_retry_validatio
 
 
 @pytest.mark.asyncio
+async def test_request_self_correction_handles_empty_completion_choices() -> None:
+    async def call_proposal_completion(
+        _: ProposalCompletionRequest,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(choices=())
+
+    events: list[dict[str, str]] = []
+    async for event in request_self_correction(
+        turn=_make_turn(),
+        request_id="req-empty-choices",
+        conversation=[],
+        new_messages_start=0,
+        error_message="Invalid outline_flow draft.",
+        llm_messages=[{"role": "user", "content": "build flow"}],
+        tool_call=_original_tool_call(),
+        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        available_model_refs=None,
+        available_kb_refs=None,
+        max_output_tokens=1024,
+        self_correction_temperature=0.35,
+        self_correction_bumped_temperature=0.6,
+        max_self_correction_retries=0,
+        forced_proposal_temperature=0.1,
+        call_proposal_completion=call_proposal_completion,
+        process_tool_invocation=AsyncMock(),
+        target_tool_name="outline_flow",
+        forced_tool_prompt="Call outline_flow.",
+        flow=None,
+    ):
+        events.append(event)
+
+    assert events[-1]["event"] == "error"
+    payload = json.loads(events[-1]["data"])
+    assert payload["request_id"] == "req-empty-choices"
+    assert payload["code"] == "planner_invalid_repair_response"
+
+
+@pytest.mark.asyncio
 async def test_request_self_correction_retries_forced_retry_validation_feedback() -> (
     None
 ):
@@ -699,11 +738,9 @@ async def test_request_self_correction_retries_forced_retry_validation_feedback(
     invocation_count = 0
 
     async def call_proposal_completion(
-        *,
-        messages: list[dict[str, Any]],
-        **_: Any,
+        request: ProposalCompletionRequest,
     ) -> SimpleNamespace:
-        observed_messages.append(messages)
+        observed_messages.append(request.messages)
         return responses.pop(0)
 
     async def process_invocation(
@@ -785,11 +822,9 @@ async def test_request_self_correction_limits_text_feedback_retry_budget() -> No
     invocation_count = 0
 
     async def call_proposal_completion(
-        *,
-        messages: list[dict[str, Any]],
-        **_: Any,
+        request: ProposalCompletionRequest,
     ) -> SimpleNamespace:
-        observed_messages.append(messages)
+        observed_messages.append(request.messages)
         return responses.pop(0)
 
     async def process_invocation(
@@ -855,7 +890,9 @@ async def test_request_self_correction_still_yields_text_for_legitimate_info_req
         ]
     )
 
-    async def call_proposal_completion(**_: Any) -> SimpleNamespace:
+    async def call_proposal_completion(
+        _: ProposalCompletionRequest,
+    ) -> SimpleNamespace:
         return text_response
 
     async def process_invocation(

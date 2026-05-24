@@ -261,7 +261,7 @@ async def test_attempt_description_repair_uses_completion_boundary_only_for_desc
     assert repaired.flow_name == original.flow_name
     assert repaired.steps == original.steps
     completion.assert_awaited_once()
-    assert completion.await_args.kwargs["tool_schemas"] == []
+    assert completion.await_args.args[0].tool_schemas == []
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,7 @@ from intric.flows.ai_builder.ai_builder_edit_models import EditAdvisory
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
     ProposalCompletionFn,
+    ProposalCompletionRequest,
 )
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -94,12 +95,15 @@ async def attempt_description_repair(
 
     try:
         response = await call_proposal_completion(
-            messages=[{"role": "user", "content": repair_prompt}],
-            tool_schemas=[],
-            litellm_model=litellm_model,
-            litellm_kwargs=litellm_kwargs,
-            max_output_tokens=max_output_tokens,
-            temperature=0.3,
+            ProposalCompletionRequest(
+                messages=[{"role": "user", "content": repair_prompt}],
+                tool_schemas=[],
+                litellm_model=litellm_model,
+                litellm_kwargs=litellm_kwargs,
+                max_output_tokens=max_output_tokens,
+                temperature=0.3,
+                counts_as_repair=False,
+            )
         )
         new_description = (response.choices[0].message.content or "").strip()
         if not new_description:

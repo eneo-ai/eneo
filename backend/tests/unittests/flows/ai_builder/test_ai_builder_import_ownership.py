@@ -786,7 +786,7 @@ def test_question_recovery_has_single_owner_and_typed_boundary() -> None:
             f"{question_path}:{request_class.lineno} fields {request_fields}"
         )
 
-    completion_import_count = 0
+    tracked_completion_import_count = 0
     direct_completion_import_count = 0
     for node in ast.walk(question_tree):
         if isinstance(node, ast.ImportFrom):
@@ -797,7 +797,7 @@ def test_question_recovery_has_single_owner_and_typed_boundary() -> None:
             if node.module == "intric.flows.ai_builder.ai_builder_proposal_completion":
                 for alias in node.names:
                     if alias.name == "call_proposal_completion_with_usage":
-                        completion_import_count += 1
+                        tracked_completion_import_count += 1
                     if alias.name == "call_proposal_completion":
                         direct_completion_import_count += 1
 
@@ -840,15 +840,81 @@ def test_question_recovery_has_single_owner_and_typed_boundary() -> None:
                     f"{question_path}:{node.lineno} field {node.target.id} uses Any"
                 )
 
-    if completion_import_count != 1:
+    if tracked_completion_import_count:
         violations.append(
             f"{question_path}: call_proposal_completion_with_usage imports "
-            f"{completion_import_count}"
+            f"{tracked_completion_import_count}"
         )
-    if direct_completion_import_count:
-        violations.append(f"{question_path}: imports call_proposal_completion")
+    if direct_completion_import_count != 1:
+        violations.append(
+            f"{question_path}: call_proposal_completion imports "
+            f"{direct_completion_import_count}"
+        )
     if question_text.count('"question-recovery"') != 1:
         violations.append(f"{question_path}: question-recovery literal count changed")
+
+    assert violations == []
+
+
+def test_proposal_completion_has_single_request_boundary() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    contracts_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+    )
+    completion_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_completion.py"
+    )
+    submission_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
+    )
+    proposal_callers = [
+        backend_root / Path("src/intric/flows/ai_builder/ai_builder_edit_repair.py"),
+        backend_root
+        / Path("src/intric/flows/ai_builder/ai_builder_proposal_repair.py"),
+        submission_path,
+        backend_root
+        / Path("src/intric/flows/ai_builder/ai_builder_question_recovery.py"),
+    ]
+    contracts_tree = ast.parse(contracts_path.read_text(), filename=str(contracts_path))
+    completion_text = completion_path.read_text()
+    submission_text = submission_path.read_text()
+    violations: list[str] = []
+
+    protocol_class = next(
+        node
+        for node in ast.walk(contracts_tree)
+        if isinstance(node, ast.ClassDef) and node.name == "ProposalCompletionFn"
+    )
+    call_method = next(
+        node
+        for node in protocol_class.body
+        if isinstance(node, ast.FunctionDef) and node.name == "__call__"
+    )
+    positional_args = [arg.arg for arg in call_method.args.args if arg.arg != "self"]
+    if positional_args != ["request"]:
+        violations.append(
+            f"{contracts_path}:{call_method.lineno} __call__ args {positional_args}"
+        )
+    if call_method.args.kwonlyargs or call_method.args.vararg or call_method.args.kwarg:
+        violations.append(f"{contracts_path}:{call_method.lineno} exposes kwargs")
+
+    for path in [completion_path, *proposal_callers]:
+        text = path.read_text()
+        if "call_proposal_completion_with_usage" in text:
+            violations.append(f"{path}: references call_proposal_completion_with_usage")
+
+    for path in proposal_callers:
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr == "acompletion":
+                violations.append(f"{path}:{node.lineno} calls acompletion")
+
+    if "usage_tracker.record_response" not in completion_text:
+        violations.append(f"{completion_path}: completion owner does not record usage")
+    if "LiteLLMProposalMessage" in submission_text:
+        violations.append(
+            f"{submission_path}: defines local LiteLLMProposalMessage shadow protocol"
+        )
 
     assert violations == []
 
