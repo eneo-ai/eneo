@@ -20,6 +20,7 @@ rules:
   no_push_without_owner_request: true
   peer_gate_before_implementation: true
   post_implementation_review_required_for_non_trivial_changes: true
+  public_contract_changes_update_swagger_examples: true
 
 agents:
   scout: installed
@@ -28,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T082
+active_task: T083
 
 interruptions:
   - id: I001
@@ -7766,7 +7767,7 @@ tasks:
   - id: T082
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Re-rank the next highest score-floor mover after T081 from current repo reality, without defaulting to file splitting or LOC reduction."
     constraints:
@@ -7779,6 +7780,79 @@ tasks:
       - "Ranked candidate table with file:line evidence."
       - "Selected next tranche with canonical owner decisions, delete/merge/move path, acceptance criteria, non-goals, validation, peer-gate requirements, and honest score impact."
       - "Explicit explanation of why the chosen tranche improves the strict 9/10 floor more than easier alternatives."
+    receipt:
+      completed_at: "2026-05-24T20:21:32Z"
+      summary: "Re-ranked the next score-floor mover after T081 from current repo evidence. Selected T083 Proposal Completion Typed Boundary because proposal LLM completion still exposes duplicated raw LiteLLM/provider call signatures across submission, repair, question recovery, edit repair, and telemetry. Rejected LOC-based splitting, deletion-only discovery wrapper cleanup, broad AI-slop cleanup, full-source baseline, and live eval replay as weaker immediate score-floor movers."
+      artifact: ".codex/artifacts/flow-ai-builder-t082-next-tranche-ranking.md"
+      peer_review:
+        claude_iteration_1: "GREEN_LIGHT no / MIN_SCORE 6; accepted blockers around ProposalTurnContext ownership ambiguity, response typing scope, usage tracking unification, static guard specificity, and missing call-site matrix."
+        claude_iteration_2: "GREEN_LIGHT no / MIN_SCORE 7; accepted blockers around an inaccurate ai_builder_proposal_submission.py:292 matrix row, ambiguous tool_choice column semantics, and missing counts_as_repair-on-request rationale."
+        claude_iteration_3: "GREEN_LIGHT yes / MIN_SCORE 8 after Codex fixed the matrix definition and source mismatch, justified counts_as_repair on the request, and kept integration smoke in validation."
+        antigravity_iteration_1: "GREEN_LIGHT yes / MIN_SCORE 9; accepted plan and added implementation requirements: ProposalCompletionResponse must include typed usage, and ProposalCompletionRequest.tool_choice must be dict[str, Any] | str | None."
+      selected_worker: T083
+      score_impact: "Read-only judge task. No score increase until T083 is implemented, validated, and post-reviewed."
+      broader_goal_complete: false
+
+  - id: T083
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Implement the proposal-completion typed boundary: ProposalTurnContext owns turn-stable fields, ProposalCompletionRequest owns one provider call, call_proposal_completion is the single provider entry point, and response/usage contracts are typed."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_completion.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair_runtime.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_repair.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_telemetry.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+      - ".codex/artifacts/flow-ai-builder-t083-implementation-summary.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    constraints:
+      - "Do not split files or set hard LOC targets. This tranche is about typed ownership of the proposal completion boundary."
+      - "No public API, SSE, DB/schema, prompt, diagnostic, model-selection, or OpenTelemetry changes."
+      - "Swagger/OpenAPI impact is expected to be none. If the implementation unexpectedly requires public API/SSE/schema or generated-client-visible changes, stop and re-plan with Swagger/OpenAPI examples, schema examples, and generated client updates in scope."
+      - "Do not add factories/interfaces for future flexibility. Keep callback adapter only if repair runtime still needs one, and it must carry no hidden repair-counting state."
+      - "Any remains allowed only at the LiteLLM provider edge or as existing boundary input where no tighter local type exists."
+      - "Preserve unrelated dirty files and do not push."
+    acceptance_criteria:
+      - "ProposalTurnContext remains canonical for turn-stable completion fields and exposes a narrow request builder."
+      - "ProposalCompletionRequest is the sole internal provider-call request shape."
+      - "ProposalCompletionFn.__call__ accepts exactly one request: ProposalCompletionRequest."
+      - "call_proposal_completion_with_usage is deleted."
+      - "call_proposal_completion is the only provider execution function and records usage when usage_tracker is provided, using request.counts_as_repair."
+      - "ProposalCompletionResponse Protocol includes typed choices and typed usage: ProposalCompletionUsage | None."
+      - "ProposalCompletionRequest.tool_choice is typed as dict[str, Any] | str | None."
+      - "Response Protocol uses non-optional sequences where absence can be normalized at the edge, especially tool_calls."
+      - "Provider response_format stripping and drop_params=True forcing remain tested."
+      - "Repair/non-repair usage and tool_choice behavior are preserved for all matrix rows named in .codex/artifacts/flow-ai-builder-t082-next-tranche-ranking.md."
+      - "AST/import ownership guards prevent reintroducing the old kwargs Protocol, call_proposal_completion_with_usage, or direct LiteLLM completion calls outside the completion owner."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::<selected proposal/session smoke> -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check <touched T083 files>"
+      - "cd backend && uv run ruff format --check <touched T083 files>"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "git diff --check"
+      - "Claude implementation gate GREEN_LIGHT yes / MIN_SCORE >= 8; Antigravity implementation gate if quota/tooling available."
+    stop_if:
+      - "The request object becomes a broad bag duplicating ProposalTurnContext without a request-builder boundary."
+      - "ProposalCompletionFn still exposes the old kwargs signature."
+      - "call_proposal_completion_with_usage remains public without a peer-reviewed reason."
+      - "Response typing leaks Any into more files than today or cannot be represented by a narrow Protocol."
+      - "Tests cannot prove repair/non-repair usage semantics and tool_choice behavior stayed stable."
+      - "Need public API/SSE/schema/prompt behavior changes."
     receipt: null
 
 checks:
