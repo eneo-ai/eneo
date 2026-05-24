@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T086
+active_task: T087
 
 interruptions:
   - id: I001
@@ -8052,7 +8052,7 @@ tasks:
   - id: T086
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Re-rank the next highest score-floor mover after the planner-completion boundary from current repo reality, without implementing during the ranking tranche."
     constraints:
@@ -8068,6 +8068,62 @@ tasks:
       - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, expected score impact, and Swagger/OpenAPI impact."
       - "Explicit explanation of why the selected tranche moves the strict 9/10 floor more than easier cleanup."
       - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
+    receipt:
+      completed_at: "2026-05-24T22:08:23Z"
+      summary: "Re-ranked the next score-floor mover after T085 from current repo evidence. Selected T087 to retire the unused AI Builder materialization bridge / DraftPlanEnvelope island only after porting unique surviving coverage to current owners. Claude rejected the first plan because it missed an integration round-trip test and unique registry coverage; Codex revised the plan, and both Claude and Antigravity passed the revised plan."
+      repo_reality:
+        branch: "feature/refactor-flows-flowai"
+        head: "c71bdcfa9 Move AI Builder planner completion ownership"
+        status: "dirty only with unrelated workspace files preserved: .devcontainer/docker-compose.yml, .gitignore, AGENTS.md, .devcontainer/devcontainer-lock.json, PRODUCT.md, utvecklingssamtal.mp3"
+      selected_worker: T087
+      artifact: ".codex/artifacts/flow-ai-builder-t086-next-tranche-ranking.md"
+      peer_review:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-ai-builder-next-tranche-ranking-after-planner-completion-20260524T215851Z.md -> GREEN_LIGHT no / MIN_SCORE 6; required inventorying the integration round-trip test, porting positive-pattern coverage, auditing edit-mode duplication, and replacing grep-only guards with pytest/static ownership guards."
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-ai-builder-next-tranche-ranking-after-planner-completion-iteration-2-20260524T220550Z.md -> GREEN_LIGHT yes / MIN_SCORE 8 after Codex revised the plan with concrete coverage ports, honest score framing, and no public API impact."
+        antigravity_iteration_1: ".codex/artifacts/antigravity-peer-loop-ai-builder-t086-next-tranche-ranking-final-synthesis-20260524T220823Z.md -> GREEN_LIGHT yes / MIN_SCORE 8; agreed the bridge is a dead topology seam and required neutralizing copied fixture vocabulary, placing stale-module guards in importlinter tests, and deleting duplicate bridge edit-mode tests without porting."
+      canonical_owner_decisions:
+        - "Positive pattern compile coverage moves from the stale bridge test to test_ai_builder_create_compiler.py against compile_create_draft, the active create compilation owner."
+        - "Builder plan spec_json/envelope/resource-binding round-trip coverage moves from apply_to_draft to a direct AIBuilderRepository.create_plan/get_plan integration test."
+        - "Edit-mode add/modify/delete routing remains owned by ai_builder_materializer.py/test_ai_builder_materializer.py; Claude and Antigravity both found the bridge edit-mode tests duplicate existing materializer coverage."
+        - "Flow API import boundary becomes a no-exception AI Builder source rule in test_ai_builder_importlinter_rules.py; the stale bridge exception is removed."
+      swagger_openapi_impact: "None expected. T087 deletes/ports internal backend tests/source around an unused internal bridge and does not change REST/SSE contracts, OpenAPI schemas, Swagger examples, generated clients, frontend code, database schema, request/response models, or public API examples."
+      score_impact: "Read-only judge task. No score increase until T087 is implemented, validated, and post-reviewed. The selected worker may improve Maintainability, Clean Architecture, Separation of Concerns, Human Readability, Human Reviewability, Test Quality, and AI Slop evidence by deleting a stale topology/test island, but the strict overall floor remains 8/10."
+      broader_goal_complete: false
+
+  - id: T087
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Retire the unused AI Builder materialization bridge and DraftPlanEnvelope island after preserving the real behavior coverage under current canonical owners."
+    constraints:
+      - "Do not optimize for LOC. Deletion is valid only because it removes a stale alternate architecture path and moves surviving contracts to active owners."
+      - "Port positive-pattern compile coverage to test_ai_builder_create_compiler.py against compile_create_draft before deleting bridge tests."
+      - "Sanitize copied archetype fixtures away from narrow municipal/case-management vocabulary such as ärende/case-registry."
+      - "Port direct repository create_plan/get_plan round-trip coverage to backend/tests/integration/flows/ai_builder/test_ai_builder_create_plan_roundtrip.py before deleting test_ai_builder_apply_to_draft.py."
+      - "Do not port TestBridgeEditModeDelegation unless a per-test audit finds unique behavior not already covered by test_ai_builder_materializer.py."
+      - "Replace the bridge-specific flows-api import exception with a no-exception AI Builder source import rule and keep helper coverage for all offending import shapes."
+      - "Add a pytest-owned stale-module guard for ai_builder_materialization_bridge, ai_builder_draft_plan, and DraftPlanEnvelope."
+      - "No public API/SSE/OpenAPI/Swagger/generated-client/frontend/database-schema changes."
+      - "Stop and re-rank if a production source caller, public API dependency, or unportable unique behavior appears."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_materialization_bridge.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_draft_plan.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_materialization_bridge.py"
+      - "backend/tests/integration/flows/ai_builder/test_ai_builder_apply_to_draft.py"
+      - "backend/tests/integration/flows/ai_builder/test_ai_builder_create_plan_roundtrip.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_materializer.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_importlinter_rules.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t087-implementation-summary.md"
+    expected_output:
+      - "Bridge and DraftPlanEnvelope source removed if no production caller is found."
+      - "Bridge-only unit/integration tests removed after unique coverage is ported or proven duplicate."
+      - "Current-owner tests protect positive-pattern compile coverage, repository round-trip behavior, import boundaries, and stale-module absence."
+      - "Implementation receipt names exactly what was ported, deleted, and proven duplicate."
+      - "Focused and broad AI Builder validation, Ruff, Pyright, git diff --check, Claude implementation gate, and Antigravity implementation gate if available."
     receipt: null
 
 checks:
@@ -8076,15 +8132,9 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T085 completed, validated, Claude-gated, Antigravity-gated, and ready for scoped commit. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T085
+    result: "T086 completed as a read-only ranking gate. Claude and Antigravity passed the revised T087 plan; broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T086
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 79 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner.py -q -> 21 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_repair.py tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py -q -> 33 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2408 passed, 4 skipped, 11 warnings"
-      - "cd backend && ruff check/format --check touched T085 files -> clean"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
-      - "git diff --check -> clean"
-      - "Claude T085 final implementation gate -> GREEN_LIGHT yes / MIN_SCORE 9"
-      - "Antigravity T085 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 9"
+      - "Claude T086 iteration 1 -> GREEN_LIGHT no / MIN_SCORE 6; valid blockers incorporated."
+      - "Claude T086 iteration 2 -> GREEN_LIGHT yes / MIN_SCORE 8."
+      - "Antigravity T086 final synthesis -> GREEN_LIGHT yes / MIN_SCORE 8."
