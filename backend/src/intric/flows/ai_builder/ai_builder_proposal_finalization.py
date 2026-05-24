@@ -5,14 +5,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
+    BackendQuestionPersistenceResult,
+    persist_backend_question,
+)
 from intric.flows.ai_builder.ai_builder_conversation_metadata import RuntimeToolCall
 from intric.flows.ai_builder.ai_builder_create_feedback import (
     format_create_outline_quality_feedback,
 )
-from intric.flows.ai_builder.ai_builder_discovery_followup import (
-    BackendQuestionPersistenceResult,
-    persist_backend_question,
-)
+from intric.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_events import build_plan_event
@@ -216,8 +217,10 @@ class CompiledProposalFinalizer:
             turn=request.turn,
             conversation=request.conversation,
             new_messages_start=request.new_messages_start,
-            question_data=question_data,
-            assistant_text=assistant_text,
+            question=BackendQuestion(
+                question_data=question_data,
+                assistant_text=assistant_text,
+            ),
             assistant_metadata=assistant_metadata_builder(),
             tool_content=(
                 "MCP selection question presented because MCP usage requires explicit "

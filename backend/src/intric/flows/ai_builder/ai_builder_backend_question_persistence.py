@@ -8,8 +8,8 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     make_persisted_assistant_tool_call,
     metadata_for_assistant_question,
 )
-from intric.flows.ai_builder.ai_builder_discovery_runtime import (
-    build_discovery_followup_runtime,
+from intric.flows.ai_builder.ai_builder_discovery_models import (
+    BackendQuestion,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -36,8 +36,7 @@ async def persist_backend_question(
     turn: SessionSendTurn,
     conversation: list[ConversationMessage],
     new_messages_start: int,
-    question_data: dict[str, object],
-    assistant_text: str,
+    question: BackendQuestion,
     assistant_metadata: dict[str, Any] | None = None,
     tool_content: str = "Question presented to user. Awaiting their selection.",
     flow: Flow | None = None,
@@ -51,7 +50,7 @@ async def persist_backend_question(
     conversation.
     """
     tool_call_id = f"discovery_{uuid4().hex[:12]}"
-    question_metadata = metadata_for_assistant_question(question_data)
+    question_metadata = metadata_for_assistant_question(question.question_data)
     metadata = {
         **(assistant_metadata or {}),
         **(question_metadata or {}),
@@ -59,13 +58,13 @@ async def persist_backend_question(
     tool_call = make_persisted_assistant_tool_call(
         tool_call_id=tool_call_id,
         tool_name=ASK_STRUCTURED_QUESTION_TOOL_NAME,
-        arguments=question_data,
+        arguments=question.question_data,
     )
 
     conversation.append(
         ConversationMessage(
             role="assistant",
-            content=assistant_text,
+            content=question.assistant_text,
             metadata=metadata,
             tool_calls=[tool_call.model_dump(mode="json")],
         )
@@ -86,47 +85,8 @@ async def persist_backend_question(
 
     return BackendQuestionPersistenceResult(
         events=[
-            build_text_event(assistant_text),
-            build_question_event(question_data),
+            build_text_event(question.assistant_text),
+            build_question_event(question.question_data),
         ],
         new_planning_state_version=new_version,
-    )
-
-
-async def emit_discovery_followup_if_needed(
-    *,
-    repo: AIBuilderRepository,
-    turn: SessionSendTurn,
-    conversation: list[ConversationMessage],
-    new_messages_start: int,
-    flow: Flow | None = None,
-    litellm_client: Any | None = None,
-    litellm_model: str | None = None,
-    litellm_kwargs: dict[str, Any] | None = None,
-    ui_language: str | None = None,
-    assistant_metadata: dict[str, Any] | None = None,
-) -> BackendQuestionPersistenceResult | None:
-    """Persist and return the next backend-generated discovery follow-up, if any."""
-    followup, _analysis, _planning_state = await build_discovery_followup_runtime(
-        conversation,
-        flow=flow,
-        litellm_client=litellm_client,
-        litellm_model=litellm_model,
-        litellm_kwargs=litellm_kwargs,
-        ui_language=ui_language,
-        tenant_id=turn.tenant_id,
-    )
-    if followup is None:
-        return None
-
-    _issue, question_data, assistant_text = followup
-    return await persist_backend_question(
-        repo=repo,
-        turn=turn,
-        conversation=conversation,
-        new_messages_start=new_messages_start,
-        question_data=question_data,
-        assistant_text=assistant_text,
-        flow=flow,
-        assistant_metadata=assistant_metadata,
     )

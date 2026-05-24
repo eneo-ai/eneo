@@ -62,6 +62,13 @@ class DiscoveryIssue:
 
 
 @dataclass(frozen=True)
+class BackendQuestion:
+    question_data: dict[str, object]
+    assistant_text: str
+    issue: DiscoveryIssue | None = None
+
+
+@dataclass(frozen=True)
 class DiscoveryCandidate:
     issue_id: str
     question_id: str | None

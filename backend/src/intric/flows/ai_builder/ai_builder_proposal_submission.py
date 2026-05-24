@@ -12,6 +12,9 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
     build_proposal_architecture_error_event,
     record_proposal_architecture_failure,
 )
+from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
+    persist_backend_question,
+)
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     RuntimeToolCall,
     make_provider_safe_server_tool_call_id,
@@ -22,8 +25,9 @@ from intric.flows.ai_builder.ai_builder_create_proposal import (
     process_scoped_step_model_revision_if_requested,
     scoped_model_revision_assistant_text,
 )
-from intric.flows.ai_builder.ai_builder_discovery_followup import (
-    emit_discovery_followup_if_needed,
+from intric.flows.ai_builder.ai_builder_discovery_runtime import (
+    DiscoveryRuntimeResult,
+    build_discovery_runtime_result,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -234,6 +238,7 @@ class ProposalSubmissionOwner:
         planning_state: PlanningState | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
+        discovery_runtime: DiscoveryRuntimeResult | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         submission_tool_name = active_submission_tool_name(
             is_edit_mode=flow is not None
@@ -269,6 +274,7 @@ class ProposalSubmissionOwner:
             usage_tracker=usage_tracker,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
+            discovery_runtime=discovery_runtime,
         )
         scoped_model_preflight_result = (
             await self._preflight_scoped_model_revision_if_requested(ctx=ctx)
@@ -572,23 +578,33 @@ class ProposalSubmissionOwner:
         if requirements_state.confirmed:
             return False, []
 
-        followup_result = await emit_discovery_followup_if_needed(
-            repo=self.repo,
-            turn=ctx.turn,
-            conversation=ctx.conversation,
-            new_messages_start=ctx.new_messages_start,
-            flow=ctx.flow,
-            litellm_client=self.litellm_client,
-            litellm_model=ctx.litellm_model,
-            litellm_kwargs=ctx.litellm_kwargs,
-            assistant_metadata=assistant_metadata_with_usage(
-                conversation=ctx.conversation,
-                base_metadata=ctx.assistant_metadata,
-                usage_tracker=ctx.usage_tracker,
-                tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
-            ),
+        discovery_runtime = (
+            ctx.discovery_runtime
+            or await build_discovery_runtime_result(
+                ctx.conversation,
+                flow=ctx.flow,
+                litellm_client=self.litellm_client,
+                litellm_model=ctx.litellm_model,
+                litellm_kwargs=ctx.litellm_kwargs,
+                tenant_id=ctx.turn.tenant_id,
+            )
         )
-        if followup_result is not None:
+        if discovery_runtime.followup is not None:
+            followup_result = await persist_backend_question(
+                repo=self.repo,
+                turn=ctx.turn,
+                conversation=ctx.conversation,
+                new_messages_start=ctx.new_messages_start,
+                question=discovery_runtime.followup,
+                flow=ctx.flow,
+                tool_content="Question presented to user. Awaiting their selection.",
+                assistant_metadata=assistant_metadata_with_usage(
+                    conversation=ctx.conversation,
+                    base_metadata=ctx.assistant_metadata,
+                    usage_tracker=ctx.usage_tracker,
+                    tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
+                ),
+            )
             return True, followup_result.events
         if not analyze_discovery_ready(ctx.conversation, flow=ctx.flow):
             return True, []

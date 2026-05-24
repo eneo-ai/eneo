@@ -4,12 +4,14 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, TypeAlias
 
+from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
+    persist_backend_question,
+)
 from intric.flows.ai_builder.ai_builder_discovery import (
     build_registry_question_followup,
 )
-from intric.flows.ai_builder.ai_builder_discovery_followup import (
-    emit_discovery_followup_if_needed,
-    persist_backend_question,
+from intric.flows.ai_builder.ai_builder_discovery_runtime import (
+    build_discovery_runtime_result,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_error_contract import (
@@ -94,23 +96,31 @@ async def stream_structured_question_tool_call(
     self_correction_temperature: float,
     request: StructuredQuestionRecoveryRequest,
 ) -> AsyncGenerator[QuestionRecoveryItem, None]:
-    followup_result = await emit_discovery_followup_if_needed(
-        repo=repo,
-        turn=request.turn,
-        conversation=request.conversation,
-        new_messages_start=request.new_messages_start,
+    # Self-correction can add or replace conversation context, so reuse of a
+    # prepared discovery snapshot would risk asking a stale backend question.
+    discovery_runtime = await build_discovery_runtime_result(
+        request.conversation,
         flow=request.flow,
         litellm_client=litellm_client,
         litellm_model=request.litellm_model,
         litellm_kwargs=request.litellm_kwargs,
-        assistant_metadata=assistant_metadata_with_usage(
-            conversation=request.conversation,
-            base_metadata=request.assistant_metadata,
-            usage_tracker=request.usage_tracker,
-            tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
-        ),
+        tenant_id=request.turn.tenant_id,
     )
-    if followup_result is not None:
+    if discovery_runtime.followup is not None:
+        followup_result = await persist_backend_question(
+            repo=repo,
+            turn=request.turn,
+            conversation=request.conversation,
+            new_messages_start=request.new_messages_start,
+            question=discovery_runtime.followup,
+            flow=request.flow,
+            assistant_metadata=assistant_metadata_with_usage(
+                conversation=request.conversation,
+                base_metadata=request.assistant_metadata,
+                usage_tracker=request.usage_tracker,
+                tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
+            ),
+        )
         for event in followup_result.events:
             yield event
         return
@@ -170,14 +180,12 @@ async def stream_structured_question_tool_call(
         else None
     )
     if registry_followup is not None:
-        backend_question_data, assistant_text = registry_followup
         persisted_question = await persist_backend_question(
             repo=repo,
             turn=request.turn,
             conversation=request.conversation,
             new_messages_start=request.new_messages_start,
-            question_data=backend_question_data,
-            assistant_text=assistant_text,
+            question=registry_followup,
             assistant_metadata=assistant_metadata_with_usage(
                 conversation=request.conversation,
                 base_metadata=request.assistant_metadata,
@@ -221,23 +229,31 @@ async def _stream_non_question_continuation(
     ]
     discovery_ready = analyze_discovery_ready(request.conversation, flow=request.flow)
     if not filtered_tool_schemas:
-        followup_result = await emit_discovery_followup_if_needed(
-            repo=repo,
-            turn=request.turn,
-            conversation=request.conversation,
-            new_messages_start=request.new_messages_start,
+        # No tool remains to repair the repeated question. Re-evaluate after
+        # self-correction instead of threading an earlier discovery snapshot.
+        discovery_runtime = await build_discovery_runtime_result(
+            request.conversation,
             flow=request.flow,
             litellm_client=litellm_client,
             litellm_model=request.litellm_model,
             litellm_kwargs=request.litellm_kwargs,
-            assistant_metadata=assistant_metadata_with_usage(
-                conversation=request.conversation,
-                base_metadata=None,
-                usage_tracker=request.usage_tracker,
-                tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
-            ),
+            tenant_id=request.turn.tenant_id,
         )
-        if followup_result is not None:
+        if discovery_runtime.followup is not None:
+            followup_result = await persist_backend_question(
+                repo=repo,
+                turn=request.turn,
+                conversation=request.conversation,
+                new_messages_start=request.new_messages_start,
+                question=discovery_runtime.followup,
+                flow=request.flow,
+                assistant_metadata=assistant_metadata_with_usage(
+                    conversation=request.conversation,
+                    base_metadata=None,
+                    usage_tracker=request.usage_tracker,
+                    tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
+                ),
+            )
             for event in followup_result.events:
                 yield event
             return

@@ -40,7 +40,11 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
     slot_classification_metadata_from_result,
 )
-from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
+from intric.flows.ai_builder.ai_builder_discovery_models import (
+    BackendQuestion,
+    DiscoveryAnalysis,
+)
+from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderSession,
     SessionStatus,
@@ -126,7 +130,7 @@ def _make_planner() -> AIBuilderPlanner:
 
 def _make_prepared_request(
     *,
-    should_emit_forced_followup: bool = False,
+    followup: BackendQuestion | None = None,
     slot_classification_metadata: SlotClassificationMetadata | None = None,
     orchestration_context: OrchestrationContext | None = None,
 ) -> NormalPlannerPrepared:
@@ -135,9 +139,29 @@ def _make_prepared_request(
         ui_language="en",
         llm_messages=[{"role": "system", "content": "system"}],
         system_prompt_hash="system-hash",
-        should_emit_forced_followup=should_emit_forced_followup,
+        followup=followup,
         slot_classification_metadata=slot_classification_metadata,
         orchestration_context=orchestration_context or _make_orchestration_context(),
+    )
+
+
+def _backend_question() -> BackendQuestion:
+    return BackendQuestion(
+        question_data={
+            "question_id": "terminal_output",
+            "question": "Vilket slutresultat vill du ha?",
+            "options": [
+                {
+                    "id": "text",
+                    "label": "Text",
+                    "description": "Svara med text.",
+                    "value": "text",
+                }
+            ],
+            "selection_mode": "single",
+            "allow_custom": True,
+        },
+        assistant_text="Vilket slutresultat vill du ha?",
     )
 
 
@@ -147,6 +171,14 @@ def _make_orchestration_context(
     return OrchestrationContext(
         current_version=0,
         session_state=state or PlanningState.empty(),
+    )
+
+
+def _discovery_runtime() -> DiscoveryRuntimeResult:
+    return DiscoveryRuntimeResult(
+        discovery_block_message=None,
+        discovery_analysis=DiscoveryAnalysis(issues=()),
+        planning_state=PlanningState.empty(),
     )
 
 
@@ -913,7 +945,7 @@ async def test_send_message_orchestration_context_uses_rebuilt_state() -> None:
         llm_messages=[{"role": "system", "content": "system"}],
         system_prompt_hash="system-hash",
         slot_classification_metadata=None,
-        should_emit_forced_followup=False,
+        followup=None,
         orchestration_context=OrchestrationContext(
             current_version=0,
             session_state=rebuilt_both_resolved,
@@ -1012,7 +1044,7 @@ async def test_send_message_orchestration_context_blocks_commit_until_core_slots
         llm_messages=[{"role": "system", "content": "system"}],
         system_prompt_hash="system-hash",
         slot_classification_metadata=None,
-        should_emit_forced_followup=False,
+        followup=None,
         orchestration_context=OrchestrationContext(
             current_version=0,
             session_state=partial,
@@ -1077,7 +1109,7 @@ async def test_send_message_uses_discovery_selected_questions_as_non_core_ask_su
         llm_messages=[{"role": "system", "content": "system"}],
         system_prompt_hash="system-hash",
         slot_classification_metadata=None,
-        should_emit_forced_followup=False,
+        followup=None,
         orchestration_context=OrchestrationContext(
             current_version=0,
             session_state=PlanningState.empty(),
@@ -1144,6 +1176,7 @@ async def test_send_message_discovery_block_ends_cleanly_without_followup() -> N
         ui_language="en",
         slot_classification_metadata=None,
         discovery_block_message="Need more information.",
+        followup=None,
     )
 
     with (
@@ -1163,9 +1196,9 @@ async def test_send_message_discovery_block_ends_cleanly_without_followup() -> N
             new=AsyncMock(return_value=prepared),
         ),
         patch(
-            "intric.flows.ai_builder.ai_builder_planner.emit_discovery_followup_if_needed",
-            new=AsyncMock(return_value=None),
-        ) as followup_mock,
+            "intric.flows.ai_builder.ai_builder_planner.persist_backend_question",
+            new=AsyncMock(side_effect=AssertionError("no followup should persist")),
+        ) as persist_question,
         patch(
             "intric.flows.ai_builder.ai_builder_planner.run_planner_turn",
             new=AsyncMock(side_effect=AssertionError("planner turn should not run")),
@@ -1174,11 +1207,7 @@ async def test_send_message_discovery_block_ends_cleanly_without_followup() -> N
         events = await _collect_events(planner, **_send_kwargs())
 
     assert [event["event"] for event in events] == ["done"]
-    call_kwargs = followup_mock.await_args.kwargs
-    assert "litellm_client" not in call_kwargs
-    assert "litellm_model" not in call_kwargs
-    assert "litellm_kwargs" not in call_kwargs
-    assert "ui_language" not in call_kwargs
+    persist_question.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1402,6 +1431,7 @@ async def test_send_message_routes_proposal_mode_to_task_specific_proposer() -> 
             available_kbs=[],
         ),
         orchestration_context=_make_orchestration_context(),
+        discovery_runtime=_discovery_runtime(),
     )
     captured: dict[str, Any] = {}
 
@@ -1440,6 +1470,7 @@ async def test_send_message_routes_proposal_mode_to_task_specific_proposer() -> 
     assert "slot_classification" in proposal_conversation[-1].metadata
     assert captured["available_model_refs"] == set()
     assert captured["available_kb_refs"] == set()
+    assert captured["discovery_runtime"] is prepared.discovery_runtime
 
 
 @pytest.mark.asyncio

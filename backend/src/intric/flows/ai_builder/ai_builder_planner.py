@@ -16,6 +16,9 @@ from intric.flows.ai_builder.ai_builder_accepted_action_rendering import (
     RequirementsSummaryRenderContext,
     build_accepted_action_messages,
 )
+from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
+    persist_backend_question,
+)
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     UI_LANGUAGE_METADATA_KEY,
     AIBuilderQuestionAnswerInput,
@@ -23,9 +26,6 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_with_slot_classification,
     requirements_confirmation_from_question_answer,
     ui_language_from_question_answer,
-)
-from intric.flows.ai_builder.ai_builder_discovery_followup import (
-    emit_discovery_followup_if_needed,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -454,39 +454,39 @@ class AIBuilderPlanner:
             planner_turn_context: OrchestrationContext
             planner_prompt_hash: str | None
             match prepared_request:
-                case DiscoveryBlockPrepared():
-                    followup_result = await emit_discovery_followup_if_needed(
-                        repo=self.repo,
-                        turn=turn,
-                        conversation=conversation,
-                        new_messages_start=new_messages_start,
-                        flow=flow,
-                        assistant_metadata=build_assistant_message_metadata(
-                            conversation,
-                            tool_calls=[{"name": "ask_structured_question"}],
-                        ),
-                    )
-                    if followup_result is not None:
+                case DiscoveryBlockPrepared(followup=followup):
+                    if followup is not None:
+                        followup_result = await persist_backend_question(
+                            repo=self.repo,
+                            turn=turn,
+                            conversation=conversation,
+                            new_messages_start=new_messages_start,
+                            question=followup,
+                            flow=flow,
+                            assistant_metadata=build_assistant_message_metadata(
+                                conversation,
+                                tool_calls=[{"name": "ask_structured_question"}],
+                            ),
+                        )
                         for event in followup_result.events:
                             yield event
                     yield {"event": SSE_EVENT_DONE, "data": ""}
                     return
-                case NormalPlannerPrepared(should_emit_forced_followup=True):
-                    # This stall escape uses the deterministic discovery catalog, not another classifier pass.
-                    followup_result = await emit_discovery_followup_if_needed(
+                case NormalPlannerPrepared(followup=followup) if followup is not None:
+                    followup_result = await persist_backend_question(
                         repo=self.repo,
                         turn=turn,
                         conversation=conversation,
                         new_messages_start=new_messages_start,
+                        question=followup,
                         flow=flow,
                         assistant_metadata=build_assistant_message_metadata(
                             conversation,
                             tool_calls=[{"name": "ask_structured_question"}],
                         ),
                     )
-                    if followup_result is not None:
-                        for event in followup_result.events:
-                            yield event
+                    for event in followup_result.events:
+                        yield event
                     yield {"event": SSE_EVENT_DONE, "data": ""}
                     return
                 case ProposalPrepared() as proposal_request:
@@ -518,6 +518,7 @@ class AIBuilderPlanner:
                         planning_state=(
                             proposal_request.orchestration_context.session_state
                         ),
+                        discovery_runtime=proposal_request.discovery_runtime,
                         plan_edit_context=proposal_request.plan_edit_context,
                         prior_plan_for_revision=(
                             proposal_request.prior_plan_for_revision

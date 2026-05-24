@@ -25,11 +25,15 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     tool_calls_from_message,
     ui_language_from_metadata,
 )
-from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
+from intric.flows.ai_builder.ai_builder_discovery_models import (
+    BackendQuestion,
+    DiscoveryAnalysis,
+)
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
 )
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
+    DiscoveryRuntimeResult,
     build_discovery_runtime_result,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
@@ -148,6 +152,7 @@ class ServerOutputPrepared(_PreparedBase):
 @dataclass(frozen=True, slots=True)
 class DiscoveryBlockPrepared(_PreparedBase):
     discovery_block_message: str
+    followup: BackendQuestion | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,13 +163,14 @@ class ProposalPrepared(_PreparedBase):
     prior_plan_for_revision: BuilderPlan | None
     resource_catalog: AIBuilderResourceCatalog
     orchestration_context: OrchestrationContext
+    discovery_runtime: DiscoveryRuntimeResult
 
 
 @dataclass(frozen=True, slots=True)
 class NormalPlannerPrepared(_PreparedBase):
     llm_messages: list[LLMMessage]
     system_prompt_hash: str
-    should_emit_forced_followup: bool
+    followup: BackendQuestion | None
     orchestration_context: OrchestrationContext
 
 
@@ -321,6 +327,7 @@ async def prepare_planner_request(
             prior_plan_for_revision=request.prior_plan_for_revision,
             resource_catalog=resource_catalog,
             orchestration_context=orchestration_context,
+            discovery_runtime=discovery_runtime,
         )
 
     models_ctx = (
@@ -428,6 +435,7 @@ async def prepare_planner_request(
                 discovery_runtime.slot_classification_metadata
             ),
             discovery_block_message=discovery_block_message,
+            followup=discovery_runtime.followup,
         )
 
     return NormalPlannerPrepared(
@@ -436,7 +444,11 @@ async def prepare_planner_request(
         slot_classification_metadata=discovery_runtime.slot_classification_metadata,
         llm_messages=prepared_prompt.llm_messages,
         system_prompt_hash=prepared_prompt.system_prompt_hash,
-        should_emit_forced_followup=discovery_runtime.should_emit_forced_followup,
+        followup=(
+            discovery_runtime.followup
+            if discovery_runtime.should_emit_forced_followup
+            else None
+        ),
         orchestration_context=orchestration_context,
     )
 

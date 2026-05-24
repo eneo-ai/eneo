@@ -23,6 +23,8 @@ from intric.database.tables.spaces_table import (
 )
 from intric.database.tables.tenant_table import Tenants
 from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
+from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     PlannerPlanEnvelope,
@@ -2365,12 +2367,12 @@ async def test_handle_confirm_requirements_with_lost_lease_rolls_back(
             base_planning_state_version=0,
         )
         with patch(
-            "intric.flows.ai_builder.ai_builder_confirm_requirements.build_discovery_block_message_runtime",
+            "intric.flows.ai_builder.ai_builder_confirm_requirements.build_discovery_runtime_result",
             new=AsyncMock(
-                return_value=(
-                    None,
-                    SimpleNamespace(assumptions=[]),
-                    PlanningState.empty(),
+                return_value=DiscoveryRuntimeResult(
+                    discovery_block_message=None,
+                    discovery_analysis=DiscoveryAnalysis(issues=()),
+                    planning_state=PlanningState.empty(),
                 )
             ),
         ):
@@ -2477,8 +2479,15 @@ async def test_handle_structured_question_recovery_with_lost_lease_rolls_back(
         )
         with (
             patch(
-                "intric.flows.ai_builder.ai_builder_question_recovery.emit_discovery_followup_if_needed",
-                new=AsyncMock(return_value=None),
+                "intric.flows.ai_builder.ai_builder_question_recovery."
+                "build_discovery_runtime_result",
+                new=AsyncMock(
+                    return_value=DiscoveryRuntimeResult(
+                        discovery_block_message=None,
+                        discovery_analysis=DiscoveryAnalysis(issues=()),
+                        planning_state=PlanningState.empty(),
+                    )
+                ),
             ),
             pytest.raises(BadRequestException) as exc,
         ):

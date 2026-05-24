@@ -14,7 +14,10 @@ from intric.flows.ai_builder.ai_builder_discovery import (
     build_discovery_block_message,
     build_discovery_followup,
 )
-from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
+from intric.flows.ai_builder.ai_builder_discovery_models import (
+    BackendQuestion,
+    DiscoveryAnalysis,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
@@ -50,6 +53,7 @@ class DiscoveryRuntimeResult:
     planning_state: PlanningState
     slot_classification_metadata: SlotClassificationMetadata | None = None
     should_emit_forced_followup: bool = False
+    followup: BackendQuestion | None = None
 
 
 def _narrow_structured_analysis_need_from_classifier(
@@ -245,6 +249,11 @@ async def build_discovery_runtime_result(
         planning_state=context.planning_state,
         slot_classification_result=context.slot_classification_result,
     )
+    followup = build_discovery_followup(
+        conversation,
+        flow=flow,
+        analysis=analysis,
+    )
     discovery_block_message = build_discovery_block_message(
         conversation,
         flow=flow,
@@ -259,48 +268,12 @@ async def build_discovery_runtime_result(
             discovery_block_message=discovery_block_message,
             discovery_analysis=analysis,
             flow=flow,
+            followup=followup,
         ),
         discovery_analysis=analysis,
         planning_state=context.planning_state,
         slot_classification_metadata=context.slot_classification_metadata,
-    )
-
-
-async def build_discovery_followup_runtime(
-    conversation: list[ConversationMessage],
-    *,
-    flow: Flow | None = None,
-    litellm_client: Any | None = None,
-    litellm_model: str | None = None,
-    litellm_kwargs: dict[str, Any] | None = None,
-    ui_language: str | None = None,
-    allow_semantic_adjudication: bool = True,
-    tenant_id: UUID,
-):
-    context = await build_runtime_discovery_context(
-        conversation,
-        flow=flow,
-        litellm_client=litellm_client,
-        litellm_model=litellm_model,
-        litellm_kwargs=litellm_kwargs,
-        ui_language=ui_language,
-        tenant_id=tenant_id,
-        allow_classification=allow_semantic_adjudication,
-    )
-    analysis = analyze_discovery(
-        conversation,
-        flow=flow,
-        planning_state=context.planning_state,
-        slot_classification_result=context.slot_classification_result,
-    )
-    return (
-        build_discovery_followup(
-            conversation,
-            flow=flow,
-            analysis=analysis,
-        ),
-        analysis,
-        context.planning_state,
+        followup=followup,
     )
 
 
@@ -312,8 +285,8 @@ def _should_emit_forced_followup(
     discovery_block_message: str | None,
     discovery_analysis: DiscoveryAnalysis,
     flow: Flow | None,
+    followup: BackendQuestion | None,
 ) -> bool:
-    # Two unanswered discovery turns are enough evidence of a stalled freeform loop.
     is_free_discovery = (
         not requirements_confirmed
         and not is_requirements_confirmation
@@ -324,7 +297,7 @@ def _should_emit_forced_followup(
         return False
     if _count_free_discovery_turns(conversation) < 2:
         return False
-    return _get_mvs_forced_followup(conversation, flow=flow) is not None
+    return followup is not None
 
 
 def _count_free_discovery_turns(conversation: list[ConversationMessage]) -> int:
@@ -335,14 +308,3 @@ def _count_free_discovery_turns(conversation: list[ConversationMessage]) -> int:
         elif msg.role == "user" and metadata_has_question_answer(msg.metadata):
             break
     return count
-
-
-def _get_mvs_forced_followup(
-    conversation: list[ConversationMessage],
-    *,
-    flow: Flow | None = None,
-) -> str | None:
-    followup = build_discovery_followup(conversation, flow=flow)
-    if followup is not None:
-        return followup[2]
-    return None

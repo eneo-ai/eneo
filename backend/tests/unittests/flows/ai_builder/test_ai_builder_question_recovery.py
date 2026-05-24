@@ -8,6 +8,11 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_discovery_models import (
+    BackendQuestion,
+    DiscoveryAnalysis,
+)
+from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from intric.flows.ai_builder.ai_builder_question_recovery import (
@@ -23,6 +28,7 @@ from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
 )
+from intric.flows.ai_builder.planning_state import PlanningState
 
 
 def _make_turn() -> SessionSendTurn:
@@ -130,25 +136,47 @@ def _make_request(
     )
 
 
+def _runtime_result(followup: BackendQuestion | None = None) -> DiscoveryRuntimeResult:
+    return DiscoveryRuntimeResult(
+        discovery_block_message=None,
+        discovery_analysis=DiscoveryAnalysis(issues=()),
+        planning_state=PlanningState.empty(),
+        followup=followup,
+    )
+
+
+def _backend_question() -> BackendQuestion:
+    return BackendQuestion(
+        question_data={
+            "question_id": "input_material_mode",
+            "question": "Vilken typ av underlag ska flödet ta emot?",
+            "options": [
+                {
+                    "id": "audio",
+                    "label": "Ljud",
+                    "description": "Spela in eller ladda upp ljud.",
+                    "value": "audio",
+                }
+            ],
+            "selection_mode": "single",
+            "allow_custom": True,
+        },
+        assistant_text="Jag behöver förstå indata bättre.",
+    )
+
+
 @pytest.mark.asyncio
 async def test_question_recovery_uses_backend_followup_when_only_question_tool_available() -> (
     None
 ):
-    followup_events = (
-        {"event": "text", "data": '{"text":"Jag behöver förstå indata bättre."}'},
-        {
-            "event": "question",
-            "data": (
-                '{"question_id":"input_material_mode","question":"Vilken typ av underlag ska flödet ta emot?"}'
-            ),
-        },
-    )
+    repo = AsyncMock()
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.emit_discovery_followup_if_needed",
-            new=AsyncMock(return_value=SimpleNamespace(events=followup_events)),
-        ) as emit_followup,
+            "intric.flows.ai_builder.ai_builder_question_recovery."
+            "build_discovery_runtime_result",
+            new=AsyncMock(return_value=_runtime_result(_backend_question())),
+        ) as build_runtime,
         patch(
             "intric.flows.ai_builder.ai_builder_question_recovery.call_proposal_completion_with_usage",
             new=AsyncMock(),
@@ -157,7 +185,7 @@ async def test_question_recovery_uses_backend_followup_when_only_question_tool_a
         events = [
             item
             async for item in stream_structured_question_tool_call(
-                repo=AsyncMock(),
+                repo=repo,
                 litellm_client=AsyncMock(),
                 self_correction_temperature=0.2,
                 request=_make_request(
@@ -166,8 +194,9 @@ async def test_question_recovery_uses_backend_followup_when_only_question_tool_a
             )
         ]
 
-    assert events == list(followup_events)
-    emit_followup.assert_awaited_once()
+    assert [event["event"] for event in events] == ["text", "question"]
+    build_runtime.assert_awaited_once()
+    repo.commit_turn.assert_awaited_once()
     proposal_completion.assert_not_awaited()
 
 
@@ -190,9 +219,10 @@ async def test_question_recovery_recovers_with_requirements_dispatch_when_discov
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.emit_discovery_followup_if_needed",
-            new=AsyncMock(side_effect=[None, None]),
-        ) as emit_followup,
+            "intric.flows.ai_builder.ai_builder_question_recovery."
+            "build_discovery_runtime_result",
+            new=AsyncMock(side_effect=[_runtime_result(), _runtime_result()]),
+        ) as build_runtime,
         patch(
             "intric.flows.ai_builder.ai_builder_question_recovery.analyze_discovery_ready",
             return_value=True,
@@ -227,16 +257,17 @@ async def test_question_recovery_recovers_with_requirements_dispatch_when_discov
         "type": "function",
         "function": {"name": CONFIRM_REQUIREMENTS_TOOL_NAME},
     }
-    emit_followup.assert_awaited()
+    assert build_runtime.await_count == 2
 
 
 @pytest.mark.asyncio
 async def test_question_recovery_returns_typed_error_when_no_followup_exists() -> None:
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.emit_discovery_followup_if_needed",
-            new=AsyncMock(side_effect=[None, None]),
-        ) as emit_followup,
+            "intric.flows.ai_builder.ai_builder_question_recovery."
+            "build_discovery_runtime_result",
+            new=AsyncMock(side_effect=[_runtime_result(), _runtime_result()]),
+        ) as build_runtime,
         patch(
             "intric.flows.ai_builder.ai_builder_question_recovery.analyze_discovery_ready",
             return_value=False,
@@ -261,7 +292,7 @@ async def test_question_recovery_returns_typed_error_when_no_followup_exists() -
     assert [event["event"] for event in events] == ["error"]
     payload = json.loads(events[0]["data"])
     assert payload["code"] == "question_recovery_unavailable"
-    assert emit_followup.await_count == 2
+    assert build_runtime.await_count == 2
     proposal_completion.assert_not_awaited()
 
 
@@ -276,8 +307,9 @@ async def test_question_recovery_exhausts_repeated_structured_question_after_ret
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.emit_discovery_followup_if_needed",
-            new=AsyncMock(side_effect=[None, None]),
+            "intric.flows.ai_builder.ai_builder_question_recovery."
+            "build_discovery_runtime_result",
+            new=AsyncMock(return_value=_runtime_result()),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_question_recovery.analyze_discovery_ready",
@@ -328,8 +360,9 @@ async def test_question_recovery_streams_repairing_before_completion_resolves() 
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.emit_discovery_followup_if_needed",
-            new=AsyncMock(side_effect=[None, None]),
+            "intric.flows.ai_builder.ai_builder_question_recovery."
+            "build_discovery_runtime_result",
+            new=AsyncMock(return_value=_runtime_result()),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_question_recovery.analyze_discovery_ready",
@@ -373,8 +406,9 @@ async def test_handle_structured_question_persists_supported_backend_question() 
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.emit_discovery_followup_if_needed",
-            new=AsyncMock(return_value=None),
+            "intric.flows.ai_builder.ai_builder_question_recovery."
+            "build_discovery_runtime_result",
+            new=AsyncMock(return_value=_runtime_result()),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_question_recovery.persist_backend_question",
@@ -406,8 +440,9 @@ async def test_handle_structured_question_persists_fallback_text_for_invalid_que
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.emit_discovery_followup_if_needed",
-            new=AsyncMock(return_value=None),
+            "intric.flows.ai_builder.ai_builder_question_recovery."
+            "build_discovery_runtime_result",
+            new=AsyncMock(return_value=_runtime_result()),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_question_recovery.persist_tool_turn",
@@ -437,8 +472,9 @@ async def test_question_recovery_completion_counts_as_repair() -> None:
 
     with (
         patch(
-            "intric.flows.ai_builder.ai_builder_question_recovery.emit_discovery_followup_if_needed",
-            new=AsyncMock(side_effect=[None, None]),
+            "intric.flows.ai_builder.ai_builder_question_recovery."
+            "build_discovery_runtime_result",
+            new=AsyncMock(return_value=_runtime_result()),
         ),
         patch(
             "intric.flows.ai_builder.ai_builder_question_recovery.analyze_discovery_ready",

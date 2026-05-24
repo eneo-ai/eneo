@@ -4,15 +4,16 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
+    persist_backend_question,
+)
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     make_persisted_assistant_tool_call,
     requirements_summary_to_metadata,
 )
-from intric.flows.ai_builder.ai_builder_discovery_followup import (
-    emit_discovery_followup_if_needed,
-)
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
-    build_discovery_block_message_runtime,
+    DiscoveryRuntimeResult,
+    build_discovery_runtime_result,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_event_models import (
@@ -66,6 +67,7 @@ class ConfirmRequirementsProcessingRequest:
     assistant_metadata: dict[str, Any] | None = None
     usage_tracker: ProposalTurnTelemetry | None = None
     allow_discovery_followup: bool = False
+    discovery_runtime: DiscoveryRuntimeResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,29 +90,28 @@ async def process_confirm_requirements(
             failure_kind="parse",
         )
 
-    (
-        discovery_block_message,
-        discovery_analysis,
-        _planning_state,
-    ) = await build_discovery_block_message_runtime(
-        request.conversation,
-        flow=request.flow,
-        litellm_client=request.litellm_client,
-        litellm_model=request.litellm_model,
-        litellm_kwargs=request.litellm_kwargs,
-        tenant_id=request.tenant_id,
+    discovery_runtime = (
+        request.discovery_runtime
+        or await build_discovery_runtime_result(
+            request.conversation,
+            flow=request.flow,
+            litellm_client=request.litellm_client,
+            litellm_model=request.litellm_model,
+            litellm_kwargs=request.litellm_kwargs,
+            tenant_id=request.tenant_id,
+        )
     )
+    discovery_block_message = discovery_runtime.discovery_block_message
+    discovery_analysis = discovery_runtime.discovery_analysis
     if discovery_block_message is not None:
-        if request.allow_discovery_followup:
-            followup_result = await emit_discovery_followup_if_needed(
+        if request.allow_discovery_followup and discovery_runtime.followup is not None:
+            followup_result = await persist_backend_question(
                 repo=request.repo,
                 turn=request.turn,
                 conversation=request.conversation,
                 new_messages_start=request.new_messages_start,
+                question=discovery_runtime.followup,
                 flow=request.flow,
-                litellm_client=request.litellm_client,
-                litellm_model=request.litellm_model,
-                litellm_kwargs=request.litellm_kwargs,
                 assistant_metadata=assistant_metadata_with_usage(
                     conversation=request.conversation,
                     base_metadata=request.assistant_metadata,
@@ -120,13 +121,10 @@ async def process_confirm_requirements(
                     tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}],
                 ),
             )
-            if followup_result is not None:
-                return ToolProcessingResult(
-                    events=tuple(followup_result.events),
-                    new_planning_state_version=(
-                        followup_result.new_planning_state_version
-                    ),
-                )
+            return ToolProcessingResult(
+                events=tuple(followup_result.events),
+                new_planning_state_version=followup_result.new_planning_state_version,
+            )
         return ToolProcessingResult(
             feedback=discovery_block_message,
             failure_kind="validation",

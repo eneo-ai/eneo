@@ -11,7 +11,10 @@ from uuid import uuid4
 import pytest
 
 from intric.files.file_models import File, FileType
-from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
+from intric.flows.ai_builder.ai_builder_discovery_models import (
+    BackendQuestion,
+    DiscoveryAnalysis,
+)
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
     DiscoveryRuntimeResult,
     _should_emit_forced_followup,
@@ -101,11 +104,36 @@ def _runtime_result(
     discovery_block_message: str | None,
     discovery_analysis: object,
     planning_state: PlanningState,
+    *,
+    followup: BackendQuestion | None = None,
+    should_emit_forced_followup: bool = False,
 ) -> DiscoveryRuntimeResult:
     return DiscoveryRuntimeResult(
         discovery_block_message=discovery_block_message,
         discovery_analysis=cast(DiscoveryAnalysis, discovery_analysis),
         planning_state=planning_state,
+        followup=followup,
+        should_emit_forced_followup=should_emit_forced_followup,
+    )
+
+
+def _backend_question() -> BackendQuestion:
+    return BackendQuestion(
+        question_data={
+            "question_id": "terminal_output",
+            "question": "Vilket slutresultat vill du ha?",
+            "options": [
+                {
+                    "id": "text",
+                    "label": "Text",
+                    "description": "Svara med text.",
+                    "value": "text",
+                }
+            ],
+            "selection_mode": "single",
+            "allow_custom": True,
+        },
+        assistant_text="Vilket slutresultat vill du ha?",
     )
 
 
@@ -205,12 +233,13 @@ def test_prepared_turn_outcomes_keep_branch_specific_fields() -> None:
         "discovery": DiscoveryBlockPrepared(
             **shared,
             discovery_block_message="Need more detail.",
+            followup=None,
         ),
         "normal": NormalPlannerPrepared(
             **shared,
             llm_messages=[],
             system_prompt_hash="normal-hash",
-            should_emit_forced_followup=False,
+            followup=None,
             orchestration_context=orchestration_context,
         ),
         "proposal": ProposalPrepared(
@@ -224,6 +253,11 @@ def test_prepared_turn_outcomes_keep_branch_specific_fields() -> None:
                 available_kbs=[],
             ),
             orchestration_context=orchestration_context,
+            discovery_runtime=_runtime_result(
+                None,
+                DiscoveryAnalysis(issues=()),
+                PlanningState.empty(),
+            ),
         ),
         "server": ServerOutputPrepared(
             **shared,
@@ -242,6 +276,7 @@ def test_prepared_turn_outcomes_keep_branch_specific_fields() -> None:
         "ui_language",
         "slot_classification_metadata",
         "discovery_block_message",
+        "followup",
     }
     assert field_names["normal"] == {
         "requirements_state",
@@ -249,7 +284,7 @@ def test_prepared_turn_outcomes_keep_branch_specific_fields() -> None:
         "slot_classification_metadata",
         "llm_messages",
         "system_prompt_hash",
-        "should_emit_forced_followup",
+        "followup",
         "orchestration_context",
     }
     assert field_names["proposal"] == {
@@ -262,6 +297,7 @@ def test_prepared_turn_outcomes_keep_branch_specific_fields() -> None:
         "prior_plan_for_revision",
         "resource_catalog",
         "orchestration_context",
+        "discovery_runtime",
     }
     assert field_names["server"] == {
         "requirements_state",
@@ -471,15 +507,6 @@ async def test_resolve_message_metadata_infers_final_output_answer_from_structur
 def test_should_emit_forced_followup_arms_after_two_free_discovery_turns_with_catalog_hit() -> (
     None
 ):
-    """Backend-owned followup arms only when three conditions line up.
-
-    Free discovery (requirements not confirmed, MVS not met, no
-    discovery block) PLUS the last two assistant messages were free
-    discovery without a structured answer PLUS the MVS forced-followup
-    catalog has a priority question waiting. Any one of those missing
-    and `send_message` must defer to the planner LLM instead of
-    short-circuiting with a backend question.
-    """
     conversation = [
         ConversationMessage(
             role="assistant", content="What kind of input should I expect?"
@@ -489,18 +516,15 @@ def test_should_emit_forced_followup_arms_after_two_free_discovery_turns_with_ca
         ),
     ]
 
-    with patch(
-        "intric.flows.ai_builder.ai_builder_discovery_runtime._get_mvs_forced_followup",
-        return_value="forced followup",
-    ):
-        armed = _should_emit_forced_followup(
-            conversation=conversation,
-            requirements_confirmed=False,
-            is_requirements_confirmation=False,
-            discovery_block_message=None,
-            discovery_analysis=SimpleNamespace(mvs_met=False),
-            flow=None,
-        )
+    armed = _should_emit_forced_followup(
+        conversation=conversation,
+        requirements_confirmed=False,
+        is_requirements_confirmation=False,
+        discovery_block_message=None,
+        discovery_analysis=SimpleNamespace(mvs_met=False),
+        flow=None,
+        followup=_backend_question(),
+    )
 
     assert armed is True
 
@@ -574,7 +598,7 @@ async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_he
 
     assert isinstance(prepared, NormalPlannerPrepared)
     assert prepared.requirements_state is requirements_state
-    assert prepared.should_emit_forced_followup is False
+    assert prepared.followup is None
     assert prepared.llm_messages[0] == {"role": "system", "content": "system prompt"}
     assert build_system_prompt.call_args.kwargs["available_models"] == [
         {
@@ -592,6 +616,79 @@ async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_he
             "description": "",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_normal_prepared_followup_stays_gated_by_forced_followup_policy() -> None:
+    planner = _make_planner()
+    conversation = [
+        ConversationMessage(role="assistant", content="What input will the flow use?"),
+    ]
+    requirements_state = _requirements_state_unconfirmed()
+    discovery_analysis = DiscoveryAnalysis(issues=(), mvs_met=False)
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
+            return_value=requirements_state,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
+            new_callable=AsyncMock,
+            return_value=_runtime_result(
+                None,
+                discovery_analysis,
+                PlanningState.empty(),
+                followup=_backend_question(),
+                should_emit_forced_followup=False,
+            ),
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
+            return_value=None,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_server_planner_output",
+            return_value=None,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner_request_preparation.build_system_prompt",
+            return_value="system prompt",
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
+            return_value=256,
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_planner_request_preparation.trim_conversation_for_context",
+            return_value=[
+                {"role": "assistant", "content": "What input will the flow use?"}
+            ],
+        ),
+    ):
+        prepared = await _prepare_planner_request_for_test(
+            planner,
+            conversation=conversation,
+            message="Still deciding",
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            available_models=None,
+            available_kbs=None,
+            flow=None,
+            assistant_snapshots=None,
+            max_input_tokens=4096,
+            max_output_tokens=1024,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=128,
+                minimum_conversation_budget_tokens=256,
+                unknown_model_context_window_tokens=8192,
+            ),
+            is_requirements_confirmation=False,
+            base_planning_state_version=0,
+        )
+
+    assert isinstance(prepared, NormalPlannerPrepared)
+    assert prepared.followup is None
 
 
 @pytest.mark.asyncio
@@ -1348,6 +1445,11 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
             orchestration_context=OrchestrationContext(
                 current_version=0,
                 session_state=PlanningState.empty(),
+            ),
+            discovery_runtime=_runtime_result(
+                None,
+                DiscoveryAnalysis(issues=()),
+                PlanningState.empty(),
             ),
             resource_catalog=build_ai_builder_resource_catalog(
                 available_models=[{"id": str(local_model_id), "name": "Renamed model"}],

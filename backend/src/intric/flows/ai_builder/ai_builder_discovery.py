@@ -64,6 +64,7 @@ from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     ultra_vague_output_choice_is_vague as _ultra_vague_output_choice_is_vague,
 )
 from intric.flows.ai_builder.ai_builder_discovery_models import (
+    BackendQuestion,
     DiscoveryAnalysis,
     DiscoveryCandidate,
     DiscoveryIssue,
@@ -521,7 +522,7 @@ def build_discovery_followup(
     *,
     flow: Flow | None = None,
     analysis: DiscoveryAnalysis | None = None,
-) -> tuple[DiscoveryIssue, dict[str, object], str] | None:
+) -> BackendQuestion | None:
     profile = _build_discovery_profile(conversation, flow=flow)
     analysis = analysis or analyze_discovery(conversation, flow=flow)
     pending_question_id = _latest_pending_question_id(conversation)
@@ -565,10 +566,10 @@ def build_discovery_followup(
                 "selection_mode": suggestion.selection_mode,
                 "allow_custom": suggestion.allow_custom,
             }
-            return (
-                issue,
-                question_data,
-                build_discovery_followup_text(
+            return BackendQuestion(
+                issue=issue,
+                question_data=question_data,
+                assistant_text=build_discovery_followup_text(
                     issue,
                     profile.language,
                 ),
@@ -594,7 +595,11 @@ def build_discovery_followup(
         "selection_mode": suggestion.selection_mode,
         "allow_custom": suggestion.allow_custom,
     }
-    return issue, question_data, build_discovery_followup_text(issue, profile.language)
+    return BackendQuestion(
+        issue=issue,
+        question_data=question_data,
+        assistant_text=build_discovery_followup_text(issue, profile.language),
+    )
 
 
 def build_registry_question_followup(
@@ -602,7 +607,7 @@ def build_registry_question_followup(
     conversation: list[ConversationMessage],
     *,
     flow: Flow | None = None,
-) -> tuple[dict[str, object], str] | None:
+) -> BackendQuestion | None:
     canonical_id = canonical_question_id(question_id)
     if question_is_already_resolved(canonical_id, conversation, flow=flow):
         return None
@@ -647,7 +652,11 @@ def build_registry_question_followup(
         "selection_mode": suggestion.selection_mode,
         "allow_custom": suggestion.allow_custom,
     }
-    return question_data, assistant_text
+    return BackendQuestion(
+        question_data=question_data,
+        assistant_text=assistant_text,
+        issue=issue,
+    )
 
 
 def build_discovery_guidance(

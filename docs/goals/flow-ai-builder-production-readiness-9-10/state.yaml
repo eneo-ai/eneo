@@ -28,7 +28,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T081
+active_task: T082
 
 interruptions:
   - id: I001
@@ -7655,7 +7655,7 @@ tasks:
   - id: T081
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Implement discovery follow-up runtime contract cleanup so discovery runtime decides once, prepared outcomes carry BackendQuestion, and persistence only commits typed backend questions."
     allowed_files:
@@ -7717,6 +7717,68 @@ tasks:
       - "NormalPlannerPrepared followup cannot preserve current stall gating semantics."
       - "Tests reveal user-visible discovery/follow-up behavior changes outside the approved ownership cleanup."
       - "Peer implementation gate finds blockers that cannot be fixed within the approved tranche."
+    receipt:
+      completed_at: "2026-05-24T20:02:25Z"
+      summary: "Implemented the discovery follow-up runtime contract cleanup. Discovery runtime now owns follow-up selection through DiscoveryRuntimeResult.followup: BackendQuestion | None, prepared outcomes carry the typed question, and persistence only commits a typed backend question through ai_builder_backend_question_persistence.persist_backend_question. Deleted emit_discovery_followup_if_needed, build_discovery_followup_runtime, and _get_mvs_forced_followup instead of preserving a narrower bridge."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t081-implementation-summary.md"
+        - ".codex/artifacts/claude-peer-loop-t081-discovery-follow-up-runtime-contract-implementation-review-20260523T183801Z.md"
+        - ".codex/artifacts/claude-peer-loop-t081-discovery-follow-up-runtime-contract-implementation-review-iteration-2-20260523T185059Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t081-discovery-follow-up-runtime-contract-implementation-review-20260523T185606Z.md"
+        - ".codex/artifacts/claude-peer-loop-t081-discovery-follow-up-runtime-contract-implementation-review-final-20260524T195940Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t081-discovery-follow-up-runtime-contract-final-implementation-review-20260524T200135Z.md"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_backend_question_persistence.py tests/unittests/flows/ai_builder/test_ai_builder_confirm_requirements.py tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_confirm_requirements_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_structured_question_recovery_with_lost_lease_rolls_back -q -> 21 passed, 16 warnings"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2397 passed, 4 skipped, 11 warnings"
+        - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_confirm_requirements_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_structured_question_recovery_with_lost_lease_rolls_back -q -> 2 passed, 16 warnings"
+        - "git grep -n \"emit_discovery_followup_if_needed\\|build_discovery_followup_runtime\\|_get_mvs_forced_followup\" -- backend/src backend/tests -> only ownership-guard assertions remain"
+        - "cd backend && git -C .. diff --name-only --diff-filter=ACMRT -- backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder backend/tests/integration/flows/test_ai_builder_session_api_regressions.py | sed 's#^backend/##' | xargs uv run ruff check -> passed"
+        - "cd backend && git -C .. diff --name-only --diff-filter=ACMRT -- backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder backend/tests/integration/flows/test_ai_builder_session_api_regressions.py | sed 's#^backend/##' | xargs uv run ruff format --check -> 21 files already formatted"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings"
+        - "git diff --check -> passed"
+      live_eval:
+        status: "not_run"
+        reason: "T081 is a backend runtime/persistence ownership cleanup with no prompt or normal-user output behavior change. Docker containers were running, but no backend restart was performed against this dirty worktree; output-quality proof remains a broader follow-up gate rather than evidence for this commit."
+      peer_review:
+        claude_iteration_1: "GREEN_LIGHT no / MIN_SCORE 6; accepted blockers around stale integration patch, overclaim about prepared-runtime reuse, and thin persistence coverage."
+        claude_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 8 after Codex fixed the first stale integration patch, threaded prepared DiscoveryRuntimeResult through proposal/confirm handling, and added persistence coverage."
+        antigravity_iteration_1: "GREEN_LIGHT no / MIN_SCORE 7; accepted blocker that a second integration test still patched a deleted follow-up wrapper, plus requested self-correction recomputation comments and empty-metadata persistence coverage."
+        claude_iteration_3: "GREEN_LIGHT yes / MIN_SCORE 8 after Codex fixed the second stale integration patch, added the empty-metadata persistence test, and added concise recovery-path why comments."
+        antigravity_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 9 after reviewing the exact revised diff."
+      codex_self_review:
+        verdict: "pass"
+        simpler_than_before: "Yes. Discovery runtime selects backend questions once for prepared turns; prepared outcomes transport the typed BackendQuestion; persistence writes only the typed question and no longer accepts LiteLLM/provider/classifier parameters."
+        complexity_removed:
+          - "Deleted emit_discovery_followup_if_needed bridge."
+          - "Deleted build_discovery_followup_runtime and _get_mvs_forced_followup."
+          - "Removed planner-to-discovery-runtime follow-up persistence coupling."
+        owner_clarity: "Discovery runtime owns follow-up selection, BackendQuestion owns the backend question payload, planner/preparation carries decisions, and backend-question persistence owns the atomic conversation/planning-state write."
+        reviewability: "Diff is behavior-scoped and protected by focused unit tests, two integration lost-lease regressions, and AST import ownership guards."
+        no_hard_loc_goal: true
+        broader_goal_complete: false
+      score_impact: "Improves Maintainability, Clean Architecture, Separation of Concerns, Single Source of Truth, Human Readability, Human Reviewability, Runtime Reliability, Test Quality, and AI Slop resistance inside discovery follow-up handling. Does not raise the strict overall score floor above 8 because broader AI-slop/comment/naming cleanup, proposal-completion typing, full-source baseline, and repeated live-output proof still block a defensible subsystem-wide 9/10."
+      residual_risks:
+        - "build_discovery_block_message_runtime remains as a block-message compatibility wrapper and should be deleted once callers consume DiscoveryRuntimeResult directly."
+        - "ProposalTurnContext.discovery_runtime remains optional for the question-recovery re-entrance path; narrowing it requires a separate topology cleanup."
+        - "Full-source Pyright outside Flow AI Builder remains a broader quality blocker."
+        - "No live eval was run for T081; repeat live eval remains required before claiming final normal-user output quality."
+
+  - id: T082
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest score-floor mover after T081 from current repo reality, without defaulting to file splitting or LOC reduction."
+    constraints:
+      - "Start from git status, latest commits, the T081 receipt, and current source evidence."
+      - "Do not implement during T082."
+      - "Do not set hard LOC targets or split files unless ownership evidence proves the split removes real complexity."
+      - "Consider T082 bounded AI-slop/comment/naming cleanup, T084 LiteLLM/proposal-completion boundary typing, full-source baseline, live eval replay, remaining topology/schema/DX cleanup, and deletion of build_discovery_block_message_runtime."
+      - "Use Claude and Antigravity for the selected implementation-ready plan before any worker starts."
+    expected_output:
+      - "Ranked candidate table with file:line evidence."
+      - "Selected next tranche with canonical owner decisions, delete/merge/move path, acceptance criteria, non-goals, validation, peer-gate requirements, and honest score impact."
+      - "Explicit explanation of why the chosen tranche improves the strict 9/10 floor more than easier alternatives."
     receipt: null
 
 checks:
@@ -7725,16 +7787,14 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T073 completed, validated, and peer-gated. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T073
+    result: "T081 completed, validated, Claude-gated, Antigravity-gated, and ready for scoped commit. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T081
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_orchestrator_guardrails.py::TestOrchestrationContextConstruction tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py -q -> 39 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py -q -> 32 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2373 passed, 4 skipped"
-      - "cd backend && uv run ruff check touched files -> clean"
-      - "cd backend && uv run ruff format --check touched files -> clean"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_backend_question_persistence.py tests/unittests/flows/ai_builder/test_ai_builder_confirm_requirements.py tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_confirm_requirements_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_structured_question_recovery_with_lost_lease_rolls_back -q -> 21 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2397 passed, 4 skipped"
+      - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_confirm_requirements_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_structured_question_recovery_with_lost_lease_rolls_back -q -> 2 passed"
+      - "cd backend && ruff check/format --check touched T081 files -> clean"
       - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright touched planner tests -> 0 errors"
       - "git diff --check -> clean"
-      - "Claude T073 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity T073 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 9"
+      - "Claude T081 final implementation gate -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity T081 final implementation gate -> GREEN_LIGHT yes / MIN_SCORE 9"

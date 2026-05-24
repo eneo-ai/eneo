@@ -13,12 +13,12 @@ from intric.flows.ai_builder.ai_builder_action_policy import (
     build_planner_action_policy,
     compute_unresolved_core_slots,
 )
+from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
+    persist_backend_question,
+)
 from intric.flows.ai_builder.ai_builder_discovery import (
     build_discovery_followup,
     build_registry_question_followup,
-)
-from intric.flows.ai_builder.ai_builder_discovery_followup import (
-    persist_backend_question,
 )
 from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryAnalysis
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
@@ -112,30 +112,29 @@ async def dispatch_backend_selected_question_if_any(
             analysis=request.discovery_analysis,
         )
         if discovery_followup is not None:
-            _, question_data, assistant_text = discovery_followup
-            if question_data.get("question_id") == question_id:
-                followup = question_data, assistant_text
+            if discovery_followup.question_data.get("question_id") == question_id:
+                followup = discovery_followup
             else:
                 logger.warning(
                     "AI Builder server question fallback selected a different "
                     "discovery question.",
                     extra={
                         "requested_question_id": question_id,
-                        "fallback_question_id": question_data.get("question_id"),
+                        "fallback_question_id": (
+                            discovery_followup.question_data.get("question_id")
+                        ),
                     },
                 )
 
     if followup is None:
         return [build_text_event(action.payload.prompt)]
 
-    question_data, assistant_text = followup
     persisted = await persist_backend_question(
         repo=request.repo,
         turn=request.turn,
         conversation=request.conversation,
         new_messages_start=request.new_messages_start,
-        question_data=question_data,
-        assistant_text=assistant_text,
+        question=followup,
         flow=request.flow,
         assistant_metadata=build_assistant_message_metadata(
             request.conversation,

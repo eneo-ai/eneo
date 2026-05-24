@@ -16,6 +16,11 @@ from intric.flows.ai_builder.ai_builder_confirm_requirements import (
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     requirements_summary_from_metadata,
 )
+from intric.flows.ai_builder.ai_builder_discovery_models import (
+    BackendQuestion,
+    DiscoveryAnalysis,
+)
+from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
@@ -31,6 +36,8 @@ from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
+from intric.flows.ai_builder.ai_builder_slot_classifier import SlotClassificationResult
+from intric.flows.ai_builder.planning_state import PlanningState
 
 
 def _make_turn() -> SessionSendTurn:
@@ -80,6 +87,43 @@ def _make_request(**overrides: object) -> ConfirmRequirementsProcessingRequest:
     return ConfirmRequirementsProcessingRequest(**defaults)
 
 
+def _runtime_result(
+    discovery_block_message: str | None,
+    *,
+    assumptions: list[str] | None = None,
+    followup: BackendQuestion | None = None,
+) -> DiscoveryRuntimeResult:
+    return DiscoveryRuntimeResult(
+        discovery_block_message=discovery_block_message,
+        discovery_analysis=DiscoveryAnalysis(
+            issues=(),
+            assumptions=tuple(assumptions or []),
+        ),
+        planning_state=PlanningState.empty(),
+        followup=followup,
+    )
+
+
+def _backend_question() -> BackendQuestion:
+    return BackendQuestion(
+        question_data={
+            "question_id": "input_material_mode",
+            "question": "Vilken indatakälla?",
+            "options": [
+                {
+                    "id": "audio",
+                    "label": "Ljud",
+                    "description": "Spela in eller ladda upp ljud.",
+                    "value": "audio",
+                }
+            ],
+            "selection_mode": "single",
+            "allow_custom": True,
+        },
+        assistant_text="Vilken indatakälla?",
+    )
+
+
 @pytest.mark.asyncio
 async def test_process_confirm_requirements_persists_metadata_and_emits_summary() -> (
     None
@@ -88,12 +132,11 @@ async def test_process_confirm_requirements_persists_metadata_and_emits_summary(
 
     with patch(
         "intric.flows.ai_builder.ai_builder_confirm_requirements."
-        "build_discovery_block_message_runtime",
+        "build_discovery_runtime_result",
         new=AsyncMock(
-            return_value=(
+            return_value=_runtime_result(
                 None,
-                SimpleNamespace(assumptions=["Ljud transkriberas."]),
-                None,
+                assumptions=["Ljud transkriberas."],
             )
         ),
     ):
@@ -149,20 +192,18 @@ async def test_process_confirm_requirements_validation_followup_returns_events()
     None
 ):
     request = _make_request(allow_discovery_followup=True)
-    followup = SimpleNamespace(
-        events=[
-            {"event": "text", "data": '{"text":"Vilken indatakälla?"}'},
-            {"event": "question", "data": "{}"},
-        ],
-        new_planning_state_version=17,
-    )
+    request.repo.commit_turn.return_value = 17
+    followup = _backend_question()
 
     with (
         patch(
             "intric.flows.ai_builder.ai_builder_confirm_requirements."
-            "build_discovery_block_message_runtime",
+            "build_discovery_runtime_result",
             new=AsyncMock(
-                return_value=("Missing source material.", SimpleNamespace(), None)
+                return_value=_runtime_result(
+                    "Missing source material.",
+                    followup=followup,
+                )
             ),
         ),
         patch(
@@ -170,16 +211,11 @@ async def test_process_confirm_requirements_validation_followup_returns_events()
             "assistant_metadata_with_usage",
             return_value={"planner_telemetry": {"tool_call_count": 1}},
         ) as metadata_with_usage,
-        patch(
-            "intric.flows.ai_builder.ai_builder_confirm_requirements."
-            "emit_discovery_followup_if_needed",
-            new=AsyncMock(return_value=followup),
-        ) as emit_followup,
     ):
         result = await process_confirm_requirements(request)
 
     assert result.event is None
-    assert result.events == tuple(followup.events)
+    assert [event["event"] for event in result.events] == ["text", "question"]
     assert result.feedback is None
     assert result.failure_kind is None
     assert result.new_planning_state_version == 17
@@ -187,11 +223,77 @@ async def test_process_confirm_requirements_validation_followup_returns_events()
     assert metadata_with_usage.call_args.kwargs["tool_calls"] == [
         {"name": "ask_structured_question"}
     ]
-    emit_followup.assert_awaited_once()
-    assert emit_followup.await_args.kwargs["assistant_metadata"] == {
-        "planner_telemetry": {"tool_call_count": 1}
-    }
-    request.repo.commit_turn.assert_not_awaited()
+    request.repo.commit_turn.assert_awaited_once()
+    assistant_message = request.conversation[1]
+    assert assistant_message.metadata is not None
+    assert assistant_message.metadata["planner_telemetry"] == {"tool_call_count": 1}
+
+
+@pytest.mark.asyncio
+async def test_process_confirm_requirements_validation_followup_classifies_once() -> (
+    None
+):
+    request = _make_request(
+        allow_discovery_followup=True,
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde för mötesljud men fråga mig vad som saknas "
+                    "innan planen bekräftas."
+                ),
+            )
+        ],
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            new=AsyncMock(return_value=SlotClassificationResult()),
+        ) as classify_slots,
+        patch(
+            "intric.flows.ai_builder.ai_builder_discovery_runtime."
+            "build_discovery_block_message",
+            return_value="Missing source material.",
+        ),
+        patch(
+            "intric.flows.ai_builder.ai_builder_discovery_runtime."
+            "build_discovery_followup",
+            return_value=_backend_question(),
+        ),
+    ):
+        result = await process_confirm_requirements(request)
+
+    assert result.event is None
+    assert [event["event"] for event in result.events] == ["text", "question"]
+    assert result.feedback is None
+    assert result.failure_kind is None
+    classify_slots.assert_awaited_once()
+    request.repo.commit_turn.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_process_confirm_requirements_uses_precomputed_discovery_runtime() -> (
+    None
+):
+    discovery_runtime = _runtime_result(
+        "Missing source material.",
+        followup=_backend_question(),
+    )
+    request = _make_request(
+        allow_discovery_followup=True,
+        discovery_runtime=discovery_runtime,
+    )
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_confirm_requirements."
+        "build_discovery_runtime_result",
+        new=AsyncMock(side_effect=AssertionError("discovery must not re-run")),
+    ):
+        result = await process_confirm_requirements(request)
+
+    assert [event["event"] for event in result.events] == ["text", "question"]
+    request.repo.commit_turn.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -203,16 +305,9 @@ async def test_process_confirm_requirements_validation_without_followup_returns_
     with (
         patch(
             "intric.flows.ai_builder.ai_builder_confirm_requirements."
-            "build_discovery_block_message_runtime",
-            new=AsyncMock(
-                return_value=("Missing source material.", SimpleNamespace(), None)
-            ),
+            "build_discovery_runtime_result",
+            new=AsyncMock(return_value=_runtime_result("Missing source material.")),
         ),
-        patch(
-            "intric.flows.ai_builder.ai_builder_confirm_requirements."
-            "emit_discovery_followup_if_needed",
-            new=AsyncMock(return_value=None),
-        ) as emit_followup,
     ):
         result = await process_confirm_requirements(request)
 
@@ -220,7 +315,6 @@ async def test_process_confirm_requirements_validation_without_followup_returns_
     assert result.events == ()
     assert result.failure_kind == "validation"
     assert result.feedback == "Missing source material."
-    emit_followup.assert_awaited_once()
     request.repo.commit_turn.assert_not_awaited()
 
 

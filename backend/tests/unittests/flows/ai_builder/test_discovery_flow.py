@@ -849,7 +849,7 @@ class TestExtendedClarificationHints:
         followup = build_discovery_followup(conversation)
 
         assert followup is not None
-        _, question_data, _assistant_text = followup
+        question_data = followup.question_data
         assert question_data["question_id"] == "final_output_mode"
 
     def test_rich_prompt_uses_full_question_budget_when_slots_remain(
@@ -898,7 +898,7 @@ class TestExtendedClarificationHints:
 
         followup = build_discovery_followup(conversation)
         assert followup is not None
-        _, question_data, _assistant_text = followup
+        question_data = followup.question_data
         assert question_data["question_id"] == "structured_analysis_need"
 
     def test_vague_case_analysis_prompt_is_resolved_after_full_answers(self) -> None:
@@ -975,7 +975,7 @@ class TestExtendedClarificationHints:
 
         followup = build_discovery_followup(conversation)
         assert followup is not None
-        _issue, question, _text = followup
+        question = followup.question_data
         assert question["question"] == "Vad ska flödet producera som slutresultat?"
         first_option = question["options"][0]
         assert first_option["label"] == "Strukturerat textresultat"
@@ -1791,7 +1791,10 @@ class TestExtendedClarificationHints:
         followup = build_discovery_followup(conversation)
 
         assert followup is not None
-        issue, question_data, assistant_text = followup
+        assert followup.issue is not None
+        issue = followup.issue
+        question_data = followup.question_data
+        assistant_text = followup.assistant_text
         assert issue.issue_id == "external_delivery_unsupported"
         assert question_data["question_id"] == "final_output_mode"
         assert assistant_snippet in assistant_text
@@ -2362,7 +2365,7 @@ class TestExtendedClarificationHints:
         followup = build_discovery_followup(conversation)
 
         assert followup is not None
-        _, question_data, _ = followup
+        question_data = followup.question_data
         assert question_data["question_id"] == "docx_output_mode"
 
     def test_structured_docx_output_answer_does_not_reopen_docx_mode_question(

@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from intric.flows.ai_builder.ai_builder_discovery_followup import (
+from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
     BackendQuestionPersistenceResult,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (

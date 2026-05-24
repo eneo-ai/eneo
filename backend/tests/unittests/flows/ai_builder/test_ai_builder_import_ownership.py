@@ -71,7 +71,15 @@ PROCESSOR_FINALIZATION_METHODS = frozenset(
         "mcp_clarification_events_if_needed",
     }
 )
-DISCOVERY_FOLLOWUP_BRIDGE_METHOD = "emit_discovery_followup_if_needed"
+BACKEND_QUESTION_PERSISTENCE_PATH = Path(
+    "src/intric/flows/ai_builder/ai_builder_backend_question_persistence.py"
+)
+BACKEND_QUESTION_PERSISTENCE_PUBLIC_NAMES = frozenset(
+    {
+        "BackendQuestionPersistenceResult",
+        "persist_backend_question",
+    }
+)
 FINALIZATION_OWNER_NAMES = frozenset(
     {"CompiledProposalFinalizationRequest", "CompiledProposalFinalizer"}
 )
@@ -457,32 +465,48 @@ def test_compiled_proposal_finalization_has_single_owner() -> None:
     assert violations == []
 
 
-def test_proposal_processor_does_not_own_discovery_followup_bridge() -> None:
+def test_backend_question_persistence_has_no_discovery_runtime_owner() -> None:
     backend_root = Path(__file__).resolve().parents[4]
-    processor_path = backend_root / Path(
-        "src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
+    persistence_path = backend_root / BACKEND_QUESTION_PERSISTENCE_PATH
+    persistence_tree = ast.parse(
+        persistence_path.read_text(), filename=str(persistence_path)
     )
-    processor_tree = ast.parse(processor_path.read_text(), filename=str(processor_path))
     violations: list[str] = []
-    class_found = False
 
-    for node in ast.walk(processor_tree):
+    public_names = _top_level_public_names(persistence_tree)
+    if public_names != BACKEND_QUESTION_PERSISTENCE_PUBLIC_NAMES:
+        violations.append(f"{persistence_path}: public names {sorted(public_names)}")
+
+    for module in _imported_modules(persistence_tree):
+        if module in {
+            "intric.flows.ai_builder.ai_builder_discovery_runtime",
+            "intric.flows.ai_builder.ai_builder_slot_classifier",
+        }:
+            violations.append(f"{persistence_path}: imports {module}")
+
+    for node in ast.walk(persistence_tree):
         if (
-            not isinstance(node, ast.ClassDef)
-            or node.name != "AIBuilderProposalProcessor"
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "emit_discovery_followup_if_needed"
         ):
-            continue
-        class_found = True
-        for class_node in node.body:
-            if (
-                isinstance(class_node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and class_node.name == DISCOVERY_FOLLOWUP_BRIDGE_METHOD
-            ):
+            violations.append(f"{persistence_path}:{node.lineno} defines {node.name}")
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "persist_backend_question"
+        ):
+            parameter_names = {argument.arg for argument in node.args.kwonlyargs}
+            runtime_parameters = {
+                "litellm_client",
+                "litellm_model",
+                "litellm_kwargs",
+                "ui_language",
+            }
+            overlap = sorted(parameter_names & runtime_parameters)
+            if overlap:
                 violations.append(
-                    f"{processor_path}:{class_node.lineno} defines {class_node.name}"
+                    f"{persistence_path}:{node.lineno} accepts runtime params {overlap}"
                 )
 
-    assert class_found
     assert violations == []
 
 
@@ -1355,7 +1379,7 @@ def test_planner_action_rendering_and_dispatch_have_canonical_owners() -> None:
                 AI_BUILDER_PLANNER_MODULE,
                 AI_BUILDER_PROPOSAL_PROCESSOR_MODULE,
                 "intric.flows.ai_builder.ai_builder_repo",
-                "intric.flows.ai_builder.ai_builder_discovery_followup",
+                "intric.flows.ai_builder.ai_builder_backend_question_persistence",
             }:
                 violations.append(f"{rendering_path}: imports {module}")
         for node in ast.walk(rendering_tree):
@@ -1449,6 +1473,9 @@ def test_planner_request_preparation_has_canonical_owner() -> None:
     }:
         if helper_name in _top_level_names(planner_tree):
             violations.append(f"{planner_path}: defines {helper_name}")
+    for module in _imported_modules(planner_tree):
+        if module == "intric.flows.ai_builder.ai_builder_discovery_runtime":
+            violations.append(f"{planner_path}: imports {module}")
 
     if preparation_path.is_file():
         preparation_tree = ast.parse(

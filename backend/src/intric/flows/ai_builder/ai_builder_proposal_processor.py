@@ -7,16 +7,18 @@ from typing import (
     AsyncGenerator,
 )
 
+from intric.flows.ai_builder.ai_builder_backend_question_persistence import (
+    BackendQuestionPersistenceResult,
+    persist_backend_question,
+)
 from intric.flows.ai_builder.ai_builder_confirm_requirements import (
     ConfirmRequirementsProcessingRequest,
     ConfirmRequirementsRetryConfigRequest,
     build_confirm_requirements_retry_config,
     process_confirm_requirements,
 )
-from intric.flows.ai_builder.ai_builder_discovery_followup import (
-    BackendQuestionPersistenceResult,
-    persist_backend_question,
-)
+from intric.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
+from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
@@ -142,6 +144,7 @@ class AIBuilderProposalProcessor:
         usage_tracker: ProposalTurnTelemetry | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
+        discovery_runtime: DiscoveryRuntimeResult | None = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         ctx = ProposalTurnContext(
             turn=turn,
@@ -164,6 +167,7 @@ class AIBuilderProposalProcessor:
             usage_tracker=usage_tracker,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
+            discovery_runtime=discovery_runtime,
         )
         if (
             ctx.text_content
@@ -201,6 +205,7 @@ class AIBuilderProposalProcessor:
         planning_state: PlanningState | None = None,
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
+        discovery_runtime: DiscoveryRuntimeResult | None = None,
         available_mcps: AIBuilderMCPResourceInput = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         """Run the server-selected plan proposal task.
@@ -245,6 +250,7 @@ class AIBuilderProposalProcessor:
             planning_state=planning_state,
             plan_edit_context=plan_edit_context,
             prior_plan_for_revision=prior_plan_for_revision,
+            discovery_runtime=discovery_runtime,
         ):
             yield event
 
@@ -324,6 +330,7 @@ class AIBuilderProposalProcessor:
                     plan_edit_context=ctx.plan_edit_context,
                     prior_plan_for_revision=ctx.prior_plan_for_revision,
                     usage_tracker=ctx.usage_tracker,
+                    discovery_runtime=ctx.discovery_runtime,
                 ):
                     yield event
                 return
@@ -367,8 +374,10 @@ class AIBuilderProposalProcessor:
             turn=turn,
             conversation=conversation,
             new_messages_start=new_messages_start,
-            question_data=question_data,
-            assistant_text=assistant_text,
+            question=BackendQuestion(
+                question_data=question_data,
+                assistant_text=assistant_text,
+            ),
             assistant_metadata=assistant_metadata,
             tool_content=(
                 "MCP selection question presented before proposal because the user "
@@ -437,6 +446,7 @@ class AIBuilderProposalProcessor:
                 ),
                 usage_tracker=ctx.usage_tracker,
                 allow_discovery_followup=True,
+                discovery_runtime=ctx.discovery_runtime,
             )
         )
         if confirm_result.has_events:
