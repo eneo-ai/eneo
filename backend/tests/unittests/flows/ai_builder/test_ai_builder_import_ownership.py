@@ -919,6 +919,60 @@ def test_proposal_completion_has_single_request_boundary() -> None:
     assert violations == []
 
 
+def test_planner_completion_has_single_provider_boundary() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    completion_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_planner_completion.py"
+    )
+    repair_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_repair.py"
+    )
+    pipeline_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_orchestration_pipeline.py"
+    )
+
+    completion_tree = ast.parse(
+        completion_path.read_text(), filename=str(completion_path)
+    )
+    violations: list[str] = []
+
+    acompletion_refs = [
+        node
+        for node in ast.walk(completion_tree)
+        if isinstance(node, ast.Attribute) and node.attr == "acompletion"
+    ]
+    if len(acompletion_refs) != 1:
+        lines = ", ".join(str(node.lineno) for node in acompletion_refs) or "none"
+        violations.append(f"{completion_path}: acompletion refs {lines}")
+
+    for path in (repair_path, pipeline_path):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr == "acompletion":
+                violations.append(f"{path}:{node.lineno} calls acompletion")
+
+    completion_imports = _imported_modules(completion_tree)
+    banned_imports = {
+        "intric.flows.ai_builder.ai_builder_repair",
+        "intric.flows.ai_builder.ai_builder_orchestration_pipeline",
+        "intric.flows.ai_builder.ai_builder_planner_turn",
+        "intric.flows.ai_builder.ai_builder_router",
+        "intric.flows.ai_builder.ai_builder_api_models",
+    }
+    for module in sorted(completion_imports & banned_imports):
+        violations.append(f"{completion_path}: imports {module}")
+
+    repair_tree = ast.parse(repair_path.read_text(), filename=str(repair_path))
+    for node in ast.walk(repair_tree):
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in {
+            "CompletionMetadata",
+            "completion_metadata_from_response",
+        }:
+            violations.append(f"{repair_path}:{node.lineno} defines {node.name}")
+
+    assert violations == []
+
+
 def test_confirm_requirements_has_single_owner_and_typed_boundary() -> None:
     backend_root = Path(__file__).resolve().parents[4]
     processor_path = backend_root / Path(

@@ -43,7 +43,7 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     RejectionReason,
     evaluate_planner_output,
 )
-from intric.flows.ai_builder.ai_builder_repair import CompletionMetadata
+from intric.flows.ai_builder.ai_builder_planner_completion import CompletionMetadata
 from intric.flows.ai_builder.ai_builder_response_format import (
     PlannerResponseFormatSelection,
 )
@@ -220,6 +220,7 @@ async def run_planner_turn(
     ) -> TurnTelemetry:
         completion = pipeline_outcome.final_completion
         cumulative_usage = pipeline_outcome.cumulative_token_usage
+        completion_usage = completion.usage if completion is not None else None
         return TurnTelemetry(
             request_id=str(turn.lease.request_id),
             model=litellm_model,
@@ -232,37 +233,37 @@ async def run_planner_turn(
             prompt_tokens=(
                 cumulative_usage.prompt_tokens
                 if cumulative_usage is not None and cumulative_usage.has_tokens
-                else completion.prompt_tokens
-                if completion is not None
+                else completion_usage.prompt_tokens
+                if completion_usage is not None
                 else None
             ),
             completion_tokens=(
                 cumulative_usage.completion_tokens
                 if cumulative_usage is not None and cumulative_usage.has_tokens
-                else completion.completion_tokens
-                if completion is not None
+                else completion_usage.completion_tokens
+                if completion_usage is not None
                 else None
             ),
             total_tokens=(
                 cumulative_usage.total_tokens
                 if cumulative_usage is not None and cumulative_usage.has_tokens
-                else completion.total_tokens
-                if completion is not None
+                else completion_usage.total_tokens
+                if completion_usage is not None
                 else None
             ),
             finish_reason=completion.finish_reason if completion is not None else None,
             token_usage_source=(
                 cumulative_usage.source
                 if cumulative_usage is not None and cumulative_usage.has_tokens
-                else completion.token_usage_source
-                if completion is not None
+                else completion_usage.source
+                if completion_usage is not None
                 else None
             ),
             token_usage_estimated=(
                 cumulative_usage.estimated
                 if cumulative_usage is not None and cumulative_usage.has_tokens
-                else completion.token_usage_estimated
-                if completion is not None
+                else completion_usage.estimated
+                if completion_usage is not None
                 else False
             ),
         )

@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T085
+active_task: T086
 
 interruptions:
   - id: I001
@@ -7995,6 +7995,79 @@ tasks:
       - "Tests only assert mocked call choreography and do not prove accepted, repair, parse, token-usage, and empty-choice behavior."
       - "Pyright requires broad Any, ignores, or type weakening outside the provider edge."
       - "CompletionMetadata keeps duplicated token fields or .token_usage() without a new peer-reviewed reason."
+    receipt:
+      completed_at: "2026-05-24T21:48:56Z"
+      summary: "Moved planner-union provider execution and provider-response normalization into ai_builder_planner_completion.py. The pipeline now delegates provider execution to call_planner_completion while still owning parse/evaluation/retry flow. Repair now delegates provider execution while still owning corrective prompt construction, repair eligibility, parse-repair prompt shape, and commit-drift checks. CompletionMetadata moved out of repair and now composes CompletionTokenUsage directly as usage, removing duplicated token fields and token_usage() remapping."
+      implementation_artifact: ".codex/artifacts/flow-ai-builder-t085-implementation-summary.md"
+      files_changed:
+        - "backend/src/intric/flows/ai_builder/ai_builder_planner_completion.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_orchestration_pipeline.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_repair.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_planner_turn.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      deleted_or_simplified:
+        - "Deleted _InitialCallOutcome and _call_planner from ai_builder_orchestration_pipeline.py."
+        - "Deleted repair-owned CompletionMetadata and public completion_metadata_from_response export from ai_builder_repair.py."
+        - "Deleted CompletionMetadata.token_usage() remapping by composing CompletionTokenUsage directly."
+        - "Removed direct planner-union litellm_client.acompletion calls from orchestration pipeline and repair."
+      behavior_notes:
+        - "Planner prompts, response-format selection, orchestration evaluation, retry budgets, parse-repair behavior, semantic-repair behavior, dispatch behavior, and public API/SSE/OpenAPI surfaces are unchanged."
+        - "Empty provider choices now normalize to raw_content == '' and flow through the existing parse-failure/parse-repair path instead of leaking a raw IndexError."
+        - "TurnTelemetry remains a flat telemetry/log/SSE shape and now reads completion.usage fields at construction."
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py::TestPlannerCompletionBoundary tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py::TestParseFailures::test_initial_call_empty_choices_returns_parse_failed tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_planner_completion_has_single_provider_boundary -q -> 4 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 79 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner.py -q -> 21 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_repair.py tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py -q -> 33 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2408 passed, 4 skipped, 11 warnings"
+        - "cd backend && uv run ruff check touched T085 files -> clean"
+        - "cd backend && uv run ruff format --check touched T085 files -> clean"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
+        - "git diff --check -> clean"
+        - "rg -n \"\\.token_usage\\(\" backend || true -> no matches"
+        - "rg -n \"completion_metadata_from_response\" backend/src backend/tests || true -> only private planner-completion owner and the banned-symbol AST guard"
+        - "PYTHONDONTWRITEBYTECODE=1 uv run pyright --strict src/intric/flows/ai_builder/ai_builder_planner_completion.py -> not run; installed pyright reports 'Unexpected option --strict', and configured pyright over src/intric/flows/ai_builder is clean."
+      peer_review:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-ai-builder-planner-completion-implementation-gate-20260524T214104Z.md -> GREEN_LIGHT yes / MIN_SCORE 8; accepted suggestions to add a pipeline-level empty-choices test and avoid reading provider choices twice."
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-ai-builder-planner-completion-implementation-gate-iteration-2-20260524T214524Z.md -> GREEN_LIGHT yes / MIN_SCORE 9 after Codex applied the quality nits."
+        antigravity_iteration_1: ".codex/artifacts/antigravity-peer-loop-ai-builder-planner-completion-implementation-synthesis-20260524T214818Z.md -> GREEN_LIGHT yes / MIN_SCORE 9."
+      swagger_openapi_impact: "None. T085 is internal backend planner-completion ownership work and does not change public REST/SSE contracts, OpenAPI schemas, Swagger examples, generated TypeScript, request/response models, or API examples."
+      session_goal_tool_status: "get_goal works but still reports stale T081 objective text; no set_goal/update-objective primitive is available in this session. Durable board remains the source of truth."
+      codex_self_review:
+        verdict: "pass for T085 scope. This is simpler for maintainers because provider execution, provider content extraction, finish_reason extraction, and token usage extraction for planner-union completions have one canonical owner. Repair and pipeline now keep their domain responsibilities without owning raw provider shape."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "The planner-completion seam still accepts litellm_client as Any at the external LiteLLM boundary; this remains intentionally contained and Pyright-clean."
+        - "A future PlannerCompletionFn callable may be worth considering only if it reduces test/setup complexity without creating a fake seam; both Claude and Antigravity treated it as a follow-up, not a blocker."
+        - "No live eval was run for T085 because the tranche is internal backend provider-boundary cleanup with no intentional normal-user behavior or public API change beyond safer empty-choice handling."
+        - "Broader Flow AI Builder strict floor remains 8/10 because normal-user output proof, bounded AI-slop/comment/naming cleanup, broader planner/source readability, and any remaining full-source baseline work are still not final."
+      score_impact: "Raises the planner-completion seam to a peer-reviewed 9/10 for maintainability, clean architecture, SSoT, type contracts, and test quality. Does not raise the overall subsystem floor above 8 because this is one internal seam and broader readability/output-quality/DX proof blockers remain."
+      broader_goal_complete: false
+
+  - id: T086
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest score-floor mover after the planner-completion boundary from current repo reality, without implementing during the ranking tranche."
+    constraints:
+      - "Start from git status, latest commits, current scorecard, T085 receipt, source evidence, and latest peer artifacts."
+      - "Do not implement during T086."
+      - "Do not switch to broader Flows work."
+      - "Do not select LOC reduction or file splitting unless evidence proves it removes real complexity, reduces coupling, clarifies canonical ownership, improves debugging, improves tests, or improves human reviewability."
+      - "Consider bounded AI-slop/comment/naming cleanup, deletion of stale compatibility wrappers, remaining planner/source topology and readability blockers, full-source typing/test baseline, live eval replay after behavior-affecting changes, diagnostics/DX and future OpenTelemetry compatibility, data/schema/JSONB ownership, and frontend/backend contract or generated-client drift."
+      - "If a candidate changes public API/SSE/schema/generated-client-visible contracts, include Swagger/OpenAPI docs, examples, and generated client updates in that candidate scope."
+      - "Use Claude for the plan gate and Antigravity if available. Missing Antigravity coverage is a skip, not a pass."
+    expected_output:
+      - "Ranked candidate table with file:line evidence."
+      - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, expected score impact, and Swagger/OpenAPI impact."
+      - "Explicit explanation of why the selected tranche moves the strict 9/10 floor more than easier cleanup."
+      - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
     receipt: null
 
 checks:
@@ -8003,14 +8076,15 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T083 completed, validated, Claude-gated, Antigravity-gated, and ready for scoped commit. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T083
+    result: "T085 completed, validated, Claude-gated, Antigravity-gated, and ready for scoped commit. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T085
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_completion.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py tests/unittests/flows/ai_builder/test_ai_builder_edit_repair.py::test_attempt_description_repair_uses_completion_boundary_only_for_description -q -> 99 passed"
-      - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_confirm_requirements_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_structured_question_recovery_with_lost_lease_rolls_back tests/integration/flows/test_ai_builder_session_api_regressions.py::test_handle_edit_flow_with_lost_lease_rolls_back -q -> 3 passed, 16 warnings"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2404 passed, 4 skipped, 11 warnings"
-      - "cd backend && ruff check/format --check touched T083 files -> clean"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 79 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner.py -q -> 21 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_repair.py tests/unittests/flows/ai_builder/test_ai_builder_parse_repair.py -q -> 33 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2408 passed, 4 skipped, 11 warnings"
+      - "cd backend && ruff check/format --check touched T085 files -> clean"
       - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
       - "git diff --check -> clean"
-      - "Claude T083 final implementation gate -> GREEN_LIGHT yes / MIN_SCORE 9"
-      - "Antigravity T083 final implementation gate -> GREEN_LIGHT yes / MIN_SCORE >= 8"
+      - "Claude T085 final implementation gate -> GREEN_LIGHT yes / MIN_SCORE 9"
+      - "Antigravity T085 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 9"

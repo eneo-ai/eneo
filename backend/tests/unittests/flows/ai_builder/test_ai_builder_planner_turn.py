@@ -495,7 +495,7 @@ class TestPipelineParseFailed:
         assert result.kind == "parse_failed"
         assert result.final_completion is not None
         assert result.final_completion.finish_reason == "length"
-        assert result.final_completion.completion_tokens == 1024
+        assert result.final_completion.usage.completion_tokens == 1024
         assert result.parse_error_raw is not None
         repo.commit_turn.assert_not_awaited()
 

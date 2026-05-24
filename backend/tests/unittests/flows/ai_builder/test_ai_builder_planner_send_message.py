@@ -67,6 +67,7 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     RejectionReason,
 )
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
+from intric.flows.ai_builder.ai_builder_planner_completion import CompletionMetadata
 from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
     DiscoveryBlockPrepared,
     NormalPlannerPrepared,
@@ -78,7 +79,6 @@ from intric.flows.ai_builder.ai_builder_planner_turn import (
     PlannerTurnResult,
     TurnTelemetry,
 )
-from intric.flows.ai_builder.ai_builder_repair import CompletionMetadata
 from intric.flows.ai_builder.ai_builder_requirements_state import RequirementsState
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
@@ -98,6 +98,7 @@ from intric.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedSlot,
     SlotClassificationResult,
 )
+from intric.flows.ai_builder.ai_builder_token_usage import CompletionTokenUsage
 from intric.flows.ai_builder.planning_state import PlanningState
 
 
@@ -801,9 +802,11 @@ async def test_send_message_parse_failed_with_length_finish_reason_emits_output_
         kind="parse_failed",
         final_completion=CompletionMetadata(
             finish_reason="length",
-            prompt_tokens=1000,
-            completion_tokens=2048,
-            total_tokens=3048,
+            usage=CompletionTokenUsage(
+                prompt_tokens=1000,
+                completion_tokens=2048,
+                total_tokens=3048,
+            ),
         ),
         parse_error_raw="<truncated JSON>",
         parse_error_message="unexpected EOF",

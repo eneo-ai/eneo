@@ -43,6 +43,9 @@ from intric.flows.ai_builder.ai_builder_orchestration_pipeline import (
     run_planner_pipeline,
 )
 from intric.flows.ai_builder.ai_builder_orchestrator import OrchestrationContext
+from intric.flows.ai_builder.ai_builder_planner_completion import (
+    call_planner_completion,
+)
 from intric.flows.ai_builder.ai_builder_token_usage import (
     TOKEN_USAGE_SOURCE_PROVIDER,
 )
@@ -191,6 +194,56 @@ def _llm_response(
     else:
         wrapper.usage = None
     return wrapper
+
+
+@pytest.mark.asyncio
+class TestPlannerCompletionBoundary:
+    async def test_call_planner_completion_returns_raw_content_and_usage(self) -> None:
+        llm = AsyncMock()
+        llm.acompletion.return_value = _llm_response(
+            _planner_output_json(kind="confirm_requirements"),
+            finish_reason="stop",
+            prompt_tokens=17,
+            completion_tokens=9,
+            total_tokens=26,
+        )
+
+        result = await call_planner_completion(
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={"timeout": 30},
+            messages=[{"role": "system", "content": "system"}],
+        )
+
+        assert result.raw_content == _planner_output_json(kind="confirm_requirements")
+        assert result.metadata.finish_reason == "stop"
+        assert result.metadata.usage.prompt_tokens == 17
+        assert result.metadata.usage.completion_tokens == 9
+        assert result.metadata.usage.total_tokens == 26
+        assert result.metadata.usage.source == TOKEN_USAGE_SOURCE_PROVIDER
+        llm.acompletion.assert_awaited_once_with(
+            model="openai/gpt-5.4",
+            messages=[{"role": "system", "content": "system"}],
+            timeout=30,
+        )
+
+    async def test_call_planner_completion_handles_empty_choices(self) -> None:
+        llm = AsyncMock()
+        response = AsyncMock()
+        response.choices = []
+        response.usage = None
+        llm.acompletion.return_value = response
+
+        result = await call_planner_completion(
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            messages=[{"role": "system", "content": "system"}],
+        )
+
+        assert result.raw_content == ""
+        assert result.metadata.finish_reason is None
+        assert result.metadata.usage.estimated is True
 
 
 @pytest.mark.asyncio
@@ -672,9 +725,32 @@ class TestParseFailures:
         assert outcome.kind == "parse_failed"
         assert outcome.final_completion is not None
         assert outcome.final_completion.finish_reason == "length"
-        assert outcome.final_completion.completion_tokens == 1024
+        assert outcome.final_completion.usage.completion_tokens == 1024
         assert outcome.parse_error_raw is not None
         assert outcome.parse_error_message is not None
+
+    async def test_initial_call_empty_choices_returns_parse_failed(self) -> None:
+        llm = AsyncMock()
+        response = AsyncMock()
+        response.choices = []
+        response.usage = None
+        llm.acompletion.return_value = response
+
+        outcome = await run_planner_pipeline(
+            litellm_client=llm,
+            litellm_model="openai/gpt-5.4",
+            litellm_kwargs={},
+            base_messages=[{"role": "system", "content": "system"}],
+            orchestration_context=_make_context(),
+        )
+
+        assert outcome.kind == "parse_failed"
+        assert outcome.final_completion is not None
+        assert outcome.final_completion.finish_reason is None
+        assert outcome.parse_error_raw == ""
+        assert outcome.parse_error_message is not None
+        assert outcome.llm_calls_made == 2
+        assert outcome.parse_repair_attempts == 1
 
     async def test_repair_call_malformed_json_returns_parse_failed(self) -> None:
         """If a repair turn returns malformed JSON, the pipeline must
@@ -714,8 +790,8 @@ class TestParseFailures:
         assert outcome.kind == "parse_failed"
         assert outcome.final_completion is not None
         assert outcome.final_completion.finish_reason == "length"
-        assert outcome.final_completion.prompt_tokens == 700
-        assert outcome.final_completion.completion_tokens == 1024
+        assert outcome.final_completion.usage.prompt_tokens == 700
+        assert outcome.final_completion.usage.completion_tokens == 1024
         assert outcome.llm_calls_made == 2
         assert outcome.repair_attempts == 0
         assert outcome.parse_error_raw is not None
@@ -749,9 +825,9 @@ class TestCompletionMetadataThreading:
 
         assert outcome.final_completion is not None
         assert outcome.final_completion.finish_reason == "stop"
-        assert outcome.final_completion.prompt_tokens == 250
-        assert outcome.final_completion.completion_tokens == 80
-        assert outcome.final_completion.total_tokens == 330
+        assert outcome.final_completion.usage.prompt_tokens == 250
+        assert outcome.final_completion.usage.completion_tokens == 80
+        assert outcome.final_completion.usage.total_tokens == 330
 
     async def test_final_completion_from_repair_call_when_repair_accepted(
         self,
@@ -793,8 +869,8 @@ class TestCompletionMetadataThreading:
         assert outcome.kind == "accepted"
         assert outcome.final_completion is not None
         assert outcome.final_completion.finish_reason == "length"
-        assert outcome.final_completion.prompt_tokens == 600
-        assert outcome.final_completion.completion_tokens == 1024
+        assert outcome.final_completion.usage.prompt_tokens == 600
+        assert outcome.final_completion.usage.completion_tokens == 1024
 
     async def test_cumulative_token_usage_sums_initial_and_repair_calls(
         self,
@@ -830,7 +906,7 @@ class TestCompletionMetadataThreading:
 
         assert outcome.kind == "accepted"
         assert outcome.final_completion is not None
-        assert outcome.final_completion.prompt_tokens == 200
+        assert outcome.final_completion.usage.prompt_tokens == 200
         assert outcome.cumulative_token_usage is not None
         assert outcome.cumulative_token_usage.prompt_tokens == 300
         assert outcome.cumulative_token_usage.completion_tokens == 50

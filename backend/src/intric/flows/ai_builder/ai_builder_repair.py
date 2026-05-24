@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Final, Literal, cast
+from typing import Any, Final, Literal
 
 from pydantic import ValidationError
 
@@ -60,13 +60,9 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     parse_planner_output,
     summarize_parse_failure,
 )
-from intric.flows.ai_builder.ai_builder_token_usage import (
-    TOKEN_USAGE_SOURCE_ESTIMATE,
-    TOKEN_USAGE_SOURCE_NONE,
-    TOKEN_USAGE_SOURCE_PROVIDER,
-    CompletionTokenUsage,
-    TokenUsageSource,
-    completion_token_usage_from_response,
+from intric.flows.ai_builder.ai_builder_planner_completion import (
+    CompletionMetadata,
+    call_planner_completion,
 )
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
@@ -84,45 +80,6 @@ MAX_ORCHESTRATOR_REPAIR_RETRIES: Final[int] = 3
 # cannot honor the contract, at which point falling through to the
 # user-facing error is the honest move.
 MAX_PARSE_REPAIR_RETRIES: Final[int] = 1
-
-
-@dataclass(frozen=True, slots=True)
-class CompletionMetadata:
-    """Metadata from one LLM completion call.
-
-    Surfaced on `RepairOutcome` so the outer pipeline can track the
-    final call's metadata — the caller needs `finish_reason == "length"`
-    to detect truncation and `*_tokens` for per-turn telemetry.
-    Metadata is extracted BEFORE parse, so truncation that produced
-    malformed JSON still surfaces as a `parse_failed` outcome with
-    metadata populated.
-
-    `None` fields are normal — upstream clients (litellm) may not
-    populate every metric for every provider.
-    """
-
-    finish_reason: str | None
-    prompt_tokens: int | None
-    completion_tokens: int | None
-    total_tokens: int | None
-    token_usage_source: str | None = None
-    token_usage_estimated: bool = False
-
-    def token_usage(self) -> CompletionTokenUsage:
-        source = self.token_usage_source
-        if source not in {
-            TOKEN_USAGE_SOURCE_PROVIDER,
-            TOKEN_USAGE_SOURCE_ESTIMATE,
-            TOKEN_USAGE_SOURCE_NONE,
-        }:
-            source = TOKEN_USAGE_SOURCE_NONE
-        return CompletionTokenUsage(
-            prompt_tokens=self.prompt_tokens,
-            completion_tokens=self.completion_tokens,
-            total_tokens=self.total_tokens,
-            source=cast(TokenUsageSource, source),
-            estimated=self.token_usage_estimated,
-        )
 
 
 # Repair-eligible rejection codes. A rejection outside this set means
@@ -312,18 +269,14 @@ async def repair_planner_turn(
         rejection=rejection,
     )
 
-    response = await litellm_client.acompletion(
-        model=litellm_model,
-        messages=messages,
-        **litellm_kwargs,
-    )
-    raw_content = response.choices[0].message.content or ""
-    completion_metadata = completion_metadata_from_response(
-        response,
+    completion = await call_planner_completion(
+        litellm_client=litellm_client,
         litellm_model=litellm_model,
+        litellm_kwargs=litellm_kwargs,
         messages=messages,
-        completion_text=raw_content,
     )
+    raw_content = completion.raw_content
+    completion_metadata = completion.metadata
 
     try:
         repaired_output = parse_planner_output(raw_content)
@@ -439,18 +392,14 @@ async def repair_parse_failure(
         },
     ]
 
-    response = await litellm_client.acompletion(
-        model=litellm_model,
-        messages=messages,
-        **litellm_kwargs,
-    )
-    raw_content = response.choices[0].message.content or ""
-    completion_metadata = completion_metadata_from_response(
-        response,
+    completion = await call_planner_completion(
+        litellm_client=litellm_client,
         litellm_model=litellm_model,
+        litellm_kwargs=litellm_kwargs,
         messages=messages,
-        completion_text=raw_content,
     )
+    raw_content = completion.raw_content
+    completion_metadata = completion.metadata
 
     try:
         repaired_output = parse_planner_output(raw_content)
@@ -467,30 +416,6 @@ async def repair_parse_failure(
         kind="repaired",
         repaired_output=repaired_output,
         completion_metadata=completion_metadata,
-    )
-
-
-def completion_metadata_from_response(
-    response: Any,
-    *,
-    litellm_model: str,
-    messages: list[dict[str, Any]],
-    completion_text: str,
-) -> CompletionMetadata:
-    choice = response.choices[0]
-    usage = completion_token_usage_from_response(
-        response,
-        model_name=litellm_model,
-        messages=messages,
-        completion_text=completion_text,
-    )
-    return CompletionMetadata(
-        finish_reason=getattr(choice, "finish_reason", None),
-        prompt_tokens=usage.prompt_tokens,
-        completion_tokens=usage.completion_tokens,
-        total_tokens=usage.total_tokens,
-        token_usage_source=usage.source,
-        token_usage_estimated=usage.estimated,
     )
 
 
@@ -525,13 +450,11 @@ def _detect_commit_drift(
 __all__ = [
     "MAX_ORCHESTRATOR_REPAIR_RETRIES",
     "MAX_PARSE_REPAIR_RETRIES",
-    "CompletionMetadata",
     "ParseRepairOutcome",
     "RepairOutcome",
     "build_repair_messages",
     "build_parse_repair_user_message",
     "build_repair_user_message",
-    "completion_metadata_from_response",
     "repair_parse_failure",
     "repair_planner_turn",
 ]
