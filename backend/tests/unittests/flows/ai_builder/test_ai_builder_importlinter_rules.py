@@ -49,7 +49,16 @@ RULE_7_NAME = "AI Builder must not import MCP execution surfaces"
 AI_BUILDER_PACKAGE = "intric.flows.ai_builder"
 FCM_MODULE = "intric.flows.flow_capability_manifest"
 FLOW_API_PARENT_PACKAGE = "intric.flows.api"
-BRIDGE_MODULE_NAME = "ai_builder_materialization_bridge"
+STALE_AI_BUILDER_REFERENCES: frozenset[str] = frozenset(
+    {
+        "ai_builder_materialization_bridge",
+        "ai_builder_draft_plan",
+        "DraftPlanEnvelope",
+        "MaterializationError",
+        "MaterializedDraft",
+        "apply_to_draft",
+    }
+)
 MCP_EXECUTION_MODULES: frozenset[str] = frozenset(
     {
         "intric.mcp_servers.infrastructure.proxy",
@@ -137,10 +146,9 @@ def _modules_importing_flows_api(
     - ``from intric.flows import api``            (grandparent form; then
       ``api.flow_models.X`` at the call site)
 
-    The whole ``intric.flows.api`` surface is off-limits to non-bridge
-    ai_builder modules: DTOs, assemblers, HTTP routers — none of them are
-    legitimate dependencies of planner code. Only the materialization
-    bridge may reach in when it lands.
+    The whole ``intric.flows.api`` surface is off-limits to AI Builder source:
+    DTOs, assemblers, HTTP routers — none of them are legitimate dependencies
+    of planner and proposal code.
 
     Recurses through sub-packages so Rule 6 stays honest if the ai_builder
     package grows nested modules. Skips every ``__init__.py``.
@@ -174,6 +182,30 @@ def _modules_importing_flows_api(
         if imports:
             rel = py_file.relative_to(package_root).as_posix()
             offenders[rel] = imports
+    return offenders
+
+
+def _stale_ai_builder_reference_offenders(
+    roots: tuple[pathlib.Path, ...],
+    *,
+    ignored_files: frozenset[pathlib.Path],
+) -> dict[str, list[str]]:
+    """Use substring matches so stale names in comments/docstrings fail too."""
+    offenders: dict[str, list[str]] = {}
+    backend_root = _backend_root()
+    ignored_resolved = {path.resolve() for path in ignored_files}
+    for root in roots:
+        for py_file in sorted(root.rglob("*.py")):
+            if py_file.resolve() in ignored_resolved:
+                continue
+            text = py_file.read_text(encoding="utf-8")
+            hits = sorted(
+                reference
+                for reference in STALE_AI_BUILDER_REFERENCES
+                if reference in text
+            )
+            if hits:
+                offenders[py_file.relative_to(backend_root).as_posix()] = hits
     return offenders
 
 
@@ -505,104 +537,35 @@ class TestRule4QuestionCatalogDirectSiblingImports:
         )
 
 
-class TestRule6MaterializationBridgeAcl:
-    """Rule 6 — Materialization Bridge ACL.
-
-    Inside ``intric.flows.ai_builder``, only
-    ``ai_builder_materialization_bridge.py`` is permitted to import from
-    the ``intric.flows.api`` package — the flows-domain write surface
-    covering DTOs, assemblers, and routers. The bridge exposes a narrow
-    public surface via ``__all__`` so additional helpers land with an
-    explicit review of the seam rather than by accident.
-    """
-
-    _EXPECTED_BRIDGE_ALL: frozenset[str] = frozenset(
-        {
-            "MaterializationError",
-            "MaterializedDraft",
-            "apply_to_draft",
-            "materialize",
-        }
-    )
+class TestRule6FlowApiBoundary:
+    """Rule 6 — AI Builder source must not depend on Flow API adapters."""
 
     def _package_root(self) -> pathlib.Path:
         return _backend_root() / "src" / "intric" / "flows" / "ai_builder"
 
-    def test_bridge_has_role_docstring(self) -> None:
-        bridge = self._package_root() / f"{BRIDGE_MODULE_NAME}.py"
-        assert bridge.exists(), (
-            "Expected Materialization Bridge module at "
-            f"{bridge.relative_to(_backend_root())}."
-        )
-        tree = ast.parse(bridge.read_text(encoding="utf-8"))
-        assert ast.get_docstring(tree) is not None, (
-            f"{BRIDGE_MODULE_NAME}.py must have a module docstring declaring "
-            "its bridge role."
-        )
-
-    def test_bridge_public_surface_is_narrow(self) -> None:
-        """The bridge exposes only the sanctioned public names via
-        ``__all__``. Any new public symbol must land here deliberately
-        so the write-surface seam does not widen silently.
-        """
-        from intric.flows.ai_builder import (
-            ai_builder_materialization_bridge as bridge,
-        )
-
-        declared = getattr(bridge, "__all__", None)
-        assert declared is not None, (
-            f"{BRIDGE_MODULE_NAME}.py must declare an `__all__` tuple to "
-            "pin its public surface."
-        )
-        assert frozenset(declared) == self._EXPECTED_BRIDGE_ALL, (
-            f"{BRIDGE_MODULE_NAME}.py `__all__` drifted from the sanctioned "
-            "bridge surface.\n"
-            f"Expected: {sorted(self._EXPECTED_BRIDGE_ALL)}\n"
-            f"Found:    {sorted(declared)}"
-        )
-
-    def test_bridge_has_no_non_underscored_top_level_defs_outside_all(
-        self,
-    ) -> None:
-        """``__all__`` parity: every non-private top-level ``def`` / ``class``
-        in the bridge must also appear in ``__all__``. The runtime
-        ``__all__`` check catches drift in the declared list; this static
-        AST scan catches the opposite drift — a new public helper sneaking
-        in via a ``def debug_bridge_state(): ...`` without being listed
-        in ``__all__`` would otherwise slip past the runtime check because
-        ``__all__`` alone says nothing about what else the module exports.
-        """
-        bridge_path = self._package_root() / f"{BRIDGE_MODULE_NAME}.py"
-        tree = ast.parse(bridge_path.read_text(encoding="utf-8"))
-
-        top_level_public_names: list[str] = []
-        for node in tree.body:
-            if isinstance(
-                node,
-                (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
-            ):
-                if not node.name.startswith("_"):
-                    top_level_public_names.append(node.name)
-
-        unsanctioned = set(top_level_public_names) - self._EXPECTED_BRIDGE_ALL
-        assert not unsanctioned, (
-            f"{BRIDGE_MODULE_NAME}.py exposes top-level public symbols that "
-            "are not in the sanctioned `__all__` surface. Either prefix them "
-            "with `_` to mark them private, or add them to "
-            "`_EXPECTED_BRIDGE_ALL` (and the module's `__all__`) with an "
-            "explicit review of the write-surface seam.\n"
-            f"Unsanctioned public symbols: {sorted(unsanctioned)}"
-        )
-
-    def test_only_bridge_imports_flows_api(self) -> None:
+    def test_no_ai_builder_source_imports_flows_api(self) -> None:
         offenders = _modules_importing_flows_api(self._package_root())
-        offenders.pop(f"{BRIDGE_MODULE_NAME}.py", None)
         assert not offenders, (
-            "Only `ai_builder_materialization_bridge.py` may import from "
-            f"`{FLOW_API_PARENT_PACKAGE}` inside the ai_builder plugin. "
-            "All other modules must route flows-api type usage through "
-            "the bridge.\n"
+            f"No AI Builder source module may import `{FLOW_API_PARENT_PACKAGE}`; "
+            "HTTP/API DTOs and assemblers belong outside planner/proposal code.\n"
             f"Offenders: {offenders}"
+        )
+
+    def test_materialization_bridge_names_are_not_reintroduced(self) -> None:
+        backend_root = _backend_root()
+        roots = (
+            backend_root / "src" / "intric" / "flows" / "ai_builder",
+            backend_root / "tests" / "unittests" / "flows" / "ai_builder",
+            backend_root / "tests" / "integration" / "flows" / "ai_builder",
+        )
+        offenders = _stale_ai_builder_reference_offenders(
+            roots,
+            ignored_files=frozenset({pathlib.Path(__file__)}),
+        )
+        assert not offenders, (
+            "The retired materialization bridge names must not be reintroduced. "
+            "Use compile_create_draft, compile_changeset, or AIBuilderRepository "
+            f"directly.\nOffenders: {offenders}"
         )
 
     def test_helper_catches_all_offending_import_shapes(

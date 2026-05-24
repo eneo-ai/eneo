@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import cast
 
 import pytest
@@ -49,6 +50,7 @@ from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
 from intric.flows.ai_builder.ai_builder_validator import validate_spec
 from intric.flows.ai_builder.pattern_registry import (
     FLOW_INPUT_AUDIO_TRANSCRIPTION,
+    PATTERN_REGISTRY,
     STRUCTURED_EXTRACTION_STEP,
     TERMINAL_ARTIFACT_STEP,
 )
@@ -93,6 +95,395 @@ def _draft_with_steps(steps: list[NewStepDraft]) -> FlowCreateDraft:
         plan_rationale="Exercise targeted underlag mechanics.",
         steps=steps,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class _CreateCompilerArchetypeCase:
+    pattern_id: str
+    steps: tuple[CreateStepDraft, ...]
+    expected_output_modes: tuple[str, ...]
+    form_fields: tuple[CreateFormFieldDraft, ...] = ()
+    expected_mcp_server_refs_by_step: tuple[tuple[str, ...], ...] | None = None
+    expected_mcp_tool_refs_by_step: tuple[tuple[str, ...], ...] | None = None
+
+
+def _case(
+    *,
+    pattern_id: str,
+    steps: tuple[CreateStepDraft, ...],
+    expected_output_modes: tuple[str, ...],
+    form_fields: tuple[CreateFormFieldDraft, ...] = (),
+    expected_mcp_server_refs_by_step: tuple[tuple[str, ...], ...] | None = None,
+    expected_mcp_tool_refs_by_step: tuple[tuple[str, ...], ...] | None = None,
+) -> _CreateCompilerArchetypeCase:
+    return _CreateCompilerArchetypeCase(
+        pattern_id=pattern_id,
+        steps=steps,
+        form_fields=form_fields,
+        expected_output_modes=expected_output_modes,
+        expected_mcp_server_refs_by_step=expected_mcp_server_refs_by_step,
+        expected_mcp_tool_refs_by_step=expected_mcp_tool_refs_by_step,
+    )
+
+
+_CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
+    _case(
+        pattern_id="summarize_text",
+        steps=(
+            CreateStepDraft(
+                name="Sammanfatta texten",
+                instructions="Skriv en kort sammanfattning av texten.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+        ),
+        expected_output_modes=("pass_through",),
+    ),
+    _case(
+        pattern_id="extract_structured_fields",
+        steps=(
+            CreateStepDraft(
+                name="Extrahera fält",
+                instructions="Extrahera namn och datum från texten.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_type=OutputType.JSON,
+                output_fields=(
+                    _field("customer_name", "string", description="Kundens namn."),
+                    _field("issued_at", "string", description="Utfärdandedatum."),
+                ),
+            ),
+        ),
+        expected_output_modes=("pass_through",),
+    ),
+    _case(
+        pattern_id="document_to_structured_report",
+        steps=(
+            CreateStepDraft(
+                name="Rapport från dokument",
+                instructions="Sammanfatta dokumentet som en strukturerad rapport.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.TEXT,
+                runtime_upload=True,
+            ),
+        ),
+        expected_output_modes=("pass_through",),
+    ),
+    _case(
+        pattern_id="document_to_docx_template",
+        steps=(
+            CreateStepDraft(
+                name="Läs in dokument",
+                instructions="Läs in dokumentet och extrahera nyckelvärden.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+                runtime_upload=True,
+                output_fields=(
+                    _field("reference_id", "string", description="Referensnummer."),
+                ),
+            ),
+            CreateStepDraft(
+                name="Skriv brödtext",
+                instructions="Förbered den text som ska fyllas i mallen.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.TEXT,
+            ),
+            CreateStepDraft(
+                name="Fyll DOCX-mall",
+                instructions="Fyll i DOCX-mallen med brödtexten.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.DOCX,
+                document_delivery_mode="template_fill",
+            ),
+        ),
+        expected_output_modes=("pass_through", "pass_through", "template_fill"),
+    ),
+    _case(
+        pattern_id="document_to_pdf_report",
+        steps=(
+            CreateStepDraft(
+                name="PDF-rapport",
+                instructions="Producera en strukturerad PDF-rapport.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.PDF,
+                runtime_upload=True,
+            ),
+        ),
+        expected_output_modes=("pass_through",),
+    ),
+    _case(
+        pattern_id="audio_transcription",
+        steps=(
+            CreateStepDraft(
+                name="Transkribera ljud",
+                instructions="Transkribera inspelningen till text.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.AUDIO,
+                output_type=OutputType.TEXT,
+                runtime_upload=True,
+            ),
+        ),
+        expected_output_modes=("transcribe_only",),
+    ),
+    _case(
+        pattern_id="audio_to_artifact_report",
+        steps=(
+            CreateStepDraft(
+                name="Transkribera ljud",
+                instructions="Transkribera inspelningen till text.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.AUDIO,
+                output_type=OutputType.TEXT,
+                runtime_upload=True,
+            ),
+            CreateStepDraft(
+                name="Skapa PDF-rapport",
+                instructions="Skapa en PDF-rapport från transkriptionen.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.PDF,
+            ),
+        ),
+        expected_output_modes=("transcribe_only", "pass_through"),
+    ),
+    _case(
+        pattern_id="text_to_artifact_report",
+        steps=(
+            CreateStepDraft(
+                name="Skapa DOCX-rapport",
+                instructions="Skapa en DOCX-rapport från textunderlaget.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_type=OutputType.DOCX,
+            ),
+        ),
+        expected_output_modes=("pass_through",),
+    ),
+    _case(
+        pattern_id="multi_step_quality_chain",
+        steps=(
+            CreateStepDraft(
+                name="Extrahera struktur",
+                instructions="Extrahera strukturerade fält från dokumentet.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+                runtime_upload=True,
+                output_fields=(
+                    _field("topic", "string", description="Huvudämnet i dokumentet."),
+                ),
+            ),
+            CreateStepDraft(
+                name="Skriv utkast",
+                instructions="Skapa ett första utkast baserat på extraktionen.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.TEXT,
+            ),
+            CreateStepDraft(
+                name="Granska kvalitet",
+                instructions="Granska utkastet och föreslå förbättringar.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+            CreateStepDraft(
+                name="Slutresultat",
+                instructions="Producera den slutgiltiga texten.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+        ),
+        expected_output_modes=(
+            "pass_through",
+            "pass_through",
+            "pass_through",
+            "pass_through",
+        ),
+    ),
+    _case(
+        pattern_id="comparison",
+        steps=(
+            CreateStepDraft(
+                name="Jämför dokument",
+                instructions="Jämför dokumentet mot de angivna referenserna.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.TEXT,
+                runtime_upload=True,
+            ),
+        ),
+        expected_output_modes=("pass_through",),
+    ),
+    _case(
+        pattern_id="sectioned_form_intake",
+        steps=(
+            CreateStepDraft(
+                name="Fånga sektioner",
+                instructions="Ta in rubriktext för varje angiven sektion.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+                uses_form_fields=("bakgrund", "analys"),
+            ),
+            CreateStepDraft(
+                name="Komponera resultat",
+                instructions="Sammanställ sektionerna till ett slutresultat.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+        ),
+        form_fields=(
+            CreateFormFieldDraft(
+                variable_name="bakgrund",
+                label="Bakgrund",
+                field_type="text",
+                required=True,
+            ),
+            CreateFormFieldDraft(
+                variable_name="analys",
+                label="Analys",
+                field_type="text",
+                required=True,
+            ),
+        ),
+        expected_output_modes=("pass_through", "pass_through"),
+    ),
+    _case(
+        pattern_id="form_field_runtime_inputs",
+        steps=(
+            CreateStepDraft(
+                name="Generera svar",
+                instructions="Svara med utgångspunkt från formulärfälten.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+                uses_form_fields=("reference_id", "owning_unit"),
+            ),
+        ),
+        form_fields=(
+            CreateFormFieldDraft(
+                variable_name="reference_id",
+                label="Referens-ID",
+                field_type="text",
+                required=True,
+            ),
+            CreateFormFieldDraft(
+                variable_name="owning_unit",
+                label="Ansvarig enhet",
+                field_type="text",
+            ),
+        ),
+        expected_output_modes=("pass_through",),
+    ),
+    _case(
+        pattern_id="mcp_tool_step",
+        steps=(
+            CreateStepDraft(
+                name="Hämta lagerstatus",
+                instructions="Använd lagerverktyget för att hämta aktuell produktdata.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+                mcp_server_refs=("mcp_server.inventory-api",),
+                mcp_tool_refs=("mcp_tool.inventory-lookup",),
+            ),
+        ),
+        expected_output_modes=("pass_through",),
+        expected_mcp_server_refs_by_step=(("mcp_server.inventory-api",),),
+        expected_mcp_tool_refs_by_step=(("mcp_tool.inventory-lookup",),),
+    ),
+    _case(
+        pattern_id="source_parallel_extractions_to_final_text",
+        steps=(
+            CreateStepDraft(
+                name="Extrahera produktdata",
+                instructions="Plocka ut produktrelaterade fält ur underlaget.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_type=OutputType.JSON,
+            ),
+            CreateStepDraft(
+                name="Extrahera kunddata",
+                instructions="Plocka ut kundrelaterade fält ur samma underlag.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_type=OutputType.JSON,
+            ),
+            CreateStepDraft(
+                name="Skriv sammanfattning",
+                instructions="Sammanfatta produkten och kundprofilen.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+        ),
+        expected_output_modes=("pass_through", "pass_through", "pass_through"),
+    ),
+)
+
+
+def _draft_for_archetype_case(case: _CreateCompilerArchetypeCase) -> FlowCreateDraft:
+    return FlowCreateDraft(
+        flow_name=f"{case.pattern_id} flow",
+        flow_description=f"Create compiler fixture for {case.pattern_id}.",
+        plan_rationale=f"Canonical {case.pattern_id} realization.",
+        form_fields=list(case.form_fields),
+        steps=list(case.steps),
+    )
+
+
+def test_every_positive_pattern_has_create_compiler_fixture() -> None:
+    positive_registry_ids = {
+        pattern.id
+        for pattern in PATTERN_REGISTRY.values()
+        if pattern.polarity == "positive"
+    }
+    covered_ids = {case.pattern_id for case in _CREATE_COMPILER_ARCHETYPE_CASES}
+    missing = positive_registry_ids - covered_ids
+    assert not missing, (
+        "Every positive PATTERN_REGISTRY entry must have a create-compiler "
+        f"fixture; missing: {sorted(missing)}"
+    )
+    unknown = covered_ids - positive_registry_ids
+    assert not unknown, (
+        "Create-compiler archetype fixtures reference patterns absent from the "
+        f"registry: {sorted(unknown)}"
+    )
+
+
+@pytest.mark.parametrize(
+    "case",
+    _CREATE_COMPILER_ARCHETYPE_CASES,
+    ids=[case.pattern_id for case in _CREATE_COMPILER_ARCHETYPE_CASES],
+)
+def test_positive_pattern_fixture_compiles_through_create_compiler(
+    case: _CreateCompilerArchetypeCase,
+) -> None:
+    compiled = compile_create_draft(_draft_for_archetype_case(case))
+
+    assert len(compiled.steps) == len(case.steps)
+    assert tuple(step.output_mode.value for step in compiled.steps) == (
+        case.expected_output_modes
+    )
+    if case.expected_mcp_server_refs_by_step is not None:
+        assert (
+            tuple(tuple(step.assistant_spec.mcp_server_refs) for step in compiled.steps)
+            == case.expected_mcp_server_refs_by_step
+        )
+    if case.expected_mcp_tool_refs_by_step is not None:
+        assert (
+            tuple(tuple(step.assistant_spec.mcp_tool_refs) for step in compiled.steps)
+            == case.expected_mcp_tool_refs_by_step
+        )
 
 
 def test_compile_create_draft_generates_runtime_upload_contracts_and_form_fields() -> (
