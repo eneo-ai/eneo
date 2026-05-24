@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T084
+active_task: T085
 
 interruptions:
   - id: I001
@@ -7905,7 +7905,7 @@ tasks:
   - id: T084
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Re-rank the next highest score-floor mover after T083 from current repo reality, without implementing during the ranking tranche."
     constraints:
@@ -7921,6 +7921,80 @@ tasks:
       - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, and expected score impact."
       - "Explicit explanation of why the selected tranche moves the strict 9/10 floor more than easier cleanup."
       - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
+    receipt:
+      completed_at: "2026-05-24T21:26:00Z"
+      summary: "Re-ranked the next score-floor mover after T083 from current repo evidence. Selected the Planner Completion Boundary worker because planner-union completions still have three raw LiteLLM response read sites and generic CompletionMetadata lives in ai_builder_repair.py despite being used by orchestration pipeline and planner-turn telemetry. Rejected LOC-based splitting, deletion-only discovery wrapper cleanup, broad AI-slop cleanup, live eval replay, typed event-builder cleanup, and full-source work outside AI Builder as weaker immediate score-floor movers."
+      artifact: ".codex/artifacts/flow-ai-builder-t084-next-tranche-ranking.md"
+      selected_worker: T085
+      peer_review:
+        claude_iteration_1: "GREEN_LIGHT no / MIN_SCORE 7; accepted blockers around overclaiming score-floor impact, underspecified new owner surface, missing import graph, weak behavior preservation criteria, and task-vocabulary slippage."
+        claude_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 8 after Codex revised to a minimal PlannerCompletionResult surface, explicit no-back-edge import graph, explicit exports, empty-response preservation, behavior-test guarantees, and honest score framing."
+        antigravity_iteration_1: "GREEN_LIGHT yes / MIN_SCORE 8; accepted plan and added SSoT requirement that CompletionMetadata should compose CompletionTokenUsage directly instead of duplicating token fields and remapping through token_usage()."
+        claude_iteration_3: "GREEN_LIGHT yes / MIN_SCORE 8 after Codex incorporated the CompletionTokenUsage composition plan; accepted clarifications that TurnTelemetry remains flat, test assertion updates are limited to .usage access, and empty choices become an intentional no-IndexError micro-improvement."
+      score_impact: "Read-only judge task. No score increase until T085 is implemented, validated, and post-reviewed. The selected worker is expected to improve Maintainability, Clean Architecture, Separation of Concerns, Single Source of Truth, Human Reviewability, Type Contracts, and AI Slop resistance for the planner-completion seam, but Human Readability and broader AI-slop remain below 9 until follow-up readability/comment cleanup and final live/output proof."
+      broader_goal_complete: false
+
+  - id: T085
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Move planner-union completion provider execution, response normalization, and CompletionMetadata ownership into one minimal planner-completion owner without changing public API or planner prompt behavior."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner_completion.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_orchestration_pipeline.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_repair.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner_turn.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_token_usage.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - ".codex/artifacts/flow-ai-builder-t085-implementation-summary.md"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+    constraints:
+      - "Do not use task IDs or internal task vocabulary in commit titles, commit messages, code comments, docstrings, or test docstrings."
+      - "Do not create a PlannerCompletionRequest, Protocol stack, callback interface, factory, service, manager, helper, or request/response family."
+      - "Any remains allowed only at the LiteLLM provider edge in the planner-completion owner."
+      - "No public API, SSE, OpenAPI, Swagger, generated-client, prompt, diagnostics/OpenTelemetry, DB/schema, model-selection, or normal-user-output behavior changes."
+      - "Swagger/OpenAPI impact is expected to be none. If implementation requires public contract changes, stop and re-plan with API docs/examples/generated client updates in scope."
+      - "Preserve unrelated dirty files and do not push."
+    acceptance_criteria:
+      - "A canonical planner-completion owner exposes the minimal surface: call_planner_completion(...) -> PlannerCompletionResult."
+      - "PlannerCompletionResult is a frozen slotted dataclass with raw_content: str and metadata: CompletionMetadata."
+      - "CompletionMetadata is owned by the planner-completion module and composes CompletionTokenUsage directly as usage: CompletionTokenUsage, with no duplicated token fields and no token_usage() remapping method."
+      - "_completion_metadata_from_response is private unless implementation finds a concrete peer-reviewed external consumer."
+      - "ai_builder_orchestration_pipeline.py no longer directly calls litellm_client.acompletion."
+      - "ai_builder_repair.py no longer directly calls litellm_client.acompletion and no longer exports CompletionMetadata or completion_metadata_from_response."
+      - "ai_builder_repair.py keeps repair ownership: retry budgets, repair prompt construction, repair outcomes, parse-repair prompt, eligibility, and commit-drift checks."
+      - "ai_builder_planner_turn.py keeps TurnTelemetry flat for wire/log telemetry; only the construction site may read completion.usage.<field>."
+      - "Empty provider choices produce raw_content == '' without raw IndexError; implementation summary records this as an intentional micro-improvement."
+      - "_call_planner is deleted if it becomes a wrapper over call_planner_completion; keep it only with a documented non-wrapper reason."
+      - "Existing behavior tests remain semantically stable; assertion edits are limited to .usage access migration and must be documented in the implementation summary."
+      - "No broad AI-slop sweep; touch comments/docstrings only where this worker already edits code, and keep comments why-focused."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_orchestration_pipeline.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check <touched T085 files>"
+      - "cd backend && uv run ruff format --check <touched T085 files>"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "git grep -n \"acompletion\" -- backend/src/intric/flows/ai_builder -> new planner-completion owner plus existing isolated owners only."
+      - "git grep -n \"\\.token_usage(\" -- backend/src/intric/flows/ai_builder -> no source hits."
+      - "git grep -n \"token_usage_source\" -- backend/src/intric/flows/ai_builder/ai_builder_planner_completion.py -> no hits."
+      - "Staged hunks and commit title contain no task IDs or internal task vocabulary."
+      - "git diff --check"
+      - "Claude implementation gate GREEN_LIGHT yes / MIN_SCORE >= 8; Antigravity implementation gate if quota/tooling available."
+    stop_if:
+      - "The new owner becomes a pass-through facade or grows an interface as complex as its callers."
+      - "A request/response struct family, callback Protocol, broad Callable, or generic helper/service/manager abstraction appears."
+      - "More than one planner-completion owner remains after the change."
+      - "Repair decision logic moves out of ai_builder_repair.py without a stronger peer-reviewed reason."
+      - "TurnTelemetry is restructured instead of only changing how it reads completion metadata."
+      - "Public API/SSE/OpenAPI/Swagger/generated-client/frontend/router/schema changes are needed."
+      - "Tests only assert mocked call choreography and do not prove accepted, repair, parse, token-usage, and empty-choice behavior."
+      - "Pyright requires broad Any, ignores, or type weakening outside the provider edge."
+      - "CompletionMetadata keeps duplicated token fields or .token_usage() without a new peer-reviewed reason."
     receipt: null
 
 checks:
