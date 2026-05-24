@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T088
+active_task: T090
 
 interruptions:
   - id: I001
@@ -8183,7 +8183,7 @@ tasks:
   - id: T088
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Re-rank the next highest score-floor mover after T087 from current repo reality, without implementing during the ranking tranche."
     constraints:
@@ -8199,6 +8199,141 @@ tasks:
       - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, expected score impact, and Swagger/OpenAPI impact."
       - "Explicit explanation of why the selected tranche moves the strict 9/10 floor more than easier cleanup."
       - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
+    receipt:
+      completed_at: "2026-05-24T22:53:17Z"
+      summary: "Re-ranked the next Flow AI Builder tranche after T087. Selected T089 as a narrow test-only safety-net repair for the red AI Builder planner-turn integration baseline before deeper topology/readability work. The plan aligns test_ai_builder_orchestrator_v2.py with the current SessionSendTurn contract and the production DB lease claim invariant, while explicitly not claiming a score-floor increase."
+      repo_reality:
+        branch: "feature/refactor-flows-flowai"
+        head: "a3fb63287 Remove unused AI Builder materialization bridge"
+        status: "dirty only with unrelated workspace files preserved: .devcontainer/docker-compose.yml, .gitignore, AGENTS.md, .devcontainer/devcontainer-lock.json, PRODUCT.md, utvecklingssamtal.mp3"
+      selected_worker: T089
+      artifact: ".codex/artifacts/flow-ai-builder-t088-next-tranche-ranking.md"
+      red_evidence:
+        command: "cd backend && uv run pytest tests/integration/flows/ai_builder/test_ai_builder_orchestrator_v2.py -q"
+        result: "3 failed with TypeError: run_planner_turn() got an unexpected keyword argument 'session_id'"
+        source: "test_ai_builder_orchestrator_v2.py still calls removed session_id/tenant_id/request_id kwargs while production and unit tests use SessionSendTurn."
+      canonical_owner_decisions:
+        - "SessionSendTurn remains the canonical active-turn identifier/write-authority carrier."
+        - "AIBuilderRepository.claim_session_send and _lease_filters remain the canonical DB lease owner; dispatched integration tests must claim the matching lease before run_planner_turn."
+        - "run_planner_turn remains the production glue owner; T089 is not allowed to change production source unless it stops and re-plans."
+        - "test_ai_builder_orchestrator_v2.py remains the DB integration owner for planner-turn persistence proof."
+      peer_review:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t088-next-flow-ai-builder-tranche-ranking-20260524T224136Z.md -> GREEN_LIGHT no / MIN_SCORE 7; required test-only scope, inline turn construction, explicit base versions, no score inflation, and no production-source escape hatch."
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t088-next-flow-ai-builder-tranche-ranking-iteration-2-20260524T224514Z.md -> GREEN_LIGHT yes / MIN_SCORE 8 after Codex revised those points."
+        antigravity_iteration_1: ".codex/artifacts/antigravity-peer-loop-t088-next-flow-ai-builder-tranche-ranking-final-synthesis-20260524T224815Z.md -> GREEN_LIGHT no / MIN_SCORE 7; caught missing DB lease claim setup for dispatched integration tests."
+        claude_iteration_3: ".codex/artifacts/claude-peer-loop-t088-next-flow-ai-builder-tranche-ranking-iteration-3-20260524T225218Z.md -> GREEN_LIGHT yes / MIN_SCORE 8 after Codex added the claim_session_send invariant."
+        antigravity_iteration_2: ".codex/artifacts/antigravity-peer-loop-t088-next-flow-ai-builder-tranche-ranking-final-synthesis-iteration-2-20260524T225317Z.md -> GREEN_LIGHT yes / MIN_SCORE 8; final recommendation to proceed."
+      rejected_alternatives:
+        - "Planner/source topology and readability tranche: real blocker, but a red integration baseline should be repaired first so later topology regressions are attributable."
+        - "Bounded AI-slop/comment/naming cleanup: real follow-up, but too broad/cosmetic compared with the concrete red safety-net repair."
+        - "Live eval replay: required after behavior-affecting changes or final score gate, but T089 is test-only and not user-output behavior."
+        - "Typed event-builder cleanup: lower priority because API/SSE contract quality is currently scored 9 and no generated-client drift is known."
+        - "Full-source Pyright outside Flow AI Builder: real platform blocker but outside the user's Flow AI Builder-only continuation scope."
+      swagger_openapi_impact: "None expected. T089 is internal backend integration-test repair only. It must not change REST/SSE contracts, OpenAPI schemas, Swagger examples, generated client types, frontend files, database schema or migrations, public request/response models, or API examples."
+      score_impact: "Read-only judge task. No score increase. T089 is a necessary safety-net repair, not a direct score-floor mover; the strict overall floor remains 8/10."
+      broader_goal_complete: false
+
+  - id: T089
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Repair the AI Builder planner-turn integration baseline so it uses SessionSendTurn and production-faithful session send lease claiming, without production source changes."
+    constraints:
+      - "Test-only source scope: do not modify backend/src/intric/flows/ai_builder. If the aligned integration test exposes a production bug, stop and create a fresh source-owning task."
+      - "Do not add a new _make_turn or setup helper. Inline SessionSendTurn and SessionSendLease construction in the three tests."
+      - "The two dispatched happy-path tests must claim the matching lease via repo.claim_session_send before run_planner_turn and assert the claim returns True."
+      - "The rejected-outcome test should not claim the lease because it must return before dispatch; _fail_if_builder_invoked remains the no-write guard."
+      - "No public API/SSE/OpenAPI/Swagger/generated-client/frontend/database-schema changes."
+      - "Do not claim a score-floor increase from T089; it repairs safety-net evidence before future floor-moving work."
+    allowed_files:
+      - "backend/tests/integration/flows/ai_builder/test_ai_builder_orchestrator_v2.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t089-implementation-summary.md"
+    expected_output:
+      - "test_ai_builder_orchestrator_v2.py calls run_planner_turn with turn=SessionSendTurn(...), not session_id/tenant_id/request_id primitive kwargs."
+      - "Dispatched tests import and use SessionSendLease, SessionSendTurn, and timedelta; claim the DB lease with lock_expires_at=datetime.now(timezone.utc)+timedelta(seconds=30); and assert result.turn_telemetry.request_id matches turn.lease.request_id."
+      - "Rejected test uses a SessionSendTurn with base_planning_state_version=7 but no claim_session_send call, preserving the early rejection/no-dispatch proof."
+      - "No production source diff under backend/src/intric/flows/ai_builder."
+      - "Focused integration suite, full AI Builder integration folder, relevant planner-turn/send-message unit tests, Ruff, Pyright, and git diff checks pass."
+      - "Implementation receipt records that the 30-second lease TTL is a test-only value and that create_session's CHATTING default is coupled to claim_session_send's status filter."
+    receipt:
+      completed_at: "2026-05-24T23:07:56Z"
+      summary: "Repaired the AI Builder planner-turn integration baseline without production source changes. The orchestrator integration tests now call run_planner_turn with the typed SessionSendTurn carrier, dispatched paths claim the matching DB send lease before writes, rejected paths remain unclaimed to prove early abort/no-write behavior, and telemetry assertions prove request identity comes from the turn lease."
+      repo_reality:
+        branch: "feature/refactor-flows-flowai"
+        head_before_commit: "a3fb63287 Remove unused AI Builder materialization bridge"
+        session_goal_tool: "get_goal is available but still carries older T081 wording; no objective-update tool is exposed in this session, so the durable board remains the source of truth."
+        unrelated_dirty_files_preserved:
+          - ".devcontainer/docker-compose.yml"
+          - ".gitignore"
+          - "AGENTS.md"
+          - ".devcontainer/devcontainer-lock.json"
+          - "PRODUCT.md"
+          - "utvecklingssamtal.mp3"
+      implementation:
+        source_changed: "backend/tests/integration/flows/ai_builder/test_ai_builder_orchestrator_v2.py only"
+        production_source_changed: false
+        no_production_source_diff_command: "git diff -- backend/src/intric/flows/ai_builder -> empty"
+        details:
+          - "Replaced stale session_id/tenant_id/request_id kwargs with turn=SessionSendTurn(...)."
+          - "Added explicit SessionSendLease construction in all three affected tests."
+          - "Happy-path dispatched tests call repo.claim_session_send(..., lease=turn.lease, lock_expires_at=...) and assert the claim returns True."
+          - "Happy-path dispatched tests assert result.turn_telemetry.request_id == str(turn.lease.request_id)."
+          - "Rejected-outcome test passes a typed turn with base_planning_state_version=7 but does not claim the lease; _fail_if_builder_invoked remains the no-dispatch guard."
+          - "Added a short why-comment documenting that the 30-second test lock expiry is not a production TTL assertion."
+      validation:
+        - "cd backend && uv run pytest tests/integration/flows/ai_builder/test_ai_builder_orchestrator_v2.py -q -> 3 passed, 16 warnings"
+        - "cd backend && uv run pytest tests/integration/flows/ai_builder -q -> 5 passed, 20 deselected, 16 warnings"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py -q -> 33 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2383 passed, 4 skipped, 11 warnings"
+        - "cd backend && uv run ruff check tests/integration/flows/ai_builder/test_ai_builder_orchestrator_v2.py -> passed"
+        - "cd backend && uv run ruff format --check tests/integration/flows/ai_builder/test_ai_builder_orchestrator_v2.py -> passed"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations"
+        - "cd backend && uv run python AST guard -> all run_planner_turn calls have turn= and no stale session_id/tenant_id/request_id kwargs"
+        - "git diff -- backend/src/intric/flows/ai_builder -> empty"
+        - "git diff --check -> clean"
+      peer_review:
+        claude: ".codex/artifacts/claude-peer-loop-t089-ai-builder-planner-turn-integration-baseline-implementation-20260524T230445Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t089-ai-builder-planner-turn-integration-baseline-implementation-20260524T230654Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        accepted_peer_feedback:
+          - "Keep staging surgical because unrelated dirty files are present."
+          - "Document the 30-second lease TTL as test-local instead of implying a production policy."
+        deferred_peer_suggestion:
+          - "A negative dispatch-without-claim test proving SESSION_SEND_LEASE_LOST is valuable but out of T089 scope; consider during the next ranking if it outranks topology/readability/live-eval work."
+      swagger_openapi_impact: "None. T089 is internal backend integration-test repair only. No REST/SSE contract, OpenAPI schema, Swagger example, generated client type, frontend, database schema, migration, or public request/response model changed."
+      score_impact:
+        strict_floor: 8
+        rationale: "Improves Test Quality, Runtime Reliability evidence, and Human Reviewability for the active-turn contract baseline. Does not raise the overall Flow AI Builder floor above 8 because this is a safety-net repair, not a broader architecture/output-quality tranche."
+      residual_risks:
+        - "The dispatched tests depend on create_session's default status remaining claimable by claim_session_send; the explicit assert ... is True should fail loudly if that invariant changes."
+        - "A separate negative lease-required integration test may still be useful."
+        - "Normal-user output quality was not exercised because this tranche is test-only."
+      broader_goal_complete: false
+
+  - id: T090
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest score-floor mover after T089 from current repo reality, without implementing during the ranking tranche."
+    constraints:
+      - "Do not move to broader Flows work; stay within Flow AI Builder unless the user explicitly changes scope."
+      - "Start from git status, latest commits, current scorecard, T089 receipt, source evidence, and latest peer artifacts."
+      - "Consider bounded AI-slop/comment/naming cleanup, stale compatibility deletion, remaining planner/source topology and readability blockers, full-source typing/test baseline affecting AI Builder, live eval replay, diagnostics/DX and future OpenTelemetry compatibility, data/schema/JSONB ownership, frontend/backend contract/generated-client drift, and the possible negative lease-required integration test from T089 peer feedback."
+      - "Pick the tranche that most improves the strict score floor, not the easiest cleanup."
+      - "Do not implement during T090."
+      - "Do not optimize for LOC, and do not split files unless it removes real complexity or clarifies ownership."
+      - "Run Claude plan review and Antigravity if available. Missing Antigravity coverage must be recorded as missing coverage, not a pass."
+      - "Keep Swagger/OpenAPI/API examples current if the selected plan touches a public contract; otherwise explicitly record no public contract impact."
+    allowed_files:
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t090-next-tranche-ranking.md"
+    expected_output:
+      - "Evidence-backed ranking with file:line evidence."
+      - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, expected score impact, and Swagger/OpenAPI impact."
+      - "Explicit explanation of why the selected tranche moves the strict 9/10 floor more than easier cleanup."
+      - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
     receipt: null
 
 checks:
@@ -8207,15 +8342,16 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T087 completed, validated, Claude-gated, Antigravity-gated, and ready for scoped commit. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T087
+    result: "T089 completed, validated, Claude-gated, Antigravity-gated, and ready for scoped commit. T090 is active as a read-only ranking task. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T089
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_materializer.py tests/unittests/flows/ai_builder/test_ai_builder_importlinter_rules.py tests/integration/flows/ai_builder/test_ai_builder_create_plan_roundtrip.py -q -> 238 passed, 16 warnings"
+      - "cd backend && uv run pytest tests/integration/flows/ai_builder/test_ai_builder_orchestrator_v2.py -q -> 3 passed, 16 warnings"
+      - "cd backend && uv run pytest tests/integration/flows/ai_builder -q -> 5 passed, 20 deselected, 16 warnings"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner_turn.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py -q -> 33 passed"
       - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2383 passed, 4 skipped, 11 warnings"
-      - "cd backend && uv run pytest tests/integration/flows/ai_builder/test_ai_builder_create_plan_roundtrip.py -q -> 2 passed, 16 warnings"
+      - "cd backend && uv run ruff check tests/integration/flows/ai_builder/test_ai_builder_orchestrator_v2.py -> passed"
+      - "cd backend && uv run ruff format --check tests/integration/flows/ai_builder/test_ai_builder_orchestrator_v2.py -> passed"
       - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations"
-      - "cd backend && uv run ruff check/format --check touched existing T087 files -> clean"
-      - "cd backend && uv run lint-imports --no-cache -> 7 contracts kept, 0 broken"
       - "git diff --check -> clean"
-      - "Claude T087 implementation gate iteration 2 -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity T087 implementation synthesis -> GREEN_LIGHT yes / MIN_SCORE 9"
+      - "Claude T089 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity T089 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 8"

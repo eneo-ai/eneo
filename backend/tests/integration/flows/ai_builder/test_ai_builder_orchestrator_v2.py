@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -41,13 +41,17 @@ from intric.flows.ai_builder.ai_builder_architecture_commit import (
     architecture_commit_hash,
     canonical_architecture_commit_payload,
 )
-from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
     TargetKind,
 )
 from intric.flows.ai_builder.ai_builder_orchestrator import OrchestrationContext
 from intric.flows.ai_builder.ai_builder_planner_turn import run_planner_turn
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from intric.flows.ai_builder.ai_builder_session_turn import (
+    SessionSendLease,
+    SessionSendTurn,
+)
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
@@ -286,14 +290,30 @@ async def test_run_planner_turn_persists_commit_architecture_through_real_repo(
                 architecture_commit=commit,
             )
         )
+        turn = SessionSendTurn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+            base_planning_state_version=0,
+        )
+        assert (
+            await repo.claim_session_send(
+                session_id=session.id,
+                tenant_id=user.tenant_id,
+                lease=turn.lease,
+                # Keep the integration lease comfortably alive without
+                # asserting production TTL policy.
+                lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
+            )
+            is True
+        )
 
         result = await run_planner_turn(
             repo=repo,
             litellm_client=llm,
             litellm_model="openai/gpt-4o-mini",
             litellm_kwargs={},
-            session_id=session.id,
-            tenant_id=user.tenant_id,
+            turn=turn,
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_orchestration_context(),
@@ -301,7 +321,6 @@ async def test_run_planner_turn_persists_commit_architecture_through_real_repo(
                 ConversationMessage(role="user", content="Bind arkitekturen."),
                 ConversationMessage(role="assistant", content="Arkitektur committad."),
             ],
-            request_id=uuid4(),
         )
 
     assert result.kind == "dispatched"
@@ -311,6 +330,7 @@ async def test_run_planner_turn_persists_commit_architecture_through_real_repo(
     assert result.repair_attempts == 0
     assert llm.acompletion.await_count == 1
     assert result.turn_telemetry is not None
+    assert result.turn_telemetry.request_id == str(turn.lease.request_id)
     assert result.turn_telemetry.architecture_commit_populated is True
     assert result.turn_telemetry.prompt_tokens == 100
     assert result.turn_telemetry.completion_tokens == 50
@@ -369,14 +389,30 @@ async def test_run_planner_turn_persists_ask_question_without_commit(
         )
 
         llm = _mock_llm_client(_planner_output_json(kind="ask_question"))
+        turn = SessionSendTurn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+            base_planning_state_version=0,
+        )
+        assert (
+            await repo.claim_session_send(
+                session_id=session.id,
+                tenant_id=user.tenant_id,
+                lease=turn.lease,
+                # Keep the integration lease comfortably alive without
+                # asserting production TTL policy.
+                lock_expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
+            )
+            is True
+        )
 
         result = await run_planner_turn(
             repo=repo,
             litellm_client=llm,
             litellm_model="openai/gpt-4o-mini",
             litellm_kwargs={},
-            session_id=session.id,
-            tenant_id=user.tenant_id,
+            turn=turn,
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_orchestration_context(
@@ -398,6 +434,7 @@ async def test_run_planner_turn_persists_ask_question_without_commit(
     assert result.repair_attempts == 0
     assert llm.acompletion.await_count == 1
     assert result.turn_telemetry is not None
+    assert result.turn_telemetry.request_id == str(turn.lease.request_id)
     assert result.turn_telemetry.architecture_commit_populated is False
 
     async with db_container() as container:
@@ -453,6 +490,12 @@ async def test_run_planner_turn_rejected_outcome_does_not_persist(
                 base_version=99,
             )
         )
+        turn = SessionSendTurn(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+            base_planning_state_version=7,
+        )
 
         def _fail_if_builder_invoked(_a: Any, _t: Any) -> list[ConversationMessage]:
             raise AssertionError(
@@ -465,8 +508,7 @@ async def test_run_planner_turn_rejected_outcome_does_not_persist(
             litellm_client=llm,
             litellm_model="openai/gpt-4o-mini",
             litellm_kwargs={},
-            session_id=session.id,
-            tenant_id=user.tenant_id,
+            turn=turn,
             flow=None,
             base_messages=[{"role": "system", "content": "system"}],
             orchestration_context=_orchestration_context(current_version=7),
