@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, cast
 
 from intric.flows.ai_builder.ai_builder_description_semantics import (
@@ -73,6 +74,20 @@ logger = logging.getLogger(__name__)
 _RUNTIME_STEP_ALIAS_PATTERN = re.compile(r"\{\{\s*step_(\d+)(\.[^{}]+?)\s*\}\}")
 
 
+@dataclass(frozen=True, slots=True)
+class _ExistingStepEntry:
+    ref: str
+    step: FlowStep
+
+
+@dataclass(frozen=True, slots=True)
+class _NewStepEntry:
+    draft: NewStepDraft
+
+
+_EditStepEntry = _ExistingStepEntry | _NewStepEntry
+
+
 def compile_edit_draft(
     edit_draft: FlowEditDraft,
     current_steps: list[FlowStep],
@@ -95,10 +110,9 @@ def compile_edit_draft(
         flow_name: Current flow name (used if edit_draft doesn't change it).
         flow_description: Current flow description.
     """
-    # Build ref mapping: existing_step_{order} → FlowStep
-    # Work on a mutable ordered list of (ref_or_None, FlowStep_or_AddPayload)
-    working: list[tuple[str | None, FlowStep | NewStepDraft]] = [
-        (f"existing_step_{s.step_order}", s) for s in current_steps
+    working: list[_EditStepEntry] = [
+        _ExistingStepEntry(ref=f"existing_step_{s.step_order}", step=s)
+        for s in current_steps
     ]
 
     form_changes = []
@@ -108,7 +122,6 @@ def compile_edit_draft(
     primary_runtime_input_type = _primary_runtime_input_type_from_steps(current_steps)
     shadowed_primary_input_fields: list[str] = []
 
-    # Process operations in order
     for op in edit_draft.operations:
         if op.op == "remove":
             _apply_remove(op, working, removed_refs)
@@ -123,14 +136,13 @@ def compile_edit_draft(
         warnings=warnings,
     )
 
-    # Build compiled StepSpec list from working order
     compiled_steps: list[StepSpec] = []
-    for i, (ref, item) in enumerate(working):
+    for i, entry in enumerate(working):
         plan_ref = f"step_{chr(ord('a') + i)}" if i < 26 else f"step_{i + 1}"
 
-        if isinstance(item, NewStepDraft):
+        if isinstance(entry, _NewStepEntry):
             step_draft, dropped_field_names = _without_primary_runtime_shadow_fields(
-                item,
+                entry.draft,
                 primary_runtime_input_type=primary_runtime_input_type,
             )
             shadowed_primary_input_fields.extend(dropped_field_names)
@@ -142,10 +154,10 @@ def compile_edit_draft(
                 )
             )
         else:
-            patch = modified_refs.get(ref)  # type: ignore[arg-type]
+            patch = modified_refs.get(entry.ref)
             compiled_steps.append(
                 _flow_step_to_spec(
-                    item,
+                    entry.step,
                     plan_ref,
                     patch,
                     assistant_snapshots=assistant_snapshots,
@@ -189,7 +201,6 @@ def compile_edit_draft(
         form_fields=compiled_form_fields,
     )
 
-    # Build advisories from semantic signature comparison
     advisories: list[EditAdvisory] = _build_normalization_advisories(
         normalization_changes
     )
@@ -216,7 +227,6 @@ def compile_edit_draft(
         resource_catalog=resource_catalog,
     )
 
-    # Build diff
     metadata_changes: list[MetadataChange] = []
     flow_property_changes: dict[str, tuple[Any, Any]] = {}
     if edit_draft.flow_name and edit_draft.flow_name != flow_name:
@@ -240,7 +250,6 @@ def compile_edit_draft(
         net_steps_removed=net_removed,
     )
 
-    # Compute confidence
     risk_flags: list[str] = []
     if any(op.op == "remove" for op in edit_draft.operations):
         risk_flags.append("step_removal")
@@ -265,14 +274,14 @@ def compile_edit_draft(
 
 def _apply_remove(
     op: StepEditOperation,
-    working: list[tuple[str | None, FlowStep | NewStepDraft]],
+    working: list[_EditStepEntry],
     removed_refs: set[str],
 ) -> None:
     if op.target_ref is None:
         return
-    for i, (ref, item) in enumerate(working):
-        if ref == op.target_ref and isinstance(item, FlowStep):
-            removed_refs.add(op.target_ref)
+    for i, entry in enumerate(working):
+        if isinstance(entry, _ExistingStepEntry) and entry.ref == op.target_ref:
+            removed_refs.add(entry.ref)
             working.pop(i)
             return
 
@@ -293,20 +302,23 @@ def _apply_modify(
 
 def _apply_add(
     op: StepEditOperation,
-    working: list[tuple[str | None, FlowStep | NewStepDraft]],
+    working: list[_EditStepEntry],
 ) -> None:
     if op.add_payload is None:
         return
 
-    new_entry: tuple[str | None, NewStepDraft] = (None, op.add_payload)
+    new_entry = _NewStepEntry(draft=op.add_payload)
 
     if op.placement is None or op.placement.position == "append":
         working.append(new_entry)
         return
 
     if op.placement.anchor_ref is not None:
-        for i, (ref, _) in enumerate(working):
-            if ref == op.placement.anchor_ref:
+        for i, entry in enumerate(working):
+            if (
+                isinstance(entry, _ExistingStepEntry)
+                and entry.ref == op.placement.anchor_ref
+            ):
                 if op.placement.position == "before":
                     working.insert(i, new_entry)
                 else:  # after
@@ -319,36 +331,37 @@ def _apply_add(
 
 def _repair_leading_audio_document_extraction(
     *,
-    working: list[tuple[str | None, FlowStep | NewStepDraft]],
+    working: list[_EditStepEntry],
     modified_refs: dict[str, StepPatch],
     warnings: list[str],
 ) -> None:
     if len(working) < 2:
         return
-    first_ref, first_item = working[0]
-    if not isinstance(first_item, FlowStep) or first_ref is None:
+    first_entry = working[0]
+    if not isinstance(first_entry, _ExistingStepEntry):
         return
-    if not _is_bad_leading_audio_document_extraction(first_item, working):
+    if not _is_bad_leading_audio_document_extraction(first_entry.step, working):
         return
 
     working.insert(
         0,
-        (
-            None,
-            NewStepDraft(
+        _NewStepEntry(
+            draft=NewStepDraft(
                 name="Transkribera ljud",
                 instructions="Transkribera uppladdat ljud till text.",
                 input_source=InputSource.FLOW_INPUT,
                 input_type=InputType.AUDIO,
                 output_type=OutputType.TEXT,
                 runtime_upload=True,
-                runtime_required=_runtime_input_required(first_item.input_config),
-                runtime_max_files=_runtime_input_max_files(first_item.input_config),
+                runtime_required=_runtime_input_required(first_entry.step.input_config),
+                runtime_max_files=_runtime_input_max_files(
+                    first_entry.step.input_config
+                ),
             ),
         ),
     )
-    modified_refs[first_ref] = _merge_step_patch(
-        modified_refs.get(first_ref),
+    modified_refs[first_entry.ref] = _merge_step_patch(
+        modified_refs.get(first_entry.ref),
         StepPatch(
             input_source=InputSource.PREVIOUS_STEP,
             input_type=InputType.TEXT,
@@ -365,13 +378,13 @@ def _repair_leading_audio_document_extraction(
 
 def _is_bad_leading_audio_document_extraction(
     step: FlowStep,
-    working: list[tuple[str | None, FlowStep | NewStepDraft]],
+    working: list[_EditStepEntry],
 ) -> bool:
-    terminal = working[-1][1]
+    terminal = working[-1]
     terminal_output_type = (
-        terminal.output_type
-        if isinstance(terminal, NewStepDraft)
-        else OutputType(terminal.output_type)
+        terminal.draft.output_type
+        if isinstance(terminal, _NewStepEntry)
+        else OutputType(terminal.step.output_type)
     )
     return (
         step.input_source == InputSource.FLOW_INPUT.value
@@ -834,7 +847,6 @@ def _resolve_flow_description(
     edit_draft: FlowEditDraft,
     current_description: str | None,
 ) -> str:
-    """Resolve description: use draft's if provided, otherwise preserve current."""
     if edit_draft.flow_description is not None:
         return edit_draft.flow_description
     return current_description or ""

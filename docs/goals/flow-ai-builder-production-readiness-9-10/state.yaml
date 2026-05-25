@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T105
+active_task: T106
 
 interruptions:
   - id: I001
@@ -9654,7 +9654,7 @@ tasks:
   - id: T105
     type: worker
     assignee: Worker
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Implement the peer-gated typed edit-compiler working-state cleanup selected by T104."
     constraints:
@@ -9701,6 +9701,57 @@ tasks:
         antigravity_if_available: true
     swagger_openapi_impact: "None expected. T105 is internal backend edit-compiler transient-state/readability work and should not require Swagger/OpenAPI/API example updates."
     expected_score_impact: "Can improve Code Quality, Human Readability, Human Reviewability, and AI Slop / Comment / Naming evidence inside the edit compiler. Do not raise the overall strict floor above 8 unless post-implementation evidence proves every remaining weak dimension is now 9."
+    receipt:
+      completed_at: "2026-05-25"
+      summary: "Implemented the typed edit-compiler working-state cleanup. ai_builder_edit_compiler.py now represents transient edit compilation entries with private frozen slots dataclasses _ExistingStepEntry and _NewStepEntry instead of tuple[str | None, FlowStep | NewStepDraft]. The edit compiler type ignore was deleted structurally, local helpers now read entry.ref/entry.step/entry.draft, and only approved restating comments/docstrings were removed."
+      files_changed:
+        - "backend/src/intric/flows/ai_builder/ai_builder_edit_compiler.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      implementation_artifact: ".codex/artifacts/flow-ai-builder-t105-implementation-summary.md"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py -q -> 51 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 34 passed."
+        - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -> 2 files already formatted."
+        - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -> All checks passed."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations."
+        - "git diff --check -> passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2412 passed, 4 skipped, 11 warnings."
+        - "scripts/gate-local/anti_slippage.sh after staging -> anti-slippage: staged diff clean."
+      peer_review:
+        claude: ".codex/artifacts/claude-peer-loop-t105-edit-compiler-working-state-implementation-20260525T033801Z.md -> GREEN_LIGHT yes / MIN_SCORE 8; accepted implementation and suggested only P3 hardening."
+        codex_accepted_claude_p3: "Tightened the static guard scan from 'type: ignore' to '# type: ignore' and reran focused tests, Ruff, Pyright, git diff --check, and the full AI Builder unit suite."
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t105-edit-compiler-working-state-implementation-gate-20260525T034105Z.md -> GREEN_LIGHT yes / MIN_SCORE 9."
+      swagger_openapi_impact: "None. T105 changed only private backend edit-compiler transient state and one backend ownership test. It did not change REST/SSE contracts, OpenAPI schemas, Swagger examples, generated client types, frontend files, database schema or migrations, public request/response models, or API examples."
+      codex_self_review:
+        verdict: "pass for T105 scope. The change is simpler for maintainers because impossible transient compiler states are no longer representable and the previous type ignore is gone without an assert/cast workaround."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "Claude noted minor retained slop in _flow_step_to_spec's restating docstring and the pass-through half of the flow-description comment; defer until a future slice touches those functions."
+        - "Antigravity noted the empty type-ignore line allowlist would be fragile if future entries are added by line number; keep empty unless a peer-reviewed external boundary requires a different allowlist shape."
+        - "Broader topology/readability, final live-output proof, and final score-floor evidence still block subsystem-wide 9/10."
+      score_impact: "Improves Code Quality, Human Readability, Human Reviewability, Test Quality, and AI Slop / Comment / Naming evidence inside the edit compiler. Does not raise the strict overall floor above 8 by itself."
+      broader_goal_complete: false
+
+  - id: T106
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest score-floor-moving Flow AI Builder tranche after T105 from current repo evidence. Do not implement during this judge task."
+    constraints:
+      - "Stay within Flow AI Builder; do not move to broader Flows work."
+      - "Start from git status, latest commits, current scorecard, T105 receipt, source evidence, and artifacts."
+      - "Do not select file splitting, LOC reduction, or broad cleanup unless evidence shows concrete maintainability, robustness, reviewability, output-quality, API/DX, or typing/test-baseline gain."
+      - "Consider remaining edit-compiler slop P3 notes, bounded AI-slop/comment/naming cleanup tied to concrete owners, planner/source topology/readability blockers, live eval replay after accumulated behavior-affecting changes, diagnostics/DX and future OpenTelemetry compatibility, data/schema/JSONB ownership, frontend/backend contract drift, and full-source typing/test baseline affecting AI Builder."
+      - "If a candidate changes public API/SSE/schema/generated-client-visible contracts, include Swagger/OpenAPI docs, examples, and generated client updates in the candidate scope."
+      - "Use Claude for the plan gate and Antigravity with --spend-mode auto if available. Missing peer coverage is a skip, not a pass."
+    expected_output:
+      - "Ranked candidate table with file:line evidence."
+      - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, and expected score impact."
+      - "Explicit explanation of why the selected tranche is the highest score-floor mover rather than the easiest cleanup."
+      - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
     receipt: null
 
 checks:

@@ -259,6 +259,8 @@ CREATE_COMPILER_PATH = Path("src/intric/flows/ai_builder/ai_builder_create_compi
 CREATE_COMPILER_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_create_compiler")
 )
+EDIT_COMPILER_PATH = Path("src/intric/flows/ai_builder/ai_builder_edit_compiler.py")
+EDIT_COMPILER_ALLOWED_TYPE_IGNORE_LINES = frozenset[int]()
 RUNTIME_INPUT_FIELDS_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_runtime_input_fields")
 )
@@ -1097,6 +1099,94 @@ def test_proposal_completion_has_single_request_boundary() -> None:
         violations.append(
             f"{submission_path}: defines local LiteLLMProposalMessage shadow protocol"
         )
+
+    assert violations == []
+
+
+def test_edit_compiler_working_state_uses_typed_entries() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    edit_compiler_path = backend_root / EDIT_COMPILER_PATH
+    edit_compiler_text = edit_compiler_path.read_text()
+    edit_compiler_tree = ast.parse(edit_compiler_text, filename=str(edit_compiler_path))
+    violations: list[str] = []
+
+    type_ignore_lines = {
+        line_number
+        for line_number, line in enumerate(edit_compiler_text.splitlines(), start=1)
+        if "# type: ignore" in line
+    }
+    if type_ignore_lines != EDIT_COMPILER_ALLOWED_TYPE_IGNORE_LINES:
+        violations.append(
+            f"{edit_compiler_path}: type-ignore lines {sorted(type_ignore_lines)}"
+        )
+
+    class_fields: dict[str, dict[str, str]] = {}
+    for node in ast.walk(edit_compiler_tree):
+        if not isinstance(node, ast.ClassDef) or node.name not in {
+            "_ExistingStepEntry",
+            "_NewStepEntry",
+        }:
+            continue
+        class_fields[node.name] = {
+            statement.target.id: ast.unparse(statement.annotation)
+            for statement in node.body
+            if isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+        }
+
+    expected_class_fields = {
+        "_ExistingStepEntry": {"ref": "str", "step": "FlowStep"},
+        "_NewStepEntry": {"draft": "NewStepDraft"},
+    }
+    if class_fields != expected_class_fields:
+        violations.append(f"{edit_compiler_path}: entry fields {class_fields}")
+
+    edit_entry_alias = next(
+        (
+            ast.unparse(statement.value)
+            for statement in edit_compiler_tree.body
+            if isinstance(statement, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "_EditStepEntry"
+                for target in statement.targets
+            )
+        ),
+        None,
+    )
+    if edit_entry_alias != "_ExistingStepEntry | _NewStepEntry":
+        violations.append(f"{edit_compiler_path}: _EditStepEntry={edit_entry_alias}")
+
+    compile_function = next(
+        node
+        for node in ast.walk(edit_compiler_tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "compile_edit_draft"
+    )
+    working_annotations = [
+        ast.unparse(node.annotation)
+        for node in ast.walk(compile_function)
+        if isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == "working"
+    ]
+    if working_annotations != ["list[_EditStepEntry]"]:
+        violations.append(
+            f"{edit_compiler_path}: working annotations {working_annotations}"
+        )
+
+    banned_annotation = "tuple[str | None, FlowStep | NewStepDraft]"
+    for node in ast.walk(edit_compiler_tree):
+        annotation: ast.expr | None = None
+        if isinstance(node, ast.AnnAssign):
+            annotation = node.annotation
+        elif isinstance(node, ast.arg):
+            annotation = node.annotation
+        if annotation is None:
+            continue
+        rendered = ast.unparse(annotation)
+        if banned_annotation in rendered:
+            violations.append(
+                f"{edit_compiler_path}:{node.lineno} annotation {rendered}"
+            )
 
     assert violations == []
 
