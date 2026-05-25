@@ -24,11 +24,13 @@ from pydantic import (
 )
 
 from intric.flows.ai_builder.ai_builder_canonicalization import (
+    canonical_question_id,
     normalize_question_answer,
     normalize_structured_question_payload,
 )
 from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
+    StructuredQuestionPayload,
 )
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
@@ -476,19 +478,12 @@ def metadata_with_slot_classification(
     }
 
 
-def requirements_summary_to_metadata(
-    payload: RequirementsSummaryPayload | Mapping[str, Any],
-) -> JsonObject:
-    summary = (
-        payload
-        if isinstance(payload, RequirementsSummaryPayload)
-        else RequirementsSummaryPayload.model_validate(payload)
-    )
-    version = summary.requirements_version
+def requirements_summary_to_metadata(payload: RequirementsSummaryPayload) -> JsonObject:
+    version = payload.requirements_version
     if not isinstance(version, str) or not version:
         raise ValueError("requirements_summary metadata requires requirements_version")
     return {
-        REQUIREMENTS_SUMMARY_METADATA_KEY: summary.model_dump(
+        REQUIREMENTS_SUMMARY_METADATA_KEY: payload.model_dump(
             mode="json", exclude_none=True
         ),
         REQUIREMENTS_VERSION_METADATA_KEY: version,
@@ -698,11 +693,10 @@ def metadata_for_user_message(
 
 
 def metadata_for_assistant_question(
-    question_data: Mapping[str, Any],
+    question_data: StructuredQuestionPayload,
 ) -> JsonObject | None:
-    normalized = normalize_structured_question_payload(question_data)
-    question_id = normalized.get("question_id")
-    if not isinstance(question_id, str) or not question_id:
+    question_id = canonical_question_id(question_data.question_id)
+    if not question_id:
         return None
     return {ASSISTANT_QUESTION_ID_METADATA_KEY: question_id}
 

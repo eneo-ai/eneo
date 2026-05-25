@@ -32,6 +32,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
     TargetKind,
 )
+from intric.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
@@ -1682,19 +1683,21 @@ async def test_persist_tool_turn_refreshes_planning_state_with_requirements_summ
             arguments={"summary": "Kort sammanfattning"},
             tool_content="Requirements presented to user. Awaiting confirmation.",
             metadata=requirements_summary_to_metadata(
-                {
-                    "summary": "Kort sammanfattning",
-                    "key_decisions": [
-                        {
-                            "topic": "input",
-                            "decision": "Sammanställning från flera dokument.",
-                        }
-                    ],
-                    "input_description": "Flera uppladdade dokument.",
-                    "output_description": "Kort sammanfattning.",
-                    "assumptions": ["sammanställning från flera dokument"],
-                    "requirements_version": "req-v1",
-                }
+                RequirementsSummaryPayload.model_validate(
+                    {
+                        "summary": "Kort sammanfattning",
+                        "key_decisions": [
+                            {
+                                "topic": "input",
+                                "decision": "Sammanställning från flera dokument.",
+                            }
+                        ],
+                        "input_description": "Flera uppladdade dokument.",
+                        "output_description": "Kort sammanfattning.",
+                        "assumptions": ["sammanställning från flera dokument"],
+                        "requirements_version": "req-v1",
+                    }
+                )
             ),
         )
 

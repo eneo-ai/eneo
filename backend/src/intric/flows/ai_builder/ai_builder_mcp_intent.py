@@ -12,6 +12,7 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from intric.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     AIBuilderResourceCatalogEntry,
@@ -500,7 +501,7 @@ def build_mcp_resource_selection_question(
     issue: NamedMCPReferenceIssue,
     catalog: AIBuilderResourceCatalog,
     language: Literal["sv", "en"] = "sv",
-) -> tuple[dict[str, object], str]:
+) -> tuple[StructuredQuestionPayload, str]:
     """Build the same structured-question shape used by discovery follow-ups."""
 
     requested_name = _requested_display_name(issue, catalog)
@@ -578,7 +579,7 @@ def build_mcp_resource_selection_question(
         for server in available_servers
     )
 
-    return (
+    question_payload = StructuredQuestionPayload.model_validate(
         {
             "question_id": MCP_RESOURCE_SELECTION_QUESTION_ID,
             "question": question,
@@ -587,8 +588,8 @@ def build_mcp_resource_selection_question(
             "allow_custom": False,
             "requires_confirm": True,
         },
-        assistant_text,
     )
+    return question_payload, assistant_text
 
 
 def _reference_issue_for_name_group(

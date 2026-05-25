@@ -14,6 +14,7 @@ from intric.flows.ai_builder.ai_builder_discovery_models import (
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from intric.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
 from intric.flows.ai_builder.ai_builder_events import (
     build_question_event,
     build_text_event,
@@ -22,6 +23,7 @@ from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_tools import ASK_STRUCTURED_QUESTION_TOOL_NAME
 from intric.flows.domain.flow import Flow
+from intric.flows.flow_authoring_spec import JsonObject
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +60,7 @@ async def persist_backend_question(
     tool_call = make_persisted_assistant_tool_call(
         tool_call_id=tool_call_id,
         tool_name=ASK_STRUCTURED_QUESTION_TOOL_NAME,
-        arguments=question.question_data,
+        arguments=_persisted_question_arguments(question.question_data),
     )
 
     conversation.append(
@@ -89,4 +91,14 @@ async def persist_backend_question(
             build_question_event(question.question_data),
         ],
         new_planning_state_version=new_version,
+    )
+
+
+def _persisted_question_arguments(
+    question_data: StructuredQuestionPayload,
+) -> JsonObject:
+    return question_data.model_dump(
+        mode="json",
+        exclude_none=False,
+        exclude_unset=True,
     )

@@ -850,7 +850,7 @@ class TestExtendedClarificationHints:
 
         assert followup is not None
         question_data = followup.question_data
-        assert question_data["question_id"] == "final_output_mode"
+        assert question_data.question_id == "final_output_mode"
 
     def test_rich_prompt_uses_full_question_budget_when_slots_remain(
         self,
@@ -899,7 +899,7 @@ class TestExtendedClarificationHints:
         followup = build_discovery_followup(conversation)
         assert followup is not None
         question_data = followup.question_data
-        assert question_data["question_id"] == "structured_analysis_need"
+        assert question_data.question_id == "structured_analysis_need"
 
     def test_vague_case_analysis_prompt_is_resolved_after_full_answers(self) -> None:
         """After 5 explicit answers covering scope, input, output mode, and
@@ -976,13 +976,13 @@ class TestExtendedClarificationHints:
         followup = build_discovery_followup(conversation)
         assert followup is not None
         question = followup.question_data
-        assert question["question"] == "Vad ska flödet producera som slutresultat?"
-        first_option = question["options"][0]
-        assert first_option["label"] == "Strukturerat textresultat"
+        assert question.question == "Vad ska flödet producera som slutresultat?"
+        first_option = question.options[0]
+        assert first_option.label == "Strukturerat textresultat"
         assert all(
-            option["label"] != english
+            option.label != english
             for option, english in zip(
-                question["options"],
+                question.options,
                 [
                     "Structured text result",
                     "PDF document",
@@ -1796,9 +1796,9 @@ class TestExtendedClarificationHints:
         question_data = followup.question_data
         assistant_text = followup.assistant_text
         assert issue.issue_id == "external_delivery_unsupported"
-        assert question_data["question_id"] == "final_output_mode"
+        assert question_data.question_id == "final_output_mode"
         assert assistant_snippet in assistant_text
-        assert question_snippet in question_data["question"]
+        assert question_snippet in question_data.question
 
     @pytest.mark.parametrize(
         "prompt",
@@ -2366,7 +2366,7 @@ class TestExtendedClarificationHints:
 
         assert followup is not None
         question_data = followup.question_data
-        assert question_data["question_id"] == "docx_output_mode"
+        assert question_data.question_id == "docx_output_mode"
 
     def test_structured_docx_output_answer_does_not_reopen_docx_mode_question(
         self,

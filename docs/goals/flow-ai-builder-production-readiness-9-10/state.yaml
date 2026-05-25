@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T099
+active_task: T100
 
 interruptions:
   - id: I001
@@ -9154,7 +9154,7 @@ tasks:
   - id: T099
     type: worker
     assignee: Worker
-    status: active
+    status: completed
     reasoning_hint: medium
     objective: "Make AI Builder question and requirements-summary public-event builders accept typed payload models at their internal boundary, and remove the remaining raw dict handoff where canonical event payload models already exist."
     constraints:
@@ -9176,14 +9176,23 @@ tasks:
       - "backend/src/intric/flows/ai_builder/ai_builder_backend_question_persistence.py"
       - "backend/src/intric/flows/ai_builder/ai_builder_accepted_action_rendering.py"
       - "backend/src/intric/flows/ai_builder/ai_builder_confirm_requirements.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner_action_dispatch.py"
       - "backend/src/intric/flows/ai_builder/ai_builder_proposal_processor.py"
       - "backend/src/intric/flows/ai_builder/ai_builder_proposal_finalization.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_events.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_backend_question_persistence.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py"
       - "backend/tests/unittests/flows/ai_builder/test_confirm_requirements.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_confirm_requirements.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py"
       - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_accepted_action_rendering.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_action_dispatch.py"
+      - "backend/tests/unittests/flows/ai_builder/test_discovery_flow.py"
+      - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
       - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
       - ".codex/artifacts/flow-ai-builder-t099-implementation-summary.md"
     expected_output:
@@ -9192,8 +9201,9 @@ tasks:
       - "BackendQuestion.question_data is StructuredQuestionPayload, with no parallel field."
       - "build_mcp_resource_selection_question returns tuple[StructuredQuestionPayload, str]."
       - "build_requirements_summary_payload returns RequirementsSummaryPayload and replaces build_requirements_summary_data."
-      - "metadata_for_assistant_question accepts StructuredQuestionPayload | Mapping[str, Any]."
-      - "Persisted backend-question tool-call arguments preserve explicit null fields via model_dump(mode='json', exclude_none=False)."
+      - "metadata_for_assistant_question accepts StructuredQuestionPayload only."
+      - "requirements_summary_to_metadata accepts RequirementsSummaryPayload only."
+      - "Persisted backend-question tool-call arguments preserve explicit null fields via model_dump(mode='json', exclude_none=False, exclude_unset=True)."
       - "SSE event JSON remains unchanged for representative question and requirements-summary events."
       - "AI_BUILDER_SCHEMA_HOIST_MODELS membership remains unchanged; no Swagger/OpenAPI/generated-client/frontend/database diff."
     validation_plan:
@@ -9220,6 +9230,106 @@ tasks:
       implementation_required: "Run Claude implementation gate after validation; run Antigravity implementation gate with --spend-mode auto if available."
     swagger_openapi_impact: "None expected. Public event models already exist and schema hoist membership should remain unchanged; verify and record."
     score_impact: "May improve Maintainability, Clean Architecture, Separation of Concerns, SSoT, Human Readability, Human Reviewability, API maintainer DX, and AI Slop resistance for the event payload boundary. Do not raise the overall strict floor above 8 from this slice alone."
+    receipt:
+      completed_at: "2026-05-25T02:20:00Z"
+      result: "Implemented typed question and requirements-summary event payload boundary. BackendQuestion.question_data is retyped in place to StructuredQuestionPayload, event builders accept typed payloads, MCP resource-selection questions return typed payloads, requirements summary rendering returns RequirementsSummaryPayload, and conversation metadata helpers now accept typed payloads only. Persisted backend-question tool-call arguments use exclude_none=False plus exclude_unset=True to preserve explicit nulls without adding default-only fields."
+      files_changed:
+        - ".codex/artifacts/flow-ai-builder-t099-implementation-summary.md"
+        - "backend/src/intric/flows/ai_builder/ai_builder_accepted_action_rendering.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_backend_question_persistence.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_confirm_requirements.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_conversation_metadata.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_discovery.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_discovery_models.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_events.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_mcp_intent.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_planner_action_dispatch.py"
+        - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_accepted_action_rendering.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_backend_question_persistence.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_confirm_requirements.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_events.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_action_dispatch.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py"
+        - "backend/tests/unittests/flows/ai_builder/test_confirm_requirements.py"
+        - "backend/tests/unittests/flows/ai_builder/test_discovery_flow.py"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      red_evidence:
+        - "New persistence test failed before production changes because Pydantic defaults leaked into persisted tool-call args without exclude_unset=True."
+        - "New import-ownership guard failed before production changes because event builders and BackendQuestion still used dict-shaped boundaries."
+      validation:
+        focused:
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_events.py -q -> 4 passed"
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_backend_question_persistence.py -q -> 5 passed"
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py -q -> 18 passed"
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_confirm_requirements.py tests/unittests/flows/ai_builder/test_ai_builder_confirm_requirements.py -q -> 30 passed"
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_mcp_intent.py -q -> 23 passed"
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 32 passed"
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_accepted_action_rendering.py -q -> 3 passed"
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py -q -> 48 passed"
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner_action_dispatch.py -q -> 2 passed"
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_discovery_flow.py -q -> 80 passed"
+          - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_persist_tool_turn_refreshes_planning_state_with_requirements_summary -q -> 1 passed, 16 warnings"
+        broad:
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2409 passed, 4 skipped, 11 warnings"
+          - "cd backend && uv run pytest tests/unit/test_ai_builder_openapi_contract.py -q -> 13 passed, 15 warnings"
+          - "cd backend && uv run ruff check touched T099 files -> All checks passed"
+          - "cd backend && uv run ruff format --check touched T099 files -> 23 files already formatted"
+          - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations"
+          - "git diff --check -> clean"
+          - "git diff -- backend/src/intric/flows/ai_builder/ai_builder_event_models.py backend/src/intric/flows/ai_builder/ai_builder_api_models.py backend/src/intric/server/main.py frontend/packages/intric-js/src/client/schema.d.ts frontend/packages/intric-js/src/client/types.d.ts -> no diff"
+      peer_gates:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t099-typed-event-payload-boundary-implementation-20260525T020729Z.md -> GREEN_LIGHT no / MIN_SCORE 7; accepted blockers were residual Mapping unions in conversation metadata helpers."
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t099-typed-event-payload-boundary-implementation-revision-20260525T021410Z.md -> GREEN_LIGHT yes / MIN_SCORE 8."
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t099-typed-event-payload-boundary-implementation-20260525T021712Z.md -> GREEN_LIGHT yes / MIN_SCORE 8."
+      swagger_openapi: "No public model, OpenAPI, Swagger example, generated-client, or frontend schema diff. AI Builder OpenAPI contract tests passed."
+      score_impact:
+        strict_floor: 8
+        rationale: "Improves typed contracts, SSoT, API maintainer DX, maintainability, readability, and reviewability for one event payload seam. Does not raise the broader Flow AI Builder strict floor above 8 because final live-output proof, broader topology/readability/slop cleanup, and full-source baseline blockers remain."
+      residual_risks:
+        - "requirements_summary_to_metadata and backend-question persistence intentionally use different dump policies because they serialize different contracts; future JSONB-shape work could add a narrow TypedDict if it earns its place."
+        - "Import ownership guard matches exact AST annotation strings by design; it can require adjustment after intentional renames."
+
+  - id: T100
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest score-floor-moving Flow AI Builder tranche after T099 from current source evidence. Do not implement during this judge task."
+    constraints:
+      - "Stay within Flow AI Builder; do not move to broader Flows work."
+      - "Do not default to LOC reduction or file splitting; choose only work that improves maintainability, ownership, DX, runtime/data/API contract quality, test quality, or normal-user output quality."
+      - "Preserve unrelated dirty files and do not stage them."
+      - "Do not raise the strict overall score floor above 8 unless the ranking and peer evidence prove every remaining 8-scored dimension is now defensibly 9."
+    candidates_to_consider:
+      - "bounded AI-slop/comment/naming cleanup tied to concrete owners"
+      - "remaining planner/source topology and readability blockers"
+      - "source-material / underlag intelligence and variable wiring follow-ups"
+      - "full-source typing/test baseline that affects AI Builder maintainability"
+      - "live eval replay after behavior-affecting changes"
+      - "diagnostics/DX and future OpenTelemetry compatibility"
+      - "data/schema/JSONB ownership gaps if evidence remains"
+      - "frontend/backend contract or generated-client drift if evidence exists"
+    allowed_files:
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t100-next-tranche-ranking.md"
+    expected_output:
+      - "A short evidence-backed ranking artifact with file:line evidence."
+      - "Current owner and proposed canonical owner table for any selected concept."
+      - "Clear rejected alternatives and why they are lower score-floor movers."
+      - "Acceptance criteria, tests, non-goals, validation commands, stop conditions, and expected score impact for the selected worker."
+      - "Claude plan gate and Antigravity plan gate if available; missing Antigravity coverage must be recorded as missing, not pass."
+    validation_plan:
+      - "Inspect current git status, commits, scorecard, state.yaml, and relevant artifacts."
+      - "Inspect source evidence for all candidate blockers before ranking."
+      - "Run Claude plan gate; revise until GREEN_LIGHT yes / MIN_SCORE >= 8 or document exact disagreement."
+      - "Run Antigravity with --spend-mode auto if available; record quota/tooling failure as missing coverage."
+    score_impact: "Read-only judge task. No score increase until the selected worker is implemented, validated, and post-reviewed."
     receipt: null
 
 checks:
@@ -9228,9 +9338,11 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T098 completed with Claude and Antigravity green. T099 is active as the next worker. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T098
+    result: "T099 completed with Claude and Antigravity green. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T099
     commands:
-      - "Claude T098 iteration 1 -> GREEN_LIGHT no / MIN_SCORE 7"
-      - "Claude T098 iteration 2 -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity T098 synthesis -> GREEN_LIGHT yes / MIN_SCORE 9"
+      - "Full Flow AI Builder unit suite -> 2409 passed, 4 skipped"
+      - "AI Builder OpenAPI contract tests -> 13 passed"
+      - "Ruff, Ruff format --check, Pyright, git diff --check -> passed"
+      - "Claude T099 iteration 2 -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity T099 implementation -> GREEN_LIGHT yes / MIN_SCORE 8"

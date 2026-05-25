@@ -27,6 +27,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 from intric.flows.ai_builder.ai_builder_event_models import (
     KeyDecisionPayload,
     RequirementsSummaryPayload,
+    StructuredQuestionPayload,
 )
 from intric.flows.ai_builder.ai_builder_orchestrator import OrchestrationContext
 from intric.flows.ai_builder.ai_builder_planner import (
@@ -119,20 +120,22 @@ def _runtime_result(
 
 def _backend_question() -> BackendQuestion:
     return BackendQuestion(
-        question_data={
-            "question_id": "terminal_output",
-            "question": "Vilket slutresultat vill du ha?",
-            "options": [
-                {
-                    "id": "text",
-                    "label": "Text",
-                    "description": "Svara med text.",
-                    "value": "text",
-                }
-            ],
-            "selection_mode": "single",
-            "allow_custom": True,
-        },
+        question_data=StructuredQuestionPayload.model_validate(
+            {
+                "question_id": "terminal_output",
+                "question": "Vilket slutresultat vill du ha?",
+                "options": [
+                    {
+                        "id": "text",
+                        "label": "Text",
+                        "description": "Svara med text.",
+                        "value": "text",
+                    }
+                ],
+                "selection_mode": "single",
+                "allow_custom": True,
+            }
+        ),
         assistant_text="Vilket slutresultat vill du ha?",
     )
 

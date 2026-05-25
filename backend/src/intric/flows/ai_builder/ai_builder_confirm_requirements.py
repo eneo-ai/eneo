@@ -173,9 +173,7 @@ async def process_confirm_requirements(
         flow=request.flow,
     )
     return ToolProcessingResult(
-        event=build_requirements_summary_event(
-            requirements_payload.model_dump(mode="json", exclude_none=True)
-        ),
+        event=build_requirements_summary_event(requirements_payload),
         new_planning_state_version=new_version,
     )
 

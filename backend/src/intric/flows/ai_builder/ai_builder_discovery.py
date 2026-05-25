@@ -70,6 +70,7 @@ from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryIssue,
     DiscoveryLanguage,
     DiscoveryProfile,
+    DiscoveryQuestionSuggestion,
 )
 from intric.flows.ai_builder.ai_builder_discovery_priority import (
     sort_discovery_issues,
@@ -107,6 +108,7 @@ from intric.flows.ai_builder.ai_builder_discovery_questions import (
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from intric.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     canonical_question_id,
     has_explicit_structured_answer,
@@ -551,24 +553,9 @@ def build_discovery_followup(
                     suggestion=suggestion,
                 ),
             )
-            question_data = {
-                "question_id": suggestion.question_id,
-                "question": suggestion.question,
-                "options": [
-                    {
-                        "id": option.id,
-                        "label": option.label,
-                        "description": option.description,
-                        "value": option.value,
-                    }
-                    for option in suggestion.options
-                ],
-                "selection_mode": suggestion.selection_mode,
-                "allow_custom": suggestion.allow_custom,
-            }
             return BackendQuestion(
                 issue=issue,
-                question_data=question_data,
+                question_data=_structured_question_payload_from_suggestion(suggestion),
                 assistant_text=build_discovery_followup_text(
                     issue,
                     profile.language,
@@ -580,24 +567,9 @@ def build_discovery_followup(
         return None
 
     suggestion = issue.suggestion
-    question_data: dict[str, object] = {
-        "question_id": suggestion.question_id,
-        "question": suggestion.question,
-        "options": [
-            {
-                "id": option.id,
-                "label": option.label,
-                "description": option.description,
-                "value": option.value,
-            }
-            for option in suggestion.options
-        ],
-        "selection_mode": suggestion.selection_mode,
-        "allow_custom": suggestion.allow_custom,
-    }
     return BackendQuestion(
         issue=issue,
-        question_data=question_data,
+        question_data=_structured_question_payload_from_suggestion(suggestion),
         assistant_text=build_discovery_followup_text(issue, profile.language),
     )
 
@@ -637,25 +609,32 @@ def build_registry_question_followup(
         ),
         profile.language,
     )
-    question_data: dict[str, object] = {
-        "question_id": suggestion.question_id,
-        "question": suggestion.question,
-        "options": [
-            {
-                "id": option.id,
-                "label": option.label,
-                "description": option.description,
-                "value": option.value,
-            }
-            for option in suggestion.options
-        ],
-        "selection_mode": suggestion.selection_mode,
-        "allow_custom": suggestion.allow_custom,
-    }
     return BackendQuestion(
-        question_data=question_data,
+        question_data=_structured_question_payload_from_suggestion(suggestion),
         assistant_text=assistant_text,
         issue=issue,
+    )
+
+
+def _structured_question_payload_from_suggestion(
+    suggestion: DiscoveryQuestionSuggestion,
+) -> StructuredQuestionPayload:
+    return StructuredQuestionPayload.model_validate(
+        {
+            "question_id": suggestion.question_id,
+            "question": suggestion.question,
+            "options": [
+                {
+                    "id": option.id,
+                    "label": option.label,
+                    "description": option.description,
+                    "value": option.value,
+                }
+                for option in suggestion.options
+            ],
+            "selection_mode": suggestion.selection_mode,
+            "allow_custom": suggestion.allow_custom,
+        }
     )
 
 

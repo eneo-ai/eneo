@@ -24,6 +24,7 @@ from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntim
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
+    StructuredQuestionPayload,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolProcessingResult,
@@ -106,20 +107,22 @@ def _runtime_result(
 
 def _backend_question() -> BackendQuestion:
     return BackendQuestion(
-        question_data={
-            "question_id": "input_material_mode",
-            "question": "Vilken indatakälla?",
-            "options": [
-                {
-                    "id": "audio",
-                    "label": "Ljud",
-                    "description": "Spela in eller ladda upp ljud.",
-                    "value": "audio",
-                }
-            ],
-            "selection_mode": "single",
-            "allow_custom": True,
-        },
+        question_data=StructuredQuestionPayload.model_validate(
+            {
+                "question_id": "input_material_mode",
+                "question": "Vilken indatakälla?",
+                "options": [
+                    {
+                        "id": "audio",
+                        "label": "Ljud",
+                        "description": "Spela in eller ladda upp ljud.",
+                        "value": "audio",
+                    }
+                ],
+                "selection_mode": "single",
+                "allow_custom": True,
+            }
+        ),
         assistant_text="Vilken indatakälla?",
     )
 

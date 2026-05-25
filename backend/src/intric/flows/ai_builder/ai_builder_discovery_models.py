@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     )
     from intric.flows.domain.flow import Flow
 
+from intric.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     InputIntentResolution,
 )
@@ -63,7 +64,7 @@ class DiscoveryIssue:
 
 @dataclass(frozen=True)
 class BackendQuestion:
-    question_data: dict[str, object]
+    question_data: StructuredQuestionPayload
     assistant_text: str
     issue: DiscoveryIssue | None = None
 

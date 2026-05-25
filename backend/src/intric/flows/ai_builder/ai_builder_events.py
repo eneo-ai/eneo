@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -66,14 +65,14 @@ def build_done_event() -> dict[str, str]:
     return _to_wire_event(AIBuilderDoneEvent())
 
 
-def build_question_event(question_data: dict[str, Any]) -> dict[str, str]:
-    payload = StructuredQuestionPayload.model_validate(question_data)
-    return _to_wire_event(AIBuilderQuestionEvent(data=payload))
+def build_question_event(question_data: StructuredQuestionPayload) -> dict[str, str]:
+    return _to_wire_event(AIBuilderQuestionEvent(data=question_data))
 
 
-def build_requirements_summary_event(data: dict[str, Any]) -> dict[str, str]:
-    payload = RequirementsSummaryPayload.model_validate(data)
-    return _to_wire_event(AIBuilderRequirementsSummaryEvent(data=payload))
+def build_requirements_summary_event(
+    data: RequirementsSummaryPayload,
+) -> dict[str, str]:
+    return _to_wire_event(AIBuilderRequirementsSummaryEvent(data=data))
 
 
 def build_plan_event(

@@ -236,7 +236,9 @@ class TestRequirementsSummaryEvent:
             "output_description": "DOCX report",
             "manual_setup_notes": ["Connect knowledge base"],
         }
-        event = build_requirements_summary_event(data)
+        event = build_requirements_summary_event(
+            RequirementsSummaryPayload.model_validate(data)
+        )
         assert event["event"] == "requirements_summary"
 
         payload = json.loads(event["data"])
@@ -253,7 +255,9 @@ class TestRequirementsSummaryEvent:
             "input_description": "X",
             "output_description": "Y",
         }
-        event = build_requirements_summary_event(data)
+        event = build_requirements_summary_event(
+            RequirementsSummaryPayload.model_validate(data)
+        )
         payload = json.loads(event["data"])
         assert (
             payload.get("manual_setup_notes") is None

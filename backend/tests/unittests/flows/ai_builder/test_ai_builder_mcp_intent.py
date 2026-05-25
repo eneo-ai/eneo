@@ -411,15 +411,15 @@ def test_mcp_selection_question_lists_only_enabled_servers() -> None:
     )
 
     assert "aktiverade" in assistant_text
-    assert question_data["question_id"] == "mcp_resource_selection"
-    assert question_data["requires_confirm"] is True
-    labels = [option["label"] for option in question_data["options"]]
+    assert question_data.question_id == "mcp_resource_selection"
+    assert question_data.requires_confirm is True
+    labels = [option.label for option in question_data.options]
     assert labels == [
         "Fortsätt utan MCP",
         "Använd Svelte mcp",
     ]
-    assert question_data["allow_custom"] is False
-    values = [option["value"] for option in question_data["options"]]
+    assert question_data.allow_custom is False
+    values = [option.value for option in question_data.options]
     assert f"use_mcp_server:{SVELTE_SERVER_SLOT}" in values
     assert all(TIME_SERVER_SLOT not in str(value) for value in values)
 

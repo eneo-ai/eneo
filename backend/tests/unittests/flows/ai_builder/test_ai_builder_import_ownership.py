@@ -291,7 +291,7 @@ ACCEPTED_ACTION_RENDERING_PUBLIC_NAMES = frozenset(
         "RequirementsSummaryRenderContext",
         "build_accepted_action_events",
         "build_accepted_action_messages",
-        "build_requirements_summary_data",
+        "build_requirements_summary_payload",
     }
 )
 PLANNER_ACTION_DISPATCH_PUBLIC_NAMES = frozenset(
@@ -555,6 +555,126 @@ def test_backend_question_persistence_has_no_discovery_runtime_owner() -> None:
                 violations.append(
                     f"{persistence_path}:{node.lineno} accepts runtime params {overlap}"
                 )
+
+    assert violations == []
+
+
+def test_question_and_requirements_events_use_typed_payload_boundary() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    discovery_models_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_discovery_models.py"
+    )
+    events_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_events.py"
+    )
+    mcp_intent_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_mcp_intent.py"
+    )
+    conversation_metadata_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_conversation_metadata.py"
+    )
+    rendering_path = backend_root / ACCEPTED_ACTION_RENDERING_PATH
+    violations: list[str] = []
+
+    discovery_tree = ast.parse(
+        discovery_models_path.read_text(), filename=str(discovery_models_path)
+    )
+    backend_question = next(
+        node
+        for node in ast.walk(discovery_tree)
+        if isinstance(node, ast.ClassDef) and node.name == "BackendQuestion"
+    )
+    question_data_annotation = None
+    for statement in backend_question.body:
+        if (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+            and statement.target.id == "question_data"
+        ):
+            question_data_annotation = ast.unparse(statement.annotation)
+    if question_data_annotation != "StructuredQuestionPayload":
+        violations.append(
+            f"{discovery_models_path}:{backend_question.lineno} "
+            f"question_data={question_data_annotation}"
+        )
+
+    events_tree = ast.parse(events_path.read_text(), filename=str(events_path))
+    # Static shape guard; matches exact annotation strings in target files.
+    expected_event_parameters = {
+        "build_question_event": "StructuredQuestionPayload",
+        "build_requirements_summary_event": "RequirementsSummaryPayload",
+    }
+    for function_name, expected_annotation in expected_event_parameters.items():
+        function = next(
+            node
+            for node in ast.walk(events_tree)
+            if isinstance(node, ast.FunctionDef) and node.name == function_name
+        )
+        first_arg = function.args.args[0]
+        annotation = ast.unparse(first_arg.annotation) if first_arg.annotation else None
+        if annotation != expected_annotation:
+            violations.append(
+                f"{events_path}:{function.lineno} {function_name} param={annotation}"
+            )
+
+    mcp_tree = ast.parse(mcp_intent_path.read_text(), filename=str(mcp_intent_path))
+    mcp_function = next(
+        node
+        for node in ast.walk(mcp_tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "build_mcp_resource_selection_question"
+    )
+    mcp_return = ast.unparse(mcp_function.returns) if mcp_function.returns else None
+    if mcp_return != "tuple[StructuredQuestionPayload, str]":
+        violations.append(
+            f"{mcp_intent_path}:{mcp_function.lineno} return={mcp_return}"
+        )
+
+    metadata_tree = ast.parse(
+        conversation_metadata_path.read_text(), filename=str(conversation_metadata_path)
+    )
+    expected_metadata_parameters = {
+        "metadata_for_assistant_question": "StructuredQuestionPayload",
+        "requirements_summary_to_metadata": "RequirementsSummaryPayload",
+    }
+    for function_name, expected_annotation in expected_metadata_parameters.items():
+        function = next(
+            node
+            for node in ast.walk(metadata_tree)
+            if isinstance(node, ast.FunctionDef) and node.name == function_name
+        )
+        first_arg = function.args.args[0]
+        annotation = ast.unparse(first_arg.annotation) if first_arg.annotation else None
+        if annotation != expected_annotation:
+            violations.append(
+                f"{conversation_metadata_path}:{function.lineno} {function_name} "
+                f"param={annotation}"
+            )
+
+    rendering_tree = ast.parse(rendering_path.read_text(), filename=str(rendering_path))
+    rendering_function = next(
+        (
+            node
+            for node in ast.walk(rendering_tree)
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "build_requirements_summary_payload"
+        ),
+        None,
+    )
+    if rendering_function is None:
+        violations.append(
+            f"{rendering_path}: missing build_requirements_summary_payload"
+        )
+    else:
+        rendering_return = (
+            ast.unparse(rendering_function.returns)
+            if rendering_function.returns
+            else None
+        )
+        if rendering_return != "RequirementsSummaryPayload":
+            violations.append(
+                f"{rendering_path}:{rendering_function.lineno} return={rendering_return}"
+            )
 
     assert violations == []
 

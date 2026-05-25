@@ -14,6 +14,7 @@ from intric.flows.ai_builder.ai_builder_discovery_models import (
 )
 from intric.flows.ai_builder.ai_builder_discovery_runtime import DiscoveryRuntimeResult
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from intric.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from intric.flows.ai_builder.ai_builder_question_recovery import (
     RecoveredToolDispatchRequest,
@@ -147,20 +148,22 @@ def _runtime_result(followup: BackendQuestion | None = None) -> DiscoveryRuntime
 
 def _backend_question() -> BackendQuestion:
     return BackendQuestion(
-        question_data={
-            "question_id": "input_material_mode",
-            "question": "Vilken typ av underlag ska flödet ta emot?",
-            "options": [
-                {
-                    "id": "audio",
-                    "label": "Ljud",
-                    "description": "Spela in eller ladda upp ljud.",
-                    "value": "audio",
-                }
-            ],
-            "selection_mode": "single",
-            "allow_custom": True,
-        },
+        question_data=StructuredQuestionPayload.model_validate(
+            {
+                "question_id": "input_material_mode",
+                "question": "Vilken typ av underlag ska flödet ta emot?",
+                "options": [
+                    {
+                        "id": "audio",
+                        "label": "Ljud",
+                        "description": "Spela in eller ladda upp ljud.",
+                        "value": "audio",
+                    }
+                ],
+                "selection_mode": "single",
+                "allow_custom": True,
+            }
+        ),
         assistant_text="Jag behöver förstå indata bättre.",
     )
 

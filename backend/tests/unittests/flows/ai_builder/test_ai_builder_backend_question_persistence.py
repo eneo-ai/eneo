@@ -13,6 +13,7 @@ from intric.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from intric.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
 from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
@@ -30,17 +31,59 @@ def _make_turn() -> SessionSendTurn:
 
 def _backend_question() -> BackendQuestion:
     return BackendQuestion(
-        question_data={
-            "question_id": "runtime_metadata_fields",
-            "question": "Vilka fält behöver vi?",
-            "options": [
-                {"value": "title", "label": "Rubrik", "description": None},
-                {"value": "author", "label": "Författare", "description": None},
-            ],
-            "selection_mode": "multi",
-            "allow_custom": False,
-        },
+        question_data=StructuredQuestionPayload.model_validate(
+            _expected_question_arguments()
+        ),
         assistant_text="Vilka fält behöver vi?",
+    )
+
+
+def _expected_question_arguments() -> dict[str, object]:
+    return {
+        "question_id": "runtime_metadata_fields",
+        "question": "Vilka fält behöver vi?",
+        "options": [
+            {"value": "title", "label": "Rubrik", "description": None},
+            {"value": "author", "label": "Författare", "description": None},
+        ],
+        "selection_mode": "multi",
+        "allow_custom": False,
+    }
+
+
+def _expected_confirming_question_arguments() -> dict[str, object]:
+    return {
+        "question_id": "mcp_resource_selection",
+        "question": "Ska AI Builder använda MCP-verktyg?",
+        "options": [
+            {
+                "id": "continue_without_mcp",
+                "value": "without_mcp",
+                "label": "Fortsätt utan MCP",
+                "description": "Bygg flödet utan externa MCP-verktyg.",
+            }
+        ],
+        "selection_mode": "single",
+        "allow_custom": False,
+        "requires_confirm": True,
+    }
+
+
+def _empty_question_id_payload() -> StructuredQuestionPayload:
+    return StructuredQuestionPayload.model_validate(
+        {
+            "question_id": "runtime_metadata_fields",
+            "question": "Vad behöver du veta?",
+            "options": [
+                {
+                    "value": "details",
+                    "label": "Detaljer",
+                    "description": None,
+                }
+            ],
+            "selection_mode": "single",
+            "allow_custom": True,
+        }
     )
 
 
@@ -70,6 +113,7 @@ async def test_persist_backend_question_commits_turn_with_flow_and_lease() -> No
     assert assistant_msg.content == "Vilka fält behöver vi?"
     assert assistant_msg.tool_calls is not None
     assert assistant_msg.tool_calls[0]["name"] == "ask_structured_question"
+    assert assistant_msg.tool_calls[0]["arguments"] == _expected_question_arguments()
     assert tool_msg.role == "tool"
     assert tool_msg.tool_call_id == assistant_msg.tool_calls[0]["id"]
     repo.commit_turn.assert_awaited_once()
@@ -80,6 +124,31 @@ async def test_persist_backend_question_commits_turn_with_flow_and_lease() -> No
     assert [message.role for message in new_messages] == ["assistant", "tool"]
     assert len(result.events) == 2
     assert result.new_planning_state_version == 23
+
+
+@pytest.mark.asyncio
+async def test_persist_backend_question_preserves_explicit_id_and_confirm_flag() -> (
+    None
+):
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 1
+    conversation = [ConversationMessage(role="user", content="Bygg")]
+    expected_arguments = _expected_confirming_question_arguments()
+
+    await persist_backend_question(
+        repo=repo,
+        turn=_make_turn(),
+        conversation=conversation,
+        new_messages_start=1,
+        question=BackendQuestion(
+            question_data=StructuredQuestionPayload.model_validate(expected_arguments),
+            assistant_text="Ska AI Builder använda MCP-verktyg?",
+        ),
+    )
+
+    assistant_msg = conversation[1]
+    assert assistant_msg.tool_calls is not None
+    assert assistant_msg.tool_calls[0]["arguments"] == expected_arguments
 
 
 @pytest.mark.asyncio
@@ -116,19 +185,9 @@ async def test_persist_backend_question_omits_empty_metadata() -> None:
         conversation=conversation,
         new_messages_start=1,
         question=BackendQuestion(
-            question_data={
-                "question_id": "",
-                "question": "Vad behöver du veta?",
-                "options": [
-                    {
-                        "value": "details",
-                        "label": "Detaljer",
-                        "description": None,
-                    }
-                ],
-                "selection_mode": "single",
-                "allow_custom": True,
-            },
+            question_data=_empty_question_id_payload().model_copy(
+                update={"question_id": ""}
+            ),
             assistant_text="Vad behöver du veta?",
         ),
     )

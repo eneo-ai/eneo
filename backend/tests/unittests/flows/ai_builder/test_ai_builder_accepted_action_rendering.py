@@ -6,7 +6,7 @@ from intric.flows.ai_builder.ai_builder_accepted_action_rendering import (
     RequirementsSummaryRenderContext,
     build_accepted_action_events,
     build_accepted_action_messages,
-    build_requirements_summary_data,
+    build_requirements_summary_payload,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_event_models import KeyDecisionPayload
@@ -152,10 +152,11 @@ def test_confirm_requirements_rendering_reuses_one_versioned_summary_payload() -
         used_auxiliary_llm=True,
     )
     events = build_accepted_action_events(output, context=context)
-    summary_data = build_requirements_summary_data(
+    summary_payload = build_requirements_summary_payload(
         output.planner_action.payload,
         context=context,
     )
+    summary_data = summary_payload.model_dump(mode="json", exclude_none=True)
 
     assert messages[-1].metadata is not None
     assert messages[-1].metadata["requirements_summary"] == summary_data

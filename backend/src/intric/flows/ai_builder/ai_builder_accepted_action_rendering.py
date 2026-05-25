@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, assert_never
+from typing import TYPE_CHECKING, assert_never
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    requirements_summary_to_metadata,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from intric.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from intric.flows.ai_builder.ai_builder_events import (
@@ -27,6 +30,7 @@ from intric.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
     build_planner_telemetry_from_turn,
 )
+from intric.flows.flow_authoring_spec import JsonObject
 
 if TYPE_CHECKING:
     from intric.flows.ai_builder.ai_builder_planner_turn import TurnTelemetry
@@ -49,7 +53,7 @@ def build_accepted_action_messages(
     used_auxiliary_llm: bool,
 ) -> list[ConversationMessage]:
     action = accepted.planner_action
-    base_metadata: dict[str, Any] | None = None
+    base_metadata: JsonObject | None = None
 
     match action:
         case AskQuestionAction():
@@ -59,14 +63,11 @@ def build_accepted_action_messages(
             return [*context.conversation[new_messages_start:]]
         case ConfirmRequirementsAction():
             assistant_content = action.payload.summary
-            requirements_payload = build_requirements_summary_data(
+            requirements_payload = build_requirements_summary_payload(
                 action.payload,
                 context=context,
             )
-            base_metadata = {
-                "requirements_summary": requirements_payload,
-                "requirements_version": requirements_payload["requirements_version"],
-            }
+            base_metadata = requirements_summary_to_metadata(requirements_payload)
         case _ as unhandled:
             assert_never(unhandled)
 
@@ -102,18 +103,18 @@ def build_accepted_action_events(
         case ConfirmRequirementsAction():
             return [
                 build_requirements_summary_event(
-                    build_requirements_summary_data(action.payload, context=context)
+                    build_requirements_summary_payload(action.payload, context=context)
                 )
             ]
         case _ as unhandled:
             assert_never(unhandled)
 
 
-def build_requirements_summary_data(
+def build_requirements_summary_payload(
     payload: ConfirmRequirementsPayload,
     *,
     context: RequirementsSummaryRenderContext,
-) -> dict[str, Any]:
+) -> RequirementsSummaryPayload:
     normalized = normalize_requirements_summary_for_flow(
         payload.model_dump(),
         conversation=context.conversation,
@@ -121,16 +122,17 @@ def build_requirements_summary_data(
         language=context.ui_language,
     )
     requirements_payload = RequirementsSummaryPayload.model_validate(normalized)
-    requirements_data = requirements_payload.model_dump(mode="json")
-    requirements_data["requirements_version"] = build_requirements_version(
-        requirements_payload
+    return requirements_payload.model_copy(
+        update={
+            "requirements_version": build_requirements_version(requirements_payload)
+        },
+        deep=True,
     )
-    return requirements_data
 
 
 __all__ = [
     "RequirementsSummaryRenderContext",
     "build_accepted_action_events",
     "build_accepted_action_messages",
-    "build_requirements_summary_data",
+    "build_requirements_summary_payload",
 ]

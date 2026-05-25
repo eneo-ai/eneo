@@ -20,6 +20,7 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     slot_classification_metadata_from_result,
     tool_calls_from_message,
 )
+from intric.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from intric.flows.ai_builder.ai_builder_slot_classifier import (
     ClassifiedSlot,
     SlotClassificationResult,
@@ -162,19 +163,21 @@ def test_provider_safe_tool_call_id_maps_legacy_scoped_revision_id() -> None:
 
 def test_requirements_summary_round_trips_through_canonical_metadata() -> None:
     metadata = requirements_summary_to_metadata(
-        {
-            "requirements_version": "req_1",
-            "summary": "Build a document summary flow.",
-            "key_decisions": [
-                {
-                    "topic": "input",
-                    "decision": "Use uploaded user documents.",
-                }
-            ],
-            "input_description": "Uploaded documents from the user.",
-            "output_description": "A concise summary.",
-            "assumptions": ["The user will upload files at runtime."],
-        }
+        RequirementsSummaryPayload.model_validate(
+            {
+                "requirements_version": "req_1",
+                "summary": "Build a document summary flow.",
+                "key_decisions": [
+                    {
+                        "topic": "input",
+                        "decision": "Use uploaded user documents.",
+                    }
+                ],
+                "input_description": "Uploaded documents from the user.",
+                "output_description": "A concise summary.",
+                "assumptions": ["The user will upload files at runtime."],
+            }
+        )
     )
 
     parsed = requirements_summary_from_metadata(metadata)

@@ -112,7 +112,7 @@ async def dispatch_backend_selected_question_if_any(
             analysis=request.discovery_analysis,
         )
         if discovery_followup is not None:
-            if discovery_followup.question_data.get("question_id") == question_id:
+            if discovery_followup.question_data.question_id == question_id:
                 followup = discovery_followup
             else:
                 logger.warning(
@@ -121,7 +121,7 @@ async def dispatch_backend_selected_question_if_any(
                     extra={
                         "requested_question_id": question_id,
                         "fallback_question_id": (
-                            discovery_followup.question_data.get("question_id")
+                            discovery_followup.question_data.question_id
                         ),
                     },
                 )
