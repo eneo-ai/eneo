@@ -91,7 +91,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T005
+active_task: T023
 
 tasks:
   - id: T001
@@ -404,7 +404,7 @@ tasks:
   - id: T005
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: low
     objective: "Mechanically split the oversized Flow router test file by router/API surface without changing assertions or behavior."
     allowed_files:
@@ -422,12 +422,71 @@ tasks:
     stop_if:
       - "The split requires changing assertions, fixtures, or behavior."
       - "A moved test fails for reasons not caused by import/module path adjustment."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Mechanically split the 4654-line Flow router test file into router/API-surface files. test_flow_router.py now contains shared test support only, while test bodies moved to CRUD, upload, run execution, review checkpoint, evidence, scope error, and template router test modules. Import ownership was corrected after Claude review: new files import stdlib, third-party, and intric symbols canonically, and import only underscore-prefixed test helpers from the support module."
+      evidence:
+        - "backend/tests/unittests/flows/test_flow_router.py:1"
+        - "backend/tests/unittests/flows/test_flow_router.py:405"
+        - "backend/tests/unittests/flows/test_flow_router_crud.py:1"
+        - "backend/tests/unittests/flows/test_flow_upload_router.py:1"
+        - "backend/tests/unittests/flows/test_flow_run_execution_router.py:1"
+        - "backend/tests/unittests/flows/test_flow_review_checkpoint_router.py:1"
+        - "backend/tests/unittests/flows/test_flow_evidence_router.py:1"
+        - "backend/tests/unittests/flows/test_flow_scope_errors.py:1"
+        - "backend/tests/unittests/flows/test_flow_template_router.py:1"
+      commands:
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_router.py -q"
+          status: pass
+          output: "97 passed, 15 warnings before split."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_router.py --collect-only -q > /tmp/t005_pre_collect.txt"
+          status: pass
+          output: "97 collected ids before split."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_router_crud.py tests/unittests/flows/test_flow_upload_router.py tests/unittests/flows/test_flow_run_execution_router.py tests/unittests/flows/test_flow_review_checkpoint_router.py tests/unittests/flows/test_flow_evidence_router.py tests/unittests/flows/test_flow_scope_errors.py tests/unittests/flows/test_flow_template_router.py --collect-only -q > /tmp/t005_post_collect.txt && normalize/compare collected ids"
+          status: pass
+          output: "97 pre ids and 97 post ids; normalized ids match."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_router_crud.py tests/unittests/flows/test_flow_upload_router.py tests/unittests/flows/test_flow_run_execution_router.py tests/unittests/flows/test_flow_review_checkpoint_router.py tests/unittests/flows/test_flow_evidence_router.py tests/unittests/flows/test_flow_scope_errors.py tests/unittests/flows/test_flow_template_router.py -q"
+          status: pass
+          output: "97 passed, 15 warnings"
+        - cmd: "cd backend && uv run ruff check tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_router_crud.py tests/unittests/flows/test_flow_upload_router.py tests/unittests/flows/test_flow_run_execution_router.py tests/unittests/flows/test_flow_review_checkpoint_router.py tests/unittests/flows/test_flow_evidence_router.py tests/unittests/flows/test_flow_scope_errors.py tests/unittests/flows/test_flow_template_router.py"
+          status: pass
+          output: "All checks passed"
+        - cmd: "cd backend && uv run ruff format --check tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_router_crud.py tests/unittests/flows/test_flow_upload_router.py tests/unittests/flows/test_flow_run_execution_router.py tests/unittests/flows/test_flow_review_checkpoint_router.py tests/unittests/flows/test_flow_evidence_router.py tests/unittests/flows/test_flow_scope_errors.py tests/unittests/flows/test_flow_template_router.py"
+          status: pass
+          output: "8 files already formatted"
+        - cmd: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_router_crud.py tests/unittests/flows/test_flow_upload_router.py tests/unittests/flows/test_flow_run_execution_router.py tests/unittests/flows/test_flow_review_checkpoint_router.py tests/unittests/flows/test_flow_evidence_router.py tests/unittests/flows/test_flow_scope_errors.py tests/unittests/flows/test_flow_template_router.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "support import AST contract: every split file imports only underscore-prefixed names from tests.unittests.flows.test_flow_router"
+          status: pass
+          output: "support imports are underscore helpers only"
+        - cmd: "test \"$(rg -n '^(async )?def test_' backend/tests/unittests/flows/test_flow_router.py | wc -l | tr -d ' ')\" = \"0\""
+          status: pass
+          output: "no-tests-left"
+        - cmd: "cd backend && uv run pytest tests/unittests/flows -q --collect-only"
+          status: pass
+          output: "4267 tests collected"
+        - cmd: "git diff --check"
+          status: pass
+      peer_review:
+        claude:
+          plan_artifact: ".codex/artifacts/claude-peer-loop-t005-router-test-mechanical-split-plan-20260525T200448Z.md"
+          revised_plan_artifact: ".codex/artifacts/claude-peer-loop-t005-router-test-mechanical-split-revised-plan-20260525T200733Z.md"
+          first_implementation_artifact: ".codex/artifacts/claude-peer-loop-t005-router-test-mechanical-split-implementation-review-20260525T201706Z.md"
+          final_artifact: ".codex/artifacts/claude-peer-loop-t005-router-test-split-implementation-review-after-import-fix-20260525T202307Z.md"
+          verdict: "Final GREEN_LIGHT yes; MIN_SCORE 9. Prior P1 god-module re-export blocker resolved by canonical imports and helper-only support imports."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t005-router-test-split-antigravity-synthesis-20260525T202442Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 9; blockers none."
+      notes:
+        - "Did not rename test_flow_router.py to a non-test support module because T005 allowed_files did not include a new support module path; keep this as a future pure support-module rename only if Judge/PM expands allowed files."
+        - "T004 scope helper evidence moved after the split: _assert_scope_mismatch is now at backend/tests/unittests/flows/test_flow_router.py:405, while moved scope-error assertions live in backend/tests/unittests/flows/test_flow_scope_errors.py."
+        - "Preserved unrelated dirty/untracked files, including docker-compose, AGENTS.md, PRODUCT.md, devcontainer lock, root review docs, and utvecklingssamtal.mp3."
 
   - id: T023
     type: scout
     assignee: Scout
-    status: queued
+    status: active
     reasoning_hint: medium
     objective: "Inventory Flow dead code, legacy compatibility paths, obsolete fallback behavior, and tests that only protect compatibility slated for deletion."
     inputs:
