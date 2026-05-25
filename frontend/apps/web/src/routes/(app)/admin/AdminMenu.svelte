@@ -12,6 +12,7 @@
   import { IconCPU } from "@intric/icons/CPU";
   import { IconBulb } from "@intric/icons/bulb";
   import { IconHistory } from "@intric/icons/history";
+  import { IconSparkles } from "@intric/icons/sparkles";
   import { page } from "$app/stores";
   import { Navigation } from "$lib/components/layout";
   import { ChartPie, LayoutTemplate, Cloud, Plug, ShieldCheck } from "lucide-svelte";
@@ -56,6 +57,12 @@
       label={m.templates()}
     />
   {/if}
+  <Navigation.Link
+    href={localizeHref("/admin/help-assistants")}
+    isActive={isSelected("/admin/help-assistants", currentRoute)}
+    icon={IconSparkles}
+    label={m.admin_help_assistants_nav_label()}
+  />
   <Navigation.Link
     href={localizeHref("/admin/security-classifications")}
     isActive={isSelected("/admin/security-classifications", currentRoute)}
