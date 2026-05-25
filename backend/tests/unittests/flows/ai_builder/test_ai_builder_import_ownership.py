@@ -259,6 +259,7 @@ CREATE_COMPILER_PATH = Path("src/intric/flows/ai_builder/ai_builder_create_compi
 CREATE_COMPILER_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_create_compiler")
 )
+EDIT_MODELS_PATH = Path("src/intric/flows/ai_builder/ai_builder_edit_models.py")
 EDIT_COMPILER_PATH = Path("src/intric/flows/ai_builder/ai_builder_edit_compiler.py")
 EDIT_COMPILER_ALLOWED_TYPE_IGNORE_LINES = frozenset[int]()
 RUNTIME_INPUT_FIELDS_MODULE = ".".join(
@@ -1187,6 +1188,35 @@ def test_edit_compiler_working_state_uses_typed_entries() -> None:
             violations.append(
                 f"{edit_compiler_path}:{node.lineno} annotation {rendered}"
             )
+
+    assert violations == []
+
+
+def test_edit_models_do_not_encode_operation_shape_as_field_comments() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    edit_models_path = backend_root / EDIT_MODELS_PATH
+    text = edit_models_path.read_text()
+
+    banned_snippets = (
+        "# Required for",
+        "# For add ops only",
+        "# For modify ops only",
+        "# For add/modify",
+    )
+    task_markers = (
+        # Concatenated so this guard's own source does not trip the check.
+        "T" + "106",
+        "T" + "107",
+        "Ph" + "ase",
+        "\u00a7" + "A",
+        "plan " + "\u00a7",
+    )
+    scanned_text = text.lower()
+    violations = [
+        f"{edit_models_path}: contains {snippet!r}"
+        for snippet in (*banned_snippets, *task_markers)
+        if snippet.lower() in scanned_text
+    ]
 
     assert violations == []
 

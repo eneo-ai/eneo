@@ -11,6 +11,7 @@ and executes the *result*.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import (
@@ -46,7 +47,7 @@ class StepPlacement(BaseModel):
     """Where to insert a new step relative to existing steps."""
 
     position: Literal["before", "after", "append"]
-    anchor_ref: str | None = None  # Required for before/after
+    anchor_ref: str | None = None
 
 
 class StepPatch(BaseModel):
@@ -74,10 +75,103 @@ class StepEditOperation(BaseModel):
     """A single edit operation on a step."""
 
     op: Literal["add", "modify", "remove"]
-    target_ref: str | None = None  # Required for modify/remove
-    placement: StepPlacement | None = None  # Required for add
-    add_payload: NewStepDraft | None = None  # For add ops only
-    patch: StepPatch | None = None  # For modify ops only
+    target_ref: str | None = None
+    placement: StepPlacement | None = None
+    add_payload: NewStepDraft | None = None
+    patch: StepPatch | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StepOperationShapeIssue:
+    code: str
+    message: str
+    step_ref: str | None = None
+
+
+def validate_step_operation_shape(
+    op: StepEditOperation,
+    *,
+    label: str,
+    valid_refs: list[str] | None = None,
+) -> tuple[StepOperationShapeIssue, ...]:
+    issues: list[StepOperationShapeIssue] = []
+
+    if op.op == "add":
+        if op.target_ref is not None:
+            issues.append(
+                StepOperationShapeIssue(
+                    code="add_with_target_ref",
+                    message=(
+                        f"{label}: 'add' operations must NOT have target_ref. "
+                        "To modify an existing step, use op='modify' instead."
+                    ),
+                )
+            )
+        if op.add_payload is None:
+            issues.append(
+                StepOperationShapeIssue(
+                    code="add_missing_payload",
+                    message=(
+                        f"{label}: 'add' operations require add_payload with a "
+                        "typed new-step draft."
+                    ),
+                )
+            )
+        if (
+            op.placement is not None
+            and op.placement.position != "append"
+            and op.placement.anchor_ref is None
+        ):
+            issues.append(
+                StepOperationShapeIssue(
+                    code="placement_missing_anchor",
+                    message=(
+                        f"{label}: placement position '{op.placement.position}' "
+                        f"requires anchor_ref.{_valid_refs_suffix(valid_refs)}"
+                    ),
+                )
+            )
+
+    elif op.op == "modify":
+        if op.target_ref is None:
+            issues.append(
+                StepOperationShapeIssue(
+                    code="modify_missing_target",
+                    message=(
+                        f"{label}: 'modify' operations require target_ref."
+                        f"{_valid_refs_suffix(valid_refs)}"
+                    ),
+                )
+            )
+        if op.patch is None:
+            issues.append(
+                StepOperationShapeIssue(
+                    step_ref=op.target_ref,
+                    code="modify_missing_patch",
+                    message=(
+                        f"{label}: 'modify' operations require a patch with at "
+                        "least one field."
+                    ),
+                )
+            )
+
+    elif op.op == "remove":
+        if op.target_ref is None:
+            issues.append(
+                StepOperationShapeIssue(
+                    code="remove_missing_target",
+                    message=(
+                        f"{label}: 'remove' operations require target_ref."
+                        f"{_valid_refs_suffix(valid_refs)}"
+                    ),
+                )
+            )
+
+    return tuple(issues)
+
+
+def _valid_refs_suffix(valid_refs: list[str] | None) -> str:
+    return f" Valid refs: {valid_refs}" if valid_refs is not None else ""
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +194,7 @@ class FormFieldOperation(BaseModel):
 
     op: Literal["add", "modify", "remove"]
     field_name: str
-    field_payload: FormFieldSpec | None = None  # For add/modify
+    field_payload: FormFieldSpec | None = None
 
 
 # ---------------------------------------------------------------------------

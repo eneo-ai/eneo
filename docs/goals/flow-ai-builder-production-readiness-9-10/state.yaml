@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T107
+active_task: T108
 
 interruptions:
   - id: I001
@@ -9780,7 +9780,7 @@ tasks:
   - id: T107
     type: worker
     assignee: Worker
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Implement the peer-gated edit-operation structural shape ownership cleanup selected by T106."
     constraints:
@@ -9840,6 +9840,82 @@ tasks:
         antigravity_if_available: true
     swagger_openapi_impact: "None expected. T107 is internal backend edit-mode validation ownership and should not require Swagger/OpenAPI/API example updates."
     expected_score_impact: "Can improve Single Source of Truth, Human Readability, Human Reviewability, Test Quality, and AI Slop / Comment / Naming evidence inside edit mode. Do not raise the overall strict floor above 8 unless post-implementation evidence proves every remaining weak dimension is now 9."
+    receipt:
+      completed_at: "2026-05-25"
+      repo_reality:
+        head_before_commit: "5d6032a49 Select AI Builder edit operation shape cleanup"
+        branch: "feature/refactor-flows-flowai"
+        dirty_status_before_commit: "dirty with T107-owned backend files plus unrelated workspace files preserved: .devcontainer/docker-compose.yml, .gitignore, AGENTS.md, .devcontainer/devcontainer-lock.json, PRODUCT.md, utvecklingssamtal.mp3"
+        session_goal_tool_note: "get_goal works but still reports stale T081 objective text; no set_goal/update-objective primitive is available. Durable state.yaml remains the source of truth."
+      summary: "Moved edit-operation structural shape issue construction into ai_builder_edit_models.py via typed StepOperationShapeIssue and validate_step_operation_shape(...), while keeping validate_edit_draft(...) as the LLM/user feedback boundary and semantic flow-context validator. Deleted comment-only operation requiredness from the edit models, added model-level shape tests including add/modify no-short-circuit cases, and added an ownership guard against reintroducing comment-only shape rules or task/phase markers."
+      artifact: ".codex/artifacts/flow-ai-builder-t107-implementation-summary.md"
+      files_changed:
+        - "backend/src/intric/flows/ai_builder/ai_builder_edit_models.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_edit_validator.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_models.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      canonical_owner_result:
+        edit_operation_shape_owner: "ai_builder_edit_models.py owns typed structural shape issue construction."
+        feedback_boundary_owner: "ai_builder_edit_validator.py remains the LLM/user feedback boundary and maps shape issues into SpecValidationResult."
+        semantic_validation_owner: "ai_builder_edit_validator.py continues to own valid refs, placement anchor existence, form fields, mechanics, output-mode, and capability rules."
+      accepted_peer_feedback:
+        - "Claude requested symmetric add-operation no-short-circuit coverage; added test_reports_all_add_shape_issues_without_short_circuiting."
+        - "Claude requested an explanatory comment for the ownership guard's concatenated marker strings; added one why-comment in the test."
+        - "Antigravity requested an explicit remove branch instead of a final fallback; applied."
+        - "Antigravity requested case-insensitive ownership-guard matching; applied."
+      rejected_or_deferred:
+        - "Empty/no-op StepPatch invalidation deferred. Red-test exploration showed test_normalize_edit_draft_mechanics_does_not_clear_existing_bindings_on_noise expects malformed binding noise to normalize to an empty no-op patch and still validate; changing that is an edit-normalizer policy tranche, not T107 structural ownership cleanup."
+        - "Discriminated StepEditOperation union remains deferred because it would move useful LLM/self-correction feedback from validate_edit_draft into generic parse errors and churn construction sites."
+      validation:
+        focused:
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_edit_models.py tests/unittests/flows/ai_builder/test_ai_builder_edit_validator.py tests/unittests/flows/ai_builder/test_ai_builder_edit_normalizer.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 170 passed"
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_edit_models.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 52 passed after Claude-requested test addition"
+        broader:
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2419 passed, 4 skipped, 11 warnings"
+        static:
+          - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_edit_models.py src/intric/flows/ai_builder/ai_builder_edit_validator.py tests/unittests/flows/ai_builder/test_ai_builder_edit_models.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -> passed"
+          - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_edit_models.py src/intric/flows/ai_builder/ai_builder_edit_validator.py tests/unittests/flows/ai_builder/test_ai_builder_edit_models.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -> passed"
+          - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations"
+          - "git diff --check -> passed"
+        not_run:
+          - "Live AI Builder eval not run because T107 does not affect prompts, public API/SSE contracts, generated clients, frontend, or runtime materialization."
+          - "Swagger/OpenAPI generation not run because T107 has no public API/schema/example impact."
+      peer_review:
+        claude_implementation: ".codex/artifacts/claude-peer-loop-t107-edit-operation-shape-implementation-20260525T041239Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity_implementation: ".codex/artifacts/antigravity-peer-loop-t107-edit-operation-shape-implementation-gate-20260525T041509Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      codex_self_review:
+        simpler_for_maintainers: true
+        complexity_removed: "Comment-only requiredness hints and duplicated structural message construction in validator-local branches."
+        owner_clearer: "Structural edit-operation shape in ai_builder_edit_models.py; contextual LLM/user feedback and semantic rules in ai_builder_edit_validator.py."
+        coupling_removed: "Validator no longer owns every structural shape message, but still owns flow-context semantics."
+        easier_to_test_or_debug: "Structural issues are now unit-testable without full flow context while validator tests still prove integration feedback."
+        new_parallel_path_created: false
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+      swagger_openapi_impact: "None. T107 changed only internal backend edit-mode validation ownership; no REST/SSE models, Swagger examples, generated clients, frontend files, DB schema, or API docs changed."
+      score_impact:
+        strict_floor: 8
+        rationale: "Improves Single Source of Truth, Human Readability, Human Reviewability, Test Quality, and AI Slop / Comment / Naming evidence inside edit mode. Does not raise the overall Flow AI Builder score floor above 8 because this is one internal edit-mode seam, not proof every remaining weak dimension is now 9."
+
+  - id: T108
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest score-floor-moving Flow AI Builder tranche after T107 from current repo evidence. Do not implement during this judge task."
+    constraints:
+      - "Stay within Flow AI Builder; do not move to broader Flows work."
+      - "Start from git status, latest commits, current scorecard, T107 receipt, source evidence, and artifacts."
+      - "Do not select file splitting, LOC reduction, or broad cleanup unless evidence shows concrete maintainability, robustness, reviewability, output-quality, API/DX, or typing/test-baseline gain."
+      - "Consider bounded AI-slop/comment/naming cleanup, deletion of stale compatibility wrappers if still present, planner/source topology and readability blockers, full-source typing/test baseline, live eval replay after behavior-affecting changes, diagnostics/DX with future OpenTelemetry compatibility, data/schema/JSONB ownership gaps, and frontend/backend contract or generated-client drift."
+      - "If a candidate changes public API/SSE/schema/generated-client-visible contracts, include Swagger/OpenAPI docs, examples, and generated client updates in the candidate scope."
+      - "Use Claude for the plan gate and Antigravity with --spend-mode auto if available. Missing peer coverage is a skip, not a pass."
+    expected_output:
+      - "Ranked candidate table with file:line evidence."
+      - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, and expected score impact."
+      - "Explicit explanation of why the selected tranche is the highest score-floor mover rather than the easiest cleanup."
+      - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
     receipt: null
 
 checks:
@@ -9848,10 +9924,10 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T103 completed with Claude and Antigravity green. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T103
+    result: "T107 completed with Claude and Antigravity green. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T107
     commands:
-      - "Full Flow AI Builder unit suite -> 2411 passed, 4 skipped"
-      - "Ruff, Ruff format --check, Pyright, git diff --check -> passed"
-      - "Claude T103 implementation -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity T103 implementation -> GREEN_LIGHT yes / MIN_SCORE 9"
+      - "Full Flow AI Builder unit suite -> 2419 passed, 4 skipped"
+      - "Ruff, Ruff format --check, Pyright on src/intric/flows/ai_builder, git diff --check -> passed"
+      - "Claude T107 implementation -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity T107 implementation -> GREEN_LIGHT yes / MIN_SCORE 8"

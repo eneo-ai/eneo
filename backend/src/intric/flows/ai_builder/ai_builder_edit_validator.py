@@ -19,6 +19,7 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     FlowEditDraft,
     StepEditOperation,
     StepPatch,
+    validate_step_operation_shape,
 )
 from intric.flows.ai_builder.ai_builder_form_fields import (
     effective_form_field_names,
@@ -75,6 +76,16 @@ def validate_edit_draft(
 
     for i, op in enumerate(draft.operations):
         op_label = f"operations[{i}]"
+        for issue in validate_step_operation_shape(
+            op,
+            label=op_label,
+            valid_refs=valid_step_refs,
+        ):
+            result.add_error(
+                step_ref=issue.step_ref,
+                code=issue.code,
+                message=issue.message,
+            )
 
         if op.op == "add":
             _validate_add_op(
@@ -128,34 +139,12 @@ def _validate_add_op(
     available_form_fields: set[str],
     effective_steps: list[EffectiveStepState],
 ) -> None:
-    if op.target_ref is not None:
-        result.add_error(
-            step_ref=None,
-            code="add_with_target_ref",
-            message=(
-                f"{label}: 'add' operations must NOT have target_ref. "
-                f"To modify an existing step, use op='modify' instead."
-            ),
-        )
-
-    if op.add_payload is None:
-        result.add_error(
-            step_ref=None,
-            code="add_missing_payload",
-            message=f"{label}: 'add' operations require add_payload with a typed new-step draft.",
-        )
-
-    if op.placement is not None and op.placement.position != "append":
-        if op.placement.anchor_ref is None:
-            result.add_error(
-                step_ref=None,
-                code="placement_missing_anchor",
-                message=(
-                    f"{label}: placement position '{op.placement.position}' "
-                    f"requires anchor_ref. Valid refs: {valid_refs}"
-                ),
-            )
-        elif op.placement.anchor_ref not in valid_refs:
+    if (
+        op.placement is not None
+        and op.placement.position != "append"
+        and op.placement.anchor_ref is not None
+    ):
+        if op.placement.anchor_ref not in valid_refs:
             result.add_error(
                 step_ref=None,
                 code="invalid_placement_anchor",
@@ -194,16 +183,7 @@ def _validate_modify_op(
     available_form_fields: set[str],
     effective_steps: list[EffectiveStepState],
 ) -> None:
-    if op.target_ref is None:
-        result.add_error(
-            step_ref=None,
-            code="modify_missing_target",
-            message=(
-                f"{label}: 'modify' operations require target_ref. "
-                f"Valid refs: {valid_refs}"
-            ),
-        )
-    elif op.target_ref not in valid_refs:
+    if op.target_ref is not None and op.target_ref not in valid_refs:
         result.add_error(
             step_ref=op.target_ref,
             code="invalid_target_ref",
@@ -211,13 +191,6 @@ def _validate_modify_op(
                 f"{label}: target_ref '{op.target_ref}' does not match any "
                 f"existing step. Valid refs: {valid_refs}"
             ),
-        )
-
-    if op.patch is None:
-        result.add_error(
-            step_ref=op.target_ref,
-            code="modify_missing_patch",
-            message=f"{label}: 'modify' operations require a patch with at least one field.",
         )
 
     if op.patch is not None:
@@ -273,16 +246,7 @@ def _validate_remove_op(
     label: str,
     result: SpecValidationResult,
 ) -> None:
-    if op.target_ref is None:
-        result.add_error(
-            step_ref=None,
-            code="remove_missing_target",
-            message=(
-                f"{label}: 'remove' operations require target_ref. "
-                f"Valid refs: {valid_refs}"
-            ),
-        )
-    elif op.target_ref not in valid_refs:
+    if op.target_ref is not None and op.target_ref not in valid_refs:
         result.add_error(
             step_ref=op.target_ref,
             code="invalid_target_ref",

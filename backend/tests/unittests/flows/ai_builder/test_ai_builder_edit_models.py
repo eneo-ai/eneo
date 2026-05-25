@@ -22,6 +22,7 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     StepPatch,
     StepPlacement,
     TranscriptionPatch,
+    validate_step_operation_shape,
 )
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -125,6 +126,154 @@ class TestStepEditOperation:
         )
         assert op.op == "remove"
         assert op.target_ref == "existing_step_3"
+
+
+class TestStepEditOperationShape:
+    def test_reports_add_with_target_ref(self):
+        issues = validate_step_operation_shape(
+            StepEditOperation(
+                op="add",
+                target_ref="existing_step_1",
+                placement=StepPlacement(position="append"),
+                add_payload=_make_add_payload(
+                    name="Summary", instructions="Summarize."
+                ),
+            ),
+            label="operations[0]",
+            valid_refs=["existing_step_1"],
+        )
+
+        assert [(issue.code, issue.message, issue.step_ref) for issue in issues] == [
+            (
+                "add_with_target_ref",
+                (
+                    "operations[0]: 'add' operations must NOT have target_ref. "
+                    "To modify an existing step, use op='modify' instead."
+                ),
+                None,
+            )
+        ]
+
+    def test_reports_add_missing_payload(self):
+        issues = validate_step_operation_shape(
+            StepEditOperation(op="add", placement=StepPlacement(position="append")),
+            label="operations[0]",
+            valid_refs=["existing_step_1"],
+        )
+
+        assert [(issue.code, issue.message, issue.step_ref) for issue in issues] == [
+            (
+                "add_missing_payload",
+                (
+                    "operations[0]: 'add' operations require add_payload with a "
+                    "typed new-step draft."
+                ),
+                None,
+            )
+        ]
+
+    def test_reports_before_after_placement_missing_anchor(self):
+        issues = validate_step_operation_shape(
+            StepEditOperation(
+                op="add",
+                placement=StepPlacement(position="before"),
+                add_payload=_make_add_payload(
+                    name="Summary", instructions="Summarize."
+                ),
+            ),
+            label="operations[0]",
+            valid_refs=["existing_step_1"],
+        )
+
+        assert [(issue.code, issue.message, issue.step_ref) for issue in issues] == [
+            (
+                "placement_missing_anchor",
+                (
+                    "operations[0]: placement position 'before' requires "
+                    "anchor_ref. Valid refs: ['existing_step_1']"
+                ),
+                None,
+            )
+        ]
+
+    def test_reports_all_add_shape_issues_without_short_circuiting(self):
+        issues = validate_step_operation_shape(
+            StepEditOperation(
+                op="add",
+                target_ref="existing_step_1",
+                placement=StepPlacement(position="before"),
+            ),
+            label="operations[0]",
+            valid_refs=["existing_step_1"],
+        )
+
+        assert [(issue.code, issue.message, issue.step_ref) for issue in issues] == [
+            (
+                "add_with_target_ref",
+                (
+                    "operations[0]: 'add' operations must NOT have target_ref. "
+                    "To modify an existing step, use op='modify' instead."
+                ),
+                None,
+            ),
+            (
+                "add_missing_payload",
+                (
+                    "operations[0]: 'add' operations require add_payload with a "
+                    "typed new-step draft."
+                ),
+                None,
+            ),
+            (
+                "placement_missing_anchor",
+                (
+                    "operations[0]: placement position 'before' requires "
+                    "anchor_ref. Valid refs: ['existing_step_1']"
+                ),
+                None,
+            ),
+        ]
+
+    def test_reports_modify_missing_target_and_patch_without_short_circuiting(self):
+        issues = validate_step_operation_shape(
+            StepEditOperation(op="modify"),
+            label="operations[0]",
+            valid_refs=["existing_step_1"],
+        )
+
+        assert [(issue.code, issue.message, issue.step_ref) for issue in issues] == [
+            (
+                "modify_missing_target",
+                (
+                    "operations[0]: 'modify' operations require target_ref. "
+                    "Valid refs: ['existing_step_1']"
+                ),
+                None,
+            ),
+            (
+                "modify_missing_patch",
+                "operations[0]: 'modify' operations require a patch with at least one field.",
+                None,
+            ),
+        ]
+
+    def test_reports_remove_missing_target(self):
+        issues = validate_step_operation_shape(
+            StepEditOperation(op="remove"),
+            label="operations[0]",
+            valid_refs=["existing_step_1"],
+        )
+
+        assert [(issue.code, issue.message, issue.step_ref) for issue in issues] == [
+            (
+                "remove_missing_target",
+                (
+                    "operations[0]: 'remove' operations require target_ref. "
+                    "Valid refs: ['existing_step_1']"
+                ),
+                None,
+            )
+        ]
 
 
 class TestFlowEditDraft:
