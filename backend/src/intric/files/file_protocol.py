@@ -16,7 +16,9 @@ from intric.main.exceptions import (
 )
 
 
-def bytes_extractor(filepath: Path, _mimetype: str, _filename: str | None = None):
+def bytes_extractor(
+    filepath: Path, _mimetype: str, _filename: str | None = None
+) -> bytes:
     with open(filepath, "rb") as file:
         return file.read()
 
@@ -51,14 +53,12 @@ class FileProtocol:
         max_size: int,
         extractor: Callable[[Path, str, str | None], str | bytes],
         limit_setting_name: str | None = None,
-    ):
-        file_size = self.file_size_service.get_file_size(upload_file.file)
-        if file_size > max_size:
-            raise FileTooLargeException(
-                file_size=file_size,
-                max_size=max_size,
-                setting_name=limit_setting_name,
-            )
+    ) -> FileBaseWithContent:
+        self.validate_size(
+            upload_file,
+            max_size=max_size,
+            limit_setting_name=limit_setting_name,
+        )
 
         filepath = await self.file_size_service.save_file_to_disk(upload_file.file)
         filepath = Path(filepath)
@@ -80,6 +80,21 @@ class FileProtocol:
         finally:
             with contextlib.suppress(FileNotFoundError):
                 os.remove(filepath)
+
+    def validate_size(
+        self,
+        upload_file: UploadFile,
+        *,
+        max_size: int,
+        limit_setting_name: str | None = None,
+    ) -> None:
+        file_size = self.file_size_service.get_file_size(upload_file.file)
+        if file_size > max_size:
+            raise FileTooLargeException(
+                file_size=file_size,
+                max_size=max_size,
+                setting_name=limit_setting_name,
+            )
 
     def _create_file_base(
         self,
@@ -116,7 +131,7 @@ class FileProtocol:
         upload_file: UploadFile,
         max_size: int | None = None,
         limit_setting_name: str | None = None,
-    ):
+    ) -> FileBaseWithContent:
         if max_size is None:
             max_size = get_settings().upload_file_to_session_max_size
             if limit_setting_name is None:
@@ -135,7 +150,7 @@ class FileProtocol:
         upload_file: UploadFile,
         max_size: int | None = None,
         limit_setting_name: str | None = None,
-    ):
+    ) -> FileBaseWithContent:
         if max_size is None:
             max_size = get_settings().upload_image_to_session_max_size
             if limit_setting_name is None:
@@ -154,7 +169,7 @@ class FileProtocol:
         upload_file: UploadFile,
         max_size: int | None = None,
         limit_setting_name: str | None = None,
-    ):
+    ) -> FileBaseWithContent:
         if max_size is None:
             max_size = get_settings().transcription_max_file_size
             if limit_setting_name is None:
@@ -168,12 +183,31 @@ class FileProtocol:
             limit_setting_name=limit_setting_name,
         )
 
+    async def document_to_domain(
+        self,
+        upload_file: UploadFile,
+        max_size: int | None = None,
+        limit_setting_name: str | None = None,
+    ) -> FileBaseWithContent:
+        if max_size is None:
+            max_size = get_settings().upload_max_file_size
+            if limit_setting_name is None:
+                limit_setting_name = "UPLOAD_MAX_FILE_SIZE"
+
+        return await self._get_content(
+            upload_file,
+            file_type=FileType.DOCUMENT,
+            max_size=max_size,
+            extractor=bytes_extractor,
+            limit_setting_name=limit_setting_name,
+        )
+
     async def to_domain(
         self,
         upload_file: UploadFile,
         max_size: int | None = None,
         limit_setting_name: str | None = None,
-    ):
+    ) -> FileBaseWithContent:
         content_type = upload_file.content_type or ""
         if ImageMimeTypes.has_value(content_type):
             return await self.image_to_domain(

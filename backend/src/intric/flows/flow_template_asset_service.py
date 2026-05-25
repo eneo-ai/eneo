@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -67,12 +67,17 @@ class FlowTemplateAssetService:
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
         if flow.id is None:
             raise NotFoundException("Flow template asset parent flow is missing an id.")
-        file_service = cast(Any, self.file_service)
-        saved_file = cast(File, await file_service.save_docx_template(upload_file))
+        document_file = await self.file_service.document_from_upload(upload_file)
+        if document_file.blob is None:
+            raise BadRequestException(
+                "The uploaded DOCX template could not be saved with file content.",
+                code="flow_template_missing_content",
+            )
         placeholders = inspect_docx_template_bytes(
-            saved_file.blob or b"",
-            filename=saved_file.name,
+            document_file.blob,
+            filename=document_file.name,
         )
+        saved_file = await self.file_service.save_file_content(document_file)
         asset = await self.template_asset_repo.create(
             flow_id=flow.id,
             space_id=flow.space_id,
@@ -177,7 +182,7 @@ class FlowTemplateAssetService:
         )
 
 
-def _unique_placeholder_names(placeholders: list[dict[str, Any]]) -> list[str]:
+def _unique_placeholder_names(placeholders: list[dict[str, str | None]]) -> list[str]:
     names: list[str] = []
     for item in placeholders:
         name = str(item.get("name", "")).strip()

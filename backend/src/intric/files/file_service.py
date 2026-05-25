@@ -1,6 +1,7 @@
 import hashlib
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from typing import Any
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -27,7 +28,7 @@ class FileService:
         self.protocol = protocol
 
     @asynccontextmanager
-    async def _write_transaction(self) -> AsyncIterator[None]:
+    async def _write_transaction(self) -> AsyncGenerator[None, None]:
         """Open a short write transaction only when one is not already active."""
         session = self.repo.session
         if session.in_transaction():
@@ -37,26 +38,29 @@ class FileService:
         async with session.begin():
             yield
 
-    async def save_file(self, upload_file: UploadFile, max_size: int | None = None):
+    async def save_file(
+        self, upload_file: UploadFile, max_size: int | None = None
+    ) -> File:
         if max_size is None:
             file = await self.protocol.to_domain(upload_file)
         else:
             file = await self.protocol.to_domain(upload_file, max_size=max_size)
 
-        async with self._write_transaction():
-            saved_file = await self.repo.add(
-                FileCreate.model_validate(
-                    {
-                        **file.model_dump(mode="python"),
-                        **self._owner_fields(),
-                        "tenant_id": self.user.tenant_id,
-                    }
-                )
-            )
+        return await self.save_file_content(file)
 
-        return saved_file
+    async def document_from_upload(
+        self,
+        upload_file: UploadFile,
+        max_size: int | None = None,
+    ) -> FileBaseWithContent:
+        if max_size is None:
+            return await self.protocol.document_to_domain(upload_file)
+        return await self.protocol.document_to_domain(upload_file, max_size=max_size)
 
-    async def _save_file_record(self, file: FileBaseWithContent):
+    async def save_file_content(self, file: FileBaseWithContent) -> File:
+        return await self._save_file_record(file)
+
+    async def _save_file_record(self, file: FileBaseWithContent) -> File:
         async with self._write_transaction():
             saved_file = await self.repo.add(
                 FileCreate.model_validate(
