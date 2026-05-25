@@ -37,6 +37,10 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
     resolve_requirements_state,
 )
+from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
+    NO_EXTRA_RUNTIME_METADATA,
+    infer_runtime_metadata_slot,
+)
 from intric.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
     SlotClassificationResult,
@@ -338,6 +342,12 @@ def _model_slot_can_replace(
     if existing_slot.source == "heuristic":
         if (
             existing_slot.name == "primary_runtime_input"
+            and existing_slot.confidence == "high"
+        ):
+            return False
+        if (
+            existing_slot.name == "runtime_metadata_fields"
+            and existing_slot.value == NO_EXTRA_RUNTIME_METADATA
             and existing_slot.confidence == "high"
         ):
             return False
@@ -649,6 +659,12 @@ def _heuristic_slot_confidence(
     slot_value: str,
     freeform_text: str,
 ) -> SlotConfidence:
+    if (
+        question_id == "runtime_metadata_fields"
+        and slot_value == NO_EXTRA_RUNTIME_METADATA
+        and infer_runtime_metadata_slot(freeform_text) == NO_EXTRA_RUNTIME_METADATA
+    ):
+        return "high"
     if question_id != "input_material_mode" or not freeform_text:
         return "medium"
 

@@ -1070,6 +1070,44 @@ def test_extract_answer_signals_does_not_infer_runtime_metadata_from_output_fiel
     assert "runtime_metadata_fields" not in signals
 
 
+def test_extract_answer_signals_treats_negated_swedish_runtime_fields_as_absent() -> (
+    None
+):
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "Användaren ska inte fylla i extra formulärfält, metadatafält "
+                    "eller inmatningsfält vid körning. Rapportfält som datum, "
+                    "språk i ljudet, namn, kontaktuppgifter, risker och "
+                    "osäkerheter ska hämtas från ljudet och transkriberingen."
+                ),
+            }
+        ]
+    )
+
+    assert signals["runtime_metadata_fields"] == {"no_extra_metadata"}
+
+
+def test_extract_answer_signals_treats_source_derived_report_fields_as_absent() -> None:
+    signals = extract_answer_signals(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "Alla rapportfält ska hämtas från ljudet/transkriberingen: "
+                    "datum, källa, språk i ljudet, ljudkvalitet, namn, "
+                    "kontaktuppgifter, risker och osäkerheter. Om något saknas "
+                    "ska rapporten skriva Ej nämnt i underlaget."
+                ),
+            }
+        ]
+    )
+
+    assert signals["runtime_metadata_fields"] == {"no_extra_metadata"}
+
+
 @pytest.mark.parametrize(
     "text",
     [

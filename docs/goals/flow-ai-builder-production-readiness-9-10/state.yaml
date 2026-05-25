@@ -653,6 +653,86 @@ interruptions:
         - "Flow run history UI still lacks a copyable AI-Builder-style technical report; this remains a separate DX/UI task."
         - "The broader Flow AI Builder 9/10 goal remains incomplete; next work should return to the board's read-only audit/ranking instead of extending this interruption."
       score_impact: "Improves Runtime Reliability, Single Source of Truth, Clean Architecture, Human Reviewability, and Developer Diagnostic Experience for AI Builder-created flow runtime contracts. Does not raise the strict overall score floor above 8 because this live interruption does not close every remaining subsystem-wide 9/10 blocker."
+  - id: I010
+    kind: live_bug_hotfix
+    status: committed
+    reported_at: "2026-05-25T12:00:00+02:00"
+    summary: "Realistic Swedish audio-to-DOCX report prompts failed with `self_correction_quality_failure` because AI Builder accepted `runtime_metadata_fields` for report fields that should be extracted from the audio/transcript, causing the critic to repeatedly ask for runtime form fields."
+    decision: "Fix the evidence boundary before the critic instead of suppressing `runtime_metadata_requires_form_fields`: runtime metadata inference now treats explicit Swedish no-extra-field wording and source-derived report fields as `no_extra_metadata`, while real user-entered runtime fields still resolve to metadata inputs and must be wired to form fields."
+    constraints:
+      - "Preserve the real `runtime_metadata_requires_form_fields` invariant."
+      - "Do not add hallucinated form fields for source-derived report sections."
+      - "Do not solve this as prompt-only guidance or a critic suppression."
+      - "Keep the fix inside runtime metadata inference and planning-state classifier merge boundaries."
+      - "Preserve unrelated dirty files."
+    evidence:
+      - "Live session `2bd426c7-fcc2-48f9-886a-bcf81107cd45`, request `1d42197b-c385-40d5-873e-3a2d7677b4b0`, model `openai/gpt-5.4`, accepted `runtime_metadata_fields` and failed with repeated Swedish feedback asking which extra runtime fields the user should fill in."
+      - "Live session `f83c1c15-325f-45c8-ac94-d4820f6241fa`, request `9d34d8be-6405-405a-acca-035badb47d44`, model `openai/gpt-5.4-mini`, repeated the same failure even after the prompt explicitly said no extra form fields, metadata fields, or input fields at runtime."
+      - "`ai_builder_runtime_input_fields.py` was the existing canonical owner for runtime input field inference and already fed `extract_answer_signals` through `infer_runtime_metadata_slot`."
+      - "`planning_state_builder.py` allowed a high-confidence speculative model slot to replace deterministic heuristic `no_extra_metadata`, so the bad classifier result could survive into the critic."
+    acceptance:
+      - "Explicit Swedish negation such as `Användaren ska inte fylla i extra formulärfält, metadatafält eller inmatningsfält` resolves to `no_extra_metadata`."
+      - "Report fields that are stated to be extracted from audio/transcription resolve to `no_extra_metadata` and do not produce runtime field hints."
+      - "Common Swedish source-derived paraphrases such as `kommer ur transkriptet` and `tas från ljudinspelningen` are covered."
+      - "A simulated bad high-confidence classifier cannot replace high-confidence deterministic `no_extra_metadata` for explicit negation or source-derived report fields."
+      - "Real runtime field requests such as `användaren ska fylla i ärendenummer och ansvarig enhet vid körning` still resolve to `detailed_case_metadata` with field hints."
+      - "Mixed prompts with source-derived report fields plus a genuine runtime field keep the runtime field instead of collapsing to no-extra metadata."
+      - "The critic still emits missing-form-field feedback when runtime metadata is genuinely requested and the plan lacks form_fields."
+      - "The audio-to-DOCX report plan shape can include audio input, transcription, structured extraction, and DOCX output without hallucinated runtime form fields."
+    receipt:
+      completed_at: "2026-05-25T14:42:06+02:00"
+      summary: "Closed the live source-derived report-field classification bug. Runtime metadata inference now recognizes explicit Swedish no-extra runtime field clauses and source-derived report fields from audio/transcription as `no_extra_metadata`; planning-state merge treats that deterministic no-extra verdict as high-confidence and prevents speculative model slot overwrite. Positive and mixed-signal regressions prove actual user-entered runtime fields still become metadata inputs and still require form fields."
+      repo_reality:
+        branch: "feature/refactor-flows-flowai"
+        head_before_commit: "a6aee8eac Enforce Flow question binding contract"
+        unrelated_dirty_files_preserved: ".devcontainer/docker-compose.yml, .gitignore, AGENTS.md, .devcontainer/devcontainer-lock.json, PRODUCT.md, utvecklingssamtal.mp3."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-i010-runtime-metadata-source-derived-report-fields-summary.md"
+        - ".codex/artifacts/claude-peer-loop-i010-source-derived-report-fields-runtime-metadata-fix-20260525T123712Z.md"
+        - ".codex/artifacts/claude-peer-loop-i010-source-derived-report-fields-post-claude-hardening-20260525T124140Z.md"
+      changed_files:
+        - "backend/src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py"
+        - "backend/src/intric/flows/ai_builder/planning_state_builder.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py"
+        - "backend/tests/unittests/flows/ai_builder/test_planning_state_builder.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      validation:
+        - "Red-first focused tests failed before implementation on explicit Swedish negation/source-derived cases and planning-state classifier overwrite, proving the live bug shape was reproduced."
+        - "PYTHONPATH=backend/src backend/.venv/bin/pytest backend/tests/unittests/flows/ai_builder/test_ai_builder_runtime_input_fields.py -q -> 42 passed after post-Claude hardening."
+        - "PYTHONPATH=backend/src backend/.venv/bin/pytest focused runtime-metadata regression set -> 49 passed."
+        - "PYTHONPATH=backend/src backend/.venv/bin/pytest backend/tests/unittests/flows/ai_builder/test_ai_builder_slot_classifier.py backend/tests/unittests/flows/ai_builder/test_planning_state_builder.py backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py -q -> 164 passed."
+        - "PYTHONPATH=backend/src backend/.venv/bin/pytest backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py backend/tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_finalization.py -q -> 131 passed."
+        - "PYTHONPATH=backend/src backend/.venv/bin/pytest backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py backend/tests/unittests/flows/ai_builder/test_ai_builder_create_feedback.py -q -> 191 passed."
+        - "Deterministic replay of original-like Swedish audio report prompt, explicit no-extra-fields prompt, and source-derived paraphrase prompt -> runtime_metadata_fields no_extra_metadata, high heuristic slot, simulated bad classifier did not override, critic feedback None."
+        - "Deterministic replay of positive runtime-fields control -> detailed_case_metadata and existing missing-form-fields critic feedback."
+        - "PYTHONPATH=backend/src backend/.venv/bin/pytest backend/tests/unittests/flows/ai_builder -q -> 2460 passed, 4 skipped, 2 known unrelated baseline failures."
+        - "backend/.venv/bin/ruff check touched I010 backend source/test files -> passed."
+        - "backend/.venv/bin/pyright backend/src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py backend/src/intric/flows/ai_builder/planning_state_builder.py -> 0 errors, 0 warnings, 0 informations."
+        - "git diff --check -> passed."
+        - "rg anti-slippage check over touched source/test files for phase IDs and temp paths -> no matches."
+      known_validation_limitations:
+        - "The exact live session records were not present in the local DB, so validation used deterministic replay of the reported prompt shape rather than an authenticated live session replay."
+        - "No authenticated browser/API live smoke was run after this source change. The replay proves the classifier/critic failure shape; a fresh live eval remains a recommended post-commit check after service restart."
+        - "Full AI Builder unit suite still has two unrelated baseline failures from the prior I009 runtime-contract commit: `test_ai_builder_materializer.py::TestCompileCreateFlow::test_step_fields_propagate_correctly` and `test_importlinter_boundary.py::test_source_modules_cover_every_flows_sibling`."
+        - "The source-derived marker set is strongest for audio/transcript prompts. Document-source paraphrases such as `PDF-filen` remain future coverage if the same pattern appears outside audio."
+      peer_review:
+        claude_implementation_gate: ".codex/artifacts/claude-peer-loop-i010-source-derived-report-fields-runtime-metadata-fix-20260525T123712Z.md -> GREEN_LIGHT yes / MIN_SCORE 8; Claude confirmed the fix is structural and keeps the critic invariant intact."
+        claude_re_review_after_hardening: ".codex/artifacts/claude-peer-loop-i010-source-derived-report-fields-post-claude-hardening-20260525T124140Z.md -> GREEN_LIGHT yes / MIN_SCORE 8; Claude verified the accepted hardening items and found no blockers."
+      self_review:
+        simpler_for_maintainer: true
+        complexity_removed: "Removed the path where a speculative runtime_metadata_fields classifier answer could override deterministic no-extra evidence for explicit negation/source-derived report fields. Removed a redundant window-scoped negation helper after Claude flagged it."
+        owner_clarified: "ai_builder_runtime_input_fields.py owns runtime metadata polarity and field-hint inference; planning_state_builder.py owns classifier merge precedence."
+        invariant_preserved: "Actual runtime metadata requests still produce detailed_case_metadata, extracted field hints, and critic feedback when form_fields are missing."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "Hand-maintained source-derived marker lists can miss future paraphrases; if another source domain repeats this bug, a typed source-derived intent rule or classifier-backed boundary may be warranted."
+        - "No post-commit live smoke was run in this turn; the next authenticated live eval should include both the original long prompt and the explicit no-extra-fields prompt."
+        - "The broader Flow AI Builder 9/10 goal remains incomplete; this is a live normal-user output-quality hotfix, not a score-floor completion tranche."
+      score_impact: "Improves Runtime Reliability, Normal-User Output Quality, Developer Diagnostic Experience, Single Source of Truth, Human Reviewability, and Test Quality for audio-to-DOCX report creation. Does not raise the strict overall Flow AI Builder score floor above 8 because this live interruption does not close every remaining subsystem-wide 9/10 blocker."
 
 scoring_target:
   dimensions:

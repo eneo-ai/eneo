@@ -74,6 +74,8 @@ _RUNTIME_METADATA_ABSENCE_TRIGGERS = (
     "extra fält",
     "extra falt",
     "extra fields",
+    "metadatafält",
+    "metadatafalt",
     "metadata",
 )
 _RUNTIME_METADATA_INTENT_TRIGGERS = (
@@ -253,6 +255,68 @@ _POST_TRIGGER_NEGATABLE_ABSENCE_PREDICATE_TOKENS = frozenset(
         "needed",
     }
 )
+_SOURCE_DERIVED_FIELD_MARKERS: tuple[str, ...] = (
+    "rapportfält",
+    "rapportfalt",
+    "rapportens fält",
+    "rapportens falt",
+    "fält i rapporten",
+    "falt i rapporten",
+    "metadatafält i rapporten",
+    "metadatafalt i rapporten",
+    "metadata fields in the report",
+    "report fields",
+    "report sections",
+)
+_SOURCE_DERIVED_ACTION_MARKERS: tuple[str, ...] = (
+    "ska hämtas från",
+    "ska hamtas fran",
+    "hämtas från",
+    "hamtas fran",
+    "ska extraheras från",
+    "ska extraheras fran",
+    "extraheras från",
+    "extraheras fran",
+    "extraheras ur",
+    "utifrån",
+    "utifran",
+    "baserat på",
+    "baserat pa",
+    "tas från",
+    "tas fran",
+    "tas ur",
+    "kommer från",
+    "kommer fran",
+    "kommer ur",
+    "dras ut ur",
+    "läses från",
+    "lases fran",
+    "läses ur",
+    "lases ur",
+    "derived from",
+    "extracted from",
+    "pulled from",
+    "taken from",
+)
+_SOURCE_MATERIAL_MARKERS: tuple[str, ...] = (
+    "ljudet",
+    "ljudfilen",
+    "inspelningen",
+    "inspelning",
+    "inspelningsfilen",
+    "ljudinspelningen",
+    "ljudinspelning",
+    "transkriptet",
+    "transkript",
+    "transkriberingen",
+    "transkriptionen",
+    "underlaget",
+    "audio",
+    "recording",
+    "source material",
+    "transcript",
+    "transcription",
+)
 _ABSENCE_AUXILIARY_TOKENS = frozenset(
     {
         "are",
@@ -272,9 +336,10 @@ def runtime_input_fields_declared_absent(text: str) -> bool:
     fields needed" from being parsed as a request for a field named "needed".
     """
 
-    tokens = normalize_discovery_text(text).split()
-    if not tokens:
+    token_spans = _normalized_token_spans(text)
+    if not token_spans:
         return False
+    tokens = [token for token, _, _ in token_spans]
 
     trigger_polarities: list[tuple[int, bool]] = []
     for trigger in _RUNTIME_METADATA_ABSENCE_TRIGGERS:
@@ -285,12 +350,17 @@ def runtime_input_fields_declared_absent(text: str) -> bool:
             before = tokens[max(0, start_index - 4) : start_index]
             after_start = start_index + len(trigger_tokens)
             after = tokens[after_start : after_start + 4]
+            start_char = token_spans[start_index][1]
             trigger_polarities.append(
                 (
                     start_index,
                     _field_trigger_has_absence_polarity(
                         before=before,
                         after=after,
+                    )
+                    or _trigger_clause_has_negated_user_field_action(
+                        text,
+                        trigger_start_char=start_char,
                     ),
                 )
             )
@@ -301,6 +371,10 @@ def runtime_input_fields_declared_absent(text: str) -> bool:
 
 def runtime_input_fields_requested(text: str) -> bool:
     if runtime_input_fields_declared_absent(text):
+        return False
+    if _source_derived_report_fields_requested(
+        text
+    ) and not _has_user_provided_runtime_field_clause(text):
         return False
     normalized = normalize_discovery_text(text)
     return contains_any_phrase(
@@ -345,6 +419,10 @@ def runtime_metadata_allows_input_fields(
 def infer_runtime_metadata_slot(text: str) -> RuntimeMetadataState | None:
     if runtime_input_fields_declared_absent(text):
         return NO_EXTRA_RUNTIME_METADATA
+    if _source_derived_report_fields_requested(
+        text
+    ) and not _has_user_provided_runtime_field_clause(text):
+        return NO_EXTRA_RUNTIME_METADATA
     if extract_runtime_input_field_hints(text):
         return DETAILED_CASE_METADATA
     if runtime_input_fields_requested(text):
@@ -387,6 +465,46 @@ def _field_trigger_has_absence_polarity(
     if any(token in _ABSENCE_PREDICATE_TOKENS for token in after):
         return True
     return _post_trigger_clause_has_absence_polarity(after)
+
+
+def _trigger_clause_has_negated_user_field_action(
+    text: str,
+    *,
+    trigger_start_char: int,
+) -> bool:
+    prefix = text[
+        _last_clause_boundary_end(text, trigger_start_char) : trigger_start_char
+    ]
+    tokens = normalize_discovery_text(prefix).split()
+    if not tokens or not any(token in _NEGATION_TOKENS for token in tokens):
+        return False
+
+    for phrase in _USER_FIELD_ACTION_PHRASES:
+        phrase_tokens = normalize_discovery_text(phrase).split()
+        if not phrase_tokens:
+            continue
+        for start_index in _find_token_sequence_indexes(tokens, phrase_tokens):
+            if _user_field_action_is_negated(tokens, start_index):
+                return True
+    return False
+
+
+def _last_clause_boundary_end(text: str, end_char: int) -> int:
+    prefix = text[:end_char]
+    indexes = [prefix.rfind(boundary) for boundary in (".", "\n", ";", "!", "?")]
+    latest = max(indexes)
+    return 0 if latest < 0 else latest + 1
+
+
+def _source_derived_report_fields_requested(text: str) -> bool:
+    normalized = normalize_discovery_text(text)
+    if not normalized:
+        return False
+    return (
+        contains_any_phrase(normalized, _SOURCE_DERIVED_FIELD_MARKERS)
+        and contains_any_phrase(normalized, _SOURCE_DERIVED_ACTION_MARKERS)
+        and contains_any_phrase(normalized, _SOURCE_MATERIAL_MARKERS)
+    )
 
 
 def _post_trigger_clause_has_absence_polarity(after: list[str]) -> bool:
@@ -454,9 +572,19 @@ def _user_field_action_end_char_indexes(text: str) -> tuple[int, ...]:
         for start_index in _find_token_sequence_indexes(tokens, phrase_tokens):
             if not _has_user_actor_before_action(tokens, start_index):
                 continue
+            if _user_field_action_is_negated(tokens, start_index):
+                continue
             end_index = start_index + len(phrase_tokens) - 1
             indexes.add(token_spans[end_index][2])
     return tuple(sorted(indexes))
+
+
+def _user_field_action_is_negated(
+    tokens: list[str],
+    action_start_index: int,
+) -> bool:
+    before = tokens[max(0, action_start_index - 4) : action_start_index]
+    return any(token in _NEGATION_TOKENS for token in before)
 
 
 def _has_user_actor_before_action(tokens: list[str], action_start_index: int) -> bool:

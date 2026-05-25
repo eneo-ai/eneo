@@ -345,6 +345,44 @@ def test_flags_missing_form_fields_when_runtime_metadata_was_requested() -> None
     assert "form_fields" in feedback
 
 
+def test_flags_missing_form_fields_when_freeform_runtime_fields_were_requested() -> (
+    None
+):
+    conversation = [
+        {
+            "role": "user",
+            "content": (
+                "Bygg ett ljudflöde där användaren ska fylla i ärendenummer "
+                "och ansvarig enhet vid körning innan ljudet transkriberas."
+            ),
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Ljudrapport",
+        steps=[
+            _step(
+                "step_a",
+                "Transkribera ljud",
+                "Transkribera ljudet.",
+                input_type=InputType.AUDIO,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+            ),
+            _step(
+                "step_b",
+                "Skapa rapport",
+                "Skriv rapporten.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+    )
+
+    feedback = build_conversation_aware_quality_feedback(conversation, spec)
+
+    assert feedback is not None
+    assert "form_fields" in feedback
+
+
 def test_no_input_fields_instruction_does_not_request_runtime_form_fields() -> None:
     conversation = [
         {
@@ -380,6 +418,69 @@ def test_no_input_fields_instruction_does_not_request_runtime_form_fields() -> N
 
     assert "runtime_metadata_requires_form_fields" not in issue_ids
     assert "rich_workflow_requires_form_fields" not in issue_ids
+
+
+def test_audio_docx_report_fields_from_transcript_do_not_request_runtime_form_fields() -> (
+    None
+):
+    conversation = [
+        {
+            "role": "user",
+            "content": (
+                "Bygg ett generellt transkriptionsflöde. Användaren laddar upp "
+                "en ljudfil vid körning. Flödet ska transkribera ljudet, "
+                "extrahera fakta från transkriptionen och skapa en DOCX-rapport. "
+                "Användaren ska inte fylla i extra formulärfält, metadatafält "
+                "eller inmatningsfält vid körning. Alla rapportfält ska hämtas "
+                "från ljudet/transkriberingen: datum, källa, språk i ljudet, "
+                "ljudkvalitet, namn, kontaktuppgifter, risker och osäkerheter. "
+                "Om något saknas ska rapporten skriva Ej nämnt i underlaget."
+            ),
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Transkriptionsrapport",
+        steps=[
+            _step(
+                "step_audio",
+                "Transkribera ljud",
+                "Transkribera ljudfilen.",
+                input_type=InputType.AUDIO,
+                output_type=OutputType.TEXT,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+            ),
+            _step(
+                "step_extract",
+                "Extrahera rapportfakta",
+                (
+                    "Extrahera datum, källa, språk, ljudkvalitet, namn, "
+                    "kontaktuppgifter, risker och osäkerheter från transkriptionen. "
+                    "Skriv Ej nämnt i underlaget när uppgift saknas."
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "required": ["rapportfakta"],
+                    "properties": {"rapportfakta": {"type": "object"}},
+                    "additionalProperties": False,
+                },
+            ),
+            _step(
+                "step_docx",
+                "Skapa DOCX-rapport",
+                "Skapa DOCX-rapporten från extraherade rapportfakta.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+    )
+
+    feedback = build_conversation_aware_quality_feedback(conversation, spec)
+
+    assert feedback is None
 
 
 def test_flags_unrelated_mcp_selection_when_requested_mcp_is_unavailable() -> None:

@@ -518,6 +518,104 @@ class TestPolicyDefaults:
         assert state.resolved_slots["terminal_output"].value == "docx_document"
 
 
+class TestRuntimeMetadataClassificationBoundaries:
+    def test_classifier_cannot_override_explicit_negated_runtime_field_request(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Bygg ett transkriptionsflöde där användaren laddar upp "
+                        "ljud vid körning. Användaren ska inte fylla i extra "
+                        "formulärfält, metadatafält eller inmatningsfält vid "
+                        "körning. Rapportfält som datum, språk i ljudet, namn, "
+                        "kontaktuppgifter, risker och osäkerheter ska hämtas "
+                        "från ljudet och transkriberingen."
+                    ),
+                )
+            ]
+        )
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(
+                    _classified(
+                        "runtime_metadata_fields",
+                        "detailed_case_metadata",
+                        "high",
+                    ),
+                )
+            ),
+            prompt_hash="f" * 64,
+        )
+
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "no_extra_metadata"
+        assert slot.source == "heuristic"
+        assert slot.confidence == "high"
+
+    def test_classifier_cannot_override_source_derived_report_fields(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Bygg ett flöde där användaren laddar upp en ljudfil, "
+                        "flödet transkriberar ljudet och skapar en DOCX-rapport. "
+                        "Alla rapportfält ska hämtas från ljudet/transkriberingen: "
+                        "datum, källa, språk i ljudet, ljudkvalitet, namn, "
+                        "kontaktuppgifter, risker och osäkerheter. Om något "
+                        "saknas ska rapporten skriva Ej nämnt i underlaget."
+                    ),
+                )
+            ]
+        )
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(
+                    _classified(
+                        "runtime_metadata_fields",
+                        "detailed_case_metadata",
+                        "high",
+                    ),
+                )
+            ),
+            prompt_hash="a" * 64,
+        )
+
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "no_extra_metadata"
+        assert slot.source == "heuristic"
+        assert slot.confidence == "high"
+
+    def test_real_runtime_fields_still_resolve_as_metadata_inputs(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Bygg ett ljudflöde där användaren ska fylla i "
+                        "ärendenummer och ansvarig enhet vid körning innan "
+                        "ljudet transkriberas."
+                    ),
+                )
+            ]
+        )
+
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "detailed_case_metadata"
+        assert slot.source == "heuristic"
+
+
 class TestSlotClassificationMetadataReplay:
     def test_replays_terminal_output_and_runtime_fields_from_conversation_metadata(
         self,

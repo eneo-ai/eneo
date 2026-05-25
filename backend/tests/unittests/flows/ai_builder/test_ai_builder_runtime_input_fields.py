@@ -81,6 +81,81 @@ def test_runtime_input_field_extraction_understands_post_trigger_negation(
     assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
 
 
+def test_runtime_input_field_extraction_understands_negated_swedish_runtime_field_list() -> (
+    None
+):
+    text = (
+        "Användaren ska inte fylla i extra formulärfält, metadatafält eller "
+        "inmatningsfält vid körning. Rapportfält som datum, språk i ljudet, "
+        "namn, kontaktuppgifter, risker och osäkerheter ska hämtas från "
+        "ljudet och transkriberingen."
+    )
+
+    assert runtime_input_fields_declared_absent(text)
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
+
+
+def test_runtime_input_field_extraction_treats_source_derived_report_fields_as_no_extra_metadata() -> (
+    None
+):
+    text = (
+        "Alla rapportfält ska hämtas från ljudet/transkriberingen: datum, "
+        "källa, språk i ljudet, ljudkvalitet, namn, kontaktuppgifter, risker "
+        "och osäkerheter. Om något saknas ska rapporten skriva Ej nämnt i "
+        "underlaget."
+    )
+
+    assert not runtime_input_fields_declared_absent(text)
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
+
+
+def test_runtime_input_field_extraction_accepts_swedish_source_derived_paraphrases() -> (
+    None
+):
+    text = (
+        "Rapportfält kommer ur transkriptet och tas från ljudinspelningen: "
+        "datum, källa, namn, kontaktuppgifter, risker och osäkerheter."
+    )
+
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
+
+
+def test_runtime_input_field_extraction_preserves_runtime_fields_with_source_report_fields() -> (
+    None
+):
+    text = (
+        "Användaren ska fylla i ärendenummer vid körning. Alla rapportfält "
+        "ska hämtas från ljudet/transkriberingen: datum, källa, namn, "
+        "kontaktuppgifter, risker och osäkerheter."
+    )
+
+    assert [
+        (hint.variable_name, hint.label)
+        for hint in extract_runtime_input_field_hints(text)
+    ] == [("arendenummer", "ärendenummer")]
+    assert infer_runtime_metadata_slot(text) == DETAILED_CASE_METADATA
+
+
+def test_runtime_input_field_extraction_preserves_real_swedish_runtime_fields() -> None:
+    text = (
+        "Användaren ska fylla i ärendenummer och ansvarig enhet vid körning "
+        "innan ljudet analyseras."
+    )
+
+    assert not runtime_input_fields_declared_absent(text)
+    assert [
+        (hint.variable_name, hint.label)
+        for hint in extract_runtime_input_field_hints(text)
+    ] == [
+        ("arendenummer", "ärendenummer"),
+        ("ansvarig_enhet", "ansvarig enhet"),
+    ]
+    assert infer_runtime_metadata_slot(text) == DETAILED_CASE_METADATA
+
+
 def test_runtime_input_field_extraction_understands_bare_metadata_absence() -> None:
     text = "Skapa ett rapportflöde. Ingen metadata behövs vid körning."
 
