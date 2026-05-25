@@ -121,6 +121,19 @@ def validate_input_contract(
             text=text,
             schema=input_contract,
         )
+        if (
+            contract_validation["parse_attempted"]
+            and not contract_validation["parse_succeeded"]
+        ):
+            exc = TypedIOValidationException(
+                (
+                    f"Step {step_order} input: expected valid JSON text for "
+                    "the structured input contract."
+                ),
+                code="typed_io_contract_violation",
+            )
+            setattr(exc, "contract_validation", contract_validation)
+            raise exc
         try:
             validate_against_contract(
                 candidate,

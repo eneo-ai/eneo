@@ -1733,10 +1733,11 @@ async def test_text_input_contract_accepts_json_array_string(user):
 @pytest.mark.asyncio
 async def test_text_input_contract_rejects_non_json_for_object_schema(user):
     executor, _, _, _ = _build_executor(user)
+    raw_text = "not json at all"
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
-        input_payload={"text": "not json at all"},
+        input_payload={"text": raw_text},
     )
     step = _runtime_step(
         input_type="text",
@@ -1754,6 +1755,8 @@ async def test_text_input_contract_rejects_non_json_for_object_schema(user):
         await executor._execute_step(step=step, run=run)
 
     assert exc.value.code == "typed_io_contract_violation"
+    assert raw_text not in str(exc.value)
+    assert len(str(exc.value)) < 200
 
 
 @pytest.mark.asyncio

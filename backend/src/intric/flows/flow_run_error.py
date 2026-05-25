@@ -11,6 +11,7 @@ FlowRunErrorJson: TypeAlias = dict[str, object]
 
 _MAX_STEP_DESCRIPTION_LENGTH = 256
 _MAX_MESSAGE_LENGTH = 4096
+_MESSAGE_TRUNCATION_SUFFIX = "... [truncated]"
 
 
 class FlowRunErrorDetails(BaseModel):
@@ -102,7 +103,7 @@ class FlowRunError(BaseModel):
     ) -> FlowRunError:
         return cls(
             code=code,
-            message=message,
+            message=_bound_message(message),
             source=source,
             step_id=step_id,
             step_order=step_order,
@@ -120,3 +121,12 @@ def parse_flow_run_error(value: object) -> FlowRunError | None:
     if value is None:
         return None
     return FlowRunError.model_validate(value)
+
+
+def _bound_message(message: str) -> str:
+    if len(message) <= _MAX_MESSAGE_LENGTH:
+        return message
+    budget = _MAX_MESSAGE_LENGTH - len(_MESSAGE_TRUNCATION_SUFFIX)
+    if budget <= 0:
+        return _MESSAGE_TRUNCATION_SUFFIX[:_MAX_MESSAGE_LENGTH]
+    return f"{message[:budget]}{_MESSAGE_TRUNCATION_SUFFIX}"

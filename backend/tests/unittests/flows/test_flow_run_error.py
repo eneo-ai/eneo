@@ -98,10 +98,12 @@ def test_flow_run_error_requires_machine_readable_code() -> None:
         )
 
 
-def test_flow_run_error_rejects_unbounded_messages() -> None:
-    with pytest.raises(ValidationError):
-        FlowRunError.from_source(
-            FlowRunLifecycleSource.EXECUTOR_FAILED,
-            code="flow_run_failed",
-            message="x" * 4097,
-        )
+def test_flow_run_error_from_source_truncates_unbounded_messages() -> None:
+    error = FlowRunError.from_source(
+        FlowRunLifecycleSource.EXECUTOR_FAILED,
+        code="flow_run_failed",
+        message="x" * 5000,
+    )
+
+    assert len(error.message) == 4096
+    assert error.message.endswith("... [truncated]")

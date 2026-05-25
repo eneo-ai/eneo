@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from intric.main.exceptions import TypedIOValidationException
 from intric.flows.runtime.step_input_validation import (
     validate_input_contract,
     validate_runtime_input_policy,
 )
 from intric.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
+from intric.main.exceptions import TypedIOValidationException
 
 
 def test_validate_runtime_input_policy_rejects_unsupported_input_type() -> None:
@@ -83,7 +83,9 @@ def test_validate_runtime_input_policy_rejects_missing_image_files(monkeypatch) 
     assert exc.value.code == "typed_io_missing_required_files"
 
 
-def test_validate_runtime_input_policy_rejects_non_image_files_for_image_input(monkeypatch) -> None:
+def test_validate_runtime_input_policy_rejects_non_image_files_for_image_input(
+    monkeypatch,
+) -> None:
     monkeypatch.setitem(
         INPUT_TYPE_POLICIES,
         "image",
@@ -112,7 +114,9 @@ def test_validate_runtime_input_policy_rejects_non_image_files_for_image_input(m
     assert exc.value.code == "typed_io_missing_required_files"
 
 
-def test_validate_runtime_input_policy_rejects_mixed_image_and_non_image_files(monkeypatch) -> None:
+def test_validate_runtime_input_policy_rejects_mixed_image_and_non_image_files(
+    monkeypatch,
+) -> None:
     monkeypatch.setitem(
         INPUT_TYPE_POLICIES,
         "image",
@@ -207,16 +211,20 @@ def test_validate_input_contract_keeps_text_for_string_schema() -> None:
 
 
 def test_validate_input_contract_invalid_text_json_attaches_parse_metadata() -> None:
+    raw_text = "{invalid-json"
+
     with pytest.raises(TypedIOValidationException) as exc:
         validate_input_contract(
             step_order=41,
             input_type="text",
             input_contract={"type": "object", "properties": {"a": {"type": "number"}}},
-            text="{invalid-json",
+            text=raw_text,
             structured=None,
         )
 
     assert exc.value.code == "typed_io_contract_violation"
+    assert raw_text not in str(exc.value)
+    assert len(str(exc.value)) < 200
     contract_validation = getattr(exc.value, "contract_validation", None)
     assert contract_validation is not None
     assert contract_validation["parse_attempted"] is True

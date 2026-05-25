@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from intric.flows.domain.flow import (
@@ -103,7 +104,9 @@ def build_typed_failure_plan(
     error_message: str,
     input_payload_json: dict[str, Any] | None = None,
     effective_prompt: str | None = None,
+    run_error_message: str | None = None,
 ) -> StepFailurePlan:
+    public_error = run_error_message or error_message
     return StepFailurePlan(
         attempt_status=FlowStepAttemptStatus.FAILED,
         error_code=error_code,
@@ -114,9 +117,35 @@ def build_typed_failure_plan(
             input_payload_json=input_payload_json,
             effective_prompt=effective_prompt,
         ),
-        run_error_message=error_message,
-        return_result={"status": "failed", "error": error_message},
+        run_error_message=public_error,
+        return_result={"status": "failed", "error": public_error},
     )
+
+
+def build_typed_failure_run_error_message(
+    *,
+    step_order: int,
+    error_code: str,
+    contract_validation: object | None,
+) -> str:
+    summary = _contract_validation_summary(contract_validation)
+    if summary is not None:
+        return f"Step {step_order}: {summary} ({error_code})."
+    return f"Step {step_order}: typed input/output validation failed ({error_code})."
+
+
+def _contract_validation_summary(contract_validation: object | None) -> str | None:
+    if not isinstance(contract_validation, Mapping):
+        return None
+    validation = cast(Mapping[object, object], contract_validation)
+    parse_attempted = validation.get("parse_attempted") is True
+    parse_succeeded = validation.get("parse_succeeded") is True
+    if not parse_attempted or parse_succeeded:
+        return None
+    schema_type_hint = validation.get("schema_type_hint")
+    if schema_type_hint in {"object", "array"}:
+        return f"expected valid JSON text for structured {schema_type_hint} input"
+    return "expected valid JSON text for structured input"
 
 
 def build_generic_failure_plan(

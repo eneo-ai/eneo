@@ -478,6 +478,107 @@ interruptions:
         - "A fresh authenticated live smoke after backend restart remains recommended for this exact UI path."
         - "The post-T112/T113 score-floor audit remains the correct next step before any further implementation; do not continue into T113/T114/T115 without that read-only decision gate."
       score_impact: "Improves Runtime Reliability, Normal-User Output Quality, Human Reviewability, Developer Diagnostic Experience, and Single Source of Truth for selected-step terminal output edits. Does not raise the strict overall Flow AI Builder score floor above 8 because this is a live interruption fix, not proof every remaining subsystem-wide dimension is now 9."
+  - id: I008
+    kind: live_bug_hotfix
+    status: committed
+    reported_at: "2026-05-25T09:41:36Z"
+    summary: "A Flow AI Builder-created flow failed at runtime with generic `flow_task_failure` after an explicit text underlag step retained a stale structured input_contract. The real typed input error then exceeded the 4096-character FlowRunError.message budget, causing the failure handler itself to fail and masking the typed_io error."
+    decision: "Implement a narrow, long-term runtime-contract fix with three canonical owners: AI Builder step normalization clears stale input_contract for explicit question underlag, runtime text contract validation short-circuits non-JSON text before jsonschema emits huge instance-containing errors, and FlowRunError.from_source owns bounded terminal error messages."
+    constraints:
+      - "Preserve unrelated dirty files."
+      - "Do not make JSON schemas lax, ignore extra properties globally, or add one-off logic for the reported flow id."
+      - "Do not globally ban input_type=text with input_contract because runtime intentionally supports valid JSON text satisfying structured contracts."
+      - "Keep typed_io_contract_violation as the machine-readable error code unless source evidence proves a public-code change is safe."
+      - "Do not add OpenTelemetry, broad observability, DB migrations, frontend redesign, public API schema changes, or generated-client changes in this slice."
+      - "Defer Flow run copyable technical report UX and first-step text-vs-document input-policy changes to follow-up ranking."
+    artifacts:
+      - ".codex/artifacts/flow-ai-builder-i008-flow-run-contract-diagnostics-plan.md"
+      - ".codex/artifacts/claude-peer-loop-i008-flow-runtime-contract-diagnostics-from-ai-builder-flow-20260525T095514Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-i008-flow-runtime-contract-diagnostics-synthesis-20260525T095744Z.md"
+      - ".codex/artifacts/flow-ai-builder-i008-revised-plan.md"
+      - ".codex/artifacts/claude-peer-loop-i008-revised-flow-runtime-contract-diagnostics-plan-20260525T100457Z.md"
+    peer_review:
+      claude_iteration_1: "GREEN_LIGHT no / MIN_SCORE 5; required promoting the explicit-underlag invariant, hardening the runtime consumer, replacing the overlong-message rejection test, and executor-level typed-failure coverage."
+      antigravity_iteration_1: "GREEN_LIGHT no / MIN_SCORE 7 with --spend-mode auto; agreed on the three-owner shape and required backward-compatible typed_io_contract_violation semantics."
+      claude_iteration_2: "GREEN_LIGHT yes / MIN_SCORE 8 after the revised plan preserved valid-JSON text contracts, specified the AI Builder invariant owner, and deferred frontend/first-step policy follow-ups."
+    acceptance:
+      - "A normalized AI Builder step with explicit input_bindings.question cannot retain a stale input_contract."
+      - "The source-material shape that created the live failure normalizes to input_contract=null instead of validating rendered text against an inherited object schema."
+      - "Valid JSON text still satisfies object/array input_contracts in Flow runtime."
+      - "Non-JSON text with a structured input_contract fails with a short typed_io_contract_violation before raw text reaches jsonschema validation."
+      - "FlowRunError.from_source bounds overlong messages and never fails the terminalization path on message length alone."
+      - "Typed step failures with overlong exception text preserve the original typed error code in the terminal run error instead of falling through to generic flow_task_failure."
+      - "Run-level typed error messages avoid raw rendered prompt/source-material leakage."
+    validation_required:
+      - "Focused AI Builder step-transition tests for explicit question binding clearing stale input_contract."
+      - "Focused step input validation tests preserving valid JSON text behavior and hardening non-JSON text behavior."
+      - "FlowRunError tests replacing overlong rejection with bounded from_source behavior."
+      - "Executor/runtime test proving overlong typed errors terminalize with typed code and bounded message."
+      - "Ruff check/format on touched backend files."
+      - "Pyright on touched AI Builder/runtime/error files."
+      - "git diff --check."
+    receipt:
+      completed_at: "2026-05-25T10:22:00Z"
+      summary: "Closed the live Flow run failure class by aligning three canonical owners: AI Builder step normalization now clears stale input_contract whenever a step has explicit question underlag, runtime input-contract validation short-circuits non-JSON text before jsonschema can emit huge instance-containing errors, and FlowRunError.from_source owns terminal message bounding. Typed runtime failures now preserve their typed error code in terminal run errors with bounded sanitized public messages instead of falling through to generic flow_task_failure."
+      repo_reality:
+        branch: "feature/refactor-flows-flowai"
+        head_before_commit: "1166cab45 Use slot classification for AI Builder output edits"
+        unrelated_dirty_files_preserved: ".devcontainer/docker-compose.yml, .gitignore, AGENTS.md, .devcontainer/devcontainer-lock.json, PRODUCT.md, utvecklingssamtal.mp3."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-i008-flow-run-contract-diagnostics-plan.md"
+        - ".codex/artifacts/flow-ai-builder-i008-revised-plan.md"
+        - ".codex/artifacts/flow-ai-builder-i008-implementation-summary.md"
+        - ".codex/artifacts/claude-peer-loop-i008-flow-runtime-contract-diagnostics-from-ai-builder-flow-20260525T095514Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-i008-flow-runtime-contract-diagnostics-synthesis-20260525T095744Z.md"
+        - ".codex/artifacts/claude-peer-loop-i008-revised-flow-runtime-contract-diagnostics-plan-20260525T100457Z.md"
+        - ".codex/artifacts/claude-peer-loop-i008-implementation-review-20260525T101753Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-i008-implementation-synthesis-20260525T102043Z.md"
+      changed_files:
+        - "backend/src/intric/flows/ai_builder/ai_builder_step_transition_policy.py"
+        - "backend/src/intric/flows/runtime/step_input_validation.py"
+        - "backend/src/intric/flows/flow_run_error.py"
+        - "backend/src/intric/flows/runtime/step_attempt_runtime.py"
+        - "backend/src/intric/flows/runtime/executor.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py"
+        - "backend/tests/unittests/flows/test_step_input_validation.py"
+        - "backend/tests/unittests/flows/test_typed_io_executor.py"
+        - "backend/tests/unittests/flows/test_flow_run_error.py"
+        - "backend/tests/unittests/flows/test_flow_executor_runtime.py"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      validation:
+        - "Red-first focused I008 tests failed before implementation for the expected current-code reasons: stale explicit-question input_contract, raw non-JSON text in validation messages, FlowRunError.from_source rejecting overlong messages, and typed failure terminalization raising during error handling."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py::test_normalize_ai_builder_spec_clears_explicit_question_input_contract tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py::test_normalize_ai_builder_spec_completes_source_material_underlag tests/unittests/flows/test_step_input_validation.py::test_validate_input_contract_invalid_text_json_attaches_parse_metadata tests/unittests/flows/test_typed_io_executor.py::test_text_input_contract_rejects_non_json_for_object_schema tests/unittests/flows/test_flow_run_error.py::test_flow_run_error_from_source_truncates_unbounded_messages tests/unittests/flows/test_flow_executor_runtime.py::test_typed_validation_failure_terminalizes_with_bounded_public_error -q -> 6 passed after implementation."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/test_step_input_validation.py tests/unittests/flows/test_flow_run_error.py tests/unittests/flows/test_step_attempt_runtime.py tests/unittests/flows/test_typed_io_executor.py -q -k 'not document_outputs_generate_downloadable_artifacts' -> 124 passed, 2 deselected."
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py::test_typed_validation_failure_terminalizes_with_bounded_public_error tests/unittests/flows/test_flow_executor_runtime.py::test_typed_validation_failure_persists_input_context_for_export tests/unittests/flows/test_flow_executor_runtime.py::test_typed_validation_failure_persists_model_telemetry tests/unittests/flows/test_flow_executor_runtime.py::test_typed_validation_failure_partial_typed_exc_falls_back_field_independently tests/unittests/flows/test_flow_executor_runtime.py::test_llm_timeout_failure_retains_attempt_start_provenance -q -> 5 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py -q -k 'not execute_step_records_attempt_start_before_llm_dispatch and not execute_step_uses_rag_chunks_when_knowledge_present and not execute_step_skips_rag_when_assistant_has_no_knowledge and not execute_step_rag_timeout_appends_diagnostic_and_continues and not execute_step_rag_failure_appends_diagnostic_and_continues and not execute_step_skips_rag_when_input_is_whitespace' -> 64 passed, 6 deselected."
+        - "cd backend && uv run pytest tests/unittests/flows/test_typed_io_executor.py::test_text_input_contract_rejects_extra_properties -q -> 1 passed."
+        - "cd backend && uv run ruff check touched I008 backend files -> passed."
+        - "cd backend && uv run ruff format --check touched I008 backend files -> passed."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder src/intric/flows/runtime src/intric/flows/flow_run_error.py -> 0 errors, 0 warnings, 0 informations."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright touched I008 source files -> 0 errors, 0 warnings, 0 informations."
+        - "ruby -e \"require 'yaml'; data=YAML.load_file('docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml'); puts 'yaml ok active=' + data['active_task'].to_s\" -> yaml ok active=I008 before receipt update."
+        - "git diff --check -> passed."
+      known_validation_limitations:
+        - "Full tests/unittests/flows/test_typed_io_executor.py still fails locally on the pre-existing host WeasyPrint/Pango dependency issue: OSError cannot load library 'libgobject-2.0-0'. The I008-relevant tests pass with the PDF artifact test deselected."
+        - "Full tests/unittests/flows/test_flow_executor_runtime.py still has six pre-existing stale-test failures where older tests mock _process_typed_output as a tuple while current runtime expects TypedOutputProcessingResult. The I008 typed-failure regression and the rest of that file pass with those six stale tests deselected."
+      peer_review:
+        claude_plan_iteration_1: ".codex/artifacts/claude-peer-loop-i008-flow-runtime-contract-diagnostics-from-ai-builder-flow-20260525T095514Z.md -> GREEN_LIGHT no / MIN_SCORE 5."
+        antigravity_plan_synthesis: ".codex/artifacts/antigravity-peer-loop-i008-flow-runtime-contract-diagnostics-synthesis-20260525T095744Z.md -> initial synthesis required revision; final recommendation selected the same three-owner shape."
+        claude_revised_plan_gate: ".codex/artifacts/claude-peer-loop-i008-revised-flow-runtime-contract-diagnostics-plan-20260525T100457Z.md -> GREEN_LIGHT yes / MIN_SCORE 8."
+        claude_implementation_gate: ".codex/artifacts/claude-peer-loop-i008-implementation-review-20260525T101753Z.md -> GREEN_LIGHT yes / MIN_SCORE 8."
+        antigravity_implementation_gate: ".codex/artifacts/antigravity-peer-loop-i008-implementation-synthesis-20260525T102043Z.md -> GREEN_LIGHT yes / MIN_SCORE 8 with --spend-mode auto; quota available."
+      self_review:
+        simpler_for_maintainer: true
+        complexity_removed: "Deleted the duplicate private _question_binding helper and moved stale explicit-underlag contract clearing to the central per-step normalizer instead of patching one source-material mutator."
+        owner_clarified: "ai_builder_step_transition_policy.py owns AI Builder step-shape invariants, step_input_validation.py owns runtime text/contract interpretation, flow_run_error.py owns message budget safety, and step_attempt_runtime.py owns sanitized typed-failure run messages."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "contract_validation metadata still travels dynamically on TypedIOValidationException. Claude and Antigravity both judged it safe for I008, but a future typed ContractValidationMetadata follow-up would improve static locality."
+        - "Flow run UI still lacks an AI-Builder-style copyable technical report in the history/error alert. This is deferred to a separate frontend/API DX task so I008 remains a backend runtime-contract fix."
+        - "First-step text-versus-document input policy remains a separate read-only ranking item; this interruption intentionally did not change input-source preference logic."
+      score_impact: "Improves Runtime Reliability, Developer Diagnostic Experience, Single Source of Truth, Human Reviewability, and Normal-User Output Quality for AI Builder-generated Flow runtime failures. Does not raise the strict overall Flow AI Builder score floor above 8 because this live interruption does not close every remaining subsystem-wide 9/10 blocker."
 
 scoring_target:
   dimensions:

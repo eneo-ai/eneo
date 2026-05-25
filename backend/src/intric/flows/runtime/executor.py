@@ -118,6 +118,7 @@ from intric.flows.runtime.step_attempt_runtime import (
     build_step_gate_decision,
     build_step_success_plan,
     build_typed_failure_plan,
+    build_typed_failure_run_error_message,
 )
 from intric.flows.runtime.step_execution_runtime import (
     FlowStepCancelledError,
@@ -1282,12 +1283,18 @@ class FlowRunExecutor:
         state: RunExecutionState | None = None,
     ) -> dict[str, Any]:
         failed_prompt = getattr(typed_exc, "effective_prompt", None)
+        error_code = typed_exc.code or "typed_io_validation_failed"
         failure_plan = build_typed_failure_plan(
             claimed=claimed,
-            error_code=typed_exc.code or "typed_io_validation_failed",
+            error_code=error_code,
             error_message=str(typed_exc),
             input_payload_json=failed_input_payload,
             effective_prompt=failed_prompt if isinstance(failed_prompt, str) else None,
+            run_error_message=build_typed_failure_run_error_message(
+                step_order=step.step_order,
+                error_code=error_code,
+                contract_validation=getattr(typed_exc, "contract_validation", None),
+            ),
         )
         await self._rollback()
         requested_model = getattr(typed_exc, "requested_model", None)

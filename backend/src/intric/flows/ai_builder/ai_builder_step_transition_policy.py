@@ -683,7 +683,7 @@ def _artifact_helper_source_binding(
     spec: FlowDraftSpecCore,
     artifact_step: StepSpec,
 ) -> str | None:
-    question = _question_binding(artifact_step)
+    question = question_binding(artifact_step.input_bindings)
     if question:
         return question
     if artifact_step.input_source != InputSource.PREVIOUS_STEP:
@@ -767,7 +767,7 @@ def _can_rewire_all_previous_to_previous_step(
     if step.input_source != InputSource.ALL_PREVIOUS_STEPS:
         return False
 
-    question = _question_binding(step)
+    question = question_binding(step.input_bindings)
     if question is None:
         return repeated_all_previous and not preserve_as_final_fan_in
 
@@ -865,6 +865,21 @@ def normalize_ai_builder_step(
             updates["output_config"] = normalized_output_config
 
     if (
+        question_binding(step.input_bindings) is not None
+        and step.input_contract is not None
+    ):
+        updates["input_contract"] = None
+        changes.append(
+            StepNormalizationChange(
+                code="explicit_question_input_contract_cleared",
+                field_suffix="input_contract",
+                message=(
+                    "Removed input_contract because the explicit question binding "
+                    "supplies rendered text, not the inherited structured object."
+                ),
+            )
+        )
+    elif (
         step.input_source == InputSource.ALL_PREVIOUS_STEPS
         and step.input_contract is not None
     ):
@@ -905,12 +920,3 @@ def _as_output_config_dict(output_config: Any) -> dict[str, Any] | None:
     for key, value in typed_output_config.items():
         normalized[str(key)] = value
     return normalized
-
-
-def _question_binding(step: StepSpec) -> str | None:
-    if not isinstance(step.input_bindings, dict):
-        return None
-    question = step.input_bindings.get("question")
-    if isinstance(question, str) and question.strip():
-        return question
-    return None

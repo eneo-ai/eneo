@@ -227,6 +227,34 @@ def test_normalize_ai_builder_spec_clears_all_previous_input_contract() -> None:
     )
 
 
+def test_normalize_ai_builder_spec_clears_explicit_question_input_contract() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Explicit underlag",
+        steps=[
+            _step(ref="step_a", name="Extract", input_source=InputSource.FLOW_INPUT),
+            _step(
+                ref="step_b",
+                name="Write",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                input_bindings={"question": "{{ step_a.output.structured.title }}"},
+                input_contract={
+                    "type": "object",
+                    "properties": {"title": {"type": "string"}},
+                },
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(spec)
+
+    assert normalized.steps[1].input_contract is None
+    assert any(
+        change.code == "explicit_question_input_contract_cleared"
+        for _step_spec, change in changes
+    )
+
+
 def test_normalize_ai_builder_spec_rewires_previous_only_binding() -> None:
     spec = FlowDraftSpecCore(
         flow_name="Previous only",
@@ -1028,6 +1056,10 @@ def test_normalize_ai_builder_spec_completes_source_material_underlag() -> None:
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.JSON,
                 output_type=OutputType.JSON,
+                input_contract={
+                    "type": "object",
+                    "properties": {"agenda": {"type": "array"}},
+                },
             ),
             _step(
                 ref="step_d",
@@ -1035,6 +1067,10 @@ def test_normalize_ai_builder_spec_completes_source_material_underlag() -> None:
                 input_source=InputSource.PREVIOUS_STEP,
                 input_type=InputType.JSON,
                 output_type=OutputType.DOCX,
+                input_contract={
+                    "type": "object",
+                    "properties": {"metadata": {"type": "object"}},
+                },
             ),
         ],
     )
@@ -1050,17 +1086,24 @@ def test_normalize_ai_builder_spec_completes_source_material_underlag() -> None:
             "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
         )
     }
+    assert normalized.steps[2].input_contract is None
     assert normalized.steps[3].input_type == InputType.TEXT
     assert normalized.steps[3].input_bindings == {
         "question": (
             "{{ step_c.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
         )
     }
+    assert normalized.steps[3].input_contract is None
     assert [
         change.code
         for _step_spec, change in changes
         if change.code == "source_material_underlag_completed"
     ] == ["source_material_underlag_completed", "source_material_underlag_completed"]
+    assert all(
+        step.input_contract is None
+        for step in normalized.steps
+        if question_binding(step.input_bindings) is not None
+    )
 
 
 def test_normalize_ai_builder_spec_completes_source_material_for_text_report() -> None:

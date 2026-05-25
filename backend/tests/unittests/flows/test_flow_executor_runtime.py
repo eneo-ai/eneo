@@ -1513,6 +1513,54 @@ async def test_typed_validation_failure_partial_typed_exc_falls_back_field_indep
 
 
 @pytest.mark.asyncio
+async def test_typed_validation_failure_terminalizes_with_bounded_public_error(user):
+    executor, flow_repo, flow_run_repo, _ = _build_executor(user)
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_repo.save_step_result = AsyncMock()
+    executor._terminalize_run = AsyncMock()
+    executor._rollback = AsyncMock()
+
+    step = _step_for_execute_step(step_order=3)
+    run_id = uuid4()
+    flow_id = uuid4()
+    claimed = _claimed_step_result(
+        run_id=run_id,
+        flow_id=flow_id,
+        tenant_id=user.tenant_id,
+        step_id=step.step_id,
+        assistant_id=step.assistant_id,
+    )
+    raw_source_excerpt = "SECRET_SOURCE_MATERIAL"
+    typed_exc = TypedIOValidationException(
+        "Step 3 input: "
+        + raw_source_excerpt
+        + (" x" * 5000)
+        + " is not of type 'object'",
+        code="typed_io_contract_violation",
+    )
+
+    await executor._handle_typed_step_failure(
+        run_id=run_id,
+        tenant_id=user.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=typed_exc,
+        failed_input_payload={"text": raw_source_excerpt},
+        state=_empty_execution_state(),
+    )
+
+    executor._terminalize_run.assert_awaited_once()
+    terminal_error = executor._terminalize_run.await_args.kwargs["error"]
+    assert isinstance(terminal_error, FlowRunError)
+    assert terminal_error.code == "typed_io_contract_violation"
+    assert terminal_error.step_order == 3
+    assert len(terminal_error.message) <= 4096
+    assert raw_source_excerpt not in terminal_error.message
+    assert "flow_task_failure" not in terminal_error.message
+
+
+@pytest.mark.asyncio
 async def test_cancelled_step_retains_attempt_start_provenance(user):
     executor, _, flow_run_repo, _ = _build_executor(user)
     flow_run_repo.finish_attempt = AsyncMock()
