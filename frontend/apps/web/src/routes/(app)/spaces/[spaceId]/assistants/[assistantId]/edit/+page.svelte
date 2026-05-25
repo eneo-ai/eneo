@@ -33,6 +33,14 @@
 
   let { data } = $props();
 
+  // Help assistants have logging permanently disabled (PRD §6); surface the
+  // explanation in the security section on their edit page. `is_help_assistant`
+  // is computed by the single-assistant GET endpoint and is not yet part of the
+  // generated OpenAPI schema, hence the local cast.
+  const isHelpAssistant = $derived(
+    (data.assistant as { is_help_assistant?: boolean }).is_help_assistant ?? false
+  );
+
   const {
     state: { currentSpace },
     refreshCurrentSpace
@@ -538,6 +546,13 @@
       </Settings.Group>
 
       <Settings.Group title={m.security_and_privacy()}>
+        {#if isHelpAssistant}
+          <p
+            class="border-default bg-primary text-secondary mb-2 rounded-lg border px-3 py-2 text-sm"
+          >
+            {m.admin_help_assistants_edit_logging_explanation()}
+          </p>
+        {/if}
         <Settings.Row
           hasChanges={$currentChanges.diff.data_retention_days !== undefined}
           revertFn={() => {

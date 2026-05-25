@@ -115,13 +115,15 @@ async def _insert_assistant(
     return assistant_id
 
 
-async def _seed_assistant_in_org_space(container, admin_user) -> UUID:
+async def _seed_assistant_in_org_space(
+    container, admin_user, *, name: str | None = None
+) -> UUID:
     """Insert system user + an assistant in the tenant's org-space."""
     session = container.session()
     org_space_id = await _get_org_space(session, tenant_id=admin_user.tenant_id)
     await _insert_system_user(session, tenant_id=admin_user.tenant_id)
     assistant_id = await _insert_assistant(
-        session, owner_user_id=admin_user.id, space_id=org_space_id
+        session, owner_user_id=admin_user.id, space_id=org_space_id, name=name
     )
     await session.flush()
     return assistant_id
@@ -248,7 +250,9 @@ async def test_full_lifecycle_round_trip(
     the original) → archive → list history → unassign.
     """
     async with db_container() as container:
-        assistant_id = await _seed_assistant_in_org_space(container, admin_user)
+        assistant_id = await _seed_assistant_in_org_space(
+            container, admin_user, name="Prompt Guide Helper"
+        )
 
     headers = {"Authorization": f"Bearer {admin_token}"}
     kind = HelperKind.PROMPT_GUIDE.value
@@ -275,13 +279,19 @@ async def test_full_lifecycle_round_trip(
     assert body["count"] >= 1
     kinds = {item["kind"] for item in body["items"]}
     assert kind in kinds
+    # The read endpoints resolve the assistant's display name for the admin
+    # table (mutation responses leave it null — the UI re-fetches the list).
+    prompt_guide_item = next(item for item in body["items"] if item["kind"] == kind)
+    assert prompt_guide_item["assistant_name"] == "Prompt Guide Helper"
 
     # GET /roles/{kind}/
     resp = await client.get(
         f"/api/v1/admin/help-assistants/roles/{kind}/", headers=headers
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["assistant_id"] == str(assistant_id)
+    body = resp.json()
+    assert body["assistant_id"] == str(assistant_id)
+    assert body["assistant_name"] == "Prompt Guide Helper"
 
     # PATCH /enabled
     resp = await client.patch(

@@ -565,6 +565,18 @@ class AssistantService:
 
         return assistant, permissions  # type: ignore[return-value]
 
+    async def is_help_assistant(self, assistant_id: UUID) -> bool:
+        """Whether ``assistant_id`` currently fills a Help Assistant role.
+
+        True iff an active row in ``org_space_assistant_roles`` points at it.
+        The single-assistant GET endpoint surfaces this so the edit UI can
+        explain why logging is permanently disabled on helpers (PRD §6, §9).
+        Mirrors the "active" half of the ``assert_not_helper_assistant`` guard.
+        """
+        return await self.org_space_assistant_role_repo.exists_active_for_assistant(
+            assistant_id
+        )
+
     async def get_assistants(
         self,
         name: str | None = None,

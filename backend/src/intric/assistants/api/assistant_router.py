@@ -215,9 +215,12 @@ async def get_assistant(
     assembler = container.assistant_assembler()
 
     assistant, permissions = await service.get_assistant(assistant_id=id)
+    is_help_assistant = await service.is_help_assistant(assistant_id=id)
 
     return assembler.from_assistant_to_model(
-        assistant=assistant, permissions=permissions
+        assistant=assistant,
+        permissions=permissions,
+        is_help_assistant=is_help_assistant,
     )
 
 

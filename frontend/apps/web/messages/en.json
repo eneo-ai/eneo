@@ -3168,5 +3168,20 @@
   "admin_help_assistants_archive_button": "Archive",
   "admin_help_assistants_history_section_title": "History",
   "admin_help_assistants_history_entry_summary": "{date} – {actor} replaced {name} ({reason})",
-  "admin_help_assistants_edit_logging_explanation": "Logging is permanently disabled for help assistants to protect user privacy."
+  "admin_help_assistants_edit_logging_explanation": "Logging is permanently disabled for help assistants to protect user privacy.",
+  "admin_help_assistants_reassign_button": "Re-assign",
+  "admin_help_assistants_reassign_dialog_title": "Choose an assistant for this role",
+  "admin_help_assistants_reassign_empty": "No assistants are available in the organization space. Create one there first, then assign it here.",
+  "admin_help_assistants_reset_instructions_confirm": "Reset the instructions for {name} to the shipped default? The assistant keeps its identity; only its instructions change.",
+  "admin_help_assistants_archive_confirm": "Archive {name}? This permanently deletes the replaced helper assistant and cannot be undone.",
+  "admin_help_assistants_roles_empty": "No help assistants are assigned for your organization yet.",
+  "admin_help_assistants_history_empty": "No changes have been recorded yet.",
+  "admin_help_assistants_archive_empty": "There are no replaced help assistants to archive.",
+  "admin_help_assistants_history_actor_admin": "An administrator",
+  "admin_help_assistants_history_actor_system": "System",
+  "admin_help_assistants_history_reason_reassigned": "re-assigned",
+  "admin_help_assistants_history_reason_unassigned": "unassigned",
+  "admin_help_assistants_history_reason_reset_instructions_only": "instructions reset",
+  "admin_help_assistants_history_reason_reset_to_default": "reset to default",
+  "admin_help_assistants_history_reason_archived": "archived"
 }

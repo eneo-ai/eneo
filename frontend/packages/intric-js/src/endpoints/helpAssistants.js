@@ -26,6 +26,7 @@
  * @property {string} org_space_id
  * @property {HelperKind} kind
  * @property {string} assistant_id
+ * @property {string | null} [assistant_name] Display name of the assigned assistant. Resolved only on the read endpoints (`listRoles` / `getRole`); mutation responses leave it null since the admin UI re-fetches the list.
  * @property {boolean} is_enabled
  * @property {boolean} is_visible_to_users
  * @property {string} created_at

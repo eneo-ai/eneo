@@ -149,6 +149,23 @@ async def test_update_space_assistant_member(setup: Setup):
     await setup.service.update_assistant(assistant_update, TEST_UUID)
 
 
+async def test_is_help_assistant_true_when_active_role_exists(setup: Setup):
+    assistant_id = uuid4()
+    role_repo = setup.service.org_space_assistant_role_repo
+    role_repo.exists_active_for_assistant.return_value = True
+
+    assert await setup.service.is_help_assistant(assistant_id) is True
+    role_repo.exists_active_for_assistant.assert_awaited_once_with(assistant_id)
+
+
+async def test_is_help_assistant_false_when_no_active_role(setup: Setup):
+    assistant_id = uuid4()
+    role_repo = setup.service.org_space_assistant_role_repo
+    role_repo.exists_active_for_assistant.return_value = False
+
+    assert await setup.service.is_help_assistant(assistant_id) is False
+
+
 async def test_delete_space_assistant_not_member(setup: Setup):
     actor = MagicMock()
     actor.can_delete_assistants.return_value = False

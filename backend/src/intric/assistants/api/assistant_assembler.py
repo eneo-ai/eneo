@@ -85,6 +85,7 @@ class AssistantAssembler:
         self,
         assistant: Assistant,
         permissions: list["ResourcePermission"] | None = None,
+        is_help_assistant: bool = False,
     ) -> AssistantPublic:
         permissions = permissions or []
 
@@ -173,6 +174,7 @@ class AssistantAssembler:
             metadata_json=assistant.metadata_json,
             model_info=model_info,
             icon_id=assistant.icon_id,
+            is_help_assistant=is_help_assistant,
         )
 
     def from_assistant_to_default_assistant_model(

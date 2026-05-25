@@ -18,10 +18,13 @@ availability endpoint (step 023).
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
+
+if TYPE_CHECKING:
+    from intric.assistants.assistant_service import AssistantService
 
 from intric.help_assistants.api.admin_models import (
     AssignmentHistoryPublic,
@@ -44,7 +47,9 @@ router = APIRouter()
 AdminContainer = Annotated[Container, Depends(get_container(with_user=True))]
 
 
-def _role_to_public(role: RoleAssignment) -> RoleAssignmentPublic:
+def _role_to_public(
+    role: RoleAssignment, assistant_name: str | None = None
+) -> RoleAssignmentPublic:
     assert role.id is not None
     assert role.created_at is not None
     assert role.updated_at is not None
@@ -53,11 +58,28 @@ def _role_to_public(role: RoleAssignment) -> RoleAssignmentPublic:
         org_space_id=role.org_space_id,
         kind=role.kind,
         assistant_id=role.assistant_id,
+        assistant_name=assistant_name,
         is_enabled=role.is_enabled,
         is_visible_to_users=role.is_visible_to_users,
         created_at=role.created_at,
         updated_at=role.updated_at,
     )
+
+
+async def _resolve_name(
+    assistant_service: "AssistantService", role: RoleAssignment
+) -> str | None:
+    """Display name of the assistant filling ``role`` (for the admin table).
+
+    An active role always points at a live org-space assistant the caller can
+    read — the helper-run path loads the same assistant as an ordinary user,
+    so an admin load is strictly more privileged. Returned only on the read
+    endpoints; mutations leave ``assistant_name`` ``None`` (the UI re-fetches).
+    """
+    assistant, _permissions = await assistant_service.get_assistant(
+        assistant_id=role.assistant_id
+    )
+    return assistant.name
 
 
 def _history_to_public(entry: AssignmentHistory) -> AssignmentHistoryPublic:
@@ -82,8 +104,13 @@ def _history_to_public(entry: AssignmentHistory) -> AssignmentHistoryPublic:
 )
 async def list_roles(container: AdminContainer):
     service = container.org_space_assistant_role_service()
+    assistant_service = container.assistant_service()
     roles = await service.list_for_calling_tenant()
-    return protocol.to_paginated_response([_role_to_public(r) for r in roles])
+    items = [
+        _role_to_public(role, assistant_name=await _resolve_name(assistant_service, role))
+        for role in roles
+    ]
+    return protocol.to_paginated_response(items)
 
 
 @router.get(
@@ -96,7 +123,10 @@ async def get_active_role(kind: HelperKind, container: AdminContainer):
     role = await service.get_active(kind=kind)
     if role is None:
         return None
-    return _role_to_public(role)
+    assistant_service = container.assistant_service()
+    return _role_to_public(
+        role, assistant_name=await _resolve_name(assistant_service, role)
+    )
 
 
 @router.post(

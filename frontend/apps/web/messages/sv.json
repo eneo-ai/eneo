@@ -3168,5 +3168,20 @@
   "admin_help_assistants_archive_button": "Arkivera",
   "admin_help_assistants_history_section_title": "Historik",
   "admin_help_assistants_history_entry_summary": "{date} – {actor} ersatte {name} ({reason})",
-  "admin_help_assistants_edit_logging_explanation": "Loggning är permanent inaktiverad för hjälpassistenter för att skydda användarnas integritet."
+  "admin_help_assistants_edit_logging_explanation": "Loggning är permanent inaktiverad för hjälpassistenter för att skydda användarnas integritet.",
+  "admin_help_assistants_reassign_button": "Tilldela om",
+  "admin_help_assistants_reassign_dialog_title": "Välj en assistent för rollen",
+  "admin_help_assistants_reassign_empty": "Det finns inga assistenter i organisationsytan. Skapa en där först och tilldela den sedan här.",
+  "admin_help_assistants_reset_instructions_confirm": "Återställ instruktionerna för {name} till levererad standard? Assistenten behåller sin identitet; endast instruktionerna ändras.",
+  "admin_help_assistants_archive_confirm": "Arkivera {name}? Detta tar permanent bort den ersatta hjälpassistenten och kan inte ångras.",
+  "admin_help_assistants_roles_empty": "Inga hjälpassistenter är tilldelade för din organisation ännu.",
+  "admin_help_assistants_history_empty": "Inga ändringar har registrerats ännu.",
+  "admin_help_assistants_archive_empty": "Det finns inga ersatta hjälpassistenter att arkivera.",
+  "admin_help_assistants_history_actor_admin": "En administratör",
+  "admin_help_assistants_history_actor_system": "System",
+  "admin_help_assistants_history_reason_reassigned": "omtilldelad",
+  "admin_help_assistants_history_reason_unassigned": "borttagen",
+  "admin_help_assistants_history_reason_reset_instructions_only": "instruktioner återställda",
+  "admin_help_assistants_history_reason_reset_to_default": "återställd till standard",
+  "admin_help_assistants_history_reason_archived": "arkiverad"
 }

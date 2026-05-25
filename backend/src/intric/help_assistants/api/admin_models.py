@@ -23,7 +23,14 @@ from intric.help_assistants.domain.helper_kind import HelperKind
 
 
 class RoleAssignmentPublic(BaseModel):
-    """One row of ``org_space_assistant_roles``."""
+    """One row of ``org_space_assistant_roles``.
+
+    ``assistant_name`` is a display convenience for the admin table: it is
+    resolved (via the assistant load) only on the read endpoints
+    (``list_roles`` / ``get_active_role``) the UI renders from. Mutation
+    responses leave it ``None`` because the admin page re-fetches the list
+    after every mutation, so the displayed name always comes from a read.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -31,6 +38,7 @@ class RoleAssignmentPublic(BaseModel):
     org_space_id: UUID
     kind: HelperKind
     assistant_id: UUID
+    assistant_name: str | None = None
     is_enabled: bool
     is_visible_to_users: bool
     created_at: datetime
