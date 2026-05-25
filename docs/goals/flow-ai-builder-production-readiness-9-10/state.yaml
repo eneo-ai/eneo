@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T096
+active_task: T097
 
 interruptions:
   - id: I001
@@ -8929,7 +8929,7 @@ tasks:
   - id: T096
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Re-rank the next highest score-floor mover after T095 from current repo reality, without implementing during the ranking tranche."
     constraints:
@@ -8950,6 +8950,96 @@ tasks:
       - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, expected score impact, and Swagger/OpenAPI impact."
       - "Explicit explanation of why the selected tranche moves the strict 9/10 floor more than easier cleanup."
       - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
+    receipt:
+      completed_at: "2026-05-25T01:07:00Z"
+      summary: "Re-ranked the next Flow AI Builder score-floor mover after T095. Selected T097 as a focused create compile-context ownership cleanup: move the runtime metadata state plus runtime input field hint gate into outline_compile_context_from_planning_state, remove production precomputed hint derivation from create proposal, replace raw text with a typed RuntimeInputFieldHintSource value object, and make runtime_metadata_state_from_planning_state private with an ownership guard."
+      repo_reality:
+        branch: "feature/refactor-flows-flowai"
+        head: "9d4892323 Consolidate AI Builder form-field type ownership"
+        status: "dirty only with unrelated workspace files preserved: .devcontainer/docker-compose.yml, .gitignore, AGENTS.md, .devcontainer/devcontainer-lock.json, PRODUCT.md, utvecklingssamtal.mp3"
+      selected_worker: T097
+      artifact: ".codex/artifacts/flow-ai-builder-t096-next-tranche-ranking.md"
+      source_evidence:
+        - "ai_builder_create_proposal.py:228-242 precomputes runtime metadata state, gates runtime field extraction, extracts hints from aggregate_freeform_user_text, and passes hints into outline_compile_context_from_planning_state."
+        - "ai_builder_create_compiler.py:325-359 owns outline_compile_context_from_planning_state and recomputes runtime_metadata_state for the returned OutlineCompileContext."
+        - "ai_builder_create_compiler.py:362-368 defines runtime_metadata_state_from_planning_state; rg shows production import outside the compiler only in create proposal."
+        - "ai_builder_runtime_input_fields.py keeps extract_runtime_input_field_hints and runtime_metadata_allows_input_fields as pure parser/predicate owners."
+      selected_scope:
+        moves:
+          - "Create proposal keeps aggregation via aggregate_freeform_user_text, wraps the aggregate in RuntimeInputFieldHintSource, and passes it to outline_compile_context_from_planning_state."
+          - "outline_compile_context_from_planning_state owns the runtime metadata state gate plus hint extraction when given RuntimeInputFieldHintSource."
+          - "Downstream tests that need exact hints construct OutlineCompileContext directly instead of keeping a test-only parameter on outline_compile_context_from_planning_state."
+        deletes:
+          - "create-proposal imports/use of runtime_metadata_state_from_planning_state, extract_runtime_input_field_hints, and runtime_metadata_allows_input_fields."
+          - "runtime_input_field_hints parameter on outline_compile_context_from_planning_state."
+        renames:
+          - "runtime_metadata_state_from_planning_state -> _runtime_metadata_state_from_planning_state."
+      rejected_alternatives:
+        - "Raw source-text string parameter: rejected by Claude as a weak boundary after T095 removed similar slop."
+        - "Keep runtime_input_field_hints as test-only override: rejected because it creates a production parallel path for tests."
+        - "Move aggregate_freeform_user_text into the compiler owner: rejected as broader coupling because create proposal owns conversation shape and can pass a typed aggregate-text value."
+        - "Strict output-type conversion cleanup first: valid but smaller and mostly removes unreachable defense."
+        - "Tool-turn persistence request tightening or typed event payloads first: valid follow-ups but less directly tied to the current create-mode topology/readability floor."
+      peer_review:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t096-next-flow-ai-builder-tranche-ranking-20260525T010156Z.md -> GREEN_LIGHT no / MIN_SCORE 6; accepted blockers around raw string boundary, test-only override, and under-specified behavior tests."
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t096-next-flow-ai-builder-tranche-ranking-revision-20260525T010505Z.md -> GREEN_LIGHT yes / MIN_SCORE 8; accepted RuntimeInputFieldHintSource, override removal, private helper, and four-quadrant gate tests."
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t096-next-flow-ai-builder-tranche-ranking-20260525T010656Z.md -> GREEN_LIGHT yes / MIN_SCORE 8; emphasized immediate bypass when source is None or empty and confirmed the orchestrator/compiler/parser division."
+      swagger_openapi_impact: "None expected. T097 is internal backend compile-context ownership work and must not change REST/SSE contracts, OpenAPI schemas, Swagger examples, generated client types, frontend files, database schema or migrations, public request/response models, or API examples."
+      score_impact: "Read-only judge task. No score increase. T097 may improve Maintainability, Clean Architecture, Separation of Concerns, Single Source of Truth, Human Readability, Human Reviewability, and AI Slop resistance if implementation deletes the duplicate production runtime-metadata/hint decision point while preserving behavior. Overall strict floor remains 8/10."
+      broader_goal_complete: false
+
+  - id: T097
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: medium
+    objective: "Move runtime input field hint derivation behind the create compile-context owner so production create proposal no longer precomputes runtime metadata state and hints before outline compilation."
+    constraints:
+      - "Do not move to broader Flows work; stay within Flow AI Builder unless the user explicitly changes scope."
+      - "Do not change runtime-input phrase lists, prompt wording, uses_input_fields policy, output-type conversion behavior, tool-turn persistence, event-builder payload typing, public API contracts, Swagger/OpenAPI examples, generated clients, frontend code, database schema, or broader Flow behavior."
+      - "Do not keep runtime_input_field_hints as a test-only override on outline_compile_context_from_planning_state."
+      - "Do not add a new module/helper/service/interface for this; deepen the existing create compile-context owner."
+      - "Do not add docstrings/comments that restate the value object or task move; names must carry the design."
+      - "Immediately bypass runtime hint extraction when RuntimeInputFieldHintSource is None or contains empty aggregate text."
+      - "Keep aggregate_freeform_user_text in ai_builder_create_proposal.py; create proposal owns conversation aggregation and passes RuntimeInputFieldHintSource to the compiler context owner."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_compiler.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_proposal.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t097-implementation-summary.md"
+    expected_output:
+      - "RuntimeInputFieldHintSource is a frozen/slotted value object in ai_builder_create_compiler.py with aggregated_conversation_text: str."
+      - "outline_compile_context_from_planning_state accepts RuntimeInputFieldHintSource | None and no longer accepts runtime_input_field_hints."
+      - "outline_compile_context_from_planning_state extracts runtime input hints only when runtime metadata state allows fields and the source has non-empty aggregate text."
+      - "ai_builder_create_proposal.py no longer imports runtime_metadata_state_from_planning_state, extract_runtime_input_field_hints, or runtime_metadata_allows_input_fields."
+      - "runtime_metadata_state_from_planning_state is private and has zero external importers."
+      - "Tests cover all four gate quadrants plus create-proposal behavior parity."
+      - "No public API/OpenAPI/Swagger/generated-client/frontend/database diff."
+    validation_plan:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check touched T097 files"
+      - "cd backend && uv run ruff format --check touched T097 files"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "scripts/gate-local/anti_slippage.sh after staging"
+      - "git diff --check"
+    stop_conditions:
+      - "Stop if implementation needs public API/OpenAPI/generated-client/frontend/database changes."
+      - "Stop if moving the gate requires moving aggregate_freeform_user_text or conversation-message ownership into the compiler."
+      - "Stop if direct-hint tests cannot be rewritten without preserving a runtime_input_field_hints parameter on outline_compile_context_from_planning_state."
+      - "Stop if Pyright requires Any/casts/ignores at this boundary."
+    peer_gate:
+      plan:
+        claude: "GREEN_LIGHT yes / MIN_SCORE 8 via T096 iteration 2"
+        antigravity: "GREEN_LIGHT yes / MIN_SCORE 8 via T096 synthesis"
+      implementation_required: "Run Claude implementation gate after validation; run Antigravity implementation gate with --spend-mode auto if available. Missing Antigravity coverage is a skip, not a pass."
+    swagger_openapi_impact: "None expected. T097 is internal backend compile-context ownership work and should not require Swagger/OpenAPI/API example updates."
+    score_impact: "May improve Maintainability, Clean Architecture, Separation of Concerns, Single Source of Truth, Human Readability, Human Reviewability, and AI Slop resistance. Do not raise the overall strict floor above 8 unless post-implementation evidence proves every remaining 8-scored dimension is now 9."
     receipt: null
 
 checks:
