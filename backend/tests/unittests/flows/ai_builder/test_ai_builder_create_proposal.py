@@ -543,7 +543,16 @@ async def test_scoped_outline_revision_changes_model_on_selected_ai_step() -> No
 
 
 @pytest.mark.asyncio
-async def test_scoped_outline_revision_changes_selected_terminal_step_to_pdf() -> None:
+@pytest.mark.parametrize(
+    "message",
+    [
+        "kan du ändra så att jag får en pdf fil istället?",
+        "utdatat ska vara pdf fil",
+    ],
+)
+async def test_scoped_outline_revision_changes_selected_terminal_step_to_pdf(
+    message: str,
+) -> None:
     prior_spec = FlowDraftSpecCore(
         flow_name="Mötesflöde",
         steps=[
@@ -580,7 +589,7 @@ async def test_scoped_outline_revision_changes_selected_terminal_step_to_pdf() -
         conversation=[
             ConversationMessage(
                 role="user",
-                content="kan du ändra så att jag får en pdf fil istället?",
+                content=message,
             )
         ],
         available_model_refs=None,

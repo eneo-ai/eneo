@@ -240,7 +240,16 @@ async def test_scoped_revision_preflight_uses_bounded_server_tool_call_id() -> N
 
 
 @pytest.mark.asyncio
-async def test_scoped_revision_preflight_finalizes_terminal_pdf_revision() -> None:
+@pytest.mark.parametrize(
+    "message",
+    [
+        "kan du ändra så att jag får en pdf fil istället?",
+        "utdatat ska vara pdf fil",
+    ],
+)
+async def test_scoped_revision_preflight_finalizes_terminal_pdf_revision(
+    message: str,
+) -> None:
     submission = _make_submission()
     prior_spec = _make_flow_spec(model_ref="model.gpt-4o-mini", knowledge_refs=[])
     prior_plan = _builder_plan(prior_spec)
@@ -249,7 +258,7 @@ async def test_scoped_revision_preflight_finalizes_terminal_pdf_revision() -> No
         conversation=[
             ConversationMessage(
                 role="user",
-                content="kan du ändra så att jag får en pdf fil istället?",
+                content=message,
             )
         ],
         prior_plan_for_revision=prior_plan,

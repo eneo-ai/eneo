@@ -363,6 +363,66 @@ interruptions:
         - "Local PDF artifact validation is blocked on the host by missing WeasyPrint native library libgobject-2.0-0; rerun that parametrization in the devcontainer or after local Pango/Cairo/GLib repair."
         - "A separate live selected-step edit issue was reported after I005: wording such as 'utdatat ska vara pdf fil' can still fall through to scoped LLM repair and fail quality checks. That must be handled as a new interruption, not mixed into I005."
       score_impact: "Improves Runtime Reliability, Data/Schema Quality, Normal-User Output Quality, Developer Diagnostic Experience, Human Reviewability, and Test Quality for strict runtime JSON outputs. Does not raise the strict overall Flow AI Builder score floor above 8 because broader topology/readability, full-source baseline, and the newly reported selected-step PDF edit wording issue remain."
+  - id: I006
+    kind: live_bug_hotfix
+    status: committed
+    reported_at: "2026-05-25T08:24:00Z"
+    summary: "A selected final-step edit with Swedish wording `utdatat ska vara pdf fil` fell through to scoped LLM repair and ended in self_correction_quality_failure instead of using the deterministic selected-step terminal output-file edit path."
+    decision: "Keep the selected-step deterministic output-artifact owner introduced by I004. Fix the root intent gap in the canonical terminal-output policy so plain `pdf fil` / `pdf file` wording resolves to PDF before the scoped patch check. Do not add a parallel phrase path inside ai_builder_plan_edit_context.py, do not enumerate every typo combination, and do not broaden this into output-edit architecture work."
+    constraints:
+      - "Preserve unrelated dirty files."
+      - "Do not mix with I005 runtime JSON pruning; I005 is already committed."
+      - "Do not weaken scoped-edit preservation rules; unrelated steps and runtime form fields must still be rejected if changed."
+      - "Do not add a new LLM repair path, frontend workaround, or broad phrase-matching subsystem."
+    acceptance:
+      - "terminal_output_type_for_conversation resolves selected-step messages such as `utdatat ska vara pdf fil` to OutputType.PDF."
+      - "resolve_scoped_step_revision_if_requested applies a deterministic output_artifact patch for that wording when the selected target is the terminal step."
+      - "The existing non-terminal selected-step notice still applies when the same PDF file wording targets a non-terminal step."
+      - "Existing selected-step PDF/DOCX tests continue to pass."
+    validation_required:
+      - "Focused AI Builder plan-edit context tests."
+      - "Focused selected-step create proposal/submission tests."
+      - "Ruff check/format check on touched files."
+      - "Pyright on touched AI Builder source."
+      - "git diff --check."
+      - "Claude implementation gate; Antigravity implementation gate if available and proportionate."
+    artifacts:
+      - ".codex/artifacts/flow-ai-builder-i006-selected-step-pdf-file-wording-implementation-summary.md"
+      - ".codex/artifacts/claude-peer-loop-i006-selected-step-pdf-file-wording-implementation-gate-20260525T084155Z.md"
+      - ".codex/artifacts/claude-peer-loop-i006-selected-step-pdf-file-wording-revised-gate-20260525T084510Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-i006-selected-step-pdf-file-wording-gate-20260525T084920Z.md"
+    receipt:
+      commit: null
+      summary: "Fixed the selected-step terminal PDF output wording gap by adding normalization-distinct `pdf fil`, `pdf file`, and `pdffil` entries to the canonical PDF output marker set. This keeps deterministic selected-step PDF edits in the existing terminal-output intent owner instead of adding a parallel phrase path or falling through to scoped LLM repair."
+      changed_files:
+        - "backend/src/intric/flows/ai_builder/ai_builder_keywords.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
+      validation:
+        - "Red-first: cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py::test_scoped_step_revision_changes_terminal_output_for_pdf_file_wording -q -> failed before implementation because terminal_output_type_for_conversation returned None; passed after implementation."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py::test_scoped_step_revision_changes_terminal_output_for_pdf_file_wording tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py::test_plan_revision_terminal_output_intent_accepts_current_pdf_edit tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py::test_plan_revision_terminal_output_intent_uses_latest_user_message -q -> 3 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_policy.py -q -> 84 passed."
+        - "cd backend && uv run ruff check touched I006 files -> passed."
+        - "cd backend && uv run ruff format --check touched I006 files -> passed."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder/ai_builder_keywords.py src/intric/flows/ai_builder/ai_builder_proposal_policy.py src/intric/flows/ai_builder/ai_builder_plan_edit_context.py -> 0 errors, 0 warnings, 0 informations."
+        - "git diff --check -> passed."
+      peer_review:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-i006-selected-step-pdf-file-wording-implementation-gate-20260525T084155Z.md -> GREEN_LIGHT no / MIN_SCORE 7; required removing normalization-equivalent `pdf-fil`/`pdf-file` marker duplicates or testing all variants."
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-i006-selected-step-pdf-file-wording-revised-gate-20260525T084510Z.md -> GREEN_LIGHT yes / MIN_SCORE 8 after retaining only normalization-distinct markers and adding intent-layer coverage for spaced, hyphenated, English, and compound PDF-file wordings."
+        antigravity_implementation_gate: ".codex/artifacts/antigravity-peer-loop-i006-selected-step-pdf-file-wording-gate-20260525T084920Z.md -> GREEN_LIGHT yes / MIN_SCORE 8 with --spend-mode auto; no blockers."
+      self_review:
+        simpler_for_maintainer: true
+        complexity_removed: "The selected-step PDF edit now stays on the deterministic output_artifact path instead of entering scoped LLM repair for common PDF-file wording."
+        owner_clarified: "ai_builder_keywords.py remains the single source of truth for terminal PDF wording; ai_builder_plan_edit_context.py remains the deterministic selected-step patch owner."
+        coupling_removed: "No new frontend workaround, LLM repair path, or selected-step-specific phrase list was added."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "Antigravity noted a non-blocking Swedish closed-compound follow-up: pdfrapport, pdfdokument, and pdfmall may need coverage in a future marker cleanup, but the live `pdf fil` failure is fixed without broad phrase-list expansion."
+        - "The required post-T112 score-floor audit remains paused by live interruptions and still needs to resume before planned T113/T114/T115 implementation."
+      score_impact: "Improves Normal-User Output Quality, Runtime Reliability, Human Reviewability, and Developer Diagnostic Experience for selected-step terminal PDF output edits. Does not raise the strict overall Flow AI Builder score floor above 8."
 
 scoring_target:
   dimensions:

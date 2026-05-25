@@ -308,6 +308,70 @@ def test_scoped_step_revision_changes_terminal_output_artifact(
     assert result.spec.steps[1].output_contract is None
 
 
+def test_scoped_step_revision_changes_terminal_output_for_pdf_file_wording() -> None:
+    context = _step_context(target_plan_step_ref="step_b")
+    prior = _edit_spec(
+        [
+            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
+            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
+        ]
+    )
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Bygg ett flöde som skapar ett strukturerat textresultat.",
+        ),
+        ConversationMessage(role="assistant", content="Här är planen."),
+        ConversationMessage(role="user", content="utdatat ska vara pdf fil"),
+    ]
+    output_type = terminal_output_type_for_conversation(
+        conversation,
+        plan_edit_context=context,
+        prior_plan=None,
+    )
+
+    result = resolve_scoped_step_revision_if_requested(
+        context=context,
+        prior_spec=prior,
+        latest_user_text="utdatat ska vara pdf fil",
+        resource_catalog=None,
+        requested_terminal_output_type=output_type,
+    )
+
+    assert output_type == OutputType.PDF
+    assert isinstance(result, ScopedStepSpecRevision)
+    assert result.kind == "output_artifact"
+    assert result.spec.steps[1].output_type == OutputType.PDF
+
+
+@pytest.mark.parametrize(
+    "wording",
+    [
+        "pdf fil",
+        "pdf-fil",
+        "pdf file",
+        "pdf-file",
+        "pdffil",
+    ],
+)
+def test_terminal_output_intent_recognizes_pdf_file_wording(
+    wording: str,
+) -> None:
+    conversation = [
+        ConversationMessage(role="assistant", content="Här är planen."),
+        ConversationMessage(role="user", content=f"utdatat ska vara {wording}"),
+    ]
+
+    assert (
+        terminal_output_type_for_conversation(
+            conversation,
+            plan_edit_context=_step_context(target_plan_step_ref="step_b"),
+            prior_plan=None,
+        )
+        == OutputType.PDF
+    )
+
+
 def test_scoped_step_revision_keeps_matching_terminal_output_as_noop() -> None:
     prior = _edit_spec(
         [
@@ -327,9 +391,16 @@ def test_scoped_step_revision_keeps_matching_terminal_output_as_noop() -> None:
     assert result is None
 
 
-def test_scoped_step_revision_warns_when_output_artifact_target_is_not_terminal() -> (
-    None
-):
+@pytest.mark.parametrize(
+    "message",
+    [
+        "kan du ändra så att jag får en pdf fil istället?",
+        "utdatat ska vara pdf fil",
+    ],
+)
+def test_scoped_step_revision_warns_when_output_artifact_target_is_not_terminal(
+    message: str,
+) -> None:
     prior = _edit_spec(
         [
             _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
@@ -340,7 +411,7 @@ def test_scoped_step_revision_warns_when_output_artifact_target_is_not_terminal(
     result = resolve_scoped_step_revision_if_requested(
         context=_step_context(target_plan_step_ref="step_a"),
         prior_spec=prior,
-        latest_user_text="kan du ändra så att jag får en pdf fil istället?",
+        latest_user_text=message,
         resource_catalog=None,
         requested_terminal_output_type=OutputType.PDF,
     )
