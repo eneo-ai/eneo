@@ -374,11 +374,12 @@ export function initFlows(client) {
 
     published: {
       /**
-       * Fetch the published runtime projection for a Flow.
-       * @param {{id: string}} params
+       * Fetch the service-key-safe published runtime projection for a Flow.
+       * @param {string | {id: string}} flowOrId
        * @throws {IntricError}
        */
-      get: async ({ id }) => {
+      get: async (flowOrId) => {
+        const id = typeof flowOrId === "string" ? flowOrId : flowOrId.id;
         return _fetch(`/api/v1/flows/${id}/published/`, { method: "get" });
       }
     },

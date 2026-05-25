@@ -89,6 +89,17 @@ def _get_operation(openapi_spec: dict, path: str, method: str) -> dict:
     return openapi_spec.get("paths", {}).get(path, {}).get(method, {})
 
 
+def _path_for_operation_id(openapi_spec: dict, operation_id: str) -> str:
+    for path, methods in openapi_spec.get("paths", {}).items():
+        for operation in methods.values():
+            if (
+                isinstance(operation, dict)
+                and operation.get("operationId") == operation_id
+            ):
+                return path
+    pytest.fail(f"Missing OpenAPI operationId: {operation_id}")
+
+
 def _iter_non_ai_builder_flow_operations(
     openapi_spec: dict,
 ) -> Iterator[tuple[str, str, dict]]:
@@ -375,6 +386,10 @@ REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
 
 REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
     (
+        "/api/v1/flows/{id}/",
+        "get",
+    ): {"403", "404"},
+    (
         "/api/v1/flows/{id}/published/",
         "get",
     ): {"403", "404"},
@@ -511,6 +526,10 @@ FLOW_SETTINGS_INVALID_PAYLOAD_MESSAGES: dict[str, str] = {
 }
 
 REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
+    (
+        "/api/v1/flows/{id}/",
+        "get",
+    ): {"403", "404"},
     (
         "/api/v1/flows/{id}/published/",
         "get",
@@ -2168,6 +2187,32 @@ def test_openapi_flow_authoring_docs_separate_draft_and_service_key_runtime(
     assert "external webapps" in published_description
     assert "review checkpoints" in published_description
     assert "artifact/evidence retrieval" in published_description
+
+
+def test_openapi_get_flow_service_key_denial_points_to_published_runtime(
+    openapi_spec: dict,
+) -> None:
+    operation = _get_operation(openapi_spec, "/api/v1/flows/{id}/", "get")
+    response = operation.get("responses", {}).get("403", {})
+    examples = (
+        response.get("content", {}).get("application/json", {}).get("examples", {})
+    )
+    service_key_example = examples["flow_service_key_principal_not_supported"]["value"]
+    context = service_key_example["context"]
+    hint = context["runtime_endpoint_hint"]
+
+    assert service_key_example["intric_error_code"] == 9001
+    assert service_key_example["code"] == "flow_service_key_principal_not_supported"
+    assert context["auth_layer"] == "service_key_principal"
+    assert context["capability"] == "view"
+    assert hint == {
+        "key": "published_flow_runtime",
+        "description": "Use the published runtime projection for service-key Flow clients.",
+        "endpoint_template": _path_for_operation_id(
+            openapi_spec,
+            "get_published_flow_runtime",
+        ),
+    }
 
 
 def test_openapi_flow_runtime_visibility_docs_are_explicit(openapi_spec: dict) -> None:

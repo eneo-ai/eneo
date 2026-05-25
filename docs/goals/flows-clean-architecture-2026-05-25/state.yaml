@@ -110,7 +110,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T026
+active_task: T008
 
 tasks:
   - id: T001
@@ -1084,7 +1084,7 @@ tasks:
   - id: T026
     type: scout
     assignee: Scout
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Preflight the service-key Flow API consumer behavior reported by the owner: verify current /flows/{id}/ service-key denial, compare develop without switching or merging branches, map which Flow proper endpoints service-key API consumers should and should not use, and identify the smallest safe Worker if a source fix is needed."
     inputs:
@@ -1110,12 +1110,237 @@ tasks:
       - "Whether the reported behavior is intended wrong-endpoint usage, a docs/SDK DX gap, or a backend policy bug."
       - "Smallest safe next task with allowed_files, verification commands, and stop conditions."
       - "Any product decisions still required before implementation."
-    receipt: null
+    receipt:
+      completed_at: "2026-05-25T23:12:00+02:00"
+      summary: "Preflighted the owner-reported service-key call to GET /api/v1/flows/{id}/. Current source intentionally denies service-key principals on that route because it is the user-principal/current-draft FlowPublic endpoint; service-key runtime clients are expected to use list discovery, GET /published/, run-contract, upload, run, polling, step/artifact/evidence, and own-run review/resume endpoints. origin/develop is already an ancestor of this branch and does not contain a separate Flow API service-key fix to merge."
+      evidence:
+        current_denial:
+          - "backend/src/intric/flows/api/flow_authoring_router.py:252 defines GET /{id}/ as response_model=FlowPublic and documents it as the current draft/current-definition view for user principals."
+          - "backend/src/intric/flows/api/flow_authoring_router.py:287 calls get_flow_access_context_for_request without allow_service_key_principals=True."
+          - "backend/src/intric/flows/flow_access_policy.py:195-209 rejects service-key principals unless the route explicitly opts in and the action permits service keys."
+          - "backend/src/intric/flows/flow_access_policy.py:222-229 emits flow_service_key_principal_not_supported with capability=view for this case."
+          - "backend/tests/unittests/flows/test_flow_router_crud.py:517 asserts GET /flows/{id}/ keeps service-key principals human-only."
+        service_key_runtime_surfaces:
+          - "backend/src/intric/flows/api/flow_authoring_router.py:206-240 allows GET /flows/?space_id=... for service-key published-flow discovery and forces published_only=True for service-key principals."
+          - "backend/src/intric/flows/api/flow_authoring_router.py:337-367 allows GET /flows/{id}/published/ for service-key runtime-safe single-flow projection and hides unpublished flows from service keys."
+          - "backend/src/intric/flows/api/flow_upload_router.py:99-119 allows GET /run-contract/ for published-flow runtime discovery."
+          - "backend/src/intric/flows/api/flow_upload_router.py:178-201 and 272-301 allow published-flow runtime uploads for service-key principals."
+          - "backend/src/intric/flows/api/flow_run_execution_router.py:477-541 allows service-key published-flow run creation."
+          - "backend/src/intric/flows/api/flow_run_execution_router.py:579-672 allows run list/get, with service-key run visibility constrained by flow_run_service/access policy to the current service key's runs."
+          - "backend/src/intric/flows/api/flow_run_steps_router.py:117-169 and 291-330 allow own-run steps and artifact signed URLs."
+          - "backend/src/intric/flows/api/flow_run_evidence_router.py:101-143 and 198-236 allow own-run evidence paths, with evidence capability enforcement in the run access policy."
+          - "backend/src/intric/flows/api/flow_run_execution_router.py:788-817, 864-892, 939-968, and 1015-1063 currently allow service-key review edit/approve/reject/resume when route policy permits REVIEW/RESUME; rerun at 1148-1166 remains user-principal-only because RERUN is not opted in."
+        user_principal_only_surfaces:
+          - "Draft CRUD, publish/unpublish, template management, flow-managed assistant authoring, and Flow AI Builder use authoring/edit policy paths without service-key opt-in."
+          - "frontend/apps/docs-site/src/content/guides/flows-api-guide.mdx:51-78 documents the user-principal-only families and service-key runtime families."
+          - "backend/src/intric/authentication/auth_models.py:147-159 states flows=admin satisfies DELETE-level resource checks but service-key principals still cannot use endpoints whose Flow policy requires a user principal."
+        develop_comparison:
+          - "git merge-base --is-ancestor origin/develop HEAD returned 0, so origin/develop is already included in this branch."
+          - "git ls-tree -r --name-only origin/develop -- backend/src/intric/flows returned no Flow proper files; the current Flow proper API/service-key surface is branch-local."
+          - "git grep on origin/develop found generic service-key/auth changes but no flow_service_key_principal_not_supported or Flow proper route fix to merge."
+        dx_gap:
+          - "frontend/packages/intric-js/src/endpoints/flows.js:239-245 still exposes flows.get({id}) as 'Get a flow by id' and calls the service-key-denied draft endpoint; the service-key-safe published method is nested at frontend/packages/intric-js/src/endpoints/flows.js:375-383."
+          - "Raw curl/API-doc users can still choose GET /flows/{id}/ first because the route name is 'Get Flow'; the denial is technically consistent but not self-directing enough for service-key API consumers."
+      endpoint_matrix:
+        discovery: "Service keys should use GET /flows/?space_id=... for published-flow discovery in scoped spaces."
+        single_flow_runtime_projection: "Use GET /flows/{id}/published/; do not use GET /flows/{id}/ for service-key runtime clients."
+        run_contract: "Allowed on published flows through GET /flows/{id}/run-contract/."
+        uploads: "Allowed on published flows through /files/ and /steps/{step_id}/runtime-files/."
+        run_create_poll_steps_artifacts: "Allowed for published flows, constrained to runs owned by the service key except elevated tenant-admin service-key behavior already modeled by access policy."
+        evidence: "Allowed for own runs only when flow_evidence capability/policy permits the requested evidence level."
+        graph: "Allowed for published/runtime-safe topology and own-run snapshots; draft authoring graph behavior remains user-principal-oriented."
+        draft_authoring: "User principal only."
+        templates_and_flow_assistants: "User principal only."
+        flow_ai_builder: "User principal only."
+        review_resume: "Partially allowed today for service-key-owned runs; exact product policy remains decision-gated by T009/T011."
+        rerun: "User principal only today; changing this is product-decision-gated."
+      assessment:
+        verdict: "The reported 403 is not caused by missing generic service-key admin permissions and no develop merge appears available. It is an API consumer DX/policy-boundary issue: the current source intentionally separates the draft/current Flow endpoint from service-key runtime projections, but the wrong endpoint is easy to call and the error does not point to /published/."
+        smallest_safe_next: "T027 Judge should choose between a docs/SDK/error-DX Worker that preserves the canonical /published/ runtime owner, or a backend API compatibility/policy Worker if the product decision is that service keys must call GET /flows/{id}/ directly."
+        product_decisions_needed:
+          - "Whether service-key GET /flows/{id}/ should remain denied with clearer guidance, redirect/alias to the published projection, or return a different shape for service-key principals. Returning different response models by principal is likely poor API DX and should be rejected unless explicitly approved."
+          - "Whether service keys may review/resume/rerun beyond own-run review/resume behavior already present; T009/T011 remain the decision gates for identity/review/rerun semantics."
+      commands:
+        - command: "git merge-base --is-ancestor origin/develop HEAD; printf '%s\\n' $?"
+          status: "pass"
+          output: "0"
+        - command: "git ls-tree -r --name-only origin/develop -- backend/src/intric/flows"
+          status: "pass"
+          output: "No Flow proper files on origin/develop."
+        - command: "git grep -n 'allow_service_key_principals\\|flow_service_key_principal_not_supported\\|Service-key principals\\|service-key\\|service key\\|service_key' origin/develop -- backend/src/intric/flows backend/tests | head -200"
+          status: "pass"
+          output: "No Flow proper service-key route/policy fix found on origin/develop; only generic service-key tests outside backend/src/intric/flows were found by broader search."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_router_crud.py::test_get_flow_keeps_service_key_principals_human_only tests/unittests/flows/test_flow_router_crud.py::test_get_published_flow_runtime_allows_service_key_principals tests/unittests/flows/test_flow_router_crud.py::test_list_flows_allows_service_key_principals_for_published_discovery -q"
+          status: "pass"
+          output: "3 passed, 9 warnings"
+      next_task: T027
+
+  - id: T027
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the smallest safe service-key API consumer fix after T026: preserve /published/ as the canonical service-key runtime owner with SDK/docs/error-DX improvements, or approve a backend policy change for GET /flows/{id}/ only if the source/product evidence proves direct service-key access should be supported."
+    inputs:
+      - "T026 receipt"
+      - "Owner report that a broad/admin service key calling GET /api/v1/flows/{id}/ receives flow_service_key_principal_not_supported."
+      - "backend/src/intric/flows/api/flow_authoring_router.py"
+      - "backend/src/intric/flows/api/flow_upload_router.py"
+      - "backend/src/intric/flows/api/flow_run_execution_router.py"
+      - "backend/src/intric/flows/api/flow_run_steps_router.py"
+      - "backend/src/intric/flows/api/flow_run_evidence_router.py"
+      - "frontend/packages/intric-js/src/endpoints/flows.js"
+      - "frontend/apps/docs-site/src/content/guides/flows-api-guide.mdx"
+    constraints:
+      - "Do not implement in the Judge task."
+      - "Do not edit router/API/error-envelope files unless a subsequent Worker is activated with allowed_files and peer-review gates."
+      - "Do not change service-key identity, review/rerun/resume, retention, schema migration, webhook outbox, or Flow AI Builder behavior here."
+      - "Reject any design that returns two unrelated response shapes from the same endpoint based only on principal type unless explicitly approved with a contract migration plan."
+      - "Prefer canonical-owner reuse: published runtime projection remains the service-key-safe single-flow owner unless the Judge records source/product evidence that it is insufficient."
+    expected_output:
+      - "Decision: wrong-endpoint/DX gap, backend policy bug, or product decision required."
+      - "Approved next Worker with allowed_files, consolidation effect, verification commands, peer-review requirements, and stop conditions."
+      - "Explicitly state whether T009/T011 service-key identity/review/rerun gates remain blocked."
+    receipt:
+      result: done
+      summary: "Classified the owner-reported service-key 403 on GET /api/v1/flows/{id}/ as a wrong-endpoint/API consumer DX gap, not a permission-matrix bug. Approved T028 to keep /published/ as the canonical service-key single-flow runtime owner, make the denial self-directing through a symbolic policy hint resolved at the FastAPI router boundary, and fix the JS SDK published.get string-id footgun. Service-key identity, review/rerun/resume policy, retention, schema migration, webhook outbox, and Flow AI Builder remain out of scope/blocked."
+      decision: "Activate T028."
+      evidence:
+        - "backend/src/intric/flows/api/flow_authoring_router.py:252"
+        - "backend/src/intric/flows/api/flow_authoring_router.py:263"
+        - "backend/src/intric/flows/api/flow_authoring_router.py:337"
+        - "backend/src/intric/flows/api/flow_authoring_router.py:367"
+        - "backend/src/intric/flows/flow_access_policy.py:195"
+        - "backend/src/intric/flows/flow_access_policy.py:209"
+        - "backend/tests/unittests/flows/test_flow_router_crud.py:517"
+        - "backend/tests/unittests/flows/test_flow_router_crud.py:544"
+        - "frontend/packages/intric-js/src/endpoints/flows.js:381"
+        - "frontend/packages/intric-js/src/endpoints/flows.js:383"
+        - "frontend/packages/intric-js/package.json:12"
+        - ".codex/artifacts/t027-service-key-judge-antigravity-revised-brief.md"
+        - ".codex/artifacts/claude-peer-loop-t027-service-key-flow-api-consumer-judge-antigravity-revision-20260525T230858Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t027-service-key-flow-api-consumer-antigravity-revision-20260525T231123Z.md"
+      commands:
+        - command: "rg -n \"flows\\.published\\.get\\(\" frontend backend -g '*.js' -g '*.ts' -g '*.svelte' -g '*.tsx' -g '*.jsx'"
+          status: "pass"
+          output: "Only existing object-form unit test found; no internal production caller. SDK remains a public external API surface, so T028 keeps the string-id guard as a targeted DX hardening."
+        - command: "cat frontend/packages/intric-js/package.json"
+          status: "pass"
+          output: "package test script is node --test update.test.js; T028 must use frontend Vitest directly for flows.test.js."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t027-service-key-judge --phase verification --iteration 4 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: "pass"
+          output: "GREEN_LIGHT yes; MIN_SCORE 8. Non-blocking flags: verify SDK caller scope, fix Vitest command, pin router/policy handoff."
+        - command: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t027-service-key-judge-synthesis --phase synthesis --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: "pass_with_runner_parse_note"
+          output: "Saved final artifact says GREEN_LIGHT yes; MIN_SCORE 9 after revised brief. Wrapper exited nonzero because resumed transcript still contained the prior red verdict."
+      approved_worker: T028
+
+  - id: T028
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Make service-key Flow runtime discovery self-directing while preserving /published/ as the canonical service-key single-flow runtime owner."
+    allowed_files:
+      - "backend/src/intric/flows/flow_access_policy.py"
+      - "backend/src/intric/flows/api/flow_authoring_router.py"
+      - "backend/tests/unittests/flows/test_flow_access_policy.py"
+      - "backend/tests/unittests/flows/test_flow_router_crud.py"
+      - "backend/tests/unit/test_flow_openapi_contract.py"
+      - "frontend/packages/intric-js/src/endpoints/flows.js"
+      - "frontend/packages/intric-js/src/endpoints/flows.test.js"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_router_crud.py tests/unit/test_flow_openapi_contract.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/flow_access_policy.py src/intric/flows/api/flow_authoring_router.py tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_router_crud.py tests/unit/test_flow_openapi_contract.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/flow_access_policy.py src/intric/flows/api/flow_authoring_router.py tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_router_crud.py tests/unit/test_flow_openapi_contract.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/flow_access_policy.py src/intric/flows/api/flow_authoring_router.py tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_router_crud.py tests/unit/test_flow_openapi_contract.py"
+      - "cd frontend && bun x vitest run packages/intric-js/src/endpoints/flows.test.js"
+      - "git diff --check"
+      - "git diff -- backend/src/intric/flows/flow_access_policy.py | rg -n '^\\+.*(/api/v1/flows/\\{id\\}/published/|/api/v1/)'"
+      - "git diff -- backend/src/intric/flows/flow_access_policy.py backend/src/intric/flows/api/flow_authoring_router.py backend/tests/unittests/flows/test_flow_access_policy.py backend/tests/unittests/flows/test_flow_router_crud.py backend/tests/unit/test_flow_openapi_contract.py frontend/packages/intric-js/src/endpoints/flows.js frontend/packages/intric-js/src/endpoints/flows.test.js | rg -n '^\\+.*(pyright: ignore|type: ignore|cast\\(Any|dict\\[str, Any\\]|T0[0-9][0-9]|Phase [0-9A-G]\\b)'"
+    stop_if:
+      - "A correct fix requires changing service-key identity, review/rerun/resume policy, retention, schema migrations, webhook outbox, global auth, or Flow AI Builder behavior."
+      - "flow_access_policy.py requires raw HTTP route templates."
+      - "The SDK change requires generated type regeneration or broader client API redesign."
+      - "OpenAPI examples cannot be validated against GeneralError without changing the shared error schema."
+      - "Verification fails twice for reasons unrelated to this task."
+    consolidation_effect:
+      reused_existing_owner: "FlowActionRequirement owns service-key capability policy; flow_authoring_router owns HTTP route/OpenAPI shape; flows.published.get owns SDK single-flow runtime projection fetches."
+      logic_moved_from: "The proposed published runtime endpoint template is kept out of flow_access_policy.py and resolved only in the router/API boundary."
+      logic_deleted: "None expected."
+      duplicate_path_removed: "The SDK string-id path no longer implicitly creates /api/v1/flows/undefined/published/."
+      new_code_added: "One symbolic policy hint value object, one narrow router-boundary hint augmentation path, one SDK id-narrowing branch, and focused guards."
+      why_existing_owners_were_insufficient: "Existing policy could deny service keys but could not name the runtime alternative; existing router docs named /published/ but the runtime error and SDK call shape were not self-directing."
+      guard_preventing_duplicate_logic_from_returning: "Policy tests block transport path leakage; router/OpenAPI tests pin the API-bound route template; SDK tests pin string and object call forms."
+      net_flow_logic_surface_area: "preserved"
+      if_increased_why: "No new authorization path is introduced; the slice makes the existing denial and SDK runtime projection path explicit."
+    receipt:
+      result: done
+      summary: "Made the service-key denial on draft/current GET /api/v1/flows/{id}/ self-directing without allowing service keys onto the draft endpoint. FlowActionRequirement now owns a symbolic published-runtime alternative for VIEW denials, flow_authoring_router resolves the actual published route template at the FastAPI boundary, OpenAPI documents both 403 examples as GeneralError, and intric-js published.get no longer turns string ids into /undefined/published/."
+      evidence:
+        - "backend/src/intric/flows/flow_access_policy.py:44"
+        - "backend/src/intric/flows/flow_access_policy.py:62"
+        - "backend/src/intric/flows/flow_access_policy.py:85"
+        - "backend/src/intric/flows/flow_access_policy.py:230"
+        - "backend/src/intric/flows/api/flow_authoring_router.py:74"
+        - "backend/src/intric/flows/api/flow_authoring_router.py:83"
+        - "backend/src/intric/flows/api/flow_authoring_router.py:100"
+        - "backend/src/intric/flows/api/flow_authoring_router.py:320"
+        - "backend/src/intric/flows/api/flow_authoring_router.py:370"
+        - "backend/tests/unittests/flows/test_flow_access_policy.py:172"
+        - "backend/tests/unittests/flows/test_flow_router_crud.py:537"
+        - "backend/tests/unit/test_flow_openapi_contract.py:2189"
+        - "frontend/packages/intric-js/src/endpoints/flows.js:381"
+        - "frontend/packages/intric-js/src/endpoints/flows.test.js:58"
+      commands:
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_access_policy.py::test_service_key_principals_fail_closed_unless_route_explicitly_allows tests/unittests/flows/test_flow_access_policy.py::test_non_view_service_key_denials_do_not_get_runtime_endpoint_hint tests/unittests/flows/test_flow_router_crud.py::test_get_flow_keeps_service_key_principals_human_only tests/unit/test_flow_openapi_contract.py::test_openapi_flow_consumer_error_contracts tests/unit/test_flow_openapi_contract.py::test_openapi_flow_consumer_typed_error_schemas tests/unit/test_flow_openapi_contract.py::test_openapi_get_flow_service_key_denial_points_to_published_runtime -q"
+          status: "fail_expected_red"
+          output: "3 failed, 3 passed before implementation; policy hint, router endpoint template, and OpenAPI service-key example were missing."
+        - command: "cd frontend && bun x vitest run packages/intric-js/src/endpoints/flows.test.js"
+          status: "fail_expected_red"
+          output: "1 failed, 24 passed before implementation; flows.published.get(\"flow-1\") requested /api/v1/flows/undefined/published/."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_router_crud.py tests/unit/test_flow_openapi_contract.py -q"
+          status: "pass"
+          output: "101 passed, 21 warnings"
+        - command: "cd frontend && bun x vitest run packages/intric-js/src/endpoints/flows.test.js"
+          status: "pass"
+          output: "25 passed"
+        - command: "cd backend && uv run ruff check src/intric/flows/flow_access_policy.py src/intric/flows/api/flow_authoring_router.py tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_router_crud.py tests/unit/test_flow_openapi_contract.py"
+          status: "pass"
+          output: "All checks passed"
+        - command: "cd backend && uv run ruff format --check src/intric/flows/flow_access_policy.py src/intric/flows/api/flow_authoring_router.py tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_router_crud.py tests/unit/test_flow_openapi_contract.py"
+          status: "pass"
+          output: "5 files already formatted"
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/flow_access_policy.py src/intric/flows/api/flow_authoring_router.py tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_router_crud.py tests/unit/test_flow_openapi_contract.py"
+          status: "pass"
+          output: "0 errors, 0 warnings, 0 informations"
+        - command: "git diff --check"
+          status: "pass"
+        - command: "git diff -- backend/src/intric/flows/flow_access_policy.py | rg -n '^\\+.*(/api/v1/flows/\\{id\\}/published/|/api/v1/)'"
+          status: "pass"
+          output: "No matches; no HTTP route template was added to flow_access_policy.py."
+        - command: "git diff -- backend/src/intric/flows/flow_access_policy.py backend/src/intric/flows/api/flow_authoring_router.py backend/tests/unittests/flows/test_flow_access_policy.py backend/tests/unittests/flows/test_flow_router_crud.py backend/tests/unit/test_flow_openapi_contract.py frontend/packages/intric-js/src/endpoints/flows.js frontend/packages/intric-js/src/endpoints/flows.test.js | rg -n '^\\+.*(pyright: ignore|type: ignore|cast\\(Any|dict\\[str, Any\\]|T0[0-9][0-9]|Phase [0-9A-G]\\b)'"
+          status: "pass"
+          output: "No matches."
+      peer_review:
+        claude:
+          first_artifact: ".codex/artifacts/claude-peer-loop-t028-service-key-runtime-discovery-implementation-review-20260525T232304Z.md"
+          final_artifact: ".codex/artifacts/claude-peer-loop-t028-service-key-runtime-discovery-implementation-review-after-operation-id-cleanup-20260525T232542Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8. Operation-id duplication note addressed before final gate."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t028-service-key-runtime-discovery-antigravity-final-gate-20260525T232740Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 9; blockers none."
+      notes:
+        - "Did not edit service-key identity, review/rerun/resume policy, retention, schema migrations, webhook outbox, global auth, or Flow AI Builder behavior."
+        - "Kept /published/ as the canonical service-key single-flow runtime owner; GET /flows/{id}/ remains a user-principal draft/current endpoint."
+        - "Accepted Claude's single-source-of-truth note by reusing _PUBLISHED_FLOW_RUNTIME_OPERATION_ID in both the route decorator and resolver."
+      next_task: T008
 
   - id: T008
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: medium
     objective: "Remove obsolete frontend generated-contract fallbacks once backend runtime contract ownership is canonical."
     allowed_files:

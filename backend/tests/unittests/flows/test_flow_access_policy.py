@@ -176,16 +176,35 @@ def test_service_key_principals_fail_closed_unless_route_explicitly_allows() -> 
         require_flow_action(service_key_user, FlowApiAction.VIEW)
 
     assert exc_info.value.code == "flow_service_key_principal_not_supported"
-    assert exc_info.value.context == {
-        "auth_layer": "service_key_principal",
-        "capability": "view",
-    }
+    context = exc_info.value.context
+    assert context is not None
+    assert context["auth_layer"] == "service_key_principal"
+    assert context["capability"] == "view"
+    hint = context["runtime_endpoint_hint"]
+    assert isinstance(hint, dict)
+    assert hint["key"] == "published_flow_runtime"
+    assert "published runtime" in str(hint["description"])
+    assert len(str(hint["description"])) <= 120
+    assert "endpoint_template" not in hint
 
     require_flow_action(
         service_key_user,
         FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
+
+
+def test_non_view_service_key_denials_do_not_get_runtime_endpoint_hint() -> None:
+    service_key_user = _service_key_user(Permission.FLOWS)
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        require_flow_action(service_key_user, FlowApiAction.EDIT)
+
+    assert exc_info.value.code == "flow_service_key_principal_not_supported"
+    assert exc_info.value.context == {
+        "auth_layer": "service_key_principal",
+        "capability": "manage",
+    }
 
 
 def test_flow_permission_mapping_has_one_source_owner() -> None:

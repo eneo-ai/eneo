@@ -52,6 +52,20 @@ from tests.unittests.flows.test_flow_router import (
 )
 
 
+def _request_with_published_runtime_route():
+    return SimpleNamespace(
+        state=SimpleNamespace(),
+        app=SimpleNamespace(
+            routes=[
+                SimpleNamespace(
+                    operation_id="get_published_flow_runtime",
+                    path="/api/v1/flows/{id}/published/",
+                )
+            ]
+        ),
+    )
+
+
 @pytest.mark.asyncio
 async def test_test_flow_http_returns_typed_invalid_config_payload(monkeypatch):
     container = MagicMock()
@@ -537,11 +551,20 @@ async def test_get_flow_keeps_service_key_principals_human_only(monkeypatch):
     with pytest.raises(UnauthorizedException) as exc_info:
         await definition_get_flow(
             id=flow_id,
-            request=SimpleNamespace(state=SimpleNamespace()),
+            request=_request_with_published_runtime_route(),
             container=container,
         )
 
     assert exc_info.value.code == "flow_service_key_principal_not_supported"
+    context = exc_info.value.context
+    assert context is not None
+    hint = context["runtime_endpoint_hint"]
+    assert isinstance(hint, dict)
+    assert hint == {
+        "key": "published_flow_runtime",
+        "description": "Use the published runtime projection for service-key Flow clients.",
+        "endpoint_template": "/api/v1/flows/{id}/published/",
+    }
 
 
 @pytest.mark.asyncio

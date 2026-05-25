@@ -41,6 +41,28 @@ class FlowAccessFilterMode(str, Enum):
     VISIBLE = "visible"
 
 
+class ServiceKeyRuntimeAlternativeKey(str, Enum):
+    PUBLISHED_FLOW_RUNTIME = "published_flow_runtime"
+
+
+@dataclass(frozen=True)
+class ServiceKeyRuntimeAlternative:
+    key: ServiceKeyRuntimeAlternativeKey
+    description: str
+
+    def as_error_context(self) -> dict[str, object]:
+        return {
+            "key": self.key.value,
+            "description": self.description,
+        }
+
+
+PUBLISHED_FLOW_RUNTIME_ALTERNATIVE = ServiceKeyRuntimeAlternative(
+    key=ServiceKeyRuntimeAlternativeKey.PUBLISHED_FLOW_RUNTIME,
+    description="Use the published runtime projection for service-key Flow clients.",
+)
+
+
 @dataclass(frozen=True)
 class FlowActionRequirement:
     required_permissions: tuple[Permission, ...]
@@ -49,6 +71,7 @@ class FlowActionRequirement:
     service_key_allowed_when_requested: bool = False
     requires_flow_edit: bool = False
     implemented: bool = True
+    service_key_runtime_alternative: ServiceKeyRuntimeAlternative | None = None
 
 
 _BUILDER_PERMISSIONS = (
@@ -62,6 +85,7 @@ FLOW_ACTION_REQUIREMENTS: dict[FlowApiAction, FlowActionRequirement] = {
         denial_message="You do not have permission to view flows.",
         service_key_capability="view",
         service_key_allowed_when_requested=True,
+        service_key_runtime_alternative=PUBLISHED_FLOW_RUNTIME_ALTERNATIVE,
     ),
     FlowApiAction.RUN: FlowActionRequirement(
         required_permissions=(Permission.FLOWS_RUN,),
@@ -206,7 +230,10 @@ def require_flow_action(
             and requirement.service_key_allowed_when_requested
         ):
             return
-        raise_service_key_not_supported(capability=requirement.service_key_capability)
+        raise_service_key_not_supported(
+            capability=requirement.service_key_capability,
+            runtime_alternative=requirement.service_key_runtime_alternative,
+        )
     if not user_can_perform_flow_action(user, action):
         raise_insufficient_tenant_permission(requirement.denial_message)
 
@@ -219,14 +246,22 @@ def raise_insufficient_tenant_permission(message: str) -> None:
     )
 
 
-def raise_service_key_not_supported(*, capability: str) -> None:
+def raise_service_key_not_supported(
+    *,
+    capability: str,
+    runtime_alternative: ServiceKeyRuntimeAlternative | None = None,
+) -> None:
+    context: dict[str, object] = {
+        "auth_layer": "service_key_principal",
+        "capability": capability,
+    }
+    if runtime_alternative is not None:
+        context["runtime_endpoint_hint"] = runtime_alternative.as_error_context()
+
     raise UnauthorizedException(
         "This Flows endpoint requires a user principal. Service-key principals cannot use this action.",
         code="flow_service_key_principal_not_supported",
-        context={
-            "auth_layer": "service_key_principal",
-            "capability": capability,
-        },
+        context=context,
     )
 
 

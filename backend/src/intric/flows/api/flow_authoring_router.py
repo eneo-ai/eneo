@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from typing import Annotated, Any, Protocol, cast
 from uuid import UUID
 
@@ -24,6 +25,7 @@ from intric.flows.api.flow_models import (
     FlowUpdateRequest,
 )
 from intric.flows.application.flow_service import FlowService
+from intric.flows.flow_access_policy import ServiceKeyRuntimeAlternativeKey
 from intric.flows.principal import FlowPrincipal
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes, NotFoundException, UnauthorizedException
@@ -69,6 +71,8 @@ _FLOW_PUBLISHED_RUNTIME_DESCRIPTION = (
     "as the entry point for external webapps that already know a published flow id."
 )
 
+_PUBLISHED_FLOW_RUNTIME_OPERATION_ID = "get_published_flow_runtime"
+
 
 class _FlowReaderProtocol(Protocol):
     def can_read_flow(self, flow: object) -> bool: ...
@@ -76,6 +80,58 @@ class _FlowReaderProtocol(Protocol):
 
 def _get_flow_service(container: Container) -> FlowService:
     return container.flow_service()
+
+
+def _path_for_operation_id(request: Request, operation_id: str) -> str | None:
+    app = getattr(request, "app", None)
+    routes = cast(Iterable[object], getattr(app, "routes", ()))
+    for route in routes:
+        if getattr(route, "operation_id", None) != operation_id:
+            continue
+        path = getattr(route, "path", None)
+        if isinstance(path, str):
+            return path
+    return None
+
+
+def _with_published_runtime_endpoint_hint(
+    request: Request,
+    exc: UnauthorizedException,
+) -> UnauthorizedException:
+    context = exc.context
+    if context is None:
+        return exc
+
+    hint = context.get("runtime_endpoint_hint")
+    if not isinstance(hint, Mapping):
+        return exc
+    hint_mapping = cast(Mapping[object, object], hint)
+    if (
+        hint_mapping.get("key")
+        != ServiceKeyRuntimeAlternativeKey.PUBLISHED_FLOW_RUNTIME.value
+    ):
+        return exc
+
+    endpoint_template = _path_for_operation_id(
+        request,
+        _PUBLISHED_FLOW_RUNTIME_OPERATION_ID,
+    )
+    if endpoint_template is None:
+        return exc
+
+    runtime_hint: dict[str, object] = {
+        "key": hint_mapping.get("key"),
+        "description": hint_mapping.get("description"),
+        "endpoint_template": endpoint_template,
+    }
+    return UnauthorizedException(
+        str(exc),
+        code=exc.code,
+        context={
+            **context,
+            "runtime_endpoint_hint": runtime_hint,
+        },
+    )
 
 
 @router.post(
@@ -264,10 +320,40 @@ async def list_flows(
     responses={
         403: error_response(
             description=_FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
-            message="API key space scope does not match requested flow.",
-            intric_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
-            context={"auth_layer": "api_key_scope"},
+            examples={
+                "insufficient_scope": {
+                    "summary": "API key scope mismatch",
+                    "value": {
+                        "message": "API key space scope does not match requested flow.",
+                        "intric_error_code": int(ErrorCodes.UNAUTHORIZED),
+                        "code": "insufficient_scope",
+                        "context": {"auth_layer": "api_key_scope"},
+                    },
+                },
+                "flow_service_key_principal_not_supported": {
+                    "summary": "Service-key principal called draft Flow endpoint",
+                    "value": {
+                        "message": (
+                            "This Flows endpoint requires a user principal. "
+                            "Service-key principals cannot use this action."
+                        ),
+                        "intric_error_code": int(ErrorCodes.UNAUTHORIZED),
+                        "code": "flow_service_key_principal_not_supported",
+                        "context": {
+                            "auth_layer": "service_key_principal",
+                            "capability": "view",
+                            "runtime_endpoint_hint": {
+                                "key": "published_flow_runtime",
+                                "description": (
+                                    "Use the published runtime projection for "
+                                    "service-key Flow clients."
+                                ),
+                                "endpoint_template": "/api/v1/flows/{id}/published/",
+                            },
+                        },
+                    },
+                },
+            },
         ),
         404: error_response(
             description="Flow not found in tenant scope.",
@@ -284,12 +370,15 @@ async def get_flow(
     request: Request,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    access_context = await common.get_flow_access_context_for_request(
-        request,
-        container,
-        flow_id=id,
-        required_access=common.FlowApiAction.VIEW,
-    )
+    try:
+        access_context = await common.get_flow_access_context_for_request(
+            request,
+            container,
+            flow_id=id,
+            required_access=common.FlowApiAction.VIEW,
+        )
+    except UnauthorizedException as exc:
+        raise _with_published_runtime_endpoint_hint(request, exc) from exc
     assembler = FlowAssembler()
     actor = cast(_FlowReaderProtocol | None, access_context.actor)
     if actor is None or not actor.can_read_flow(cast(Any, access_context.flow)):
@@ -306,7 +395,7 @@ async def get_flow(
     "/{id}/published/",
     response_model=FlowRuntimePublic,
     status_code=status.HTTP_200_OK,
-    operation_id="get_published_flow_runtime",
+    operation_id=_PUBLISHED_FLOW_RUNTIME_OPERATION_ID,
     summary="Get Published Flow Runtime View",
     description=(
         f"{_FLOW_PUBLISHED_RUNTIME_DESCRIPTION} "
