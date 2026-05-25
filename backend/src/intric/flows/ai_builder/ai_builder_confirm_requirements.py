@@ -35,12 +35,12 @@ from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolRetryConfig,
     ToolRetryInvocation,
 )
-from intric.flows.ai_builder.ai_builder_repair_transport import persist_tool_turn
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from intric.flows.ai_builder.ai_builder_tool_turn_persistence import persist_tool_turn
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,

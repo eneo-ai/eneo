@@ -273,21 +273,6 @@ def build_tool_retry_messages(
     ]
 
 
-def append_retry_feedback_turn(
-    *,
-    llm_messages: list[dict[str, Any]],
-    tool_call: Any,
-    assistant_content: str | None,
-    tool_feedback: str,
-) -> list[dict[str, Any]]:
-    return build_tool_retry_messages(
-        llm_messages=llm_messages,
-        tool_call=tool_call,
-        tool_feedback=tool_feedback,
-        assistant_content=assistant_content,
-    )
-
-
 def append_text_retry_feedback_turn(
     *,
     llm_messages: list[dict[str, Any]],
@@ -496,7 +481,7 @@ async def request_self_correction(
             if retry_feedback is not None:
                 correction_tool_call, feedback, failure_kind = retry_feedback
                 retry_state = retry_state.consume(failure_kind=failure_kind)
-                correction_messages = append_retry_feedback_turn(
+                correction_messages = build_tool_retry_messages(
                     llm_messages=correction_messages,
                     tool_call=correction_tool_call,
                     assistant_content=assistant_text,

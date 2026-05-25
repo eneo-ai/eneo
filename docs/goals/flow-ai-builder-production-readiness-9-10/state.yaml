@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T093
+active_task: T094
 
 interruptions:
   - id: I001
@@ -241,6 +241,7 @@ current_scorecard:
     - "T071a closed the stale baseline tests exposed by T069: tests/unit/test_ai_builder_plan_edit_context.py was deleted after valuable pure coverage moved to the structured unittest owner, and tests/integration/flows/test_ai_builder_session_api_regressions.py now targets current request discriminators, lease ownership, owner-module patch bindings, and public dispatch behavior."
     - "T073 closed one concrete planner topology seam by moving duplicate production OrchestrationContext assembly into OrchestrationContext.for_turn and replacing PlannerPreparedRequest.requirements_state Any with RequirementsState. This improves maintainability/readability inside planner turns but does not by itself raise Maintainability or Human Readability above 8 because ai_builder_planner.py and related orchestration topology still need broader consolidation/readability work."
     - "T079 closed the next planner topology seam: request preparation, provider-bound conversation replay, failure-event rendering, and discovery-stall arming no longer live in AIBuilderPlanner.send_message. Claude and Antigravity both passed the implementation after Codex fixed a discovery-block fall-through and removed duplicate classifier calls. Maintainability/Human Readability/AI Slop remain 8 at subsystem level because remaining broader topology, naming/comment inventory, and full-source typing/test baseline are not yet closed."
+    - "T093 deleted the fake ai_builder_repair_transport.py seam, moved tool-turn persistence to ai_builder_tool_turn_persistence.py, removed append_retry_feedback_turn, and relocated tests to canonical owners. This improves topology/readability/slop evidence, but the subsystem floor remains 8 because T091 compiler follow-ups, broader planner/source topology/readability, final live-output proof, and full-source baseline blockers remain."
     - "Overall remains 8 until full-source typing outside AI Builder, planner/source consolidation/readability tranches, AI slop/comment/naming cleanup, and repeated authenticated live-eval evidence prove every dimension is honestly at least 9."
 
 score_floor_completion_gates:
@@ -8582,7 +8583,7 @@ tasks:
   - id: T093
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Delete the AI Builder repair-transport fake seam by making tool-turn persistence a named owner and retry-message construction a direct proposal-repair owner."
     constraints:
@@ -8642,6 +8643,111 @@ tasks:
       implementation_required: "Run Claude implementation gate after validation; run Antigravity implementation gate with --spend-mode auto if available. Missing Antigravity coverage is a skip, not a pass."
     swagger_openapi_impact: "None expected. T093 is internal backend owner/readability work and must not change public contracts or examples."
     score_impact: "May improve Maintainability, Clean Architecture, Separation of Concerns, Human Readability, Human Reviewability, and AI Slop resistance. Do not raise the overall strict floor above 8 unless post-implementation evidence proves every remaining 8-scored dimension is now 9."
+    receipt:
+      completed_at: "2026-05-25T00:19:55Z"
+      summary: "Deleted the AI Builder repair-transport fake seam. Tool-turn persistence now has a persistence-named owner, retry-message construction is imported directly from ai_builder_proposal_repair.py, the remaining append_retry_feedback_turn pass-through wrapper is deleted, and tests were moved to the canonical owners. No public API/OpenAPI/Swagger/frontend/database/generated-client surface changed."
+      repo_reality:
+        branch: "feature/refactor-flows-flowai"
+        head_before_commit: "efa96b774 Select AI Builder tool-turn persistence cleanup"
+        unrelated_dirty_files_preserved:
+          - ".devcontainer/docker-compose.yml"
+          - ".gitignore"
+          - "AGENTS.md"
+          - ".devcontainer/devcontainer-lock.json"
+          - "PRODUCT.md"
+          - "utvecklingssamtal.mp3"
+      implementation:
+        production_files:
+          - "backend/src/intric/flows/ai_builder/ai_builder_tool_turn_persistence.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_repair_transport.py (deleted)"
+          - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_question_recovery.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_confirm_requirements.py"
+        test_files:
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_tool_turn_persistence.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_repair_transport.py (deleted)"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+          - "backend/tests/integration/flows/test_ai_builder_session_api_regressions.py"
+        artifact: ".codex/artifacts/flow-ai-builder-t093-implementation-summary.md"
+        details:
+          - "Added ai_builder_tool_turn_persistence.py with persist_tool_turn as its only public function."
+          - "Deleted ai_builder_repair_transport.py instead of keeping a compatibility shim."
+          - "Updated question recovery to import build_tool_retry_messages from ai_builder_proposal_repair.py and persist_tool_turn from ai_builder_tool_turn_persistence.py."
+          - "Updated confirm requirements and the DB regression test to import persist_tool_turn from ai_builder_tool_turn_persistence.py."
+          - "Deleted append_retry_feedback_turn from ai_builder_proposal_repair.py; internal repair retry now calls build_tool_retry_messages directly."
+          - "Moved retry-message tests to proposal repair, persisted tool-call shape coverage to conversation metadata, and persistence coverage to tool-turn persistence."
+          - "Added an AST ownership guard preventing repair-transport imports, append_retry_feedback_turn references, and retry-message imports from the persistence owner."
+      red_green_evidence:
+        red_guard:
+          command: "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_tool_turn_persistence_has_single_owner_without_repair_transport_facade -q"
+          result: "1 failed before move; violations showed ai_builder_repair_transport.py still existed, exported retry/persistence functions, callers imported it, append_retry_feedback_turn still existed, and the new persistence owner was missing."
+        green_guard:
+          command: "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_tool_turn_persistence_has_single_owner_without_repair_transport_facade -q"
+          result: "1 passed after move"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q -> 26 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py -q -> 18 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_tool_turn_persistence.py -q -> 1 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py -q -> 9 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 28 passed"
+        - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_persist_tool_turn_refreshes_planning_state_with_requirements_summary -q -> 1 passed, 16 warnings"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2393 passed, 4 skipped, 11 warnings"
+        - "cd backend && uv run ruff check touched T093 files -> all checks passed"
+        - "cd backend && uv run ruff format --check touched T093 files -> 9 files already formatted"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations"
+        - "rg -n \"ai_builder_repair_transport|append_retry_feedback_turn|append_tool_retry_feedback_turn\" backend/src backend/tests --glob '!**/test_ai_builder_import_ownership.py' -> no matches"
+        - "git diff --check -> clean"
+      peer_review:
+        claude: ".codex/artifacts/claude-peer-loop-t093-tool-turn-persistence-implementation-gate-20260525T001703Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t093-tool-turn-persistence-implementation-gate-20260525T001945Z.md -> GREEN_LIGHT yes / MIN_SCORE 9"
+        accepted_or_deferred_peer_feedback:
+          - "Claude P3: optional metadata=None/assistant_content=None unit coverage can be queued; not a blocker because the old test did not pin those paths and the integration regression covers the stateful path."
+          - "Claude P3: persist_tool_turn still accepts both tool_call and arguments; changing that coupling is a future typed-boundary tranche, not part of this topology move."
+          - "Antigravity P3: arguments could eventually tighten from dict[str, Any] to Mapping[str, Any]; defer because this exact boundary is a JSON/persistence seam and Pyright is clean."
+      swagger_openapi_impact: "None. T093 is internal backend owner/readability work. It did not change REST/SSE contracts, OpenAPI schemas, Swagger examples, generated client types, frontend files, database schema or migrations, public request/response models, or API examples."
+      score_impact:
+        strict_floor: 8
+        dimensions_helped:
+          - "Maintainability"
+          - "Clean Architecture"
+          - "Separation of Concerns"
+          - "Human Readability"
+          - "Human Reviewability"
+          - "AI Slop / Comment / Naming Quality"
+        rationale: "Deletes a fake seam and makes canonical ownership clearer, but does not raise the overall Flow AI Builder floor above 8 because remaining compiler follow-ups, broader topology/readability/slop blockers, final live-output proof, and full-source baseline issues remain."
+      residual_risks:
+        - "T091 compiler follow-ups remain: form-field cast(Any, ...), output-type fallback consistency, duplicate runtime metadata lookup, and unknown uses_input_fields behavior."
+        - "persist_tool_turn still has a dual tool_call/arguments boundary inherited from the old implementation."
+        - "Optional default-path unit coverage for persist_tool_turn metadata=None/assistant_content=None remains a small follow-up."
+        - "Final live-output proof and any remaining topology/readability/slop blockers still block a broader 9/10 completion claim."
+      broader_goal_complete: false
+
+  - id: T094
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest score-floor mover after T093 from current repo reality, without implementing during the ranking tranche."
+    constraints:
+      - "Do not move to broader Flows work; stay within Flow AI Builder unless the user explicitly changes scope."
+      - "Start from git status, latest commits, current scorecard, T093 receipt, source evidence, Claude/Antigravity T093 findings, and current dirty diff."
+      - "Consider remaining T091/T093 follow-ups: runtime_metadata_state_from_planning_state ownership, form-field field_type casts, inconsistent output_type fallback, unknown uses_input_fields drop behavior, optional persist_tool_turn default-path coverage, dual tool_call/arguments boundary, and Mapping[str, Any] tightening."
+      - "Also consider typed event-builder payload tightening, negative dispatch-without-lease integration test, bounded AI-slop/comment/naming cleanup, remaining planner/source topology/readability blockers, final live-output proof, AI Builder-scoped typing/test baseline, diagnostics/DX, data/schema/JSONB ownership, and frontend/backend contract drift."
+      - "Pick the tranche that most improves the strict score floor, not the easiest cleanup."
+      - "Do not implement during T094."
+      - "Do not optimize for LOC, and do not split files unless it removes real complexity or clarifies ownership."
+      - "Run Claude plan review and Antigravity if available. Missing Antigravity coverage must be recorded as missing coverage, not a pass."
+      - "Keep Swagger/OpenAPI/API examples current if the selected plan touches a public contract; otherwise explicitly record no public contract impact."
+    allowed_files:
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t094-next-tranche-ranking.md"
+    expected_output:
+      - "Evidence-backed ranking with file:line evidence."
+      - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, expected score impact, and Swagger/OpenAPI impact."
+      - "Explicit explanation of why the selected tranche moves the strict 9/10 floor more than easier cleanup."
+      - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
     receipt: null
 
 checks:
@@ -8650,9 +8756,16 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T092 completed as a read-only ranking task with Claude and Antigravity green. T093 is active as the next worker. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T092
+    result: "T093 completed, validated, Claude-gated, Antigravity-gated, and ready for scoped commit. T094 is active as a read-only ranking task. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T093
     commands:
-      - "T092 is read-only; no source validation commands were required."
-      - "Claude T092 plan gate -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity T092 plan gate -> GREEN_LIGHT yes / MIN_SCORE 9"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q -> 26 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py -q -> 18 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_tool_turn_persistence.py -q -> 1 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py -q -> 9 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 28 passed"
+      - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_persist_tool_turn_refreshes_planning_state_with_requirements_summary -q -> 1 passed, 16 warnings"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2393 passed, 4 skipped, 11 warnings"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations"
+      - "Claude T093 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity T093 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 9"

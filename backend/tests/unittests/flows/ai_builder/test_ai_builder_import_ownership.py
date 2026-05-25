@@ -242,6 +242,18 @@ CREATE_OUTLINE_MODULE = ".".join(
 )
 CREATE_OUTLINE_PATH = Path("src/intric/flows/ai_builder/ai_builder_create_outline.py")
 CREATE_COMPILER_PATH = Path("src/intric/flows/ai_builder/ai_builder_create_compiler.py")
+REPAIR_TRANSPORT_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_repair_transport")
+)
+REPAIR_TRANSPORT_PATH = Path(
+    "src/intric/flows/ai_builder/ai_builder_repair_transport.py"
+)
+TOOL_TURN_PERSISTENCE_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_tool_turn_persistence")
+)
+TOOL_TURN_PERSISTENCE_PATH = Path(
+    "src/intric/flows/ai_builder/ai_builder_tool_turn_persistence.py"
+)
 CREATE_COMPILER_PUBLIC_NAMES = frozenset(
     {
         "OutlineCompileContext",
@@ -1763,6 +1775,103 @@ def test_create_outline_no_longer_owns_create_compiler_mechanics() -> None:
     compiler_text = compiler_path.read_text()
     if "build_outline_flow_tool_schema" in compiler_text:
         violations.append(f"{compiler_path}: builds outline LLM tool schema")
+
+    assert violations == []
+
+
+def test_tool_turn_persistence_has_single_owner_without_repair_transport_facade() -> (
+    None
+):
+    backend_root = Path(__file__).resolve().parents[4]
+    repair_transport_path = backend_root / REPAIR_TRANSPORT_PATH
+    persistence_path = backend_root / TOOL_TURN_PERSISTENCE_PATH
+    proposal_repair_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+    )
+    question_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_question_recovery.py"
+    )
+    confirm_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_confirm_requirements.py"
+    )
+    violations: list[str] = []
+
+    if importlib.util.find_spec(REPAIR_TRANSPORT_MODULE) is not None:
+        violations.append(f"{repair_transport_path}: repair transport facade exists")
+    if importlib.util.find_spec(TOOL_TURN_PERSISTENCE_MODULE) is None:
+        violations.append(f"{persistence_path}: missing tool-turn persistence owner")
+
+    if repair_transport_path.exists():
+        repair_tree = ast.parse(
+            repair_transport_path.read_text(), filename=str(repair_transport_path)
+        )
+        for node in ast.walk(repair_tree):
+            if isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef)
+            ) and node.name in {
+                "build_tool_retry_messages",
+                "append_tool_retry_feedback_turn",
+                "persist_tool_turn",
+            }:
+                violations.append(
+                    f"{repair_transport_path}:{node.lineno} defines {node.name}"
+                )
+
+    if persistence_path.exists():
+        persistence_tree = ast.parse(
+            persistence_path.read_text(), filename=str(persistence_path)
+        )
+        public_names = _top_level_public_names(persistence_tree)
+        if public_names != frozenset({"persist_tool_turn"}):
+            violations.append(
+                f"{persistence_path}: public names {sorted(public_names)}"
+            )
+        for node in ast.walk(persistence_tree):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module == PROPOSAL_REPAIR_MODULE
+            ):
+                violations.append(
+                    f"{persistence_path}:{node.lineno} imports {node.module}"
+                )
+
+    proposal_repair_tree = ast.parse(
+        proposal_repair_path.read_text(), filename=str(proposal_repair_path)
+    )
+    for node in ast.walk(proposal_repair_tree):
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "append_retry_feedback_turn"
+        ):
+            violations.append(
+                f"{proposal_repair_path}:{node.lineno} defines {node.name}"
+            )
+
+    for path in _python_files():
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                if node.module == REPAIR_TRANSPORT_MODULE:
+                    violations.append(f"{path}:{node.lineno} imports {node.module}")
+                imported_names = {alias.name for alias in node.names}
+                if "append_retry_feedback_turn" in imported_names:
+                    violations.append(
+                        f"{path}:{node.lineno} imports append_retry_feedback_turn"
+                    )
+
+    question_tree = ast.parse(question_path.read_text(), filename=str(question_path))
+    question_imports = _imported_modules(question_tree)
+    if PROPOSAL_REPAIR_MODULE not in question_imports:
+        violations.append(f"{question_path}: missing proposal-repair retry import")
+    if TOOL_TURN_PERSISTENCE_MODULE not in question_imports:
+        violations.append(f"{question_path}: missing tool-turn persistence import")
+
+    confirm_tree = ast.parse(confirm_path.read_text(), filename=str(confirm_path))
+    confirm_imports = _imported_modules(confirm_tree)
+    if PROPOSAL_REPAIR_MODULE in confirm_imports:
+        violations.append(f"{confirm_path}: imports proposal repair")
+    if TOOL_TURN_PERSISTENCE_MODULE not in confirm_imports:
+        violations.append(f"{confirm_path}: missing tool-turn persistence import")
 
     assert violations == []
 

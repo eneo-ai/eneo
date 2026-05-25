@@ -7,6 +7,7 @@ from typing import get_args
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
     LLMResolvableSlotName,
+    make_persisted_assistant_tool_call,
     metadata_for_user_message,
     metadata_with_slot_classification,
     provider_safe_tool_call_id,
@@ -109,6 +110,19 @@ def test_tool_calls_from_message_ignores_extra_persisted_fields() -> None:
         "id": "call_legacy",
         "name": "confirm_requirements",
         "arguments": {"requirements_version": "req_1"},
+    }
+
+
+def test_make_persisted_assistant_tool_call_returns_canonical_tool_shape() -> None:
+    tool_call = make_persisted_assistant_tool_call(
+        tool_call_id="call_2",
+        tool_name="confirm_requirements",
+    )
+
+    assert tool_call.model_dump(mode="json") == {
+        "id": "call_2",
+        "name": "confirm_requirements",
+        "arguments": {},
     }
 
 

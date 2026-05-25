@@ -8,9 +8,14 @@ from uuid import uuid4
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
+)
+from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     ForcedToolRetryOutcome,
     _build_retry_feedback,
+    build_tool_retry_messages,
     request_self_correction,
     retry_forced_tool_after_text,
 )
@@ -69,6 +74,55 @@ def _make_turn() -> SessionSendTurn:
         lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
         base_planning_state_version=3,
     )
+
+
+def test_build_tool_retry_messages_appends_tool_call_and_feedback() -> None:
+    tool_call = SimpleNamespace(
+        id="call_1",
+        function=SimpleNamespace(
+            name=OUTLINE_FLOW_TOOL_NAME,
+            arguments='{"flow_name":"Draft"}',
+        ),
+    )
+
+    messages = build_tool_retry_messages(
+        llm_messages=[{"role": "system", "content": "Prompt"}],
+        tool_call=tool_call,
+        tool_feedback="Please fix the draft.",
+    )
+
+    assert messages[0] == {"role": "system", "content": "Prompt"}
+    assert messages[1]["role"] == "assistant"
+    assert messages[1]["tool_calls"][0]["function"]["name"] == OUTLINE_FLOW_TOOL_NAME
+    assert messages[2] == {
+        "role": "tool",
+        "tool_call_id": "call_1",
+        "content": "Please fix the draft.",
+    }
+
+
+def test_build_tool_retry_messages_normalizes_oversized_tool_call_ids() -> None:
+    legacy_id = "server_scoped_model_revision:00000000-0000-0000-0000-000000000000"
+    assert len(legacy_id) == PROVIDER_TOOL_CALL_ID_MAX_LENGTH + 1
+    tool_call = SimpleNamespace(
+        id=legacy_id,
+        function=SimpleNamespace(
+            name=OUTLINE_FLOW_TOOL_NAME,
+            arguments='{"flow_name":"Draft"}',
+        ),
+    )
+
+    messages = build_tool_retry_messages(
+        llm_messages=[{"role": "system", "content": "Prompt"}],
+        tool_call=tool_call,
+        tool_feedback="Please fix the draft.",
+    )
+
+    assistant_id = messages[1]["tool_calls"][0]["id"]
+    tool_result_id = messages[2]["tool_call_id"]
+    assert assistant_id == tool_result_id
+    assert assistant_id != legacy_id
+    assert len(assistant_id) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH
 
 
 @pytest.mark.asyncio

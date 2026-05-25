@@ -34,6 +34,9 @@ from intric.flows.ai_builder.ai_builder_interaction_utils import (
 from intric.flows.ai_builder.ai_builder_proposal_completion import (
     call_proposal_completion,
 )
+from intric.flows.ai_builder.ai_builder_proposal_repair import (
+    build_tool_retry_messages,
+)
 from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalTurnTelemetry,
     assistant_metadata_with_usage,
@@ -41,13 +44,11 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCompletionRequest,
 )
-from intric.flows.ai_builder.ai_builder_repair_transport import (
-    append_tool_retry_feedback_turn,
-    build_tool_retry_messages,
-    persist_tool_turn,
-)
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from intric.flows.ai_builder.ai_builder_tool_turn_persistence import (
+    persist_tool_turn,
+)
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
@@ -362,7 +363,7 @@ async def _stream_non_question_continuation(
                     )
                     return
                 retries_remaining -= 1
-                active_messages = append_tool_retry_feedback_turn(
+                active_messages = build_tool_retry_messages(
                     llm_messages=active_messages,
                     tool_call=repeated_question_call,
                     assistant_content=message.content,

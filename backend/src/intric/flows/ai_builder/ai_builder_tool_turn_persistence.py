@@ -10,47 +10,11 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_proposal_repair import (
-    append_retry_feedback_turn,
-)
-from intric.flows.ai_builder.ai_builder_proposal_repair import (
-    build_tool_retry_messages as build_proposal_tool_retry_messages,
-)
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 
 if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
-
-
-def build_tool_retry_messages(
-    *,
-    llm_messages: list[dict[str, Any]],
-    tool_call: Any,
-    tool_feedback: str,
-    assistant_content: str | None = None,
-) -> list[dict[str, Any]]:
-    return build_proposal_tool_retry_messages(
-        llm_messages=llm_messages,
-        tool_call=tool_call,
-        tool_feedback=tool_feedback,
-        assistant_content=assistant_content,
-    )
-
-
-def append_tool_retry_feedback_turn(
-    *,
-    llm_messages: list[dict[str, Any]],
-    tool_call: Any,
-    assistant_content: str | None,
-    tool_feedback: str,
-) -> list[dict[str, Any]]:
-    return append_retry_feedback_turn(
-        llm_messages=llm_messages,
-        tool_call=tool_call,
-        assistant_content=assistant_content,
-        tool_feedback=tool_feedback,
-    )
 
 
 async def persist_tool_turn(

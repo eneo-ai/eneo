@@ -1636,7 +1636,9 @@ async def test_persist_tool_turn_refreshes_planning_state_with_requirements_summ
         make_persisted_assistant_tool_call,
         requirements_summary_to_metadata,
     )
-    from intric.flows.ai_builder.ai_builder_repair_transport import persist_tool_turn
+    from intric.flows.ai_builder.ai_builder_tool_turn_persistence import (
+        persist_tool_turn,
+    )
 
     space_id = await _create_space_with_planner_model(
         client=client,
