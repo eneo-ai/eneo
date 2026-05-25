@@ -110,7 +110,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T025
+active_task: T006
 
 tasks:
   - id: T001
@@ -670,7 +670,7 @@ tasks:
   - id: T025
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Delete zero-reference Flow legacy helpers: FlowRepository.get_step_result_by_order and normalize_legacy_config, including only its package export and normalize-specific tests."
     allowed_files:
@@ -712,12 +712,110 @@ tasks:
       - "Tests removed only with removed behavior."
       - "Line-level list of tests preserved and removed, mapped to the behavior retained or deleted."
       - "Clean-checkout verification receipt when the worktree has unrelated dirty/untracked files."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Deleted the exact T024-approved zero-reference Flow legacy helpers: FlowRepository.get_step_result_by_order and normalize_legacy_config, including the package export and normalize-only tests. Preserved is_authored_config and its four behavior tests. No router/API/error-envelope/frontend/generated/migration files were edited."
+      source_commit: "a29f6ef6c2212f478823b5b6c5a3b85bfb1a7d22"
+      consolidation_effect:
+        reused_existing_owner:
+          - "FlowRepository.get_step_result remains the canonical step-result lookup by stable step id."
+          - "is_authored_config remains the only HTTP authored-shape predicate in http_transport.normalizer."
+        logic_moved_from: []
+        logic_deleted:
+          - "backend/src/intric/flows/infrastructure/flow_repo.py: deleted get_step_result_by_order."
+          - "backend/src/intric/flows/http_transport/normalizer.py: deleted normalize_legacy_config and its private legacy inference helpers."
+          - "backend/src/intric/flows/http_transport/__init__.py: deleted normalize_legacy_config package export."
+          - "backend/tests/unittests/flows/http_transport/test_normalizer.py: deleted normalize_legacy_config-only tests."
+        duplicate_path_removed:
+          - "Removed the unused order-based step-result lookup path so step-id lookup is the single repository path."
+          - "Removed the uncalled legacy HTTP config normalizer rather than preserving a speculative parallel bridge."
+        new_code_added: "None, aside from formatter line wrapping after deletion."
+        why_existing_owners_were_insufficient: "No new owner was needed; the approved action was deletion because existing canonical owners were sufficient."
+        guard_test_preventing_duplicate_logic_from_returning:
+          - "Zero-symbol rg check for get_step_result_by_order and normalize_legacy_config."
+          - "Package import probe confirms normalize_legacy_config is no longer exported."
+          - "Flow architecture guard test remains green."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: null
+      tests_preserved:
+        - "backend/tests/unittests/flows/http_transport/test_normalizer.py: four test_is_authored_config_* tests."
+        - "backend/tests/integration/flows/test_flow_repository.py: canonical repository behavior remains green."
+      tests_removed:
+        - "backend/tests/unittests/flows/http_transport/test_normalizer.py: normalize_legacy_config-only compatibility tests removed with the deleted behavior."
+      commands:
+        - cmd: "git diff --cached --name-only"
+          status: pass
+          output: "Exactly the four T025 source/test files were staged before source commit."
+        - cmd: "git diff --cached --stat"
+          status: pass
+          output: "4 files changed, 11 insertions(+), 310 deletions(-)."
+        - cmd: "Pre-change: rg -n \"get_step_result_by_order|normalize_legacy_config\" backend/src frontend backend/tests -g '!**/node_modules/**' -g '!**/.svelte-kit/**' -g '!**/generated/**'"
+          status: pass
+          output: "Only approved definition/export/test surfaces were found."
+        - cmd: "Pre-change: rg -n \"get_step_result_by_order\" backend/src/intric/worker backend/src/intric/flows -g '*.py'"
+          status: pass
+          output: "Only backend/src/intric/flows/infrastructure/flow_repo.py."
+        - cmd: "Post-change: rg -n \"get_step_result_by_order|normalize_legacy_config\" backend/src frontend backend/tests -g '!**/node_modules/**' -g '!**/.svelte-kit/**' -g '!**/generated/**'"
+          status: pass
+          output: "No hits; rg exit 1 is expected for zero matches."
+        - cmd: "rg -n \"normalize_legacy_config|is_authored_config\" backend/src/intric/flows/http_transport/__init__.py backend/tests/unittests/flows/http_transport/test_normalizer.py backend/src/intric/flows/http_transport/normalizer.py"
+          status: pass
+          output: "Only is_authored_config remains."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/http_transport/test_normalizer.py tests/integration/flows/test_flow_repository.py -q"
+          status: pass
+          output: "19 passed, 16 warnings."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py -q"
+          status: pass
+          output: "1 passed."
+        - cmd: "cd backend && uv run ruff check src/intric/flows/infrastructure/flow_repo.py src/intric/flows/http_transport/normalizer.py src/intric/flows/http_transport/__init__.py tests/unittests/flows/http_transport/test_normalizer.py"
+          status: fail
+          output: "Initial run found import formatting after deletion; fixed with ruff check --fix and ruff format."
+        - cmd: "cd backend && uv run ruff check src/intric/flows/infrastructure/flow_repo.py src/intric/flows/http_transport/normalizer.py src/intric/flows/http_transport/__init__.py tests/unittests/flows/http_transport/test_normalizer.py"
+          status: pass
+          output: "All checks passed."
+        - cmd: "cd backend && uv run ruff format --check src/intric/flows/infrastructure/flow_repo.py src/intric/flows/http_transport/normalizer.py src/intric/flows/http_transport/__init__.py tests/unittests/flows/http_transport/test_normalizer.py"
+          status: pass
+          output: "4 files already formatted."
+        - cmd: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/infrastructure/flow_repo.py src/intric/flows/http_transport"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations."
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/http_transport -q"
+          status: pass
+          output: "67 passed."
+        - cmd: "cd backend && uv run python - <<'PY' ... import normalize_legacy_config should fail ... PY"
+          status: pass
+          output: "normalize_legacy_config import removed."
+        - cmd: "test \"$(rg -n '^def test_is_authored_config_' backend/tests/unittests/flows/http_transport/test_normalizer.py | wc -l | tr -d ' ')\" = \"4\""
+          status: pass
+          output: "four is_authored_config tests preserved."
+        - cmd: "Clean worktree pytest before copying ignored backend/.env"
+          status: fail
+          output: "Detached clean worktree lacked ignored backend/.env, so settings validation failed before test collection."
+        - cmd: "Clean worktree after applying only T025 patch and copying ignored backend/.env: ruff, pyright, architecture guard, and targeted pytest"
+          status: pass
+          output: "ruff passed; pyright 0 errors; architecture guard 1 passed; targeted pytest 19 passed, 16 warnings."
+      peer_artifacts:
+        claude: ".codex/artifacts/claude-peer-loop-t025-zero-reference-legacy-helper-deletion-20260525T212658Z.md"
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t025-zero-reference-legacy-helper-deletion-synthesis-20260525T213050Z.md"
+      peer_review:
+        claude: "GREEN_LIGHT yes; MIN_SCORE 8. Required staging exactly the four T025 files and leaving unrelated dirty files unstaged."
+        antigravity: "GREEN_LIGHT yes; MIN_SCORE 8. Approved committing the staged deletion-only diff and reiterated that the authored HTTP runtime mismatch is a future ownership/preflight concern, not a T025 blocker."
+      future_notes:
+        - "Authored HTTP config runtime mismatch remains queued for future source preflight: persistence/test endpoints accept authored auth/custom_headers shape while runtime orchestration still reads flat headers/body_template/body_json."
+      unrelated_files_preserved:
+        - ".devcontainer/docker-compose.yml"
+        - ".gitignore"
+        - "AGENTS.md"
+        - ".devcontainer/devcontainer-lock.json"
+        - "root Flow review docs, PRODUCT.md, notes/source-material-index.md, notes/step-handler-and-renderer-architecture.md, and utvecklingssamtal.mp3"
+      next_task: T006
 
   - id: T006
     type: judge
     assignee: Judge
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Before runtime contract refactor, decide whether /input-policy/ can be deleted; keep it only if a real caller cannot use /run-contract/, and then only as a pure projection."
     inputs:
