@@ -120,6 +120,18 @@ def test_resolve_explicit_output_choice_detects_pdf_from_swedish_prompt() -> Non
     assert output == "pdf_document"
 
 
+def test_resolve_output_intent_keeps_pdf_files_as_input_when_output_is_absent() -> None:
+    output = resolve_output_intent("flera pdf filer ska vara input", {})
+
+    assert output.terminal_output is None
+
+
+def test_resolve_output_intent_keeps_singular_pdf_file_output_wording() -> None:
+    output = resolve_output_intent("utdatat ska vara pdf fil", {})
+
+    assert output.terminal_output == "pdf_document"
+
+
 def test_resolve_explicit_output_choice_prefers_word_target_in_substitution_phrase() -> (
     None
 ):

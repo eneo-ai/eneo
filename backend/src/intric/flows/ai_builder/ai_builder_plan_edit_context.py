@@ -365,6 +365,8 @@ def _resolve_scoped_output_artifact_revision(
     output_type = requested_terminal_output_type
     if output_type is None or output_type not in _DOCUMENT_OUTPUT_TYPES:
         return None
+    # Two gates: typed slot evidence picks the artifact type, while text tokens
+    # confirm this is an output-file edit rather than an incidental file mention.
     if not _looks_like_output_artifact_revision_request(
         latest_user_text,
         output_type,
@@ -401,9 +403,15 @@ def _looks_like_output_artifact_revision_request(
 ) -> bool:
     tokens = _word_tokens(text)
     if requested_terminal_output_type == OutputType.PDF:
-        return "pdf" in tokens
+        return "pdf" in tokens and bool(tokens & _OUTPUT_ARTIFACT_HINT_WORDS)
     if requested_terminal_output_type == OutputType.DOCX:
-        return bool(tokens & {"docx", "word", "dokument", "document"})
+        if tokens & {"docx", "word"}:
+            return bool(tokens & _OUTPUT_ARTIFACT_HINT_WORDS)
+        # Generic "document" needs an action verb; input-document mentions
+        # must not patch the selected terminal step.
+        if tokens & {"dokument", "document"}:
+            return bool(tokens & _OUTPUT_ARTIFACT_CHANGE_WORDS)
+        return False
     return False
 
 
@@ -460,6 +468,45 @@ _SWEDISH_MODEL_REVISION_HINT_WORDS = (
 ) | {"modell", "till"}
 _SWEDISH_OUTPUT_ARTIFACT_HINT_WORDS = frozenset(
     {"ändra", "andra", "fil", "istället", "istallet", "får", "far"}
+)
+_OUTPUT_ARTIFACT_CHANGE_WORDS = frozenset(
+    {
+        "ändra",
+        "andra",
+        "byt",
+        "byta",
+        "change",
+        "switch",
+        "gör",
+        "gor",
+        "make",
+        "skapa",
+        "create",
+        "generate",
+        "generera",
+    }
+)
+_OUTPUT_ARTIFACT_HINT_WORDS = _OUTPUT_ARTIFACT_CHANGE_WORDS | frozenset(
+    {
+        "fil",
+        "filen",
+        "file",
+        "format",
+        "formatet",
+        "output",
+        "utdata",
+        "utdatat",
+        "resultat",
+        "slutresultat",
+        "slutresultatet",
+        "final",
+        "last",
+        "sista",
+        "rapport",
+        "report",
+        "dokument",
+        "document",
+    }
 )
 _WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
 

@@ -6,6 +6,10 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    metadata_with_slot_classification,
+    slot_classification_metadata_from_result,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
@@ -25,6 +29,10 @@ from intric.flows.ai_builder.ai_builder_proposal_policy import (
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
     build_ai_builder_resource_catalog,
+)
+from intric.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedSlot,
+    SlotClassificationResult,
 )
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -57,6 +65,25 @@ def _catalog():
         available_kbs=[],
         available_mcps=[],
     )
+
+
+def _terminal_output_slot_metadata(value: str = "pdf_document") -> dict[str, object]:
+    metadata = slot_classification_metadata_from_result(
+        SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="terminal_output",
+                    value=value,
+                    confidence="medium",
+                    reason="classified terminal output",
+                ),
+            )
+        ),
+        prompt_hash="a" * 64,
+    )
+    result = metadata_with_slot_classification(None, metadata)
+    assert result is not None
+    return result
 
 
 def _spec(
@@ -370,6 +397,100 @@ def test_terminal_output_intent_recognizes_pdf_file_wording(
         )
         == OutputType.PDF
     )
+
+
+def test_terminal_output_intent_uses_latest_slot_classification_for_plan_edit() -> None:
+    conversation = [
+        ConversationMessage(role="assistant", content="Här är planen."),
+        ConversationMessage(
+            role="user",
+            content="ändra output filen till pdf",
+            metadata=_terminal_output_slot_metadata(),
+        ),
+    ]
+
+    assert (
+        terminal_output_type_for_conversation(
+            conversation,
+            plan_edit_context=_step_context(target_plan_step_ref="step_b"),
+            prior_plan=None,
+        )
+        == OutputType.PDF
+    )
+
+
+def test_scoped_step_revision_uses_slot_classification_for_pdf_output_edit() -> None:
+    context = _step_context(target_plan_step_ref="step_b")
+    prior = _edit_spec(
+        [
+            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
+            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
+        ]
+    )
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="ändra output filen till pdf",
+            metadata=_terminal_output_slot_metadata(),
+        )
+    ]
+
+    result = resolve_scoped_step_revision_if_requested(
+        context=context,
+        prior_spec=prior,
+        latest_user_text="ändra output filen till pdf",
+        resource_catalog=None,
+        requested_terminal_output_type=terminal_output_type_for_conversation(
+            conversation,
+            plan_edit_context=context,
+            prior_plan=None,
+        ),
+    )
+
+    assert isinstance(result, ScopedStepSpecRevision)
+    assert result.kind == "output_artifact"
+    assert result.spec.steps[1].output_type == OutputType.PDF
+
+
+@pytest.mark.parametrize(
+    ("message", "terminal_output_value"),
+    [
+        ("flera pdf filer ska vara input", "pdf_document"),
+        ("flera docx filer ska vara input", "docx_document"),
+    ],
+)
+def test_scoped_step_revision_does_not_patch_input_file_mentions(
+    message: str,
+    terminal_output_value: str,
+) -> None:
+    context = _step_context(target_plan_step_ref="step_b")
+    prior = _edit_spec(
+        [
+            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
+            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
+        ]
+    )
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=message,
+            metadata=_terminal_output_slot_metadata(terminal_output_value),
+        )
+    ]
+
+    result = resolve_scoped_step_revision_if_requested(
+        context=context,
+        prior_spec=prior,
+        latest_user_text=message,
+        resource_catalog=None,
+        requested_terminal_output_type=terminal_output_type_for_conversation(
+            conversation,
+            plan_edit_context=context,
+            prior_plan=None,
+        ),
+    )
+
+    assert result is None
 
 
 def test_scoped_step_revision_keeps_matching_terminal_output_as_noop() -> None:

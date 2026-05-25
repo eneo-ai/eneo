@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    slot_classification_from_metadata,
     ui_language_from_metadata,
 )
 from intric.flows.ai_builder.ai_builder_create_feedback import (
@@ -207,7 +208,11 @@ def terminal_output_type_for_conversation(
             extract_answer_signals([latest_user_message]),
         )
         latest_output_type = _output_type_from_intent(output_intent.terminal_output)
-        return latest_output_type or _terminal_output_type_from_prior_plan(prior_plan)
+        return (
+            latest_output_type
+            or _terminal_output_type_from_slot_classification(latest_user_message)
+            or _terminal_output_type_from_prior_plan(prior_plan)
+        )
 
     output_intent = resolve_output_intent(
         aggregate_freeform_user_text(conversation),
@@ -224,6 +229,18 @@ def _terminal_output_type_from_prior_plan(
     output_type = prior_plan.spec.steps[-1].output_type
     if output_type in _PRESERVED_PLAN_EDIT_TERMINAL_TYPES:
         return output_type
+    return None
+
+
+def _terminal_output_type_from_slot_classification(
+    message: ConversationMessage,
+) -> OutputType | None:
+    classification = slot_classification_from_metadata(message.metadata)
+    if classification is None:
+        return None
+    for slot in classification.slots:
+        if slot.slot_name == "terminal_output":
+            return _output_type_from_intent(slot.value)
     return None
 
 

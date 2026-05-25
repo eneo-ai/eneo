@@ -10,6 +10,10 @@ from intric.flows.ai_builder.ai_builder_architecture_commit import (
 from intric.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    metadata_with_slot_classification,
+    slot_classification_metadata_from_result,
+)
 from intric.flows.ai_builder.ai_builder_create_proposal import (
     process_outline_arguments,
     process_scoped_step_revision_if_requested,
@@ -39,6 +43,10 @@ from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
 from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
+)
+from intric.flows.ai_builder.ai_builder_slot_classifier import (
+    ClassifiedSlot,
+    SlotClassificationResult,
 )
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
@@ -146,6 +154,25 @@ def _builder_plan(spec: FlowDraftSpecCore) -> BuilderPlan:
         spec_hash=spec.spec_hash(),
         envelope=PlannerPlanEnvelope(spec=spec),
     )
+
+
+def _terminal_output_slot_metadata(value: str = "pdf_document") -> dict[str, object]:
+    metadata = slot_classification_metadata_from_result(
+        SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="terminal_output",
+                    value=value,
+                    confidence="medium",
+                    reason="classified terminal output",
+                ),
+            )
+        ),
+        prompt_hash="a" * 64,
+    )
+    result = metadata_with_slot_classification(None, metadata)
+    assert result is not None
+    return result
 
 
 def test_create_contextual_quality_feedback_uses_semantic_remediation() -> None:
@@ -613,3 +640,67 @@ async def test_scoped_outline_revision_changes_selected_terminal_step_to_pdf(
     )
     assert revised_steps[1].output_type == OutputType.PDF
     assert revised_steps[1].output_contract is None
+
+
+@pytest.mark.asyncio
+async def test_scoped_outline_revision_uses_slot_classification_for_pdf_edit() -> None:
+    prior_spec = FlowDraftSpecCore(
+        flow_name="Mötesflöde",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Extrahera agenda",
+                assistant_spec=AssistantSpec(instructions="Extrahera agenda."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"agenda": {"type": "array"}},
+                },
+            ),
+            StepSpec(
+                plan_step_ref="step_f",
+                name="Sätt ihop slutligt strukturerat textresultat",
+                assistant_spec=AssistantSpec(
+                    instructions="Skriv ett strukturerat textprotokoll.",
+                    model_ref="model.gpt-5-4-mini",
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+    prior_plan = _builder_plan(prior_spec)
+
+    result = process_scoped_step_revision_if_requested(
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="ändra output filen till pdf",
+                metadata=_terminal_output_slot_metadata(),
+            )
+        ],
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=None,
+        plan_edit_context=AIBuilderPlanEditContext(
+            scope="step",
+            plan_id=prior_plan.id,
+            target_plan_step_ref="step_f",
+            target_step_name="Sätt ihop slutligt strukturerat textresultat",
+            target_step_number=2,
+        ),
+        prior_plan_for_revision=prior_plan,
+    )
+
+    assert result is not None
+    assert result.compiled_proposal is not None
+    revised_steps = result.compiled_proposal.spec.steps
+    assert revised_steps[0].model_dump(mode="json") == prior_spec.steps[0].model_dump(
+        mode="json"
+    )
+    assert revised_steps[1].output_type == OutputType.PDF

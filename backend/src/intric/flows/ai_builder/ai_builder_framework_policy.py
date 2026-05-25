@@ -1087,7 +1087,7 @@ def _first_phrase_index(
     *,
     ignore_negated: bool = False,
 ) -> int | None:
-    """Return the first phrase index after skipping locally negated matches."""
+    """Return the first whole-phrase index after skipping local negations."""
 
     if not text:
         return None
@@ -1100,6 +1100,9 @@ def _first_phrase_index(
         start_idx = text.find(normalized_phrase)
         while start_idx != -1:
             end_idx = start_idx + len(normalized_phrase)
+            if not _is_phrase_boundary_match(text, start_idx, end_idx):
+                start_idx = text.find(normalized_phrase, start_idx + 1)
+                continue
             if not ignore_negated or not _is_negated_at_index(
                 text,
                 start_idx,
@@ -1111,6 +1114,12 @@ def _first_phrase_index(
     if not indexes:
         return None
     return min(indexes)
+
+
+def _is_phrase_boundary_match(text: str, start_idx: int, end_idx: int) -> bool:
+    starts_on_boundary = start_idx == 0 or text[start_idx - 1].isspace()
+    ends_on_boundary = end_idx == len(text) or text[end_idx].isspace()
+    return starts_on_boundary and ends_on_boundary
 
 
 def _is_negated_at_index(text: str, start_idx: int, end_idx: int) -> bool:

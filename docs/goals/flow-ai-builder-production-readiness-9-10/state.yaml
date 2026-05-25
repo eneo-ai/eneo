@@ -423,6 +423,61 @@ interruptions:
         - "Antigravity noted a non-blocking Swedish closed-compound follow-up: pdfrapport, pdfdokument, and pdfmall may need coverage in a future marker cleanup, but the live `pdf fil` failure is fixed without broad phrase-list expansion."
         - "The required post-T112 score-floor audit remains paused by live interruptions and still needs to resume before planned T113/T114/T115 implementation."
       score_impact: "Improves Normal-User Output Quality, Runtime Reliability, Human Reviewability, and Developer Diagnostic Experience for selected-step terminal PDF output edits. Does not raise the strict overall Flow AI Builder score floor above 8."
+  - id: I007
+    kind: live_bug_hotfix
+    status: committed
+    reported_at: "2026-05-25T09:03:06Z"
+    summary: "A follow-up selected-step PDF output edit still failed after I006. The slot classifier detected `terminal_output`, but the deterministic selected-step preflight ignored latest-message slot-classification metadata and fell through to proposal LLM/self-correction, where the LLM rewrote the scoped plan and dropped target step_k."
+    decision: "Use the typed slot-classification metadata already attached to the latest user message as canonical evidence in terminal output resolution before selected-step preflight, and harden existing phrase matching so `pdf fil` no longer matches input-only wording such as `pdf filer`. Keep the fix inside existing owners: proposal policy resolves terminal output evidence, framework policy owns phrase matching, and plan-edit context owns safe selected-step patch gating."
+    constraints:
+      - "Preserve unrelated dirty files."
+      - "Do not add a new LLM repair path, frontend workaround, diagnostic schema, DB/API/OpenAPI change, or broad output-intent subsystem."
+      - "Do not weaken scoped-edit preservation rules; unrelated steps and disappeared selected target refs must still be rejected."
+      - "Do not enumerate every Swedish typo/compound as a replacement for typed slot classification."
+    acceptance:
+      - "`terminal_output_type_for_conversation` reads latest-message slot_classification metadata in plan-edit mode and maps terminal_output=pdf_document to OutputType.PDF."
+      - "Selected-step deterministic output-artifact revision patches only the selected terminal step for wording such as `ändra output filen till pdf`."
+      - "The create-proposal preflight path uses the same slot-classification evidence before calling the LLM repair loop."
+      - "Input-only file mentions such as `flera pdf filer ska vara input` and `flera docx filer ska vara input` do not patch the selected terminal output."
+      - "Singular `utdatat ska vara pdf fil` behavior from I006 remains covered."
+    artifacts:
+      - ".codex/artifacts/flow-ai-builder-i007-selected-output-slot-classification-summary.md"
+      - ".codex/artifacts/claude-peer-loop-i007-selected-output-slot-classification-implementation-20260525T092621Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-i007-selected-output-slot-classification-implementation-synthesis-20260525T093358Z.md"
+    receipt:
+      commit: null
+      summary: "Closed the second selected-step PDF output edit failure by routing typed latest-turn slot classification into terminal-output resolution and by replacing substring phrase matching with whole-phrase matching. Plan-edit context now requires both typed artifact intent and output/change/file context before applying a deterministic selected-step output_artifact patch, preventing input-file mentions from being treated as output format changes."
+      changed_files:
+        - "backend/src/intric/flows/ai_builder/ai_builder_framework_policy.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_plan_edit_context.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_policy.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py"
+      validation:
+        - "Red-first targeted tests failed before implementation: terminal_output_type_for_conversation ignored slot classification, selected-step revision returned None for `ändra output filen till pdf`, and input `pdf filer` could be treated as output `pdf fil`."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_policy.py -q -> 240 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2449 passed, 4 skipped, 11 warnings."
+        - "cd backend && uv run ruff check touched I007 files -> passed."
+        - "cd backend && uv run ruff format --check touched I007 files -> passed."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/ai_builder_plan_edit_context.py src/intric/flows/ai_builder/ai_builder_proposal_policy.py -> 0 errors, 0 warnings, 0 informations."
+        - "git diff --check -> passed."
+      peer_review:
+        claude_implementation_gate: ".codex/artifacts/claude-peer-loop-i007-selected-output-slot-classification-implementation-20260525T092621Z.md -> GREEN_LIGHT yes / MIN_SCORE 8."
+        antigravity_implementation_gate: ".codex/artifacts/antigravity-peer-loop-i007-selected-output-slot-classification-implementation-synthesis-20260525T093358Z.md -> GREEN_LIGHT yes / MIN_SCORE 9 with --spend-mode auto."
+      self_review:
+        simpler_for_maintainer: true
+        complexity_removed: "Deterministic selected-step output edits no longer rely only on fragile freeform phrase coverage when the backend already has typed slot-classification evidence."
+        owner_clarified: "ai_builder_proposal_policy.py resolves terminal output from canonical latest-turn evidence; ai_builder_framework_policy.py owns whole-phrase text matching; ai_builder_plan_edit_context.py only decides whether a selected-step patch is safe."
+        coupling_removed: "The path no longer depends on LLM self-correction for output-file edits that the slot classifier already resolved."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "Closed compounds such as `pdffilen`, `wordfilen`, `pdfrapporten`, and `pdfdokumentet` intentionally rely on slot classification instead of broad substring phrase matching. A future output-intent quality slice should handle those only if live eval/user reports show the gap matters."
+        - "A fresh authenticated live smoke after backend restart remains recommended for this exact UI path."
+        - "The post-T112/T113 score-floor audit remains the correct next step before any further implementation; do not continue into T113/T114/T115 without that read-only decision gate."
+      score_impact: "Improves Runtime Reliability, Normal-User Output Quality, Human Reviewability, Developer Diagnostic Experience, and Single Source of Truth for selected-step terminal output edits. Does not raise the strict overall Flow AI Builder score floor above 8 because this is a live interruption fix, not proof every remaining subsystem-wide dimension is now 9."
 
 scoring_target:
   dimensions:
@@ -10600,13 +10655,16 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "I004 completed with full AI Builder unit suite, Ruff, format, Pyright, git diff check, Claude green, Antigravity green, and user-reported live smoke pass. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: I004
+    result: "I007 completed with full AI Builder unit suite, Ruff, format, Pyright, git diff check, Claude green, and Antigravity green. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: I007
     commands:
-      - "git status --short --branch -> branch feature/refactor-flows-flowai ahead 35 before I004 commit; unrelated dirty files preserved."
-      - "git log --oneline --decorate -5 -> HEAD a785b4c73 Own AI Builder typed resource boundary before I004 commit."
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2433 passed, 4 skipped, 11 warnings."
-      - "Claude I004 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 8 after one required fix."
-      - "Antigravity I004 implementation gate with --spend-mode auto -> GREEN_LIGHT yes / MIN_SCORE 9."
+      - "git status --short --branch -> branch feature/refactor-flows-flowai ahead 38 before I007 commit; unrelated dirty files preserved."
+      - "git log --oneline --decorate -12 -> HEAD cc0df8820 Recognize AI Builder PDF file wording before I007 commit."
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_framework_policy.py tests/unittests/flows/ai_builder/test_planning_state_builder.py tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_policy.py -q -> 240 passed."
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2449 passed, 4 skipped, 11 warnings."
+      - "cd backend && uv run ruff check touched I007 files -> passed."
+      - "cd backend && uv run ruff format --check touched I007 files -> passed."
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder/ai_builder_framework_policy.py src/intric/flows/ai_builder/ai_builder_plan_edit_context.py src/intric/flows/ai_builder/ai_builder_proposal_policy.py -> 0 errors, 0 warnings, 0 informations."
+      - "Claude I007 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 8."
+      - "Antigravity I007 implementation gate with --spend-mode auto -> GREEN_LIGHT yes / MIN_SCORE 9."
       - "git diff --check -> passed"
