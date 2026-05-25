@@ -35,6 +35,9 @@ from intric.flows.flow_validators_http import (
 from intric.flows.flow_validators_template import (
     validate_template_fill_output_config,
 )
+from intric.flows.input_binding_contract_rules import (
+    input_contract_conflicts_with_question_binding,
+)
 from intric.flows.output_modes import transcribe_only_violation
 from intric.flows.output_processing import (
     schema_expects_structured,
@@ -149,6 +152,7 @@ def validate_steps(
                 )
             except TypedIOValidationException as exc:
                 raise BadRequestException(str(exc)) from exc
+            _validate_input_contract_binding_compatibility(step=step)
             _validate_input_contract_source_compatibility(step=step)
         if step.output_contract is not None:
             try:
@@ -274,6 +278,26 @@ def _validate_input_contract_source_compatibility(*, step: FlowStep) -> None:
         f"Step {step.step_order}: structured input_contract is not supported with "
         "input_source 'all_previous_steps' because concatenated prior step text "
         "is not a single JSON value."
+    )
+
+
+def _validate_input_contract_binding_compatibility(*, step: FlowStep) -> None:
+    if not input_contract_conflicts_with_question_binding(
+        input_bindings=step.input_bindings,
+        input_contract=step.input_contract,
+    ):
+        return
+    raise BadRequestException(
+        f"Step {step.step_order}: input_contract cannot validate "
+        "input_bindings.question because the question binding supplies the "
+        "complete rendered step input. Remove input_contract or remove "
+        "input_bindings.question.",
+        code="flow_input_contract_inapplicable",
+        context={
+            "step_order": step.step_order,
+            "field": "input_contract",
+            "conflict": "input_bindings.question",
+        },
     )
 
 

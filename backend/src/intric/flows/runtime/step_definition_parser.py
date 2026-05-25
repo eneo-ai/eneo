@@ -12,6 +12,9 @@ from intric.database.tables.flow_tables import (
 from intric.flows.domain.flow import JsonObject
 from intric.flows.enums import FlowOutputMode
 from intric.flows.flow_review_policy import parse_flow_step_review_policy
+from intric.flows.input_binding_contract_rules import (
+    input_contract_conflicts_with_question_binding,
+)
 from intric.flows.output_modes import ALLOWED_OUTPUT_MODES, transcribe_only_violation
 from intric.flows.runtime.models import RuntimeStep
 from intric.flows.runtime_input import build_runtime_input_config
@@ -184,6 +187,26 @@ def _parse_input_fields(item: Mapping[str, object]) -> _StepInputFields:
     )
 
 
+def _validate_input_contract_binding_compatibility(
+    input_fields: _StepInputFields,
+) -> None:
+    if not input_contract_conflicts_with_question_binding(
+        input_bindings=input_fields.input_bindings,
+        input_contract=input_fields.input_contract,
+    ):
+        return
+    raise BadRequestException(
+        "input_contract cannot validate input_bindings.question because the "
+        "question binding supplies the complete rendered step input. Remove "
+        "input_contract or remove input_bindings.question.",
+        code="flow_input_contract_inapplicable",
+        context={
+            "field": "input_contract",
+            "conflict": "input_bindings.question",
+        },
+    )
+
+
 def _parse_input_config(
     *,
     raw_input_config: object,
@@ -251,7 +274,10 @@ def _parse_output_config(
             raise BadRequestException(
                 "Template fill output_config.bindings must be an object."
             )
-        if "template_asset_id" not in output_config and "template_file_id" not in output_config:
+        if (
+            "template_asset_id" not in output_config
+            and "template_file_id" not in output_config
+        ):
             raise BadRequestException(
                 "Template fill output_config.template_asset_id or template_file_id is required."
             )
@@ -311,6 +337,7 @@ def parse_runtime_steps(definition_json: Mapping[str, object]) -> list[RuntimeSt
                 user_description=user_description,
             )
             input_fields = _parse_input_fields(item_dict)
+            _validate_input_contract_binding_compatibility(input_fields)
             output_fields = _parse_output_fields(item_dict)
             transcribe_only_error = transcribe_only_violation(
                 step_order=identity.step_order,

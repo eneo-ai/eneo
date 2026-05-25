@@ -2899,6 +2899,75 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
     assert run_error.source == FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
 
 
+@pytest.mark.asyncio
+async def test_execute_rejects_question_binding_input_contract_before_step_execution(
+    user,
+):
+    executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+
+    flow_run_repo.get = AsyncMock(return_value=queued_run)
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_version_repo.get = AsyncMock(
+        return_value=FlowVersion(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum="checksum",
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(uuid4()),
+                        "step_order": 1,
+                        "assistant_id": str(uuid4()),
+                        "input_source": "flow_input",
+                        "output_type": "json",
+                        "output_mode": "pass_through",
+                    },
+                    {
+                        "step_id": str(uuid4()),
+                        "step_order": 2,
+                        "assistant_id": str(uuid4()),
+                        "input_source": "previous_step",
+                        "input_type": "text",
+                        "input_bindings": {
+                            "question": (
+                                "{{ step_1.output.structured }}\n\n"
+                                "Källmaterial: {{ step_1.output.text }}"
+                            )
+                        },
+                        "input_contract": {
+                            "type": "object",
+                            "properties": {"title": {"type": "string"}},
+                        },
+                        "output_mode": "pass_through",
+                    },
+                ]
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        celery_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {"status": "failed", "error": "flow_input_contract_inapplicable"}
+    flow_run_repo.create_or_get_attempt_started.assert_not_awaited()
+    run_error = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
+        "error"
+    ]
+    assert run_error.code == "flow_input_contract_inapplicable"
+    assert run_error.source == FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
+    assert run_error.step_order == 2
+
+
 def test_run_error_from_bad_request_sanitizes_context(user) -> None:
     executor, _, _, _ = _build_executor(user)
 

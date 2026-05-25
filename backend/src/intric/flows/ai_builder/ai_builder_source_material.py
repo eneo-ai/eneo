@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import cast
 
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
@@ -21,6 +20,7 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from intric.flows.input_binding_contract_rules import question_binding
 from intric.flows.template_reference_analyzer import (
     TemplateReference,
     analyze_template,
@@ -222,16 +222,6 @@ def _question_mentions_prior_text_source(
         and _reference_tail_is_output(reference, output="text")
         for reference in _analyze_step_references(question, known_steps=prior_steps)
     )
-
-
-def question_binding(input_bindings: object) -> str | None:
-    if not isinstance(input_bindings, Mapping):
-        return None
-    mapping = cast(Mapping[object, object], input_bindings)
-    question = mapping.get("question")
-    if isinstance(question, str) and question.strip():
-        return question
-    return None
 
 
 def source_material_label_for_text(text: str) -> str:

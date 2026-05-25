@@ -142,6 +142,85 @@ def test_parse_runtime_steps_rejects_incompatible_previous_step_chain():
         )
 
 
+def test_parse_runtime_steps_rejects_question_binding_with_input_contract():
+    with pytest.raises(
+        BadRequestException,
+        match="input_contract cannot validate input_bindings.question",
+    ) as exc_info:
+        parse_runtime_steps(
+            _definition(
+                _step_snapshot(
+                    step_order=1,
+                    output_type="json",
+                ),
+                _step_snapshot(
+                    step_order=2,
+                    input_source="previous_step",
+                    input_type="text",
+                    input_bindings={
+                        "question": (
+                            "{{ step_1.output.structured }}\n\n"
+                            "Källmaterial: {{ step_1.output.text }}"
+                        )
+                    },
+                    input_contract={
+                        "type": "object",
+                        "properties": {"title": {"type": "string"}},
+                    },
+                ),
+            )
+        )
+
+    assert exc_info.value.code == "flow_input_contract_inapplicable"
+
+
+def test_parse_runtime_steps_rejects_single_expression_question_binding_with_input_contract():
+    with pytest.raises(
+        BadRequestException,
+        match="input_contract cannot validate input_bindings.question",
+    ) as exc_info:
+        parse_runtime_steps(
+            _definition(
+                _step_snapshot(
+                    step_order=1,
+                    output_type="json",
+                ),
+                _step_snapshot(
+                    step_order=2,
+                    input_source="previous_step",
+                    input_type="json",
+                    input_bindings={"question": "{{ step_1.output.structured }}"},
+                    input_contract={
+                        "type": "object",
+                        "properties": {"title": {"type": "string"}},
+                    },
+                ),
+            )
+        )
+
+    assert exc_info.value.code == "flow_input_contract_inapplicable"
+
+
+def test_parse_runtime_steps_allows_question_binding_without_input_contract():
+    parsed = parse_runtime_steps(
+        _definition(
+            _step_snapshot(
+                step_order=1,
+                output_type="json",
+            ),
+            _step_snapshot(
+                step_order=2,
+                input_source="previous_step",
+                input_type="json",
+                input_bindings={"question": "{{ step_1.output.structured }}"},
+            ),
+        )
+    )
+
+    assert parsed[1].input_bindings == {"question": "{{ step_1.output.structured }}"}
+    assert parsed[1].input_contract is None
+
+
 def test_parse_runtime_steps_rejects_duplicate_step_orders():
     with pytest.raises(BadRequestException, match="Duplicate step_order detected"):
         parse_runtime_steps(

@@ -579,6 +579,80 @@ interruptions:
         - "Flow run UI still lacks an AI-Builder-style copyable technical report in the history/error alert. This is deferred to a separate frontend/API DX task so I008 remains a backend runtime-contract fix."
         - "First-step text-versus-document input policy remains a separate read-only ranking item; this interruption intentionally did not change input-source preference logic."
       score_impact: "Improves Runtime Reliability, Developer Diagnostic Experience, Single Source of Truth, Human Reviewability, and Normal-User Output Quality for AI Builder-generated Flow runtime failures. Does not raise the strict overall Flow AI Builder score floor above 8 because this live interruption does not close every remaining subsystem-wide 9/10 blocker."
+  - id: I009
+    kind: live_bug_follow_up
+    status: committed
+    reported_at: "2026-05-25T10:25:31Z"
+    summary: "The same AI Builder-created flow from I008 still failed on rerun with `Step 3: expected valid JSON text for structured object input (typed_io_contract_violation)`. Debug export and DB inspection showed the saved flow definition still had both `input_bindings.question` and a structured `input_contract` on the same step, so runtime attempted to validate the fully rendered underlag prompt as structured JSON."
+    decision: "Treat this as an engine-boundary invariant instead of migrating or silently repairing old pre-production flows: `input_bindings.question` supplies the complete rendered step input, therefore it is mutually exclusive with `input_contract`. New authoring/publish paths reject the invalid combination, and stale saved definitions fail during runtime definition parsing before any step attempt or provider call."
+    constraints:
+      - "Preserve unrelated dirty files."
+      - "Do not add a DB migration/backfill or hidden compatibility shim for old local flows because Flow AI Builder has not rolled out in production."
+      - "Do not weaken structured JSON schema validation or make additionalProperties lax."
+      - "Do not add one-off logic for the reported flow id."
+      - "Do not change public API/OpenAPI/generated-client shape."
+      - "Keep AI Builder draft normalization as editor auto-heal, but enforce the hard invariant at Flow validation and runtime parse boundaries."
+    evidence:
+      - "Debug export `/Users/ccimen/Downloads/flow-debug-export-cbfaedfd-5ee9-448d-bf61-e0a2b3b9fcbd.json` showed step 3 with `input_bindings.question={{ step_2.output.structured }}\\n\\nKällmaterial: {{ step_1.output.text }}` and a structured object `input_contract`."
+      - "DB inspection of flow_id `8094b29d-2954-4aa0-835f-ee086f4efdcf` showed step_order=3, input_type=text, input_source=previous_step, explicit question binding, and inherited structured input_contract."
+      - "Runtime code evidence: `step_input_resolution.py` treats explicit `input_bindings.question` as the complete rendered input; `step_input_validation.py` then parses text against structured contracts when an input_contract exists."
+      - "AI Builder compiler/normalizer evidence already cleared `input_contract` for explicit question bindings, but runtime/authoring boundaries did not reject stale or externally authored published definitions."
+    acceptance:
+      - "A Flow step with `input_bindings.question` and any non-null `input_contract` is rejected by `validate_steps` with code `flow_input_contract_inapplicable`."
+      - "Published runtime definition parsing rejects the same invalid combination with code `flow_input_contract_inapplicable` before step execution starts."
+      - "The reported composed-underlag shape and a single-expression question binding shape are both rejected; there is no fragile composed-vs-single carveout."
+      - "Question bindings without input_contract remain valid."
+      - "AI Builder source-material and quality lint code share the Flow-owned `question_binding` helper instead of carrying duplicate private copies."
+      - "No provider call or step attempt is created when runtime rejects the stale invalid published definition."
+    receipt:
+      completed_at: "2026-05-25T10:55:00Z"
+      summary: "Added a Flow-owned `input_binding_contract_rules.py` as the canonical owner for question-binding interpretation and the `input_contract` conflict predicate. `validate_steps` now rejects new invalid specs at authoring/publish validation, `parse_runtime_steps` rejects stale published snapshots before execution, and AI Builder source-material/quality lint code reuses the same helper instead of duplicating private question-binding logic."
+      repo_reality:
+        branch: "feature/refactor-flows-flowai"
+        head_before_commit: "c58ab79df Harden Flow runtime contract diagnostics"
+        unrelated_dirty_files_preserved: ".devcontainer/docker-compose.yml, .gitignore, AGENTS.md, .devcontainer/devcontainer-lock.json, PRODUCT.md, utvecklingssamtal.mp3."
+      artifacts:
+        - ".codex/artifacts/claude-peer-loop-flow-runtime-composed-underlag-input-contract-policy-20260525T103301Z.md"
+        - ".codex/artifacts/claude-peer-loop-flow-runtime-input-contract-question-binding-implementation-20260525T104423Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-flow-runtime-input-contract-question-binding-synthesis-20260525T105313Z.md"
+      changed_files:
+        - "backend/src/intric/flows/input_binding_contract_rules.py"
+        - "backend/src/intric/flows/flow_validators.py"
+        - "backend/src/intric/flows/runtime/step_definition_parser.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_source_material.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_validation_quality.py"
+        - "backend/tests/unittests/flows/test_flow_validators.py"
+        - "backend/tests/unittests/flows/test_step_definition_parser.py"
+        - "backend/tests/unittests/flows/test_flow_executor_runtime.py"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_validators.py::test_validate_steps_rejects_question_binding_with_input_contract tests/unittests/flows/test_flow_validators.py::test_validate_steps_rejects_single_expression_question_binding_with_input_contract tests/unittests/flows/test_flow_validators.py::test_validate_steps_allows_question_binding_without_input_contract tests/unittests/flows/test_step_definition_parser.py::test_parse_runtime_steps_rejects_question_binding_with_input_contract tests/unittests/flows/test_step_definition_parser.py::test_parse_runtime_steps_rejects_single_expression_question_binding_with_input_contract tests/unittests/flows/test_step_definition_parser.py::test_parse_runtime_steps_allows_question_binding_without_input_contract tests/unittests/flows/test_flow_executor_runtime.py::test_execute_rejects_question_binding_input_contract_before_step_execution -q -> 7 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_step_definition_parser.py tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q -> 373 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py::test_execute_rejects_question_binding_input_contract_before_step_execution -q -> 1 passed."
+        - "cd backend && uv run ruff check touched I009 backend files -> passed."
+        - "cd backend && uv run ruff format --check touched I009 backend files -> passed."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright touched I009 source files -> 0 errors, 0 warnings, 0 informations."
+        - "git diff --check -> passed."
+      known_validation_limitations:
+        - "Full tests/unittests/flows/test_flow_executor_runtime.py still has six pre-existing stale-test failures where older tests mock _process_typed_output as a tuple while current runtime expects TypedOutputProcessingResult. The new I009 executor preflight regression passes in isolation, and the validator/parser/AI Builder suites pass."
+        - "No authenticated live smoke was rerun after this commit. The reported stale flow should now fail earlier as `flow_input_contract_inapplicable`; recreating the flow with current AI Builder code is the intended path for local pre-production data."
+      peer_review:
+        claude_plan_iteration_1: ".codex/artifacts/claude-peer-loop-flow-runtime-composed-underlag-input-contract-policy-20260525T103301Z.md -> GREEN_LIGHT no / MIN_SCORE 3; rejected composed-only carveout and required the simpler mutual-exclusion invariant."
+        claude_implementation_gate: ".codex/artifacts/claude-peer-loop-flow-runtime-input-contract-question-binding-implementation-20260525T104423Z.md -> GREEN_LIGHT yes / MIN_SCORE 8."
+        antigravity_implementation_gate: ".codex/artifacts/antigravity-peer-loop-flow-runtime-input-contract-question-binding-synthesis-20260525T105313Z.md -> GREEN_LIGHT yes / MIN_SCORE 9 with --spend-mode auto; quota available. Antigravity agreed with keeping the new rules module pure and keeping AI Builder editor auto-heal as defense in depth."
+      self_review:
+        simpler_for_maintainer: true
+        complexity_removed: "Removed duplicated private question-binding helpers from AI Builder modules and removed the ambiguous runtime state where a complete rendered prompt was also treated as separately contract-validatable input."
+        owner_clarified: "input_binding_contract_rules.py owns the question-binding predicate; flow_validators.py owns authoring/publish rejection; step_definition_parser.py owns stale published runtime snapshot rejection; AI Builder transition policy remains editor auto-heal."
+        failure_mode_explicit: "Invalid saved definitions fail as `flow_input_contract_inapplicable` before LLM/provider dispatch instead of failing later as a typed_io parse error after partial execution."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "Existing local flows with the stale invalid shape are not migrated or silently repaired. They should be recreated/edited under current validation because the product is pre-production."
+        - "Flow run history UI still lacks a copyable AI-Builder-style technical report; this remains a separate DX/UI task."
+        - "The broader Flow AI Builder 9/10 goal remains incomplete; next work should return to the board's read-only audit/ranking instead of extending this interruption."
+      score_impact: "Improves Runtime Reliability, Single Source of Truth, Clean Architecture, Human Reviewability, and Developer Diagnostic Experience for AI Builder-created flow runtime contracts. Does not raise the strict overall score floor above 8 because this live interruption does not close every remaining subsystem-wide 9/10 blocker."
 
 scoring_target:
   dimensions:

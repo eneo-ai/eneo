@@ -18,10 +18,10 @@ from intric.flows.ai_builder.ai_builder_validation_common import SpecValidationR
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
-    JsonObject,
     OutputType,
     StepSpec,
 )
+from intric.flows.input_binding_contract_rules import question_binding
 from intric.flows.template_reference_analyzer import (
     TemplateReferenceKind,
     analyze_template,
@@ -218,7 +218,7 @@ def lint_all_previous_with_specific_refs(
     for step in spec.steps:
         if step.input_source != InputSource.ALL_PREVIOUS_STEPS:
             continue
-        question = _question_binding(step.input_bindings)
+        question = question_binding(step.input_bindings)
         if question is None:
             continue
         refs = analyze_template(
@@ -255,7 +255,7 @@ def lint_unfiltered_structured_interpolation(
     }
 
     for step in spec.steps:
-        question = _question_binding(step.input_bindings)
+        question = question_binding(step.input_bindings)
         if question is None:
             continue
         refs = analyze_template(
@@ -299,15 +299,6 @@ def lint_source_material_underlag_boundaries(
                 "the immediate structured output and the earlier source text."
             ),
         )
-
-
-def _question_binding(input_bindings: JsonObject | None) -> str | None:
-    if not isinstance(input_bindings, dict):
-        return None
-    question = input_bindings.get("question")
-    if isinstance(question, str) and question.strip():
-        return question
-    return None
 
 
 def _iter_step_templates(step: StepSpec) -> list[str]:

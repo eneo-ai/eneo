@@ -172,6 +172,68 @@ def test_validate_steps_allows_runtime_step_input_reference_in_bindings():
     )
 
 
+def test_validate_steps_rejects_question_binding_with_input_contract():
+    with pytest.raises(
+        BadRequestException,
+        match="input_contract cannot validate input_bindings.question",
+    ):
+        validate_steps(
+            [
+                _step(1, output_type="json"),
+                _step(
+                    2,
+                    input_type="text",
+                    input_bindings={
+                        "question": (
+                            "{{ step_1.output.structured }}\n\n"
+                            "Källmaterial: {{ step_1.output.text }}"
+                        )
+                    },
+                    input_contract={
+                        "type": "object",
+                        "properties": {"title": {"type": "string"}},
+                    },
+                ),
+            ]
+        )
+
+
+def test_validate_steps_rejects_single_expression_question_binding_with_input_contract():
+    with pytest.raises(
+        BadRequestException,
+        match="input_contract cannot validate input_bindings.question",
+    ) as exc_info:
+        validate_steps(
+            [
+                _step(1, output_type="json"),
+                _step(
+                    2,
+                    input_type="json",
+                    input_bindings={"question": "{{ step_1.output.structured }}"},
+                    input_contract={
+                        "type": "object",
+                        "properties": {"title": {"type": "string"}},
+                    },
+                ),
+            ]
+        )
+
+    assert exc_info.value.code == "flow_input_contract_inapplicable"
+
+
+def test_validate_steps_allows_question_binding_without_input_contract():
+    validate_steps(
+        [
+            _step(1, output_type="json"),
+            _step(
+                2,
+                input_type="json",
+                input_bindings={"question": "{{ step_1.output.structured }}"},
+            ),
+        ]
+    )
+
+
 def test_validate_steps_rejects_audio_document_flow_without_transcript_step():
     with pytest.raises(
         BadRequestException,
