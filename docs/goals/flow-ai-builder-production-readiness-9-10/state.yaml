@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T103
+active_task: T104
 
 interruptions:
   - id: I001
@@ -9521,7 +9521,7 @@ tasks:
   - id: T103
     type: worker
     assignee: Worker
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Implement the peer-gated repair terminal-output projection cleanup selected by T102."
     constraints:
@@ -9577,6 +9577,56 @@ tasks:
         claude_required: true
         antigravity_if_available: true
     expected_score_impact: "Can improve maintainability, clean architecture, separation of concerns, readability, reviewability, test quality, and AI-slop evidence for one proposal repair seam. Do not raise the overall strict floor above 8 from this slice alone."
+    receipt:
+      completed_at: "2026-05-25"
+      summary: "Consolidated proposal repair terminal-output projection. Deleted the fake _ToolFailureCodes Protocol and dynamic getattr helpers, replaced the paired has-events/events projection with one typed _repair_terminal_events(ToolProcessingResult) helper, read failure_codes directly, tightened retry_feedback to ProposalCompletionToolCall, and added a standalone AST ownership guard."
+      files_changed:
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      implementation_artifact: ".codex/artifacts/flow-ai-builder-t103-implementation-summary.md"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q -> 26 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 33 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py -q -> 2 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py -q -> 25 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2411 passed, 4 skipped, 11 warnings."
+        - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -> passed."
+        - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -> passed."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors."
+        - "git diff --check -> passed."
+      peer_review:
+        claude: ".codex/artifacts/claude-peer-loop-t103-repair-projection-implementation-review-20260525T031142Z.md -> GREEN_LIGHT yes / MIN_SCORE 8."
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t103-repair-projection-implementation-gate-20260525T031337Z.md -> GREEN_LIGHT yes / MIN_SCORE 9."
+      swagger_openapi_impact: "None. T103 is internal backend proposal-repair ownership work and does not change public REST/SSE schemas, Swagger examples, generated clients, frontend parsing, or API examples."
+      codex_self_review:
+        verdict: "pass for T103 scope. The change is simpler for maintainers because repair terminal-output projection has one typed owner and the old dynamic Protocol/getattr path is deleted rather than wrapped."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "Broader topology/readability, bounded comment/naming cleanup, and final live-output proof still block subsystem-wide 9/10."
+        - "Future cleanup may tighten remaining legitimate provider-edge Any parameters such as tool_call, but that was outside T103."
+      score_impact: "Improves Maintainability, Clean Architecture, Separation of Concerns, Human Readability, Human Reviewability, Test Quality, and AI Slop/Comment/Naming for one proposal repair seam. Does not raise the strict overall score floor above 8 by itself."
+      broader_goal_complete: false
+
+  - id: T104
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest score-floor-moving Flow AI Builder tranche after T103 from current repo evidence. Do not implement during this judge task."
+    constraints:
+      - "Stay within Flow AI Builder; do not move to broader Flows work."
+      - "Start from git status, latest commits, scorecard, T103 receipt, current source, and artifacts."
+      - "Do not select file splitting, LOC reduction, or broad cleanup unless evidence shows concrete maintainability, robustness, reviewability, or output-quality gain."
+      - "Consider bounded AI-slop/comment/naming cleanup, deletion/merge of stale compatibility wrappers, planner/source topology and readability blockers, live eval replay after behavior-affecting changes, diagnostics/DX and future OpenTelemetry compatibility, data/schema/JSONB ownership, frontend/backend contract drift, and normal-user output quality."
+      - "If a candidate changes public API/SSE/schema/generated-client-visible contracts, include Swagger/OpenAPI docs, examples, and generated client updates in the candidate scope."
+      - "Use Claude for the plan gate and Antigravity with --spend-mode auto if available. Missing peer coverage is a skip, not a pass."
+    expected_output:
+      - "Ranked candidate table with file:line evidence."
+      - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, and expected score impact."
+      - "Explicit explanation of why the selected tranche is the highest score-floor mover rather than the easiest cleanup."
+      - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
     receipt: null
 
 checks:
@@ -9585,10 +9635,10 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T101 completed with Claude and Antigravity green. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T101
+    result: "T103 completed with Claude and Antigravity green. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T103
     commands:
-      - "Full Flow AI Builder unit suite -> 2410 passed, 4 skipped"
+      - "Full Flow AI Builder unit suite -> 2411 passed, 4 skipped"
       - "Ruff, Ruff format --check, Pyright, git diff --check -> passed"
-      - "Claude T101 implementation -> GREEN_LIGHT yes / MIN_SCORE 9"
-      - "Antigravity T101 implementation -> GREEN_LIGHT yes / MIN_SCORE 9"
+      - "Claude T103 implementation -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity T103 implementation -> GREEN_LIGHT yes / MIN_SCORE 9"

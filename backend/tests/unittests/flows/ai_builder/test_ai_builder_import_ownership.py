@@ -137,6 +137,18 @@ PROPOSAL_REPAIR_RUNTIME_ALLOWED_ANY_NAMES = frozenset(
         "tool_schemas",
     }
 )
+PROPOSAL_REPAIR_ALLOWED_ANY_NAMES = frozenset(
+    {
+        "arguments",
+        "build_assistant_metadata",
+        "correction_messages",
+        "litellm_kwargs",
+        "llm_messages",
+        "tool_call",
+        "tool_schemas",
+        "value",
+    }
+)
 PROPOSAL_SUBMISSION_METHODS = frozenset(
     {
         "active_submission_tool_name",
@@ -1219,6 +1231,61 @@ def test_confirm_requirements_has_single_owner_and_typed_boundary() -> None:
 
     if 'tool_calls=[{"name": ASK_STRUCTURED_QUESTION_TOOL_NAME}]' not in confirm_text:
         violations.append(f"{confirm_path}: missing synthetic ask-question stub")
+
+    assert violations == []
+
+
+def test_proposal_repair_has_typed_result_projection() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    repair_path = backend_root / Path(
+        "src/intric/flows/ai_builder/ai_builder_proposal_repair.py"
+    )
+    repair_tree = ast.parse(repair_path.read_text(), filename=str(repair_path))
+    violations: list[str] = []
+
+    banned_names = {
+        "_ToolFailureCodes",
+        "_tool_result_has_events",
+        "_tool_result_events",
+        "_tool_result_failure_codes",
+    }
+    banned_imports = {"Protocol", "runtime_checkable"}
+
+    for node in ast.walk(repair_tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            imported_names = {alias.name for alias in node.names}
+            banned = sorted(imported_names & banned_imports)
+            if banned:
+                violations.append(
+                    f"{repair_path}:{node.lineno} imports {', '.join(banned)}"
+                )
+
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name in banned_names:
+                violations.append(f"{repair_path}:{node.lineno} defines {node.name}")
+
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.args.kwarg is not None:
+                annotation = node.args.kwarg.annotation
+                if annotation is not None and ast.unparse(annotation) == "Any":
+                    violations.append(
+                        f"{repair_path}:{node.lineno} defines **kwargs: Any"
+                    )
+            for arg in [*node.args.args, *node.args.kwonlyargs]:
+                if _annotation_uses_any(arg.annotation) and (
+                    arg.arg not in PROPOSAL_REPAIR_ALLOWED_ANY_NAMES
+                ):
+                    violations.append(
+                        f"{repair_path}:{node.lineno} arg {arg.arg} uses Any"
+                    )
+
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if _annotation_uses_any(node.annotation) and (
+                node.target.id not in PROPOSAL_REPAIR_ALLOWED_ANY_NAMES
+            ):
+                violations.append(
+                    f"{repair_path}:{node.lineno} field {node.target.id} uses Any"
+                )
 
     assert violations == []
 

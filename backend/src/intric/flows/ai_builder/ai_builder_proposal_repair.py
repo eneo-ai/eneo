@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
@@ -30,6 +30,7 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCompletionFn,
     ProposalCompletionRequest,
+    ProposalCompletionToolCall,
     ToolProcessingResult,
     ToolRetryInvocation,
 )
@@ -52,11 +53,6 @@ class ForcedToolRetryOutcome:
     events: EventBatch | None = None
     feedback: str | None = None
     failure_kind: ToolProcessingFailureKind | None = None
-
-
-@runtime_checkable
-class _ToolFailureCodes(Protocol):
-    failure_codes: frozenset[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,30 +181,15 @@ def _self_correction_user_message(
     )
 
 
-def _tool_result_has_events(tool_result: Any) -> bool:
-    event = getattr(tool_result, "event", None)
-    events = getattr(tool_result, "events", None)
-    user_message = getattr(tool_result, "user_message", None)
-    return event is not None or bool(events) or user_message is not None
-
-
-def _tool_result_events(tool_result: Any) -> EventBatch:
-    event = getattr(tool_result, "event", None)
-    events = tuple(getattr(tool_result, "events", tuple()) or tuple())
-    user_message = getattr(tool_result, "user_message", None)
+def _repair_terminal_events(result: ToolProcessingResult) -> EventBatch:
     user_message_events = (
-        (build_text_event(user_message),) if user_message is not None else tuple()
+        (build_text_event(result.user_message),)
+        if result.user_message is not None
+        else tuple()
     )
-    if event is None:
-        return (*events, *user_message_events)
-    return (event, *events, *user_message_events)
-
-
-def _tool_result_failure_codes(tool_result: object) -> frozenset[str]:
-    if not isinstance(tool_result, _ToolFailureCodes):
-        return frozenset()
-    raw_codes = tool_result.failure_codes
-    return raw_codes
+    if result.event is None:
+        return (*result.events, *user_message_events)
+    return (result.event, *result.events, *user_message_events)
 
 
 def _build_tool_retry_invocation(
@@ -407,9 +388,10 @@ async def request_self_correction(
         assistant_text = _safe_assistant_text(getattr(message, "content", None))
 
         if hasattr(message, "tool_calls") and message.tool_calls:
-            retry_feedback: tuple[Any, str, ToolProcessingFailureKind | None] | None = (
-                None
-            )
+            retry_feedback: (
+                tuple[ProposalCompletionToolCall, str, ToolProcessingFailureKind | None]
+                | None
+            ) = None
             for correction_tool_call in message.tool_calls:
                 if correction_tool_call.function.name != target_tool_name:
                     continue
@@ -452,7 +434,8 @@ async def request_self_correction(
                         build_assistant_metadata=build_assistant_metadata,
                     )
                 )
-                if not _tool_result_has_events(tool_result):
+                terminal_events = _repair_terminal_events(tool_result)
+                if not terminal_events:
                     if retry_state.can_retry(failure_kind=tool_result.failure_kind):
                         retry_feedback = (
                             correction_tool_call,
@@ -461,7 +444,7 @@ async def request_self_correction(
                                 feedback=tool_result.feedback
                                 or "Invalid tool payload.",
                                 failure_kind=tool_result.failure_kind,
-                                failure_codes=_tool_result_failure_codes(tool_result),
+                                failure_codes=tool_result.failure_codes,
                                 retry_count=retry_state.next_retry_count,
                             ),
                             tool_result.failure_kind,
@@ -474,7 +457,7 @@ async def request_self_correction(
                     )
                     return
 
-                for event in _tool_result_events(tool_result):
+                for event in terminal_events:
                     yield event
                 return
 
@@ -678,7 +661,8 @@ async def retry_forced_tool_after_text(
                 build_assistant_metadata=build_assistant_metadata,
             )
         )
-        if not _tool_result_has_events(tool_result):
+        terminal_events = _repair_terminal_events(tool_result)
+        if not terminal_events:
             logger.warning(
                 "Forced tool retry returned %s issue: %s",
                 tool_result.failure_kind or "unknown",
@@ -689,7 +673,7 @@ async def retry_forced_tool_after_text(
                 failure_kind=tool_result.failure_kind,
             )
 
-        return ForcedToolRetryOutcome(events=_tool_result_events(tool_result))
+        return ForcedToolRetryOutcome(events=terminal_events)
 
     return ForcedToolRetryOutcome()
 
@@ -729,12 +713,13 @@ async def _try_process_json_text_as_tool_arguments(
             build_assistant_metadata=build_assistant_metadata,
         )
     )
-    if _tool_result_has_events(tool_result):
+    terminal_events = _repair_terminal_events(tool_result)
+    if terminal_events:
         logger.info(
             "Accepted %s arguments returned as JSON text during forced retry.",
             target_tool_name,
         )
-        return ForcedToolRetryOutcome(events=_tool_result_events(tool_result))
+        return ForcedToolRetryOutcome(events=terminal_events)
 
     logger.warning(
         "JSON text fallback for %s returned %s issue: %s",
