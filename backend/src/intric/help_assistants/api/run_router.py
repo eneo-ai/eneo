@@ -1,6 +1,6 @@
-"""Helper-run router for ``/api/v1/help-assistants/runs/...`` (PRD §5, §10).
+"""Helper-run router for ``/api/v1/help-assistants/...`` (PRD §5, §10).
 
-Three endpoints, one shared service:
+Four endpoints, two shared services:
 
 * ``POST /runs/`` — start a new helper run for ``{kind, target_type,
   target_id, question, stream}``. The helper assistant resolves
@@ -10,6 +10,10 @@ Three endpoints, one shared service:
 * ``POST /runs/{run_id}/turns/`` — follow-up turn on an existing run.
 * ``PATCH /runs/{run_id}/`` — UX-driven terminal-status transition
   (Apply, Abandon, Failed).
+* ``GET /availability`` — cheap pre-flight the frontend hits before
+  rendering the prompt-guide toolbar button. Mirrors every gate
+  ``HelperRunService.run`` would enforce but returns a typed
+  ``disabled_reason`` instead of raising.
 
 Authorization is owned by ``HelperRunService``: the start and follow-up
 paths require ``ResourcePermission.EDIT`` on the target assistant; the
@@ -37,6 +41,7 @@ from sse_starlette import EventSourceResponse
 
 from intric.ai_models.completion_models.completion_model import Completion, ResponseType
 from intric.help_assistants.api.run_models import (
+    AvailabilityResponse,
     ContinueTurnRequest,
     HelperRunPublic,
     HelperRunResponsePublic,
@@ -44,6 +49,7 @@ from intric.help_assistants.api.run_models import (
     UpdateStatusRequest,
 )
 from intric.help_assistants.application.helper_run_service import HelperRunResponse
+from intric.help_assistants.domain.helper_kind import HelperKind
 from intric.help_assistants.domain.helper_run import HelperRun
 from intric.info_blobs.info_blob import (
     InfoBlobAskAssistantPublic,
@@ -51,6 +57,8 @@ from intric.info_blobs.info_blob import (
     InfoBlobMetadata,
 )
 from intric.main.container.container import Container
+from intric.main.exceptions import NotFoundException, UnauthorizedException
+from intric.main.models import ResourcePermission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 
@@ -232,3 +240,71 @@ async def update_helper_run_status(
     service = container.helper_run_service()
     run = await service.set_status(run_id=run_id, status=body.status)
     return _run_to_public(run)
+
+
+@router.get(
+    "/availability",
+    response_model=AvailabilityResponse,
+)
+async def get_helper_availability(
+    kind: HelperKind,
+    target_id: UUID,
+    container: HelperRunContainer,
+) -> AvailabilityResponse:
+    """Decide whether to render the prompt-guide toolbar button.
+
+    Mirrors every gate ``HelperRunService.run`` would enforce, but maps
+    each failure mode to a typed ``disabled_reason`` instead of raising.
+    The frontend hides the button whenever ``available`` is False; the
+    reason is diagnostic so an admin UX can surface a clear message
+    ("role disabled", "no completion model", ...).
+
+    The helper assistant id is intentionally **not** in the response —
+    callers never need it (resolution is server-side via
+    :class:`StartRunRequest`) and exposing it would defeat the
+    "helper assistants are hidden" invariant.
+
+    ``no_edit_rights`` collapses three target-side failure cases — the
+    assistant does not exist, the caller cannot read its space, the
+    caller can read but cannot edit — into a single reason so this
+    endpoint cannot be used as an assistant-existence probe.
+    """
+    assistant_service = container.assistant_service()
+    role_service = container.org_space_assistant_role_service()
+
+    try:
+        _, permissions = await assistant_service.get_assistant(
+            assistant_id=target_id
+        )
+    except (NotFoundException, UnauthorizedException):
+        return AvailabilityResponse(
+            available=False, disabled_reason="no_edit_rights"
+        )
+    if ResourcePermission.EDIT not in permissions:
+        return AvailabilityResponse(
+            available=False, disabled_reason="no_edit_rights"
+        )
+
+    role = await role_service.get_active(kind)
+    if role is None:
+        return AvailabilityResponse(
+            available=False, disabled_reason="no_assignment"
+        )
+    if not role.is_enabled:
+        return AvailabilityResponse(
+            available=False, disabled_reason="role_disabled"
+        )
+    if not role.is_visible_to_users:
+        return AvailabilityResponse(
+            available=False, disabled_reason="role_not_visible"
+        )
+
+    helper, _ = await assistant_service.get_assistant(
+        assistant_id=role.assistant_id
+    )
+    if helper.completion_model is None or not helper.completion_model.can_access:
+        return AvailabilityResponse(
+            available=False, disabled_reason="no_completion_model"
+        )
+
+    return AvailabilityResponse(available=True)

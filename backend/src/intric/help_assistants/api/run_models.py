@@ -16,6 +16,7 @@ reference-renderer without a second schema.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -89,3 +90,30 @@ class HelperRunResponsePublic(BaseModel):
     run: HelperRunPublic
     answer: str
     references: list[InfoBlobAskAssistantPublic]
+
+
+class AvailabilityResponse(BaseModel):
+    """Cheap read-only signal for the prompt-guide toolbar button (PRD §5, §10).
+
+    Returned by ``GET /help-assistants/availability``. The frontend hides
+    the toolbar button whenever ``available`` is False; ``disabled_reason``
+    lets the admin UX surface the underlying cause without parsing a
+    human-readable message.
+
+    The helper assistant id is intentionally absent — the modal never
+    needs it (helper resolution is server-side per :class:`StartRunRequest`)
+    and exposing it here would defeat the "helper assistants are hidden
+    from every listing" invariant.
+    """
+
+    available: bool
+    disabled_reason: (
+        Literal[
+            "no_assignment",
+            "role_disabled",
+            "role_not_visible",
+            "no_completion_model",
+            "no_edit_rights",
+        ]
+        | None
+    ) = None
