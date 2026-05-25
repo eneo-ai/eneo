@@ -632,24 +632,6 @@ class FlowRepository:
             return None
         return self.factory.from_flow_step_result_db(result)
 
-    async def get_step_result_by_order(
-        self,
-        flow_run_id: UUID,
-        step_order: int,
-        tenant_id: UUID,
-    ) -> FlowStepResult | None:
-        """Legacy ARQ-only method. New flow runtime should use step_id lookups."""
-        stmt = (
-            sa.select(FlowStepResults)
-            .where(FlowStepResults.flow_run_id == flow_run_id)
-            .where(FlowStepResults.step_order == step_order)
-            .where(FlowStepResults.tenant_id == tenant_id)
-        )
-        result = await self.session.scalar(stmt)
-        if result is None:
-            return None
-        return self.factory.from_flow_step_result_db(result)
-
     async def save_step_result(
         self,
         flow_run_id: UUID,
