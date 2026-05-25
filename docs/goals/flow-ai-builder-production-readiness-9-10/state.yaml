@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T108
+active_task: T109
 
 interruptions:
   - id: I001
@@ -9901,7 +9901,7 @@ tasks:
   - id: T108
     type: judge
     assignee: Judge
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Re-rank the next highest score-floor-moving Flow AI Builder tranche after T107 from current repo evidence. Do not implement during this judge task."
     constraints:
@@ -9916,6 +9916,106 @@ tasks:
       - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, and expected score impact."
       - "Explicit explanation of why the selected tranche is the highest score-floor mover rather than the easiest cleanup."
       - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
+    receipt:
+      completed_at: "2026-05-25"
+      repo_reality:
+        head: "6e427d6ef Clarify AI Builder edit operation shape ownership"
+        branch: "feature/refactor-flows-flowai"
+        dirty_status: "dirty only with unrelated workspace files preserved: .devcontainer/docker-compose.yml, .gitignore, AGENTS.md, .devcontainer/devcontainer-lock.json, PRODUCT.md, utvecklingssamtal.mp3"
+      summary: "Re-ranked the next Flow AI Builder tranche after T107. Selected T109, a confirmed-requirements typed prompt/signal ownership cleanup across proposal prompt, system prompt, and critic signal paths. The first two Claude iterations rejected narrower plans because they risked parallel renderers and left the build_system_prompt dict/fake-conversation path untouched. The final plan expands scope enough to remove the co-located typed->dict->typed/fake-conversation roundtrip while staying internal to AI Builder prompt/signal rendering."
+      artifact: ".codex/artifacts/flow-ai-builder-t108-next-tranche-ranking.md"
+      selected_worker: T109
+      source_evidence:
+        - "ai_builder_planner_request_preparation.py:263-274 dumps typed latest_confirmed_requirements into JSON for the proposal prompt."
+        - "ai_builder_planner_request_preparation.py:383-387 dumps the same typed confirmed_requirements into JSON for build_system_prompt."
+        - "ai_builder_prompts.py:154-178 validates dict requirements back to RequirementsSummaryPayload, builds a fake conversation, and re-enters requirements-state parsing."
+        - "ai_builder_plan_proposal_task.py:147-187 duplicates confirmed-requirements rendering with dict lookups and casts."
+        - "ai_builder_plan_quality_critic.py:74-86 dumps typed requirements state to JSON before signal extraction."
+        - "ai_builder_planner_pattern_signals.py:177-216 accepts Mapping[str, Any], uses Any, and has # pyright: ignore[reportUnknownVariableType]."
+        - "ai_builder_requirements_state.py:69-84 and ai_builder_event_models.py own the typed RequirementsSummaryPayload contract."
+      selected_worker_scope:
+        - "Use RequirementsSummaryPayload | None directly in build_plan_proposal_system_prompt, build_system_prompt, and build_requirements_signal_text."
+        - "Move confirmed-requirements proposal/system rendering to typed renderer functions in ai_builder_requirements_state.py and avoid parallel renderers."
+        - "Delete ai_builder_prompts.py synthetic [tool, user] conversation construction for already-typed requirements."
+        - "Remove dict/cast/Any/pyright-ignore mechanics from the touched confirmed-requirements paths."
+        - "Keep byte-equivalent prompt/signal output unless tests document an intentional tiny drift."
+      peer_review:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t108-next-flow-ai-builder-tranche-ranking-20260525T042542Z.md -> GREEN_LIGHT no / MIN_SCORE 7; accepted blockers around renderer ownership ambiguity, byte-equivalence proof, Pyright-ignore inventory, and Any/cast criteria."
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t108-revised-next-flow-ai-builder-tranche-ranking-20260525T043116Z.md -> GREEN_LIGHT no / MIN_SCORE 7; accepted blocker that build_system_prompt still had a co-located dict/fake-conversation requirements path."
+        claude_iteration_3: ".codex/artifacts/claude-peer-loop-t108-final-next-flow-ai-builder-tranche-ranking-20260525T043507Z.md -> GREEN_LIGHT yes / MIN_SCORE 8 after expanding T109 to the system prompt path and requiring critic-path tests."
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t108-next-flow-ai-builder-tranche-final-synthesis-20260525T043739Z.md -> GREEN_LIGHT yes / MIN_SCORE 8; added small implementation criterion to align ai_builder_plan_proposal_task.py available_models/available_kbs typing so Any can disappear."
+      swagger_openapi_impact: "None expected. T109 is internal backend prompt/signal rendering and must not change REST/SSE contracts, Swagger/OpenAPI schemas, examples, generated clients, frontend files, database schema, migrations, or public request/response models."
+      score_impact:
+        strict_floor: 8
+        rationale: "T108 is read-only. T109 can improve Maintainability, Clean Architecture, Separation of Concerns, Human Readability, Type Contracts, Single Source of Truth, and AI Slop / Comment / Naming for confirmed-requirements prompt/signal ownership, but it must not raise the overall strict floor above 8 by itself."
+
+  - id: T109
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Implement the peer-gated confirmed-requirements typed prompt/signal ownership cleanup selected by T108."
+    constraints:
+      - "Stay within Flow AI Builder; do not move to broader Flows work."
+      - "Preserve unrelated dirty files and stage only tranche-owned files."
+      - "Do not rewrite planner prompts broadly or change prompt meaning beyond byte-equivalent confirmed-requirements rendering."
+      - "Do not change public API, SSE, OpenAPI, Swagger examples, generated clients, frontend, DB/schema, migrations, runtime materialization, live-eval scripts, or diagnostic schemas."
+      - "No new interface/factory/service, no fake compatibility path, no broad Any, pyright/type ignores, callback bags, task/phase IDs, or comments explaining obvious mechanics."
+      - "No string-grep ownership guard for model_dump unless implementation proves Pyright cannot fence the typed signatures; prefer typed signatures plus behavior tests."
+    problem: "Confirmed requirements have a typed RequirementsSummaryPayload owner, but active proposal prompt, system prompt, and critic signal paths dump it back into dict[str, Any], re-parse it, duplicate rendering, and in one path synthesize a fake conversation just to reach the typed renderer."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_requirements_state.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_prompts.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_proposal_task.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner_request_preparation.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_plan_quality_critic.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_planner_pattern_signals.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_prompts.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_conditional_prompt.py"
+      - "backend/tests/unittests/flows/ai_builder/test_discovery_flow.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t109-implementation-summary.md"
+    canonical_owner_decision:
+      requirements_payload_owner: "RequirementsSummaryPayload remains the typed domain payload."
+      renderer_owner: "ai_builder_requirements_state.py owns confirmed-requirements filtering and prompt-block rendering for system/proposal audiences."
+      signal_owner: "build_requirements_signal_text consumes RequirementsSummaryPayload | None directly and must not parse Mapping[str, Any]."
+      what_deletes: "Proposal dict renderer, system-prompt fake conversation construction, dict model_dump handoffs in planner request preparation and critic, pyright ignore in planner pattern signals, and dead defensive isinstance/cast branches made unnecessary by typed payloads."
+    acceptance_criteria:
+      - "build_plan_proposal_system_prompt(... confirmed_requirements=...) accepts RequirementsSummaryPayload | None."
+      - "build_system_prompt(... confirmed_requirements=...) accepts RequirementsSummaryPayload | None."
+      - "build_requirements_signal_text(...) accepts RequirementsSummaryPayload | None."
+      - "ai_builder_planner_request_preparation.py passes the typed confirmed_requirements local directly to both proposal and system prompt builders."
+      - "ai_builder_plan_quality_critic.py passes requirements_state.latest_summary directly to build_requirements_signal_text."
+      - "ai_builder_prompts.py deletes the synthetic [tool, user] conversation construction for confirmed requirements and calls the typed system renderer directly."
+      - "ai_builder_plan_proposal_task.py deletes the private _confirmed_requirements_block dict renderer and no longer imports Any or cast; align available_models/available_kbs typing if needed to make that true."
+      - "ai_builder_planner_pattern_signals.py removes the # pyright: ignore[reportUnknownVariableType] and dead defensive mapping/string checks made unnecessary by RequirementsSummaryPayload."
+      - "requirements_version must not leak into proposal prompt, system prompt, or signal text."
+      - "Prompt/signal output stays byte-equivalent for the covered confirmed-requirements cases unless a deliberate tiny drift is documented with test updates."
+      - "No public REST/SSE/OpenAPI/Swagger/generated-client/frontend/database behavior changes."
+    validation_plan:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_prompts.py tests/unittests/flows/ai_builder/test_ai_builder_conditional_prompt.py tests/unittests/flows/ai_builder/test_discovery_flow.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py -q"
+      - "cd backend && uv run ruff check touched files"
+      - "cd backend && uv run ruff format --check touched files"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "git diff --check"
+      - "scripts/gate-local/anti_slippage.sh after staging"
+    peer_gates:
+      plan:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t108-next-flow-ai-builder-tranche-ranking-20260525T042542Z.md -> GREEN_LIGHT no / MIN_SCORE 7"
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t108-revised-next-flow-ai-builder-tranche-ranking-20260525T043116Z.md -> GREEN_LIGHT no / MIN_SCORE 7"
+        claude_iteration_3: ".codex/artifacts/claude-peer-loop-t108-final-next-flow-ai-builder-tranche-ranking-20260525T043507Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t108-next-flow-ai-builder-tranche-final-synthesis-20260525T043739Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      implementation:
+        claude_required: true
+        antigravity_if_available: true
+    swagger_openapi_impact: "None expected. T109 is internal backend prompt/signal rendering and should not require Swagger/OpenAPI/API example updates."
+    expected_score_impact: "Can improve Maintainability, Clean Architecture, Separation of Concerns, Human Readability, Type Contracts, Single Source of Truth, and AI Slop / Comment / Naming for one confirmed-requirements prompt/signal boundary. Do not raise the overall strict floor above 8 unless post-implementation evidence proves every remaining weak dimension is now 9."
     receipt: null
 
 checks:
@@ -9924,10 +10024,9 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T107 completed with Claude and Antigravity green. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T107
+    result: "T108 completed with Claude and Antigravity green. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T108
     commands:
-      - "Full Flow AI Builder unit suite -> 2419 passed, 4 skipped"
-      - "Ruff, Ruff format --check, Pyright on src/intric/flows/ai_builder, git diff --check -> passed"
-      - "Claude T107 implementation -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity T107 implementation -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "T108 read-only ranking selected T109; no source validation required beyond board YAML parse and peer gates."
+      - "Claude T108 plan iteration 3 -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity T108 final synthesis -> GREEN_LIGHT yes / MIN_SCORE 8"
