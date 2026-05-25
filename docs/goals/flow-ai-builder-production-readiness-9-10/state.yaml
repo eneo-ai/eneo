@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T097
+active_task: T098
 
 interruptions:
   - id: I001
@@ -8991,7 +8991,7 @@ tasks:
   - id: T097
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Move runtime input field hint derivation behind the create compile-context owner so production create proposal no longer precomputes runtime metadata state and hints before outline compilation."
     constraints:
@@ -9040,6 +9040,79 @@ tasks:
       implementation_required: "Run Claude implementation gate after validation; run Antigravity implementation gate with --spend-mode auto if available. Missing Antigravity coverage is a skip, not a pass."
     swagger_openapi_impact: "None expected. T097 is internal backend compile-context ownership work and should not require Swagger/OpenAPI/API example updates."
     score_impact: "May improve Maintainability, Clean Architecture, Separation of Concerns, Single Source of Truth, Human Readability, Human Reviewability, and AI Slop resistance. Do not raise the overall strict floor above 8 unless post-implementation evidence proves every remaining 8-scored dimension is now 9."
+    receipt:
+      completed_at: "2026-05-25T01:24:05Z"
+      summary: "Moved runtime input field hint derivation into the create compile-context owner. create proposal now aggregates conversation text and passes RuntimeInputFieldHintSource; outline_compile_context_from_planning_state owns runtime metadata state resolution plus hint extraction gating; runtime_metadata_state_from_planning_state is private and guarded against external imports."
+      files_changed:
+        - "backend/src/intric/flows/ai_builder/ai_builder_create_compiler.py"
+        - "backend/src/intric/flows/ai_builder/ai_builder_create_proposal.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t097-implementation-summary.md"
+        - ".codex/artifacts/claude-peer-loop-t097-runtime-hint-context-implementation-review-20260525T012112Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t097-runtime-hint-context-implementation-synthesis-20260525T012331Z.md"
+      validation:
+        red_tests:
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py::test_outline_compile_context_extracts_runtime_hints_when_state_allows_source -q -> failed before implementation because RuntimeInputFieldHintSource did not exist"
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_create_proposal_does_not_own_runtime_hint_derivation -q -> failed before implementation because create proposal imported/referenced runtime hint helpers"
+        passed:
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -> 165 passed"
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py -q -> 9 passed"
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 31 passed"
+          - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2405 passed, 4 skipped, 11 warnings"
+          - "cd backend && uv run ruff check touched T097 files -> passed"
+          - "cd backend && uv run ruff format --check touched T097 files -> 5 files already formatted"
+          - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations"
+          - "git diff --check -> clean"
+          - "rg checks confirmed create proposal no longer imports runtime metadata state or runtime-input hint gate helpers"
+      peer_gates:
+        claude: "GREEN_LIGHT yes / MIN_SCORE 8 in .codex/artifacts/claude-peer-loop-t097-runtime-hint-context-implementation-review-20260525T012112Z.md"
+        antigravity: "GREEN_LIGHT yes / MIN_SCORE 9 in .codex/artifacts/antigravity-peer-loop-t097-runtime-hint-context-implementation-synthesis-20260525T012331Z.md"
+      swagger_openapi_impact: "None. T097 changed only internal backend compile-context ownership and tests; REST/SSE contracts, OpenAPI/Swagger examples, generated clients, frontend code, and database schema were not touched."
+      self_review:
+        production_ready_for_scope: true
+        simpler_than_before: "Yes. The runtime metadata state and runtime input hint gate now have one production decision site in the compile-context owner instead of precomputed orchestration state plus compiler state."
+        complexity_removed: "create proposal no longer imports or owns runtime metadata state resolution, runtime hint extraction, or runtime metadata allows-field policy."
+        new_parallel_path: "No. The direct runtime_input_field_hints override was removed from outline_compile_context_from_planning_state; downstream compiler tests construct OutlineCompileContext directly where exact hints are the behavior under test."
+      score_impact:
+        strict_floor: 8
+        rationale: "Improves Maintainability, Clean Architecture, Separation of Concerns, SSoT, Human Readability, Human Reviewability, Test Quality, and AI Slop resistance for the create compile-context seam. Does not raise the broader Flow AI Builder floor above 8 because remaining subsystem-wide blockers still include broader planner/source topology/readability, final live-output proof after accumulated changes, and full-source baseline issues."
+
+  - id: T098
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T097 using current repo evidence, strict score floor, and the latest no-LOC-only steering."
+    constraints:
+      - "Do not implement during T098."
+      - "Do not move to broader Flows work; stay within Flow AI Builder."
+      - "Do not default to processor LOC reduction. Rank by strict score-floor movement, canonical ownership, deletion/merge/simplification opportunities, normal-user output proof, full-source typing/test baseline, API/DX/schema risk, and human reviewability."
+      - "Preserve unrelated dirty files and do not stage them."
+      - "If a selected tranche touches public contracts, Swagger/OpenAPI examples and generated client impact must be explicit."
+    allowed_files:
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t098-next-tranche-ranking.md"
+    expected_output:
+      - "Evidence-backed ranking with file:line citations for the remaining blockers."
+      - "Decision on the next worker tranche and why it moves the strict 8/10 floor more than easier cleanup."
+      - "Canonical owner, files, acceptance criteria, non-goals, validation commands, peer gates, and expected score impact for the selected worker."
+      - "Claude plan gate and Antigravity plan gate if available; missing Antigravity coverage must be recorded as missing coverage, not pass."
+    validation_plan:
+      - "git status --short --branch"
+      - "git log --oneline --decorate -8"
+      - "inspect current state.yaml scorecard and latest receipts"
+      - "inspect candidate source/test evidence with file:line citations"
+      - "run Claude plan gate; run Antigravity with --spend-mode auto if available"
+    stop_conditions:
+      - "Stop if the ranking cannot identify a tranche that plausibly improves the strict floor; write a final overnight status artifact instead of switching to broader Flows."
+      - "Stop if selected worker would require broad architecture rewrite without explicit peer-gated evidence."
+    peer_gate:
+      plan_required: "Run Claude after Codex ranking. Run Antigravity after Claude if available."
+    swagger_openapi_impact: "Unknown until ranking selects the next worker."
+    score_impact: "Read-only judge task. No score increase until the selected worker is implemented, validated, and post-reviewed."
     receipt: null
 
 checks:
@@ -9048,11 +9121,14 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T095 completed, validated, Claude-gated, Antigravity-gated, and ready for scoped commit. T096 is active as a read-only ranking task. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T095
+    result: "T097 completed, validated, Claude-gated, Antigravity-gated, and ready for scoped commit. T098 is active as a read-only ranking task. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T097
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -> 160 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 29 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -> 165 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py -q -> 9 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 31 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2405 passed, 4 skipped, 11 warnings"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
       - "cd backend && uv run pytest tests/unittests/flows/test_flow_capability_manifest.py -q -> 359 passed"
       - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2397 passed, 4 skipped, 11 warnings"
       - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations"

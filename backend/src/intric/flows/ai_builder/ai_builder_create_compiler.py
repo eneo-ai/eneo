@@ -36,7 +36,9 @@ from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     NO_EXTRA_RUNTIME_METADATA,
     RuntimeInputFieldHint,
     RuntimeMetadataState,
+    extract_runtime_input_field_hints,
     normalize_runtime_metadata_state,
+    runtime_metadata_allows_input_fields,
 )
 from intric.flows.ai_builder.ai_builder_step_skeleton import (
     StepSkeletonOutputTypeDrift,
@@ -101,6 +103,11 @@ class OutlineCompileContext:
     runtime_metadata_state: RuntimeMetadataState | None = None
     runtime_input_field_hints: tuple[RuntimeInputFieldHint, ...] = ()
     aggregation_intent: AggregationIntent = "linear"
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeInputFieldHintSource:
+    aggregated_conversation_text: str
 
 
 def compile_outline_to_create_draft(
@@ -326,17 +333,22 @@ def outline_compile_context_from_planning_state(
     planning_state: PlanningState | None,
     *,
     ui_language: str | None = None,
-    runtime_input_field_hints: tuple[RuntimeInputFieldHint, ...] = (),
+    runtime_input_hint_source: RuntimeInputFieldHintSource | None = None,
 ) -> OutlineCompileContext | None:
+    runtime_metadata_state = _runtime_metadata_state_from_planning_state(planning_state)
+    runtime_input_field_hints = _runtime_input_field_hints_from_source(
+        runtime_metadata_state=runtime_metadata_state,
+        runtime_input_hint_source=runtime_input_hint_source,
+    )
     if planning_state is None:
         if ui_language is None and not runtime_input_field_hints:
             return None
         return OutlineCompileContext(
             ui_language=ui_language,
+            runtime_metadata_state=runtime_metadata_state,
             runtime_input_field_hints=runtime_input_field_hints,
         )
     architecture = _architecture_envelope_from_planning_state(planning_state)
-    runtime_metadata_state = runtime_metadata_state_from_planning_state(planning_state)
     return OutlineCompileContext(
         runtime_input_type=(
             _runtime_input_type_from_architecture(architecture)
@@ -359,13 +371,28 @@ def outline_compile_context_from_planning_state(
     )
 
 
-def runtime_metadata_state_from_planning_state(
+def _runtime_metadata_state_from_planning_state(
     planning_state: PlanningState | None,
 ) -> RuntimeMetadataState | None:
     if planning_state is None:
         return None
     slot = planning_state.resolved_slots.get("runtime_metadata_fields")
     return normalize_runtime_metadata_state(slot.value if slot is not None else None)
+
+
+def _runtime_input_field_hints_from_source(
+    *,
+    runtime_metadata_state: RuntimeMetadataState | None,
+    runtime_input_hint_source: RuntimeInputFieldHintSource | None,
+) -> tuple[RuntimeInputFieldHint, ...]:
+    if runtime_input_hint_source is None:
+        return ()
+    source_text = runtime_input_hint_source.aggregated_conversation_text.strip()
+    if not source_text:
+        return ()
+    if not runtime_metadata_allows_input_fields(runtime_metadata_state):
+        return ()
+    return extract_runtime_input_field_hints(source_text)
 
 
 def _runtime_input_type_from_planning_state(state: PlanningState) -> InputType | None:

@@ -11,10 +11,10 @@ from intric.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
 from intric.flows.ai_builder.ai_builder_create_compiler import (
+    RuntimeInputFieldHintSource,
     compile_create_draft,
     compile_outline_to_create_draft,
     outline_compile_context_from_planning_state,
-    runtime_metadata_state_from_planning_state,
 )
 from intric.flows.ai_builder.ai_builder_create_dataflow import (
     normalize_create_draft_mechanics,
@@ -61,10 +61,6 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     canonicalize_create_draft_resources,
     collect_flow_spec_resource_bindings,
     format_resource_resolution_feedback,
-)
-from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
-    extract_runtime_input_field_hints,
-    runtime_metadata_allows_input_fields,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from intric.flows.ai_builder.ai_builder_tools import (
@@ -225,20 +221,15 @@ async def process_outline_arguments(
                 ),
                 catalog=resource_catalog,
             )
-        runtime_metadata_state = runtime_metadata_state_from_planning_state(
-            planning_state
-        )
-        runtime_input_field_hints = (
-            extract_runtime_input_field_hints(
-                aggregate_freeform_user_text(conversation)
-            )
-            if runtime_metadata_allows_input_fields(runtime_metadata_state)
-            else ()
-        )
+        aggregate_text = aggregate_freeform_user_text(conversation)
         compile_context = outline_compile_context_from_planning_state(
             planning_state,
             ui_language=resolve_ui_language(conversation),
-            runtime_input_field_hints=runtime_input_field_hints,
+            runtime_input_hint_source=(
+                RuntimeInputFieldHintSource(aggregated_conversation_text=aggregate_text)
+                if aggregate_text
+                else None
+            ),
         )
         draft = compile_outline_to_create_draft(
             outline,

@@ -14,6 +14,7 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
 )
 from intric.flows.ai_builder.ai_builder_create_compiler import (
     OutlineCompileContext,
+    RuntimeInputFieldHintSource,
     compile_create_draft,
     compile_outline_to_create_draft,
     outline_compile_context_from_planning_state,
@@ -2785,8 +2786,7 @@ def test_compile_outline_flow_drops_server_derived_hints_when_planner_did_not_re
             ],
         }
     )
-    context = outline_compile_context_from_planning_state(
-        None,
+    context = OutlineCompileContext(
         runtime_input_field_hints=(
             RuntimeInputFieldHint(variable_name="audience", label="Audience"),
             RuntimeInputFieldHint(variable_name="detail_level", label="Detail level"),
@@ -2830,8 +2830,7 @@ def test_compile_outline_flow_keeps_hint_when_planner_referenced_it_via_uses_inp
             ],
         }
     )
-    context = outline_compile_context_from_planning_state(
-        None,
+    context = OutlineCompileContext(
         runtime_input_field_hints=(
             RuntimeInputFieldHint(variable_name="audience", label="Audience"),
             RuntimeInputFieldHint(variable_name="detail_level", label="Detail level"),
@@ -2891,8 +2890,7 @@ def test_compile_outline_flow_includes_only_referenced_runtime_hints() -> None:
             ],
         }
     )
-    context = outline_compile_context_from_planning_state(
-        None,
+    context = OutlineCompileContext(
         runtime_input_field_hints=(
             RuntimeInputFieldHint(variable_name="audience", label="Audience"),
             RuntimeInputFieldHint(variable_name="report_type", label="Report type"),
@@ -2959,10 +2957,7 @@ def test_compile_outline_flow_drops_extracted_metadata_hints_when_planner_did_no
             ],
         }
     )
-    context = outline_compile_context_from_planning_state(
-        None,
-        runtime_input_field_hints=field_hints,
-    )
+    context = OutlineCompileContext(runtime_input_field_hints=field_hints)
 
     draft = compile_outline_to_create_draft(outline, context=context)
     compiled = compile_create_draft(draft)
@@ -3015,8 +3010,7 @@ def test_compile_outline_flow_overlap_planner_declared_field_and_hint_with_same_
             ],
         }
     )
-    context = outline_compile_context_from_planning_state(
-        None,
+    context = OutlineCompileContext(
         runtime_input_field_hints=(
             RuntimeInputFieldHint(
                 variable_name="audience", label="Audience hint label"
@@ -3720,6 +3714,125 @@ def test_runtime_input_field_hints_parse_generic_field_declarations() -> None:
         ("malgrupp", "målgrupp"),
         ("rapportniva", "rapportnivå"),
     ]
+
+
+def test_outline_compile_context_extracts_runtime_hints_when_state_allows_source() -> (
+    None
+):
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "runtime_metadata_fields": ResolvedSlot(
+            name="runtime_metadata_fields",
+            value=DETAILED_CASE_METADATA,
+            source="structured_answer",
+            confidence="high",
+        ),
+    }
+
+    context = outline_compile_context_from_planning_state(
+        state,
+        runtime_input_hint_source=RuntimeInputFieldHintSource(
+            aggregated_conversation_text=(
+                "Använd inmatningsfält för målgrupp och rapportnivå vid körning."
+            )
+        ),
+    )
+
+    assert context is not None
+    assert [
+        (hint.variable_name, hint.label) for hint in context.runtime_input_field_hints
+    ] == [
+        ("malgrupp", "målgrupp"),
+        ("rapportniva", "rapportnivå"),
+    ]
+
+
+def test_outline_compile_context_suppresses_runtime_hints_when_state_forbids_source() -> (
+    None
+):
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "runtime_metadata_fields": ResolvedSlot(
+            name="runtime_metadata_fields",
+            value=NO_EXTRA_RUNTIME_METADATA,
+            source="policy_default",
+            confidence="medium",
+        ),
+    }
+
+    context = outline_compile_context_from_planning_state(
+        state,
+        runtime_input_hint_source=RuntimeInputFieldHintSource(
+            aggregated_conversation_text=(
+                "Använd inmatningsfält för målgrupp och rapportnivå vid körning."
+            )
+        ),
+    )
+
+    assert context is not None
+    assert context.runtime_input_field_hints == ()
+
+
+def test_outline_compile_context_does_not_extract_runtime_hints_without_source() -> (
+    None
+):
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "runtime_metadata_fields": ResolvedSlot(
+            name="runtime_metadata_fields",
+            value=DETAILED_CASE_METADATA,
+            source="structured_answer",
+            confidence="high",
+        ),
+    }
+
+    context = outline_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.runtime_input_field_hints == ()
+
+
+def test_outline_compile_context_keeps_hints_empty_when_state_and_source_absent() -> (
+    None
+):
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "runtime_metadata_fields": ResolvedSlot(
+            name="runtime_metadata_fields",
+            value=NO_EXTRA_RUNTIME_METADATA,
+            source="policy_default",
+            confidence="medium",
+        ),
+    }
+
+    context = outline_compile_context_from_planning_state(state)
+
+    assert context is not None
+    assert context.runtime_input_field_hints == ()
+
+
+def test_outline_compile_context_does_not_extract_runtime_hints_from_empty_source() -> (
+    None
+):
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "runtime_metadata_fields": ResolvedSlot(
+            name="runtime_metadata_fields",
+            value=DETAILED_CASE_METADATA,
+            source="structured_answer",
+            confidence="high",
+        ),
+    }
+
+    context = outline_compile_context_from_planning_state(
+        state,
+        runtime_input_hint_source=RuntimeInputFieldHintSource(
+            aggregated_conversation_text=""
+        ),
+    )
+
+    assert context is not None
+    assert context.runtime_input_field_hints == ()
 
 
 def test_compile_outline_flow_uses_server_architecture_context_for_core_shape() -> None:

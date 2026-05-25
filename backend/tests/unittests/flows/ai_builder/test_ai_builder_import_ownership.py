@@ -241,7 +241,14 @@ CREATE_OUTLINE_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_create_outline")
 )
 CREATE_OUTLINE_PATH = Path("src/intric/flows/ai_builder/ai_builder_create_outline.py")
+CREATE_PROPOSAL_PATH = Path("src/intric/flows/ai_builder/ai_builder_create_proposal.py")
 CREATE_COMPILER_PATH = Path("src/intric/flows/ai_builder/ai_builder_create_compiler.py")
+CREATE_COMPILER_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_create_compiler")
+)
+RUNTIME_INPUT_FIELDS_MODULE = ".".join(
+    ("intric", "flows", "ai_builder", "ai_builder_runtime_input_fields")
+)
 REPAIR_TRANSPORT_MODULE = ".".join(
     ("intric", "flows", "ai_builder", "ai_builder_repair_transport")
 )
@@ -257,10 +264,10 @@ TOOL_TURN_PERSISTENCE_PATH = Path(
 CREATE_COMPILER_PUBLIC_NAMES = frozenset(
     {
         "OutlineCompileContext",
+        "RuntimeInputFieldHintSource",
         "compile_create_draft",
         "compile_outline_to_create_draft",
         "outline_compile_context_from_planning_state",
-        "runtime_metadata_state_from_planning_state",
     }
 )
 CREATE_OUTLINE_BANNED_COMPILER_NAMES = frozenset(
@@ -277,7 +284,6 @@ CREATE_OUTLINE_BANNED_COMPILER_NAMES = frozenset(
         "materialize_step_skeleton",
         "outline_compile_context_from_planning_state",
         "resolve_step_skeleton_patterns",
-        "runtime_metadata_state_from_planning_state",
     }
 )
 ACCEPTED_ACTION_RENDERING_PUBLIC_NAMES = frozenset(
@@ -1775,6 +1781,68 @@ def test_create_outline_no_longer_owns_create_compiler_mechanics() -> None:
     compiler_text = compiler_path.read_text()
     if "build_outline_flow_tool_schema" in compiler_text:
         violations.append(f"{compiler_path}: builds outline LLM tool schema")
+
+    assert violations == []
+
+
+def test_create_proposal_does_not_own_runtime_hint_derivation() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    create_proposal_path = backend_root / CREATE_PROPOSAL_PATH
+    create_proposal_tree = ast.parse(
+        create_proposal_path.read_text(), filename=str(create_proposal_path)
+    )
+    banned_names = frozenset(
+        {
+            "runtime_metadata_state_from_planning_state",
+            "_runtime_metadata_state_from_planning_state",
+            "extract_runtime_input_field_hints",
+            "runtime_metadata_allows_input_fields",
+        }
+    )
+    violations: list[str] = []
+
+    for node in ast.walk(create_proposal_tree):
+        if isinstance(node, ast.ImportFrom) and node.module in {
+            CREATE_COMPILER_MODULE,
+            RUNTIME_INPUT_FIELDS_MODULE,
+        }:
+            imported_names = {
+                alias.name for alias in node.names if alias.name in banned_names
+            }
+            if imported_names:
+                names = ", ".join(sorted(imported_names))
+                violations.append(
+                    f"{create_proposal_path}:{node.lineno} imports {names}"
+                )
+        if isinstance(node, ast.Name) and node.id in banned_names:
+            violations.append(
+                f"{create_proposal_path}:{node.lineno} references {node.id}"
+            )
+
+    assert violations == []
+
+
+def test_runtime_metadata_state_extraction_is_private_to_create_compiler() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    violations: list[str] = []
+
+    for path in (backend_root / "src").rglob("*.py"):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if (
+                not isinstance(node, ast.ImportFrom)
+                or node.module != CREATE_COMPILER_MODULE
+            ):
+                continue
+            imported_names = {
+                alias.name
+                for alias in node.names
+                if alias.name == "_runtime_metadata_state_from_planning_state"
+            }
+            if imported_names:
+                violations.append(
+                    f"{path}:{node.lineno} imports _runtime_metadata_state_from_planning_state"
+                )
 
     assert violations == []
 

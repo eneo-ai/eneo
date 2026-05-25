@@ -32,6 +32,9 @@ from intric.flows.ai_builder.ai_builder_proposal_policy import (
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
+from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
+    DETAILED_CASE_METADATA,
+)
 from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
@@ -39,6 +42,7 @@ from intric.flows.ai_builder.ai_builder_session_turn import (
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     PlanningState,
+    ResolvedSlot,
     StepTriple,
 )
 from intric.flows.flow_authoring_spec import (
@@ -336,6 +340,54 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
     spec = result.compiled_proposal.spec
     assert spec.steps[0].input_type == InputType.AUDIO
     assert spec.steps[-1].output_type == OutputType.DOCX
+
+
+@pytest.mark.asyncio
+async def test_outline_processing_uses_runtime_hint_source_from_conversation() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots = {
+        "runtime_metadata_fields": ResolvedSlot(
+            name="runtime_metadata_fields",
+            value=DETAILED_CASE_METADATA,
+            source="structured_answer",
+            confidence="high",
+        ),
+    }
+
+    result = await process_outline_arguments(
+        turn=_make_turn(),
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde som använder inmatningsfält för målgrupp "
+                    "vid körning och skriver en rapport."
+                ),
+            )
+        ],
+        arguments={
+            "flow_name": "Målgruppsrapport",
+            "plan_rationale": "Anpassa rapporten efter målgrupp.",
+            "steps": [
+                {
+                    "name": "Skriv rapport",
+                    "task": "Skriv rapporten för vald målgrupp.",
+                    "uses_input_fields": ["malgrupp"],
+                }
+            ],
+        },
+        tool_call_id="call-runtime-hints",
+        available_model_refs=None,
+        available_kb_refs=None,
+        planning_state=state,
+    )
+
+    assert result.compiled_proposal is not None
+    spec = result.compiled_proposal.spec
+    assert spec.form_fields is not None
+    assert [field.name for field in spec.form_fields] == ["malgrupp"]
+    assert spec.steps[0].input_bindings is not None
+    assert "{{ flow_input.malgrupp }}" in spec.steps[0].input_bindings["question"]
 
 
 @pytest.mark.asyncio
