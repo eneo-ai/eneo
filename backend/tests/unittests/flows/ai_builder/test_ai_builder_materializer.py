@@ -324,7 +324,6 @@ class TestCompileCreateFlow:
         assert changeset.compiled_steps[0].assistant_id is None
 
     def test_step_fields_propagate_correctly(self) -> None:
-        bindings = {"question": "{{ Ärendenummer }}"}  # Form field var — not rewritten
         contract = {"type": "object", "properties": {"x": {"type": "string"}}}
         spec = _make_spec(
             steps=[
@@ -336,7 +335,6 @@ class TestCompileCreateFlow:
                     output_mode=OutputMode.PASS_THROUGH,
                     output_type=OutputType.JSON,
                     mcp_policy=MCPPolicy.RESTRICTED,
-                    input_bindings=bindings,
                     input_contract=contract,
                     output_contract=contract,
                 ),
@@ -349,8 +347,30 @@ class TestCompileCreateFlow:
         assert step.output_mode == "pass_through"
         assert step.output_type == "json"
         assert step.mcp_policy == "restricted"
-        assert step.input_bindings == bindings
+        assert step.input_bindings is None
         assert step.input_contract == contract
+        assert step.output_contract == contract
+
+    def test_question_binding_clears_input_contract(self) -> None:
+        bindings = {"question": "{{ Ärendenummer }}"}
+        contract = {"type": "object", "properties": {"x": {"type": "string"}}}
+        spec = _make_spec(
+            steps=[
+                _make_step_spec(
+                    plan_step_ref="step_a",
+                    name="Bound Step",
+                    input_bindings=bindings,
+                    input_contract=contract,
+                    output_contract=contract,
+                ),
+            ],
+        )
+
+        changeset = compile_changeset(spec, current_flow=None)
+        step = changeset.compiled_steps[0]
+
+        assert step.input_bindings == bindings
+        assert step.input_contract is None
         assert step.output_contract == contract
 
     def test_document_flow_input_defaults_runtime_upload_config(self) -> None:

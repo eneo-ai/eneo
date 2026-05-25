@@ -69,6 +69,7 @@ source_modules =
     intric.flows.flow_variable_definitions
     intric.flows.http_transport
     intric.flows.infrastructure
+    intric.flows.input_binding_contract_rules
     intric.flows.output_modes
     intric.flows.output_processing
     intric.flows.principal

@@ -733,6 +733,43 @@ interruptions:
         - "No post-commit live smoke was run in this turn; the next authenticated live eval should include both the original long prompt and the explicit no-extra-fields prompt."
         - "The broader Flow AI Builder 9/10 goal remains incomplete; this is a live normal-user output-quality hotfix, not a score-floor completion tranche."
       score_impact: "Improves Runtime Reliability, Normal-User Output Quality, Developer Diagnostic Experience, Single Source of Truth, Human Reviewability, and Test Quality for audio-to-DOCX report creation. Does not raise the strict overall Flow AI Builder score floor above 8 because this live interruption does not close every remaining subsystem-wide 9/10 blocker."
+  - id: I011
+    kind: baseline_health
+    status: committed
+    reported_at: "2026-05-25T14:43:00+02:00"
+    summary: "Post-I009/I010 baseline health check found the full AI Builder unit suite red only because of two stale baseline-health issues: a materializer test still expected question bindings to propagate `input_contract`, and `.importlinter` omitted the new Flow-owned `input_binding_contract_rules` module."
+    decision: "Keep the production I009 question-binding/input-contract mutual-exclusion invariant unchanged. Update the stale materializer assertions to encode both valid current cases, and add the new Flow-owned rules module to the importlinter source-module boundary."
+    constraints:
+      - "Do not start a new architecture/refactor tranche."
+      - "Do not touch planner topology, underlag ownership, question recovery diagnostics, Swedish compound wording, AI-slop cleanup, broad test cleanup, or broader Flows."
+      - "Do not weaken the Flow question-binding/input-contract production invariant."
+      - "Preserve unrelated dirty files."
+    receipt:
+      completed_at: "2026-05-25T14:49:06+02:00"
+      summary: "Restored the committed Flow AI Builder baseline. `test_step_fields_propagate_correctly` now verifies normal `input_contract` propagation when no question binding exists, and a new materializer regression verifies `input_contract` is cleared when `input_bindings.question` supplies the full rendered input. `.importlinter` now includes `intric.flows.input_binding_contract_rules` in the flows-engine source modules."
+      repo_reality:
+        branch: "feature/refactor-flows-flowai"
+        head_before_commit: "d7af73481 Prevent report fields becoming runtime metadata"
+        unrelated_dirty_files_preserved: ".devcontainer/docker-compose.yml, .gitignore, AGENTS.md, .devcontainer/devcontainer-lock.json, PRODUCT.md, utvecklingssamtal.mp3."
+      changed_files:
+        - "backend/.importlinter"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_materializer.py"
+        - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      red_first:
+        - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder -q -> reproduced 2 failures, 2460 passed, 4 skipped, 11 warnings."
+        - "Failures reproduced: `test_ai_builder_materializer.py::TestCompileCreateFlow::test_step_fields_propagate_correctly` and `test_importlinter_boundary.py::test_source_modules_cover_every_flows_sibling`."
+        - "No additional failures appeared, so scope stayed limited to the stale materializer test and `.importlinter` config."
+      validation:
+        - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_ai_builder_materializer.py::TestCompileCreateFlow::test_step_fields_propagate_correctly tests/unittests/flows/ai_builder/test_ai_builder_materializer.py::TestCompileCreateFlow::test_question_binding_clears_input_contract -q -> 2 passed."
+        - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder/test_importlinter_boundary.py::test_source_modules_cover_every_flows_sibling -q -> 1 passed."
+        - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/test_flow_validators.py::test_validate_steps_rejects_question_binding_with_input_contract tests/unittests/flows/test_flow_validators.py::test_validate_steps_rejects_single_expression_question_binding_with_input_contract tests/unittests/flows/test_flow_validators.py::test_validate_steps_allows_question_binding_without_input_contract tests/unittests/flows/test_step_definition_parser.py::test_parse_runtime_steps_rejects_question_binding_with_input_contract tests/unittests/flows/test_step_definition_parser.py::test_parse_runtime_steps_rejects_single_expression_question_binding_with_input_contract tests/unittests/flows/test_step_definition_parser.py::test_parse_runtime_steps_allows_question_binding_without_input_contract tests/unittests/flows/test_flow_executor_runtime.py::test_execute_rejects_question_binding_input_contract_before_step_execution -q -> 7 passed."
+        - "PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/unittests/flows/ai_builder -q -> 2463 passed, 4 skipped, 11 warnings."
+        - "uv run lint-imports -> 7 contracts kept, 0 broken."
+        - "uv run ruff check tests/unittests/flows/ai_builder/test_ai_builder_materializer.py -> passed."
+        - "uv run ruff format --check tests/unittests/flows/ai_builder/test_ai_builder_materializer.py -> 1 file already formatted."
+        - "git diff --check -> passed."
+      validation_gate_lesson: "Post-I009 targeted validation proved the new Flow contract behavior but missed a red AI Builder baseline. Runtime/authoring contract changes that touch AI Builder-adjacent behavior must include the full AI Builder unit suite before the commit is considered baseline-healthy."
+      score_impact: "Restores Test Quality and Developer Diagnostic Experience from the temporary red-baseline floor of 6/10 back to the pre-existing broader Flow AI Builder floor of 8/10. This is baseline-health recovery only and does not raise the broader 9/10 goal floor."
 
 scoring_target:
   dimensions:
