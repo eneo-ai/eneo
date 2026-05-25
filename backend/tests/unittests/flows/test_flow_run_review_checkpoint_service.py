@@ -20,7 +20,11 @@ from intric.flows.flow import FlowRun, FlowRunStatus
 from intric.flows.infrastructure.flow_run_repo import (
     FlowRunReviewCheckpointResumeResult,
 )
-from intric.main.exceptions import BadRequestException, UnauthorizedException
+from intric.main.exceptions import (
+    BadRequestException,
+    TypedIOValidationException,
+    UnauthorizedException,
+)
 
 
 def _run(user, flow_id) -> FlowRun:
@@ -63,6 +67,7 @@ def _review_checkpoint(
     state: FlowRunReviewCheckpointState = FlowRunReviewCheckpointState.AWAITING_REVIEW,
     revision: int = 1,
     resume_idempotency_key: str | None = None,
+    output_contract_json: dict[str, object] | None = None,
 ) -> FlowRunReviewCheckpoint:
     now = datetime.now(timezone.utc)
     return FlowRunReviewCheckpoint(
@@ -78,6 +83,7 @@ def _review_checkpoint(
         schema_version=1,
         original_payload_json={"text": "Draft"},
         current_payload_json={"text": "Draft"},
+        output_contract_json=output_contract_json,
         requester_user_id=user.id,
         requester_principal_type=PrincipalType.USER,
         decided_by_user_id=None,
@@ -222,6 +228,46 @@ async def test_review_mutations_reject_service_key_for_run_owned_by_another_prin
 
     assert exc_info.value.code == "flow_run_access_denied"
     flow_run_repo.get_review_checkpoint_for_edit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_edit_review_checkpoint_rejects_extra_structured_properties(user):
+    flow_run_repo = AsyncMock()
+    access_policy = AsyncMock()
+    flow_id = uuid4()
+    run = _run(user=user, flow_id=flow_id)
+    checkpoint = _review_checkpoint(
+        user,
+        run,
+        output_contract_json={
+            "type": "object",
+            "required": ["title"],
+            "properties": {"title": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    )
+    access_policy.load_run.return_value = run
+    flow_run_repo.get_review_checkpoint_for_edit.return_value = checkpoint
+    service = _service(
+        user,
+        flow_run_repo=flow_run_repo,
+        access_policy=access_policy,
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await service.edit_review_checkpoint(
+            flow_id=flow_id,
+            run_id=run.id,
+            checkpoint_id=checkpoint.id,
+            expected_checkpoint_revision=checkpoint.revision,
+            current_payload_json={
+                "structured": {"title": "Draft", "extra": "not allowed"}
+            },
+        )
+
+    assert exc_info.value.code == "typed_io_contract_violation"
+    assert "Additional properties are not allowed" in str(exc_info.value)
+    flow_run_repo.edit_review_checkpoint_payload.assert_not_awaited()
 
 
 @pytest.mark.asyncio

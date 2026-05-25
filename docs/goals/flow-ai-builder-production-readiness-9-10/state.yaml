@@ -272,6 +272,97 @@ interruptions:
         - "Antigravity noted optional P3 support for Swedish compound fallback words such as wordfil/pdffil; not needed for the reported PDF path or current green gate."
         - "The required post-T112 read-only score-floor audit still remains the next non-implementation gate before more planned AI Builder work."
       score_impact: "Improves Runtime Reliability, Normal-User Output Quality, Human Reviewability, and Developer Diagnostic Experience for selected-step terminal output-file edits. Does not raise the strict overall Flow AI Builder score floor above 8 because broader topology/readability, full-source baseline, and score-floor audit work remain."
+  - id: I005
+    kind: live_bug_hotfix
+    status: committed
+    reported_at: "2026-05-25T07:58:00Z"
+    summary: "An AI Builder-created Flow ran successfully until a structured JSON step failed at runtime with typed_io_contract_violation because the selected runtime model emitted an undeclared item-level field (`rubrik_kommentar`) under a strict output_contract with additionalProperties=false."
+    decision: "Pause the post-T112 score-floor audit again and fix the live runtime reliability/schema-DX issue narrowly: keep stored output contracts strict, improve AI Builder nested field guidance, and add model-output-only pruning for undeclared properties before final validation. Do not put pruning inside the shared validator, do not normalize user inputs or review checkpoint payloads, and do not add provider strict-schema selection or LLM repair retry in this slice."
+    constraints:
+      - "Preserve unrelated dirty files."
+      - "Do not relax AI Builder-generated contracts to additionalProperties=true."
+      - "Do not put extra-property pruning in validate_against_contract because step inputs and review checkpoints must stay strict."
+      - "Do not add broad Flow API flags, provider strict JSON Schema selection, OpenTelemetry work, frontend redesign, or an LLM repair retry in this slice."
+      - "Final structured output must still pass the original strict output_contract."
+      - "Raw model completion text must remain preserved for audit/debugging while structured output is contract-clean."
+    artifacts:
+      - ".codex/artifacts/flow-ai-builder-i005-runtime-extra-json-field-plan-brief.md"
+      - ".codex/artifacts/flow-ai-builder-i005-runtime-extra-json-field-revised-plan.md"
+      - ".codex/artifacts/flow-ai-builder-i005-runtime-extra-json-field-final-plan.md"
+      - ".codex/artifacts/claude-peer-loop-i005-runtime-extra-json-field-failure-20260525T074502Z.md"
+      - ".codex/artifacts/claude-peer-loop-i005-runtime-extra-json-field-failure-revised-plan-20260525T075209Z.md"
+      - ".codex/artifacts/claude-peer-loop-i005-runtime-extra-json-field-final-plan-20260525T080037Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-i005-runtime-json-extra-field-clean-final-gate-20260525T080403Z.md"
+      - ".codex/artifacts/flow-ai-builder-i005-runtime-extra-json-field-implementation-summary.md"
+      - ".codex/artifacts/claude-peer-loop-i005-runtime-extra-json-field-implementation-gate-20260525T082834Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-i005-runtime-json-extra-field-implementation-gate-20260525T083046Z.md"
+    peer_gate_status:
+      claude_iteration_1: "GREEN_LIGHT no / MIN_SCORE 5; rejected global/local pruning as initially framed, required nested field guidance first, explicit optional-field strict-schema blocker handling, and no runtime import of AI Builder planner response-format code."
+      claude_iteration_2: "GREEN_LIGHT no / MIN_SCORE 6; accepted model-output-only narrowing but required an explicit pruning-vs-repair-retry decision, typed dropped-path shape, raw-output preservation proof, and stricter boundary tests."
+      antigravity_synthesis: "Initial synthesis was inconsistent after stale context; clean final gate with --spend-mode auto returned GREEN_LIGHT yes / MIN_SCORE 8 and added an executor wrapper/protocol sync watch item."
+      claude_final_gate: "GREEN_LIGHT yes / MIN_SCORE 8 after final plan explicitly rejected global validator pruning, repair retry, and provider strict-schema selection for this slice while specifying typed diagnostics, raw completion preservation, and input/review strictness tests."
+      claude_implementation_gate: ".codex/artifacts/claude-peer-loop-i005-runtime-extra-json-field-implementation-gate-20260525T082834Z.md -> GREEN_LIGHT yes / MIN_SCORE 8; no blockers. P2/P3 follow-ups only: optional docstring note for unsupported advanced schema keywords, possible header rename, optional type-alias consistency."
+      antigravity_implementation_gate: ".codex/artifacts/antigravity-peer-loop-i005-runtime-json-extra-field-implementation-gate-20260525T083046Z.md -> GREEN_LIGHT yes / MIN_SCORE 9 with --spend-mode auto; no blockers."
+    acceptance:
+      - "AI Builder compiled instructions include compact nested object and array item allowed-field guidance so weak models are less likely to invent sibling keys."
+      - "Runtime model-output processing drops only undeclared object properties where the output schema explicitly has additionalProperties=false."
+      - "The shared validate_against_contract function remains strict and does not prune."
+      - "Step input validation and review checkpoint validation still reject extra properties."
+      - "Final structured output passes the original strict output_contract after pruning."
+      - "Missing required fields and wrong field types still fail with typed_io_contract_violation."
+      - "Raw completion text remains preserved for audit/debugging when structured output is pruned."
+      - "A bounded StepDiagnostic records dropped JSON Pointer paths without raw payloads."
+      - "Runtime output processing uses a typed result instead of a loose tuple so diagnostics travel explicitly."
+    validation_required:
+      - "Red tests proving the reported extra item property fails before implementation and passes after model-output-only pruning."
+      - "Tests proving permissive schemas with missing/true additionalProperties are not pruned."
+      - "Tests proving deep pruning is bounded, idempotent, and skips $ref/oneOf/anyOf/allOf nodes."
+      - "Tests proving missing required fields and wrong types still fail after pruning extras."
+      - "Tests proving step input and review checkpoint payloads still reject extra properties."
+      - "Tests proving raw full_text is preserved and a bounded diagnostic is recorded."
+      - "Focused backend tests for output_processing, output_runtime, typed_io_executor, step_execution_runtime, and AI Builder create compiler."
+      - "Ruff check/format check on touched files, Pyright on touched runtime/compiler files, git diff --check."
+      - "Claude implementation gate; Antigravity implementation gate if available."
+    receipt:
+      commit: null
+      summary: "Implemented model-output-only strict-schema extra-property pruning for runtime structured outputs. AI Builder compiled step guidance now includes compact nested object/array item allowed-field lines. Runtime output processing now returns a typed result carrying structured output, artifacts, and bounded diagnostics. Shared validation, step input validation, and review checkpoint validation remain strict."
+      changed_files:
+        - "backend/src/intric/flows/ai_builder/ai_builder_new_step_compiler.py"
+        - "backend/src/intric/flows/output_processing.py"
+        - "backend/src/intric/flows/runtime/executor.py"
+        - "backend/src/intric/flows/runtime/output_runtime.py"
+        - "backend/src/intric/flows/runtime/step_execution_runtime.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+        - "backend/tests/unittests/flows/test_flow_run_review_checkpoint_service.py"
+        - "backend/tests/unittests/flows/test_output_processing.py"
+        - "backend/tests/unittests/flows/test_output_runtime.py"
+        - "backend/tests/unittests/flows/test_step_execution_runtime.py"
+        - "backend/tests/unittests/flows/test_typed_io_executor.py"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/test_output_processing.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_flow_run_review_checkpoint_service.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -> 252 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/test_typed_io_executor.py -q -k 'not document_outputs_generate_downloadable_artifacts' -> 55 passed, 2 deselected, 1 warning."
+        - "cd backend && uv run pytest tests/unittests/flows/test_typed_io_executor.py::test_document_outputs_generate_downloadable_artifacts -q -> DOCX parametrization passed; PDF parametrization failed because local WeasyPrint import cannot load native library libgobject-2.0-0. This is a local macOS Pango/Cairo/GLib dependency issue, not an I005 regression."
+        - "cd backend && uv run ruff check touched I005 source/tests -> passed."
+        - "cd backend && uv run ruff format --check touched I005 source/tests -> passed."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/output_processing.py src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/runtime/executor.py src/intric/flows/ai_builder/ai_builder_new_step_compiler.py -> 0 errors, 0 warnings, 0 informations."
+        - "git diff --check -> passed."
+      peer_review:
+        claude_implementation_gate: ".codex/artifacts/claude-peer-loop-i005-runtime-extra-json-field-implementation-gate-20260525T082834Z.md -> GREEN_LIGHT yes / MIN_SCORE 8."
+        antigravity_implementation_gate: ".codex/artifacts/antigravity-peer-loop-i005-runtime-json-extra-field-implementation-gate-20260525T083046Z.md -> GREEN_LIGHT yes / MIN_SCORE 9."
+      self_review:
+        simpler_for_maintainer: true
+        complexity_removed: "Runtime tolerance for undeclared model-output keys now has one explicit boundary instead of leaking into shared validation or creating provider/repair complexity."
+        owner_clarified: "output_processing.py owns pure schema-based pruning; output_runtime.py owns the model-output-only application and diagnostics; validate_against_contract remains the strict authority."
+        coupling_removed: "Weaker model extra-key failures no longer require changing AI Builder contracts, user-input validation, review checkpoint handling, or LLM repair loops."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "I005 does not add provider-side strict-schema selection or an LLM repair retry for missing required fields/wrong types; those remain intentionally rejected by validation."
+        - "Advanced JSON Schema features with $ref/oneOf/anyOf/allOf are not pruned; validation remains strict for those shapes. Current AI Builder-generated contracts are inline and do not use those constructs."
+        - "Local PDF artifact validation is blocked on the host by missing WeasyPrint native library libgobject-2.0-0; rerun that parametrization in the devcontainer or after local Pango/Cairo/GLib repair."
+        - "A separate live selected-step edit issue was reported after I005: wording such as 'utdatat ska vara pdf fil' can still fall through to scoped LLM repair and fail quality checks. That must be handled as a new interruption, not mixed into I005."
+      score_impact: "Improves Runtime Reliability, Data/Schema Quality, Normal-User Output Quality, Developer Diagnostic Experience, Human Reviewability, and Test Quality for strict runtime JSON outputs. Does not raise the strict overall Flow AI Builder score floor above 8 because broader topology/readability, full-source baseline, and the newly reported selected-step PDF edit wording issue remain."
 
 scoring_target:
   dimensions:

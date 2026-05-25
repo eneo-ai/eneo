@@ -786,6 +786,13 @@ def test_compile_create_draft_generates_runtime_upload_contracts_and_form_fields
     assert "Required JSON fields:" in first_step.assistant_spec.instructions
     assert "risker" in first_step.assistant_spec.instructions
     assert "konsekvenser" in first_step.assistant_spec.instructions
+    assert (
+        "Allowed fields for items of risker: titel, nivå. Do not emit other fields."
+    ) in first_step.assistant_spec.instructions
+    assert (
+        "Allowed fields for items of konsekvenser: sammanfattning. Do not emit "
+        "other fields."
+    ) in first_step.assistant_spec.instructions
     assert first_step.output_contract is not None
     assert first_step.output_contract["properties"]["risker"]["type"] == "array"
     assert (

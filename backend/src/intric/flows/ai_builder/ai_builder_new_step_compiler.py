@@ -415,13 +415,60 @@ def _append_output_field_guidance(
         return instructions
 
     normalized_instructions = instructions.casefold()
+    guidance_lines: list[str] = []
     top_level_fields = [
         field
         for field in output_fields
         if field.name and field.name.casefold() not in normalized_instructions
     ]
-    if not top_level_fields:
+    guidance_lines.extend(
+        f"- {field.name}: {field.description}" for field in top_level_fields
+    )
+    guidance_lines.extend(_nested_output_field_guidance(output_fields))
+    if not guidance_lines:
         return instructions
 
-    field_lines = [f"- {field.name}: {field.description}" for field in top_level_fields]
-    return f"{instructions}\n\nRequired JSON fields:\n{chr(10).join(field_lines)}"
+    return f"{instructions}\n\nRequired JSON fields:\n{chr(10).join(guidance_lines)}"
+
+
+def _nested_output_field_guidance(
+    output_fields: list[StructuredFieldDraft],
+    *,
+    parent_path: str = "",
+) -> list[str]:
+    lines: list[str] = []
+    for field in output_fields:
+        if not field.name:
+            continue
+        field_path = f"{parent_path}.{field.name}" if parent_path else field.name
+        if field.field_type == "array" and field.item_fields:
+            item_names = _field_name_list(field.item_fields)
+            if item_names:
+                lines.append(
+                    f"Allowed fields for items of {field_path}: {item_names}. "
+                    "Do not emit other fields."
+                )
+            lines.extend(
+                _nested_output_field_guidance(
+                    field.item_fields,
+                    parent_path=f"{field_path}[]",
+                )
+            )
+        elif field.field_type == "object" and field.fields:
+            object_names = _field_name_list(field.fields)
+            if object_names:
+                lines.append(
+                    f"Allowed fields for object {field_path}: {object_names}. "
+                    "Do not emit other fields."
+                )
+            lines.extend(
+                _nested_output_field_guidance(
+                    field.fields,
+                    parent_path=field_path,
+                )
+            )
+    return lines
+
+
+def _field_name_list(fields: list[StructuredFieldDraft]) -> str:
+    return ", ".join(field.name for field in fields if field.name)

@@ -5,12 +5,18 @@ from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
 from intric.files.file_models import FileCreate, FileType
+from intric.flows.output_processing import prune_extras_to_strict_schema
 from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime.document_rendering.limits import (
     DEFAULT_DOCUMENT_RENDER_LIMITS,
     DocumentRenderLimits,
     ensure_source_within_limits,
 )
+from intric.flows.runtime.models import StepDiagnostic
+
+_MAX_DROPPED_PATHS_REPORTED = 20
+_MAX_DROPPED_PATH_LENGTH = 200
+_MAX_DROPPED_PATHS_MESSAGE_LENGTH = 1600
 
 
 class RuntimeOutputStep(Protocol):
@@ -68,6 +74,13 @@ class RenderStructuredDocumentFn(Protocol):
     ) -> tuple[bytes, str, str]: ...
 
 
+@dataclass(frozen=True, slots=True)
+class TypedOutputProcessingResult:
+    structured_output: dict[str, Any] | list[Any] | None
+    artifacts: list[dict[str, Any]] | None
+    diagnostics: list[StepDiagnostic]
+
+
 @dataclass(frozen=True)
 class OutputRuntimeDeps:
     file_repo: Any
@@ -87,9 +100,10 @@ async def process_typed_output(
     step: RuntimeOutputStep,
     run: RuntimeOutputRun,
     deps: OutputRuntimeDeps,
-) -> tuple[dict[str, Any] | list[Any] | None, list[dict[str, Any]] | None]:
+) -> TypedOutputProcessingResult:
     structured_output: dict[str, Any] | list[Any] | None = None
     artifacts: list[dict[str, Any]] | None = None
+    diagnostics: list[StepDiagnostic] = []
 
     compiled = deps.compile_validators([step])
 
@@ -97,6 +111,13 @@ async def process_typed_output(
         structured_output = deps.parse_json_output(full_text)
         validator = compiled.get(("output", step.step_order))
         if validator:
+            # Model output only; user inputs and review checkpoint edits stay strict.
+            diagnostics.extend(
+                _prune_model_output_extras(
+                    structured_output,
+                    step.output_contract or {},
+                )
+            )
             deps.validate_against_contract(
                 structured_output,
                 step.output_contract or {},
@@ -105,6 +126,13 @@ async def process_typed_output(
     elif step.output_type in ("pdf", "docx"):
         if step.output_contract is not None:
             structured_output = deps.parse_json_output(full_text)
+            # Model output only; user inputs and review checkpoint edits stay strict.
+            diagnostics.extend(
+                _prune_model_output_extras(
+                    structured_output,
+                    step.output_contract,
+                )
+            )
             deps.validate_against_contract(
                 structured_output,
                 step.output_contract,
@@ -156,4 +184,45 @@ async def process_typed_output(
             }
         ]
 
-    return structured_output, artifacts
+    return TypedOutputProcessingResult(
+        structured_output=structured_output,
+        artifacts=artifacts,
+        diagnostics=diagnostics,
+    )
+
+
+def _prune_model_output_extras(
+    structured_output: dict[str, Any] | list[Any],
+    output_contract: dict[str, Any],
+) -> list[StepDiagnostic]:
+    result = prune_extras_to_strict_schema(structured_output, output_contract)
+    if not result.dropped_paths:
+        return []
+    return [
+        StepDiagnostic(
+            code="typed_output_extra_properties_dropped",
+            message=_format_dropped_paths_message(result.dropped_paths),
+            severity="warning",
+        )
+    ]
+
+
+def _format_dropped_paths_message(dropped_paths: tuple[str, ...]) -> str:
+    shown_paths = tuple(
+        _truncate_path(path) for path in dropped_paths[:_MAX_DROPPED_PATHS_REPORTED]
+    )
+    suffix = ""
+    hidden_count = len(dropped_paths) - len(shown_paths)
+    if hidden_count > 0:
+        suffix = f"; {hidden_count} more omitted"
+    message = (
+        f"Dropped {len(dropped_paths)} undeclared field"
+        f"{'' if len(dropped_paths) == 1 else 's'}: {', '.join(shown_paths)}{suffix}"
+    )
+    return message[:_MAX_DROPPED_PATHS_MESSAGE_LENGTH]
+
+
+def _truncate_path(path: str) -> str:
+    if len(path) <= _MAX_DROPPED_PATH_LENGTH:
+        return path
+    return f"{path[: _MAX_DROPPED_PATH_LENGTH - 3]}..."

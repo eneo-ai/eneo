@@ -105,6 +105,7 @@ from intric.flows.runtime.models import (
 )
 from intric.flows.runtime.output_runtime import (
     OutputRuntimeDeps,
+    TypedOutputProcessingResult,
 )
 from intric.flows.runtime.output_runtime import (
     process_typed_output as process_typed_output_runtime,
@@ -1844,7 +1845,7 @@ class FlowRunExecutor:
         full_text: str,
         step: RuntimeStep,
         run: FlowRun,
-    ) -> tuple[dict[str, Any] | list[Any] | None, list[dict[str, Any]] | None]:
+    ) -> TypedOutputProcessingResult:
         from intric.flows.output_processing import (
             compile_validators,
             parse_json_output,

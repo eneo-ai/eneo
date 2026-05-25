@@ -34,6 +34,7 @@ from intric.flows.runtime.models import (
     StepExecutionOutput,
     StepInputValue,
 )
+from intric.flows.runtime.output_runtime import TypedOutputProcessingResult
 from intric.flows.runtime.protocols import RuntimeAssistantProtocol
 from intric.flows.runtime.step_input_validation import (
     validate_input_contract,
@@ -119,9 +120,7 @@ class ProcessTypedOutputFn(Protocol):
         full_text: str,
         step: RuntimeStep,
         run: FlowRun,
-    ) -> Awaitable[
-        tuple[dict[str, Any] | list[Any] | None, list[dict[str, Any]] | None]
-    ]: ...
+    ) -> Awaitable[TypedOutputProcessingResult]: ...
 
 
 class ApplyOutputCapFn(Protocol):
@@ -1190,7 +1189,7 @@ async def complete_step_execution(
             step.output_type,
         )
     try:
-        structured_output, artifacts = await deps.process_typed_output(
+        typed_output = await deps.process_typed_output(
             full_text=full_text,
             step=step,
             run=run,
@@ -1201,6 +1200,10 @@ async def complete_step_execution(
             input_payload_for_result=prepared.input_payload_for_result,
             effective_prompt=prompt_override,
         ) from exc
+
+    diagnostics.extend(typed_output.diagnostics)
+    structured_output = typed_output.structured_output
+    artifacts = typed_output.artifacts
 
     if deps.logger is not None:
         deps.logger.info(

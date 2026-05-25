@@ -1757,6 +1757,34 @@ async def test_text_input_contract_rejects_non_json_for_object_schema(user):
 
 
 @pytest.mark.asyncio
+async def test_text_input_contract_rejects_extra_properties(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": '{"title":"Sakerhetsanalys","extra":"nope"}'},
+    )
+    step = _runtime_step(
+        input_type="text",
+        input_contract={
+            "type": "object",
+            "required": ["title"],
+            "properties": {"title": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    )
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(step=step, run=run)
+
+    assert exc.value.code == "typed_io_contract_violation"
+    assert "Additional properties are not allowed" in str(exc.value)
+
+
+@pytest.mark.asyncio
 async def test_text_input_contract_string_schema_keeps_string_behavior(user):
     executor, _, _, _ = _build_executor(user)
     run = _run(

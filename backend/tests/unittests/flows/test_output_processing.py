@@ -7,6 +7,7 @@ import pytest
 from intric.flows.output_processing import (
     compile_validators,
     parse_json_output,
+    prune_extras_to_strict_schema,
     validate_against_contract,
     validate_schema_syntax,
 )
@@ -92,6 +93,156 @@ def test_validate_against_contract_error_code():
     with pytest.raises(TypedIOValidationException) as exc_info:
         validate_against_contract({}, schema, label="output")
     assert exc_info.value.code == "typed_io_contract_violation"
+
+
+def test_prune_extras_to_strict_schema_drops_extra_item_property():
+    schema = {
+        "type": "object",
+        "required": ["beslutslista"],
+        "properties": {
+            "beslutslista": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["rubrik", "beslut", "omrostning"],
+                    "properties": {
+                        "rubrik": {"type": "string"},
+                        "beslut": {"type": "string"},
+                        "omrostning": {"type": "boolean"},
+                        "roster_for": {"type": "string"},
+                        "roster_emot": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "additionalProperties": False,
+    }
+    data = {
+        "beslutslista": [
+            {
+                "rubrik": "Budget",
+                "beslut": "Godkänd",
+                "omrostning": False,
+                "rubrik_kommentar": "extra",
+            }
+        ]
+    }
+
+    result = prune_extras_to_strict_schema(data, schema)
+
+    assert result.dropped_paths == ("/beslutslista/0/rubrik_kommentar",)
+    assert "rubrik_kommentar" not in data["beslutslista"][0]
+    validate_against_contract(data, schema, label="Step 4 output")
+
+
+def test_prune_extras_to_strict_schema_leaves_permissive_schemas_unchanged():
+    schema = {
+        "type": "object",
+        "properties": {"rubrik": {"type": "string"}},
+    }
+    data = {"rubrik": "Budget", "rubrik_kommentar": "kept"}
+
+    result = prune_extras_to_strict_schema(data, schema)
+
+    assert result.dropped_paths == ()
+    assert data["rubrik_kommentar"] == "kept"
+
+
+def test_prune_extras_to_strict_schema_is_deep_and_idempotent():
+    schema = {
+        "type": "object",
+        "properties": {
+            "sections": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {"title": {"type": "string"}},
+                                "additionalProperties": False,
+                            },
+                        }
+                    },
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "additionalProperties": False,
+    }
+    data = {
+        "sections": [
+            {
+                "items": [
+                    {"title": "One", "unexpected": "drop"},
+                ],
+                "section_extra": "drop",
+            }
+        ],
+    }
+
+    first = prune_extras_to_strict_schema(data, schema)
+    second = prune_extras_to_strict_schema(data, schema)
+
+    assert first.dropped_paths == (
+        "/sections/0/section_extra",
+        "/sections/0/items/0/unexpected",
+    )
+    assert second.dropped_paths == ()
+    assert data == {"sections": [{"items": [{"title": "One"}]}]}
+
+
+def test_prune_extras_to_strict_schema_skips_composition_nodes():
+    schema = {
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {"title": {"type": "string"}},
+                "additionalProperties": False,
+            }
+        ]
+    }
+    data = {"title": "One", "unexpected": "kept"}
+
+    result = prune_extras_to_strict_schema(data, schema)
+
+    assert result.dropped_paths == ()
+    assert data["unexpected"] == "kept"
+
+
+def test_pruned_output_still_fails_missing_required():
+    schema = {
+        "type": "object",
+        "required": ["rubrik"],
+        "properties": {"rubrik": {"type": "string"}},
+        "additionalProperties": False,
+    }
+    data = {"rubrik_kommentar": "drop"}
+
+    result = prune_extras_to_strict_schema(data, schema)
+
+    assert result.dropped_paths == ("/rubrik_kommentar",)
+    with pytest.raises(TypedIOValidationException, match="'rubrik' is a required"):
+        validate_against_contract(data, schema, label="Step output")
+
+
+def test_pruned_output_still_fails_wrong_type():
+    schema = {
+        "type": "object",
+        "required": ["omrostning"],
+        "properties": {"omrostning": {"type": "boolean"}},
+        "additionalProperties": False,
+    }
+    data = {"omrostning": "nej", "extra": "drop"}
+
+    result = prune_extras_to_strict_schema(data, schema)
+
+    assert result.dropped_paths == ("/extra",)
+    with pytest.raises(TypedIOValidationException, match="is not of type"):
+        validate_against_contract(data, schema, label="Step output")
 
 
 # --- validate_schema_syntax ---

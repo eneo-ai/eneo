@@ -10,7 +10,11 @@ import pytest
 
 from intric.files.file_models import FileType
 from intric.flows.runtime.document_rendering.limits import DocumentRenderLimits
-from intric.flows.runtime.output_runtime import OutputRuntimeDeps, process_typed_output
+from intric.flows.runtime.output_runtime import (
+    OutputRuntimeDeps,
+    TypedOutputProcessingResult,
+    process_typed_output,
+)
 from intric.main.exceptions import TypedIOValidationException
 
 
@@ -45,15 +49,15 @@ async def test_process_typed_output_json_with_contract_validation() -> None:
         ),
     )
 
-    structured, artifacts = await process_typed_output(
+    result = await process_typed_output(
         full_text='{"ok": true}',
         step=step,
         run=run,
         deps=deps,
     )
 
-    assert structured == {"ok": True}
-    assert artifacts is None
+    assert result.structured_output == {"ok": True}
+    assert result.artifacts is None
 
 
 @pytest.mark.asyncio
@@ -82,15 +86,15 @@ async def test_process_typed_output_json_without_compiled_validator_skips_contra
         ),
     )
 
-    structured, artifacts = await process_typed_output(
+    result = await process_typed_output(
         full_text='{"ok": true}',
         step=step,
         run=run,
         deps=deps,
     )
 
-    assert structured == {"ok": True}
-    assert artifacts is None
+    assert result.structured_output == {"ok": True}
+    assert result.artifacts is None
 
 
 @pytest.mark.asyncio
@@ -122,15 +126,15 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
         ),
     )
 
-    structured, artifacts = await process_typed_output(
+    result = await process_typed_output(
         full_text="Rendered docx content",
         step=step,
         run=run,
         deps=deps,
     )
 
-    assert structured is None
-    assert artifacts == [
+    assert result.structured_output is None
+    assert result.artifacts == [
         {
             "file_id": str(file_id),
             "name": filename,
@@ -173,17 +177,17 @@ async def test_process_typed_output_pdf_preserves_pdf_bytes_from_model() -> None
         ),
     )
 
-    structured, artifacts = await process_typed_output(
+    result = await process_typed_output(
         full_text=f"\n{raw_pdf}",
         step=step,
         run=run,
         deps=deps,
     )
 
-    assert structured is None
-    assert artifacts is not None
-    assert artifacts[0]["mimetype"] == "application/pdf"
-    assert artifacts[0]["name"] == "step_8_output.pdf"
+    assert result.structured_output is None
+    assert result.artifacts is not None
+    assert result.artifacts[0]["mimetype"] == "application/pdf"
+    assert result.artifacts[0]["name"] == "step_8_output.pdf"
     file_create = file_repo.add.await_args.args[0]
     assert file_create.blob == raw_pdf.encode("latin-1")
 
@@ -261,18 +265,92 @@ async def test_process_typed_output_docx_renders_validated_structured_contract()
         render_structured_document=_render_structured,
     )
 
-    structured, artifacts = await process_typed_output(
+    result = await process_typed_output(
         full_text='{"structured": 1}',
         step=step,
         run=run,
         deps=deps,
     )
 
-    assert structured == {"structured": 1}
+    assert result.structured_output == {"structured": 1}
     assert validate_calls == [({"structured": 1}, {"type": "object"}, "Step 4 output")]
     assert render_calls == [({"structured": 1}, "docx", 4, {"type": "object"})]
-    assert artifacts is not None
-    assert artifacts[0]["file_id"] == str(file_id)
+    assert result.artifacts is not None
+    assert result.artifacts[0]["file_id"] == str(file_id)
+
+
+@pytest.mark.asyncio
+async def test_process_typed_output_prunes_extra_item_properties_before_validation() -> (
+    None
+):
+    contract = {
+        "type": "object",
+        "required": ["beslutslista"],
+        "properties": {
+            "beslutslista": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["rubrik", "beslut", "omrostning"],
+                    "properties": {
+                        "rubrik": {"type": "string"},
+                        "beslut": {"type": "string"},
+                        "omrostning": {"type": "boolean"},
+                    },
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "additionalProperties": False,
+    }
+    parsed = {
+        "beslutslista": [
+            {
+                "rubrik": "Budget",
+                "beslut": "Godkänd",
+                "omrostning": False,
+                "rubrik_kommentar": "extra",
+            }
+        ]
+    }
+    validate_calls: list[tuple[object, dict, str]] = []
+
+    def _validate(data, schema, label):
+        validate_calls.append((data, schema, label))
+
+    deps = OutputRuntimeDeps(
+        file_repo=SimpleNamespace(add=AsyncMock()),
+        user_id=uuid4(),
+        compile_validators=lambda steps: {("output", 4): object()},
+        parse_json_output=lambda text: parsed,
+        validate_against_contract=_validate,
+        render_document=lambda text, output_type, step_order: (b"", "", ""),
+        render_structured_document=lambda data, output_type, step_order, schema=None: (
+            b"",
+            "",
+            "",
+        ),
+    )
+
+    result = await process_typed_output(
+        full_text='{"beslutslista":[]}',
+        step=_Step(step_order=4, output_type="json", output_contract=contract),
+        run=_Run(tenant_id=uuid4()),
+        deps=deps,
+    )
+
+    assert isinstance(result, TypedOutputProcessingResult)
+    assert result.structured_output == {
+        "beslutslista": [{"rubrik": "Budget", "beslut": "Godkänd", "omrostning": False}]
+    }
+    assert result.artifacts is None
+    assert [diagnostic.code for diagnostic in result.diagnostics] == [
+        "typed_output_extra_properties_dropped"
+    ]
+    assert "/beslutslista/0/rubrik_kommentar" in result.diagnostics[0].message
+    assert validate_calls == [
+        (result.structured_output, contract, "Step 4 output"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -300,16 +378,16 @@ async def test_process_typed_output_docx_treats_empty_contract_as_structured() -
         render_structured_document=_render_structured,
     )
 
-    structured, artifacts = await process_typed_output(
+    result = await process_typed_output(
         full_text='["legacy", "data"]',
         step=step,
         run=run,
         deps=deps,
     )
 
-    assert structured == ["legacy", "data"]
+    assert result.structured_output == ["legacy", "data"]
     assert render_calls == [(["legacy", "data"], "docx", 4, {})]
-    assert artifacts is not None
+    assert result.artifacts is not None
 
 
 @pytest.mark.asyncio
@@ -339,15 +417,15 @@ async def test_process_typed_output_docx_without_contract_does_not_parse_json() 
         ),
     )
 
-    structured, artifacts = await process_typed_output(
+    result = await process_typed_output(
         full_text="pre-render text",
         step=step,
         run=run,
         deps=deps,
     )
 
-    assert structured is None
-    assert artifacts is not None
+    assert result.structured_output is None
+    assert result.artifacts is not None
     file_repo.add.assert_awaited_once()
 
 
@@ -371,15 +449,15 @@ async def test_process_typed_output_unknown_type_returns_empty() -> None:
         ),
     )
 
-    structured, artifacts = await process_typed_output(
+    result = await process_typed_output(
         full_text="plain text output",
         step=step,
         run=run,
         deps=deps,
     )
 
-    assert structured is None
-    assert artifacts is None
+    assert result.structured_output is None
+    assert result.artifacts is None
     file_repo.add.assert_not_called()
 
 

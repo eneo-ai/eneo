@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from typing import Any, cast
 
 import jsonschema
@@ -15,6 +16,14 @@ _FENCED_JSON_PATTERN = re.compile(
     r"^\s*```(?:json)?\s*(.*?)\s*```\s*$",
     re.IGNORECASE | re.DOTALL,
 )
+_SCHEMA_TRAVERSAL_STOP_KEYS = frozenset({"$ref", "oneOf", "anyOf", "allOf"})
+
+JsonStructuredValue = JsonObject | list[Any]
+
+
+@dataclass(frozen=True, slots=True)
+class StrictSchemaPruneResult:
+    dropped_paths: tuple[str, ...]
 
 
 def _parse_json_candidate(raw_text: str) -> JsonObject | list[Any]:
@@ -75,6 +84,87 @@ def validate_against_contract(data: Any, schema: dict[str, Any], *, label: str) 
             f"{label}: {exc.message}",
             code="typed_io_contract_violation",
         ) from exc
+
+
+def prune_extras_to_strict_schema(
+    data: JsonStructuredValue,
+    schema: JsonObject,
+) -> StrictSchemaPruneResult:
+    """Drop only undeclared model-output keys under explicit additionalProperties:false."""
+    dropped_paths: list[str] = []
+    _prune_extras_to_strict_schema_node(data, schema, "", dropped_paths)
+    return StrictSchemaPruneResult(dropped_paths=tuple(dropped_paths))
+
+
+def _prune_extras_to_strict_schema_node(
+    data: object,
+    schema: object,
+    path: str,
+    dropped_paths: list[str],
+) -> None:
+    if not isinstance(schema, dict):
+        return
+    schema_node = cast(dict[str, object], schema)
+    if _schema_has_traversal_stop(schema_node):
+        return
+
+    if isinstance(data, dict):
+        data_object = cast(dict[object, object], data)
+        _prune_object_extras(data_object, schema_node, path, dropped_paths)
+        return
+
+    if isinstance(data, list):
+        data_items = cast(list[object], data)
+        item_schema = schema_node.get("items")
+        if isinstance(item_schema, dict):
+            typed_item_schema = cast(dict[str, object], item_schema)
+            for index, item in enumerate(data_items):
+                _prune_extras_to_strict_schema_node(
+                    item,
+                    typed_item_schema,
+                    f"{path}/{index}",
+                    dropped_paths,
+                )
+
+
+def _schema_has_traversal_stop(schema: dict[str, object]) -> bool:
+    return any(key in schema for key in _SCHEMA_TRAVERSAL_STOP_KEYS)
+
+
+def _prune_object_extras(
+    data: dict[object, object],
+    schema: dict[str, object],
+    path: str,
+    dropped_paths: list[str],
+) -> None:
+    properties = schema.get("properties")
+    typed_properties = (
+        cast(dict[str, object], properties) if isinstance(properties, dict) else {}
+    )
+
+    if schema.get("additionalProperties") is False:
+        allowed_keys = set(typed_properties)
+        for key in list(data):
+            if isinstance(key, str) and key not in allowed_keys:
+                del data[key]
+                dropped_paths.append(f"{path}/{_json_pointer_token(key)}")
+
+    for key, value in list(data.items()):
+        if not isinstance(key, str):
+            continue
+        child_schema = typed_properties.get(key)
+        if child_schema is None:
+            continue
+        _prune_extras_to_strict_schema_node(
+            value,
+            child_schema,
+            f"{path}/{_json_pointer_token(key)}",
+            dropped_paths,
+        )
+
+
+def _json_pointer_token(token: str) -> str:
+    return token.replace("~", "~0").replace("/", "~1")
 
 
 def validate_schema_syntax(schema: dict[str, Any], *, label: str) -> None:

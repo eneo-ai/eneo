@@ -20,9 +20,11 @@ from intric.flows.flow_run_step_result_file import build_step_result_file_refere
 from intric.flows.runtime.models import (
     RunExecutionState,
     RuntimeStep,
+    StepDiagnostic,
     StepExecutionOutput,
     StepInputValue,
 )
+from intric.flows.runtime.output_runtime import TypedOutputProcessingResult
 from intric.flows.runtime.step_execution_runtime import (
     FlowStepCancelledError,
     PreparedStepExecution,
@@ -67,6 +69,18 @@ def _state() -> RunExecutionState:
         json_mode_supported={},
         file_cache={},
         step_ref_mapping={},
+    )
+
+
+def _typed_output_result(
+    structured_output=None,
+    artifacts=None,
+    diagnostics=None,
+) -> TypedOutputProcessingResult:
+    return TypedOutputProcessingResult(
+        structured_output=structured_output,
+        artifacts=artifacts,
+        diagnostics=diagnostics or [],
     )
 
 
@@ -492,7 +506,7 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
         retrieve_rag_chunks=AsyncMock(
             return_value=([], {"status": "skipped_no_service"}, [])
         ),
-        process_typed_output=AsyncMock(return_value=({"ok": True}, None)),
+        process_typed_output=AsyncMock(return_value=_typed_output_result({"ok": True})),
         apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
         attach_typed_failure_context=lambda exc, **kwargs: exc,
         effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
@@ -581,7 +595,7 @@ async def test_complete_step_execution_shares_deadline_across_json_mode_retry(
         retrieve_rag_chunks=AsyncMock(
             return_value=([], {"status": "skipped_no_service"}, [])
         ),
-        process_typed_output=AsyncMock(return_value=({"ok": True}, None)),
+        process_typed_output=AsyncMock(return_value=_typed_output_result({"ok": True})),
         apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
         attach_typed_failure_context=attach_typed_failure_context,
         effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
@@ -665,7 +679,7 @@ async def test_complete_step_execution_fast_fails_when_deadline_already_exhauste
         retrieve_rag_chunks=AsyncMock(
             return_value=([], {"status": "skipped_no_service"}, [])
         ),
-        process_typed_output=AsyncMock(return_value=({"ok": True}, None)),
+        process_typed_output=AsyncMock(return_value=_typed_output_result({"ok": True})),
         apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
         attach_typed_failure_context=attach_typed_failure_context,
         effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
@@ -730,7 +744,7 @@ async def test_complete_step_execution_times_out_llm_request():
         retrieve_rag_chunks=AsyncMock(
             return_value=([], {"status": "skipped_no_service"}, [])
         ),
-        process_typed_output=AsyncMock(return_value=(None, None)),
+        process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("too late", [])),
         attach_typed_failure_context=attach_typed_failure_context,
         effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
@@ -798,7 +812,7 @@ async def test_complete_step_execution_cancels_llm_request_when_run_is_cancelled
         retrieve_rag_chunks=AsyncMock(
             return_value=([], {"status": "skipped_no_service"}, [])
         ),
-        process_typed_output=AsyncMock(return_value=(None, None)),
+        process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("too late", [])),
         attach_typed_failure_context=attach_typed_failure_context,
         effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
@@ -867,7 +881,7 @@ async def test_complete_step_execution_returns_when_cancelled_llm_suppresses_can
         retrieve_rag_chunks=AsyncMock(
             return_value=([], {"status": "skipped_no_service"}, [])
         ),
-        process_typed_output=AsyncMock(return_value=(None, None)),
+        process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("too late", [])),
         attach_typed_failure_context=attach_typed_failure_context,
         effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
@@ -946,7 +960,7 @@ async def test_complete_step_execution_logs_json_mode_kwargs_failures(
         retrieve_rag_chunks=AsyncMock(
             return_value=([], {"status": "skipped_no_service"}, [])
         ),
-        process_typed_output=AsyncMock(return_value=({"ok": True}, None)),
+        process_typed_output=AsyncMock(return_value=_typed_output_result({"ok": True})),
         apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
         attach_typed_failure_context=lambda exc, **kwargs: exc,
         effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
@@ -1018,7 +1032,7 @@ async def test_complete_step_execution_skips_native_json_mode_when_capability_is
         retrieve_rag_chunks=AsyncMock(
             return_value=([], {"status": "skipped_no_service"}, [])
         ),
-        process_typed_output=AsyncMock(return_value=({"ok": True}, None)),
+        process_typed_output=AsyncMock(return_value=_typed_output_result({"ok": True})),
         apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
         attach_typed_failure_context=lambda exc, **kwargs: exc,
         effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
@@ -1099,7 +1113,9 @@ async def test_complete_step_execution_does_not_force_json_object_for_array_docu
         retrieve_rag_chunks=AsyncMock(
             return_value=([], {"status": "skipped_no_service"}, [])
         ),
-        process_typed_output=AsyncMock(return_value=([{"title": "A"}], None)),
+        process_typed_output=AsyncMock(
+            return_value=_typed_output_result([{"title": "A"}])
+        ),
         apply_output_cap=AsyncMock(return_value=('[{"title":"A"}]', [])),
         attach_typed_failure_context=lambda exc, **kwargs: exc,
         effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
@@ -1164,7 +1180,7 @@ async def test_complete_step_execution_prefers_provider_reported_usage() -> None
         retrieve_rag_chunks=AsyncMock(
             return_value=([], {"status": "skipped_no_service"}, [])
         ),
-        process_typed_output=AsyncMock(return_value=(None, None)),
+        process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("Svar", [])),
         attach_typed_failure_context=lambda exc, **kwargs: exc,
         effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
@@ -1227,7 +1243,7 @@ async def test_complete_step_execution_falls_back_to_estimated_usage_when_provid
         retrieve_rag_chunks=AsyncMock(
             return_value=([], {"status": "skipped_no_service"}, [])
         ),
-        process_typed_output=AsyncMock(return_value=(None, None)),
+        process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("Svar", [])),
         attach_typed_failure_context=lambda exc, **kwargs: exc,
         effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
@@ -1300,7 +1316,7 @@ async def test_complete_step_execution_falls_back_per_usage_field(
         retrieve_rag_chunks=AsyncMock(
             return_value=([], {"status": "skipped_no_service"}, [])
         ),
-        process_typed_output=AsyncMock(return_value=(None, None)),
+        process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("Svar", [])),
         attach_typed_failure_context=lambda exc, **kwargs: exc,
         effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
@@ -1464,7 +1480,7 @@ async def test_complete_step_execution_uses_version_2_and_strips_inline_refs_for
         load_assistant=AsyncMock(),
         resolve_step_input=AsyncMock(),
         retrieve_rag_chunks=AsyncMock(return_value=([], rag_metadata, [])),
-        process_typed_output=AsyncMock(return_value=(None, None)),
+        process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("Svar med kallor", [])),
         attach_typed_failure_context=lambda exc, **kwargs: exc,
         effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
@@ -1559,7 +1575,7 @@ async def test_complete_step_execution_records_missing_citations_without_failing
         load_assistant=AsyncMock(),
         resolve_step_input=AsyncMock(),
         retrieve_rag_chunks=AsyncMock(return_value=([], rag_metadata, [])),
-        process_typed_output=AsyncMock(return_value=(None, None)),
+        process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("Svar utan kallor", [])),
         attach_typed_failure_context=lambda exc, **kwargs: exc,
         effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
@@ -1642,7 +1658,7 @@ async def test_complete_step_execution_does_not_expect_citations_when_no_knowled
         load_assistant=AsyncMock(),
         resolve_step_input=AsyncMock(),
         retrieve_rag_chunks=AsyncMock(return_value=([], rag_metadata, [])),
-        process_typed_output=AsyncMock(return_value=(None, None)),
+        process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("Svar utan kallor", [])),
         attach_typed_failure_context=lambda exc, **kwargs: exc,
         effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
@@ -1773,7 +1789,7 @@ async def test_complete_step_execution_tracks_inherited_citations_for_synthesis_
         load_assistant=AsyncMock(),
         resolve_step_input=AsyncMock(),
         retrieve_rag_chunks=AsyncMock(return_value=([], None, [])),
-        process_typed_output=AsyncMock(return_value=(None, None)),
+        process_typed_output=AsyncMock(return_value=_typed_output_result()),
         apply_output_cap=AsyncMock(return_value=("Slutrapport", [])),
         attach_typed_failure_context=lambda exc, **kwargs: exc,
         effective_model_parameters=lambda assistant_obj: {"temperature": 0.2},
@@ -1869,6 +1885,37 @@ def test_build_output_payload_excludes_artifact_display_keys():
         "webhook_delivered": False,
         "structured": {"ok": True},
     }
+
+
+def test_build_output_payload_preserves_raw_text_for_pruned_structured_output():
+    payload = build_output_payload(
+        StepExecutionOutput(
+            input_text="hello",
+            source_text="hello",
+            input_source="flow_input",
+            used_question_binding=False,
+            legacy_prompt_binding_used=False,
+            full_text='{"beslutslista":[{"rubrik_kommentar":"extra"}]}',
+            persisted_text='{"beslutslista":[{"rubrik_kommentar":"extra"}]}',
+            generated_file_ids=[],
+            tool_calls_metadata=None,
+            num_tokens_input=1,
+            num_tokens_output=1,
+            effective_prompt="prompt",
+            model_parameters_json={},
+            structured_output={"beslutslista": [{"rubrik": "Budget"}]},
+            diagnostics=[
+                StepDiagnostic(
+                    code="typed_output_extra_properties_dropped",
+                    message="Dropped 1 undeclared field: /beslutslista/0/rubrik_kommentar",
+                    severity="warning",
+                )
+            ],
+        )
+    )
+
+    assert payload["text"] == '{"beslutslista":[{"rubrik_kommentar":"extra"}]}'
+    assert payload["structured"] == {"beslutslista": [{"rubrik": "Budget"}]}
 
 
 def test_build_step_result_file_references_classifies_declared_artifacts():
