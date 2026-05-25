@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: I004
+active_task: null
 
 interruptions:
   - id: I001
@@ -194,7 +194,7 @@ interruptions:
       score_impact: "Improves Runtime Reliability, Human Reviewability, Developer Diagnostic Experience, and Normal-User Output Quality for a live session-breaking provider-contract bug. Does not raise the strict overall score floor above 8 because broader topology/readability, full-source typing/check baseline, and repeated live-eval evidence still block a defensible 9."
   - id: I004
     kind: live_bug_hotfix
-    status: active
+    status: committed
     reported_at: "2026-05-25T06:51:56Z"
     summary: "Selected-step create-mode edit failed when the user selected the terminal text step and asked in Swedish to change the output to a PDF file. Backend logs show terminal artifact normalization promoted step_f to PDF, but the scoped revision loop still exhausted self-correction after repeated ai_builder_scoped_plan_revision_rejected messages and one repair response changed unrelated step_a."
     decision: "After T112 is committed, pause the post-T112 read-only audit and fix the selected-step terminal artifact/output-file edit path as a separate interruption. The fix must be deterministic and maintainable rather than another prompt-only repair tweak: selected terminal output-file changes should preserve unrelated steps, update the intended terminal artifact contract, and return a proposal or clear notice without falling into self_correction_quality_failure."
@@ -228,6 +228,50 @@ interruptions:
       - "git diff --check."
       - "Claude implementation gate for the I004 diff; Antigravity with --spend-mode auto if available."
       - "Manual/local smoke if service is available: selected terminal step text -> PDF succeeds; non-terminal or ambiguous output-file request gets clear behavior."
+    receipt:
+      completed_at: "2026-05-25T09:31:00+02:00"
+      summary: "Fixed the live selected-step terminal output-file edit failure by extending the existing deterministic selected-step revision preflight from model-only changes to typed scoped step revisions. A selected terminal text step plus explicit PDF/DOCX request now patches only that terminal step, clears stale output contract/config, runs the normal compiled-spec preparation and scoped validation, and finalizes a proposal without entering LLM self-correction. Non-terminal output-file edits return a bounded user-facing notice."
+      repo_reality:
+        head_before_commit: "a785b4c73 Own AI Builder typed resource boundary"
+        branch: "feature/refactor-flows-flowai"
+        unrelated_dirty_files_preserved: ".devcontainer/docker-compose.yml, .gitignore, AGENTS.md, .devcontainer/devcontainer-lock.json, PRODUCT.md, utvecklingssamtal.mp3."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-i004-selected-step-output-artifact-summary.md"
+        - ".codex/artifacts/claude-peer-loop-i004-selected-step-output-artifact-fix-20260525T072048Z.md"
+        - ".codex/artifacts/claude-peer-loop-i004-selected-step-output-artifact-fix-20260525T072750Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-i004-selected-step-output-artifact-fix-20260525T073007Z.md"
+      validation:
+        - "Red-first: cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py::test_scoped_outline_revision_changes_selected_terminal_step_to_pdf -q -> failed before implementation because deterministic preflight returned None; passed after implementation."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py::test_scoped_outline_revision_changes_selected_terminal_step_to_pdf tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py::test_scoped_step_revision_changes_terminal_output_artifact tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py::test_scoped_step_revision_warns_when_output_artifact_target_is_not_terminal tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py::test_scoped_revision_preflight_finalizes_terminal_pdf_revision -q -> 4 passed before Claude blocker fix."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py::test_scoped_step_revision_changes_terminal_output_artifact tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py::test_scoped_step_revision_keeps_matching_terminal_output_as_noop tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py::test_scoped_revision_preflight_returns_error_event_for_deterministic_failure tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py::test_scoped_revision_preflight_finalizes_terminal_pdf_revision -q -> 5 passed after Claude blocker fix."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py -q -> 70 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_step_transition_policy.py tests/unittests/flows/ai_builder/test_ai_builder_compiled_spec_preparation.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q -> 80 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2433 passed, 4 skipped, 11 warnings."
+        - "cd backend && uv run ruff check touched I004 backend files/tests -> passed."
+        - "cd backend && uv run ruff format --check touched I004 backend files/tests -> passed."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations."
+        - "git diff --check -> passed."
+      peer_review:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-i004-selected-step-output-artifact-fix-20260525T072048Z.md -> GREEN_LIGHT no / MIN_SCORE 7; required stale selected-model failure copy fix, recommended DOCX/no-op coverage and UI-language SSoT consolidation."
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-i004-selected-step-output-artifact-fix-20260525T072750Z.md -> GREEN_LIGHT yes / MIN_SCORE 8 after generic selected-step failure copy, resolve_ui_language-first assistant text routing, DOCX coverage, and no-op coverage."
+        antigravity_implementation_gate: ".codex/artifacts/antigravity-peer-loop-i004-selected-step-output-artifact-fix-20260525T073007Z.md -> GREEN_LIGHT yes / MIN_SCORE 9 with --spend-mode auto."
+      live_smoke:
+        result: "user_reported_pass"
+        note: "After the local fix was available in the running environment, the user reported: 'The fix seems to work now thanks!'. Codex did not run a separate controlled browser smoke in this receipt."
+      self_review:
+        simpler_for_maintainer: true
+        complexity_removed: "Narrow terminal output-file edits no longer depend on outline LLM whole-plan rewriting and self-correction to preserve unrelated steps."
+        owner_clarified: "ai_builder_plan_edit_context.py owns deterministic selected-step revisions; ai_builder_create_proposal.py prepares/finalizes the revised spec through the existing create-proposal path; ProposalSubmissionOwner owns the preflight hook."
+        coupling_removed: "Selected terminal PDF/DOCX edits are no longer coupled to proposal repair behavior or prompt wording beyond the existing terminal-output intent policy."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "I004 is a live reliability/UX hotfix, not a broad architecture completion tranche."
+        - "Existing terminal-output intent detection remains phrase/policy based; I004 deliberately uses the existing owner instead of adding a new LLM or frontend contract."
+        - "Antigravity noted optional P3 support for Swedish compound fallback words such as wordfil/pdffil; not needed for the reported PDF path or current green gate."
+        - "The required post-T112 read-only score-floor audit still remains the next non-implementation gate before more planned AI Builder work."
+      score_impact: "Improves Runtime Reliability, Normal-User Output Quality, Human Reviewability, and Developer Diagnostic Experience for selected-step terminal output-file edits. Does not raise the strict overall Flow AI Builder score floor above 8 because broader topology/readability, full-source baseline, and score-floor audit work remain."
 
 scoring_target:
   dimensions:
@@ -10405,13 +10449,13 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T111 completed with current-head live eval pass plus Claude and Antigravity green closure. Broader goal remains active with strict floor 8/10 and must not be marked complete. T112 is active and must start with a peer-gated plan before production source edits."
-    task: T111
+    result: "I004 completed with full AI Builder unit suite, Ruff, format, Pyright, git diff check, Claude green, Antigravity green, and user-reported live smoke pass. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: I004
     commands:
-      - "git status --short --branch -> branch feature/refactor-flows-flowai ahead 32; only unrelated workspace files dirty before state.yaml board update"
-      - "git log --oneline --decorate -12 -> HEAD 2c42cd526 Select AI Builder score-floor audit gate"
+      - "git status --short --branch -> branch feature/refactor-flows-flowai ahead 35 before I004 commit; unrelated dirty files preserved."
+      - "git log --oneline --decorate -5 -> HEAD a785b4c73 Own AI Builder typed resource boundary before I004 commit."
       - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations"
-      - "Authenticated five-case live eval against http://127.0.0.1:8123 at container HEAD 2c42cd526 -> all five cases passed"
-      - "Claude T111 closure -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity T111 synthesis with --spend-mode auto -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2433 passed, 4 skipped, 11 warnings."
+      - "Claude I004 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 8 after one required fix."
+      - "Antigravity I004 implementation gate with --spend-mode auto -> GREEN_LIGHT yes / MIN_SCORE 9."
       - "git diff --check -> passed"

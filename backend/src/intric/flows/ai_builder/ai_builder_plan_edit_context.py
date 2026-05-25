@@ -18,6 +18,7 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
 from intric.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     OutputMode,
+    OutputType,
     StepSpec,
 )
 
@@ -31,16 +32,17 @@ PlanEditScope = Literal["whole_plan", "step"]
 
 
 @dataclass(frozen=True, slots=True)
-class ScopedStepModelSpecRevision:
+class ScopedStepSpecRevision:
     spec: FlowDraftSpecCore
+    kind: Literal["model", "output_artifact"]
 
 
 @dataclass(frozen=True, slots=True)
-class ScopedStepModelNotice:
+class ScopedStepNotice:
     message: str
 
 
-ScopedStepModelRevision = ScopedStepModelSpecRevision | ScopedStepModelNotice
+ScopedStepRevision = ScopedStepSpecRevision | ScopedStepNotice
 
 
 class AIBuilderPlanEditContext(BaseModel):
@@ -255,19 +257,20 @@ def validate_scoped_plan_revision(
     return None
 
 
-def resolve_scoped_step_model_revision_if_requested(
+def resolve_scoped_step_revision_if_requested(
     *,
     context: AIBuilderPlanEditContext | None,
     prior_spec: FlowDraftSpecCore | None,
     latest_user_text: str | None,
     resource_catalog: "AIBuilderResourceCatalog | None",
-) -> ScopedStepModelRevision | None:
-    """Handle selected-step model swaps that are safer as deterministic patches.
+    requested_terminal_output_type: OutputType | None = None,
+) -> ScopedStepRevision | None:
+    """Handle selected-step edits that are safer as deterministic patches.
 
     The outline LLM cannot reliably edit backend-inserted steps such as the
-    audio transcription step. When the selected step and catalog model are
-    unambiguous, patch the prior plan directly instead of asking repair to
-    chase LLM drift on unrelated steps.
+    audio transcription step or a terminal artifact change. When the selected
+    step and requested change are unambiguous, patch the prior plan directly
+    instead of asking repair to chase LLM drift on unrelated steps.
     """
 
     if (
@@ -282,9 +285,18 @@ def resolve_scoped_step_model_revision_if_requested(
     if target is None:
         return None
 
+    output_revision = _resolve_scoped_output_artifact_revision(
+        prior_spec=prior_spec,
+        target=target,
+        latest_user_text=latest_user_text,
+        requested_terminal_output_type=requested_terminal_output_type,
+    )
+    if output_revision is not None:
+        return output_revision
+
     if target.output_mode == OutputMode.TRANSCRIBE_ONLY:
         if _looks_like_transcribe_only_model_revision_request(latest_user_text):
-            return ScopedStepModelNotice(
+            return ScopedStepNotice(
                 message=_transcription_step_model_revision_message(latest_user_text)
             )
         return None
@@ -307,7 +319,7 @@ def resolve_scoped_step_model_revision_if_requested(
         if not mentioned_model_refs:
             if not _looks_like_catalog_model_revision_request(latest_user_text):
                 return None
-            return ScopedStepModelNotice(
+            return ScopedStepNotice(
                 message=_unknown_step_model_revision_message(latest_user_text)
             )
         if not _looks_like_catalog_model_revision_request(latest_user_text):
@@ -333,11 +345,79 @@ def resolve_scoped_step_model_revision_if_requested(
     revised_spec = prior_spec.model_copy(
         update={
             "steps": [
+                updated_target if step is target else step for step in prior_spec.steps
+            ]
+        }
+    )
+    return ScopedStepSpecRevision(spec=revised_spec, kind="model")
+
+
+_DOCUMENT_OUTPUT_TYPES = frozenset({OutputType.PDF, OutputType.DOCX})
+
+
+def _resolve_scoped_output_artifact_revision(
+    *,
+    prior_spec: FlowDraftSpecCore,
+    target: StepSpec,
+    latest_user_text: str,
+    requested_terminal_output_type: OutputType | None,
+) -> ScopedStepRevision | None:
+    output_type = requested_terminal_output_type
+    if output_type is None or output_type not in _DOCUMENT_OUTPUT_TYPES:
+        return None
+    if not _looks_like_output_artifact_revision_request(
+        latest_user_text,
+        output_type,
+    ):
+        return None
+    if target is not prior_spec.steps[-1]:
+        return ScopedStepNotice(
+            message=_non_terminal_output_artifact_revision_message(latest_user_text)
+        )
+    if target.output_type == output_type:
+        return None
+
+    updated_target = target.model_copy(
+        update={
+            "output_type": output_type,
+            "output_mode": OutputMode.PASS_THROUGH,
+            "output_contract": None,
+            "output_config": None,
+        }
+    )
+    revised_spec = prior_spec.model_copy(
+        update={
+            "steps": [
                 updated_target if step == target else step for step in prior_spec.steps
             ]
         }
     )
-    return ScopedStepModelSpecRevision(spec=revised_spec)
+    return ScopedStepSpecRevision(spec=revised_spec, kind="output_artifact")
+
+
+def _looks_like_output_artifact_revision_request(
+    text: str,
+    requested_terminal_output_type: OutputType,
+) -> bool:
+    tokens = _word_tokens(text)
+    if requested_terminal_output_type == OutputType.PDF:
+        return "pdf" in tokens
+    if requested_terminal_output_type == OutputType.DOCX:
+        return bool(tokens & {"docx", "word", "dokument", "document"})
+    return False
+
+
+def _non_terminal_output_artifact_revision_message(text: str) -> str:
+    tokens = _word_tokens(text)
+    if tokens & _SWEDISH_OUTPUT_ARTIFACT_HINT_WORDS:
+        return (
+            "Det markerade steget är inte slutsteget. Välj slutsteget om du "
+            "vill ändra filformatet för slutresultatet."
+        )
+    return (
+        "The selected step is not the final step. Select the final step to "
+        "change the final output file format."
+    )
 
 
 def _looks_like_catalog_model_revision_request(text: str) -> bool:
@@ -378,6 +458,9 @@ _MODEL_TARGET_PREPOSITION_WORDS = frozenset({"till", "to"})
 _SWEDISH_MODEL_REVISION_HINT_WORDS = (
     _MODEL_ACTION_WORDS - {"switch", "change", "use"}
 ) | {"modell", "till"}
+_SWEDISH_OUTPUT_ARTIFACT_HINT_WORDS = frozenset(
+    {"ändra", "andra", "fil", "istället", "istallet", "får", "far"}
+)
 _WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
 
 

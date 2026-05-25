@@ -22,8 +22,8 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
 from intric.flows.ai_builder.ai_builder_create_proposal import (
     OUTLINE_FLOW_FORCED_TOOL_PROMPT,
     process_outline_arguments,
-    process_scoped_step_model_revision_if_requested,
-    scoped_model_revision_assistant_text,
+    process_scoped_step_revision_if_requested,
+    scoped_step_revision_assistant_text,
 )
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
     DiscoveryRuntimeResult,
@@ -258,15 +258,15 @@ class ProposalSubmissionOwner:
             prior_plan_for_revision=prior_plan_for_revision,
             discovery_runtime=discovery_runtime,
         )
-        scoped_model_preflight_result = (
-            await self._preflight_scoped_model_revision_if_requested(ctx=ctx)
+        scoped_revision_preflight_result = (
+            await self._preflight_scoped_step_revision_if_requested(ctx=ctx)
         )
-        if scoped_model_preflight_result is not None:
-            if scoped_model_preflight_result.user_message is not None:
-                yield build_text_event(scoped_model_preflight_result.user_message)
+        if scoped_revision_preflight_result is not None:
+            if scoped_revision_preflight_result.user_message is not None:
+                yield build_text_event(scoped_revision_preflight_result.user_message)
                 return
-            if scoped_model_preflight_result.has_events:
-                for event in scoped_model_preflight_result.iter_events():
+            if scoped_revision_preflight_result.has_events:
+                for event in scoped_revision_preflight_result.iter_events():
                     yield event
                 return
 
@@ -358,7 +358,7 @@ class ProposalSubmissionOwner:
             request_id=request_id,
         )
 
-    async def _preflight_scoped_model_revision_if_requested(
+    async def _preflight_scoped_step_revision_if_requested(
         self,
         *,
         ctx: ProposalTurnContext,
@@ -366,7 +366,7 @@ class ProposalSubmissionOwner:
         if ctx.flow is not None:
             return None
 
-        result = process_scoped_step_model_revision_if_requested(
+        result = process_scoped_step_revision_if_requested(
             conversation=ctx.conversation,
             available_model_refs=ctx.available_model_refs,
             available_kb_refs=ctx.available_kb_refs,
@@ -379,7 +379,7 @@ class ProposalSubmissionOwner:
                 return ToolProcessingResult(
                     event=build_ai_builder_error_event(
                         message=(
-                            "The selected model change could not be applied to "
+                            "The selected step change could not be applied to "
                             "the current plan. Refresh the plan and try again."
                         ),
                         code=AIBuilderErrorCode.BAD_REQUEST,
@@ -400,14 +400,12 @@ class ProposalSubmissionOwner:
                 tool_name=OUTLINE_FLOW_TOOL_NAME,
                 arguments={
                     "plan_rationale": result.compiled_proposal.plan_rationale or "",
-                    "revision_kind": "scoped_step_model",
+                    "revision_kind": "scoped_step_direct",
                 },
-                assistant_content=scoped_model_revision_assistant_text(
-                    ctx.conversation
-                ),
+                assistant_content=scoped_step_revision_assistant_text(ctx.conversation),
                 assistant_metadata=ctx.assistant_metadata,
                 tool_call_id=make_provider_safe_server_tool_call_id(
-                    kind="scoped_model_revision",
+                    kind="scoped_step_revision",
                     stable_key=ctx.request_id,
                 ),
                 metadata_tool_call=None,

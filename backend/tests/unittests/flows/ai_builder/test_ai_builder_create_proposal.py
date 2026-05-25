@@ -12,7 +12,7 @@ from intric.flows.ai_builder.ai_builder_architecture_errors import (
 )
 from intric.flows.ai_builder.ai_builder_create_proposal import (
     process_outline_arguments,
-    process_scoped_step_model_revision_if_requested,
+    process_scoped_step_revision_if_requested,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -442,7 +442,7 @@ async def test_scoped_outline_revision_explains_model_change_on_transcription_st
     )
     prior_plan = _builder_plan(prior_spec)
 
-    result = process_scoped_step_model_revision_if_requested(
+    result = process_scoped_step_revision_if_requested(
         conversation=[
             ConversationMessage(
                 role="user",
@@ -509,7 +509,7 @@ async def test_scoped_outline_revision_changes_model_on_selected_ai_step() -> No
     )
     prior_plan = _builder_plan(prior_spec)
 
-    result = process_scoped_step_model_revision_if_requested(
+    result = process_scoped_step_revision_if_requested(
         conversation=[
             ConversationMessage(
                 role="user",
@@ -540,3 +540,67 @@ async def test_scoped_outline_revision_changes_model_on_selected_ai_step() -> No
         mode="json"
     )
     assert revised_steps[1].assistant_spec.model_ref == new_model_ref
+
+
+@pytest.mark.asyncio
+async def test_scoped_outline_revision_changes_selected_terminal_step_to_pdf() -> None:
+    prior_spec = FlowDraftSpecCore(
+        flow_name="Mötesflöde",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Extrahera agenda",
+                assistant_spec=AssistantSpec(instructions="Extrahera agenda."),
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {"agenda": {"type": "array"}},
+                },
+            ),
+            StepSpec(
+                plan_step_ref="step_f",
+                name="Sätt ihop slutligt strukturerat textresultat",
+                assistant_spec=AssistantSpec(
+                    instructions="Skriv ett strukturerat textprotokoll.",
+                    model_ref="model.gpt-5-4-mini",
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_mode=OutputMode.PASS_THROUGH,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+    prior_plan = _builder_plan(prior_spec)
+
+    result = process_scoped_step_revision_if_requested(
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="kan du ändra så att jag får en pdf fil istället?",
+            )
+        ],
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=None,
+        plan_edit_context=AIBuilderPlanEditContext(
+            scope="step",
+            plan_id=prior_plan.id,
+            target_plan_step_ref="step_f",
+            target_step_name="Sätt ihop slutligt strukturerat textresultat",
+            target_step_number=2,
+        ),
+        prior_plan_for_revision=prior_plan,
+    )
+
+    assert result is not None
+    assert result.compiled_proposal is not None
+    revised_steps = result.compiled_proposal.spec.steps
+    assert revised_steps[0].model_dump(mode="json") == prior_spec.steps[0].model_dump(
+        mode="json"
+    )
+    assert revised_steps[1].output_type == OutputType.PDF
+    assert revised_steps[1].output_contract is None

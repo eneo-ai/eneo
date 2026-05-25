@@ -44,8 +44,8 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
 )
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
-    ScopedStepModelNotice,
-    resolve_scoped_step_model_revision_if_requested,
+    ScopedStepNotice,
+    resolve_scoped_step_revision_if_requested,
     validate_scoped_plan_revision,
 )
 from intric.flows.ai_builder.ai_builder_proposal_policy import (
@@ -87,7 +87,7 @@ def _latest_user_text(conversation: list[ConversationMessage]) -> str | None:
     return None
 
 
-def process_scoped_step_model_revision_if_requested(
+def process_scoped_step_revision_if_requested(
     *,
     conversation: list[ConversationMessage],
     available_model_refs: set[str] | None,
@@ -97,7 +97,12 @@ def process_scoped_step_model_revision_if_requested(
     prior_plan_for_revision: BuilderPlan | None,
     plan_rationale: str | None = None,
 ) -> ToolProcessingResult | None:
-    scoped_model_revision = resolve_scoped_step_model_revision_if_requested(
+    requested_terminal_output_type = terminal_output_type_for_conversation(
+        conversation,
+        plan_edit_context=plan_edit_context,
+        prior_plan=prior_plan_for_revision,
+    )
+    scoped_revision = resolve_scoped_step_revision_if_requested(
         context=plan_edit_context,
         prior_spec=(
             prior_plan_for_revision.spec
@@ -106,24 +111,21 @@ def process_scoped_step_model_revision_if_requested(
         ),
         latest_user_text=_latest_user_text(conversation),
         resource_catalog=resource_catalog,
+        requested_terminal_output_type=requested_terminal_output_type,
     )
-    if scoped_model_revision is None:
+    if scoped_revision is None:
         return None
-    if isinstance(scoped_model_revision, ScopedStepModelNotice):
-        return ToolProcessingResult(user_message=scoped_model_revision.message)
+    if isinstance(scoped_revision, ScopedStepNotice):
+        return ToolProcessingResult(user_message=scoped_revision.message)
 
     prepared = prepare_compiled_spec_for_session(
-        spec=scoped_model_revision.spec,
+        spec=scoped_revision.spec,
         target_kind=TargetKind.CREATE,
         available_model_refs=available_model_refs,
         available_kb_refs=available_kb_refs,
         resource_catalog=resource_catalog,
         valid_existing_step_refs=None,
-        terminal_output_type=terminal_output_type_for_conversation(
-            conversation,
-            plan_edit_context=plan_edit_context,
-            prior_plan=prior_plan_for_revision,
-        ),
+        terminal_output_type=requested_terminal_output_type,
     )
     if prepared.failure_feedback is not None:
         if prepared.validation is not None and prepared.validation.errors:
@@ -161,7 +163,10 @@ def process_scoped_step_model_revision_if_requested(
             spec=prepared.spec,
             assumptions=tuple(),
             plan_rationale=plan_rationale
-            or _scoped_model_revision_rationale(conversation),
+            or _scoped_step_revision_rationale(
+                conversation,
+                revision_kind=scoped_revision.kind,
+            ),
             reasoning=None,
             validation=prepared.validation,
             resource_bindings=(
@@ -175,27 +180,36 @@ def process_scoped_step_model_revision_if_requested(
     )
 
 
-def _scoped_model_revision_rationale(
+def _scoped_step_revision_rationale(
     conversation: list[ConversationMessage],
+    *,
+    revision_kind: str,
 ) -> str:
-    if _scoped_model_revision_uses_swedish(conversation):
+    if revision_kind == "output_artifact":
+        if _scoped_step_revision_uses_swedish(conversation):
+            return "Ändrade filformatet på det valda slutsteget."
+        return "Updated the selected final step output file format."
+    if _scoped_step_revision_uses_swedish(conversation):
         return "Bytte modell på det valda steget."
     return "Updated the selected step model."
 
 
-def scoped_model_revision_assistant_text(
+def scoped_step_revision_assistant_text(
     conversation: list[ConversationMessage],
 ) -> str:
-    if _scoped_model_revision_uses_swedish(conversation):
-        return "Jag har uppdaterat modellen för det valda steget."
-    return "I updated the selected step model."
+    if _scoped_step_revision_uses_swedish(conversation):
+        return "Jag har uppdaterat det valda steget."
+    return "I updated the selected step."
 
 
-def _scoped_model_revision_uses_swedish(
+def _scoped_step_revision_uses_swedish(
     conversation: list[ConversationMessage],
 ) -> bool:
+    ui_language = resolve_ui_language(conversation)
+    if ui_language is not None:
+        return ui_language == "sv"
     latest = (_latest_user_text(conversation) or "").casefold()
-    return "modell" in latest
+    return any(token in latest for token in ("modell", "ändra", "fil", "istället"))
 
 
 async def process_outline_arguments(

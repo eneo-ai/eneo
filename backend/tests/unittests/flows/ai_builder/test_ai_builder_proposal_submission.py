@@ -45,6 +45,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from intric.flows.flow_authoring_spec import OutputType
 from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _builder_plan,
     _compiled_edit_proposal,
@@ -153,11 +154,11 @@ def test_forced_submission_response_accepts_one_active_submission_tool() -> None
 
 
 @pytest.mark.asyncio
-async def test_scoped_model_preflight_skips_existing_flow_edit_context() -> None:
+async def test_scoped_revision_preflight_skips_existing_flow_edit_context() -> None:
     submission = _make_submission()
     ctx = _make_context(flow=SimpleNamespace(id=uuid4()))
 
-    result = await submission._preflight_scoped_model_revision_if_requested(
+    result = await submission._preflight_scoped_step_revision_if_requested(
         ctx=ctx,
     )
 
@@ -165,7 +166,7 @@ async def test_scoped_model_preflight_skips_existing_flow_edit_context() -> None
 
 
 @pytest.mark.asyncio
-async def test_scoped_model_preflight_returns_error_event_for_deterministic_failure() -> (
+async def test_scoped_revision_preflight_returns_error_event_for_deterministic_failure() -> (
     None
 ):
     submission = _make_submission()
@@ -177,10 +178,10 @@ async def test_scoped_model_preflight_returns_error_event_for_deterministic_fail
 
     with patch(
         "intric.flows.ai_builder.ai_builder_proposal_submission."
-        "process_scoped_step_model_revision_if_requested",
+        "process_scoped_step_revision_if_requested",
         return_value=deterministic_failure,
     ):
-        result = await submission._preflight_scoped_model_revision_if_requested(
+        result = await submission._preflight_scoped_step_revision_if_requested(
             ctx=ctx,
         )
 
@@ -190,11 +191,13 @@ async def test_scoped_model_preflight_returns_error_event_for_deterministic_fail
     assert payload["code"] == "bad_request"
     assert payload["phase"] == "proposal"
     assert payload["request_id"] == "req-deterministic-failure"
+    assert "selected step change" in payload["message"]
+    assert "selected model change" not in payload["message"]
     assert payload["details"] == {"failure_kind": "quality"}
 
 
 @pytest.mark.asyncio
-async def test_scoped_model_preflight_uses_bounded_server_tool_call_id() -> None:
+async def test_scoped_revision_preflight_uses_bounded_server_tool_call_id() -> None:
     submission = _make_submission()
     prior_spec = _make_flow_spec(model_ref="model.gpt-4o-mini", knowledge_refs=[])
     prior_plan = _builder_plan(prior_spec)
@@ -225,13 +228,51 @@ async def test_scoped_model_preflight_uses_bounded_server_tool_call_id() -> None
     with patch.object(
         CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
     ):
-        result = await submission._preflight_scoped_model_revision_if_requested(
+        result = await submission._preflight_scoped_step_revision_if_requested(
             ctx=ctx,
         )
 
     assert result == ({"event": "plan", "data": "{}"},)
     request = finalize.await_args.args[0]
     assert request.tool_call_id != f"server_scoped_model_revision:{ctx.request_id}"
+    assert "scoped_step_revision" in request.tool_call_id
+    assert len(request.tool_call_id) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH
+
+
+@pytest.mark.asyncio
+async def test_scoped_revision_preflight_finalizes_terminal_pdf_revision() -> None:
+    submission = _make_submission()
+    prior_spec = _make_flow_spec(model_ref="model.gpt-4o-mini", knowledge_refs=[])
+    prior_plan = _builder_plan(prior_spec)
+    finalize = AsyncMock(return_value=({"event": "plan", "data": "{}"},))
+    ctx = _make_context(
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="kan du ändra så att jag får en pdf fil istället?",
+            )
+        ],
+        prior_plan_for_revision=prior_plan,
+        plan_edit_context=AIBuilderPlanEditContext(
+            scope="step",
+            plan_id=prior_plan.id,
+            target_plan_step_ref="step_a",
+        ),
+        request_id="00000000-0000-0000-0000-000000000001",
+    )
+
+    with patch.object(
+        CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
+    ):
+        result = await submission._preflight_scoped_step_revision_if_requested(
+            ctx=ctx,
+        )
+
+    assert result == ({"event": "plan", "data": "{}"},)
+    request = finalize.await_args.args[0]
+    assert request.arguments["revision_kind"] == "scoped_step_direct"
+    assert request.assistant_content == "Jag har uppdaterat det valda steget."
+    assert request.compiled.spec.steps[0].output_type == OutputType.PDF
     assert len(request.tool_call_id) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH
 
 
