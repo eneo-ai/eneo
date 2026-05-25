@@ -14,6 +14,8 @@ from intric.database.tables.flow_tables import (
 from intric.database.tables.roles_table import Roles
 from intric.database.tables.users_table import users_roles_table
 from intric.flows.enums import FlowRunReviewCheckpointState
+from intric.main.exceptions import ErrorCodes
+from intric.main.models import GeneralError
 from intric.roles.permissions import Permission
 
 
@@ -59,19 +61,28 @@ async def _create_space(client, *, token: str) -> str:
     return response.json()["id"]
 
 
-async def _create_flow_service_key(client, *, token: str) -> str:
+async def _create_flow_service_key(
+    client,
+    *,
+    token: str,
+    scope_type: str = "tenant",
+    scope_id: str | None = None,
+) -> str:
     expires_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    payload: dict[str, object] = {
+        "name": f"flow-service-key-{uuid4().hex[:8]}",
+        "key_type": "sk_",
+        "permission": "write",
+        "scope_type": scope_type,
+        "ownership": "service",
+        "expires_at": expires_at,
+        "resource_permissions": {"flows": "write"},
+    }
+    if scope_id is not None:
+        payload["scope_id"] = scope_id
     response = await client.post(
         "/api/v1/api-keys",
-        json={
-            "name": f"flow-service-key-{uuid4().hex[:8]}",
-            "key_type": "sk_",
-            "permission": "write",
-            "scope_type": "tenant",
-            "ownership": "service",
-            "expires_at": expires_at,
-            "resource_permissions": {"flows": "write"},
-        },
+        json=payload,
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 201, response.text
@@ -294,6 +305,39 @@ def _runtime_path(
         path = path.replace("{checkpoint_id}", checkpoint_id)
     assert "{" not in path
     return path
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_list_flows_scope_mismatch_returns_general_error(
+    client,
+    admin_token,
+):
+    requested_space_id = await _create_space(client, token=admin_token)
+    key_space_id = await _create_space(client, token=admin_token)
+    service_key = await _create_flow_service_key(
+        client,
+        token=admin_token,
+        scope_type="space",
+        scope_id=key_space_id,
+    )
+
+    response = await client.get(
+        "/api/v1/flows/",
+        params={"space_id": requested_space_id},
+        headers={
+            "X-API-Key": service_key,
+            "X-Correlation-ID": "flow-scope-mismatch-test",
+        },
+    )
+
+    assert response.status_code == 403, response.text
+    error = GeneralError.model_validate(response.json())
+    assert error.message == "API key space scope does not match requested space."
+    assert error.intric_error_code == ErrorCodes.UNAUTHORIZED
+    assert error.code == "insufficient_scope"
+    assert error.context == {"auth_layer": "api_key_scope"}
+    assert error.request_id == "flow-scope-mismatch-test"
 
 
 @pytest.mark.asyncio

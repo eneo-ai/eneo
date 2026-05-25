@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
-from fastapi import BackgroundTasks, HTTPException, UploadFile
+from fastapi import BackgroundTasks, UploadFile
 
 import intric.flows.api.flow_http_test_router as flow_http_test_router_module
 import intric.flows.api.flow_trace_audit as flow_trace_audit_module
@@ -118,6 +118,7 @@ from intric.flows.flow_run_dispatch_request import (
     FlowRunServiceKeyDispatchRequest,
     FlowRunUserDispatchRequest,
 )
+from intric.flows.flow_run_evidence_export_summary import build_evidence_export_summary
 from intric.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.flows.http_transport.test_action import HttpTestResult
@@ -264,6 +265,12 @@ def _result_file(*, run: FlowRun, step_result_id=None) -> FlowRunStepResultFile:
 def _evidence_export_payload(run: FlowRun) -> dict:
     generated_at = datetime.now(timezone.utc).isoformat()
     content_hash = "abc123"
+    summary = {
+        "status": run.status.value,
+        "trace_id": str(run.trace_id),
+        "steps_count": 0,
+    }
+    summary_typed = build_evidence_export_summary(summary, review_checkpoints=[])
     return {
         "schema_version": "flow-evidence-export.v5",
         "generated_at": generated_at,
@@ -324,11 +331,8 @@ def _evidence_export_payload(run: FlowRun) -> dict:
                 "active_checkpoint_conflict": False,
             },
         },
-        "summary": {
-            "status": run.status.value,
-            "trace_id": str(run.trace_id),
-            "steps_count": 0,
-        },
+        "summary": summary,
+        "summary_typed": summary_typed.model_dump(mode="json"),
         "redaction": {
             "applied": True,
             "policy_version": "flow-evidence-redaction.v3",
@@ -494,6 +498,18 @@ def _disable_flow_scope_filter(monkeypatch):
 
 def _request():
     return SimpleNamespace(state=SimpleNamespace())
+
+
+def _assert_scope_mismatch(
+    exc_info: pytest.ExceptionInfo[UnauthorizedException],
+    *,
+    message: str | None = None,
+) -> None:
+    error = exc_info.value
+    if message is not None:
+        assert str(error) == message
+    assert error.code == "insufficient_scope"
+    assert error.context == {"auth_layer": "api_key_scope"}
 
 
 def _user() -> SimpleNamespace:
@@ -840,7 +856,7 @@ async def test_get_flow_graph_rejects_scope_mismatch(monkeypatch):
         lambda _request: ScopeFilter(space_id=uuid4()),
     )
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(UnauthorizedException) as exc:
         await get_flow_graph(
             id=flow_id,
             request=SimpleNamespace(state=SimpleNamespace()),
@@ -848,7 +864,10 @@ async def test_get_flow_graph_rejects_scope_mismatch(monkeypatch):
             container=container,
         )
 
-    assert exc.value.status_code == 403
+    _assert_scope_mismatch(
+        exc,
+        message="API key space scope does not match requested flow.",
+    )
     container.flow_run_service.return_value.get_run.assert_not_awaited()
 
 
@@ -1605,10 +1624,12 @@ async def test_inspect_flow_template_enforces_scope_and_calls_service(monkeypatc
         flow_id,
         required_access=router_common_module.FlowApiAction.VIEW,
         load_actor_context=True,
+        allow_service_key_principals=False,
     ):
         requested_flow_ids.append(str(flow_id))
         assert required_access == router_common_module.FlowApiAction.EDIT
         assert load_actor_context is True
+        assert allow_service_key_principals is False
         flow = _flow(flow_id)
         flow.owner_user_id = container.user.return_value.id
         return SimpleNamespace(
@@ -1691,10 +1712,12 @@ async def test_upload_flow_template_file_enforces_scope_and_uses_docx_template_s
         flow_id,
         required_access=router_common_module.FlowApiAction.VIEW,
         load_actor_context=True,
+        allow_service_key_principals=False,
     ):
         requested_flow_ids.append(str(flow_id))
         assert required_access == router_common_module.FlowApiAction.EDIT
         assert load_actor_context is True
+        assert allow_service_key_principals is False
         flow = _flow(flow_id)
         flow.owner_user_id = container.user.return_value.id
         return SimpleNamespace(
@@ -1847,7 +1870,7 @@ async def test_create_flow_run_rejects_scope_mismatch(monkeypatch):
         lambda _request: ScopeFilter(space_id=uuid4()),
     )
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(UnauthorizedException) as exc:
         await create_flow_run(
             id=flow_id,
             request=SimpleNamespace(state=SimpleNamespace()),
@@ -1856,7 +1879,10 @@ async def test_create_flow_run_rejects_scope_mismatch(monkeypatch):
             container=container,
         )
 
-    assert exc.value.status_code == 403
+    _assert_scope_mismatch(
+        exc,
+        message="API key space scope does not match requested flow.",
+    )
     run_service.create_run.assert_not_awaited()
 
 
@@ -2145,17 +2171,18 @@ async def test_create_flow_rejects_space_scope_mismatch(monkeypatch):
     container.audit_service.return_value = AsyncMock()
 
     allowed_space_id = uuid4()
+    target_space_id = uuid4()
     monkeypatch.setattr(
         router_common_module,
         "get_scope_filter",
         lambda _request: ScopeFilter(space_id=allowed_space_id),
     )
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(UnauthorizedException) as exc:
         await create_flow(
             request=SimpleNamespace(state=SimpleNamespace()),
             flow_in=FlowCreateRequest(
-                space_id=uuid4(),
+                space_id=target_space_id,
                 name="Flow",
                 steps=[
                     FlowStepCreateRequest(
@@ -2173,8 +2200,13 @@ async def test_create_flow_rejects_space_scope_mismatch(monkeypatch):
             container=container,
         )
 
-    assert exc.value.status_code == 403
-    assert exc.value.detail["code"] == "insufficient_scope"
+    _assert_scope_mismatch(
+        exc,
+        message=(
+            f"API key is scoped to space '{allowed_space_id}'. "
+            f"Cannot create flow in space '{target_space_id}'."
+        ),
+    )
 
 
 @pytest.mark.asyncio
@@ -3387,27 +3419,39 @@ async def test_flow_run_alias_control_endpoints_reject_scope_mismatch(monkeypatc
     )
 
     request = SimpleNamespace(state=SimpleNamespace())
-    with pytest.raises(HTTPException):
+    with pytest.raises(UnauthorizedException) as cancel_exc:
         await cancel_flow_run_alias(
             id=flow_id,
             run_id=run.id,
             request=request,
             container=container,
         )
-    with pytest.raises(HTTPException):
+    _assert_scope_mismatch(
+        cancel_exc,
+        message="API key space scope does not match requested flow.",
+    )
+    with pytest.raises(UnauthorizedException) as redispatch_exc:
         await redispatch_flow_run_alias(
             id=flow_id,
             run_id=run.id,
             request=request,
             container=container,
         )
-    with pytest.raises(HTTPException):
+    _assert_scope_mismatch(
+        redispatch_exc,
+        message="API key space scope does not match requested flow.",
+    )
+    with pytest.raises(UnauthorizedException) as evidence_exc:
         await get_flow_run_evidence_alias(
             id=flow_id,
             run_id=run.id,
             request=request,
             container=container,
         )
+    _assert_scope_mismatch(
+        evidence_exc,
+        message="API key space scope does not match requested flow.",
+    )
 
     run_service.cancel_run.assert_not_awaited()
     run_service.redispatch_stale_queued_runs.assert_not_awaited()
@@ -3495,7 +3539,7 @@ async def test_flow_alias_endpoints_reject_scope_mismatch(monkeypatch):
     )
 
     request = SimpleNamespace(state=SimpleNamespace())
-    with pytest.raises(HTTPException) as list_exc:
+    with pytest.raises(UnauthorizedException) as list_exc:
         await list_flow_runs_alias(
             id=flow_id,
             request=request,
@@ -3503,7 +3547,7 @@ async def test_flow_alias_endpoints_reject_scope_mismatch(monkeypatch):
             offset=0,
             container=container,
         )
-    with pytest.raises(HTTPException) as get_exc:
+    with pytest.raises(UnauthorizedException) as get_exc:
         await get_flow_run_alias(
             id=flow_id,
             run_id=run.id,
@@ -3511,8 +3555,14 @@ async def test_flow_alias_endpoints_reject_scope_mismatch(monkeypatch):
             container=container,
         )
 
-    assert list_exc.value.status_code == 403
-    assert get_exc.value.status_code == 403
+    _assert_scope_mismatch(
+        list_exc,
+        message="API key space scope does not match requested flow.",
+    )
+    _assert_scope_mismatch(
+        get_exc,
+        message="API key space scope does not match requested flow.",
+    )
     run_service.list_runs.assert_not_awaited()
     run_service.get_run.assert_not_awaited()
 
@@ -3960,7 +4010,7 @@ async def test_definition_endpoints_reject_scope_mismatch(
         lambda _request: ScopeFilter(scope_type="space", space_id=uuid4()),
     )
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(UnauthorizedException) as exc_info:
         await route_fn(
             id=flow_id,
             request=_request(),
@@ -3968,8 +4018,10 @@ async def test_definition_endpoints_reject_scope_mismatch(
             **build_kwargs(flow_id),
         )
 
-    assert exc_info.value.status_code == 403
-    assert exc_info.value.detail["code"] == "insufficient_scope"
+    _assert_scope_mismatch(
+        exc_info,
+        message="API key space scope does not match requested flow.",
+    )
 
 
 @pytest.mark.asyncio
@@ -4506,7 +4558,7 @@ async def test_space_scoped_api_key_rejects_wrong_space(monkeypatch):
         lambda _request: ScopeFilter(scope_type="space", space_id=wrong_space_id),
     )
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(UnauthorizedException) as exc_info:
         await list_flow_runs_alias(
             id=flow_id,
             request=SimpleNamespace(state=SimpleNamespace()),
@@ -4514,8 +4566,10 @@ async def test_space_scoped_api_key_rejects_wrong_space(monkeypatch):
             offset=0,
             container=container,
         )
-    assert exc_info.value.status_code == 403
-    assert exc_info.value.detail["code"] == "insufficient_scope"
+    _assert_scope_mismatch(
+        exc_info,
+        message="API key space scope does not match requested flow.",
+    )
 
 
 @pytest.mark.asyncio
@@ -4583,7 +4637,7 @@ async def test_assistant_scoped_api_key_cannot_access_flow_runtime(monkeypatch):
         lambda _request: ScopeFilter(scope_type="assistant", assistant_id=uuid4()),
     )
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(UnauthorizedException) as exc_info:
         await list_flow_runs_alias(
             id=flow_id,
             request=SimpleNamespace(state=SimpleNamespace()),
@@ -4592,7 +4646,9 @@ async def test_assistant_scoped_api_key_cannot_access_flow_runtime(monkeypatch):
             container=container,
         )
 
-    assert exc_info.value.status_code == 403
-    assert exc_info.value.detail["code"] == "insufficient_scope"
+    _assert_scope_mismatch(
+        exc_info,
+        message="API key scope does not permit flow access.",
+    )
     container.flow_service.return_value.get_flow.assert_not_awaited()
     container.flow_run_service.return_value.list_runs.assert_not_awaited()

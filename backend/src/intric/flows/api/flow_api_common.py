@@ -3,10 +3,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, NoReturn, TypedDict
 from uuid import UUID
 
-from fastapi import HTTPException, Request, status
+from fastapi import Request
 
 from intric.audit.domain.actor_types import ActorType
 from intric.authentication.auth_dependencies import ScopeFilter, get_scope_filter
@@ -62,9 +62,7 @@ def error_response(
             or code is not None
             or context is not None
         ):
-            raise ValueError(
-                "examples mode must not pass single error example fields"
-            )
+            raise ValueError("examples mode must not pass single error example fields")
         return {
             "model": GeneralError,
             "description": description,
@@ -91,14 +89,11 @@ def error_response(
 
 def raise_scope_mismatch(
     message: str = "API key space scope does not match requested flow.",
-) -> None:
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail={
-            "code": "insufficient_scope",
-            "message": message,
-            "context": {"auth_layer": "api_key_scope"},
-        },
+) -> NoReturn:
+    raise UnauthorizedException(
+        message,
+        code="insufficient_scope",
+        context={"auth_layer": "api_key_scope"},
     )
 
 

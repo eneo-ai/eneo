@@ -1,0 +1,901 @@
+version: 2
+
+goal:
+  title: "Flows clean architecture"
+  slug: "flows-clean-architecture-2026-05-25"
+  kind: open_ended
+  tranche: "Reconfirm current source evidence, implement the first safe verified Flow architecture slice, verify it, and audit before continuing toward canonical runtime ownership."
+  status: active
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  preserve_unrelated_dirty_files: true
+  no_commit_without_owner_request: true
+  no_push_without_owner_request: true
+  no_branch_mutation_without_owner_request: true
+  peer_gate_before_non_trivial_architecture_change: true
+  post_implementation_review_required_for_non_trivial_changes: true
+  public_contract_changes_update_openapi_and_generated_client: true
+  one_way_in_guard_tests_required: true
+  human_decision_gate_before_product_data_changes: true
+  no_runtime_draft_state_reads_after_contract_refactor: true
+  step_behavior_and_output_format_are_separate_axes: true
+  output_format_specs_own_output_type_policy: true
+  delete_input_policy_unless_real_caller_requires_it: true
+  published_snapshot_is_runtime_boundary: true
+  no_flow_version_steps_without_real_query_need: true
+  repositories_do_not_own_product_decisions: true
+  flow_legacy_cleanup_is_evidence_gated: true
+  compatibility_paths_require_deletion_trigger: true
+  tests_removed_with_removed_behavior_only: true
+  no_repo_wide_dead_code_cleanup: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+  claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
+  antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
+
+scorecard:
+  current_floor: 5
+  target_floor: 9
+  source: "ChatGPT Pro review plus local schema and architecture maps."
+  scoring_ladder:
+    floor_6: "Known normal-path bugs fixed; public Flow API errors consistent; tests reviewable enough to proceed."
+    floor_7: "Published runtime contract canonical; frontend generated-contract fallbacks removed; core API journey contract-tested."
+    floor_8: "Webhook delivery durable; step identity stable; runtime file lifecycle explicit; service-key permission matrix coherent."
+    floor_9: "Long-term polish complete: typed public/lifecycle JSONB ownership, mature health/readiness, clean frontend state ownership, and unneeded compatibility paths deleted."
+  dimensions:
+    maintainability: 6
+    code_quality: 5
+    clean_architecture: 5
+    separation_of_concerns: 5
+    single_source_of_truth: 5
+    human_readability: 6
+    human_reviewability: 5
+    data_integrity: 5
+    api_consumer_dx: 6
+    api_maintainer_dx: 5
+    runtime_reliability: 5
+    testability: 5
+  notes:
+    - "Overall score is the minimum dimension score."
+    - "Do not chase 9/10 before the 7/8 foundations are complete."
+    - "Do not mark complete until a Judge/PM audit verifies the strict score floor is at least 9/10."
+    - "Published snapshot is the runtime boundary: strict typed JSON first, no flow_version_steps normalization without a real query need."
+    - "Dead/legacy/compatibility cleanup is Flow-scoped and evidence-gated; do not delete legacy-looking live behavior without a deletion trigger."
+
+source_material:
+  primary_reports:
+    - "FLOWS_FULL_DATA_SCHEMA_AND_PERMISSIONS_MAP_2026-05-25.md"
+    - "FLOWS_ARCHITECTURE_REVIEW_2026-05-25.md"
+  chatgpt_pro_files:
+    - "flows-clean-architecture-2026-05-25/00-master-goal.md"
+    - "flows-clean-architecture-2026-05-25/01-data-schema-and-ownership.md"
+    - "flows-clean-architecture-2026-05-25/02-runtime-reliability.md"
+    - "flows-clean-architecture-2026-05-25/03-api-contract-and-dx.md"
+    - "flows-clean-architecture-2026-05-25/04-frontend-state-and-generated-types.md"
+    - "flows-clean-architecture-2026-05-25/05-test-strategy.md"
+    - "flows-clean-architecture-2026-05-25/06-commit-roadmap.md"
+  goal_notes:
+    - "docs/goals/flows-clean-architecture-2026-05-25/notes/source-material-index.md"
+    - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+    - "docs/goals/flows-clean-architecture-2026-05-25/notes/step-handler-and-renderer-architecture.md"
+    - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
+    - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
+
+active_task: T005
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: medium
+    objective: "Reconfirm current branch/source evidence for the first safe tranche: template asset upload typed boundary, Flow scope error envelope, test locations, and verification commands."
+    inputs:
+      - "AGENTS.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/source-material-index.md"
+      - "flows-clean-architecture-2026-05-25/00-master-goal.md"
+      - "flows-clean-architecture-2026-05-25/06-commit-roadmap.md"
+      - "backend/src/intric/flows/flow_template_asset_service.py"
+      - "backend/src/intric/files/file_service.py"
+      - "backend/src/intric/flows/api/flow_template_router.py"
+      - "backend/src/intric/flows/api/flow_api_common.py"
+      - "backend/tests/unittests/flows/test_flow_router.py"
+    constraints:
+      - "Read-only."
+      - "Do not edit implementation files."
+      - "Do not inspect Flow AI Builder except for direct shared Flow dependencies."
+      - "Preserve unrelated dirty files."
+      - "Prefer file:line evidence."
+    expected_output:
+      - "Whether the template asset missing-method claim is still true."
+      - "Whether scope mismatch still bypasses the documented error envelope."
+      - "Exact smallest safe Worker objective."
+      - "allowed_files recommendation."
+      - "targeted verification commands."
+    receipt:
+      result: done
+      summary: "Reconfirmed both first-slice claims. Template asset upload still calls a missing FileService.save_docx_template behind cast(Any); scope mismatch still raises HTTPException detail lacking intric_error_code while OpenAPI documents GeneralError. Smallest safe Worker is T003."
+      evidence:
+        - "backend/src/intric/flows/flow_template_asset_service.py:70"
+        - "backend/src/intric/flows/flow_template_asset_service.py:71"
+        - "backend/src/intric/files/file_service.py:40"
+        - "backend/src/intric/flows/api/flow_api_common.py:92"
+        - "backend/src/intric/flows/api/flow_api_common.py:95"
+        - "backend/src/intric/flows/api/flow_template_router.py:150"
+        - "backend/src/intric/server/main.py:327"
+        - "backend/src/intric/main/models.py:159"
+        - "backend/tests/unittests/flows/test_flow_router.py:1641"
+      commands:
+        - cmd: "git status --short --branch"
+          status: pass
+        - cmd: "rg -n save_docx_template backend/src/intric backend/tests -g '*.py'"
+          status: pass
+        - cmd: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run python -c \"from intric.files.file_service import FileService; print(hasattr(FileService, 'save_docx_template'))\""
+          status: pass
+          output: "False"
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_template_asset_compatibility.py tests/unittests/flows/test_docx_template_runtime.py -q"
+          status: pass
+          output: "20 passed, 1 warning"
+        - cmd: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/flow_template_asset_service.py src/intric/files/file_service.py"
+          status: fail
+          output: "1 existing FileService asynccontextmanager deprecation; missing method remains hidden by cast(Any)."
+      recommended_worker: T003
+
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the first safe implementation task from T001 evidence and confirm allowed files, tests, and stop conditions."
+    inputs:
+      - "T001 receipt"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+    constraints:
+      - "Read-only."
+      - "Prefer the smallest correctness slice over broad architecture work."
+      - "Do not choose a task that requires product strategy unless a smaller safe task exists."
+      - "If template asset upload is still broken, prefer that before broader refactors."
+    expected_output:
+      - "Decision"
+      - "Exact Worker objective"
+      - "allowed_files"
+      - "verify"
+      - "stop_if"
+      - "Whether the slice should include an architecture guard test or only a focused regression test"
+      - "Deferred tasks and why"
+    receipt:
+      result: done
+      summary: "Chose T003 as the first Worker after revising the invariant: DOCX template uploads must persist raw DOCX bytes through a typed path. Rejected the direct FileService.save_file plan because generic DOCX uploads route through TextExtractor and produce FileType.TEXT with text populated and blob=None. T003 must add a dedicated byte-preserving file protocol/service path, preserve generic DOCX text extraction, and avoid router/API/error-envelope files."
+      evidence:
+        - "backend/src/intric/flows/flow_template_asset_service.py:70"
+        - "backend/src/intric/flows/flow_template_asset_service.py:71"
+        - "backend/src/intric/files/file_protocol.py:95"
+        - "backend/src/intric/files/file_protocol.py:171"
+        - "backend/src/intric/files/file_protocol.py:191"
+        - "backend/src/intric/files/text.py:293"
+        - "backend/src/intric/files/text.py:304"
+        - "backend/src/intric/files/file_router.py:253"
+        - "backend/src/intric/files/file_router.py:259"
+        - ".codex/artifacts/flows-clean-architecture-t002-storage-shape-judge-brief.md"
+        - ".codex/artifacts/claude-peer-loop-t002-raw-docx-byte-invariant-judge-decision-20260525T184004Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t002-raw-docx-byte-invariant-antigravity-synthesis-20260525T184232Z.md"
+      commands:
+        - cmd: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run python - <<'PY' ... probe FileProtocol.to_domain and FileService.save_file with DOCX upload ... PY"
+          status: pass
+          output: "to_domain file_type=FileType.TEXT text? True blob? False; save_file file_type=FileType.TEXT text? True blob? False"
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session 03027cf8-34d9-41e3-b11a-2b083c90c0be --phase plan --iteration 4 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT: yes; MIN_SCORE: 8; approved T003 as scoped."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t002-raw-docx-byte-invariant-synthesis --phase synthesis --iteration 1 --spend-mode auto --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT: yes; MIN_SCORE: 8; approved T003 with byte-preserving path and no router/API work."
+      decision: "Activate T003 before T004."
+      implementation_path: "Add a dedicated byte-preserving FileProtocol/FileService path for DOCX template uploads; FlowTemplateAssetService calls that typed method; generic FileProtocol.to_domain DOCX behavior stays text-extraction based."
+      deferred:
+        - "Flow API GeneralError scope mismatch remains T004."
+        - "Invalid-DOCX orphan file-row cleanup is noted for later unless it can be fixed without widening T003."
+
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Persist Flow template DOCX uploads as raw DOCX bytes through a typed FileProtocol/FileService path selected by Judge."
+    allowed_files:
+      - "backend/src/intric/flows/flow_template_asset_service.py"
+      - "backend/src/intric/files/file_service.py"
+      - "backend/src/intric/files/file_protocol.py"
+      - "backend/tests/unittests/flows/test_flow_template_asset_service.py"
+      - "backend/tests/unittests/files/test_file_service.py"
+      - "backend/tests/unittests/files/test_file_protocol.py"
+      - "backend/tests/unittests/flows/test_flow_template_asset_compatibility.py"
+      - "backend/tests/unittests/flows/test_docx_template_runtime.py"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/files/test_file_service.py tests/unittests/files/test_file_protocol.py tests/unittests/flows/test_flow_template_asset_compatibility.py tests/unittests/flows/test_docx_template_runtime.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/flow_template_asset_service.py src/intric/files/file_service.py src/intric/files/file_protocol.py tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/files/test_file_service.py tests/unittests/files/test_file_protocol.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/flow_template_asset_service.py src/intric/files/file_service.py src/intric/files/file_protocol.py tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/files/test_file_service.py tests/unittests/files/test_file_protocol.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/flow_template_asset_service.py src/intric/files/file_service.py src/intric/files/file_protocol.py"
+      - "git diff --check"
+      - "git diff -- backend/src/intric/flows/flow_template_asset_service.py backend/src/intric/files/file_service.py backend/src/intric/files/file_protocol.py backend/tests/unittests/flows/test_flow_template_asset_service.py backend/tests/unittests/files/test_file_service.py backend/tests/unittests/files/test_file_protocol.py | rg -n '^\\+.*(T00[0-9]|Phase [0-9A-G]\\b|pyright: ignore|type: ignore|cast\\(Any|dict\\[str, Any\\])'"
+    stop_if:
+      - "The missing method claim is false on current source."
+      - "A correct fix requires files outside allowed_files."
+      - "The fix requires changing generic FileProtocol.to_domain DOCX routing."
+      - "The fix requires router/API/error-envelope files; T004 owns that work."
+      - "DOCX validation ownership becomes ambiguous or moves out of FlowTemplateAssetService."
+      - "Verification fails twice for reasons unrelated to this task."
+    receipt:
+      result: done
+      summary: "Persisted Flow DOCX template uploads through a typed, byte-preserving document path. Flow now prepares raw DOCX bytes through FileService.document_from_upload, inspects placeholders before persistence, then persists the same FileBaseWithContent through save_file_content. Generic DOCX uploads still use the existing text-extraction path. Invalid and oversized DOCX uploads now fail before file/template-asset persistence; oversized coverage proves the upload body is not read before size rejection."
+      evidence:
+        - "backend/src/intric/flows/flow_template_asset_service.py:70"
+        - "backend/src/intric/flows/flow_template_asset_service.py:71"
+        - "backend/src/intric/flows/flow_template_asset_service.py:76"
+        - "backend/src/intric/flows/flow_template_asset_service.py:80"
+        - "backend/src/intric/files/file_protocol.py:57"
+        - "backend/src/intric/files/file_protocol.py:84"
+        - "backend/src/intric/files/file_protocol.py:186"
+        - "backend/src/intric/files/file_service.py:51"
+        - "backend/src/intric/files/file_service.py:60"
+        - "backend/tests/unittests/flows/test_flow_template_asset_service.py:96"
+        - "backend/tests/unittests/flows/test_flow_template_asset_service.py:157"
+        - "backend/tests/unittests/flows/test_flow_template_asset_service.py:165"
+        - "backend/tests/unittests/flows/test_flow_template_asset_service.py:201"
+        - "backend/tests/unittests/files/test_file_protocol.py:237"
+        - "backend/tests/unittests/files/test_file_protocol.py:254"
+        - "backend/tests/unittests/files/test_file_service.py:77"
+        - "backend/tests/unittests/files/test_file_service.py:98"
+      commands:
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/files/test_file_service.py tests/unittests/files/test_file_protocol.py -q"
+          status: fail_expected_red
+          output: "4 failed, 14 passed before implementation; missing typed document path and missing FileService method reproduced."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/files/test_file_service.py tests/unittests/files/test_file_protocol.py tests/unittests/flows/test_flow_template_asset_compatibility.py tests/unittests/flows/test_docx_template_runtime.py -q"
+          status: pass
+          output: "40 passed, 1 warning"
+        - cmd: "cd backend && uv run ruff check src/intric/flows/flow_template_asset_service.py src/intric/files/file_service.py src/intric/files/file_protocol.py tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/files/test_file_service.py tests/unittests/files/test_file_protocol.py"
+          status: pass
+        - cmd: "cd backend && uv run ruff format --check src/intric/flows/flow_template_asset_service.py src/intric/files/file_service.py src/intric/files/file_protocol.py tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/files/test_file_service.py tests/unittests/files/test_file_protocol.py"
+          status: pass
+          output: "6 files already formatted"
+        - cmd: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/flow_template_asset_service.py src/intric/files/file_service.py src/intric/files/file_protocol.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright tests/unittests/flows/test_flow_template_asset_service.py tests/unittests/files/test_file_service.py tests/unittests/files/test_file_protocol.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "added-line anti-leak grep over touched source/tests plus the new Flow template asset service test"
+          status: pass
+          output: "No added T00/Phase markers, pyright/type ignores, cast(Any), or dict[str, Any]."
+        - cmd: "rg -n \"save_docx_template\" backend/src/intric backend/tests -g '*.py'"
+          status: pass
+          output: "No matches."
+        - cmd: "rg -n \"upload_file\\.read\\(\\)\" backend/src/intric/flows backend/src/intric/files backend/tests/unittests/flows/test_flow_template_asset_service.py backend/tests/unittests/files/test_file_service.py backend/tests/unittests/files/test_file_protocol.py -g '*.py'"
+          status: pass
+          output: "No matches in the T003 Flow/files surface."
+        - cmd: "cd backend && uv run pytest tests/unittests -q"
+          status: fail_unrelated
+          output: "22 failed, 5957 passed, 4 skipped, 117 warnings; failures include local WeasyPrint libgobject loading and existing router-test monkeypatch signature drift outside T003 allowed files."
+      peer_review:
+        claude:
+          artifact: ".codex/artifacts/claude-peer-loop-persist-docx-template-assets-through-typed-file-service-revised-verification-20260525T190559Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 9; P3-only findings."
+        antigravity:
+          first_blocker_artifact: ".codex/artifacts/antigravity-peer-loop-t003-raw-docx-byte-persistence-antigravity-synthesis-20260525T185852Z.md"
+          final_artifact: ".codex/artifacts/antigravity-peer-loop-t003-raw-docx-byte-persistence-clean-final-antigravity-gate-20260525T191036Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 9; blockers none."
+      notes:
+        - "Accepted Antigravity's prior memory-ordering blocker by moving size validation before byte materialization in FileProtocol._get_content and adding an oversized read-guard test."
+        - "Accepted Antigravity's prior domain-boundary blocker by deleting the Flow-specific save_docx_template plan and using generic document_from_upload/save_file_content methods."
+        - "Did not edit router, API schema, or error-envelope files; T004 remains the Flow API GeneralError scope-mismatch task."
+        - "A duplicate Antigravity final gate was started accidentally and terminated; the retained clean final Antigravity gate passed."
+
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Normalize Flow API scope mismatch errors to the documented GeneralError envelope and add a guard against raw FastAPI HTTPException in Flow application/runtime paths if source evidence supports it."
+    allowed_files:
+      - "backend/src/intric/flows/api/flow_api_common.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+      - "backend/tests/unittests/flows/test_flow_router.py"
+      - "backend/tests/integration/flows/test_flow_consumer_api_contract.py"
+      - "backend/tests/integration/flows/test_flow_evidence_api_contracts.py"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/integration/flows/test_flow_evidence_api_contracts.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/api/flow_api_common.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/api/flow_api_common.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/api/flow_api_common.py"
+      - "git diff --check"
+    stop_if:
+      - "Global exception translation requires a broader API-wide decision."
+      - "OpenAPI documented shape is not GeneralError."
+      - "Need files outside allowed_files."
+    receipt:
+      result: done
+      summary: "Normalized Flow resolver scope mismatches onto the registered UnauthorizedException -> GeneralError path. raise_scope_mismatch no longer builds a raw FastAPI HTTPException detail, unit tests assert the typed exception contract, an integration contract test validates the real GeneralError envelope for a space-scoped service key mismatch, and a Flow architecture guard prevents FastAPI HTTPException leaks in non-API Flow proper modules."
+      evidence:
+        - "backend/src/intric/flows/api/flow_api_common.py:90"
+        - "backend/src/intric/flows/api/flow_api_common.py:92"
+        - "backend/tests/integration/flows/test_flow_consumer_api_contract.py:310"
+        - "backend/tests/integration/flows/test_flow_consumer_api_contract.py:336"
+        - "backend/tests/unittests/flows/test_flow_router.py:500"
+        - "backend/tests/unittests/flows/test_flow_router.py:511"
+        - "backend/tests/unittests/flows/test_flow_architecture_guards.py:57"
+        - "backend/src/intric/authentication/api_key_router_helpers.py:107"
+        - "backend/src/intric/flows/api/flow_router_common.py:106"
+      commands:
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_router.py::test_get_flow_graph_rejects_scope_mismatch tests/unittests/flows/test_flow_router.py::test_create_flow_run_rejects_scope_mismatch tests/unittests/flows/test_flow_router.py::test_create_flow_rejects_space_scope_mismatch tests/integration/flows/test_flow_consumer_api_contract.py::test_space_scope_mismatch_returns_general_error -q"
+          status: fail_expected_red
+          output: "4 failed before implementation; unit paths still raised FastAPI HTTPException and the first integration target returned raw detail without intric_error_code."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_router.py::test_get_flow_graph_rejects_scope_mismatch tests/unittests/flows/test_flow_router.py::test_create_flow_run_rejects_scope_mismatch tests/unittests/flows/test_flow_router.py::test_create_flow_rejects_space_scope_mismatch tests/integration/flows/test_flow_consumer_api_contract.py::test_list_flows_scope_mismatch_returns_general_error -q"
+          status: pass
+          output: "4 passed, 16 warnings"
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_router.py::test_flow_run_evidence_export_alias_returns_json_attachment tests/unittests/flows/test_flow_router.py::test_flow_run_evidence_export_alias_passes_raw_detail_and_reason -q"
+          status: pass
+          output: "2 passed, 9 warnings"
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_router.py tests/integration/flows/test_flow_consumer_api_contract.py tests/integration/flows/test_flow_evidence_api_contracts.py -q"
+          status: pass
+          output: "116 passed, 22 warnings"
+        - cmd: "cd backend && uv run ruff check src/intric/flows/api/flow_api_common.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_router.py tests/integration/flows/test_flow_consumer_api_contract.py"
+          status: pass
+          output: "All checks passed"
+        - cmd: "cd backend && uv run ruff format --check src/intric/flows/api/flow_api_common.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_router.py tests/integration/flows/test_flow_consumer_api_contract.py"
+          status: pass
+          output: "4 files already formatted"
+        - cmd: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/api/flow_api_common.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_router.py tests/integration/flows/test_flow_consumer_api_contract.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "clean temporary checkout verification with only T004 patch applied: pytest board suite"
+          status: pass
+          output: "116 passed, 22 warnings in 95.28s"
+        - cmd: "clean temporary checkout verification with only T004 patch applied: ruff check, ruff format --check, pyright"
+          status: pass
+          output: "Ruff check passed; 4 files already formatted; pyright 0 errors, 0 warnings, 0 informations."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session t004-flow-scope-mismatch-generalerror --phase plan --iteration 1 --timeout-seconds 1200 ..."
+          status: fail_expected_review
+          output: "changes_required; initial plan needed a real integration test and clearer guard scope."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session t004-flow-scope-mismatch-generalerror --phase plan --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session t004-flow-scope-mismatch-generalerror --phase commit-gate --iteration 3 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8; safe to commit with P3-only findings."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t004-general-error-scope-synthesis --phase synthesis --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: fail_review
+          output: "GREEN_LIGHT no; MIN_SCORE 6; valid dirty-worktree verification concern plus broader auth-precheck envelope concern."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t004-general-error-scope-synthesis --phase synthesis --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass_with_runner_parse_note
+          output: "Saved artifact final verdict GREEN_LIGHT yes; MIN_SCORE 8 after clean checkout verification. Wrapper command exited nonzero because the resumed transcript still contained the prior red verdict."
+      peer_review:
+        claude:
+          plan_artifact: ".codex/artifacts/claude-peer-loop-t004-flow-scope-mismatch-generalerror-plan-20260525T191905Z.md"
+          revised_plan_artifact: ".codex/artifacts/claude-peer-loop-t004-flow-scope-mismatch-generalerror-revised-plan-20260525T192617Z.md"
+          implementation_artifact: ".codex/artifacts/claude-peer-loop-t004-flow-scope-mismatch-generalerror-implementation-review-20260525T194212Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8; P3-only findings."
+        antigravity:
+          first_artifact: ".codex/artifacts/antigravity-peer-loop-t004-flow-scope-mismatch-generalerror-antigravity-synthesis-20260525T194421Z.md"
+          resolution_artifact: ".codex/artifacts/flows-clean-architecture-t004-antigravity-resolution.md"
+          final_artifact: ".codex/artifacts/antigravity-peer-loop-t004-flow-scope-mismatch-generalerror-antigravity-resolution-20260525T195130Z.md"
+          verdict: "Final saved artifact GREEN_LIGHT yes; MIN_SCORE 8. Accepted clean checkout proof and recommended committing T004 while queueing auth-precheck envelope normalization separately."
+      notes:
+        - "Did not edit routers, OpenAPI examples, global exception handlers, or authentication precheck files; T004 allowed_files and stop_if kept this slice to Flow resolver scope mismatches."
+        - "The API-key-auth precheck still returns a raw dict envelope for some path-level scope denials; this is a valid API DX follow-up requiring Scout/Judge preflight because it touches global auth/error ownership."
+        - "backend/src/intric/flows/api/flow_router_common.py required_uuid still raises FastAPI HTTPException for an adapter assertion; record for a later API-adapter cleanup task."
+        - "The new architecture guard intentionally excludes Flow AI Builder because the current goal slice is Flows proper only."
+        - "Repaired stale evidence-export fixture summary_typed shape inside the allowed router test file because the board verification command exercises those tests."
+
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: low
+    objective: "Mechanically split the oversized Flow router test file by router/API surface without changing assertions or behavior."
+    allowed_files:
+      - "backend/tests/unittests/flows/test_flow_router.py"
+      - "backend/tests/unittests/flows/test_flow_router_crud.py"
+      - "backend/tests/unittests/flows/test_flow_upload_router.py"
+      - "backend/tests/unittests/flows/test_flow_run_execution_router.py"
+      - "backend/tests/unittests/flows/test_flow_review_checkpoint_router.py"
+      - "backend/tests/unittests/flows/test_flow_evidence_router.py"
+      - "backend/tests/unittests/flows/test_flow_scope_errors.py"
+      - "backend/tests/unittests/flows/test_flow_template_router.py"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_router_crud.py tests/unittests/flows/test_flow_upload_router.py tests/unittests/flows/test_flow_run_execution_router.py tests/unittests/flows/test_flow_review_checkpoint_router.py tests/unittests/flows/test_flow_evidence_router.py tests/unittests/flows/test_flow_scope_errors.py tests/unittests/flows/test_flow_template_router.py -q"
+      - "git diff --check"
+    stop_if:
+      - "The split requires changing assertions, fixtures, or behavior."
+      - "A moved test fails for reasons not caused by import/module path adjustment."
+    receipt: null
+
+  - id: T023
+    type: scout
+    assignee: Scout
+    status: queued
+    reasoning_hint: medium
+    objective: "Inventory Flow dead code, legacy compatibility paths, obsolete fallback behavior, and tests that only protect compatibility slated for deletion."
+    inputs:
+      - "backend/src/intric/flows"
+      - "backend/tests/unittests/flows"
+      - "backend/tests/integration/flows"
+      - "frontend/apps/web/src/lib/features/flows"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+    constraints:
+      - "Read-only."
+      - "Scope is Flows proper plus directly coupled Flow contract/frontend generated-type usage."
+      - "No repo-wide unused-symbol cleanup."
+      - "No Flow AI Builder cleanup unless a Flow runtime/authoring file directly depends on the same contract."
+      - "Do not delete anything in this task."
+      - "Classify dead code separately from legacy-but-live code."
+    expected_output:
+      - "Zero-reference dead-code candidates with search/AST evidence."
+      - "Legacy-but-live compatibility paths with owner, reason, persisted-data or caller evidence, and deletion trigger."
+      - "Fallback paths that require preflight queries before deletion."
+      - "Tests that only protect compatibility behavior slated for deletion."
+      - "Recommended deletion Worker candidates, grouped by reviewable PR."
+    receipt: null
+
+  - id: T024
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Approve which Flow dead/legacy/compatibility candidates from T023 may be deleted now, which need preflight, and which must remain with a deletion trigger."
+    inputs:
+      - "T023 receipt"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+    constraints:
+      - "Read-only."
+      - "Delete only on evidence: zero references, or persisted-data/caller preflight proving no dependency."
+      - "Do not approve deletion of legacy-looking live behavior without a deletion trigger."
+      - "Do not approve standalone test deletion unless the protected behavior is removed in the same Worker task."
+    expected_output:
+      - "delete_now candidates with evidence"
+      - "needs_preflight candidates with exact preflight query/search"
+      - "keep_temporarily candidates with owner/reason/deletion trigger"
+      - "Exact Worker objective for the next deletion slice"
+      - "allowed_files"
+      - "verify"
+      - "stop_if"
+    receipt: null
+
+  - id: T025
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Delete the first Judge-approved Flow dead/legacy/compatibility slice and remove tests only when they protect the removed behavior."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "T024 has not approved a deletion slice."
+      - "A candidate lacks zero-reference evidence or required persisted-data/caller preflight."
+      - "Deletion requires files outside Judge-approved allowed_files."
+      - "The task would delete tests without deleting the behavior they protected."
+      - "Verification fails twice for reasons unrelated to this deletion slice."
+    receipt: null
+
+  - id: T006
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Before runtime contract refactor, decide whether /input-policy/ can be deleted; keep it only if a real caller cannot use /run-contract/, and then only as a pure projection."
+    inputs:
+      - "FLOWS_FULL_DATA_SCHEMA_AND_PERMISSIONS_MAP_2026-05-25.md"
+      - "flows-clean-architecture-2026-05-25/03-api-contract-and-dx.md"
+      - "Search results for /input-policy/ callers"
+    constraints:
+      - "Read-only."
+      - "Do not preserve endpoint behavior without a concrete caller or documented API reason."
+    expected_output:
+      - "delete endpoint | keep projection"
+      - "Evidence of real callers if keep projection is chosen"
+      - "Whether a typed PublishedFlowRuntimeContract model already exists or must be introduced"
+      - "Where definition_schema_version should live if missing"
+      - "Exact Worker objective"
+      - "allowed_files"
+      - "contract tests required"
+    receipt: null
+
+  - id: T007
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Make the typed published Flow runtime contract / published definition the single runtime policy owner for input policy, upload validation, graph-without-run behavior, and review/output descriptors; add schema-version handling and a guard that runtime-facing code does not read mutable draft state."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "T006 has no decision."
+      - "Need product/API decision about deleting /input-policy/."
+      - "Behavior cannot be covered with contract lifecycle tests."
+      - "Published versions missing step ids require a data migration design before fallback deletion."
+    receipt: null
+
+  - id: T008
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Remove obsolete frontend generated-contract fallbacks once backend runtime contract ownership is canonical."
+    allowed_files:
+      - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte"
+      - "frontend/apps/web/src/lib/features/flows/flowRunContract.ts"
+      - "frontend/apps/web/src/lib/features/flows/flowRunContract.test.ts"
+    verify:
+      - "cd frontend/apps/web && ../../node_modules/.bin/vitest run src/lib/features/flows/flowRunContract.test.ts"
+      - "cd frontend/apps/web && ../../node_modules/.bin/eslint src/lib/features/flows/components/FlowRunDialog.svelte src/lib/features/flows/flowRunContract.ts src/lib/features/flows/flowRunContract.test.ts"
+      - "cd frontend/apps/web && ../../node_modules/.bin/prettier --check src/lib/features/flows/components/FlowRunDialog.svelte src/lib/features/flows/flowRunContract.ts src/lib/features/flows/flowRunContract.test.ts"
+    stop_if:
+      - "Backend generated types are stale."
+      - "Runtime contract shape is not canonical yet."
+    receipt: null
+
+  - id: T022
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Add a minimal API consumer journey contract test after published runtime contract ownership is canonical."
+    allowed_files:
+      - "backend/tests/integration/flows/test_flow_consumer_api_contract.py"
+      - "backend/tests/integration/flows/test_flow_runtime_consumer_journey.py"
+      - "backend/src/intric/flows/api/flow_models.py"
+      - "backend/src/intric/flows/run_contract/flow_run_contract_models.py"
+    verify:
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_consumer_api_contract.py tests/integration/flows/test_flow_runtime_consumer_journey.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/api/flow_models.py src/intric/flows/run_contract/flow_run_contract_models.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/api/flow_models.py src/intric/flows/run_contract/flow_run_contract_models.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/api/flow_models.py src/intric/flows/run_contract/flow_run_contract_models.py"
+      - "git diff --check"
+    stop_if:
+      - "T007 is not complete."
+      - "The consumer journey requires undecided retention or service-key behavior."
+      - "Need generated client updates outside allowed_files."
+    receipt: null
+
+  - id: T017
+    type: scout
+    assignee: Scout
+    status: queued
+    reasoning_hint: medium
+    objective: "Map current runtime step behavior and every output_type concern before adding a handler/output-format seam: prompt instructions, native JSON-mode decisions, artifact rendering, handler dependencies, and existing DOCX/PDF leaf responsibilities."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/step-handler-and-renderer-architecture.md"
+      - "backend/src/intric/flows/runtime/executor.py"
+      - "backend/src/intric/flows/runtime/step_execution_runtime.py"
+      - "backend/src/intric/flows/runtime/template_fill_runtime.py"
+      - "backend/src/intric/flows/runtime/docx_template_runtime.py"
+      - "backend/src/intric/flows/runtime/step_result_builder.py"
+    constraints:
+      - "Read-only."
+      - "Prefer file:line evidence."
+      - "Do not invent handler dependencies; extract them from current source."
+      - "Do not broaden into webhook outbox implementation."
+    expected_output:
+      - "Current output_mode dispatch inventory."
+      - "Current output_type dispatch inventory split by prompt instructions, native JSON-mode decisions, validation/rendering requirements, and byte rendering."
+      - "Minimal StepHandlerDeps candidates with source evidence."
+      - "Which branches can move behind OutputFormatSpec first without behavior changes."
+      - "Focused tests and guard tests needed."
+    receipt: null
+
+  - id: T018
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: high
+    objective: "Approve the minimal StepExecutionResult, OutputFormatSpec, OutputRenderer, and StepHandler design from T017 evidence before implementation."
+    inputs:
+      - "T017 receipt"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/step-handler-and-renderer-architecture.md"
+    constraints:
+      - "Read-only."
+      - "Reject plugin SDKs, service locators, generic ports, or speculative fields."
+      - "Keep behavior/output format as separate axes."
+      - "Reject an OutputRenderer-only design if output_type prompt or JSON-mode branches would remain in generic runtime code."
+      - "Reject a StepOutput replacement that is smaller than current StepExecutionOutput needs."
+      - "Prefer the smallest behavior-preserving implementation sequence."
+    expected_output:
+      - "Decision on StepExecutionResult wrapper vs extending existing StepExecutionOutput."
+      - "Decision on StepHandlerDeps fields."
+      - "Decision on OutputFormatSpec registry scope."
+      - "Decision on OutputRenderer leaf scope."
+      - "Exact Worker objective for the first handler/renderer implementation slice."
+      - "allowed_files"
+      - "verify"
+      - "stop_if"
+    receipt: null
+
+  - id: T019
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Introduce typed StepExecutionResult or extend StepExecutionOutput, then add OutputFormatSpec registry for current text/json/docx/pdf output_type policy without changing runtime behavior."
+    allowed_files:
+      - "backend/src/intric/flows/runtime/models.py"
+      - "backend/src/intric/flows/runtime/step_execution_result.py"
+      - "backend/src/intric/flows/runtime/output_formats/base.py"
+      - "backend/src/intric/flows/runtime/output_formats/__init__.py"
+      - "backend/src/intric/flows/runtime/output_formats/text.py"
+      - "backend/src/intric/flows/runtime/output_formats/json.py"
+      - "backend/src/intric/flows/runtime/output_formats/docx.py"
+      - "backend/src/intric/flows/runtime/output_formats/pdf.py"
+      - "backend/src/intric/flows/runtime/output_renderers/base.py"
+      - "backend/src/intric/flows/runtime/output_renderers/__init__.py"
+      - "backend/src/intric/flows/runtime/output_renderers/docx.py"
+      - "backend/src/intric/flows/runtime/output_renderers/pdf.py"
+      - "backend/src/intric/flows/runtime/docx_template_runtime.py"
+      - "backend/src/intric/flows/runtime/step_execution_runtime.py"
+      - "backend/tests/unittests/flows/test_docx_template_runtime.py"
+      - "backend/tests/unittests/flows/test_flow_runtime_output_formats.py"
+      - "backend/tests/unittests/flows/test_flow_runtime_output_renderers.py"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_docx_template_runtime.py tests/unittests/flows/test_flow_runtime_output_formats.py tests/unittests/flows/test_flow_runtime_output_renderers.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/output_formats src/intric/flows/runtime/output_renderers src/intric/flows/runtime/step_execution_runtime.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/output_formats src/intric/flows/runtime/output_renderers src/intric/flows/runtime/step_execution_runtime.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/output_formats src/intric/flows/runtime/output_renderers src/intric/flows/runtime/step_execution_runtime.py"
+      - "git diff --check"
+    stop_if:
+      - "T018 has no approved minimal design."
+      - "A behavior-preserving output format move requires executor or schema changes."
+      - "The design leaves output_type prompt instructions or native JSON-mode decisions in generic runtime code."
+      - "The design replaces StepExecutionOutput with a smaller object that loses provenance, diagnostics, token usage, artifacts, structured output, or retention-relevant metadata."
+      - "Need files outside allowed_files."
+    receipt: null
+
+  - id: T020
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Introduce the StepHandler registry and move current output_mode behavior dispatch behind handlers without changing runtime behavior."
+    allowed_files:
+      - "backend/src/intric/flows/runtime/models.py"
+      - "backend/src/intric/flows/runtime/step_execution_result.py"
+      - "backend/src/intric/flows/runtime/step_handlers/base.py"
+      - "backend/src/intric/flows/runtime/step_handlers/__init__.py"
+      - "backend/src/intric/flows/runtime/step_handlers/template_fill.py"
+      - "backend/src/intric/flows/runtime/step_handlers/http_post.py"
+      - "backend/src/intric/flows/runtime/step_handlers/transcribe_only.py"
+      - "backend/src/intric/flows/runtime/step_handlers/plain_text.py"
+      - "backend/src/intric/flows/runtime/executor.py"
+      - "backend/src/intric/flows/runtime/step_execution_runtime.py"
+      - "backend/src/intric/flows/runtime/template_fill_runtime.py"
+      - "backend/tests/unittests/flows/test_flow_runtime_step_handlers.py"
+      - "backend/tests/integration/flows/test_flow_runtime_worker_contract.py"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_runtime_step_handlers.py tests/integration/flows/test_flow_runtime_worker_contract.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/step_handlers src/intric/flows/runtime/executor.py src/intric/flows/runtime/step_execution_runtime.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/step_handlers src/intric/flows/runtime/executor.py src/intric/flows/runtime/step_execution_runtime.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/step_handlers src/intric/flows/runtime/executor.py src/intric/flows/runtime/step_execution_runtime.py"
+      - "git diff --check"
+    stop_if:
+      - "T019 is not complete."
+      - "T018 did not approve StepHandlerDeps and StepExecutionResult shape."
+      - "A handler move changes run execution behavior."
+      - "Need files outside allowed_files."
+    receipt: null
+
+  - id: T021
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Add AST/import/enum-based architecture guard tests that enforce one runtime owner, no scattered output_mode/output_type branching, registry totality, and no duplicate DOCX/PDF rendering path."
+    allowed_files:
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+      - "backend/tests/unittests/flows/test_flow_runtime_step_handlers.py"
+      - "backend/tests/unittests/flows/test_flow_runtime_output_formats.py"
+      - "backend/tests/unittests/flows/test_flow_runtime_output_renderers.py"
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_runtime_output_formats.py tests/unittests/flows/test_flow_runtime_output_renderers.py -q"
+      - "git diff --check"
+    stop_if:
+      - "T020 is not complete."
+      - "Guard tests require brittle grep or line-number assertions instead of AST/import/enum-based checks with allowlists."
+      - "Allowed exceptions cannot be stated clearly."
+    receipt: null
+
+  - id: T009
+    type: judge
+    assignee: Judge
+    status: blocked
+    reasoning_hint: high
+    objective: "Choose the service-key identity and runtime input retention target model before schema/runtime implementation."
+    blocked_reason: "needs_human_product_decision"
+    decision_required:
+      - "retention_model"
+      - "service_key_identity_model"
+      - "service_key_review_resume_rerun_policy"
+    inputs:
+      - "FLOWS_FULL_DATA_SCHEMA_AND_PERMISSIONS_MAP_2026-05-25.md"
+      - "flows-clean-architecture-2026-05-25/01-data-schema-and-ownership.md"
+      - "flows-clean-architecture-2026-05-25/02-runtime-reliability.md"
+      - "ChatGPT Pro review excerpt in user message"
+    constraints:
+      - "Read-only."
+      - "Do not implement service-principal or retention behavior without explicit decision."
+      - "Prefer the simplest model that is honest for external API consumers."
+    expected_output:
+      - "Decision on exact API-key ownership vs stable service principal"
+      - "Decision on runtime input retention: clear content, delete rows, or retain indefinitely"
+      - "Review/rerun service-key capability matrix"
+      - "One permission matrix covering human owner, space admin/owner, tenant admin, and service key"
+      - "First implementation Worker task if decisions are source-safe"
+    receipt: null
+
+  - id: T010
+    type: worker
+    assignee: Worker
+    status: blocked
+    reasoning_hint: medium
+    objective: "Implement runtime input file retention lifecycle selected by Judge."
+    blocked_reason: "needs_human_product_decision"
+    decision_required:
+      - "retention_model"
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "T009 has no retention decision."
+      - "Migration/data model impact exceeds approved scope."
+      - "Evidence/API behavior after purge is ambiguous."
+    receipt: null
+
+  - id: T011
+    type: worker
+    assignee: Worker
+    status: blocked
+    reasoning_hint: medium
+    objective: "Align service-key ownership, review checkpoint principal identity, and rerun policy across API, DB, audit, evidence, and tests."
+    blocked_reason: "needs_human_product_decision"
+    decision_required:
+      - "service_key_identity_model"
+      - "service_key_review_resume_rerun_policy"
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "T009 has no service-key identity decision."
+      - "Product policy for service-key review/resume/rerun is ambiguous."
+      - "Migration requires destructive or irreversible data changes."
+    receipt: null
+
+  - id: T012
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Make draft step persistence id-owned and runtime step identity snapshot-owned: runtime rows preserve published step_id, step_order, and assistant_id without relying on mutable flow_steps."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "Preflight finds existing versions/steps that need migration design."
+      - "Frontend step update semantics are ambiguous."
+      - "Run evidence/rerun/review cannot be covered by tests."
+      - "Implementation attempts to add flow_version_steps without a real relational query need."
+    receipt: null
+
+  - id: T013
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Add durable outbound webhook delivery outbox and remove direct post-commit webhook delivery from the executor, consuming WebhookDeliveryIntent if the step-handler tranche has landed."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "Delivery success/failure semantics are undecided."
+      - "Idempotency key model is unclear."
+      - "Need queue/worker setup that is unavailable locally."
+      - "If T020 has landed, webhook design bypasses WebhookDeliveryIntent instead of consuming it."
+    receipt: null
+
+  - id: T014
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Strengthen schema invariants: published pointer FK, files.user_id FK drift, measured queued/stale indexes, and only tenant FKs that clarify normal correctness."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "Migration preflight finds violating data."
+      - "The FK design requires broad tenant-hardening beyond the approved scope."
+      - "Index additions are not backed by source query shape or EXPLAIN/catalog evidence."
+      - "A new idempotency unique-index migration is proposed without current schema inspection proving the existing partial unique indexes are absent."
+    receipt: null
+
+  - id: T015
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Harden API consumer DX: runtime paths, stable error codes, examples, generated client alignment, and service-key journey contract tests."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "Public runtime capabilities are undecided."
+      - "Generated client pipeline is red for unrelated reasons."
+    receipt: null
+
+  - id: T016
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: medium
+    objective: "Clean Flow frontend state ownership for form schema, step list identity/order, run dialog upload/recording state, and generated type usage."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "Backend contract shape is not yet stable."
+      - "UX conflict behavior for form schema edits is undecided."
+    receipt: null
+
+  - id: T900
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: xhigh
+    objective: "Re-score Flows after each completed tranche and choose the next highest-ROI tranche by strict score-floor impact."
+    inputs:
+      - "All completed task receipts"
+      - "Current scorecard"
+      - "Latest test/verification results"
+    constraints:
+      - "Read-only."
+      - "Do not claim 9/10 unless every dimension is at least 9."
+      - "Challenge whether the last tranche improved architecture or only changed code."
+    expected_output:
+      - "Updated dimension scores"
+      - "Current strict score floor"
+      - "Next tranche recommendation"
+      - "Risks and missing verification"
+    receipt: null
+
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: queued
+    reasoning_hint: xhigh
+    objective: "Final audit: decide whether Flows has reached a defensible 9/10 strict score floor."
+    inputs:
+      - "All done task receipts"
+      - "Current dirty diff"
+      - "Validation commands"
+      - "Scorecard"
+      - "Source evidence for remaining P1/P2 risks"
+    constraints:
+      - "Read-only."
+      - "Reject completion if any required Worker task remains queued or active."
+      - "Reject completion if any dimension is below 9."
+    expected_output:
+      - "complete | not_complete"
+      - "dimension scores"
+      - "missing evidence"
+      - "next required task if not complete"
+    receipt: null
+
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: unknown
+    task: null
+    commands: []
