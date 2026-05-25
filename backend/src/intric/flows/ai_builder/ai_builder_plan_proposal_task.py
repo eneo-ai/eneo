@@ -7,8 +7,7 @@ content through the create/edit tool schema.
 
 from __future__ import annotations
 
-from typing import Any, cast
-
+from intric.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_SELECTION_WITHOUT,
     mcp_selected_server_refs_from_values,
@@ -17,8 +16,7 @@ from intric.flows.ai_builder.ai_builder_mcp_resources import (
     AIBuilderMCPResourceInput,
 )
 from intric.flows.ai_builder.ai_builder_requirements_state import (
-    user_relevant_requirement_notes,
-    user_relevant_requirement_text,
+    render_confirmed_requirements_proposal_prompt_block,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -33,12 +31,12 @@ from intric.flows.ai_builder.planning_state import PlanningState
 def build_plan_proposal_system_prompt(
     *,
     planning_state: PlanningState,
-    confirmed_requirements: dict[str, Any] | None,
+    confirmed_requirements: RequirementsSummaryPayload | None,
     attachment_context: str | None,
     flow_context: str | None,
     is_edit_mode: bool,
-    available_models: list[dict[str, Any]] | None = None,
-    available_kbs: list[dict[str, Any]] | None = None,
+    available_models: list[dict[str, str]] | None = None,
+    available_kbs: list[dict[str, str]] | None = None,
     available_mcps: AIBuilderMCPResourceInput = None,
     mcp_selection_values: set[str] | frozenset[str] | None = None,
     resource_catalog: AIBuilderResourceCatalog | None = None,
@@ -99,7 +97,7 @@ def build_plan_proposal_system_prompt(
         _resolved_slots_block(planning_state),
         "",
         "Confirmed requirements:",
-        _confirmed_requirements_block(confirmed_requirements),
+        render_confirmed_requirements_proposal_prompt_block(confirmed_requirements),
     ]
     if flow_context:
         lines.extend(["", "Existing flow context:", flow_context])
@@ -142,49 +140,6 @@ def _resolved_slots_block(planning_state: PlanningState) -> str:
         f"- {name}: {slot.value}"
         for name, slot in sorted(planning_state.resolved_slots.items())
     )
-
-
-def _confirmed_requirements_block(
-    confirmed_requirements: dict[str, Any] | None,
-) -> str:
-    if not confirmed_requirements:
-        return "- none"
-
-    lines: list[str] = []
-    for key in (
-        "summary",
-        "input_description",
-        "output_description",
-    ):
-        value = confirmed_requirements.get(key)
-        if isinstance(value, str):
-            if relevant_value := user_relevant_requirement_text(value):
-                lines.append(f"- {key}: {relevant_value}")
-
-    key_decisions = confirmed_requirements.get("key_decisions")
-    if isinstance(key_decisions, list) and key_decisions:
-        lines.append("- key_decisions:")
-        for raw_decision in cast(list[Any], key_decisions):
-            if not isinstance(raw_decision, dict):
-                continue
-            decision = cast(dict[str, Any], raw_decision)
-            topic = decision.get("topic")
-            selected = decision.get("decision")
-            if isinstance(topic, str) and isinstance(selected, str):
-                lines.append(f"  - {topic}: {selected}")
-
-    assumptions = confirmed_requirements.get("assumptions")
-    if isinstance(assumptions, list) and assumptions:
-        relevant_assumptions = user_relevant_requirement_notes(
-            assumption
-            for assumption in cast(list[Any], assumptions)
-            if isinstance(assumption, str)
-        )
-        if relevant_assumptions:
-            lines.append("- assumptions:")
-            lines.extend(f"  - {assumption}" for assumption in relevant_assumptions)
-
-    return "\n".join(lines) if lines else "- none"
 
 
 def _resource_context_block(

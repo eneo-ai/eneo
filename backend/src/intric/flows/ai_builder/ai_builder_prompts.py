@@ -65,8 +65,7 @@ from intric.flows.ai_builder.ai_builder_mcp_resources import (
     normalize_ai_builder_mcp_resources,
 )
 from intric.flows.ai_builder.ai_builder_requirements_state import (
-    build_confirmed_requirements_prompt_block,
-    build_requirements_version,
+    render_confirmed_requirements_system_prompt_block,
     resolve_requirements_state,
 )
 from intric.flows.ai_builder.ai_builder_tools import active_submission_tool_name
@@ -98,7 +97,7 @@ def build_system_prompt(
     planning_state_block: str | None = None,
     base_planning_state_version: int | None = None,
     ui_language: str | None = None,
-    confirmed_requirements: dict[str, Any] | None = None,
+    confirmed_requirements: RequirementsSummaryPayload | None = None,
     is_edit_mode: bool = False,
     unresolved_architectural_choices: frozenset[str] | None = None,
     action_policy: PlannerActionPolicy | None = None,
@@ -152,32 +151,10 @@ def build_system_prompt(
         )
 
     if confirmed_requirements:
-        requirements_payload = RequirementsSummaryPayload.model_validate(
+        requirements_block = render_confirmed_requirements_system_prompt_block(
             confirmed_requirements
         )
-        requirements_version = build_requirements_version(requirements_payload)
-        requirements_block = build_confirmed_requirements_prompt_block(
-            [
-                ConversationMessage(
-                    role="tool",
-                    metadata={
-                        "requirements_summary": requirements_payload.model_dump(
-                            mode="json"
-                        ),
-                        "requirements_version": requirements_version,
-                    },
-                ),
-                ConversationMessage(
-                    role="user",
-                    metadata={
-                        "requirements_confirmed": True,
-                        "requirements_version": requirements_version,
-                    },
-                ),
-            ]
-        )
-        if requirements_block:
-            sections.append(requirements_block)
+        sections.append(requirements_block)
 
     if flow_context:
         sections.append(f"\n## Aktuellt flöde\n\n{flow_context}")

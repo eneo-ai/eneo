@@ -15,6 +15,9 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 from intric.flows.ai_builder.ai_builder_edit_scope import (
     EditScopeResolution,
 )
+from intric.flows.ai_builder.ai_builder_event_models import (
+    RequirementsSummaryPayload,
+)
 from intric.flows.ai_builder.ai_builder_prompts import (
     build_available_kbs_context,
     build_available_mcp_context,
@@ -44,6 +47,17 @@ from intric.flows.flow_authoring_spec import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _requirements(**overrides: object) -> RequirementsSummaryPayload:
+    payload = {
+        "summary": "Test",
+        "key_decisions": [],
+        "input_description": "Test",
+        "output_description": "Test",
+    }
+    payload.update(overrides)
+    return RequirementsSummaryPayload.model_validate(payload)
 
 
 def _make_flow(
@@ -114,12 +128,7 @@ class TestBuildSystemPrompt:
         # Confirmed requirements still use the compact server-state prompt;
         # final proposal has its own task-specific outline_flow prompt.
         prompt_confirmed = build_system_prompt(
-            confirmed_requirements={
-                "summary": "Test",
-                "key_decisions": [],
-                "input_description": "Test",
-                "output_description": "Test",
-            },
+            confirmed_requirements=_requirements(),
         )
         assert "Outline-flow-kompilering" in prompt_confirmed
         assert "Flow capabilities (engine truth)" in prompt_confirmed
@@ -128,12 +137,11 @@ class TestBuildSystemPrompt:
 
     def test_confirmed_prompt_omits_legacy_create_recipe_examples(self) -> None:
         prompt = build_system_prompt(
-            confirmed_requirements={
-                "summary": "Build a PDF summary from uploaded documents",
-                "key_decisions": [],
-                "input_description": "User uploads PDF documents",
-                "output_description": "Generate a PDF summary",
-            },
+            confirmed_requirements=_requirements(
+                summary="Build a PDF summary from uploaded documents",
+                input_description="User uploads PDF documents",
+                output_description="Generate a PDF summary",
+            ),
         )
 
         assert "Outline-flow-kompilering" in prompt
@@ -142,12 +150,7 @@ class TestBuildSystemPrompt:
 
     def test_create_mode_prompt_stays_on_ir_surface(self) -> None:
         prompt = build_system_prompt(
-            confirmed_requirements={
-                "summary": "Test",
-                "key_decisions": [],
-                "input_description": "Test",
-                "output_description": "Test",
-            },
+            confirmed_requirements=_requirements(),
         )
         # The planner does not AUTHOR binding templates or step refs — backend
         # compiles them. But it must still SEE the variable system so it can
@@ -252,12 +255,7 @@ class TestBuildSystemPrompt:
 
     def test_prompt_contains_contract_documentation(self) -> None:
         prompt = build_system_prompt(
-            confirmed_requirements={
-                "summary": "Test",
-                "key_decisions": [],
-                "input_description": "Test",
-                "output_description": "Test",
-            },
+            confirmed_requirements=_requirements(),
         )
         assert "output_fields" in prompt
         assert "nesting depth" in prompt
@@ -348,12 +346,7 @@ class TestBuildSystemPrompt:
         each into.
         """
         prompt = build_system_prompt(
-            confirmed_requirements={
-                "summary": "Test",
-                "key_decisions": [],
-                "input_description": "Test",
-                "output_description": "Test",
-            },
+            confirmed_requirements=_requirements(),
         )
         assert "underlag" in prompt.lower()
         assert "input_fields" in prompt
@@ -365,12 +358,7 @@ class TestBuildSystemPrompt:
 
     def test_prompt_demotes_runtime_only_aliases_and_raw_json_blobs(self) -> None:
         prompt = build_system_prompt(
-            confirmed_requirements={
-                "summary": "Test",
-                "key_decisions": [],
-                "input_description": "Test",
-                "output_description": "Test",
-            },
+            confirmed_requirements=_requirements(),
         )
         assert "kompilerar" in prompt
         assert "råa config-dicts" in prompt or "raw input_config" in prompt
@@ -378,12 +366,7 @@ class TestBuildSystemPrompt:
     def test_prompt_covers_json_pipeline_patterns(self) -> None:
         """Create mode should understand JSON extraction via output_fields only."""
         prompt = build_system_prompt(
-            confirmed_requirements={
-                "summary": "Test",
-                "key_decisions": [],
-                "input_description": "Test",
-                "output_description": "Test",
-            },
+            confirmed_requirements=_requirements(),
         )
         assert "json" in prompt.lower()
         assert "output_fields" in prompt
@@ -392,12 +375,7 @@ class TestBuildSystemPrompt:
     def test_prompt_has_long_instruction_examples(self) -> None:
         """Per user request — AI must write long, detailed instructions."""
         prompt = build_system_prompt(
-            confirmed_requirements={
-                "summary": "Test",
-                "key_decisions": [],
-                "input_description": "Test",
-                "output_description": "Test",
-            },
+            confirmed_requirements=_requirements(),
         )
         assert "LÅNGA" in prompt or "långa" in prompt
 
@@ -405,12 +383,7 @@ class TestBuildSystemPrompt:
         self,
     ) -> None:
         prompt = build_system_prompt(
-            confirmed_requirements={
-                "summary": "Test",
-                "key_decisions": [],
-                "input_description": "Test",
-                "output_description": "Test",
-            },
+            confirmed_requirements=_requirements(),
         )
         assert "bad draft" not in prompt.lower()
         assert "felaktigt utkast" not in prompt.lower()

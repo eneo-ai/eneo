@@ -2,10 +2,25 @@ from __future__ import annotations
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_event_models import (
+    RequirementsSummaryPayload,
+)
 from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     build_requirements_signal_text,
     detect_planner_pattern_signals,
 )
+
+
+def _requirements(**overrides: object) -> RequirementsSummaryPayload:
+    payload = {
+        "summary": "Översätt en kort svensk text till engelska.",
+        "key_decisions": [],
+        "input_description": "Primär indata vid körning behöver granskas.",
+        "output_description": "Huvudsakligt slutresultat behöver granskas.",
+        "assumptions": [],
+    }
+    payload.update(overrides)
+    return RequirementsSummaryPayload.model_validate(payload)
 
 
 @pytest.mark.parametrize(
@@ -51,21 +66,49 @@ def test_detect_planner_pattern_signals_does_not_flag_complex_or_ambiguous_text(
 
 def test_requirements_signal_text_ignores_confirmation_boilerplate() -> None:
     signal_text = build_requirements_signal_text(
-        {
-            "summary": "Översätt en kort svensk text till engelska.",
-            "input_description": "Primär indata vid körning behöver granskas.",
-            "output_description": "Huvudsakligt slutresultat behöver granskas.",
-            "assumptions": [
+        _requirements(
+            assumptions=[
                 "Planen ska följa kraven och underlaget i konversationen.",
                 "Användaren ska kunna granska och ändra planen innan den tillämpas.",
                 "Inga extra fält.",
             ],
-        }
+        )
     )
 
+    assert (
+        signal_text == "Översätt en kort svensk text till engelska.\nInga extra fält."
+    )
     assert "behöver granskas" not in signal_text
     assert "Användaren ska kunna granska" not in signal_text
     assert "Inga extra fält" in signal_text
     signals = detect_planner_pattern_signals(signal_text)
     assert signals.is_simple_text_transform
     assert not signals.prefers_quality_step
+
+
+def test_requirements_signal_text_uses_typed_payload_without_version_leak() -> None:
+    signal_text = build_requirements_signal_text(
+        _requirements(
+            requirements_version="do-not-render",
+            summary="Skapa ett mötesprotokoll.",
+            key_decisions=[
+                {"topic": "Indata", "decision": "Mötesljud vid körning."},
+                {"topic": "Utdata", "decision": "DOCX-protokoll."},
+            ],
+            assumptions=["Inga extra fält."],
+            manual_setup_notes=["Koppla transkriberingsmodellen."],
+        )
+    )
+
+    assert signal_text == "\n".join(
+        (
+            "Skapa ett mötesprotokoll.",
+            "Inga extra fält.",
+            "Indata",
+            "Mötesljud vid körning.",
+            "Utdata",
+            "DOCX-protokoll.",
+            "Koppla transkriberingsmodellen.",
+        )
+    )
+    assert "do-not-render" not in signal_text

@@ -199,13 +199,9 @@ def latest_confirmed_requirements(
     return state.latest_summary if state.confirmed else None
 
 
-def build_confirmed_requirements_prompt_block(
-    conversation: list[ConversationMessage],
-) -> str | None:
-    summary = latest_confirmed_requirements(conversation)
-    if summary is None:
-        return None
-
+def render_confirmed_requirements_system_prompt_block(
+    summary: RequirementsSummaryPayload,
+) -> str:
     lines = ["## Bekräftade krav"]
     if relevant_summary := user_relevant_requirement_text(summary.summary):
         lines.extend(["", relevant_summary])
@@ -241,6 +237,36 @@ def build_confirmed_requirements_prompt_block(
         ]
     )
     return "\n".join(lines)
+
+
+def render_confirmed_requirements_proposal_prompt_block(
+    summary: RequirementsSummaryPayload | None,
+) -> str:
+    if summary is None:
+        return "- none"
+
+    lines: list[str] = []
+    for key, value in (
+        ("summary", summary.summary),
+        ("input_description", summary.input_description),
+        ("output_description", summary.output_description),
+    ):
+        if relevant_value := user_relevant_requirement_text(value):
+            lines.append(f"- {key}: {relevant_value}")
+
+    if summary.key_decisions:
+        lines.append("- key_decisions:")
+        lines.extend(
+            f"  - {decision.topic}: {decision.decision}"
+            for decision in summary.key_decisions
+        )
+
+    relevant_assumptions = user_relevant_requirement_notes(summary.assumptions)
+    if relevant_assumptions:
+        lines.append("- assumptions:")
+        lines.extend(f"  - {assumption}" for assumption in relevant_assumptions)
+
+    return "\n".join(lines) if lines else "- none"
 
 
 def _is_requirements_invalidation(text: str) -> bool:

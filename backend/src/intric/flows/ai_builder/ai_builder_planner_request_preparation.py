@@ -267,11 +267,7 @@ async def prepare_planner_request(
     if action_policy.allowed_action_kinds == ("propose_plan",):
         proposal_system_prompt = build_plan_proposal_system_prompt(
             planning_state=rebuilt_planning_state,
-            confirmed_requirements=(
-                confirmed_requirements.model_dump(mode="json")
-                if confirmed_requirements is not None
-                else None
-            ),
+            confirmed_requirements=confirmed_requirements,
             attachment_context=(
                 attachment_context_result.context
                 if attachment_context_result is not None
@@ -380,11 +376,7 @@ async def prepare_planner_request(
         planning_state_block=planning_state_block,
         base_planning_state_version=request.base_planning_state_version,
         ui_language=ui_language,
-        confirmed_requirements=(
-            confirmed_requirements.model_dump(mode="json")
-            if confirmed_requirements is not None
-            else None
-        ),
+        confirmed_requirements=confirmed_requirements,
         is_edit_mode=request.flow is not None,
         unresolved_architectural_choices=unresolved_architectural_choices,
         action_policy=action_policy,

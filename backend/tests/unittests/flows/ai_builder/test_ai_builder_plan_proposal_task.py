@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from intric.flows.ai_builder.ai_builder_event_models import (
+    RequirementsSummaryPayload,
+)
 from intric.flows.ai_builder.ai_builder_plan_proposal_task import (
     build_plan_proposal_system_prompt,
 )
@@ -10,6 +13,17 @@ from intric.flows.ai_builder.planning_state import (
     PlanningState,
     StepTriple,
 )
+
+
+def _requirements(**overrides: object) -> RequirementsSummaryPayload:
+    payload = {
+        "summary": "Test",
+        "key_decisions": [],
+        "input_description": "Test",
+        "output_description": "Test",
+    }
+    payload.update(overrides)
+    return RequirementsSummaryPayload.model_validate(payload)
 
 
 def test_plan_proposal_prompt_includes_readable_resources_without_execution_surface():
@@ -33,7 +47,9 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
 
     prompt = build_plan_proposal_system_prompt(
         planning_state=state,
-        confirmed_requirements={"summary": "Look up a case and summarize it."},
+        confirmed_requirements=_requirements(
+            summary="Look up a case and summarize it."
+        ),
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
@@ -84,7 +100,9 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
 def test_plan_proposal_prompt_honors_continue_without_mcp_decision():
     prompt = build_plan_proposal_system_prompt(
         planning_state=PlanningState.empty(),
-        confirmed_requirements={"summary": "Answer without external integrations."},
+        confirmed_requirements=_requirements(
+            summary="Answer without external integrations."
+        ),
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
@@ -103,7 +121,9 @@ def test_plan_proposal_prompt_honors_continue_without_mcp_decision():
 def test_plan_proposal_prompt_identifies_runtime_metadata_as_compiler_policy():
     prompt = build_plan_proposal_system_prompt(
         planning_state=PlanningState.empty(),
-        confirmed_requirements={"summary": "Skapa ett svenskt ljud till DOCX-flöde."},
+        confirmed_requirements=_requirements(
+            summary="Skapa ett svenskt ljud till DOCX-flöde."
+        ),
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
@@ -118,9 +138,9 @@ def test_plan_proposal_prompt_identifies_runtime_metadata_as_compiler_policy():
 def test_plan_proposal_prompt_teaches_direct_text_transform_restraint():
     prompt = build_plan_proposal_system_prompt(
         planning_state=PlanningState.empty(),
-        confirmed_requirements={
-            "summary": "Översätt en kort mening till engelska.",
-        },
+        confirmed_requirements=_requirements(
+            summary="Översätt en kort mening till engelska.",
+        ),
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
@@ -134,16 +154,16 @@ def test_plan_proposal_prompt_teaches_direct_text_transform_restraint():
 def test_plan_proposal_prompt_omits_confirmed_requirement_boilerplate():
     prompt = build_plan_proposal_system_prompt(
         planning_state=PlanningState.empty(),
-        confirmed_requirements={
-            "summary": "Översätt en kort svensk text till engelska.",
-            "input_description": "Primär indata vid körning behöver granskas.",
-            "output_description": "Huvudsakligt slutresultat behöver granskas.",
-            "assumptions": [
+        confirmed_requirements=_requirements(
+            summary="Översätt en kort svensk text till engelska.",
+            input_description="Primär indata vid körning behöver granskas.",
+            output_description="Huvudsakligt slutresultat behöver granskas.",
+            assumptions=[
                 "Planen ska följa kraven och underlaget i konversationen.",
                 "Användaren ska kunna granska och ändra planen innan den tillämpas.",
                 "Inga extra fält.",
             ],
-        },
+        ),
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
@@ -155,10 +175,29 @@ def test_plan_proposal_prompt_omits_confirmed_requirement_boilerplate():
     assert "Inga extra fält." in prompt
 
 
+def test_plan_proposal_prompt_does_not_render_requirements_version() -> None:
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=PlanningState.empty(),
+        confirmed_requirements=_requirements(
+            requirements_version="do-not-render",
+            summary="Sammanfatta kunddialogen.",
+            key_decisions=[{"topic": "Indata", "decision": "Ljudfil vid körning."}],
+        ),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+    )
+
+    assert "do-not-render" not in prompt
+    assert "- Indata: Ljudfil vid körning." in prompt
+
+
 def test_plan_proposal_prompt_scopes_audio_transcription_to_backend():
     prompt = build_plan_proposal_system_prompt(
         planning_state=PlanningState.empty(),
-        confirmed_requirements={"summary": "Skapa ett svenskt ljud till DOCX-flöde."},
+        confirmed_requirements=_requirements(
+            summary="Skapa ett svenskt ljud till DOCX-flöde."
+        ),
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
@@ -175,7 +214,9 @@ def test_plan_proposal_prompt_scopes_audio_transcription_to_backend():
 def test_plan_proposal_prompt_honors_selected_mcp_server():
     prompt = build_plan_proposal_system_prompt(
         planning_state=PlanningState.empty(),
-        confirmed_requirements={"summary": "Use an enabled MCP for live data."},
+        confirmed_requirements=_requirements(
+            summary="Use an enabled MCP for live data."
+        ),
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
@@ -206,7 +247,9 @@ def test_plan_proposal_prompt_honors_selected_mcp_server():
 def test_plan_proposal_prompt_drops_selected_mcp_ref_that_is_not_in_catalog():
     prompt = build_plan_proposal_system_prompt(
         planning_state=PlanningState.empty(),
-        confirmed_requirements={"summary": "Use an enabled MCP for live data."},
+        confirmed_requirements=_requirements(
+            summary="Use an enabled MCP for live data."
+        ),
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,

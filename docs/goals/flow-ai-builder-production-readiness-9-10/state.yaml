@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T109
+active_task: T110
 
 interruptions:
   - id: I001
@@ -9952,7 +9952,7 @@ tasks:
   - id: T109
     type: worker
     assignee: Worker
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Implement the peer-gated confirmed-requirements typed prompt/signal ownership cleanup selected by T108."
     constraints:
@@ -10016,6 +10016,85 @@ tasks:
         antigravity_if_available: true
     swagger_openapi_impact: "None expected. T109 is internal backend prompt/signal rendering and should not require Swagger/OpenAPI/API example updates."
     expected_score_impact: "Can improve Maintainability, Clean Architecture, Separation of Concerns, Human Readability, Type Contracts, Single Source of Truth, and AI Slop / Comment / Naming for one confirmed-requirements prompt/signal boundary. Do not raise the overall strict floor above 8 unless post-implementation evidence proves every remaining weak dimension is now 9."
+    receipt:
+      completed_at: "2026-05-25"
+      repo_reality:
+        head_before_commit: "7d93ba967 Select AI Builder requirements prompt ownership cleanup"
+        branch: "feature/refactor-flows-flowai"
+        dirty_status: "dirty with T109-owned source/test/board/artifact files plus unrelated workspace files preserved: .devcontainer/docker-compose.yml, .gitignore, AGENTS.md, .devcontainer/devcontainer-lock.json, PRODUCT.md, utvecklingssamtal.mp3"
+        session_goal_tool: "get_goal worked but still contained a stale T081 objective; durable state.yaml remained the source of truth for active T109."
+      summary: "Implemented the confirmed-requirements typed prompt/signal ownership cleanup selected by T108. RequirementsSummaryPayload | None now travels directly through proposal prompt, system prompt, and critic signal paths. ai_builder_requirements_state.py owns system/proposal requirements rendering. The private proposal dict renderer, system-prompt fake [tool, user] conversation construction, test-only conversation-to-render wrapper, planner-request dict model_dump handoffs, critic dict model_dump handoff, Mapping[Any]/cast parsing, and a pyright ignore in the touched signal path were removed."
+      artifact: ".codex/artifacts/flow-ai-builder-t109-implementation-summary.md"
+      implementation:
+        canonical_owner: "ai_builder_requirements_state.py owns confirmed-requirements filtering and prompt-block rendering for system/proposal audiences; build_requirements_signal_text consumes RequirementsSummaryPayload directly for critic/planner signal text."
+        deleted_or_simplified:
+          - "Deleted ai_builder_plan_proposal_task.py private _confirmed_requirements_block dict renderer."
+          - "Deleted ai_builder_prompts.py synthetic [tool, user] conversation construction for already-typed confirmed requirements."
+          - "Deleted test-only build_confirmed_requirements_prompt_block(conversation) wrapper after Claude identified it as an orphan SSoT leak."
+          - "Removed dict model_dump handoffs from planner request preparation and quality critic."
+          - "Removed Mapping[str, Any] parsing and pyright ignore from requirements signal extraction."
+        swagger_openapi_impact: "None. T109 changed only internal backend prompt/signal rendering. No REST/SSE/OpenAPI/Swagger examples, generated clients, frontend files, DB schema, migrations, runtime materialization, live-eval scripts, or diagnostic schemas changed."
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q -> 144 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_prompts.py tests/unittests/flows/ai_builder/test_ai_builder_conditional_prompt.py tests/unittests/flows/ai_builder/test_discovery_flow.py -q -> 170 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py -q -> 39 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2426 passed, 4 skipped, 11 warnings"
+        - "cd backend && uv run ruff check T109 touched files -> passed"
+        - "cd backend && uv run ruff format --check T109 touched files -> passed"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations"
+        - "git diff --check -> passed"
+      peer_review:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t109-confirmed-requirements-prompt-ownership-implementation-20260525T045725Z.md -> GREEN_LIGHT no / MIN_SCORE 7; accepted blocker that build_confirmed_requirements_prompt_block(conversation) was now test-only and weakened the SSoT claim."
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t109-confirmed-requirements-prompt-ownership-implementation-iteration-2-20260525T050201Z.md -> GREEN_LIGHT yes / MIN_SCORE 8 after deleting the orphan wrapper and adding proposal renderer None/all-boilerplate edge coverage."
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t109-confirmed-requirements-implementation-gate-20260525T050336Z.md -> GREEN_LIGHT yes / MIN_SCORE 8; quota available. No blockers; highlighted same non-blocking type/helper carry-forward debt."
+      accepted_peer_feedback:
+        - "Deleted the orphan conversation-to-render wrapper and migrated its test to compose latest_confirmed_requirements(...) with render_confirmed_requirements_system_prompt_block(...)."
+        - "Added proposal renderer edge tests for None input and all-boilerplate payload fallback to '- none'."
+      deferred_debt:
+        - "PlannerPreparedRequest.available_models / available_kbs still use list[dict[str, Any]] while the proposal prompt now accepts list[dict[str, str]]; tighten the real preparation/resource boundary or revert the cosmetic narrowing in a future typed-resource tranche."
+        - "The _requirements(**overrides) test helper is duplicated across several AI Builder test files; consolidate in a future test-topology cleanup when touching those tests next."
+        - "RequirementsSummaryPayload still carries requirements_version; future ownership cleanup may separate content from addressing metadata with a versioned envelope if evidence shows more renderer drift risk."
+      score_impact:
+        strict_floor: 8
+        improved_dimensions:
+          - "Maintainability"
+          - "Clean Architecture"
+          - "Separation of Concerns"
+          - "Single Source of Truth"
+          - "Human Readability"
+          - "Human Reviewability"
+          - "Type Contracts"
+          - "AI Slop / Comment / Naming"
+        rationale: "T109 is real but narrow progress: it removes loose dict/fake-conversation confirmed-requirements paths and makes the typed payload flow reviewable. It does not raise the broader Flow AI Builder strict floor above 8 because remaining subsystem-wide blockers still include broader planner/source topology/readability, final live-output proof after accumulated changes, full-source baseline issues, and carry-forward resource/test/type cleanup."
+      broader_goal_status: "active; not complete."
+
+  - id: T110
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T109 from current repo evidence. Do not implement during this judge task."
+    constraints:
+      - "Stay within Flow AI Builder; do not move to broader Flows work."
+      - "Start from current repo reality: git status, latest commits, scorecard, T109 receipt, current source, and latest artifacts."
+      - "Preserve unrelated dirty files and avoid source/test edits during this read-only judge task."
+      - "Do not select work that is only LOC reduction, helper shuffling, or cosmetic polish."
+      - "Prefer the tranche that removes real complexity, clarifies canonical ownership, improves typed contracts, improves human reviewability/debuggability, improves normal-user output proof, or closes a remaining score-floor blocker."
+      - "Use Claude for the plan gate and Antigravity with --spend-mode auto if available. Missing peer coverage is a skip, not a pass."
+      - "Do not raise the strict overall score floor above 8 unless the ranking and peer evidence prove every remaining weak dimension is now defensibly 9."
+    candidates_to_consider:
+      - "Resource-list type contract cleanup around available_models/available_kbs and AI Builder resource catalog boundaries."
+      - "Deduplicate duplicated RequirementsSummaryPayload test constructors if evidence shows test topology/readability friction is now a real blocker."
+      - "Versioned requirements payload envelope if requirements_version/content conflation remains a real renderer or schema-risk blocker."
+      - "Broader planner/source topology/readability blocker with concrete owner evidence, not LOC-only splitting."
+      - "Bounded AI-slop/comment/naming cleanup tied to concrete owners and invariants."
+      - "Final live eval replay after accumulated behavior-affecting changes."
+      - "Full-source typing/test baseline blockers that still prevent subsystem-wide 9/10."
+    expected_output:
+      - "Ranked candidate table with file:line evidence and why each option is or is not diminishing returns."
+      - "Selected next tranche or explicit recommendation to stop AI Builder implementation for now if remaining work is diminishing returns."
+      - "Canonical owner, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, expected score impact, and Swagger/OpenAPI impact for the selected worker."
+      - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
     receipt: null
 
 checks:
@@ -10024,9 +10103,16 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T108 completed with Claude and Antigravity green. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T108
+    result: "T109 completed with Claude and Antigravity green. Broader goal remains active with strict floor 8/10 and must not be marked complete. T110 is active as a read-only next-tranche ranking task."
+    task: T109
     commands:
-      - "T108 read-only ranking selected T109; no source validation required beyond board YAML parse and peer gates."
-      - "Claude T108 plan iteration 3 -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity T108 final synthesis -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q -> 144 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_prompts.py tests/unittests/flows/ai_builder/test_ai_builder_conditional_prompt.py tests/unittests/flows/ai_builder/test_discovery_flow.py -q -> 170 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py -q -> 39 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2426 passed, 4 skipped, 11 warnings"
+      - "cd backend && uv run ruff check T109 touched files -> passed"
+      - "cd backend && uv run ruff format --check T109 touched files -> passed"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors"
+      - "git diff --check -> passed"
+      - "Claude T109 implementation iteration 2 -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity T109 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 8"

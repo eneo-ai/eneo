@@ -584,13 +584,15 @@ class TestPinnedRequirementsPrompt:
         self,
     ) -> None:
         prompt = build_system_prompt(
-            confirmed_requirements={
-                "summary": "Analysera en PDF och skapa DOCX-rapport.",
-                "key_decisions": [{"topic": "DOCX", "decision": "Utan mall"}],
-                "input_description": "En PDF per körning",
-                "output_description": "DOCX-rapport",
-                "manual_setup_notes": ["Ingen mall används."],
-            }
+            confirmed_requirements=RequirementsSummaryPayload.model_validate(
+                {
+                    "summary": "Analysera en PDF och skapa DOCX-rapport.",
+                    "key_decisions": [{"topic": "DOCX", "decision": "Utan mall"}],
+                    "input_description": "En PDF per körning",
+                    "output_description": "DOCX-rapport",
+                    "manual_setup_notes": ["Ingen mall används."],
+                }
+            )
         )
 
         assert "Bekräftade krav" in prompt

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_event_models import (
+    RequirementsSummaryPayload,
+)
 from intric.flows.ai_builder.ai_builder_orchestrator import AskQuestionPayload
 from intric.flows.ai_builder.ai_builder_prompts import (
     build_clarification_hints,
@@ -33,6 +36,17 @@ RETIRED_ASK_QUESTION_PAYLOAD_FIELDS: tuple[str, ...] = (
 )
 
 
+def _requirements(**overrides: object) -> RequirementsSummaryPayload:
+    payload = {
+        "summary": "A document analysis flow.",
+        "key_decisions": [],
+        "input_description": "User uploads documents.",
+        "output_description": "Structured analysis.",
+    }
+    payload.update(overrides)
+    return RequirementsSummaryPayload.model_validate(payload)
+
+
 class TestConditionalKnowledgePackInjection:
     def test_discovery_phase_excludes_heavy_sections(self):
         """During discovery (no confirmed requirements), skip recipes and
@@ -48,12 +62,9 @@ class TestConditionalKnowledgePackInjection:
 
     def test_confirmed_phase_includes_recipes(self):
         """After requirements are confirmed, include recipes for proposal quality."""
-        confirmed = {
-            "summary": "A document analysis flow.",
-            "key_decisions": [{"topic": "Input", "decision": "Documents"}],
-            "input_description": "User uploads documents.",
-            "output_description": "Structured analysis.",
-        }
+        confirmed = _requirements(
+            key_decisions=[{"topic": "Input", "decision": "Documents"}],
+        )
         prompt = build_system_prompt(confirmed_requirements=confirmed)
         # After confirmation, registry-derived archetypes should be present.
         assert "Planner patterns (positive archetypes)" in prompt
@@ -105,12 +116,12 @@ class TestSystemPromptV2AskQuestionContract:
             (
                 "confirmed_create",
                 {
-                    "confirmed_requirements": {
-                        "summary": "Extract structured fields from uploaded forms.",
-                        "key_decisions": [{"topic": "Input", "decision": "PDFs"}],
-                        "input_description": "User uploads PDF forms.",
-                        "output_description": "Structured JSON per form.",
-                    }
+                    "confirmed_requirements": _requirements(
+                        summary="Extract structured fields from uploaded forms.",
+                        key_decisions=[{"topic": "Input", "decision": "PDFs"}],
+                        input_description="User uploads PDF forms.",
+                        output_description="Structured JSON per form.",
+                    )
                 },
             ),
             (
@@ -125,14 +136,14 @@ class TestSystemPromptV2AskQuestionContract:
                 {
                     "flow_context": "Namn: Befintligt flöde\nAntal steg: 2",
                     "is_edit_mode": True,
-                    "confirmed_requirements": {
-                        "summary": "Tweak existing DOCX flow to emit PDF.",
-                        "key_decisions": [
+                    "confirmed_requirements": _requirements(
+                        summary="Tweak existing DOCX flow to emit PDF.",
+                        key_decisions=[
                             {"topic": "Output", "decision": "PDF instead of DOCX"}
                         ],
-                        "input_description": "Unchanged.",
-                        "output_description": "PDF report.",
-                    },
+                        input_description="Unchanged.",
+                        output_description="PDF report.",
+                    ),
                 },
             ),
         ],

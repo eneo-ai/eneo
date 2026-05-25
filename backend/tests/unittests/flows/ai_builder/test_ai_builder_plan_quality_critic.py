@@ -12,10 +12,16 @@ from intric.flows.ai_builder.ai_builder_critic_invariants import (
     enforce_architecture_critic_invariants,
     evaluate_critic_invariants,
 )
+from intric.flows.ai_builder.ai_builder_event_models import (
+    RequirementsSummaryPayload,
+)
 from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_aware_quality_feedback,
     build_conversation_critic_context,
     build_quality_feedback_from_critic_context,
+)
+from intric.flows.ai_builder.ai_builder_requirements_state import (
+    build_requirements_version,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
@@ -94,6 +100,22 @@ def _step(
     )
 
 
+def _requirements(**overrides: object) -> RequirementsSummaryPayload:
+    payload = {
+        "summary": "Skapa ett mötesprotokoll.",
+        "key_decisions": [
+            {"topic": "Indata", "decision": "Mötesljud vid körning."},
+            {"topic": "Utdata", "decision": "DOCX-protokoll."},
+        ],
+        "input_description": "Primär indata vid körning behöver granskas.",
+        "output_description": "Huvudsakligt slutresultat behöver granskas.",
+        "assumptions": ["Inga extra fält."],
+        "manual_setup_notes": ["Koppla transkriberingsmodellen."],
+    }
+    payload.update(overrides)
+    return RequirementsSummaryPayload.model_validate(payload)
+
+
 def _pdf_mismatch_context() -> "CriticContext":
     conversation = [
         {
@@ -119,6 +141,67 @@ def _pdf_mismatch_context() -> "CriticContext":
         ],
     )
     return build_conversation_critic_context(conversation, spec)
+
+
+def test_critic_context_renders_typed_confirmed_requirements_signal() -> None:
+    payload = _requirements(requirements_version="do-not-render")
+    version = build_requirements_version(payload)
+    context = build_conversation_critic_context(
+        [
+            {
+                "role": "assistant",
+                "content": "Summary",
+                "metadata": {
+                    "requirements_summary": payload.model_dump(mode="json"),
+                    "requirements_version": version,
+                },
+            },
+            {
+                "role": "user",
+                "content": "Ja, bygg planen.",
+                "metadata": {
+                    "requirements_confirmed": True,
+                    "requirements_version": version,
+                },
+            },
+        ],
+        FlowDraftSpecCore(
+            flow_name="Mötesprotokoll",
+            steps=[
+                _step(
+                    "step_a",
+                    "Transkribera",
+                    "Transkribera mötesljudet.",
+                    input_type=InputType.AUDIO,
+                )
+            ],
+        ),
+    )
+
+    assert context.requirements_text == "\n".join(
+        (
+            "Skapa ett mötesprotokoll.",
+            "Inga extra fält.",
+            "Indata",
+            "Mötesljud vid körning.",
+            "Utdata",
+            "DOCX-protokoll.",
+            "Koppla transkriberingsmodellen.",
+        )
+    )
+    assert "do-not-render" not in context.requirements_text
+
+
+def test_critic_context_omits_requirements_signal_without_summary() -> None:
+    context = build_conversation_critic_context(
+        [],
+        FlowDraftSpecCore(
+            flow_name="Tomt flöde",
+            steps=[_step("step_a", "Sammanfatta", "Sammanfatta texten.")],
+        ),
+    )
+
+    assert context.requirements_text == ""
 
 
 def test_critic_invariant_registry_has_stable_kind_map() -> None:

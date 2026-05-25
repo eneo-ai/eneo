@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Mapping
 
+from intric.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from intric.flows.ai_builder.ai_builder_form_intake_signals import (
     mentions_form_field_needs,
 )
@@ -175,44 +175,31 @@ class PlannerPatternSignals:
 
 
 def build_requirements_signal_text(
-    confirmed_requirements: Mapping[str, Any] | None,
+    confirmed_requirements: RequirementsSummaryPayload | None,
 ) -> str:
     if not confirmed_requirements:
         return ""
 
     parts: list[str] = []
-    for key in ("summary", "input_description", "output_description"):
-        value = confirmed_requirements.get(key)
-        if isinstance(value, str):
-            if relevant_value := user_relevant_requirement_text(value):
-                parts.append(relevant_value)
+    for value in (
+        confirmed_requirements.summary,
+        confirmed_requirements.input_description,
+        confirmed_requirements.output_description,
+    ):
+        if relevant_value := user_relevant_requirement_text(value):
+            parts.append(relevant_value)
 
-    assumptions: Any = confirmed_requirements.get("assumptions") or []
+    parts.extend(user_relevant_requirement_notes(confirmed_requirements.assumptions))
+
+    for decision in confirmed_requirements.key_decisions:
+        if decision.topic.strip():
+            parts.append(decision.topic.strip())
+        if decision.decision.strip():
+            parts.append(decision.decision.strip())
+
     parts.extend(
-        user_relevant_requirement_notes(
-            note for note in assumptions if isinstance(note, str)
-        )
+        user_relevant_requirement_notes(confirmed_requirements.manual_setup_notes)
     )
-
-    key_decisions: Any = confirmed_requirements.get("key_decisions") or []
-    for decision in key_decisions:
-        if not isinstance(decision, Mapping):
-            continue
-        decision_map: Mapping[str, Any] = decision  # pyright: ignore[reportUnknownVariableType]
-        topic = decision_map.get("topic")
-        choice = decision_map.get("decision")
-        if isinstance(topic, str) and topic.strip():
-            parts.append(topic.strip())
-        if isinstance(choice, str) and choice.strip():
-            parts.append(choice.strip())
-
-    manual_setup_notes: Any = confirmed_requirements.get("manual_setup_notes") or []
-    parts.extend(
-        user_relevant_requirement_notes(
-            note for note in manual_setup_notes if isinstance(note, str)
-        )
-    )
-
     return "\n".join(parts)
 
 

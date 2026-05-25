@@ -80,9 +80,7 @@ def build_conversation_critic_context(
         ]
     )
     requirements_text = build_requirements_signal_text(
-        requirements_state.latest_summary.model_dump(mode="json")
-        if requirements_state.latest_summary is not None
-        else None
+        requirements_state.latest_summary
     )
     signal_text = "\n".join(part for part in (text, requirements_text) if part)
     planner_patterns = detect_planner_pattern_signals(signal_text)

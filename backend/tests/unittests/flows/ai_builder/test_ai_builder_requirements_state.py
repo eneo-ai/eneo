@@ -18,8 +18,10 @@ from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
 from intric.flows.ai_builder.ai_builder_requirements_state import (
-    build_confirmed_requirements_prompt_block,
     build_requirements_version,
+    latest_confirmed_requirements,
+    render_confirmed_requirements_proposal_prompt_block,
+    render_confirmed_requirements_system_prompt_block,
     resolve_requirements_state,
 )
 
@@ -148,6 +150,8 @@ class TestResolveRequirementsStateFromAssistantMetadata:
         assert state.latest_summary is not None
         assert state.confirmed is False
 
+
+class TestRenderConfirmedRequirementsBlocks:
     def test_confirmed_requirements_prompt_omits_default_review_boilerplate(
         self,
     ) -> None:
@@ -194,12 +198,75 @@ class TestResolveRequirementsStateFromAssistantMetadata:
             ),
         ]
 
-        prompt_block = build_confirmed_requirements_prompt_block(conversation)
+        summary = latest_confirmed_requirements(conversation)
+        assert summary is not None
+        prompt_block = render_confirmed_requirements_system_prompt_block(summary)
 
-        assert prompt_block is not None
         assert "Granska sammanfattningen innan planen byggs" not in prompt_block
         assert "Primär indata vid körning behöver granskas" not in prompt_block
         assert "Huvudsakligt slutresultat behöver granskas" not in prompt_block
         assert "Användaren ska kunna granska" not in prompt_block
         assert "Översätt text till text" in prompt_block
         assert "Koppla standardmodellen för textsteg" in prompt_block
+
+    def test_confirmed_requirements_proposal_block_uses_user_relevant_fields_only(
+        self,
+    ) -> None:
+        payload = RequirementsSummaryPayload.model_validate(
+            {
+                "summary": "Skapa ett mötesprotokoll.",
+                "key_decisions": [
+                    {"topic": "Indata", "decision": "Mötesljud vid körning."},
+                ],
+                "input_description": "Primär indata vid körning behöver granskas.",
+                "output_description": "DOCX-protokoll.",
+                "assumptions": [
+                    "Planen ska följa kraven och underlaget i konversationen.",
+                    "Inga extra fält.",
+                ],
+                "manual_setup_notes": ["Koppla transkriberingsmodellen."],
+                "requirements_version": "do-not-render",
+            }
+        )
+
+        prompt_block = render_confirmed_requirements_proposal_prompt_block(payload)
+
+        assert prompt_block == "\n".join(
+            (
+                "- summary: Skapa ett mötesprotokoll.",
+                "- output_description: DOCX-protokoll.",
+                "- key_decisions:",
+                "  - Indata: Mötesljud vid körning.",
+                "- assumptions:",
+                "  - Inga extra fält.",
+            )
+        )
+        assert "behöver granskas" not in prompt_block
+        assert "do-not-render" not in prompt_block
+        assert "Koppla transkriberingsmodellen" not in prompt_block
+
+    def test_confirmed_requirements_proposal_block_returns_none_marker(
+        self,
+    ) -> None:
+        assert render_confirmed_requirements_proposal_prompt_block(None) == "- none"
+
+    def test_confirmed_requirements_proposal_block_returns_none_marker_for_boilerplate(
+        self,
+    ) -> None:
+        payload = RequirementsSummaryPayload.model_validate(
+            {
+                "summary": (
+                    "Jag har tillräckligt med information för att ta fram ett "
+                    "förslag till flödesplan. Granska sammanfattningen innan "
+                    "planen byggs."
+                ),
+                "key_decisions": [],
+                "input_description": "Primär indata vid körning behöver granskas.",
+                "output_description": "Huvudsakligt slutresultat behöver granskas.",
+                "assumptions": [
+                    "Planen ska följa kraven och underlaget i konversationen.",
+                ],
+            }
+        )
+
+        assert render_confirmed_requirements_proposal_prompt_block(payload) == "- none"
