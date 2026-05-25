@@ -24,14 +24,25 @@
     targetType: "assistant";
     onApply: (text: string) => void;
     open?: boolean;
+    /**
+     * Active helper-run id, exposed to the parent so the Apply handler can mark
+     * the run completed (PRD §10). `null` until the first turn returns a run;
+     * reset to `null` whenever the modal opens or closes.
+     */
+    runId?: string | null;
   };
 
-  let { targetId, targetType, onApply, open = $bindable(false) }: Props = $props();
+  let {
+    targetId,
+    targetType,
+    onApply,
+    open = $bindable(false),
+    runId = $bindable<string | null>(null)
+  }: Props = $props();
   const intric = getIntric();
 
   let turns = $state<Turn[]>([]);
   let inputText = $state("");
-  let runId = $state<string | null>(null);
   let isStreaming = $state(false);
   let errorMessage = $state<string | null>(null);
   let didApply = $state(false);

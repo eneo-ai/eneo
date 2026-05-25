@@ -123,6 +123,8 @@
   // model + caller has EDIT on this assistant). Re-checked whenever the edited
   // assistant changes; a pending or failed check leaves the button hidden.
   let isModalOpen = $state(false);
+  // Bound to the modal's active run so the Apply handler can mark it completed.
+  let promptGuideRunId = $state<string | null>(null);
   let promptGuideAvailability = $state<{
     available: boolean;
     disabled_reason?: string | null;
@@ -330,11 +332,26 @@
             ></PromptVersionDialog>
             <PromptGuideModal
               bind:open={isModalOpen}
+              bind:runId={promptGuideRunId}
               targetType="assistant"
               targetId={data.assistant.id}
-              onApply={() => {
-                // Apply wiring lands in step 028; for now just close the modal.
+              onApply={(text) => {
+                // Apply only mutates local editor state (PRD §10): the produced
+                // prompt is written into $update.prompt.text and persisted later
+                // through the normal Save button (intric.assistants.update),
+                // exactly like a manual edit. There is no parallel
+                // apply-and-save path here.
+                $update.prompt.text = text;
+                $update.prompt.description = m.prompt_guide_apply_description({
+                  date: dayjs().format("YYYY-MM-DD HH:mm")
+                });
                 isModalOpen = false;
+                // Mark the Q&A run completed — best-effort, must not block Apply.
+                if (promptGuideRunId) {
+                  data.intric.helpAssistants.runs
+                    .setStatus({ run_id: promptGuideRunId, status: "completed" })
+                    .catch(() => {});
+                }
               }}
             />
           </div>

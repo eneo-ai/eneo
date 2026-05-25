@@ -3145,6 +3145,7 @@
   "prompt_guide_dialog_title": "Promptguide",
   "prompt_guide_dialog_description": "Svara på några frågor så hjälper Promptguide dig att utforma assistentens instruktioner.",
   "prompt_guide_apply_button": "Använd som instruktioner",
+  "prompt_guide_apply_description": "Genererad av Promptguide {date}",
   "prompt_guide_cancel_button": "Avbryt",
   "prompt_guide_loading_message": "Promptguiden förbereder ett förslag...",
   "prompt_guide_streaming_announcement": "Promptguiden skriver svar",
