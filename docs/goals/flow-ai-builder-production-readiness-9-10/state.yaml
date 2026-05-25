@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T106
+active_task: T107
 
 interruptions:
   - id: I001
@@ -9737,7 +9737,7 @@ tasks:
   - id: T106
     type: judge
     assignee: Judge
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Re-rank the next highest score-floor-moving Flow AI Builder tranche after T105 from current repo evidence. Do not implement during this judge task."
     constraints:
@@ -9752,6 +9752,94 @@ tasks:
       - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, and expected score impact."
       - "Explicit explanation of why the selected tranche is the highest score-floor mover rather than the easiest cleanup."
       - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
+    receipt:
+      completed_at: "2026-05-25"
+      repo_reality:
+        head: "649237c20 Type AI Builder edit compiler working state"
+        branch: "feature/refactor-flows-flowai"
+        dirty_status: "dirty only with unrelated workspace files preserved: .devcontainer/docker-compose.yml, .gitignore, AGENTS.md, .devcontainer/devcontainer-lock.json, PRODUCT.md, utvecklingssamtal.mp3"
+        session_goal_tool_note: "get_goal works but still reports stale T081 objective text; no set_goal/update-objective primitive is available in this session. Durable state.yaml remains the source of truth."
+      summary: "Re-ranked the next Flow AI Builder tranche after T105. The first plan selected a broader typed edit-operation IR rewrite, but Claude rejected it as over-scoped and repair-feedback-risky. The revised selected worker is T107: move edit operation structural shape issue construction into the edit model owner while keeping validate_edit_draft as the LLM/user feedback boundary, preserving parse/validation semantics, deleting comment-only requiredness, and adding a no-op modify patch guard."
+      artifact: ".codex/artifacts/flow-ai-builder-t106-next-tranche-ranking.md"
+      selected_worker: T107
+      peer_review:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t106-next-flow-ai-builder-tranche-ranking-20260525T035111Z.md -> GREEN_LIGHT no / MIN_SCORE 6; accepted criticism that a discriminated-union rewrite was over-scoped, repair-feedback-risky, and oversold as a floor mover."
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t106-revised-next-flow-ai-builder-tranche-ranking-20260525T035614Z.md -> GREEN_LIGHT yes / MIN_SCORE 8 after Codex revised to a narrow model-owned shape-issue function consumed by the existing validator."
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t106-next-flow-ai-builder-tranche-final-synthesis-20260525T035756Z.md -> GREEN_LIGHT yes / MIN_SCORE 8; accepted extra edge case that empty/no-op modify patches should produce modify_missing_patch."
+      rejected_or_deferred:
+        - "Discriminated AddStepOperation/ModifyStepOperation/RemoveStepOperation union deferred because it would churn about 128 test construction sites and risks moving useful validator feedback into generic Pydantic parse errors."
+        - "A model_validator parse-stage requiredness rewrite deferred for the same feedback-boundary reason."
+        - "Provider-fragile oneOf/anyOf edit tool schema rewrite rejected; tool schema remains intentionally permissive and backend validation remains authoritative."
+        - "Broad planner/source topology consolidation deferred until a fresh owner-specific audit identifies a concrete coupling to delete or move."
+        - "Live eval replay remains required before final 9/10 but does not address the current internal readability/slop cleanup by itself."
+      swagger_openapi_impact: "None expected. T107 is internal backend edit-mode validation ownership and must not change REST/SSE contracts, OpenAPI schemas, Swagger examples, generated clients, frontend files, database schema or migrations, public request/response models, or API examples."
+      score_impact:
+        strict_floor: 8
+        rationale: "T106 is read-only. Selected T107 can improve Single Source of Truth, Human Readability, Human Reviewability, Test Quality, and AI Slop / Comment / Naming in edit mode, but it must not raise the overall strict floor above 8 by itself."
+
+  - id: T107
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Implement the peer-gated edit-operation structural shape ownership cleanup selected by T106."
+    constraints:
+      - "Stay within Flow AI Builder; do not move to broader Flows work."
+      - "Preserve unrelated dirty files and stage only tranche-owned files."
+      - "Do not split files, reduce LOC for its own sake, or create a new service/manager/helper module."
+      - "Do not convert StepEditOperation to a discriminated union or add Pydantic model_validator parse-stage requiredness in this slice."
+      - "Do not rewrite the LLM edit_flow tool schema with oneOf/anyOf."
+      - "Do not change repair failure-kind semantics, public API, SSE, OpenAPI, Swagger examples, generated clients, frontend, DB/schema, runtime materialization, prompts, or live-eval scripts."
+      - "No broad Any, pyright/type ignores, callback bags, fake interfaces, migration-history comments, task IDs, phase IDs, or tutorial comments."
+    problem: "StepEditOperation currently communicates add/modify/remove required fields through inline comments while executable structural feedback lives in ai_builder_edit_validator.py. This leaves edit-operation shape ownership split between comment-only model hints and validator-local ad hoc branches."
+    evidence:
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_models.py:49 anchor_ref comment says Required for before/after."
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_models.py:77-80 target_ref/placement/add_payload/patch comments encode per-operation requiredness."
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_validator.py:121-168 add operation structural checks."
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_validator.py:187-223 modify operation structural checks."
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_validator.py:270-294 remove operation structural checks."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_models.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_edit_validator.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_models.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_validator.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t107-implementation-summary.md"
+    canonical_owner_decision:
+      edit_operation_shape_owner: "ai_builder_edit_models.py owns typed StepOperationShapeIssue construction and validate_step_operation_shape(...)."
+      feedback_boundary_owner: "ai_builder_edit_validator.py remains the LLM/user feedback boundary and maps model-owned shape issues into SpecValidationResult."
+      semantic_validation_owner: "ai_builder_edit_validator.py continues to own flow-context rules: valid refs, duplicate targets, field references, add payload mechanics, capabilities, and placement anchor existence."
+      what_deletes: "Inline comment-only requiredness on StepPlacement/StepEditOperation fields and validator-local construction of structural shape messages."
+      what_stays: "FlowEditDraft parsing stays permissive enough for validate_edit_draft to return actionable validation feedback instead of generic Pydantic parse errors."
+    acceptance_criteria:
+      - "ai_builder_edit_models.py exposes a typed frozen slots StepOperationShapeIssue and validate_step_operation_shape(...)."
+      - "StepEditOperation and StepPlacement field comments no longer encode Required for / For ... only rules."
+      - "validate_edit_draft(...) uses the model-owned shape validator for structural add/modify/remove shape issues and keeps semantic/context validation locally."
+      - "Existing invalid-shape validator tests keep the same error codes/messages where behavior is intentionally unchanged."
+      - "Empty/no-op modify patches are rejected as modify_missing_patch."
+      - "Model-level tests prove validate_step_operation_shape(...) returns structural issue codes/messages without flow context and returns all applicable issues for multi-defect operations."
+      - "Static guard prevents reintroducing comment-only operation requiredness or task/phase IDs in ai_builder_edit_models.py and touched source/tests."
+      - "No public REST/SSE/OpenAPI/Swagger/generated-client/frontend/database behavior changes."
+    validation_plan:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_edit_models.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_edit_validator.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_edit_normalizer.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_edit_models.py src/intric/flows/ai_builder/ai_builder_edit_validator.py tests/unittests/flows/ai_builder/test_ai_builder_edit_models.py tests/unittests/flows/ai_builder/test_ai_builder_edit_validator.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_edit_models.py src/intric/flows/ai_builder/ai_builder_edit_validator.py tests/unittests/flows/ai_builder/test_ai_builder_edit_models.py tests/unittests/flows/ai_builder/test_ai_builder_edit_validator.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "git diff --check"
+      - "scripts/gate-local/anti_slippage.sh after staging"
+    peer_gates:
+      plan:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t106-next-flow-ai-builder-tranche-ranking-20260525T035111Z.md -> GREEN_LIGHT no / MIN_SCORE 6"
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t106-revised-next-flow-ai-builder-tranche-ranking-20260525T035614Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t106-next-flow-ai-builder-tranche-final-synthesis-20260525T035756Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      implementation:
+        claude_required: true
+        antigravity_if_available: true
+    swagger_openapi_impact: "None expected. T107 is internal backend edit-mode validation ownership and should not require Swagger/OpenAPI/API example updates."
+    expected_score_impact: "Can improve Single Source of Truth, Human Readability, Human Reviewability, Test Quality, and AI Slop / Comment / Naming evidence inside edit mode. Do not raise the overall strict floor above 8 unless post-implementation evidence proves every remaining weak dimension is now 9."
     receipt: null
 
 checks:
