@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T100
+active_task: T101
 
 interruptions:
   - id: I001
@@ -7938,7 +7938,7 @@ tasks:
   - id: T085
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Move planner-union completion provider execution, response normalization, and CompletionMetadata ownership into one minimal planner-completion owner without changing public API or planner prompt behavior."
     allowed_files:
@@ -9298,7 +9298,7 @@ tasks:
   - id: T100
     type: judge
     assignee: Judge
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Re-rank the next highest score-floor-moving Flow AI Builder tranche after T099 from current source evidence. Do not implement during this judge task."
     constraints:
@@ -9330,6 +9330,124 @@ tasks:
       - "Run Claude plan gate; revise until GREEN_LIGHT yes / MIN_SCORE >= 8 or document exact disagreement."
       - "Run Antigravity with --spend-mode auto if available; record quota/tooling failure as missing coverage."
     score_impact: "Read-only judge task. No score increase until the selected worker is implemented, validated, and post-reviewed."
+    receipt:
+      completed_at: "2026-05-25"
+      repo_reality:
+        head: "308a53410 Tighten AI Builder typed event payload boundary"
+        branch: "feature/refactor-flows-flowai"
+        dirty_status: "dirty only with unrelated workspace files preserved: .devcontainer/docker-compose.yml, .gitignore, AGENTS.md, .devcontainer/devcontainer-lock.json, PRODUCT.md, utvecklingssamtal.mp3"
+      artifact: ".codex/artifacts/flow-ai-builder-t100-next-tranche-ranking.md"
+      selected_worker: T101
+      selected_worker_summary: "ProposalSubmissionOwner retry-finalization locality cleanup: outline/edit retry configs keep tool-specific parsing and edit-only repair explicit, but common retry CompiledProposalFinalizationRequest wiring moves to one private owner method."
+      claude_gate:
+        first_pass:
+          artifact: ".codex/artifacts/claude-peer-loop-t100-next-flow-ai-builder-tranche-ranking-20260525T023102Z.md"
+          verdict: "changes_required"
+          green_light: false
+          min_score: 7
+          accepted_feedback:
+            - "Original repair-result cleanup was too small and its canonical ownership framing overreached."
+            - "ToolProcessingResult.has_events and repair user_message event projection have different domain semantics."
+            - "ProposalSubmissionOwner outline/edit retry-finalization duplication is a higher-ROI source-backed seam."
+        final_pass:
+          artifact: ".codex/artifacts/claude-peer-loop-t100-revised-next-flow-ai-builder-tranche-ranking-20260525T023708Z.md"
+          verdict: "green"
+          green_light: true
+          min_score: 8
+          accepted_feedback:
+            - "Pin helper signature to invocation, tool_name, compiled, request_id, and usage_tracker."
+            - "Fix phantom test reference to test_outline_retry_does_not_preserve_failed_attempt_step_count."
+            - "Make static guard walk retry-config method bodies."
+            - "Require exactly one retry-finalization helper definition and finalization-request occurrence count drop from five to four."
+      antigravity_gate:
+        artifact: ".codex/artifacts/antigravity-peer-loop-t100-next-tranche-final-synthesis-20260525T023905Z.md"
+        verdict: "green"
+        green_light: true
+        min_score: 8
+        added_requirements:
+          - "Add _finalize_retry_compiled_proposal to PROPOSAL_SUBMISSION_METHODS in test_ai_builder_import_ownership.py."
+      rejected_or_deferred:
+        - "Original repair-result Any/Protocol cleanup deferred as useful but too small to outrank active-submission duplication."
+        - "Broad processor or file split rejected because the next worker must remove real ownership duplication, not optimize LOC."
+        - "Live eval replay remains required before final 9/10 but is proof-only for this internal readability tranche."
+        - "Full-source Pyright baseline remains a broader platform blocker outside the current Flow AI Builder-only instruction."
+      score_impact:
+        strict_floor: 8
+        rationale: "T100 is read-only. Selected T101 can improve active-submission maintainability/readability/SSoT, but the broader strict floor remains 8 until implementation and post-review evidence prove more."
+
+  - id: T101
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Implement the peer-gated ProposalSubmissionOwner retry-finalization locality cleanup selected by T100."
+    constraints:
+      - "Stay within Flow AI Builder; do not move to broader Flows work."
+      - "Preserve unrelated dirty files and stage only tranche-owned files."
+      - "Do not split files or reduce LOC for its own sake."
+      - "Do not add a new file, public class, protocol, interface, manager/service/helper module, strategy table, callback bag, broad context dict, Callable[..., Any], or **kwargs: Any."
+      - "Do not change retry budgets, prompts, provider calls, telemetry semantics, selected-step model preflight, active first-attempt finalization, forced retry wrapper behavior, public API/OpenAPI/Swagger/generated clients, frontend, DB, migrations, or diagnostics schema."
+    problem: "ProposalSubmissionOwner has two near-duplicate retry tool-config closures. Outline retry and edit retry must keep tool-specific parsing and edit-only description repair explicit, but both duplicate retry CompiledProposalFinalizationRequest wiring."
+    evidence:
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:445-486 outline retry config"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:488-551 edit retry config"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:463-479 outline retry finalization request"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:528-544 edit retry finalization request"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:410-430 scoped model preflight finalization path intentionally out of scope"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:688-709 first-attempt outline finalization path intentionally out of scope"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py:921-936 first-attempt edit finalization path intentionally out of scope"
+    canonical_owner_decision:
+      concept: "Retry-generated compiled proposal finalization"
+      current_owner: "Duplicated inside ProposalSubmissionOwner._outline_flow_retry_config and _edit_flow_retry_config"
+      proposed_owner: "One private ProposalSubmissionOwner._finalize_retry_compiled_proposal method"
+      what_moves: "Only common retry CompiledProposalFinalizationRequest construction and call to _compiled_proposal_finalizer"
+      what_stays: "Tool-specific parsing, edit-only description repair, and non-retry finalization paths"
+      why: "A future retry-finalized metadata/tool-call/resource/usage field change has one owner while outline/edit semantics stay readable."
+    helper_signature:
+      name: "_finalize_retry_compiled_proposal"
+      required_keyword_only_fields:
+        - "invocation: ToolRetryInvocation"
+        - "tool_name: str"
+        - "compiled: CompiledProposal"
+        - "request_id: str"
+        - "usage_tracker: ProposalTurnTelemetry | None"
+    acceptance_criteria:
+      - "_outline_flow_retry_config and _edit_flow_retry_config still return ToolRetryConfig with a one-argument ToolRetryInvocation process callback."
+      - "Outline retry still calls process_outline_arguments with the same context and returns non-compiled ToolProcessingResult directly."
+      - "Edit retry still calls process_edit_arguments, still runs repair_compiled_edit_description_if_needed only for compiled edit proposals, and returns non-compiled ToolProcessingResult directly."
+      - "Both retry paths use _finalize_retry_compiled_proposal for CompiledProposalFinalizationRequest construction."
+      - "Retry config methods do not directly construct CompiledProposalFinalizationRequest."
+      - "Active first-attempt, scoped model preflight, and forced retry wrapper finalization paths are unchanged."
+      - "CompiledProposalFinalizationRequest occurrences in ai_builder_proposal_submission.py drop from five to four."
+      - "test_ai_builder_import_ownership.py adds a method-body AST guard and PROPOSAL_SUBMISSION_METHODS includes _finalize_retry_compiled_proposal."
+    tests:
+      - "test_ai_builder_proposal_submission.py: outline retry compiled proposal reaches finalize_compiled_proposal with OUTLINE_FLOW_TOOL_NAME, invocation fields, request_id, resource_catalog, flow, and metadata_tool_call=None."
+      - "test_ai_builder_proposal_submission.py: edit retry compiled proposal reaches finalize_compiled_proposal with EDIT_FLOW_TOOL_NAME and the repaired compiled proposal."
+      - "Existing test_outline_retry_does_not_preserve_failed_attempt_step_count remains green."
+      - "Existing test_edit_flow_retry_config_carries_invocation_context remains green."
+      - "Existing test_handle_edit_flow_repairs_compiled_edit_before_finalization remains green."
+      - "Existing test_handle_edit_flow_description_repair_records_tokens_without_repair_attempt remains green."
+      - "test_ai_builder_import_ownership.py static guard checks retry-config method bodies and helper uniqueness."
+    validation_plan:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check touched T101 files"
+      - "cd backend && uv run ruff format --check touched T101 files"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "git diff --check"
+      - "scripts/gate-local/anti_slippage.sh after staging"
+    peer_gates:
+      plan:
+        claude: ".codex/artifacts/claude-peer-loop-t100-revised-next-flow-ai-builder-tranche-ranking-20260525T023708Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t100-next-tranche-final-synthesis-20260525T023905Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      implementation:
+        claude_required: true
+        antigravity_if_available: true
+    expected_score_impact: "Can improve active-submission maintainability/readability/SSoT evidence, but should not raise the broader strict floor above 8 by itself."
     receipt: null
 
 checks:
