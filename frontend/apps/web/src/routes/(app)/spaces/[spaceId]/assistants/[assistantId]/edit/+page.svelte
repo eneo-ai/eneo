@@ -3,6 +3,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
 
   import { Button, Input, Tooltip } from "@intric/ui";
+  import { IconSparkles } from "@intric/icons/sparkles";
   import { afterNavigate, beforeNavigate } from "$app/navigation";
 
   import { initAssistantEditor } from "$lib/features/assistants/AssistantEditor.js";
@@ -15,6 +16,7 @@
   import SelectKnowledgeV2 from "$lib/features/knowledge/components/SelectKnowledgeV2.svelte";
   import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
+  import PromptGuideModal from "$lib/features/prompt-guide/components/PromptGuideModal.svelte";
   import dayjs from "dayjs";
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
   import { page } from "$app/state";
@@ -114,6 +116,51 @@
     // For regular models, show changes if any kwargs changed
     return true;
   });
+
+  // Prompt Guide (help-assistants): an availability-gated toolbar action. The
+  // availability endpoint is the single source of truth for whether the helper
+  // is usable here (role assigned + enabled + visible + a usable completion
+  // model + caller has EDIT on this assistant). Re-checked whenever the edited
+  // assistant changes; a pending or failed check leaves the button hidden.
+  let isModalOpen = $state(false);
+  let promptGuideAvailability = $state<{
+    available: boolean;
+    disabled_reason?: string | null;
+  } | null>(null);
+
+  $effect(() => {
+    const targetId = data.assistant.id;
+    let cancelled = false;
+    promptGuideAvailability = null;
+    data.intric.helpAssistants.runs
+      .availability({ kind: "prompt_guide", target_id: targetId })
+      .then((result) => {
+        if (!cancelled) promptGuideAvailability = result;
+      })
+      .catch(() => {
+        // Fail closed: don't offer an action the backend would reject.
+        if (!cancelled) promptGuideAvailability = null;
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  function promptGuideDisabledTooltip(reason: string | null | undefined): string {
+    switch (reason) {
+      case "role_disabled":
+        return m.prompt_guide_disabled_role_disabled();
+      case "role_not_visible":
+        return m.prompt_guide_disabled_role_not_visible();
+      case "no_completion_model":
+        return m.prompt_guide_disabled_no_completion_model();
+      case "no_edit_rights":
+        return m.prompt_guide_disabled_no_edit_rights();
+      case "no_assignment":
+      default:
+        return m.prompt_guide_disabled_no_assignment();
+    }
+  }
 
   beforeNavigate((navigate) => {
     if ($currentChanges.hasUnsavedChanges && !confirm(m.unsaved_changes_warning())) {
@@ -252,7 +299,24 @@
           fullWidth
           let:aria
         >
-          <div slot="toolbar" class="text-secondary">
+          <div slot="toolbar" class="text-secondary flex items-center gap-1">
+            {#if promptGuideAvailability}
+              <Tooltip
+                text={promptGuideAvailability.available
+                  ? m.prompt_guide_button_tooltip()
+                  : promptGuideDisabledTooltip(promptGuideAvailability.disabled_reason)}
+              >
+                <Button
+                  variant="simple"
+                  padding="icon-leading"
+                  disabled={!promptGuideAvailability.available}
+                  on:click={() => (isModalOpen = true)}
+                >
+                  <IconSparkles />
+                  {m.prompt_guide_button()}
+                </Button>
+              </Tooltip>
+            {/if}
             <PromptVersionDialog
               title={m.prompt_history_for({ name: $resource.name })}
               loadPromptVersionHistory={() => {
@@ -264,6 +328,15 @@
                 $update.prompt.description = `Restored prompt from ${restoredDate}`;
               }}
             ></PromptVersionDialog>
+            <PromptGuideModal
+              bind:open={isModalOpen}
+              targetType="assistant"
+              targetId={data.assistant.id}
+              onApply={() => {
+                // Apply wiring lands in step 028; for now just close the modal.
+                isModalOpen = false;
+              }}
+            />
           </div>
           <textarea
             rows={4}
