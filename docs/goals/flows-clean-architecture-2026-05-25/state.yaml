@@ -110,7 +110,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T006
+active_task: T007
 
 tasks:
   - id: T001
@@ -815,7 +815,7 @@ tasks:
   - id: T006
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Before runtime contract refactor, decide whether /input-policy/ can be deleted; keep it only if a real caller cannot use /run-contract/, and then only as a pure projection."
     inputs:
@@ -833,22 +833,144 @@ tasks:
       - "Exact Worker objective"
       - "allowed_files"
       - "contract tests required"
-    receipt: null
+    receipt:
+      result: done
+      decision: "Delete /input-policy/ in T007 and make remaining /files/ upload validation derive from the published runtime input spec."
+      summary: "Approved T007 as the published-runtime-contract consolidation slice. No first-party web caller uses /input-policy/; remaining references are generated SDK, docs, and tests. The endpoint currently reads mutable draft flow.steps through FlowFileUploadService.get_input_policy, while /run-contract/ already reads immutable flow_versions.definition_json and exposes runtime input policy for all runtime-input steps. T007 must delete the public endpoint and move the /files/ compatibility upload shortcut to the published runtime input spec, not preserve draft-derived upload policy."
+      decision_artifact: ".codex/artifacts/flows-clean-architecture-t006-input-policy-judge-brief.md"
+      evidence:
+        - "backend/src/intric/flows/api/flow_upload_router.py:47"
+        - "backend/src/intric/flows/api/flow_upload_router.py:126"
+        - "backend/src/intric/flows/api/flow_upload_router.py:179"
+        - "backend/src/intric/flows/flow_run_contract_service.py:73"
+        - "backend/src/intric/flows/flow_run_contract_service.py:269"
+        - "backend/src/intric/flows/flow_run_contract_models.py:139"
+        - "backend/src/intric/flows/flow_run_contract_models.py:274"
+        - "backend/src/intric/flows/flow_file_upload_service.py:147"
+        - "backend/src/intric/flows/flow_file_upload_service.py:193"
+        - "backend/src/intric/flows/flow_file_upload_service.py:269"
+        - "backend/src/intric/flows/flow_file_upload_service.py:284"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:307"
+        - "frontend/packages/intric-js/src/endpoints/flows.js:307"
+        - "frontend/apps/docs-site/src/content/guides/flows-api-guide.mdx:284"
+      canonical_upload_policy_derivation:
+        owner: "flow_run_step_inputs.RuntimeStepInputSpec built from parse_published_runtime_steps(flow_versions.definition_json)."
+        worker_rule: "FlowFileUploadService.upload_file_for_flow must use its existing flow_version_repo dependency, parse the published snapshot, build RuntimeStepInputSpec values, select the first published flow_input runtime spec, and pass a narrowed internal FlowFileInputPolicy to _upload_with_policy."
+        forbidden_paths:
+          - "Do not inject FlowRunContractService into FlowFileUploadService."
+          - "Do not derive upload validation from FlowRunContractPublic or any public Pydantic response model."
+          - "Do not leave draft flow.steps as a runtime upload policy owner."
+      consolidation_effect:
+        reused_existing_owner:
+          - "FlowRunContractService / published_definition remains public runtime contract owner."
+          - "flow_run_step_inputs.RuntimeStepInputSpec becomes the shared typed runtime input policy calculation for contract discovery and upload validation."
+          - "FlowFileUploadService remains the upload IO adapter."
+        logic_moved_from:
+          - "Draft-step first-input policy in FlowFileUploadService.get_input_policy."
+        logic_deleted:
+          - "GET /api/v1/flows/{id}/input-policy/."
+          - "FlowInputPolicyPublic."
+          - "FlowRuntimePathsPublic.input_policy."
+          - "Generated SDK inputPolicy endpoint and generated OpenAPI operation/schema surface."
+          - "Draft-only helpers _first_flow_input_step, _accepted_mimetypes_for_input_type, _recommended_run_payload_for_input_type, _build_policy, and get_input_policy."
+        duplicate_path_removed:
+          - "Separate public runtime input-policy discovery endpoint."
+          - "Draft-derived runtime upload policy path for /files/."
+        new_code_added:
+          - "Deepen RuntimeStepInputSpec with runtime_input and max_file_size_bytes."
+          - "Add a typed selector for the first published flow_input runtime spec if needed."
+        why_existing_owners_were_insufficient: "Existing /input-policy/ owner reads mutable draft state and exposes only the first flow_input step; /run-contract/ already exposes the immutable published runtime input policy and supports multi-step runtime inputs."
+        guard_test_preventing_duplicate_logic_from_returning:
+          - "OpenAPI absence guard for /input-policy/ and FlowInputPolicyPublic."
+          - "Generated SDK absence guard for inputPolicy."
+          - "Runtime paths must not expose input_policy."
+          - "Behavior tests proving draft edits after publish do not change /files/ validation until republish."
+          - "Same-calculation test proving /run-contract/ and /files/ derive max files, accepted mimetypes, and max file size from RuntimeStepInputSpec."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: null
+      deferred_merge_or_consolidate:
+        - concept: "/api/v1/flows/{id}/files/ compatibility upload shortcut"
+          owner: "FlowFileUploadService"
+          reason: "Documented public shortcut for the first published flow_input runtime step; keep temporarily only as a thin published-snapshot-backed compatibility wrapper."
+          deletion_trigger: "Docs, generated client, runtime examples, and consumer tests converge on /steps/{step_id}/runtime-files/ with step ids from /run-contract/."
+          test_or_preflight: "T007 behavior tests must prove /files/ uses the published RuntimeStepInputSpec, not draft flow.steps."
+      commands:
+        - cmd: "git status --short --branch"
+          status: pass
+        - cmd: "rg -n \"inputPolicy|input-policy|get_flow_input_policy|input_policy\" frontend/apps/web/src frontend/apps/web/messages -g '!**/node_modules/**' -g '!**/.svelte-kit/**'"
+          status: pass
+          output: "No first-party web app caller; rg exit 1."
+        - cmd: "rg -n \"inputPolicy|input-policy|get_flow_input_policy|input_policy\" frontend/packages/intric-js/src frontend/apps/docs-site/src backend/tests -g '!**/node_modules/**' -g '!**/.svelte-kit/**'"
+          status: pass
+          output: "References are generated SDK, docs, and tests; no app caller proving continued need."
+        - cmd: "rg -n \"async def get_input_policy|def _build_policy|async def upload_file_for_flow|async def upload_runtime_file_for_step|runtime_paths.*input_policy|FlowInputPolicyPublic\" backend/src/intric/flows -g '*.py'"
+          status: pass
+          output: "Found current endpoint/model/draft-policy owner and the existing published snapshot runtime upload path."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t006-input-policy --phase review --iteration 1 --timeout-seconds 1200 --require-green --required-min-score 8 ..."
+          status: fail
+          output: "GREEN_LIGHT no; valid blocker: T006 had not pinned the canonical /files/ upload-policy derivation."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t006-input-policy --phase review --iteration 2 --timeout-seconds 1200 --require-green --required-min-score 8 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8 after choosing RuntimeStepInputSpec published-snapshot derivation and test boundaries."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t006-input-policy-synthesis --phase synthesis --iteration 1 --timeout-seconds 1200 --spend-mode auto --require-green --required-min-score 8 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 9. Approved T007 and noted a pre-existing service-key integration permission failure."
+        - cmd: "cd backend && uv run pytest tests/integration/test_api_key_service_keys.py::test_service_key_space_scoped_published_runtime_surfaces_work_and_ai_builder_stays_denied -q"
+          status: fail
+          output: "Verified Antigravity's warning: fails before T007 behavior at _create_flow with 403 insufficient_tenant_permission."
+      peer_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t006-input-policy-deletion-judge-20260525T214425Z.md"
+        - ".codex/artifacts/claude-peer-loop-t006-input-policy-deletion-judge-revised-20260525T215036Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t006-input-policy-deletion-antigravity-synthesis-20260525T215356Z.md"
+      next_task: T007
 
   - id: T007
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: medium
-    objective: "Make the typed published Flow runtime contract / published definition the single runtime policy owner for input policy, upload validation, graph-without-run behavior, and review/output descriptors; add schema-version handling and a guard that runtime-facing code does not read mutable draft state."
-    allowed_files: []
-    verify: []
+    objective: "Delete /input-policy/ and make the published runtime input spec the single owner for run-contract input discovery and /files/ upload validation."
+    allowed_files:
+      - "backend/src/intric/flows/api/flow_upload_router.py"
+      - "backend/src/intric/flows/api/flow_assembler.py"
+      - "backend/src/intric/flows/api/flow_models.py"
+      - "backend/src/intric/flows/flow_file_upload_service.py"
+      - "backend/src/intric/flows/flow_run_contract_service.py"
+      - "backend/src/intric/flows/flow_run_contract_models.py"
+      - "backend/src/intric/flows/flow_run_step_inputs.py"
+      - "backend/tests/unittests/flows/test_flow_upload_router.py"
+      - "backend/tests/unittests/flows/test_flow_file_upload_service.py"
+      - "backend/tests/unittests/flows/test_flow_run_contract_service.py"
+      - "backend/tests/unit/test_flow_openapi_contract.py"
+      - "backend/tests/unit/test_server_startup_imports.py"
+      - "backend/tests/integration/test_api_key_service_keys.py"
+      - "backend/tests/integration/flows/test_flow_consumer_api_contract.py"
+      - "frontend/packages/intric-js/src/endpoints/flows.js"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "frontend/apps/docs-site/src/content/guides/flows-api-guide.mdx"
+      - "frontend/apps/docs-site/src/content/docs/flows.mdx"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    verify:
+      - "git status --short --branch"
+      - "rg -n \"inputPolicy|input-policy|get_flow_input_policy|FlowInputPolicyPublic|input_policy\" backend/src/intric/flows backend/tests frontend/packages/intric-js/src frontend/apps/docs-site/src frontend/apps/web/src -g '!**/node_modules/**' -g '!**/.svelte-kit/**'"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_upload_router.py tests/unittests/flows/test_flow_file_upload_service.py tests/unittests/flows/test_flow_run_contract_service.py tests/unit/test_flow_openapi_contract.py tests/unit/test_server_startup_imports.py tests/integration/test_api_key_service_keys.py tests/integration/flows/test_flow_consumer_api_contract.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/api/flow_upload_router.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_models.py src/intric/flows/flow_file_upload_service.py src/intric/flows/flow_run_contract_service.py src/intric/flows/flow_run_contract_models.py src/intric/flows/flow_run_step_inputs.py tests/unittests/flows/test_flow_upload_router.py tests/unittests/flows/test_flow_file_upload_service.py tests/unittests/flows/test_flow_run_contract_service.py tests/unit/test_flow_openapi_contract.py tests/unit/test_server_startup_imports.py tests/integration/test_api_key_service_keys.py tests/integration/flows/test_flow_consumer_api_contract.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/api/flow_upload_router.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_models.py src/intric/flows/flow_file_upload_service.py src/intric/flows/flow_run_contract_service.py src/intric/flows/flow_run_contract_models.py src/intric/flows/flow_run_step_inputs.py tests/unittests/flows/test_flow_upload_router.py tests/unittests/flows/test_flow_file_upload_service.py tests/unittests/flows/test_flow_run_contract_service.py tests/unit/test_flow_openapi_contract.py tests/unit/test_server_startup_imports.py tests/integration/test_api_key_service_keys.py tests/integration/flows/test_flow_consumer_api_contract.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/api/flow_upload_router.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_models.py src/intric/flows/flow_file_upload_service.py src/intric/flows/flow_run_contract_service.py src/intric/flows/flow_run_contract_models.py src/intric/flows/flow_run_step_inputs.py"
+      - "cd frontend/packages/intric-js && bun test update.test.js"
+      - "cd frontend/packages/intric-js && bun run check"
+      - "git diff --check"
     stop_if:
       - "T006 has no decision."
       - "Need product/API decision about deleting /input-policy/."
       - "Behavior cannot be covered with contract lifecycle tests."
       - "Published versions missing step ids require a data migration design before fallback deletion."
       - "The implementation creates a second runtime contract/input-policy owner instead of deepening the published contract owner."
+      - "A real first-party caller is found that cannot use /run-contract/."
+      - "Deleting /input-policy/ requires deleting /files/ or changing service-key product policy."
+      - "/files/ upload validation cannot move off mutable draft flow.steps within allowed_files."
+      - "The generated client cannot be updated without unrelated API churn."
+      - "The worker needs Flow AI Builder cleanup, schema migrations, retention, service-key identity, or step identity changes."
     receipt: null
 
   - id: T008
