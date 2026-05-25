@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T110
+active_task: T111
 
 interruptions:
   - id: I001
@@ -10071,7 +10071,7 @@ tasks:
   - id: T110
     type: judge
     assignee: Judge
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Re-rank the next highest-score-moving Flow AI Builder tranche after T109 from current repo evidence. Do not implement during this judge task."
     constraints:
@@ -10095,6 +10095,83 @@ tasks:
       - "Selected next tranche or explicit recommendation to stop AI Builder implementation for now if remaining work is diminishing returns."
       - "Canonical owner, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, expected score impact, and Swagger/OpenAPI impact for the selected worker."
       - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
+    receipt:
+      completed_at: "2026-05-25T05:25:00+02:00"
+      repo_reality:
+        head: "fbc83e2b7 Own AI Builder requirements prompt rendering"
+        branch: "feature/refactor-flows-flowai"
+        dirty_status: "dirty only with unrelated workspace files preserved: .devcontainer/docker-compose.yml, .gitignore, AGENTS.md, .devcontainer/devcontainer-lock.json, PRODUCT.md, utvecklingssamtal.mp3"
+        session_goal_tool: "get_goal worked but still contained stale T081 objective text; no update-objective primitive is available. Durable state.yaml remained source of truth."
+      summary: "Re-ranked the next Flow AI Builder work after T109 and selected T111 as a read-only evidence gate, not an implementation score-mover. T111 must rerun the current-head authenticated five-case live eval when local service/credentials allow, then produce a falsifiable per-dimension score-floor audit for every current 8-scored dimension. The audit must route the next real score-moving worker or document real blockers under the strict 9/10 completion rule. This avoids doing another small helper/type cleanup as diminishing-return polish before proving what still blocks 9."
+      artifact: ".codex/artifacts/flow-ai-builder-t110-next-tranche-ranking.md"
+      selected_worker: T111
+      peer_review:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t110-next-flow-ai-builder-tranche-ranking-20260525T051525Z.md -> GREEN_LIGHT no / MIN_SCORE 7; accepted blockers that T111 was framed inconsistently as a score-mover, audit criteria were too soft, AI_Slop_Comment_Naming_Quality lacked an explicit candidate, live-eval freshness was under-justified, and stop conditions did not anchor tightly enough to the strict completion rule."
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t110-next-flow-ai-builder-tranche-ranking-iteration-2-20260525T052027Z.md -> GREEN_LIGHT yes / MIN_SCORE 8 after reframing T111 as a gate, adding per-dimension falsifiable audit criteria, ranking AI-slop/comment/naming explicitly, listing T081-T109 owner changes, and tightening stop conditions."
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t110-next-flow-ai-builder-tranche-ranking-synthesis-20260525T052234Z.md -> GREEN_LIGHT yes / MIN_SCORE 8; quota available. Accepted T111 and required the audit to explicitly analyze loose available_models/available_kbs dict-shaped boundary leakage and avoid treating future RequirementsSummaryPayload envelope work as internal-only because it has SSE/OpenAPI/generated-client impact."
+      rejected_or_deferred:
+        - "Immediate resource-list typing cleanup is real but local; T111 must decide whether the loose available_models/available_kbs boundary is a concrete blocker for Maintainability/Human Readability after current-head output proof."
+        - "Immediate _requirements test-helper dedupe is useful cleanup but likely diminishing returns and does not move the score floor by itself."
+        - "RequirementsSummaryPayload envelope is deferred unless T111 finds renderer/schema drift. If selected later, it must include Swagger/OpenAPI examples and generated-client updates because requirements summary events are public."
+        - "Broad topology/readability refactor remains rejected without a concrete owner move, deletion, merge, or boundary cleanup proven by T111 evidence."
+        - "Bounded AI-slop/comment/naming cleanup is not cosmetic by default; T111 must decide whether examples such as legacy has_new_evidence wording are stale compatibility/topology debt that should be fixed with boundary cleanup."
+      swagger_openapi_impact: "None for T110/T111 gate itself. T111 must record Swagger/OpenAPI no-impact unless the subsequent selected worker changes public REST/SSE/OpenAPI/generated-client-visible contracts. Candidate RequirementsSummaryPayload envelope would have public SSE/OpenAPI/generated-client impact and must not be scoped as internal-only."
+      score_impact:
+        strict_floor: 8
+        rationale: "T110 is read-only planning. It does not raise the score floor. It prevents score inflation and routes the next worker through current-head live-output proof plus falsifiable per-dimension evidence."
+
+  - id: T111
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Run the peer-gated current-head Flow AI Builder live-eval and score-floor audit gate selected by T110, then route the next actual score-moving worker or document real blockers."
+    constraints:
+      - "Stay within Flow AI Builder; do not move to broader Flows work."
+      - "Do not edit production source during T111."
+      - "Preserve unrelated dirty files and avoid staging them."
+      - "T111 is a gate, not an implementation score-mover; do not raise the strict floor without per-dimension evidence."
+      - "Do not split files, perform resource typing cleanup, dedupe test helpers, or do AI-slop cleanup during T111."
+      - "Do not update Swagger/OpenAPI/examples during T111 because the gate should not change public contracts."
+      - "If a later selected worker changes public REST/SSE/OpenAPI/generated-client-visible contracts, include Swagger/OpenAPI docs/examples and generated client updates in that worker."
+    inputs:
+      - "T110 receipt and ranking artifact"
+      - ".codex/artifacts/flow-ai-builder-t110-next-tranche-ranking.md"
+      - ".codex/artifacts/claude-peer-loop-t110-next-flow-ai-builder-tranche-ranking-iteration-2-20260525T052027Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t110-next-flow-ai-builder-tranche-ranking-synthesis-20260525T052234Z.md"
+      - ".codex/artifacts/flow-ai-builder-live-eval.md"
+      - "backend/scripts/flow_ai_builder_live_eval.py"
+      - "Current source under backend/src/intric/flows/ai_builder"
+    acceptance_criteria:
+      - "Current repo reality is recorded: status, HEAD, active board task, dirty files."
+      - "Authenticated five-case live eval is attempted with env-only credentials if local service is available; exact blocker is recorded if service/credentials are unavailable."
+      - "Eval result is appended to .codex/artifacts/flow-ai-builder-live-eval.md without secrets, raw prompts, full conversations, file contents, plan JSON dumps, or LLM payloads."
+      - "A primary audit artifact .codex/artifacts/flow-ai-builder-t111-score-floor-audit.md is created."
+      - "The audit contains a falsifiable table for Maintainability, Clean_Architecture, Separation_of_Concerns, Human_Readability, and AI_Slop_Comment_Naming_Quality with current score, target 9 anchor, verdict, concrete evidence, smallest next worker scope, and why that worker is not LOC reduction or polish."
+      - "The audit ranks resource-list typing, requirements version envelope, duplicated requirements test helpers, bounded AI-slop/comment/naming cleanup, broad topology/readability, live-output product fix if eval fails, and final stop/pause recommendation."
+      - "The audit explicitly analyzes loose available_models/available_kbs dictionary boundary leakage across service, planner request preparation, resource catalog, and context construction."
+      - "If the eval fails, T111 triages environment/service noise versus real current-head regression and routes to the smallest canonical owner before broader refactor."
+      - "Claude reviews the T111 audit/next recommendation and returns GREEN_LIGHT yes / MIN_SCORE >= 8, or exact disagreement is documented."
+      - "Antigravity runs with --spend-mode auto if available; quota/tooling failure is recorded as missing coverage, not pass."
+    verify:
+      - "git status --short --branch"
+      - "git log --oneline --decorate -5"
+      - "git diff --name-only"
+      - "cd backend && ENEO_API_KEY=\"$ENEO_LOCAL_API_KEY\" API_KEY=\"$ENEO_LOCAL_API_KEY\" ENEO_FLOW_TEST_SPACE_ID=\"$ENEO_FLOW_TEST_SPACE_ID\" uv run python scripts/flow_ai_builder_live_eval.py, if local API service is available"
+      - "ruby -e \"require 'yaml'; YAML.load_file('docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml'); puts 'yaml ok'\""
+    peer_gates:
+      plan:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t110-next-flow-ai-builder-tranche-ranking-20260525T051525Z.md -> GREEN_LIGHT no / MIN_SCORE 7"
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t110-next-flow-ai-builder-tranche-ranking-iteration-2-20260525T052027Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t110-next-flow-ai-builder-tranche-ranking-synthesis-20260525T052234Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      closure:
+        claude_required: true
+        antigravity_if_available: true
+    stop_if:
+      - "Live eval fails in a way that points to multiple possible owners and needs product decision."
+      - "Local service is unavailable and cannot be safely started or reached in this session; record exact blocker and continue with source-evidence audit if possible."
+      - "The audit concludes remaining AI Builder-only work is not score-moving enough. In that case document a real blocker per still-below-9 dimension under the strict completion rule; do not mark the broader goal complete or switch to broader Flows without explicit user approval."
+    expected_score_impact: "T111 can increase confidence in Normal-User Output Quality and choose the next real score-moving worker. It should not automatically raise the strict overall floor above 8."
     receipt: null
 
 checks:
@@ -10103,9 +10180,15 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T109 completed with Claude and Antigravity green. Broader goal remains active with strict floor 8/10 and must not be marked complete. T110 is active as a read-only next-tranche ranking task."
-    task: T109
+    result: "T110 completed with Claude and Antigravity green. Broader goal remains active with strict floor 8/10 and must not be marked complete. T111 is active as a read-only live-eval plus score-floor audit gate."
+    task: T110
     commands:
+      - "git status --short --branch -> branch feature/refactor-flows-flowai ahead 31; only unrelated workspace files plus state.yaml board update dirty"
+      - "ruby -e \"require 'yaml'; YAML.load_file('docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml'); puts 'yaml ok active=T111 T110=completed T111=active'\" -> passed"
+      - "Claude T110 iteration 1 -> GREEN_LIGHT no / MIN_SCORE 7"
+      - "Claude T110 iteration 2 -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity T110 synthesis -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "git diff --check -> passed"
       - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_requirements_state.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py tests/unittests/flows/ai_builder/test_ai_builder_planner_pattern_signals.py tests/unittests/flows/ai_builder/test_ai_builder_plan_quality_critic.py -q -> 144 passed"
       - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_prompts.py tests/unittests/flows/ai_builder/test_ai_builder_conditional_prompt.py tests/unittests/flows/ai_builder/test_discovery_flow.py -q -> 170 passed"
       - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_planner.py tests/unittests/flows/ai_builder/test_ai_builder_planner_send_message.py -q -> 39 passed"
