@@ -35,6 +35,25 @@ rules:
   compatibility_paths_require_deletion_trigger: true
   tests_removed_with_removed_behavior_only: true
   no_repo_wide_dead_code_cleanup: true
+  reuse_before_inventing_required: true
+  duplicate_logic_requires_canonical_owner: true
+  new_parallel_paths_require_deletion_plan: true
+  canonical_owner_search_required: true
+  new_code_requires_owner_insufficiency_reason: true
+  reuse_through_typed_owners_not_generic_helpers: true
+  worker_consolidation_effect_required: true
+
+worker_receipt_requirements:
+  consolidation_effect:
+    - "Reused existing owner"
+    - "Logic moved from"
+    - "Logic deleted"
+    - "Duplicate path removed"
+    - "New code added"
+    - "Why existing owners were insufficient"
+    - "Guard/test preventing duplicate logic from returning"
+    - "Net Flow logic surface area: reduced | preserved | increased"
+    - "If increased, why the increase is necessary"
 
 agents:
   scout: installed
@@ -91,7 +110,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T023
+active_task: T024
 
 tasks:
   - id: T001
@@ -486,9 +505,9 @@ tasks:
   - id: T023
     type: scout
     assignee: Scout
-    status: active
+    status: done
     reasoning_hint: medium
-    objective: "Inventory Flow dead code, legacy compatibility paths, obsolete fallback behavior, and tests that only protect compatibility slated for deletion."
+    objective: "Inventory Flow dead code, duplicate/scattered logic, legacy compatibility paths, obsolete fallback behavior, and tests that only protect compatibility slated for deletion."
     inputs:
       - "backend/src/intric/flows"
       - "backend/tests/unittests/flows"
@@ -502,35 +521,100 @@ tasks:
       - "No Flow AI Builder cleanup unless a Flow runtime/authoring file directly depends on the same contract."
       - "Do not delete anything in this task."
       - "Classify dead code separately from legacy-but-live code."
+      - "Classify duplicate/scattered reusable logic separately from dead code and compatibility behavior."
     expected_output:
       - "Zero-reference dead-code candidates with search/AST evidence."
+      - "Duplicate or parallel implementations with current locations, behavior differences, proposed canonical owner, and merge/delete path."
+      - "For duplicated/scattered Flow concepts: Concept | Current locations | Behavior differences | Canonical owner | Merge/delete path."
       - "Legacy-but-live compatibility paths with owner, reason, persisted-data or caller evidence, and deletion trigger."
       - "Fallback paths that require preflight queries before deletion."
       - "Tests that only protect compatibility behavior slated for deletion."
-      - "Recommended deletion Worker candidates, grouped by reviewable PR."
-    receipt: null
+      - "Candidates for merge/consolidation, not only deletion."
+      - "Recommended deletion or consolidation Worker candidates, grouped by reviewable PR."
+    receipt:
+      result: done
+      summary: "Completed read-only Flow inventory for dead code, duplicate/scattered reusable logic, legacy compatibility paths, hidden fallback behavior, compatibility-only tests, and consolidation candidates. Tightened the inventory and board after peer review so runtime compatibility preflight must include immutable published snapshots in flow_versions.definition_json, test deletion needs line-level boundaries, and T025 requires clean-checkout verification when unrelated dirty/untracked files are present."
+      artifact: ".codex/artifacts/flows-clean-architecture-t023-inventory.md"
+      key_findings:
+        - "delete_now candidates for Judge review: FlowRepository.get_step_result_by_order and uncalled normalize_legacy_config plus its export/tests."
+        - "merge_or_consolidate candidates: run-contract/input-policy ownership, step-chain typed IO rules, output behavior/output-format policy, and frontend generated-contract fallbacks."
+        - "needs_preflight candidates: published step identity fallback to draft rows, template_file_id compatibility, live legacy HTTP config shape, legacy prompt bindings, legacy form schema tolerance, and remaining Flow API error-shape cleanup."
+        - "keep_temporarily candidates: /input-policy/ public/generated surface until T006/T007 and permission alias tests until global permission data ownership is decided."
+      source_evidence:
+        - "backend/src/intric/flows/infrastructure/flow_repo.py:635"
+        - "backend/src/intric/flows/http_transport/normalizer.py:21"
+        - "backend/src/intric/flows/http_transport/__init__.py:15"
+        - "backend/src/intric/flows/http_transport/__init__.py:42"
+        - "backend/src/intric/flows/flow_run_contract_service.py:73"
+        - "backend/src/intric/flows/api/flow_upload_router.py:126"
+        - "backend/src/intric/flows/flow_file_upload_service.py:269"
+        - "backend/src/intric/flows/step_chain_rules.py:32"
+        - "backend/src/intric/flows/flow_capability_manifest.py:472"
+        - "frontend/apps/web/src/lib/features/flows/flowStepTypes.ts:52"
+        - "backend/src/intric/flows/application/flow_run_service.py:273"
+        - "backend/src/intric/flows/runtime/step_execution_runtime.py:732"
+        - "backend/src/intric/flows/runtime/executor.py:1031"
+      commands:
+        - cmd: "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flows-clean-architecture-2026-05-25/state.yaml\")'"
+          status: pass
+          output: "yaml ok"
+        - cmd: "git diff --check -- docs/goals/flows-clean-architecture-2026-05-25/goal.md docs/goals/flows-clean-architecture-2026-05-25/state.yaml docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
+          status: pass
+        - cmd: "rg -n \"get_step_result_by_order|normalize_legacy_config\" backend/src frontend"
+          status: pass
+          output: "Only definition/export/test-surface evidence remains for proposed delete_now candidates."
+        - cmd: "rg -n \"get_step_result_by_order\" backend/src/intric/worker backend/src/intric/flows -g '*.py'"
+          status: pass
+          output: "Only backend/src/intric/flows/infrastructure/flow_repo.py:635."
+        - cmd: "rg -n \"input-policy|input_policy|get_flow_input_policy\" frontend/apps/web/src frontend/packages/intric-js/src/endpoints/flows.js -g '!**/node_modules/**' -g '!**/.svelte-kit/**'"
+          status: pass
+          output: "Frontend direct hit only in generated SDK endpoint frontend/packages/intric-js/src/endpoints/flows.js:308."
+        - cmd: "rg -n -e 'A\\.[0-9]' -e 'P0\\.' -e 'Phase [0-9A-G]\\b' .codex/artifacts/flows-clean-architecture-t023-inventory.md"
+          status: pass
+          output: "No matches."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t023-review --phase review --iteration 1 --timeout-seconds 1200 --require-green --required-min-score 8 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8. Non-blocking tightenings about clean checkout and line-level test ranges were verified and applied."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t023-synthesis --phase synthesis --iteration 1 --timeout-seconds 1200 --spend-mode auto --require-green --required-min-score 8 ..."
+          status: fail
+          output: "GREEN_LIGHT no; MIN_SCORE 7. Valid blocker: preflight SQL must include flow_versions.definition_json, plus line-level test ranges and clean-checkout verification."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t023-synthesis --phase synthesis --iteration 2 --timeout-seconds 1200 --spend-mode auto --require-green --required-min-score 8 ..."
+          status: pass
+          output: "Saved artifact GREEN_LIGHT yes; MIN_SCORE 9 after fixes. Wrapper exited nonzero because the resumed transcript still included the prior red verdict."
+      peer_artifacts:
+        - ".codex/artifacts/claude-peer-loop-t023-flow-consolidation-inventory-20260525T205236Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t023-flow-consolidation-inventory-antigravity-synthesis-20260525T205541Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t023-flow-consolidation-inventory-antigravity-synthesis-iteration-2-20260525T205858Z.md"
+      next_task: T024
 
   - id: T024
     type: judge
     assignee: Judge
-    status: queued
+    status: active
     reasoning_hint: high
-    objective: "Approve which Flow dead/legacy/compatibility candidates from T023 may be deleted now, which need preflight, and which must remain with a deletion trigger."
+    objective: "Approve which Flow dead/duplicate/legacy/compatibility candidates from T023 may be deleted or consolidated now, which need preflight, and which must remain with a deletion trigger."
     inputs:
       - "T023 receipt"
       - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
     constraints:
       - "Read-only."
       - "Delete only on evidence: zero references, or persisted-data/caller preflight proving no dependency."
+      - "Persisted-data preflight must include the immutable published runtime snapshot in flow_versions.definition_json when runtime behavior can depend on published versions; draft flow_steps evidence is not enough."
       - "Do not approve deletion of legacy-looking live behavior without a deletion trigger."
       - "Do not approve standalone test deletion unless the protected behavior is removed in the same Worker task."
+      - "Do not approve creating a new implementation when the correct move is to reuse, deepen, merge, or delete an existing owner."
     expected_output:
       - "delete_now candidates with evidence"
+      - "merge_or_consolidate candidates with canonical owner and behavior-preserving test plan"
       - "needs_preflight candidates with exact preflight query/search"
       - "keep_temporarily candidates with owner/reason/deletion trigger"
       - "Exact Worker objective for the next deletion slice"
+      - "Consolidation effect section for the proposed Worker"
       - "allowed_files"
       - "verify"
+      - "clean-checkout verification requirement when unrelated dirty/untracked files are present"
+      - "line-level test preservation/deletion boundaries when tests are touched"
+      - "post-change zero-symbol and export cleanup checks for deleted symbols"
       - "stop_if"
     receipt: null
 
@@ -539,7 +623,7 @@ tasks:
     assignee: Worker
     status: queued
     reasoning_hint: medium
-    objective: "Delete the first Judge-approved Flow dead/legacy/compatibility slice and remove tests only when they protect the removed behavior."
+    objective: "Delete or consolidate the first Judge-approved Flow dead/duplicate/legacy/compatibility slice and remove tests only when they protect removed behavior."
     allowed_files: []
     verify: []
     stop_if:
@@ -547,7 +631,17 @@ tasks:
       - "A candidate lacks zero-reference evidence or required persisted-data/caller preflight."
       - "Deletion requires files outside Judge-approved allowed_files."
       - "The task would delete tests without deleting the behavior they protected."
+      - "Test removal lacks line-level boundaries proving surviving behavior coverage remains."
+      - "The task would add or preserve a parallel implementation instead of reusing, deepening, merging, or deleting the canonical owner."
+      - "Judge-approved verification omits clean-checkout verification while unrelated dirty/untracked files are present."
       - "Verification fails twice for reasons unrelated to this deletion slice."
+    expected_output:
+      - "Exact T024-approved candidates handled."
+      - "Consolidation effect section."
+      - "Behavior-preserving tests where logic is moved or merged."
+      - "Tests removed only with removed behavior."
+      - "Line-level list of tests preserved and removed, mapped to the behavior retained or deleted."
+      - "Clean-checkout verification receipt when the worktree has unrelated dirty/untracked files."
     receipt: null
 
   - id: T006
@@ -586,6 +680,7 @@ tasks:
       - "Need product/API decision about deleting /input-policy/."
       - "Behavior cannot be covered with contract lifecycle tests."
       - "Published versions missing step ids require a data migration design before fallback deletion."
+      - "The implementation creates a second runtime contract/input-policy owner instead of deepening the published contract owner."
     receipt: null
 
   - id: T008
@@ -651,6 +746,7 @@ tasks:
     expected_output:
       - "Current output_mode dispatch inventory."
       - "Current output_type dispatch inventory split by prompt instructions, native JSON-mode decisions, validation/rendering requirements, and byte rendering."
+      - "Duplicate/scattered reusable logic in current output behavior, including which code should be moved behind an owner instead of copied."
       - "Minimal StepHandlerDeps candidates with source evidence."
       - "Which branches can move behind OutputFormatSpec first without behavior changes."
       - "Focused tests and guard tests needed."
@@ -671,6 +767,7 @@ tasks:
       - "Keep behavior/output format as separate axes."
       - "Reject an OutputRenderer-only design if output_type prompt or JSON-mode branches would remain in generic runtime code."
       - "Reject a StepOutput replacement that is smaller than current StepExecutionOutput needs."
+      - "Reject any design that copies current runtime logic into new files instead of moving/reusing it behind the approved owner."
       - "Prefer the smallest behavior-preserving implementation sequence."
     expected_output:
       - "Decision on StepExecutionResult wrapper vs extending existing StepExecutionOutput."
@@ -718,6 +815,7 @@ tasks:
       - "A behavior-preserving output format move requires executor or schema changes."
       - "The design leaves output_type prompt instructions or native JSON-mode decisions in generic runtime code."
       - "The design replaces StepExecutionOutput with a smaller object that loses provenance, diagnostics, token usage, artifacts, structured output, or retention-relevant metadata."
+      - "The design duplicates existing renderer/prompt/JSON-mode logic instead of moving or reusing it behind OutputFormatSpec."
       - "Need files outside allowed_files."
     receipt: null
 
@@ -751,6 +849,7 @@ tasks:
       - "T019 is not complete."
       - "T018 did not approve StepHandlerDeps and StepExecutionResult shape."
       - "A handler move changes run execution behavior."
+      - "The handler move duplicates existing execution logic instead of moving or reusing it behind StepHandler."
       - "Need files outside allowed_files."
     receipt: null
 
