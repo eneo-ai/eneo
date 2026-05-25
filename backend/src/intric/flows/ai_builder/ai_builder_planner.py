@@ -80,6 +80,10 @@ from intric.flows.ai_builder.ai_builder_proposal_processor import (
     AIBuilderProposalProcessor,
 )
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderAvailableKnowledgeBaseResource,
+    AIBuilderAvailableModelResource,
+)
 from intric.flows.ai_builder.ai_builder_response_format import (
     build_planner_request_response_format,
 )
@@ -284,8 +288,8 @@ class AIBuilderPlanner:
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
         structured_output_decision: StructuredOutputCapabilityDecision | None = None,
-        available_models: list[dict[str, Any]] | None = None,
-        available_kbs: list[dict[str, Any]] | None = None,
+        available_models: list[AIBuilderAvailableModelResource] | None = None,
+        available_kbs: list[AIBuilderAvailableKnowledgeBaseResource] | None = None,
         available_mcps: AIBuilderMCPResourceInput = None,
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
@@ -497,9 +501,6 @@ class AIBuilderPlanner:
                         llm_messages=proposal_request.llm_messages,
                         litellm_model=litellm_model,
                         litellm_kwargs=litellm_kwargs,
-                        available_models=available_models,
-                        available_kbs=available_kbs,
-                        available_mcps=available_mcps,
                         available_model_refs=(
                             proposal_request.resource_catalog.model_refs
                         ),

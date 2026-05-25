@@ -16,9 +16,6 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_output_type_values,
     document_delivery_mode_values,
 )
-from intric.flows.ai_builder.ai_builder_mcp_resources import (
-    AIBuilderMCPResourceInput,
-)
 from intric.flows.ai_builder.ai_builder_new_step_schema import (
     build_new_step_draft_schema,
     build_previous_field_refs_schema,
@@ -26,7 +23,6 @@ from intric.flows.ai_builder.ai_builder_new_step_schema import (
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
-    build_ai_builder_resource_catalog,
 )
 from intric.flows.domain.flow import FlowStep
 from intric.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
@@ -36,32 +32,16 @@ EDIT_FLOW_TOOL_NAME = "edit_flow"
 
 def build_edit_flow_tool_schema(
     current_steps: list[FlowStep],
-    available_models: list[dict[str, Any]] | None = None,
-    available_kbs: list[dict[str, Any]] | None = None,
-    available_mcps: AIBuilderMCPResourceInput = None,
-    resource_catalog: AIBuilderResourceCatalog | None = None,
+    *,
+    resource_catalog: AIBuilderResourceCatalog,
 ) -> dict[str, Any]:
-    """Build the edit_flow tool schema with dynamic constraints.
-
-    Args:
-        current_steps: Existing flow steps (for valid ref enums).
-        available_models: Available model refs (for model_ref enum).
-        available_kbs: Available KB refs (for knowledge_refs enum).
-        available_mcps: Available MCP servers/tools. MCP refs stay free-form;
-            the backend catalog resolves or rejects them after tool submission.
-    """
     valid_refs = [f"existing_step_{s.step_order}" for s in current_steps]
     # Include None for add operations where target_ref should be absent
     target_ref_enum: list[str | None] = valid_refs + [None]
     anchor_ref_enum: list[str | None] = valid_refs + [None]
 
-    catalog = resource_catalog or build_ai_builder_resource_catalog(
-        available_models=available_models,
-        available_kbs=available_kbs,
-        available_mcps=available_mcps,
-    )
-    model_refs = catalog.small_ref_enum_for_kind("model")
-    kb_refs = catalog.small_ref_enum_for_kind("knowledge_base")
+    model_refs = resource_catalog.small_ref_enum_for_kind("model")
+    kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
     # Do not constrain MCP refs with schema enums. When a requested MCP is
     # absent, enums can force the model to pick an unrelated available MCP.
     # Catalog resolution and quality feedback provide the durable guardrail.
@@ -179,15 +159,9 @@ def build_edit_flow_tool_schema(
 
 def build_edit_mode_tool_schemas(
     current_steps: list[FlowStep],
-    available_models: list[dict[str, Any]] | None = None,
-    available_kbs: list[dict[str, Any]] | None = None,
-    available_mcps: AIBuilderMCPResourceInput = None,
-    resource_catalog: AIBuilderResourceCatalog | None = None,
+    *,
+    resource_catalog: AIBuilderResourceCatalog,
 ) -> list[dict[str, Any]]:
-    """Build the full tool set for edit mode.
-
-    Includes edit_flow + ask_structured_question + confirm_requirements.
-    """
     from intric.flows.ai_builder.ai_builder_tools import (
         build_ask_structured_question_tool_schema,
         build_confirm_requirements_tool_schema,
@@ -196,10 +170,7 @@ def build_edit_mode_tool_schemas(
     return [
         build_edit_flow_tool_schema(
             current_steps,
-            available_models,
-            available_kbs,
-            available_mcps,
-            resource_catalog,
+            resource_catalog=resource_catalog,
         ),
         build_ask_structured_question_tool_schema(),
         build_confirm_requirements_tool_schema(),

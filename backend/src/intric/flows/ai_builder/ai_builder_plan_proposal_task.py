@@ -12,16 +12,12 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_SELECTION_WITHOUT,
     mcp_selected_server_refs_from_values,
 )
-from intric.flows.ai_builder.ai_builder_mcp_resources import (
-    AIBuilderMCPResourceInput,
-)
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     render_confirmed_requirements_proposal_prompt_block,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     AIBuilderResourceReferenceMaterial,
-    build_ai_builder_resource_catalog,
     build_ai_builder_resource_reference_material,
 )
 from intric.flows.ai_builder.ai_builder_tools import active_submission_tool_name
@@ -35,26 +31,16 @@ def build_plan_proposal_system_prompt(
     attachment_context: str | None,
     flow_context: str | None,
     is_edit_mode: bool,
-    available_models: list[dict[str, str]] | None = None,
-    available_kbs: list[dict[str, str]] | None = None,
-    available_mcps: AIBuilderMCPResourceInput = None,
     mcp_selection_values: set[str] | frozenset[str] | None = None,
-    resource_catalog: AIBuilderResourceCatalog | None = None,
+    resource_catalog: AIBuilderResourceCatalog,
     plan_revision_context: str | None = None,
 ) -> str:
-    """Build a compact task prompt for create/edit flow proposal."""
-
     submission_tool = active_submission_tool_name(is_edit_mode=is_edit_mode)
     selected_mcp_server_refs = mcp_selected_server_refs_from_values(
         set(mcp_selection_values or ())
     )
-    catalog = resource_catalog or build_ai_builder_resource_catalog(
-        available_models=available_models,
-        available_kbs=available_kbs,
-        available_mcps=available_mcps,
-    )
     resource_material = build_ai_builder_resource_reference_material(
-        catalog=catalog,
+        catalog=resource_catalog,
         selected_mcp_server_refs=selected_mcp_server_refs,
     )
     create_mode_rules = (

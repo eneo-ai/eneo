@@ -41,6 +41,7 @@ from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolRetryConfig,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderAvailableModelResource,
     build_ai_builder_resource_catalog,
 )
 from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
@@ -62,9 +63,18 @@ from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
 )
 
 
+def _model_resource(local_id: str, name: str) -> AIBuilderAvailableModelResource:
+    return {
+        "id": local_id,
+        "ref": local_id,
+        "name": name,
+        "display_name": name,
+        "provider": "test",
+    }
+
+
 def test_create_submission_schema_keeps_mcp_refs_free_form() -> None:
-    schemas = _make_submission()._active_submission_tool_schemas(
-        flow=None,
+    catalog = build_ai_builder_resource_catalog(
         available_models=[],
         available_kbs=[],
         available_mcps=[
@@ -73,7 +83,10 @@ def test_create_submission_schema_keeps_mcp_refs_free_form() -> None:
                 "tools": [{"ref": "tool-1", "name": "lookup_case"}],
             }
         ],
-        resource_catalog=None,
+    )
+    schemas = _make_submission()._active_submission_tool_schemas(
+        flow=None,
+        resource_catalog=catalog,
     )
 
     step_props = schemas[0]["function"]["parameters"]["properties"]["steps"]["items"][
@@ -187,8 +200,8 @@ async def test_scoped_model_preflight_uses_bounded_server_tool_call_id() -> None
     prior_plan = _builder_plan(prior_spec)
     catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {"id": "model-old", "name": "gpt-4o mini"},
-            {"id": "model-nano", "name": "gpt-5.4-nano"},
+            _model_resource("model-old", "gpt-4o mini"),
+            _model_resource("model-nano", "gpt-5.4-nano"),
         ],
         available_kbs=[],
         available_mcps=[],

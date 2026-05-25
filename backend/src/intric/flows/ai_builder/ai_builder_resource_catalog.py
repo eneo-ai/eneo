@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
 from intric.flows.ai_builder.ai_builder_edit_models import (
@@ -36,6 +36,22 @@ ResourceKind = Literal["knowledge_base", "mcp_server", "mcp_tool", "model"]
 
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 RESOURCE_DESCRIPTION_MAX_CHARS = 240
+
+
+class AIBuilderAvailableModelResource(TypedDict):
+    id: str
+    ref: str
+    name: str
+    display_name: str
+    provider: str
+
+
+class AIBuilderAvailableKnowledgeBaseResource(TypedDict):
+    id: str
+    ref: str
+    name: str
+    display_name: str
+    description: str
 
 
 class AssistantSnapshotResourceUnavailableError(ValueError):
@@ -83,12 +99,14 @@ class AIBuilderResourceReferenceMaterial:
 @dataclass(frozen=True)
 class AIBuilderResourceCatalogEntry:
     local_ref: str
+    name: str
     display_name: str
     aliases: tuple[str, ...]
     kind: ResourceKind
     slot_ref: ResourceSlotRef
     local_binding: LocalResourceBinding | None
     description: str = ""
+    provider: str = ""
     parent_ref: str | None = None
 
     @property
@@ -352,22 +370,18 @@ class AIBuilderResourceCatalog:
 
 def build_ai_builder_resource_catalog(
     *,
-    available_models: Sequence[Mapping[str, Any]] | None,
-    available_kbs: Sequence[Mapping[str, Any]] | None,
+    available_models: Sequence[AIBuilderAvailableModelResource] | None,
+    available_kbs: Sequence[AIBuilderAvailableKnowledgeBaseResource] | None,
     available_mcps: Iterable[Mapping[str, Any]] | None = None,
     prior_bindings: Iterable[LocalResourceBinding] = (),
 ) -> AIBuilderResourceCatalog:
     allocator = ResourceSlotAllocator(prior_bindings=prior_bindings)
-    models = tuple(
-        _build_entries(available_models or [], kind="model", allocator=allocator)
-    )
+    models = tuple(_build_model_entries(available_models or [], allocator=allocator))
     knowledge_bases = tuple(
-        _build_entries(available_kbs or [], kind="knowledge_base", allocator=allocator)
+        _build_knowledge_base_entries(available_kbs or [], allocator=allocator)
     )
     normalized_mcps = normalize_ai_builder_mcp_resources(available_mcps)
-    mcp_servers = tuple(
-        _build_entries(normalized_mcps, kind="mcp_server", allocator=allocator)
-    )
+    mcp_servers = tuple(_build_mcp_server_entries(normalized_mcps, allocator=allocator))
     mcp_server_entries_by_local_ref = {entry.local_ref: entry for entry in mcp_servers}
     mcp_tools = tuple(
         _build_mcp_tool_entries(
@@ -751,24 +765,20 @@ def _issue_code(*, kind: ResourceKind, prefix: Literal["ambiguous", "unknown"]) 
     return f"{prefix}_{suffix}_ref"
 
 
-def _build_entries(
-    items: Sequence[Mapping[str, Any]],
+def _build_mcp_server_entries(
+    items: Sequence[AIBuilderMCPServerResource],
     *,
-    kind: ResourceKind,
     allocator: ResourceSlotAllocator,
 ) -> list[AIBuilderResourceCatalogEntry]:
     entries: list[AIBuilderResourceCatalogEntry] = []
     for item in items:
-        ref = str(item.get("ref", item.get("id", ""))).strip()
+        ref = item["ref"].strip()
         if not ref:
             continue
-        display_name = (
-            str(item.get("display_name", item.get("name", ref))).strip() or ref
-        )
-        local_kind = _local_kind_for_resource_kind(kind)
+        display_name = item["display_name"] or item["name"] or ref
         slot_ref, local_binding = allocator.allocate(
-            slot_kind=_slot_kind_for_resource_kind(kind),
-            local_kind=local_kind,
+            slot_kind=ResourceSlotKind.MCP_SERVER,
+            local_kind=LocalResourceKind.MCP_SERVER,
             local_ref=ref,
             display_name=display_name,
         )
@@ -786,12 +796,103 @@ def _build_entries(
         entries.append(
             AIBuilderResourceCatalogEntry(
                 local_ref=ref,
+                name=display_name,
                 display_name=display_name,
                 aliases=aliases,
-                kind=kind,
+                kind="mcp_server",
                 slot_ref=slot_ref,
                 local_binding=local_binding,
-                description=str(item.get("description", "")).strip(),
+                description=item["description"],
+            )
+        )
+    return entries
+
+
+def _build_model_entries(
+    items: Sequence[AIBuilderAvailableModelResource],
+    *,
+    allocator: ResourceSlotAllocator,
+) -> list[AIBuilderResourceCatalogEntry]:
+    entries: list[AIBuilderResourceCatalogEntry] = []
+    for item in items:
+        ref = item["ref"].strip()
+        if not ref:
+            continue
+        raw_name = item["name"].strip()
+        display_name = item["display_name"].strip() or raw_name or ref
+        name = raw_name or display_name
+        slot_ref, local_binding = allocator.allocate(
+            slot_kind=_slot_kind_for_resource_kind("model"),
+            local_kind=_local_kind_for_resource_kind("model"),
+            local_ref=ref,
+            display_name=display_name,
+        )
+        aliases = tuple(
+            dict.fromkeys(
+                filter(
+                    None,
+                    [
+                        _normalize_alias(slot_ref.ref),
+                        _normalize_alias(display_name),
+                    ],
+                )
+            )
+        )
+        entries.append(
+            AIBuilderResourceCatalogEntry(
+                local_ref=ref,
+                name=name,
+                display_name=display_name,
+                aliases=aliases,
+                kind="model",
+                slot_ref=slot_ref,
+                local_binding=local_binding,
+                provider=item["provider"].strip(),
+            )
+        )
+    return entries
+
+
+def _build_knowledge_base_entries(
+    items: Sequence[AIBuilderAvailableKnowledgeBaseResource],
+    *,
+    allocator: ResourceSlotAllocator,
+) -> list[AIBuilderResourceCatalogEntry]:
+    entries: list[AIBuilderResourceCatalogEntry] = []
+    for item in items:
+        ref = item["ref"].strip()
+        if not ref:
+            continue
+        raw_name = item["name"].strip()
+        display_name = item["display_name"].strip() or raw_name or ref
+        name = raw_name or display_name
+        slot_ref, local_binding = allocator.allocate(
+            slot_kind=_slot_kind_for_resource_kind("knowledge_base"),
+            local_kind=_local_kind_for_resource_kind("knowledge_base"),
+            local_ref=ref,
+            display_name=display_name,
+        )
+        aliases = tuple(
+            dict.fromkeys(
+                filter(
+                    None,
+                    [
+                        _normalize_alias(slot_ref.ref),
+                        _normalize_alias(display_name),
+                    ],
+                )
+            )
+        )
+        entries.append(
+            AIBuilderResourceCatalogEntry(
+                local_ref=ref,
+                name=name,
+                display_name=display_name,
+                aliases=aliases,
+                kind="knowledge_base",
+                slot_ref=slot_ref,
+                local_binding=local_binding,
+                description=item["description"].strip(),
             )
         )
     return entries
@@ -854,6 +955,7 @@ def _build_mcp_tool_entries(
             entries.append(
                 AIBuilderResourceCatalogEntry(
                     local_ref=ref,
+                    name=display_name,
                     display_name=f"{server_name}: {display_name}",
                     aliases=aliases,
                     kind="mcp_tool",

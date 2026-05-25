@@ -12,6 +12,8 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     RESOURCE_DESCRIPTION_MAX_CHARS,
+    AIBuilderAvailableKnowledgeBaseResource,
+    AIBuilderAvailableModelResource,
     AssistantSnapshotResourceUnavailableError,
     build_ai_builder_resource_catalog,
     build_ai_builder_resource_reference_material,
@@ -43,6 +45,38 @@ from intric.flows.flow_resource_bindings import (
 )
 
 
+def _model_resource(
+    local_id: str,
+    name: str,
+    *,
+    display_name: str | None = None,
+    provider: str = "test",
+) -> AIBuilderAvailableModelResource:
+    return {
+        "id": local_id,
+        "ref": local_id,
+        "name": name,
+        "display_name": display_name or name,
+        "provider": provider,
+    }
+
+
+def _kb_resource(
+    local_id: str,
+    name: str,
+    *,
+    display_name: str | None = None,
+    description: str = "",
+) -> AIBuilderAvailableKnowledgeBaseResource:
+    return {
+        "id": local_id,
+        "ref": local_id,
+        "name": name,
+        "display_name": display_name or name,
+        "description": description,
+    }
+
+
 def _make_step_spec(*, model_ref: str | None, knowledge_refs: list[str]) -> StepSpec:
     return StepSpec(
         plan_step_ref="step_a",
@@ -63,11 +97,11 @@ def _make_step_spec(*, model_ref: str | None, knowledge_refs: list[str]) -> Step
 def test_unique_resource_names_are_canonicalized_to_refs() -> None:
     catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {"id": "model-uuid-1", "name": "gpt-5.4-nano"},
+            _model_resource("model-uuid-1", "gpt-5.4-nano"),
         ],
         available_kbs=[
-            {"id": "kb-uuid-1", "name": "socio"},
-            {"id": "kb-uuid-2", "name": "psyk"},
+            _kb_resource("kb-uuid-1", "socio"),
+            _kb_resource("kb-uuid-2", "psyk"),
         ],
     )
     spec = FlowDraftSpecCore(
@@ -92,7 +126,7 @@ def test_unique_resource_names_are_canonicalized_to_refs() -> None:
 def test_local_resource_ids_are_not_authoring_aliases() -> None:
     catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {"id": "model-uuid-1", "name": "gpt-5.4-nano"},
+            _model_resource("model-uuid-1", "gpt-5.4-nano"),
         ],
         available_kbs=[],
     )
@@ -113,16 +147,16 @@ def test_catalog_entries_expose_portable_slot_refs_without_changing_local_refs()
 ):
     catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {
-                "id": "11111111-1111-4111-8111-111111111111",
-                "name": "GPT 5.4 Mini",
-            },
+            _model_resource(
+                "11111111-1111-4111-8111-111111111111",
+                "GPT 5.4 Mini",
+            ),
         ],
         available_kbs=[
-            {
-                "id": "22222222-2222-4222-8222-222222222222",
-                "name": "Local Policy",
-            },
+            _kb_resource(
+                "22222222-2222-4222-8222-222222222222",
+                "Local Policy",
+            ),
         ],
         available_mcps=[
             {
@@ -173,14 +207,8 @@ def test_catalog_slot_refs_deduplicate_without_leaking_uuid_refs() -> None:
     catalog = build_ai_builder_resource_catalog(
         available_models=[],
         available_kbs=[
-            {
-                "id": "11111111-1111-4111-8111-111111111111",
-                "name": "Policy",
-            },
-            {
-                "id": "22222222-2222-4222-8222-222222222222",
-                "name": "Policy",
-            },
+            _kb_resource("11111111-1111-4111-8111-111111111111", "Policy"),
+            _kb_resource("22222222-2222-4222-8222-222222222222", "Policy"),
         ],
     )
 
@@ -208,10 +236,7 @@ def test_catalog_reuses_prior_slot_for_renamed_resource() -> None:
 
     catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {
-                "id": str(local_id),
-                "name": "Renamed production model",
-            },
+            _model_resource(str(local_id), "Renamed production model"),
         ],
         available_kbs=[],
         prior_bindings=(prior_binding,),
@@ -252,8 +277,8 @@ def test_catalog_keeps_prior_suffix_when_collision_disappears_after_rename() -> 
     catalog = build_ai_builder_resource_catalog(
         available_models=[],
         available_kbs=[
-            {"id": str(first_id), "name": "Policy"},
-            {"id": str(second_id), "name": "Local regulation"},
+            _kb_resource(str(first_id), "Policy"),
+            _kb_resource(str(second_id), "Local regulation"),
         ],
         prior_bindings=prior_bindings,
     )
@@ -291,7 +316,7 @@ def test_catalog_allocates_current_ref_when_prior_slots_share_one_local_target()
     )
 
     catalog = build_ai_builder_resource_catalog(
-        available_models=[{"id": str(local_id), "name": "Shared production model"}],
+        available_models=[_model_resource(str(local_id), "Shared production model")],
         available_kbs=[],
         prior_bindings=prior_bindings,
     )
@@ -320,7 +345,7 @@ def test_catalog_uses_invisible_prior_bindings_only_as_slot_seeds() -> None:
 
     catalog = build_ai_builder_resource_catalog(
         available_models=[],
-        available_kbs=[{"id": str(visible_id), "name": "Policy"}],
+        available_kbs=[_kb_resource(str(visible_id), "Policy")],
         prior_bindings=(prior_binding,),
     )
 
@@ -343,11 +368,11 @@ def test_catalog_slot_allocation_is_deterministic_for_identical_inputs() -> None
     )
     kwargs = {
         "available_models": [
-            {"id": str(local_id), "name": "Renamed model"},
-            {
-                "id": "22222222-2222-4222-8222-222222222222",
-                "name": "Renamed model",
-            },
+            _model_resource(str(local_id), "Renamed model"),
+            _model_resource(
+                "22222222-2222-4222-8222-222222222222",
+                "Renamed model",
+            ),
         ],
         "available_kbs": [],
         "prior_bindings": (prior_binding,),
@@ -364,10 +389,10 @@ def test_catalog_slot_allocation_is_deterministic_for_identical_inputs() -> None
 def test_catalog_owns_small_ref_enums() -> None:
     catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {"id": "model-uuid-1", "name": "gpt-5.4-nano"},
+            _model_resource("model-uuid-1", "gpt-5.4-nano"),
         ],
         available_kbs=[
-            {"id": "kb-uuid-1", "name": "Policy"},
+            _kb_resource("kb-uuid-1", "Policy"),
         ],
     )
 
@@ -378,20 +403,14 @@ def test_catalog_owns_small_ref_enums() -> None:
 def test_collect_flow_spec_resource_bindings_uses_only_normalized_spec_refs() -> None:
     catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {
-                "id": "11111111-1111-4111-8111-111111111111",
-                "name": "Model A",
-            },
-            {
-                "id": "22222222-2222-4222-8222-222222222222",
-                "name": "Unused Model",
-            },
+            _model_resource("11111111-1111-4111-8111-111111111111", "Model A"),
+            _model_resource(
+                "22222222-2222-4222-8222-222222222222",
+                "Unused Model",
+            ),
         ],
         available_kbs=[
-            {
-                "id": "33333333-3333-4333-8333-333333333333",
-                "name": "Policy",
-            },
+            _kb_resource("33333333-3333-4333-8333-333333333333", "Policy"),
         ],
     )
     spec = FlowDraftSpecCore(
@@ -418,20 +437,11 @@ def test_collect_flow_spec_resource_bindings_uses_only_normalized_spec_refs() ->
 def test_collect_flow_spec_resource_bindings_is_derived_from_current_spec() -> None:
     catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {
-                "id": "11111111-1111-4111-8111-111111111111",
-                "name": "Model A",
-            },
-            {
-                "id": "22222222-2222-4222-8222-222222222222",
-                "name": "Model B",
-            },
+            _model_resource("11111111-1111-4111-8111-111111111111", "Model A"),
+            _model_resource("22222222-2222-4222-8222-222222222222", "Model B"),
         ],
         available_kbs=[
-            {
-                "id": "33333333-3333-4333-8333-333333333333",
-                "name": "Policy",
-            },
+            _kb_resource("33333333-3333-4333-8333-333333333333", "Policy"),
         ],
     )
     first_spec = FlowDraftSpecCore(
@@ -471,16 +481,10 @@ def test_collect_flow_spec_resource_bindings_is_derived_from_current_spec() -> N
 def test_collect_flow_spec_resource_bindings_skips_unbound_or_unknown_refs() -> None:
     catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {
-                "id": "non-uuid-model-ref",
-                "name": "Local test model",
-            },
+            _model_resource("non-uuid-model-ref", "Local test model"),
         ],
         available_kbs=[
-            {
-                "id": "33333333-3333-4333-8333-333333333333",
-                "name": "Policy",
-            },
+            _kb_resource("33333333-3333-4333-8333-333333333333", "Policy"),
         ],
     )
     spec = FlowDraftSpecCore(
@@ -500,8 +504,8 @@ def test_ambiguous_resource_alias_returns_typed_issue() -> None:
     catalog = build_ai_builder_resource_catalog(
         available_models=[],
         available_kbs=[
-            {"id": "kb-uuid-1", "name": "Psyk"},
-            {"id": "kb-uuid-2", "name": "psyk"},
+            _kb_resource("kb-uuid-1", "Psyk"),
+            _kb_resource("kb-uuid-2", "psyk"),
         ],
     )
 
@@ -524,7 +528,7 @@ def test_ambiguous_resource_alias_returns_typed_issue() -> None:
 def test_unknown_model_alias_returns_typed_issue() -> None:
     catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {"id": "model-uuid-1", "name": "gpt-5.4-nano"},
+            _model_resource("model-uuid-1", "gpt-5.4-nano"),
         ],
         available_kbs=[],
     )
@@ -547,10 +551,10 @@ def test_unknown_model_alias_returns_typed_issue() -> None:
 def test_assistant_snapshot_translates_local_refs_to_authoring_slot_refs() -> None:
     catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {"id": "11111111-1111-4111-8111-111111111111", "name": "GPT"},
+            _model_resource("11111111-1111-4111-8111-111111111111", "GPT"),
         ],
         available_kbs=[
-            {"id": "22222222-2222-4222-8222-222222222222", "name": "Policy"},
+            _kb_resource("22222222-2222-4222-8222-222222222222", "Policy"),
         ],
         available_mcps=[
             {
@@ -784,8 +788,8 @@ def test_catalog_detects_explicit_resource_alias_mentions_with_boundaries() -> N
 def test_catalog_prefers_longest_overlapping_model_alias_mention() -> None:
     catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {"id": "model-base", "name": "gpt-5.4"},
-            {"id": "model-nano", "name": "gpt-5.4-nano"},
+            _model_resource("model-base", "gpt-5.4"),
+            _model_resource("model-nano", "gpt-5.4-nano"),
         ],
         available_kbs=[],
         available_mcps=[],
@@ -855,14 +859,10 @@ def test_resource_reference_material_uses_catalog_refs_and_selected_mcp_tools() 
     long_description = "x" * (RESOURCE_DESCRIPTION_MAX_CHARS + 20)
     catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {"id": "model-uuid-1", "name": "gpt-5.4-nano"},
+            _model_resource("model-uuid-1", "gpt-5.4-nano"),
         ],
         available_kbs=[
-            {
-                "id": "kb-uuid-1",
-                "name": "Risk KB",
-                "description": long_description,
-            },
+            _kb_resource("kb-uuid-1", "Risk KB", description=long_description),
         ],
         available_mcps=[
             {
@@ -906,7 +906,7 @@ def test_resource_reference_material_keeps_description_at_clamp_boundary() -> No
     catalog = build_ai_builder_resource_catalog(
         available_models=[],
         available_kbs=[
-            {"id": "kb-uuid-1", "name": "Risk KB", "description": description},
+            _kb_resource("kb-uuid-1", "Risk KB", description=description),
         ],
     )
 

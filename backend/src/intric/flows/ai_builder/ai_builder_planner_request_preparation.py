@@ -77,6 +77,8 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
     resolve_requirements_state,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderAvailableKnowledgeBaseResource,
+    AIBuilderAvailableModelResource,
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
@@ -108,8 +110,8 @@ class PlannerRequestPreparationInput:
     litellm_client: Any
     litellm_model: str
     litellm_kwargs: dict[str, Any]
-    available_models: list[dict[str, Any]] | None
-    available_kbs: list[dict[str, Any]] | None
+    available_models: list[AIBuilderAvailableModelResource] | None
+    available_kbs: list[AIBuilderAvailableKnowledgeBaseResource] | None
     flow: Flow | None
     assistant_snapshots: AssistantAuthoringSnapshots | None
     attachment_files: list[File]
@@ -275,11 +277,8 @@ async def prepare_planner_request(
             ),
             flow_context=flow_context,
             is_edit_mode=request.flow is not None,
-            available_models=request.available_models,
-            available_kbs=request.available_kbs,
-            available_mcps=request.available_mcps,
-            mcp_selection_values=mcp_resource_selection_values(request.conversation),
             resource_catalog=resource_catalog,
+            mcp_selection_values=mcp_resource_selection_values(request.conversation),
             plan_revision_context=build_plan_revision_prompt_block(
                 context=request.plan_edit_context,
                 prior_plan=request.prior_plan_for_revision,
@@ -327,19 +326,13 @@ async def prepare_planner_request(
         )
 
     models_ctx = (
-        build_available_models_context(
-            request.available_models,
-            resource_catalog=resource_catalog,
-        )
-        if request.available_models
+        build_available_models_context(resource_catalog=resource_catalog)
+        if resource_catalog.models
         else None
     )
     kbs_ctx = (
-        build_available_kbs_context(
-            request.available_kbs,
-            resource_catalog=resource_catalog,
-        )
-        if request.available_kbs
+        build_available_kbs_context(resource_catalog=resource_catalog)
+        if resource_catalog.knowledge_bases
         else None
     )
     mcps_ctx = (

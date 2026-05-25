@@ -19,6 +19,8 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
     FormFieldSpec as EditFormFieldSpec,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderAvailableKnowledgeBaseResource,
+    AIBuilderAvailableModelResource,
     AIBuilderResourceCatalog,
     AssistantSnapshotResourceUnavailableError,
     build_ai_builder_resource_catalog,
@@ -81,12 +83,32 @@ def _make_flow_step(
     )
 
 
+def _model_resource(local_id: str, name: str) -> AIBuilderAvailableModelResource:
+    return {
+        "id": local_id,
+        "ref": local_id,
+        "name": name,
+        "display_name": name,
+        "provider": "test",
+    }
+
+
+def _kb_resource(local_id: str, name: str) -> AIBuilderAvailableKnowledgeBaseResource:
+    return {
+        "id": local_id,
+        "ref": local_id,
+        "name": name,
+        "display_name": name,
+        "description": "",
+    }
+
+
 def _make_assistant_snapshot_context(
     *steps: FlowStep,
 ) -> tuple[AssistantAuthoringSnapshots, AIBuilderResourceCatalog]:
     snapshots: AssistantAuthoringSnapshots = {}
-    available_models: list[dict[str, str]] = []
-    available_kbs: list[dict[str, str]] = []
+    available_models: list[AIBuilderAvailableModelResource] = []
+    available_kbs: list[AIBuilderAvailableKnowledgeBaseResource] = []
     for index, step in enumerate(steps, start=1):
         model_ref = str(uuid4())
         kb_ref = str(uuid4())
@@ -103,10 +125,8 @@ def _make_assistant_snapshot_context(
                 ),
             ),
         )
-        available_models.append(
-            {"id": model_ref, "ref": model_ref, "name": f"Model {index}"}
-        )
-        available_kbs.append({"id": kb_ref, "ref": kb_ref, "name": f"KB {index}"})
+        available_models.append(_model_resource(model_ref, f"Model {index}"))
+        available_kbs.append(_kb_resource(kb_ref, f"KB {index}"))
     return snapshots, build_ai_builder_resource_catalog(
         available_models=available_models,
         available_kbs=available_kbs,
@@ -153,7 +173,7 @@ def _make_knowledge_assistant_snapshot_context(
     )
     catalog = build_ai_builder_resource_catalog(
         available_models=[],
-        available_kbs=[{"id": "kb-1", "ref": "kb-1", "name": "kb-1"}],
+        available_kbs=[_kb_resource("kb-1", "kb-1")],
     )
     return (
         {step.assistant_id: snapshot},

@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T112
+active_task: I004
 
 interruptions:
   - id: I001
@@ -192,6 +192,42 @@ interruptions:
         - "build_tool_retry_messages still uses the pre-existing Any boundary for provider tool calls; a small follow-up can tighten it to RuntimeToolCall."
         - "The broader 9/10 goal remains incomplete; T055 resumes to re-rank the next highest-score-moving tranche."
       score_impact: "Improves Runtime Reliability, Human Reviewability, Developer Diagnostic Experience, and Normal-User Output Quality for a live session-breaking provider-contract bug. Does not raise the strict overall score floor above 8 because broader topology/readability, full-source typing/check baseline, and repeated live-eval evidence still block a defensible 9."
+  - id: I004
+    kind: live_bug_hotfix
+    status: active
+    reported_at: "2026-05-25T06:51:56Z"
+    summary: "Selected-step create-mode edit failed when the user selected the terminal text step and asked in Swedish to change the output to a PDF file. Backend logs show terminal artifact normalization promoted step_f to PDF, but the scoped revision loop still exhausted self-correction after repeated ai_builder_scoped_plan_revision_rejected messages and one repair response changed unrelated step_a."
+    decision: "After T112 is committed, pause the post-T112 read-only audit and fix the selected-step terminal artifact/output-file edit path as a separate interruption. The fix must be deterministic and maintainable rather than another prompt-only repair tweak: selected terminal output-file changes should preserve unrelated steps, update the intended terminal artifact contract, and return a proposal or clear notice without falling into self_correction_quality_failure."
+    constraints:
+      - "Do not mix I004 source changes into the T112 typed resource boundary commit."
+      - "Stay within Flow AI Builder selected-step edit/create-proposal ownership unless source evidence proves another canonical owner."
+      - "Preserve strict scoped-edit protection: unrelated steps must still be rejected if they change."
+      - "Do not weaken quality checks or bypass the critic broadly to make PDF edits pass."
+      - "Do not add broad observability, new diagnostic schema, frontend redesign, DB migration, or public API contract changes unless source evidence proves the selected-step edit contract itself is wrong."
+      - "If public API/Swagger/OpenAPI examples change, update them in the same task."
+      - "Preserve unrelated dirty files."
+    evidence:
+      - "Frontend diagnostic: self_correction_quality_failure, phase self_correction, request_id 5382565b-5c95-46df-9251-53dd2bb5a200, session_id 199d5c77-96d7-47c0-941b-fee172bd7029."
+      - "Backend log: ai_builder_terminal_artifact_contract_normalized target_kind=CREATE terminal_output_type=PDF changes=[{'step_ref': 'step_f', 'code': 'terminal_artifact_contract_promoted', 'field': 'output_type'}]."
+      - "Backend log: repeated ai_builder_scoped_plan_revision_rejected session_id=199d5c77-96d7-47c0-941b-fee172bd7029 target_step_ref=step_f."
+      - "Backend repair warning: Step-scoped plan edits must preserve unrelated steps. Step `step_a` changed even though the user selected `step_f`."
+      - "Screenshot/user intent: selected step 6 currently text output; user asked 'kan du ändra så att jag får en pdf fil istället?'."
+    acceptance:
+      - "A selected terminal step output-file edit such as 'kan du ändra så att jag får en pdf fil istället?' changes only the selected terminal step/artifact contract and does not mutate earlier steps."
+      - "The path returns a usable proposal or typed user-facing notice, not self_correction_quality_failure."
+      - "Unrelated-step preservation remains enforced for real scoped-edit drift."
+      - "Existing terminal artifact normalization and semantic output-type drift protections remain active for non-scoped or invalid cases."
+      - "The canonical owner for deterministic selected-step output-file edits is explicit; no callback bags, broad Any, fake services, or prompt-only workaround are introduced."
+      - "Behavior tests fail on the reported live bug before the fix and pass after implementation."
+    validation_required:
+      - "Focused red/green tests around selected-step terminal PDF output edits in create mode."
+      - "Regression test proving unrelated-step scoped edit drift is still rejected."
+      - "Focused tests for terminal artifact normalization/compiled spec preparation if touched."
+      - "Ruff check and format check on touched backend files/tests."
+      - "Pyright on src/intric/flows/ai_builder."
+      - "git diff --check."
+      - "Claude implementation gate for the I004 diff; Antigravity with --spend-mode auto if available."
+      - "Manual/local smoke if service is available: selected terminal step text -> PDF succeeds; non-terminal or ambiguous output-file request gets clear behavior."
 
 scoring_target:
   dimensions:
@@ -10207,7 +10243,7 @@ tasks:
   - id: T112
     type: worker
     assignee: Worker
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Plan-gate and implement the typed AI Builder model/KB resource boundary selected by T111 so available_models/available_kbs stop leaking as a raw dict-shaped contract through internal planner/proposal/catalog layers."
     constraints:
@@ -10311,7 +10347,57 @@ tasks:
       - "Typed resource migration requires broad changes outside allowed_files."
       - "Validation fails twice with the same unclear owner or behavior drift."
     expected_score_impact: "If implemented cleanly, T112 should improve Maintainability, Clean Architecture, Separation of Concerns, Human Readability, Human Reviewability, and type-contract evidence, but it should not automatically raise the strict overall floor above 8 until AI-slop/topology and remaining score-floor blockers are closed."
-    receipt: null
+    receipt:
+      completed_at: "2026-05-25T09:06:30+02:00"
+      summary: "Implemented the peer-gated typed model/KB resource boundary. AIBuilderResourceCatalog now owns AIBuilderAvailableModelResource and AIBuilderAvailableKnowledgeBaseResource, prompt/tool-schema/proposal paths consume resource_catalog instead of parallel raw model/KB dict lists, the orphan AIBuilderPlannerContext.resource_catalog construction was deleted, and provider/display/description semantics are preserved through typed fixtures and prompt-context tests."
+      repo_reality:
+        head_before_commit: "1c4d53efd Approve AI Builder typed resource boundary plan"
+        branch: "feature/refactor-flows-flowai"
+        session_goal_tool: "get_goal worked, but its objective text still contained stale T081 details. Durable state.yaml remained the source of truth for active_task T112 and the broader 9/10 goal."
+        unrelated_dirty_files_preserved: ".devcontainer/docker-compose.yml, .gitignore, AGENTS.md, .devcontainer/devcontainer-lock.json, PRODUCT.md, utvecklingssamtal.mp3."
+      artifacts:
+        - ".codex/artifacts/flow-ai-builder-t112-typed-resource-boundary-plan.md"
+        - ".codex/artifacts/flow-ai-builder-t112-implementation-summary.md"
+        - ".codex/artifacts/claude-peer-loop-t112-typed-resource-boundary-plan-final-revision-20260525T060747Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t112-typed-resource-boundary-final-plan-synthesis-20260525T060945Z.md"
+        - ".codex/artifacts/claude-peer-loop-t112-implementation-review-20260525T064328Z.md"
+        - ".codex/artifacts/claude-peer-loop-t112-implementation-re-review-20260525T065348Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t112-typed-resource-boundary-implementation-20260525T065843Z.md"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_ai_builder_context.py tests/unittests/flows/ai_builder/test_ai_builder_prompts.py tests/unittests/flows/ai_builder/test_ai_builder_planner.py -q -> 131 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_tools.py tests/unittests/flows/ai_builder/test_ai_builder_edit_tool_schema.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -> 185 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_plan_proposal_task.py -q -> 67 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_proposal.py tests/unittests/flows/ai_builder/test_ai_builder_edit_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_plan_edit_context.py -q -> 90 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_tools.py tests/unittests/flows/ai_builder/test_ai_builder_edit_tool_schema.py tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py tests/unittests/flows/ai_builder/test_ai_builder_resource_catalog.py tests/unittests/flows/ai_builder/test_confirm_requirements.py tests/unittests/flows/ai_builder/test_ai_builder_active_tool_contracts.py -q -> 236 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2427 passed, 4 skipped, 11 warnings."
+        - "cd backend && uv run ruff check T112 touched backend files/tests -> passed."
+        - "cd backend && uv run ruff format --check T112 touched backend files/tests -> passed."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations."
+        - "rg -n \"available_models: list\\[dict\\[str, Any\\]\\]|available_kbs: list\\[dict\\[str, Any\\]\\]|available_models: Sequence\\[Mapping\\[str, Any\\]\\]|available_kbs: Sequence\\[Mapping\\[str, Any\\]\\]\" backend/src/intric/flows/ai_builder -g '*.py' -> no matches."
+        - "rg -n \"build_outline_flow_tool_schema\\(\\)|build_edit_flow_tool_schema\\([^,\\n]+\\)|build_edit_mode_tool_schemas\\([^,\\n]+\\)\" backend/src/intric/flows/ai_builder backend/tests/unittests/flows/ai_builder -g '*.py' -> only false positives from calls that include resource_catalog=..."
+        - "git diff --check -> passed."
+        - "Board-listed tests/unittests/flows/ai_builder/test_ai_builder_planner_request_preparation.py does not exist in the current tree; coverage is provided by test_ai_builder_planner.py and the full AI Builder suite."
+      peer_review:
+        claude_plan_gate: ".codex/artifacts/claude-peer-loop-t112-typed-resource-boundary-plan-final-revision-20260525T060747Z.md -> artifact text GREEN_LIGHT yes / MIN_SCORE 8; wrapper parser mismatch recorded."
+        antigravity_plan_gate: ".codex/artifacts/antigravity-peer-loop-t112-typed-resource-boundary-final-plan-synthesis-20260525T060945Z.md -> GREEN_LIGHT yes / MIN_SCORE 8."
+        claude_implementation_gate_1: ".codex/artifacts/claude-peer-loop-t112-implementation-review-20260525T064328Z.md -> artifact text GREEN_LIGHT yes / MIN_SCORE 8; wrapper parser mismatch on bold verdict. Claude listed only P2/P3 polish."
+        codex_follow_up: "Accepted and implemented Claude's non-blocking polish: require resource_catalog on outline/edit tool schema builders, type resource-catalog test helpers as TypedDicts, restore local-ref why comments, and clarify name/display_name fallback locals."
+        claude_implementation_gate_2: ".codex/artifacts/claude-peer-loop-t112-implementation-re-review-20260525T065348Z.md -> artifact text GREEN_LIGHT yes / MIN_SCORE 9; wrapper still reported parsed false because of bold tokens, but exit code was 0 and content had no blockers."
+        antigravity_implementation_gate: ".codex/artifacts/antigravity-peer-loop-t112-typed-resource-boundary-implementation-20260525T065843Z.md -> GREEN_LIGHT yes / MIN_SCORE 9 with --spend-mode auto; quota available and artifact parser succeeded."
+      self_review:
+        simpler_for_maintainer: true
+        complexity_removed: "Deleted hidden parallel model/KB carriers through proposal prompt/tool schema paths, the unused AIBuilderPlannerContext.resource_catalog field, dead build_all_tool_schemas model/KB parameters, and one generic catalog helper for arbitrary mappings."
+        owner_clarified: "ai_builder_resource_catalog.py owns model/KB resource input shape, slot-ref allocation, aliases, and prompt metadata preservation."
+        coupling_removed: "Proposal prompt/tool-schema builders no longer need raw resource lists when resource_catalog already exists."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "T112 does not rerun the authenticated live eval; T111 had current-head live-eval evidence, and the newly reported I004 selected-step PDF edit bug supersedes post-T112 audit work."
+        - "Prompt renderer parameters still use presentation-level list[dict[str, str]] shapes; Antigravity judged this safe because the typed catalog is translated to prompt presentation lists at the boundary, but a future prompt presenter type could tighten it."
+        - "MCP resource inputs still use the existing MCP typed resource path plus available_mcps Mapping input at the catalog entry point; aligning MCP with the same typed input discipline is future scope."
+        - "Broader topology/readability, full-source baseline, and live UX/output-quality interruptions still keep the strict overall Flow AI Builder floor at 8/10."
+      score_impact: "Improves Maintainability, Clean Architecture, Separation of Concerns, Single Source of Truth, Human Readability, Human Reviewability, and type-contract evidence for model/KB resources. Does not raise the strict overall score floor above 8 because remaining AI Builder topology/readability, full-source baseline, and live-output reliability blockers remain."
 
 checks:
   dirty_fingerprint:

@@ -29,6 +29,9 @@ from intric.flows.ai_builder.ai_builder_prompts import (
     build_system_prompt,
     trim_conversation_for_context,
 )
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
+)
 from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
 )
@@ -1021,24 +1024,104 @@ class TestBuildClarificationHints:
 
 
 class TestContextBuilders:
+    def test_model_and_kb_context_source_metadata_from_catalog(self) -> None:
+        catalog = build_ai_builder_resource_catalog(
+            available_models=[
+                {
+                    "id": "model-1",
+                    "ref": "model-1",
+                    "name": "Internal GPT",
+                    "display_name": "Displayed GPT",
+                    "provider": "azure",
+                }
+            ],
+            available_kbs=[
+                {
+                    "id": "kb-1",
+                    "ref": "kb-1",
+                    "name": "Policy Internal",
+                    "display_name": "Policy Display",
+                    "description": "Catalog policy description.",
+                }
+            ],
+            available_mcps=[],
+        )
+
+        models_context = build_available_models_context(resource_catalog=catalog)
+        kbs_context = build_available_kbs_context(resource_catalog=catalog)
+
+        assert models_context == [
+            {
+                "ref": "model.displayed-gpt",
+                "name": "Internal GPT",
+                "display_name": "Displayed GPT",
+                "provider": "azure",
+            }
+        ]
+        assert kbs_context == [
+            {
+                "ref": "knowledge.policy-display",
+                "name": "Policy Internal",
+                "display_name": "Policy Display",
+                "description": "Catalog policy description.",
+            }
+        ]
+
     def test_build_models_context(self) -> None:
-        models = [{"id": "abc-123", "name": "GPT-4", "provider": "openai"}]
-        result = build_available_models_context(models)
+        catalog = build_ai_builder_resource_catalog(
+            available_models=[
+                {
+                    "id": "abc-123",
+                    "ref": "abc-123",
+                    "name": "GPT-4",
+                    "display_name": "GPT-4",
+                    "provider": "openai",
+                }
+            ],
+            available_kbs=[],
+            available_mcps=[],
+        )
+        result = build_available_models_context(resource_catalog=catalog)
         assert len(result) == 1
         assert result[0]["ref"] == "model.gpt-4"
         assert result[0]["name"] == "GPT-4"
+        assert result[0]["provider"] == "openai"
 
     def test_build_kbs_context(self) -> None:
-        kbs = [{"id": "kb-1", "name": "Policy", "description": "Company policies"}]
-        result = build_available_kbs_context(kbs)
+        catalog = build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[
+                {
+                    "id": "kb-1",
+                    "ref": "kb-1",
+                    "name": "Policy",
+                    "display_name": "Policy",
+                    "description": "Company policies",
+                }
+            ],
+            available_mcps=[],
+        )
+        result = build_available_kbs_context(resource_catalog=catalog)
         assert len(result) == 1
         assert result[0]["ref"] == "knowledge.policy"
         assert result[0]["display_name"] == "Policy"
         assert result[0]["description"] == "Company policies"
 
     def test_build_kbs_context_no_description(self) -> None:
-        kbs = [{"id": "kb-1", "name": "Policy"}]
-        result = build_available_kbs_context(kbs)
+        catalog = build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[
+                {
+                    "id": "kb-1",
+                    "ref": "kb-1",
+                    "name": "Policy",
+                    "display_name": "Policy",
+                    "description": "",
+                }
+            ],
+            available_mcps=[],
+        )
+        result = build_available_kbs_context(resource_catalog=catalog)
         assert result[0]["description"] == ""
 
     def test_build_mcp_context_uses_slot_refs(self) -> None:

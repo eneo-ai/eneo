@@ -30,6 +30,7 @@ from intric.flows.ai_builder.ai_builder_proposal_policy import (
     format_create_contextual_quality_feedback,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderAvailableModelResource,
     build_ai_builder_resource_catalog,
 )
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
@@ -123,6 +124,16 @@ def _json_all_previous_architecture_spec() -> FlowDraftSpecCore:
             ]
         }
     )
+
+
+def _model_resource(local_id: str, name: str) -> AIBuilderAvailableModelResource:
+    return {
+        "id": local_id,
+        "ref": local_id,
+        "name": name,
+        "display_name": name,
+        "provider": "test",
+    }
 
 
 def _builder_plan(spec: FlowDraftSpecCore) -> BuilderPlan:
@@ -396,9 +407,9 @@ async def test_scoped_outline_revision_explains_model_change_on_transcription_st
 ):
     catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {"id": "model-old", "name": "gpt-4o mini"},
-            {"id": "model-base", "name": "gpt-5.4"},
-            {"id": "model-nano", "name": "gpt-5.4-nano"},
+            _model_resource("model-old", "gpt-4o mini"),
+            _model_resource("model-base", "gpt-5.4"),
+            _model_resource("model-nano", "gpt-5.4-nano"),
         ],
         available_kbs=[],
         available_mcps=[],
@@ -462,8 +473,8 @@ async def test_scoped_outline_revision_explains_model_change_on_transcription_st
 async def test_scoped_outline_revision_changes_model_on_selected_ai_step() -> None:
     catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {"id": "model-old", "name": "gpt-4o mini"},
-            {"id": "model-nano", "name": "gpt-5.4-nano"},
+            _model_resource("model-old", "gpt-4o mini"),
+            _model_resource("model-nano", "gpt-5.4-nano"),
         ],
         available_kbs=[],
         available_mcps=[],

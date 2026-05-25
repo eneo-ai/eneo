@@ -18,9 +18,6 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_input_type_values,
     builder_output_type_values,
 )
-from intric.flows.ai_builder.ai_builder_mcp_resources import (
-    AIBuilderMCPResourceInput,
-)
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     StructuredFieldDraft,
 )
@@ -30,7 +27,6 @@ from intric.flows.ai_builder.ai_builder_new_step_schema import (
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
-    build_ai_builder_resource_catalog,
 )
 from intric.flows.ai_builder.ai_builder_structured_field_normalizer import (
     looks_like_structured_field_spec,
@@ -528,18 +524,11 @@ def _tool_refs_for_servers(
 
 
 def build_outline_flow_tool_schema(
-    available_models: list[dict[str, Any]] | None = None,
-    available_kbs: list[dict[str, Any]] | None = None,
-    available_mcps: AIBuilderMCPResourceInput = None,
-    resource_catalog: AIBuilderResourceCatalog | None = None,
+    *,
+    resource_catalog: AIBuilderResourceCatalog,
 ) -> dict[str, Any]:
-    catalog = resource_catalog or build_ai_builder_resource_catalog(
-        available_models=available_models,
-        available_kbs=available_kbs,
-        available_mcps=available_mcps,
-    )
-    model_refs = catalog.small_ref_enum_for_kind("model")
-    kb_refs = catalog.small_ref_enum_for_kind("knowledge_base")
+    model_refs = resource_catalog.small_ref_enum_for_kind("model")
+    kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
     # Keep MCP refs free-form. Catalog resolution and quality feedback handle
     # unknown or unrelated MCP selections without coercing the planner into an
     # available-but-wrong server when the requested MCP is absent.

@@ -44,6 +44,8 @@ from intric.flows.ai_builder.ai_builder_planner_request_preparation import (
 )
 from intric.flows.ai_builder.ai_builder_requirements_state import RequirementsState
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderAvailableKnowledgeBaseResource,
+    AIBuilderAvailableModelResource,
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
 )
@@ -80,6 +82,36 @@ def _make_planner() -> AIBuilderPlanner:
     )
     planner.repo.claim_session_send.return_value = True
     return planner
+
+
+def _model_resource(
+    local_id: str,
+    name: str,
+    *,
+    provider: str = "test",
+) -> AIBuilderAvailableModelResource:
+    return {
+        "id": local_id,
+        "ref": local_id,
+        "name": name,
+        "display_name": name,
+        "provider": provider,
+    }
+
+
+def _kb_resource(
+    local_id: str,
+    name: str,
+    *,
+    description: str = "",
+) -> AIBuilderAvailableKnowledgeBaseResource:
+    return {
+        "id": local_id,
+        "ref": local_id,
+        "name": name,
+        "display_name": name,
+        "description": description,
+    }
 
 
 def _make_file(text: str = "Reference") -> File:
@@ -147,8 +179,8 @@ async def _prepare_planner_request_for_test(
     message: str,
     litellm_model: str = "openai/gpt-5.4",
     litellm_kwargs: dict[str, object] | None = None,
-    available_models: list[dict[str, object]] | None = None,
-    available_kbs: list[dict[str, object]] | None = None,
+    available_models: list[AIBuilderAvailableModelResource] | None = None,
+    available_kbs: list[AIBuilderAvailableKnowledgeBaseResource] | None = None,
     available_mcps: object = None,
     flow: object = None,
     assistant_snapshots: object = None,
@@ -581,10 +613,17 @@ async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_he
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
             available_models=[
-                {"id": "11111111-1111-4111-8111-111111111111", "name": "Model A"}
+                _model_resource(
+                    "11111111-1111-4111-8111-111111111111",
+                    "Model A",
+                    provider="openai",
+                )
             ],
             available_kbs=[
-                {"id": "22222222-2222-4222-8222-222222222222", "name": "KB A"}
+                _kb_resource(
+                    "22222222-2222-4222-8222-222222222222",
+                    "KB A",
+                )
             ],
             flow=None,
             assistant_snapshots=None,
@@ -608,7 +647,7 @@ async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_he
             "ref": "model.model-a",
             "name": "Model A",
             "display_name": "Model A",
-            "provider": "unknown",
+            "provider": "openai",
         }
     ]
     assert build_system_prompt.call_args.kwargs["available_knowledge_bases"] == [
@@ -1455,7 +1494,9 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
                 PlanningState.empty(),
             ),
             resource_catalog=build_ai_builder_resource_catalog(
-                available_models=[{"id": str(local_model_id), "name": "Renamed model"}],
+                available_models=[
+                    _model_resource(str(local_model_id), "Renamed model")
+                ],
                 available_kbs=[],
                 prior_bindings=(prior_binding,),
             ),
@@ -1498,7 +1539,7 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
             message="Revise the plan",
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
-            available_models=[{"id": str(local_model_id), "name": "Renamed model"}],
+            available_models=[_model_resource(str(local_model_id), "Renamed model")],
             available_kbs=[],
             flow=None,
             assistant_snapshots=None,

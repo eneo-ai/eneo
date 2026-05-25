@@ -52,6 +52,8 @@ from intric.flows.ai_builder.ai_builder_question_recovery import (
     RecoveredToolDispatchRequest,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderAvailableModelResource,
+    AIBuilderResourceCatalog,
     AssistantSnapshotResourceUnavailableError,
     build_ai_builder_resource_catalog,
 )
@@ -78,6 +80,26 @@ from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _make_flow_spec,
     _make_turn,
 )
+
+
+def _empty_catalog() -> AIBuilderResourceCatalog:
+    return build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[],
+    )
+
+
+def _model_resource(local_id: str, name: str) -> AIBuilderAvailableModelResource:
+    return {
+        "id": local_id,
+        "ref": local_id,
+        "name": name,
+        "display_name": name,
+        "provider": "test",
+    }
+
+
 from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
     _make_processor,
     _make_response_with_tool_calls,
@@ -305,11 +327,9 @@ async def test_propose_plan_create_mode_forces_outline_flow_only() -> None:
                 llm_messages=[{"role": "system", "content": "Prompt"}],
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
-                available_models=None,
-                available_kbs=None,
                 available_model_refs=None,
                 available_kb_refs=None,
-                resource_catalog=None,
+                resource_catalog=_empty_catalog(),
                 max_output_tokens=4096,
                 proposal_temperature=0.2,
                 request_id="req-propose",
@@ -347,11 +367,9 @@ async def test_propose_plan_provider_error_still_yields_planner_upstream_error()
                 llm_messages=[{"role": "system", "content": "Prompt"}],
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
-                available_models=None,
-                available_kbs=None,
                 available_model_refs=None,
                 available_kb_refs=None,
-                resource_catalog=None,
+                resource_catalog=_empty_catalog(),
                 max_output_tokens=4096,
                 proposal_temperature=0.2,
                 request_id="req-first-attempt-provider-error",
@@ -385,11 +403,9 @@ async def test_propose_plan_empty_completion_choices_yields_missing_tool_error()
                 llm_messages=[{"role": "system", "content": "Prompt"}],
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
-                available_models=None,
-                available_kbs=None,
                 available_model_refs=None,
                 available_kb_refs=None,
-                resource_catalog=None,
+                resource_catalog=_empty_catalog(),
                 max_output_tokens=4096,
                 proposal_temperature=0.2,
                 request_id="req-empty-first-attempt",
@@ -411,9 +427,9 @@ async def test_propose_plan_preflights_scoped_model_change_on_ai_step_without_ll
     processor = _make_processor()
     catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {"id": "model-old", "name": "gpt-4o mini"},
-            {"id": "model-base", "name": "gpt-5.4"},
-            {"id": "model-nano", "name": "gpt-5.4-nano"},
+            _model_resource("model-old", "gpt-4o mini"),
+            _model_resource("model-base", "gpt-5.4"),
+            _model_resource("model-nano", "gpt-5.4-nano"),
         ],
         available_kbs=[],
         available_mcps=[],
@@ -478,8 +494,6 @@ async def test_propose_plan_preflights_scoped_model_change_on_ai_step_without_ll
                 llm_messages=[{"role": "system", "content": "Prompt"}],
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
-                available_models=None,
-                available_kbs=None,
                 available_model_refs=catalog.model_refs,
                 available_kb_refs=None,
                 resource_catalog=catalog,
@@ -514,8 +528,8 @@ async def test_propose_plan_preflights_transcription_step_model_notice_without_l
     processor = _make_processor()
     catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {"id": "model-base", "name": "gpt-5.4"},
-            {"id": "model-nano", "name": "gpt-5.4-nano"},
+            _model_resource("model-base", "gpt-5.4"),
+            _model_resource("model-nano", "gpt-5.4-nano"),
         ],
         available_kbs=[],
         available_mcps=[],
@@ -557,8 +571,6 @@ async def test_propose_plan_preflights_transcription_step_model_notice_without_l
                 llm_messages=[{"role": "system", "content": "Prompt"}],
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
-                available_models=None,
-                available_kbs=None,
                 available_model_refs=catalog.model_refs,
                 available_kb_refs=None,
                 resource_catalog=catalog,
@@ -616,8 +628,6 @@ async def test_propose_plan_asks_before_planning_when_named_mcp_is_unavailable()
             llm_messages=[{"role": "system", "content": "Prompt"}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
-            available_models=None,
-            available_kbs=None,
             available_model_refs=None,
             available_kb_refs=None,
             resource_catalog=catalog,
@@ -672,8 +682,6 @@ async def test_propose_plan_asks_before_planning_when_named_mcp_is_enabled() -> 
             llm_messages=[{"role": "system", "content": "Prompt"}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
-            available_models=None,
-            available_kbs=None,
             available_model_refs=None,
             available_kb_refs=None,
             resource_catalog=catalog,
@@ -764,8 +772,6 @@ async def test_propose_plan_continues_after_user_declines_mcp_usage() -> None:
                 llm_messages=[{"role": "system", "content": "Prompt"}],
                 litellm_model="openai/gpt-5.4",
                 litellm_kwargs={},
-                available_models=None,
-                available_kbs=None,
                 available_model_refs=None,
                 available_kb_refs=None,
                 resource_catalog=catalog,
@@ -830,8 +836,6 @@ async def test_propose_plan_reasks_when_user_requests_mcp_after_declining() -> N
             llm_messages=[{"role": "system", "content": "Prompt"}],
             litellm_model="openai/gpt-5.4",
             litellm_kwargs={},
-            available_models=None,
-            available_kbs=None,
             available_model_refs=None,
             available_kb_refs=None,
             resource_catalog=catalog,
@@ -908,11 +912,9 @@ async def test_propose_plan_persists_initial_proposal_token_usage() -> None:
                 llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
                 litellm_model="openai/gpt-5.4-nano",
                 litellm_kwargs={},
-                available_models=None,
-                available_kbs=None,
                 available_model_refs=None,
                 available_kb_refs=None,
-                resource_catalog=None,
+                resource_catalog=_empty_catalog(),
                 max_output_tokens=4096,
                 proposal_temperature=0.2,
                 request_id="req-proposal-usage",
@@ -1018,11 +1020,9 @@ async def test_propose_plan_persists_aggregate_token_usage_after_repair() -> Non
                 llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
                 litellm_model="openai/gpt-5.4-nano",
                 litellm_kwargs={},
-                available_models=None,
-                available_kbs=None,
                 available_model_refs=None,
                 available_kb_refs=None,
-                resource_catalog=None,
+                resource_catalog=_empty_catalog(),
                 max_output_tokens=4096,
                 proposal_temperature=0.2,
                 request_id="req-proposal-repair-usage",
@@ -1127,11 +1127,9 @@ async def test_propose_plan_keeps_missing_tool_as_first_attempt_after_forced_ret
                 llm_messages=[{"role": "user", "content": "Bygg ett flöde"}],
                 litellm_model="openai/gpt-5.4-nano",
                 litellm_kwargs={},
-                available_models=None,
-                available_kbs=None,
                 available_model_refs=None,
                 available_kb_refs=None,
-                resource_catalog=None,
+                resource_catalog=_empty_catalog(),
                 max_output_tokens=4096,
                 proposal_temperature=0.2,
                 request_id="req-proposal-missing-tool",
@@ -1208,7 +1206,7 @@ async def test_edit_proposal_returns_validation_when_snapshot_resource_is_unavai
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            resource_catalog=None,
+            resource_catalog=_empty_catalog(),
         )
 
     assert result.failure_kind == "validation"
@@ -1295,7 +1293,7 @@ async def test_edit_proposal_normalizes_loose_add_payload_output_fields() -> Non
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            resource_catalog=None,
+            resource_catalog=_empty_catalog(),
         )
 
     assert result.compiled_proposal is not None
@@ -1363,7 +1361,7 @@ async def test_edit_proposal_retries_on_contextual_quality_feedback() -> None:
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            resource_catalog=None,
+            resource_catalog=_empty_catalog(),
         )
 
     assert result.compiled_proposal is not None
@@ -1589,7 +1587,7 @@ async def test_edit_proposal_passes_metadata_to_edit_validator() -> None:
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            resource_catalog=None,
+            resource_catalog=_empty_catalog(),
         )
 
     assert validate_edit.call_args is not None
@@ -1661,7 +1659,7 @@ async def test_edit_proposal_canonicalizes_duplicate_modify_ops_before_validatio
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            resource_catalog=None,
+            resource_catalog=_empty_catalog(),
         )
 
     assert result.compiled_proposal is not None
@@ -1724,7 +1722,7 @@ async def test_edit_proposal_returns_specific_feedback_for_conflicting_duplicate
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            resource_catalog=None,
+            resource_catalog=_empty_catalog(),
         )
 
     assert result.failure_kind == "validation"
@@ -1800,7 +1798,7 @@ async def test_edit_proposal_normalizes_mechanical_refs_before_validation() -> N
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            resource_catalog=None,
+            resource_catalog=_empty_catalog(),
         )
 
     assert validate_edit.call_args is not None
@@ -1866,7 +1864,7 @@ async def test_edit_proposal_returns_validation_feedback_for_explicit_mechanics_
             available_kb_refs=None,
             flow=flow,
             assistant_snapshots=None,
-            resource_catalog=None,
+            resource_catalog=_empty_catalog(),
         )
 
     assert result.failure_kind == "validation"

@@ -51,7 +51,6 @@ from intric.flows.ai_builder.ai_builder_error_contract import (
 )
 from intric.flows.ai_builder.ai_builder_events import build_text_event
 from intric.flows.ai_builder.ai_builder_interaction_utils import analyze_discovery_ready
-from intric.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
@@ -169,26 +168,17 @@ class ProposalSubmissionOwner:
         self,
         *,
         flow: "Flow | None",
-        available_models: list[dict[str, Any]] | None,
-        available_kbs: list[dict[str, Any]] | None,
-        available_mcps: AIBuilderMCPResourceInput,
-        resource_catalog: AIBuilderResourceCatalog | None,
+        resource_catalog: AIBuilderResourceCatalog,
     ) -> list[dict[str, Any]]:
         if flow is None:
             return [
                 build_outline_flow_tool_schema(
-                    available_models=available_models,
-                    available_kbs=available_kbs,
-                    available_mcps=available_mcps,
                     resource_catalog=resource_catalog,
                 )
             ]
         return [
             build_edit_flow_tool_schema(
                 list(flow.steps),
-                available_models=available_models,
-                available_kbs=available_kbs,
-                available_mcps=available_mcps,
                 resource_catalog=resource_catalog,
             )
         ]
@@ -221,12 +211,9 @@ class ProposalSubmissionOwner:
         llm_messages: list[dict[str, Any]],
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
-        available_models: list[dict[str, Any]] | None,
-        available_kbs: list[dict[str, Any]] | None,
-        available_mcps: AIBuilderMCPResourceInput,
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
-        resource_catalog: AIBuilderResourceCatalog | None,
+        resource_catalog: AIBuilderResourceCatalog,
         max_output_tokens: int,
         proposal_temperature: float,
         request_id: str,
@@ -243,9 +230,6 @@ class ProposalSubmissionOwner:
         )
         tool_schemas = self._active_submission_tool_schemas(
             flow=flow,
-            available_models=available_models,
-            available_kbs=available_kbs,
-            available_mcps=available_mcps,
             resource_catalog=resource_catalog,
         )
         usage_tracker = ProposalTurnTelemetry(

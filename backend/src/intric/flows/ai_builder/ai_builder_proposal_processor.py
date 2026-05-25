@@ -31,7 +31,6 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
     find_named_mcp_request_issue,
     mcp_selection_answer_allows_planning,
 )
-from intric.flows.ai_builder.ai_builder_mcp_resources import AIBuilderMCPResourceInput
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
@@ -191,11 +190,9 @@ class AIBuilderProposalProcessor:
         llm_messages: list[dict[str, Any]],
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
-        available_models: list[dict[str, Any]] | None,
-        available_kbs: list[dict[str, Any]] | None,
         available_model_refs: set[str] | None,
         available_kb_refs: set[str] | None,
-        resource_catalog: AIBuilderResourceCatalog | None,
+        resource_catalog: AIBuilderResourceCatalog,
         max_output_tokens: int,
         proposal_temperature: float,
         request_id: str,
@@ -206,7 +203,6 @@ class AIBuilderProposalProcessor:
         plan_edit_context: AIBuilderPlanEditContext | None = None,
         prior_plan_for_revision: BuilderPlan | None = None,
         discovery_runtime: DiscoveryRuntimeResult | None = None,
-        available_mcps: AIBuilderMCPResourceInput = None,
     ) -> AsyncGenerator[dict[str, str], None]:
         """Run the server-selected plan proposal task.
 
@@ -235,9 +231,6 @@ class AIBuilderProposalProcessor:
             llm_messages=llm_messages,
             litellm_model=litellm_model,
             litellm_kwargs=litellm_kwargs,
-            available_models=available_models,
-            available_kbs=available_kbs,
-            available_mcps=available_mcps,
             available_model_refs=available_model_refs,
             available_kb_refs=available_kb_refs,
             resource_catalog=resource_catalog,

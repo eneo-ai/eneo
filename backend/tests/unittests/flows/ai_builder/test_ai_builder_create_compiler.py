@@ -42,6 +42,9 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderAvailableKnowledgeBaseResource,
+    AIBuilderAvailableModelResource,
+    AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
     canonicalize_create_draft_resources,
 )
@@ -72,6 +75,54 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode
+
+
+def _model_resource(
+    local_id: str,
+    name: str,
+    *,
+    provider: str = "test",
+) -> AIBuilderAvailableModelResource:
+    return {
+        "id": local_id,
+        "ref": local_id,
+        "name": name,
+        "display_name": name,
+        "provider": provider,
+    }
+
+
+def _kb_resource(
+    local_id: str,
+    name: str,
+    *,
+    description: str = "",
+) -> AIBuilderAvailableKnowledgeBaseResource:
+    return {
+        "id": local_id,
+        "ref": local_id,
+        "name": name,
+        "display_name": name,
+        "description": description,
+    }
+
+
+def _catalog_with_mcps(
+    mcps: list[dict[str, object]],
+) -> AIBuilderResourceCatalog:
+    return build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=mcps,
+    )
+
+
+def _empty_catalog() -> AIBuilderResourceCatalog:
+    return build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[],
+    )
 
 
 def _field(
@@ -1048,7 +1099,7 @@ def test_compile_create_draft_sets_review_policy_from_review_mode() -> None:
 
 
 def test_outline_flow_schema_exposes_review_mode_on_steps() -> None:
-    schema = build_outline_flow_tool_schema()
+    schema = build_outline_flow_tool_schema(resource_catalog=_empty_catalog())
     parameters = cast(dict[str, object], schema["function"])["parameters"]
     properties = cast(dict[str, object], parameters)["properties"]
     steps = cast(dict[str, object], cast(dict[str, object], properties)["steps"])
@@ -1916,8 +1967,8 @@ def test_canonicalize_create_draft_resources_resolves_names_to_refs() -> None:
         ],
     )
     catalog = build_ai_builder_resource_catalog(
-        available_models=[{"id": "model-1", "name": "gpt-5.4-nano"}],
-        available_kbs=[{"id": "kb-1", "name": "Risk KB"}],
+        available_models=[_model_resource("model-1", "gpt-5.4-nano")],
+        available_kbs=[_kb_resource("kb-1", "Risk KB")],
     )
 
     canonicalized, issues = canonicalize_create_draft_resources(draft, catalog=catalog)
@@ -1928,7 +1979,7 @@ def test_canonicalize_create_draft_resources_resolves_names_to_refs() -> None:
 
 
 def test_outline_flow_schema_hides_low_level_flow_mechanics() -> None:
-    schema = build_outline_flow_tool_schema()
+    schema = build_outline_flow_tool_schema(resource_catalog=_empty_catalog())
     assert schema["function"]["name"] == "outline_flow"
     step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
         "properties"
@@ -1946,7 +1997,7 @@ def test_outline_flow_schema_hides_low_level_flow_mechanics() -> None:
 
 
 def test_outline_flow_schema_uses_flow_derived_enums() -> None:
-    schema = build_outline_flow_tool_schema()
+    schema = build_outline_flow_tool_schema(resource_catalog=_empty_catalog())
     parameters = schema["function"]["parameters"]
     properties = parameters["properties"]
     step_props = properties["steps"]["items"]["properties"]
@@ -1962,14 +2013,17 @@ def test_outline_flow_schema_uses_flow_derived_enums() -> None:
 
 
 def test_outline_flow_schema_keeps_mcp_refs_free_form_for_small_catalog() -> None:
-    schema = build_outline_flow_tool_schema(
-        available_mcps=[
+    catalog = _catalog_with_mcps(
+        [
             {
                 "ref": "server-1",
                 "name": "Case system",
                 "tools": [{"ref": "tool-1", "name": "lookup_case"}],
             }
         ]
+    )
+    schema = build_outline_flow_tool_schema(
+        resource_catalog=catalog,
     )
     step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
         "properties"
@@ -2153,7 +2207,7 @@ def test_selected_mcp_attachment_uses_explicit_tool_alias_without_server_name() 
 def test_selected_mcp_attachment_skips_knowledge_steps() -> None:
     catalog = build_ai_builder_resource_catalog(
         available_models=[],
-        available_kbs=[{"id": "kb-1", "name": "Policy"}],
+        available_kbs=[_kb_resource("kb-1", "Policy")],
         available_mcps=[
             {
                 "id": "time-server",
@@ -2229,9 +2283,12 @@ def test_selected_mcp_attachment_does_not_infer_from_domain_words() -> None:
 def test_outline_flow_schema_exposes_model_and_knowledge_refs_for_small_catalog() -> (
     None
 ):
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[_model_resource("model-1", "gpt-5.4-nano")],
+        available_kbs=[_kb_resource("kb-1", "Risk KB")],
+    )
     schema = build_outline_flow_tool_schema(
-        available_models=[{"ref": "model-1", "name": "gpt-5.4-nano"}],
-        available_kbs=[{"ref": "kb-1", "name": "Risk KB"}],
+        resource_catalog=catalog,
     )
     step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
         "properties"
@@ -2242,7 +2299,7 @@ def test_outline_flow_schema_exposes_model_and_knowledge_refs_for_small_catalog(
 
 
 def test_outline_flow_schema_form_field_enum_matches_builder_values() -> None:
-    schema = build_outline_flow_tool_schema()
+    schema = build_outline_flow_tool_schema(resource_catalog=_empty_catalog())
     parameters = cast(dict[str, object], schema["function"])["parameters"]
     properties = cast(dict[str, object], parameters)["properties"]
     input_fields = cast(dict[str, object], properties["input_fields"])
@@ -2254,14 +2311,17 @@ def test_outline_flow_schema_form_field_enum_matches_builder_values() -> None:
 
 
 def test_outline_flow_schema_keeps_mcp_refs_free_form_for_malformed_catalog() -> None:
-    schema = build_outline_flow_tool_schema(
-        available_mcps=[
+    catalog = _catalog_with_mcps(
+        [
             {"ref": "", "tools": [{"ref": "ignored-tool"}]},
             {
                 "ref": "server-1",
                 "tools": [{"ref": ""}, {"ref": "tool-1", "name": "lookup_case"}],
             },
         ]
+    )
+    schema = build_outline_flow_tool_schema(
+        resource_catalog=catalog,
     )
     step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
         "properties"
@@ -2272,14 +2332,17 @@ def test_outline_flow_schema_keeps_mcp_refs_free_form_for_malformed_catalog() ->
 
 
 def test_outline_flow_schema_omits_mcp_ref_enums_for_large_catalog() -> None:
-    schema = build_outline_flow_tool_schema(
-        available_mcps=[
+    catalog = _catalog_with_mcps(
+        [
             {
                 "ref": f"server-{index}",
                 "tools": [{"ref": f"tool-{index}", "name": "lookup"}],
             }
             for index in range(16)
         ]
+    )
+    schema = build_outline_flow_tool_schema(
+        resource_catalog=catalog,
     )
     step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
         "properties"
@@ -2292,8 +2355,8 @@ def test_outline_flow_schema_omits_mcp_ref_enums_for_large_catalog() -> None:
 def test_outline_flow_schema_keeps_mcp_refs_free_form_when_tool_catalog_is_large() -> (
     None
 ):
-    schema = build_outline_flow_tool_schema(
-        available_mcps=[
+    catalog = _catalog_with_mcps(
+        [
             {
                 "ref": "server-1",
                 "tools": [
@@ -2301,6 +2364,9 @@ def test_outline_flow_schema_keeps_mcp_refs_free_form_when_tool_catalog_is_large
                 ],
             }
         ]
+    )
+    schema = build_outline_flow_tool_schema(
+        resource_catalog=catalog,
     )
     step_props = schema["function"]["parameters"]["properties"]["steps"]["items"][
         "properties"

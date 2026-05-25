@@ -70,6 +70,10 @@ from intric.flows.ai_builder.ai_builder_plan_edit_context import (
 from intric.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
 from intric.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
 from intric.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderAvailableKnowledgeBaseResource,
+    AIBuilderAvailableModelResource,
+)
 from intric.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from intric.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from intric.model_providers.infrastructure.litellm_runtime_config import (
@@ -488,8 +492,8 @@ class AIBuilderService:
         litellm_model: str,
         litellm_kwargs: dict[str, Any],
         structured_output_decision: StructuredOutputCapabilityDecision | None = None,
-        available_models: list[dict[str, Any]] | None = None,
-        available_kbs: list[dict[str, Any]] | None = None,
+        available_models: list[AIBuilderAvailableModelResource] | None = None,
+        available_kbs: list[AIBuilderAvailableKnowledgeBaseResource] | None = None,
         available_mcps: AIBuilderMCPResourceInput = None,
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,

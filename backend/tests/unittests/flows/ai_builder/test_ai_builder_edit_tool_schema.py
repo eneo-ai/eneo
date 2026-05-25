@@ -15,6 +15,11 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_output_type_values,
     document_delivery_mode_values,
 )
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderAvailableModelResource,
+    AIBuilderResourceCatalog,
+    build_ai_builder_resource_catalog,
+)
 from intric.flows.flow import FlowStep
 
 
@@ -34,16 +39,36 @@ def _make_step(step_order: int) -> FlowStep:
     )
 
 
+def _catalog_with_models(
+    models: list[AIBuilderAvailableModelResource],
+) -> AIBuilderResourceCatalog:
+    return build_ai_builder_resource_catalog(
+        available_models=models,
+        available_kbs=[],
+        available_mcps=[],
+    )
+
+
+def _empty_catalog() -> AIBuilderResourceCatalog:
+    return build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[],
+    )
+
+
 class TestBuildEditFlowToolSchema:
     def test_schema_has_correct_name(self):
-        schema = build_edit_flow_tool_schema([_make_step(1)])
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)], resource_catalog=_empty_catalog()
+        )
         assert schema["function"]["name"] == EDIT_FLOW_TOOL_NAME
         assert "form_operations" in schema["function"]["description"]
         assert "uses_form_fields" in schema["function"]["description"]
 
     def test_target_ref_enum_contains_valid_refs(self):
         steps = [_make_step(1), _make_step(2), _make_step(3)]
-        schema = build_edit_flow_tool_schema(steps)
+        schema = build_edit_flow_tool_schema(steps, resource_catalog=_empty_catalog())
 
         ops_schema = schema["function"]["parameters"]["properties"]["operations"]
         target_ref = ops_schema["items"]["properties"]["target_ref"]
@@ -54,7 +79,7 @@ class TestBuildEditFlowToolSchema:
 
     def test_anchor_ref_enum_matches_valid_refs(self):
         steps = [_make_step(1), _make_step(2)]
-        schema = build_edit_flow_tool_schema(steps)
+        schema = build_edit_flow_tool_schema(steps, resource_catalog=_empty_catalog())
 
         ops_schema = schema["function"]["parameters"]["properties"]["operations"]
         placement = ops_schema["items"]["properties"]["placement"]
@@ -63,8 +88,25 @@ class TestBuildEditFlowToolSchema:
         assert "existing_step_2" in anchor_ref["enum"]
 
     def test_model_refs_injected_when_small(self):
-        models = [{"ref": "model_a"}, {"ref": "model_b"}]
-        schema = build_edit_flow_tool_schema([_make_step(1)], available_models=models)
+        catalog = _catalog_with_models(
+            [
+                {
+                    "id": "model_a",
+                    "ref": "model_a",
+                    "name": "model_a",
+                    "display_name": "model_a",
+                    "provider": "test",
+                },
+                {
+                    "id": "model_b",
+                    "ref": "model_b",
+                    "name": "model_b",
+                    "display_name": "model_b",
+                    "provider": "test",
+                },
+            ]
+        )
+        schema = build_edit_flow_tool_schema([_make_step(1)], resource_catalog=catalog)
 
         add_payload = schema["function"]["parameters"]["properties"]["operations"][
             "items"
@@ -74,8 +116,19 @@ class TestBuildEditFlowToolSchema:
         assert "model.model-a" in model_ref["enum"]
 
     def test_model_refs_not_injected_when_large(self):
-        models = [{"ref": f"model_{i}"} for i in range(20)]
-        schema = build_edit_flow_tool_schema([_make_step(1)], available_models=models)
+        catalog = _catalog_with_models(
+            [
+                {
+                    "id": f"model_{i}",
+                    "ref": f"model_{i}",
+                    "name": f"model_{i}",
+                    "display_name": f"model_{i}",
+                    "provider": "test",
+                }
+                for i in range(20)
+            ]
+        )
+        schema = build_edit_flow_tool_schema([_make_step(1)], resource_catalog=catalog)
 
         add_payload = schema["function"]["parameters"]["properties"]["operations"][
             "items"
@@ -84,13 +137,17 @@ class TestBuildEditFlowToolSchema:
         assert "enum" not in model_ref
 
     def test_op_enum_is_add_modify_remove(self):
-        schema = build_edit_flow_tool_schema([_make_step(1)])
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)], resource_catalog=_empty_catalog()
+        )
         ops_schema = schema["function"]["parameters"]["properties"]["operations"]
         op_field = ops_schema["items"]["properties"]["op"]
         assert op_field["enum"] == ["add", "modify", "remove"]
 
     def test_form_operations_schema_teaches_form_field_edits(self):
-        schema = build_edit_flow_tool_schema([_make_step(1)])
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)], resource_catalog=_empty_catalog()
+        )
 
         form_operations = schema["function"]["parameters"]["properties"][
             "form_operations"
@@ -129,7 +186,9 @@ class TestBuildEditFlowToolSchema:
         assert "omit field_payload for remove" in description
 
     def test_add_payload_uses_shared_new_step_authoring_shape(self):
-        schema = build_edit_flow_tool_schema([_make_step(1)])
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)], resource_catalog=_empty_catalog()
+        )
 
         add_payload = schema["function"]["parameters"]["properties"]["operations"][
             "items"
@@ -154,14 +213,19 @@ class TestBuildEditFlowToolSchema:
     def test_mcp_refs_are_exposed_without_schema_enums_on_add_and_patch_payloads(
         self,
     ):
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
+        catalog = build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[],
             available_mcps=[
                 {
                     "ref": "server-1",
                     "tools": [{"ref": "tool-1", "name": "lookup_case"}],
                 }
             ],
+        )
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)],
+            resource_catalog=catalog,
         )
 
         add_payload = schema["function"]["parameters"]["properties"]["operations"][
@@ -178,8 +242,9 @@ class TestBuildEditFlowToolSchema:
         assert "enum" not in assistant_spec["properties"]["mcp_tool_refs"]["items"]
 
     def test_mcp_refs_stay_free_form_with_empty_or_malformed_resources(self):
-        schema = build_edit_flow_tool_schema(
-            [_make_step(1)],
+        catalog = build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[],
             available_mcps=[
                 {"ref": "", "tools": [{"ref": "ignored-tool"}]},
                 {
@@ -192,6 +257,10 @@ class TestBuildEditFlowToolSchema:
                 },
             ],
         )
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1)],
+            resource_catalog=catalog,
+        )
 
         add_payload = schema["function"]["parameters"]["properties"]["operations"][
             "items"
@@ -201,7 +270,9 @@ class TestBuildEditFlowToolSchema:
         assert "enum" not in add_payload["properties"]["mcp_tool_refs"]["items"]
 
     def test_patch_schema_exposes_typed_previous_field_refs(self):
-        schema = build_edit_flow_tool_schema([_make_step(1), _make_step(2)])
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1), _make_step(2)], resource_catalog=_empty_catalog()
+        )
         patch = schema["function"]["parameters"]["properties"]["operations"]["items"][
             "properties"
         ]["patch"]
@@ -213,7 +284,9 @@ class TestBuildEditFlowToolSchema:
         assert "typed `uses_previous_fields`" in patch["description"]
 
     def test_patch_schema_uses_generated_flow_schema_values(self):
-        schema = build_edit_flow_tool_schema([_make_step(1), _make_step(2)])
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1), _make_step(2)], resource_catalog=_empty_catalog()
+        )
         patch = schema["function"]["parameters"]["properties"]["operations"]["items"][
             "properties"
         ]["patch"]
@@ -231,7 +304,9 @@ class TestBuildEditFlowToolSchema:
 
 class TestBuildEditModeToolSchemas:
     def test_includes_edit_flow_and_discovery_tools(self):
-        schemas = build_edit_mode_tool_schemas([_make_step(1)])
+        schemas = build_edit_mode_tool_schemas(
+            [_make_step(1)], resource_catalog=_empty_catalog()
+        )
         names = [s["function"]["name"] for s in schemas]
         assert EDIT_FLOW_TOOL_NAME in names
         assert "ask_structured_question" in names

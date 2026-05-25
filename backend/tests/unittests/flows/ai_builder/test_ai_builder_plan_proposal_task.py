@@ -8,6 +8,10 @@ from intric.flows.ai_builder.ai_builder_event_models import (
 from intric.flows.ai_builder.ai_builder_plan_proposal_task import (
     build_plan_proposal_system_prompt,
 )
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceCatalog,
+    build_ai_builder_resource_catalog,
+)
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
@@ -24,6 +28,14 @@ def _requirements(**overrides: object) -> RequirementsSummaryPayload:
     }
     payload.update(overrides)
     return RequirementsSummaryPayload.model_validate(payload)
+
+
+def _empty_catalog() -> AIBuilderResourceCatalog:
+    return build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[],
+    )
 
 
 def test_plan_proposal_prompt_includes_readable_resources_without_execution_surface():
@@ -45,20 +57,21 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
         }
     )
 
-    prompt = build_plan_proposal_system_prompt(
-        planning_state=state,
-        confirmed_requirements=_requirements(
-            summary="Look up a case and summarize it."
-        ),
-        attachment_context=None,
-        flow_context=None,
-        is_edit_mode=False,
+    catalog = build_ai_builder_resource_catalog(
         available_models=[
-            {"ref": "model-fast", "display_name": "Fast model"},
+            {
+                "id": "model-fast",
+                "ref": "model-fast",
+                "name": "Fast model",
+                "display_name": "Fast model",
+                "provider": "test",
+            },
         ],
         available_kbs=[
             {
+                "id": "kb-policy",
                 "ref": "kb-policy",
+                "name": "Policy KB",
                 "display_name": "Policy KB",
                 "description": "Local policy reference material.",
             }
@@ -78,6 +91,17 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
                 ],
             }
         ],
+    )
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(
+            summary="Look up a case and summarize it."
+        ),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=catalog,
     )
 
     assert "Available resources:" in prompt
@@ -106,6 +130,7 @@ def test_plan_proposal_prompt_honors_continue_without_mcp_decision():
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
         mcp_selection_values={"without_mcp"},
     )
 
@@ -127,6 +152,7 @@ def test_plan_proposal_prompt_identifies_runtime_metadata_as_compiler_policy():
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
     )
 
     assert "input_fields" in prompt
@@ -144,6 +170,7 @@ def test_plan_proposal_prompt_teaches_direct_text_transform_restraint():
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
     )
 
     assert "Direct text transformations" in prompt
@@ -167,6 +194,7 @@ def test_plan_proposal_prompt_omits_confirmed_requirement_boilerplate():
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
     )
 
     assert "- summary: Översätt en kort svensk text till engelska." in prompt
@@ -186,6 +214,7 @@ def test_plan_proposal_prompt_does_not_render_requirements_version() -> None:
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
     )
 
     assert "do-not-render" not in prompt
@@ -201,6 +230,7 @@ def test_plan_proposal_prompt_scopes_audio_transcription_to_backend():
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
     )
 
     assert "committed audio input" in prompt
@@ -212,14 +242,9 @@ def test_plan_proposal_prompt_scopes_audio_transcription_to_backend():
 
 
 def test_plan_proposal_prompt_honors_selected_mcp_server():
-    prompt = build_plan_proposal_system_prompt(
-        planning_state=PlanningState.empty(),
-        confirmed_requirements=_requirements(
-            summary="Use an enabled MCP for live data."
-        ),
-        attachment_context=None,
-        flow_context=None,
-        is_edit_mode=False,
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
         available_mcps=[
             {
                 "ref": "time-server",
@@ -234,6 +259,17 @@ def test_plan_proposal_prompt_honors_selected_mcp_server():
                 ],
             }
         ],
+    )
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=PlanningState.empty(),
+        confirmed_requirements=_requirements(
+            summary="Use an enabled MCP for live data."
+        ),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=catalog,
         mcp_selection_values={"use_mcp_server:mcp_server.time-mcp"},
     )
 
@@ -245,6 +281,18 @@ def test_plan_proposal_prompt_honors_selected_mcp_server():
 
 
 def test_plan_proposal_prompt_drops_selected_mcp_ref_that_is_not_in_catalog():
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[
+            {
+                "ref": "time-server",
+                "display_name": "Time MCP",
+                "tools": [{"ref": "current-time", "display_name": "get_current_time"}],
+            }
+        ],
+    )
+
     prompt = build_plan_proposal_system_prompt(
         planning_state=PlanningState.empty(),
         confirmed_requirements=_requirements(
@@ -253,13 +301,7 @@ def test_plan_proposal_prompt_drops_selected_mcp_ref_that_is_not_in_catalog():
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
-        available_mcps=[
-            {
-                "ref": "time-server",
-                "display_name": "Time MCP",
-                "tools": [{"ref": "current-time", "display_name": "get_current_time"}],
-            }
-        ],
+        resource_catalog=catalog,
         mcp_selection_values={"use_mcp_server:missing-server"},
     )
 

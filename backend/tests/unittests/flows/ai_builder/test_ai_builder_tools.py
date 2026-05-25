@@ -12,6 +12,10 @@ from intric.flows.ai_builder.ai_builder_create_outline import (
     build_outline_flow_tool_schema,
 )
 from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderResourceCatalog,
+    build_ai_builder_resource_catalog,
+)
 from intric.flows.ai_builder.ai_builder_tools import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
     CONFIRM_REQUIREMENTS_TOOL_NAME,
@@ -24,6 +28,14 @@ from intric.flows.ai_builder.ai_builder_tools import (
     extract_reasoning,
     parse_structured_question,
 )
+
+
+def _empty_catalog() -> AIBuilderResourceCatalog:
+    return build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[],
+    )
 
 
 class TestBuildToolSchema:
@@ -49,7 +61,7 @@ class TestBuildToolSchema:
         assert "create_flow" not in names
 
     def test_outline_schema_hides_backend_owned_mechanics(self) -> None:
-        schema = build_outline_flow_tool_schema()
+        schema = build_outline_flow_tool_schema(resource_catalog=_empty_catalog())
         assert schema["function"]["name"] == OUTLINE_FLOW_TOOL_NAME
 
         properties = schema["function"]["parameters"]["properties"]

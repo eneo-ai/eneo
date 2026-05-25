@@ -13,6 +13,9 @@ from intric.flows.ai_builder.ai_builder_edit_tool_schema import EDIT_FLOW_TOOL_N
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     supported_structured_question_ids,
 )
+from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
+)
 from intric.flows.ai_builder.ai_builder_tool_parsing import (
     extract_assumptions,
     extract_plan_rationale,
@@ -178,12 +181,14 @@ def build_confirm_requirements_tool_schema() -> dict[str, Any]:
     }
 
 
-def build_all_tool_schemas(
-    available_models: list[dict[str, Any]] | None = None,
-    available_kbs: list[dict[str, Any]] | None = None,
-) -> list[dict[str, Any]]:
+def build_all_tool_schemas() -> list[dict[str, Any]]:
+    empty_catalog = build_ai_builder_resource_catalog(
+        available_models=[],
+        available_kbs=[],
+        available_mcps=[],
+    )
     return [
-        build_outline_flow_tool_schema(),
+        build_outline_flow_tool_schema(resource_catalog=empty_catalog),
         build_ask_structured_question_tool_schema(),
         build_confirm_requirements_tool_schema(),
     ]

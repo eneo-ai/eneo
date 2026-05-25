@@ -13,8 +13,8 @@ from intric.flows.ai_builder.ai_builder_mcp_resources import (
     normalize_ai_builder_mcp_resources,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
-    AIBuilderResourceCatalog,
-    build_ai_builder_resource_catalog,
+    AIBuilderAvailableKnowledgeBaseResource,
+    AIBuilderAvailableModelResource,
 )
 from intric.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
@@ -30,17 +30,16 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class AIBuilderPlannerContext:
     model: "CompletionModel"
-    available_models: list[dict[str, str]]
-    available_kbs: list[dict[str, str]]
+    available_models: list[AIBuilderAvailableModelResource]
+    available_kbs: list[AIBuilderAvailableKnowledgeBaseResource]
     available_mcps: list[AIBuilderMCPServerResource]
-    resource_catalog: AIBuilderResourceCatalog
     max_input_tokens: int
     max_output_tokens: int
     budget_policy: AIBuilderBudgetPolicy
 
 
-def serialize_space_models(space: "Space") -> list[dict[str, str]]:
-    """Serialize local model IDs for catalog allocation, not prompt authoring refs."""
+def serialize_space_models(space: "Space") -> list[AIBuilderAvailableModelResource]:
+    # `ref` is the local resource id, not the prompt authoring ref.
     return [
         {
             "id": str(model.id),
@@ -53,8 +52,10 @@ def serialize_space_models(space: "Space") -> list[dict[str, str]]:
     ]
 
 
-def serialize_space_kbs(space: "Space") -> list[dict[str, str]]:
-    """Serialize local knowledge IDs for catalog allocation, not prompt authoring refs."""
+def serialize_space_kbs(
+    space: "Space",
+) -> list[AIBuilderAvailableKnowledgeBaseResource]:
+    # `ref` is the local resource id, not the prompt authoring ref.
     return [
         {
             "id": str(collection.id),
@@ -179,11 +180,6 @@ def build_planner_context(
         available_models=available_models,
         available_kbs=available_kbs,
         available_mcps=available_mcps,
-        resource_catalog=build_ai_builder_resource_catalog(
-            available_models=available_models,
-            available_kbs=available_kbs,
-            available_mcps=available_mcps,
-        ),
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         budget_policy=budget_policy,

@@ -235,61 +235,33 @@ def _build_edit_mode_flow_context(
 
 
 def build_available_models_context(
-    models: list[dict[str, Any]],
     *,
-    resource_catalog: AIBuilderResourceCatalog | None = None,
+    resource_catalog: AIBuilderResourceCatalog,
 ) -> list[dict[str, str]]:
-    """Build model context for system prompt injection."""
-    catalog = resource_catalog or build_ai_builder_resource_catalog(
-        available_models=models,
-        available_kbs=[],
-        available_mcps=[],
-    )
-    entries_by_local_ref = _entries_by_local_ref(catalog.models)
-    context: list[dict[str, str]] = []
-    for model in models:
-        local_ref = _local_resource_ref(model)
-        entry = entries_by_local_ref.get(local_ref)
-        if entry is None:
-            continue
-        context.append(
-            {
-                "ref": entry.authoring_ref,
-                "name": str(model.get("name", "")),
-                "display_name": str(model.get("display_name", model.get("name", ""))),
-                "provider": str(model.get("provider", "unknown")),
-            }
-        )
-    return context
+    return [
+        {
+            "ref": entry.authoring_ref,
+            "name": entry.name,
+            "display_name": entry.display_name,
+            "provider": entry.provider,
+        }
+        for entry in resource_catalog.models
+    ]
 
 
 def build_available_kbs_context(
-    knowledge_bases: list[dict[str, Any]],
     *,
-    resource_catalog: AIBuilderResourceCatalog | None = None,
+    resource_catalog: AIBuilderResourceCatalog,
 ) -> list[dict[str, str]]:
-    """Build knowledge base context for system prompt injection."""
-    catalog = resource_catalog or build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=knowledge_bases,
-        available_mcps=[],
-    )
-    entries_by_local_ref = _entries_by_local_ref(catalog.knowledge_bases)
-    context: list[dict[str, str]] = []
-    for kb in knowledge_bases:
-        local_ref = _local_resource_ref(kb)
-        entry = entries_by_local_ref.get(local_ref)
-        if entry is None:
-            continue
-        context.append(
-            {
-                "ref": entry.authoring_ref,
-                "name": str(kb.get("name", "")),
-                "display_name": str(kb.get("display_name", kb.get("name", ""))),
-                "description": str(kb.get("description", "")),
-            }
-        )
-    return context
+    return [
+        {
+            "ref": entry.authoring_ref,
+            "name": entry.name,
+            "display_name": entry.display_name,
+            "description": entry.description,
+        }
+        for entry in resource_catalog.knowledge_bases
+    ]
 
 
 def build_available_mcp_context(
@@ -342,10 +314,6 @@ def _entries_by_local_ref(
     entries: tuple[AIBuilderResourceCatalogEntry, ...],
 ) -> dict[str, AIBuilderResourceCatalogEntry]:
     return {entry.local_ref: entry for entry in entries}
-
-
-def _local_resource_ref(resource: dict[str, Any]) -> str:
-    return str(resource.get("ref", resource.get("id", ""))).strip()
 
 
 def build_step_ref_mapping(flow: Flow) -> dict[str, UUID]:

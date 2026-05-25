@@ -23,6 +23,7 @@ from intric.flows.ai_builder.ai_builder_proposal_policy import (
     terminal_output_type_for_conversation,
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
+    AIBuilderAvailableModelResource,
     build_ai_builder_resource_catalog,
 )
 from intric.flows.flow_authoring_spec import (
@@ -37,11 +38,21 @@ from intric.flows.flow_authoring_spec import (
 )
 
 
+def _model_resource(local_id: str, name: str) -> AIBuilderAvailableModelResource:
+    return {
+        "id": local_id,
+        "ref": local_id,
+        "name": name,
+        "display_name": name,
+        "provider": "test",
+    }
+
+
 def _catalog():
     return build_ai_builder_resource_catalog(
         available_models=[
-            {"id": "model-old", "name": "gpt-4o mini"},
-            {"id": "model-nano", "name": "gpt-5.4-nano"},
+            _model_resource("model-old", "gpt-4o mini"),
+            _model_resource("model-nano", "gpt-5.4-nano"),
         ],
         available_kbs=[],
         available_mcps=[],
