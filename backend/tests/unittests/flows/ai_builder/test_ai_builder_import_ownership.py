@@ -143,6 +143,7 @@ PROPOSAL_SUBMISSION_METHODS = frozenset(
         "active_submission_tool_schemas",
         "_outline_flow_retry_config",
         "_edit_flow_retry_config",
+        "_finalize_retry_compiled_proposal",
         "_handle_outline_flow_tool_call",
         "_handle_edit_flow",
         "preflight_scoped_model_revision_if_requested",
@@ -1379,16 +1380,55 @@ def test_proposal_submission_has_single_owner_and_typed_boundary() -> None:
             f"{submission_path}: ProposalSubmissionOwner count {len(submission_classes)}"
         )
     else:
-        public_methods = {
-            node.name
+        submission_methods = {
+            node.name: node
             for node in submission_classes[0].body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and not node.name.startswith("_")
+        }
+        public_methods = {
+            node.name
+            for node in submission_methods.values()
+            if not node.name.startswith("_")
         }
         if public_methods != PROPOSAL_SUBMISSION_PUBLIC_METHODS:
             violations.append(
                 f"{submission_path}:{submission_classes[0].lineno} public methods "
                 f"{sorted(public_methods)}"
+            )
+
+        retry_finalizers = [
+            node
+            for node in submission_methods.values()
+            if node.name == "_finalize_retry_compiled_proposal"
+        ]
+        if len(retry_finalizers) != 1:
+            violations.append(
+                f"{submission_path}:{submission_classes[0].lineno} "
+                f"retry finalizer count {len(retry_finalizers)}"
+            )
+        for method_name in ("_outline_flow_retry_config", "_edit_flow_retry_config"):
+            method = submission_methods.get(method_name)
+            if method is None:
+                violations.append(f"{submission_path}: missing {method_name}")
+                continue
+            for child in ast.walk(method):
+                if (
+                    isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Name)
+                    and child.func.id == "CompiledProposalFinalizationRequest"
+                ):
+                    violations.append(
+                        f"{submission_path}:{child.lineno} {method_name} "
+                        "constructs CompiledProposalFinalizationRequest"
+                    )
+
+        finalization_request_call_count = submission_text.count(
+            "CompiledProposalFinalizationRequest("
+        )
+        if finalization_request_call_count != 4:
+            violations.append(
+                f"{submission_path}: CompiledProposalFinalizationRequest calls "
+                f"{finalization_request_call_count}"
             )
 
     for node in ast.walk(submission_tree):

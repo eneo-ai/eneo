@@ -79,6 +79,7 @@ from intric.flows.ai_builder.ai_builder_proposal_telemetry import (
     record_proposal_first_attempt,
 )
 from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    CompiledProposal,
     ProposalCompletionMessage,
     ProposalCompletionToolCall,
     ProposalTurnContext,
@@ -460,23 +461,12 @@ class ProposalSubmissionOwner:
             )
             if result.compiled_proposal is None:
                 return result
-            return await self._compiled_proposal_finalizer.finalize_compiled_proposal(
-                CompiledProposalFinalizationRequest(
-                    turn=invocation.turn,
-                    conversation=invocation.conversation,
-                    new_messages_start=invocation.new_messages_start,
-                    tool_name=OUTLINE_FLOW_TOOL_NAME,
-                    arguments=invocation.arguments,
-                    assistant_content=invocation.assistant_content,
-                    assistant_metadata=invocation.assistant_metadata,
-                    tool_call_id=invocation.tool_call_id,
-                    metadata_tool_call=None,
-                    compiled=result.compiled_proposal,
-                    resource_catalog=invocation.resource_catalog,
-                    flow=invocation.flow,
-                    request_id=request_id,
-                    usage_tracker=usage_tracker,
-                )
+            return await self._finalize_retry_compiled_proposal(
+                invocation=invocation,
+                tool_name=OUTLINE_FLOW_TOOL_NAME,
+                compiled=result.compiled_proposal,
+                request_id=request_id,
+                usage_tracker=usage_tracker,
             )
 
         return ToolRetryConfig(
@@ -525,29 +515,46 @@ class ProposalSubmissionOwner:
                 litellm_kwargs=litellm_kwargs,
                 max_output_tokens=max_output_tokens,
             )
-            return await self._compiled_proposal_finalizer.finalize_compiled_proposal(
-                CompiledProposalFinalizationRequest(
-                    turn=invocation.turn,
-                    conversation=invocation.conversation,
-                    new_messages_start=invocation.new_messages_start,
-                    tool_name=EDIT_FLOW_TOOL_NAME,
-                    arguments=invocation.arguments,
-                    assistant_content=invocation.assistant_content,
-                    assistant_metadata=invocation.assistant_metadata,
-                    tool_call_id=invocation.tool_call_id,
-                    metadata_tool_call=None,
-                    compiled=compiled,
-                    resource_catalog=invocation.resource_catalog,
-                    flow=invocation.flow,
-                    request_id=request_id,
-                    usage_tracker=usage_tracker,
-                )
+            return await self._finalize_retry_compiled_proposal(
+                invocation=invocation,
+                tool_name=EDIT_FLOW_TOOL_NAME,
+                compiled=compiled,
+                request_id=request_id,
+                usage_tracker=usage_tracker,
             )
 
         return ToolRetryConfig(
             target_tool_name=EDIT_FLOW_TOOL_NAME,
             forced_tool_prompt=EDIT_FLOW_FORCED_TOOL_PROMPT,
             process_tool_invocation=_process_tool_invocation,
+        )
+
+    async def _finalize_retry_compiled_proposal(
+        self,
+        *,
+        invocation: ToolRetryInvocation,
+        tool_name: str,
+        compiled: CompiledProposal,
+        request_id: str,
+        usage_tracker: ProposalTurnTelemetry | None,
+    ) -> ToolProcessingResult:
+        return await self._compiled_proposal_finalizer.finalize_compiled_proposal(
+            CompiledProposalFinalizationRequest(
+                turn=invocation.turn,
+                conversation=invocation.conversation,
+                new_messages_start=invocation.new_messages_start,
+                tool_name=tool_name,
+                arguments=invocation.arguments,
+                assistant_content=invocation.assistant_content,
+                assistant_metadata=invocation.assistant_metadata,
+                tool_call_id=invocation.tool_call_id,
+                metadata_tool_call=None,
+                compiled=compiled,
+                resource_catalog=invocation.resource_catalog,
+                flow=invocation.flow,
+                request_id=request_id,
+                usage_tracker=usage_tracker,
+            )
         )
 
     def _build_self_correction_request(

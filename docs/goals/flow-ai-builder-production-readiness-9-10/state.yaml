@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T101
+active_task: T102
 
 interruptions:
   - id: I001
@@ -9378,7 +9378,7 @@ tasks:
   - id: T101
     type: worker
     assignee: Worker
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Implement the peer-gated ProposalSubmissionOwner retry-finalization locality cleanup selected by T100."
     constraints:
@@ -9448,6 +9448,58 @@ tasks:
         claude_required: true
         antigravity_if_available: true
     expected_score_impact: "Can improve active-submission maintainability/readability/SSoT evidence, but should not raise the broader strict floor above 8 by itself."
+    receipt:
+      completed_at: "2026-05-25"
+      summary: "Moved retry-only CompiledProposalFinalizationRequest construction into one private ProposalSubmissionOwner._finalize_retry_compiled_proposal method. Outline/edit retry closures now keep tool-specific parsing and edit-only description repair explicit, while common retry finalization wiring has one owner."
+      files_changed:
+        - "backend/src/intric/flows/ai_builder/ai_builder_proposal_submission.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py"
+        - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      implementation_artifact: ".codex/artifacts/flow-ai-builder-t101-implementation-summary.md"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py -q -> 25 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 32 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_processor.py -q -> 33 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q -> 26 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py -q -> 2 passed."
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2410 passed, 4 skipped, 11 warnings."
+        - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -> passed."
+        - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -> passed."
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors."
+        - "git diff --check -> passed."
+      peer_review:
+        claude: ".codex/artifacts/claude-peer-loop-t101-retry-finalization-implementation-review-20260525T025024Z.md -> GREEN_LIGHT yes / MIN_SCORE 9."
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t101-retry-finalization-implementation-gate-20260525T025209Z.md -> GREEN_LIGHT yes / MIN_SCORE 9."
+      swagger_openapi_impact: "None. T101 is internal backend retry finalization ownership work and does not change public REST/SSE schemas, Swagger examples, generated clients, frontend parsing, or API examples."
+      codex_self_review:
+        verdict: "pass for T101 scope. The change is simpler for maintainers because retry finalization request wiring now has one private owner while outline/edit retry semantics stay local and visible."
+        production_ready_for_tranche: true
+        broader_goal_complete: false
+        score_floor: 8
+      residual_risks:
+        - "The exact CompiledProposalFinalizationRequest occurrence-count guard is intentionally structural and must be updated if a future peer-reviewed finalization mode earns a new call site."
+        - "Broader AI-slop/comment/naming cleanup, live eval replay, source-topology readability, and final score-floor proof still block a subsystem-wide 9/10."
+      score_impact: "Improves Maintainability, Human Readability, Human Reviewability, Single Source of Truth, and Test Quality for one active-submission retry seam. Does not raise the strict overall score floor above 8 by itself."
+      broader_goal_complete: false
+
+  - id: T102
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest score-floor-moving Flow AI Builder tranche after T101 from current repo evidence. Do not implement during this judge task."
+    constraints:
+      - "Stay within Flow AI Builder; do not move to broader Flows work."
+      - "Start from git status, latest commits, scorecard, T101 receipt, current source, and artifacts."
+      - "Do not select file splitting, LOC reduction, or broad cleanup unless evidence shows concrete maintainability, robustness, reviewability, or output-quality gain."
+      - "Consider bounded AI-slop/comment/naming cleanup, deletion/merge of stale compatibility wrappers, planner/source topology and readability blockers, full-source typing/test baseline inside AI Builder, live eval replay after behavior-affecting changes, diagnostics/DX and future OpenTelemetry compatibility, data/schema/JSONB ownership, frontend/backend contract drift, and normal-user output quality."
+      - "If a candidate changes public API/SSE/schema/generated-client-visible contracts, include Swagger/OpenAPI docs, examples, and generated client updates in the candidate scope."
+      - "Use Claude for the plan gate and Antigravity with --spend-mode auto if available. Missing peer coverage is a skip, not a pass."
+    expected_output:
+      - "Short ranked candidate table with file:line evidence."
+      - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, and expected score impact."
+      - "Explicit explanation of why the selected tranche is the highest score-floor mover rather than the easiest cleanup."
+      - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
     receipt: null
 
 checks:
@@ -9456,11 +9508,10 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T099 completed with Claude and Antigravity green. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T099
+    result: "T101 completed with Claude and Antigravity green. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T101
     commands:
-      - "Full Flow AI Builder unit suite -> 2409 passed, 4 skipped"
-      - "AI Builder OpenAPI contract tests -> 13 passed"
+      - "Full Flow AI Builder unit suite -> 2410 passed, 4 skipped"
       - "Ruff, Ruff format --check, Pyright, git diff --check -> passed"
-      - "Claude T099 iteration 2 -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity T099 implementation -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Claude T101 implementation -> GREEN_LIGHT yes / MIN_SCORE 9"
+      - "Antigravity T101 implementation -> GREEN_LIGHT yes / MIN_SCORE 9"

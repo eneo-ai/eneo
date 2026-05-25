@@ -47,6 +47,7 @@ from intric.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _builder_plan,
     _compiled_edit_proposal,
+    _compiled_outline_proposal,
     _description_update_advisory,
     _make_context,
     _make_flow_spec,
@@ -432,6 +433,74 @@ async def test_outline_retry_does_not_preserve_failed_attempt_step_count() -> No
         "forced_tool_prompt",
         "process_tool_invocation",
     }
+
+
+@pytest.mark.asyncio
+async def test_outline_retry_config_finalizes_compiled_proposal_with_invocation_context() -> (
+    None
+):
+    submission = _make_submission()
+    compiled = _compiled_outline_proposal()
+    process_outline = AsyncMock(
+        return_value=ToolProcessingResult(compiled_proposal=compiled)
+    )
+    finalize = AsyncMock(
+        return_value=ToolProcessingResult(event={"event": "plan", "data": "{}"})
+    )
+    tracker = ProposalTurnTelemetry(
+        request_id="req-outline-retry-finalize",
+        model="openai/gpt-5.4",
+    )
+    resource_catalog = MagicMock()
+    flow = MagicMock()
+    invocation = _make_retry_invocation(
+        resource_catalog=resource_catalog,
+        flow=flow,
+        new_messages_start=3,
+        arguments={"flow_name": "Retry", "plan_rationale": "Retry", "steps": []},
+        assistant_content="Här är mitt korrigerade förslag:",
+        assistant_metadata={"planner_telemetry": {"request_id": "req"}},
+        tool_call_id="call-outline-retry-finalize",
+    )
+
+    config = submission._outline_flow_retry_config(
+        request_id="req-outline-retry-finalize",
+        planning_state=None,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        usage_tracker=tracker,
+    )
+
+    with (
+        patch(
+            "intric.flows.ai_builder.ai_builder_proposal_submission."
+            "process_outline_arguments",
+            new=process_outline,
+        ),
+        patch.object(
+            CompiledProposalFinalizer, "finalize_compiled_proposal", new=finalize
+        ),
+    ):
+        result = await config.process_tool_invocation(invocation)
+
+    assert result.event == {"event": "plan", "data": "{}"}
+    process_outline.assert_awaited_once()
+    finalize.assert_awaited_once()
+    request = finalize.await_args.args[0]
+    assert request.turn is invocation.turn
+    assert request.conversation is invocation.conversation
+    assert request.new_messages_start == 3
+    assert request.tool_name == OUTLINE_FLOW_TOOL_NAME
+    assert request.arguments is invocation.arguments
+    assert request.assistant_content == invocation.assistant_content
+    assert request.assistant_metadata is invocation.assistant_metadata
+    assert request.tool_call_id == "call-outline-retry-finalize"
+    assert request.metadata_tool_call is None
+    assert request.compiled is compiled
+    assert request.resource_catalog is resource_catalog
+    assert request.flow is flow
+    assert request.request_id == "req-outline-retry-finalize"
+    assert request.usage_tracker is tracker
 
 
 @pytest.mark.asyncio
