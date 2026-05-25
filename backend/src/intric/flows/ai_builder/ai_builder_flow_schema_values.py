@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal, TypeAlias, get_args
+
 from intric.flows.enums import (
     AIBuilderInputSource,
     AIBuilderInputType,
@@ -11,6 +13,10 @@ from intric.flows.flow_capability_manifest import (
     CAPABILITY_REGISTRY,
     resolve_document_generation_mode,
 )
+
+BuilderFormFieldType: TypeAlias = Literal[
+    "text", "number", "date", "select", "multiselect"
+]
 
 
 def builder_input_source_values() -> list[str]:
@@ -48,7 +54,7 @@ def builder_output_mode_values() -> list[str]:
 def builder_form_field_type_values() -> list[str]:
     """LLM-facing form-field types for AI Builder tool schemas."""
 
-    return ["text", "number", "date", "select", "multiselect"]
+    return [value for value in get_args(BuilderFormFieldType) if isinstance(value, str)]
 
 
 def document_delivery_mode_values() -> list[str]:
@@ -77,6 +83,7 @@ def _builder_exposed_input_types() -> set[str]:
 
 
 __all__ = [
+    "BuilderFormFieldType",
     "builder_form_field_type_values",
     "builder_input_source_values",
     "builder_input_type_values",

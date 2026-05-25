@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, cast
 
 from intric.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
@@ -560,7 +559,7 @@ def _compile_form_fields(
             CreateFormFieldDraft(
                 variable_name=hint.variable_name,
                 label=hint.label,
-                field_type=cast(Any, hint.field_type),
+                field_type=hint.field_type,
                 required=hint.required,
                 options=list(hint.options),
             )
@@ -879,7 +878,7 @@ def _compile_input_field(field: OutlineInputField) -> CreateFormFieldDraft:
     return CreateFormFieldDraft(
         variable_name=field.variable_name,
         label=field.label,
-        field_type=cast(Any, field.field_type),
+        field_type=field.field_type,
         required=field.required,
         options=list(field.options),
     )

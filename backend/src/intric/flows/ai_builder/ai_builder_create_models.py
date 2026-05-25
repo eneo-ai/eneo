@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Literal, cast
+from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from intric.flows.ai_builder.ai_builder_flow_schema_values import BuilderFormFieldType
 from intric.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
 )
@@ -12,15 +13,13 @@ from intric.flows.ai_builder.ai_builder_new_step_models import (
 )
 from intric.flows.flow_authoring_name import normalize_flow_name
 
-CreateFormFieldType = Literal["text", "number", "date", "select", "multiselect"]
-
 
 class CreateFormFieldDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     variable_name: str
     label: str
-    field_type: CreateFormFieldType
+    field_type: BuilderFormFieldType
     required: bool = False
     options: list[str] = Field(default_factory=list)
 

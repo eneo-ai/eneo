@@ -36,6 +36,7 @@ from intric.flows.ai_builder.ai_builder_create_outline import (
 )
 from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
+    builder_form_field_type_values,
     builder_output_type_values,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
@@ -1073,6 +1074,47 @@ def test_parse_outline_flow_arguments_accepts_review_mode() -> None:
     )
 
     assert outline.steps[0].review_mode is FlowStepReviewMode.EDIT
+
+
+def test_parse_outline_flow_arguments_strips_input_field_type_before_validation() -> (
+    None
+):
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Fältflöde",
+            "plan_rationale": "Behöver ett runtime-fält.",
+            "input_fields": [
+                {
+                    "variable_name": "case_id",
+                    "label": "Case ID",
+                    "field_type": " text ",
+                    "required": True,
+                }
+            ],
+            "steps": [{"name": "Skriv", "task": "Skriv med fältet."}],
+        }
+    )
+
+    assert outline.input_fields[0].field_type == "text"
+
+
+def test_parse_outline_flow_arguments_rejects_flow_layer_field_type_coercion() -> None:
+    with pytest.raises(OutlineFlowArgumentError, match="field_type"):
+        parse_outline_flow_arguments(
+            {
+                "flow_name": "Fältflöde",
+                "plan_rationale": "AI Builder ska vara strikt här.",
+                "input_fields": [
+                    {
+                        "variable_name": "message",
+                        "label": "Message",
+                        "field_type": "textarea",
+                        "required": True,
+                    }
+                ],
+                "steps": [{"name": "Skriv", "task": "Skriv med fältet."}],
+            }
+        )
 
 
 def test_parse_outline_flow_arguments_rejects_invalid_review_mode() -> None:
@@ -2196,6 +2238,18 @@ def test_outline_flow_schema_exposes_model_and_knowledge_refs_for_small_catalog(
 
     assert step_props["model_ref"]["enum"] == ["model.gpt-5-4-nano", None]
     assert step_props["knowledge_refs"]["items"]["enum"] == ["knowledge.risk-kb"]
+
+
+def test_outline_flow_schema_form_field_enum_matches_builder_values() -> None:
+    schema = build_outline_flow_tool_schema()
+    parameters = cast(dict[str, object], schema["function"])["parameters"]
+    properties = cast(dict[str, object], parameters)["properties"]
+    input_fields = cast(dict[str, object], properties["input_fields"])
+    input_field_items = cast(dict[str, object], input_fields["items"])
+    input_field_properties = cast(dict[str, object], input_field_items["properties"])
+    field_type = cast(dict[str, object], input_field_properties["field_type"])
+
+    assert field_type["enum"] == builder_form_field_type_values()
 
 
 def test_outline_flow_schema_keeps_mcp_refs_free_form_for_malformed_catalog() -> None:

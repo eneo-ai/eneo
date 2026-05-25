@@ -13,6 +13,8 @@ from pydantic import (
 )
 
 from intric.flows.ai_builder.ai_builder_flow_schema_values import (
+    BuilderFormFieldType,
+    builder_form_field_type_values,
     builder_input_type_values,
     builder_output_type_values,
 )
@@ -126,7 +128,7 @@ class OutlineInputField(BaseModel):
 
     variable_name: str
     label: str
-    field_type: str = "text"
+    field_type: BuilderFormFieldType = "text"
     required: bool = False
     options: list[str] = Field(default_factory=list)
 
@@ -138,15 +140,12 @@ class OutlineInputField(BaseModel):
             raise ValueError("Input fields require non-empty text values.")
         return normalized
 
-    @field_validator("field_type")
+    @field_validator("field_type", mode="before")
     @classmethod
-    def _validate_field_type(cls, value: str) -> str:
-        normalized = value.strip()
-        if normalized not in {"text", "number", "date", "select", "multiselect"}:
-            raise ValueError(
-                "field_type must be one of: text, number, date, select, multiselect"
-            )
-        return normalized
+    def _strip_field_type(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
     @field_validator("options")
     @classmethod
@@ -620,7 +619,7 @@ def _input_field_schema() -> dict[str, Any]:
             "label": {"type": "string", "minLength": 1},
             "field_type": {
                 "type": "string",
-                "enum": ["text", "number", "date", "select", "multiselect"],
+                "enum": builder_form_field_type_values(),
             },
             "required": {"type": "boolean"},
             "options": {"type": "array", "items": {"type": "string"}},

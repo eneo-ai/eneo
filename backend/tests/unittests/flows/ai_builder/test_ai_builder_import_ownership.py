@@ -1779,6 +1779,36 @@ def test_create_outline_no_longer_owns_create_compiler_mechanics() -> None:
     assert violations == []
 
 
+def test_create_form_field_type_has_single_ai_builder_owner() -> None:
+    backend_root = Path(__file__).resolve().parents[4]
+    outline_path = backend_root / CREATE_OUTLINE_PATH
+    compiler_path = backend_root / CREATE_COMPILER_PATH
+    outline_tree = ast.parse(outline_path.read_text(), filename=str(outline_path))
+    compiler_text = compiler_path.read_text()
+    form_field_values = frozenset({"text", "number", "date", "select", "multiselect"})
+    violations: list[str] = []
+
+    if "cast(Any, hint.field_type)" in compiler_text:
+        violations.append(f"{compiler_path}: casts runtime hint field_type through Any")
+    if "cast(Any, field.field_type)" in compiler_text:
+        violations.append(f"{compiler_path}: casts outline field_type through Any")
+
+    for node in ast.walk(outline_tree):
+        if not isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            continue
+        values = {
+            element.value
+            for element in node.elts
+            if isinstance(element, ast.Constant) and isinstance(element.value, str)
+        }
+        if values == form_field_values:
+            violations.append(
+                f"{outline_path}:{node.lineno} hard-codes form-field type values"
+            )
+
+    assert violations == []
+
+
 def test_tool_turn_persistence_has_single_owner_without_repair_transport_facade() -> (
     None
 ):

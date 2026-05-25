@@ -9,6 +9,7 @@ from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
     normalize_discovery_text,
 )
+from intric.flows.ai_builder.ai_builder_flow_schema_values import BuilderFormFieldType
 
 RuntimeMetadataState: TypeAlias = Literal[
     "no_extra_metadata",
@@ -39,7 +40,7 @@ class RuntimeInputFieldHint:
 
     variable_name: str
     label: str
-    field_type: str = "text"
+    field_type: BuilderFormFieldType = "text"
     required: bool = False
     options: tuple[str, ...] = ()
 

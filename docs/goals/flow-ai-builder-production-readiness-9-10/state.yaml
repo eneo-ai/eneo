@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T094
+active_task: T096
 
 interruptions:
   - id: I001
@@ -8727,7 +8727,7 @@ tasks:
   - id: T094
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Re-rank the next highest score-floor mover after T093 from current repo reality, without implementing during the ranking tranche."
     constraints:
@@ -8748,6 +8748,208 @@ tasks:
       - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, expected score impact, and Swagger/OpenAPI impact."
       - "Explicit explanation of why the selected tranche moves the strict 9/10 floor more than easier cleanup."
       - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
+    receipt:
+      completed_at: "2026-05-25T00:43:00Z"
+      summary: "Re-ranked the next Flow AI Builder score-floor mover after T093. Selected T095 as a narrow AI Builder form-field type contract cleanup: make ai_builder_flow_schema_values.py the AI Builder typed owner for builder form-field values, type create/outline/runtime hint models to that owner, remove compiler cast(Any, field_type) bridges, and add outline-schema plus Flow-layer parity tests without editing broader Flow source."
+      repo_reality:
+        branch: "feature/refactor-flows-flowai"
+        head: "4d041714d Clarify AI Builder tool-turn persistence owner"
+        status: "dirty only with unrelated workspace files preserved: .devcontainer/docker-compose.yml, .gitignore, AGENTS.md, .devcontainer/devcontainer-lock.json, PRODUCT.md, utvecklingssamtal.mp3"
+        session_goal_tool: "get_goal is available but still carries older T081 wording; no objective-update tool is exposed in this session, so the durable board remains the source of truth."
+      selected_worker: T095
+      artifact: ".codex/artifacts/flow-ai-builder-t094-next-tranche-ranking.md"
+      source_evidence:
+        - "ai_builder_create_models.py:15 defines CreateFormFieldType as a local Literal list."
+        - "ai_builder_flow_schema_values.py:48-52 separately hard-codes the same builder form-field type values."
+        - "ai_builder_create_outline.py:141-149 separately validates OutlineInputField.field_type against the same values, and :621-624 hard-codes the same enum in the outline_flow tool schema."
+        - "ai_builder_runtime_input_fields.py:36-44 leaves RuntimeInputFieldHint.field_type as raw str."
+        - "ai_builder_create_compiler.py:563 and :882 use cast(Any, ...) to bridge duplicate typing."
+        - "flow_authoring_spec.py:161 owns the broader Flow-layer _VALID_FORM_FIELD_TYPES set; T095 keeps Flow production source out of scope and guards parity in tests."
+      selected_scope:
+        moves:
+          - "Move the AI Builder form-field type value domain into BuilderFormFieldType in ai_builder_flow_schema_values.py."
+          - "Make CreateFormFieldDraft.field_type, OutlineInputField.field_type, and RuntimeInputFieldHint.field_type consume BuilderFormFieldType."
+          - "Derive builder_form_field_type_values() and the outline tool schema enum from the same Literal alias."
+        deletes:
+          - "Compiler cast(Any, hint.field_type) and cast(Any, field.field_type) bridges."
+          - "Duplicate AI Builder hard-coded form-field enum lists and redundant OutlineInputField membership validation."
+        keeps:
+          - "Flow authoring source ownership remains unchanged in T095 because the user constrained this run to Flow AI Builder."
+          - "Unsupported field_type inputs remain strict at the AI Builder LLM boundary; Flow-layer coercion such as textarea -> text is not copied into AI Builder."
+      rejected_alternatives:
+        - "Edit flow_authoring_spec.py to make Flow the single physical owner. Cleaner in a greenfield design, but out of scope under the user's Flow AI Builder-only instruction; queue as a broader Flow follow-up if explicitly authorized."
+        - "Include output-type fallback cleanup in T095. Rejected after Claude pointed out OutlineStep already validates output_type, and adding fallback would hide drift rather than improve reliability."
+        - "Unknown uses_input_fields behavior and runtime metadata owner cleanup. Both remain valid but are behavior/topology slices needing separate peer-gated plans."
+        - "Broad AI-slop/comment cleanup. Rejected as too cosmetic unless attached to a concrete owner."
+      peer_review:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t094-next-flow-ai-builder-tranche-ranking-20260525T003059Z.md -> GREEN_LIGHT no / MIN_SCORE 7; accepted blockers around Flow-layer parity, output-type fallback, explicit Literal/get_args mechanic, and concrete tests."
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t094-next-flow-ai-builder-tranche-ranking-revision-20260525T003906Z.md -> GREEN_LIGHT yes / MIN_SCORE 8; accepted P2/P3 implementation requirements for Pydantic mode='before' whitespace stripping, strict textarea rejection test, and explicit Flow parity test home."
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t094-next-flow-ai-builder-tranche-ranking-20260525T004147Z.md -> GREEN_LIGHT yes / MIN_SCORE 8; accepted P3 to delete the redundant OutlineInputField membership validator after adding the Literal and pre-stripper."
+      swagger_openapi_impact: "None expected. T095 is internal AI Builder compile/tool-schema work. It must not change REST/SSE contracts, OpenAPI schemas, Swagger examples, generated client types, frontend files, database schema or migrations, public request/response models, or API examples."
+      score_impact: "Read-only judge task. No score increase. T095 may improve Maintainability, Code Quality, Single Source of Truth discipline, Human Readability, Human Reviewability, and AI Slop resistance if implementation deletes duplicate AI Builder value lists and unsafe casts while preserving behavior. Overall strict floor remains 8/10."
+      broader_goal_complete: false
+
+  - id: T095
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Consolidate AI Builder create form-field type ownership so BuilderFormFieldType is the internal request/schema value owner, create/outline/runtime hints share it, and compiler form-field casts disappear."
+    constraints:
+      - "Do not move to broader Flows work; stay within Flow AI Builder unless the user explicitly changes scope."
+      - "Do not edit flow_authoring_spec.py production source in this tranche; add a parity test against its _VALID_FORM_FIELD_TYPES instead."
+      - "Do not change REST/SSE/OpenAPI/Swagger/generated-client/frontend/database contracts or examples. If a public contract drift appears, stop and re-plan with API DX acceptance criteria."
+      - "Do not change prompt wording, outline tool semantics beyond deriving the same enum values from the canonical owner, unknown uses_input_fields policy, runtime metadata ownership, output-type fallback behavior, edit compiler behavior, or broader Flow behavior."
+      - "Do not add new types.py/helper/manager/factory/interface/compatibility modules."
+      - "Do not optimize for LOC. This counts only if it removes duplicate AI Builder value ownership and cast bridges while preserving behavior."
+      - "Use a Pydantic mode='before' field_type stripper so padded supported values remain accepted before Literal validation."
+      - "Keep comments sparse and why-focused; no phase/task comments."
+    allowed_files:
+      - "backend/src/intric/flows/ai_builder/ai_builder_flow_schema_values.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_models.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_outline.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py"
+      - "backend/src/intric/flows/ai_builder/ai_builder_create_compiler.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+      - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "backend/tests/unittests/flows/test_flow_capability_manifest.py"
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t095-implementation-summary.md"
+    expected_output:
+      - "ai_builder_flow_schema_values.py exposes BuilderFormFieldType: Literal['text', 'number', 'date', 'select', 'multiselect'] and derives builder_form_field_type_values() from typing.get_args(BuilderFormFieldType)."
+      - "CreateFormFieldDraft.field_type, OutlineInputField.field_type, and RuntimeInputFieldHint.field_type use BuilderFormFieldType."
+      - "OutlineInputField strips surrounding whitespace before Literal validation and rejects unsupported values such as textarea without applying Flow-layer coercion."
+      - "The outline_flow tool schema field_type enum uses builder_form_field_type_values()."
+      - "ai_builder_create_compiler.py no longer casts form-field type values through Any."
+      - "Tests prove outline schema enum parity, Flow _VALID_FORM_FIELD_TYPES parity, padded field_type acceptance, textarea rejection, and static ownership guards."
+      - "No public API/OpenAPI/Swagger/generated-client/frontend/database diff."
+    validation_plan:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_capability_manifest.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check touched T095 files"
+      - "cd backend && uv run ruff format --check touched T095 files"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "scripts/gate-local/anti_slippage.sh after staging"
+      - "git diff --check"
+    stop_conditions:
+      - "Stop if implementation requires editing Flow production source, public API/OpenAPI/generated-client/frontend/database files, or broader Flow behavior."
+      - "Stop if Pydantic Literal validation cannot preserve padded supported field_type behavior without reintroducing casts or duplicate value sets."
+      - "Stop if Flow _VALID_FORM_FIELD_TYPES and BuilderFormFieldType intentionally diverge; re-plan with explicit architecture decision."
+      - "Stop if Pyright requires reintroducing broad Any, cast bridges, or ignores at the compiler boundary."
+    peer_gate:
+      plan:
+        claude: "GREEN_LIGHT yes / MIN_SCORE 8 via T094 iteration 2"
+        antigravity: "GREEN_LIGHT yes / MIN_SCORE 8 via T094 synthesis"
+      implementation_required: "Run Claude implementation gate after validation; run Antigravity implementation gate with --spend-mode auto if available. Missing Antigravity coverage is a skip, not a pass."
+    swagger_openapi_impact: "None expected. T095 is internal AI Builder compile/tool-schema work and should not require Swagger/OpenAPI/API example updates."
+    score_impact: "May improve Maintainability, Code Quality, Single Source of Truth discipline, Human Readability, Human Reviewability, and AI Slop resistance. Do not raise the overall strict floor above 8 unless post-implementation evidence proves every remaining 8-scored dimension is now 9."
+    receipt:
+      completed_at: "2026-05-25T00:56:00Z"
+      summary: "Consolidated AI Builder form-field type ownership. BuilderFormFieldType now lives in ai_builder_flow_schema_values.py, builder_form_field_type_values() derives from that alias, create/outline/runtime hint models share it, the outline tool schema consumes the same values, and ai_builder_create_compiler.py no longer casts form-field type values through Any. Behavior remains strict at the AI Builder LLM boundary: padded supported values are stripped before validation, while Flow-layer coercion inputs such as textarea are rejected."
+      repo_reality:
+        branch: "feature/refactor-flows-flowai"
+        head_before_commit: "4d041714d Clarify AI Builder tool-turn persistence owner"
+        unrelated_dirty_files_preserved:
+          - ".devcontainer/docker-compose.yml"
+          - ".gitignore"
+          - "AGENTS.md"
+          - ".devcontainer/devcontainer-lock.json"
+          - "PRODUCT.md"
+          - "utvecklingssamtal.mp3"
+      implementation:
+        production_files:
+          - "backend/src/intric/flows/ai_builder/ai_builder_flow_schema_values.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_create_models.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_create_outline.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_runtime_input_fields.py"
+          - "backend/src/intric/flows/ai_builder/ai_builder_create_compiler.py"
+        test_files:
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py"
+          - "backend/tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+          - "backend/tests/unittests/flows/test_flow_capability_manifest.py"
+        artifacts:
+          - ".codex/artifacts/flow-ai-builder-t094-next-tranche-ranking.md"
+          - ".codex/artifacts/flow-ai-builder-t095-implementation-summary.md"
+        details:
+          - "Added BuilderFormFieldType: Literal['text', 'number', 'date', 'select', 'multiselect'] to ai_builder_flow_schema_values.py."
+          - "Changed builder_form_field_type_values() to derive from typing.get_args(BuilderFormFieldType)."
+          - "Deleted the local CreateFormFieldType alias from ai_builder_create_models.py."
+          - "Retyped CreateFormFieldDraft.field_type, OutlineInputField.field_type, and RuntimeInputFieldHint.field_type to BuilderFormFieldType."
+          - "Replaced OutlineInputField's duplicate membership validator with a Pydantic mode='before' stripper so Literal validation stays strict after preserving existing whitespace normalization."
+          - "Changed the outline_flow input_fields field_type enum to use builder_form_field_type_values()."
+          - "Deleted cast(Any, hint.field_type) and cast(Any, field.field_type) from ai_builder_create_compiler.py."
+      red_green_evidence:
+        red_guard:
+          command: "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_create_form_field_type_has_single_ai_builder_owner -q"
+          result: "1 failed before production changes; failures showed both compiler casts and hard-coded outline form-field value lists."
+        green_guard:
+          command: "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py::test_create_form_field_type_has_single_ai_builder_owner -q"
+          result: "1 passed after implementation"
+      validation:
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -> 160 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 29 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_capability_manifest.py -q -> 359 passed"
+        - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2397 passed, 4 skipped, 11 warnings"
+        - "cd backend && uv run ruff check touched T095 files -> all checks passed"
+        - "cd backend && uv run ruff format --check touched T095 files -> 8 files already formatted"
+        - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations"
+        - "rg -n \"cast\\(Any, .*field_type\" backend/src/intric/flows/ai_builder -> no matches"
+        - "rg -n '\"text\", \"number\", \"date\", \"select\", \"multiselect\"' backend/src/intric/flows/ai_builder -> only ai_builder_flow_schema_values.py"
+        - "rg -n \"CreateFormFieldType\" backend -> no matches"
+        - "git diff --check -> clean"
+      peer_review:
+        claude: ".codex/artifacts/claude-peer-loop-t095-ai-builder-form-field-type-contract-implementation-20260525T005339Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t095-ai-builder-form-field-type-contract-implementation-20260525T005517Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        accepted_or_deferred_peer_feedback:
+          - "Claude P3: a broader AST guard could scan every AI Builder file except ai_builder_flow_schema_values.py; defer because current guard, schema parity, and Flow parity cover the implemented failure mode."
+          - "Claude/Antigravity P3: a future broader Flow follow-up could move FormFieldType to flow_authoring_spec.py and derive both Flow and AI Builder values from it. Defer because the current user scope is Flow AI Builder only."
+          - "Antigravity P3: ai_builder_create_models.py still imports cast for the pre-existing empty-list default_factory. Out of T095 scope."
+      swagger_openapi_impact: "None. T095 changed only internal AI Builder Python type ownership and internal LLM tool-schema value construction while preserving enum values. It did not change REST/SSE contracts, OpenAPI schemas, Swagger examples, generated client types, frontend files, database schema or migrations, public request/response models, or API examples."
+      score_impact:
+        strict_floor: 8
+        dimensions_helped:
+          - "Maintainability"
+          - "Code Quality"
+          - "Clean Architecture"
+          - "Separation of Concerns"
+          - "Single Source of Truth discipline"
+          - "Human Readability"
+          - "Human Reviewability"
+          - "AI Slop / Comment / Naming Quality"
+        rationale: "T095 removes duplicate AI Builder form-field value ownership and unsafe compiler casts, but the broader strict floor remains 8 because planner/source topology/readability, final live-output proof after accumulated changes, full-source baseline issues, and broader Flow-layer form-field physical duplication remain."
+      residual_risks:
+        - "Flow-layer _VALID_FORM_FIELD_TYPES remains a separate physical owner by scope; parity test catches drift until a broader Flow tranche is explicitly authorized."
+        - "Static guard is scoped to outline hard-coded enum values and compiler field-type casts; a future hygiene tranche can broaden it across all AI Builder files if this specific drift recurs."
+        - "Remaining T091/T093 follow-ups still include output-type conversion review, runtime metadata owner cleanup, unknown uses_input_fields behavior, optional persist_tool_turn default-path coverage, and dual tool_call/arguments boundary tightening."
+        - "Final live-output proof and broader topology/readability/slop blockers still block a broader 9/10 completion claim."
+      broader_goal_complete: false
+
+  - id: T096
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Re-rank the next highest score-floor mover after T095 from current repo reality, without implementing during the ranking tranche."
+    constraints:
+      - "Do not move to broader Flows work; stay within Flow AI Builder unless the user explicitly changes scope."
+      - "Start from git status, latest commits, current scorecard, T095 receipt, source evidence, Claude/Antigravity T095 findings, and current dirty diff."
+      - "Consider remaining T091/T093/T095 follow-ups: output-type conversion review, runtime_metadata_state_from_planning_state ownership, unknown uses_input_fields behavior, optional persist_tool_turn default-path coverage, dual tool_call/arguments boundary tightening, broader AST literal guard, and AI Builder-scoped typing/test baseline."
+      - "Also consider typed event-builder payload tightening, negative dispatch-without-lease integration test, bounded AI-slop/comment/naming cleanup, remaining planner/source topology/readability blockers, final live-output proof, diagnostics/DX, data/schema/JSONB ownership, and frontend/backend contract drift."
+      - "Pick the tranche that most improves the strict score floor, not the easiest cleanup."
+      - "Do not implement during T096."
+      - "Do not optimize for LOC, and do not split files unless it removes real complexity or clarifies ownership."
+      - "Run Claude plan review and Antigravity if available. Missing Antigravity coverage must be recorded as missing coverage, not a pass."
+      - "Keep Swagger/OpenAPI/API examples current if the selected plan touches a public contract; otherwise explicitly record no public contract impact."
+    allowed_files:
+      - "docs/goals/flow-ai-builder-production-readiness-9-10/state.yaml"
+      - ".codex/artifacts/flow-ai-builder-t096-next-tranche-ranking.md"
+    expected_output:
+      - "Evidence-backed ranking with file:line evidence."
+      - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, expected score impact, and Swagger/OpenAPI impact."
+      - "Explicit explanation of why the selected tranche moves the strict 9/10 floor more than easier cleanup."
+      - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
     receipt: null
 
 checks:
@@ -8756,16 +8958,13 @@ checks:
     status_checked: true
     result: "dirty; unrelated user/workspace files preserved"
   last_verification:
-    result: "T093 completed, validated, Claude-gated, Antigravity-gated, and ready for scoped commit. T094 is active as a read-only ranking task. Broader goal remains active with strict floor 8/10 and must not be marked complete."
-    task: T093
+    result: "T095 completed, validated, Claude-gated, Antigravity-gated, and ready for scoped commit. T096 is active as a read-only ranking task. Broader goal remains active with strict floor 8/10 and must not be marked complete."
+    task: T095
     commands:
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q -> 26 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_conversation_metadata.py -q -> 18 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_tool_turn_persistence.py -q -> 1 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_question_recovery.py -q -> 9 passed"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 28 passed"
-      - "cd backend && uv run pytest tests/integration/flows/test_ai_builder_session_api_regressions.py::test_persist_tool_turn_refreshes_planning_state_with_requirements_summary -q -> 1 passed, 16 warnings"
-      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2393 passed, 4 skipped, 11 warnings"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_create_compiler.py -q -> 160 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q -> 29 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_capability_manifest.py -q -> 359 passed"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q -> 2397 passed, 4 skipped, 11 warnings"
       - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder -> 0 errors, 0 warnings, 0 informations"
-      - "Claude T093 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 8"
-      - "Antigravity T093 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 9"
+      - "Claude T095 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 8"
+      - "Antigravity T095 implementation gate -> GREEN_LIGHT yes / MIN_SCORE 8"

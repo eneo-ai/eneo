@@ -15,6 +15,9 @@ from pathlib import Path
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_flow_schema_values import (
+    builder_form_field_type_values,
+)
 from intric.flows.ai_builder.ai_builder_step_capabilities import (
     BUILDER_FINAL_OUTPUT_ARTIFACT_BY_OUTPUT_TYPE,
     BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE,
@@ -35,6 +38,7 @@ from intric.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
 )
+from intric.flows.flow_authoring_spec import _VALID_FORM_FIELD_TYPES
 from intric.flows.flow_capability_manifest import (
     _TEMPORARY_REASON_MARKER,
     ALLOWED_MCP_POLICIES,
@@ -77,6 +81,10 @@ def _flow_capability_manifest_source() -> Path:
 
 def test_fcm_version_is_one() -> None:
     assert FCM_VERSION == 1
+
+
+def test_ai_builder_form_field_types_match_flow_authoring_values() -> None:
+    assert set(builder_form_field_type_values()) == _VALID_FORM_FIELD_TYPES
 
 
 def test_flow_capability_is_frozen_with_engine_truth_fields() -> None:
