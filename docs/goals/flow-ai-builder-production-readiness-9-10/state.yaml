@@ -29,7 +29,7 @@ agents:
   claude_peer_loop: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py"
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
-active_task: T102
+active_task: T103
 
 interruptions:
   - id: I001
@@ -9485,7 +9485,7 @@ tasks:
   - id: T102
     type: judge
     assignee: Judge
-    status: active
+    status: completed
     reasoning_hint: high
     objective: "Re-rank the next highest score-floor-moving Flow AI Builder tranche after T101 from current repo evidence. Do not implement during this judge task."
     constraints:
@@ -9500,6 +9500,83 @@ tasks:
       - "Selected next tranche with canonical owner decisions, delete/merge/move/rename path, acceptance criteria, non-goals, red/static guards, validation commands, stop conditions, and expected score impact."
       - "Explicit explanation of why the selected tranche is the highest score-floor mover rather than the easiest cleanup."
       - "Claude GREEN_LIGHT yes / MIN_SCORE >= 8 and Antigravity result if available, or exact documented disagreement/blocker."
+    receipt:
+      completed_at: "2026-05-25"
+      summary: "Re-ranked the next Flow AI Builder tranche after T101. Selected T103 as a narrow repair terminal-output projection cleanup: delete the fake _ToolFailureCodes Protocol, collapse dynamic repair-result helpers into one typed _repair_terminal_events helper, and add an AST guard so repair result projection stays typed."
+      artifact: ".codex/artifacts/flow-ai-builder-t102-next-tranche-ranking.md"
+      selected_worker: T103
+      peer_review:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t102-next-flow-ai-builder-tranche-ranking-20260525T025842Z.md -> GREEN_LIGHT no / MIN_SCORE 7; accepted blockers around overclaiming score-floor impact, missing one-helper consolidation, vague test deltas, and weak static-guard specificity."
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t102-revised-next-flow-ai-builder-tranche-ranking-20260525T030205Z.md -> GREEN_LIGHT yes / MIN_SCORE 8 after Codex reframed T103 as a narrow cleanup, accepted _repair_terminal_events consolidation, mapped existing behavior tests, and specified AST guard expectations."
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t102-revised-next-flow-ai-builder-tranche-gate-20260525T030419Z.md -> GREEN_LIGHT yes / MIN_SCORE 8; emphasized call-site control-flow alignment and a standalone import-ownership guard."
+      rejected_or_deferred:
+        - "Broad comment cleanup deferred because current evidence is real but risks cosmetic churn unless scoped by a concrete inventory."
+        - "Live eval replay remains required before final 9/10 but is proof-oriented and does not reduce current maintainability/readability/slop blockers by itself."
+        - "Large planner/source topology cleanup deferred until a fresh architecture audit can prove a non-LOC-driven owner consolidation."
+        - "API/SSE/generated-client drift review deferred because current public API score is 9 and no T101/T102 evidence shows drift."
+      score_impact:
+        strict_floor: 8
+        rationale: "T102 is read-only. Selected T103 is useful typed-boundary cleanup for one proposal repair seam but should not raise the subsystem floor above 8 by itself."
+
+  - id: T103
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Implement the peer-gated repair terminal-output projection cleanup selected by T102."
+    constraints:
+      - "Stay within Flow AI Builder; do not move to broader Flows work."
+      - "Preserve unrelated dirty files and stage only tranche-owned files."
+      - "Do not move repair-specific user_message -> text-event projection onto ToolProcessingResult."
+      - "Do not change retry budgets, prompts, telemetry semantics, public API, SSE, OpenAPI, Swagger examples, generated clients, frontend, DB/schema, or normal-user output behavior."
+      - "No new file, public class, Protocol, interface, factory, manager/helper module, callback bag, broad context dict, Callable[..., Any], or **kwargs: Any."
+    problem: "ai_builder_proposal_repair.py receives typed ToolProcessingResult from repair callbacks but still projects it dynamically through Any, getattr, and a one-field private _ToolFailureCodes Protocol."
+    evidence:
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:57-59 private _ToolFailureCodes Protocol"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:188-211 dynamic helper pair and failure-code Protocol read"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:455-477 generator call site"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:681-692 forced tool retry outcome call site"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_repair.py:732-747 JSON-text fallback outcome call site"
+      - "backend/src/intric/flows/ai_builder/ai_builder_proposal_tool_contracts.py:117-126 canonical ToolProcessingResult fields"
+    canonical_owner_decision:
+      result_shape_owner: "ToolProcessingResult remains the canonical owner of event/events/user_message/feedback/failure_kind/failure_codes."
+      repair_projection_owner: "ai_builder_proposal_repair.py owns the repair-specific _repair_terminal_events(result: ToolProcessingResult) -> EventBatch projection."
+      what_deletes: "_ToolFailureCodes, _tool_result_has_events, _tool_result_events, and _tool_result_failure_codes."
+      why: "The generic result contract stays free of repair event-rendering behavior, while the repair loop stops pretending a typed result is a dynamic structural object."
+    acceptance_criteria:
+      - "_ToolFailureCodes is deleted."
+      - "typing.Protocol and runtime_checkable disappear from ai_builder_proposal_repair.py unless implementation finds another real use."
+      - "_tool_result_has_events, _tool_result_events, and _tool_result_failure_codes are deleted."
+      - "One local _repair_terminal_events(result: ToolProcessingResult) -> EventBatch helper owns terminal output projection."
+      - "Generator call site yields terminal_events and returns; forced outcome call sites return ForcedToolRetryOutcome(events=terminal_events)."
+      - "Call sites read tool_result.failure_codes directly."
+      - "Existing proposal repair behavior tests remain green."
+      - "A standalone import-ownership guard targets ai_builder_proposal_repair.py and prevents _ToolFailureCodes, runtime_checkable, retired helper names, and tool_result: Any regression."
+    existing_behavior_coverage:
+      - "test_ai_builder_proposal_repair.py:180-220 covers user_message -> text event."
+      - "test_ai_builder_proposal_repair.py:223-265 covers forced retry direct event output."
+      - "test_ai_builder_proposal_repair.py:268-358 covers feedback/failure paths without events."
+      - "test_ai_builder_proposal_repair.py:510-531 covers recoverable parse extra retry."
+      - "test_ai_builder_proposal_repair.py:561-570 covers duplicate-step failure code guidance."
+    validation_plan:
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_repair_runtime.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_proposal_submission.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/ai_builder -q"
+      - "cd backend && uv run ruff check src/intric/flows/ai_builder/ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/ai_builder/ai_builder_proposal_repair.py tests/unittests/flows/ai_builder/test_ai_builder_import_ownership.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/ai_builder"
+      - "git diff --check"
+      - "scripts/gate-local/anti_slippage.sh after staging"
+    peer_gates:
+      plan:
+        claude: ".codex/artifacts/claude-peer-loop-t102-revised-next-flow-ai-builder-tranche-ranking-20260525T030205Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t102-revised-next-flow-ai-builder-tranche-gate-20260525T030419Z.md -> GREEN_LIGHT yes / MIN_SCORE 8"
+      implementation:
+        claude_required: true
+        antigravity_if_available: true
+    expected_score_impact: "Can improve maintainability, clean architecture, separation of concerns, readability, reviewability, test quality, and AI-slop evidence for one proposal repair seam. Do not raise the overall strict floor above 8 from this slice alone."
     receipt: null
 
 checks:
