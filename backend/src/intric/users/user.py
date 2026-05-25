@@ -295,7 +295,7 @@ class UserInDB(UserInDBBase):
         return {
             user_group.id
             for user_group in self.user_groups
-            if user_group.state != "deleted"
+            if user_group.state != UserState.DELETED
         }
 
     @computed_field
