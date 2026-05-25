@@ -127,9 +127,8 @@ Published flows can expose two runtime input shapes to API consumers:
 The runtime API exposes this through:
 
 - `GET /api/v1/flows/{id}/run-contract/`
-- `GET /api/v1/flows/{id}/input-policy/`
 
-Those endpoints are the canonical way for a client to discover what a published flow expects before starting a run.
+That endpoint is the canonical way for a client to discover what a published flow expects before starting a run.
 
 For API consumers using `frontend/packages/intric-js`, the Flow SDK also supports caller-supplied run idempotency headers and a helper for deriving stable upload-intent idempotency keys after runtime files have been uploaded but before the published run is created.
 

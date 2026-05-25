@@ -67,7 +67,7 @@ That distinction matters because service keys and ordinary human members are int
 | --------------------------------------------- | ------------------------------------------------------------------- |
 | `GET /api/v1/flows/?space_id=...`             | Allowed for published-flow discovery in the key's scoped space      |
 | `GET /api/v1/flows/{id}/published/`           | Allowed for a runtime-safe single-flow published projection         |
-| `GET /run-contract/` and `GET /input-policy/` | Allowed for published-flow runtime discovery                        |
+| `GET /run-contract/`                          | Allowed for published-flow runtime discovery                        |
 | `GET /graph/`                                 | Allowed for published/runtime-safe topology and own-run snapshots   |
 | Runtime uploads                               | Allowed for published flows                                         |
 | Run creation                                  | Allowed for published flows                                         |
@@ -104,11 +104,10 @@ For most consumer apps, the safest order is:
 1. list published flows in the scoped space
 2. fetch the published runtime projection for the chosen flow
 3. fetch the published run contract
-4. fetch the effective input policy
-5. upload files if the flow requires them
-6. create a run with an optional `Idempotency-Key`
-7. poll the run and step endpoints
-8. fetch artifacts or evidence if your principal is allowed to
+4. upload files if the flow requires them
+5. create a run with an optional `Idempotency-Key`
+6. poll the run and step endpoints
+7. fetch artifacts or evidence if your principal is allowed to
 
 ## Tenant flow settings for runtime operators
 
@@ -200,7 +199,6 @@ Example response:
   "published_version": 3,
   "runtime_paths": {
     "run_contract": "/api/v1/flows/00000000-0000-0000-0000-000000000001/run-contract/",
-    "input_policy": "/api/v1/flows/00000000-0000-0000-0000-000000000001/input-policy/",
     "create_run": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
     "list_runs": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
     "list_steps_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/"
@@ -226,7 +224,7 @@ GET /api/v1/flows/{flow_id}/run-contract/
   If you are integrating with a service key, the recommended discovery path is:
   list published flows in the scoped space, fetch{" "}
   <code>GET /api/v1/flows/{"{flow_id}"}/published/</code>, then call{" "}
-  <code>run-contract</code> and <code>input-policy</code>. Do not build
+  <code>run-contract</code>. Do not build
   service-key discovery around <code>GET /api/v1/flows/{"{flow_id}"}/</code>.
 </Callout>
 
@@ -280,24 +278,6 @@ Response shape:
   If your UI caches flow configuration, pass <code>published_flow_version</code>{" "}
   back into run creation so the server can reject stale submissions cleanly.
 </Callout>
-
-#### Get the input policy
-
-```http
-GET /api/v1/flows/{flow_id}/input-policy/
-```
-
-This resolves the effective upload rules for the first `flow_input` step. Here, `flow_input` means the published entry point for the flow's main input.
-
-It tells you:
-
-- whether flow-level upload is supported
-- accepted MIME types
-- max file size
-- max files per run
-- the recommended run payload shape
-
-That makes it the right API to call before rendering an upload form.
 
 ### 2) Upload files
 
@@ -592,7 +572,7 @@ Use this table as the canonical quick-reference for runtime access decisions.
 | List published flows in a space                  | Yes, published only in scoped space                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
 | `GET /api/v1/flows/{id}/published/`              | Yes                                                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
 | `GET /api/v1/flows/{id}/`                        | No                                                          | Yes                                 | Read-only if visible by human policy | Yes                         | Yes                       |
-| Run-contract / input-policy / runtime-safe graph | Yes                                                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
+| Run contract / runtime-safe graph                | Yes                                                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
 | Create run                                       | Yes                                                         | Yes                                 | No                                   | Yes                         | Yes                       |
 | List / get / cancel / redispatch runs            | Own runs only                                               | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
 | Step outputs / artifacts                         | Own runs only                                               | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
@@ -632,7 +612,6 @@ A typical runtime-only integration looks like this:
 
 ```text
 GET  /api/v1/flows/{flow_id}/run-contract/
-GET  /api/v1/flows/{flow_id}/input-policy/
 POST /api/v1/flows/{flow_id}/files/                          (optional)
 POST /api/v1/flows/{flow_id}/steps/{step_id}/runtime-files/ (optional)
 POST /api/v1/flows/{flow_id}/runs/                           with Idempotency-Key

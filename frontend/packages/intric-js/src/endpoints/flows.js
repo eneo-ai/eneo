@@ -299,15 +299,6 @@ export function initFlows(client) {
       });
     },
 
-    /**
-     * Get effective flow input policy (input type, accepted mimes, size limit).
-     * @param {{id: string}} params
-     * @throws {IntricError}
-     */
-    inputPolicy: async ({ id }) => {
-      return _fetch(`/api/v1/flows/${id}/input-policy/`, { method: "get" });
-    },
-
     packages: {
       /**
        * Validate a portable Flow package before selecting a target space.

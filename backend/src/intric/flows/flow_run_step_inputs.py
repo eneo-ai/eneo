@@ -6,7 +6,12 @@ from typing import Protocol
 from uuid import UUID
 
 from intric.files.file_models import File
-from intric.flows.flow_input_limits import FlowInputLimits, effective_runtime_max_files
+from intric.flows.domain.flow import FlowRuntimeInputConfig
+from intric.flows.flow_input_limits import (
+    FlowInputLimits,
+    effective_flow_input_limit,
+    effective_runtime_max_files,
+)
 from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime.models import RuntimeStep
 from intric.flows.runtime_input import (
@@ -42,8 +47,10 @@ class _FileRepositoryProtocol(Protocol):
 @dataclass(frozen=True)
 class RuntimeStepInputSpec:
     step: RuntimeStep
+    runtime_input: FlowRuntimeInputConfig
     accepted_mimetypes: list[str]
     max_files: int | None
+    max_file_size_bytes: int
 
 
 @dataclass(frozen=True)
@@ -66,14 +73,32 @@ def build_runtime_step_input_specs(
             continue
         specs[step.step_id] = RuntimeStepInputSpec(
             step=step,
+            runtime_input=runtime_input,
             accepted_mimetypes=runtime_input_accept_mimetypes(runtime_input),
             max_files=effective_runtime_max_files(
                 input_type=runtime_input.input_format,
                 step_max_files=runtime_input.max_files,
                 limits=limits,
             ),
+            max_file_size_bytes=effective_flow_input_limit(
+                input_type=runtime_input.input_format,
+                limits=limits,
+            ),
         )
     return specs
+
+
+def first_flow_input_runtime_spec(
+    specs: Mapping[UUID, RuntimeStepInputSpec],
+) -> RuntimeStepInputSpec | None:
+    candidates = [
+        spec for spec in specs.values() if spec.step.input_source == "flow_input"
+    ]
+    if not candidates:
+        return None
+    return min(
+        candidates, key=lambda spec: (spec.step.step_order, str(spec.step.step_id))
+    )
 
 
 def normalize_step_inputs_payload(
@@ -119,15 +144,14 @@ async def validate_submitted_step_inputs(
                 context={"step_id": str(step_id)},
             )
 
-        runtime_input = build_runtime_input_config(step.input_config)
-        if not runtime_input.enabled:
+        spec = specs.get(step_id)
+        if spec is None or not spec.runtime_input.enabled:
             raise BadRequestException(
                 "Runtime input is disabled for the requested step.",
                 code="flow_run_runtime_input_disabled",
                 context={"step_id": str(step_id)},
             )
 
-        spec = specs[step_id]
         if spec.max_files is not None and len(requested_file_ids) > spec.max_files:
             raise BadRequestException(
                 "Too many files were submitted for this step.",
@@ -189,7 +213,7 @@ async def validate_submitted_step_inputs(
     required_missing = [
         str(step_id)
         for step_id, spec in specs.items()
-        if build_runtime_input_config(spec.step.input_config).required
+        if spec.runtime_input.required
         and len(normalized_step_inputs.get(step_id, [])) == 0
     ]
     if required_missing:

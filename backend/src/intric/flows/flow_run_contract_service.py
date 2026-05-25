@@ -7,11 +7,7 @@ from uuid import UUID
 
 from intric.flows.domain.flow import Flow, FlowTemplateAsset, FlowVersion
 from intric.flows.enums import FlowOutputMode, FlowOutputType, FlowTemplateAssetStatus
-from intric.flows.flow_input_limits import (
-    FlowInputLimits,
-    effective_flow_input_limit,
-    effective_runtime_max_files,
-)
+from intric.flows.flow_input_limits import FlowInputLimits
 from intric.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 from intric.flows.flow_run_contract_models import (
     FlowFinalOutputContractPublic,
@@ -23,15 +19,12 @@ from intric.flows.flow_run_contract_models import (
     FormFieldPublic,
     default_runtime_upload_policy_public,
 )
+from intric.flows.flow_run_step_inputs import build_runtime_step_input_specs
 from intric.flows.published_definition import (
     PublishedFlowDefinition,
     parse_published_definition,
 )
 from intric.flows.runtime.models import RuntimeStep
-from intric.flows.runtime_input import (
-    build_runtime_input_config,
-    runtime_input_accept_mimetypes,
-)
 from intric.main.exceptions import BadRequestException, NotFoundException
 
 logger = logging.getLogger(__name__)
@@ -270,33 +263,24 @@ def _runtime_input_contracts(
     steps: list[RuntimeStep],
     limits: FlowInputLimits,
 ) -> list[FlowRuntimeInputContractPublic]:
-    contracts: list[FlowRuntimeInputContractPublic] = []
-    for step in steps:
-        runtime_input = build_runtime_input_config(step.input_config)
-        if not runtime_input.enabled:
-            continue
-        max_files = effective_runtime_max_files(
-            input_type=runtime_input.input_format,
-            step_max_files=runtime_input.max_files,
-            limits=limits,
+    specs = build_runtime_step_input_specs(steps=steps, limits=limits)
+    return [
+        FlowRuntimeInputContractPublic(
+            step_id=spec.step.step_id,
+            step_order=spec.step.step_order,
+            label=spec.runtime_input.label,
+            description=spec.runtime_input.description,
+            required=spec.runtime_input.required,
+            input_format=spec.runtime_input.input_format,
+            max_files=spec.max_files,
+            max_file_size_bytes=spec.max_file_size_bytes,
+            accepted_mimetypes=spec.accepted_mimetypes,
         )
-        contracts.append(
-            FlowRuntimeInputContractPublic(
-                step_id=step.step_id,
-                step_order=step.step_order,
-                label=runtime_input.label,
-                description=runtime_input.description,
-                required=runtime_input.required,
-                input_format=runtime_input.input_format,
-                max_files=max_files,
-                max_file_size_bytes=effective_flow_input_limit(
-                    input_type=runtime_input.input_format,
-                    limits=limits,
-                ),
-                accepted_mimetypes=runtime_input_accept_mimetypes(runtime_input),
-            )
+        for spec in sorted(
+            specs.values(),
+            key=lambda item: (item.step.step_order, str(item.step.step_id)),
         )
-    return contracts
+    ]
 
 
 def _review_step_contracts(
@@ -325,19 +309,12 @@ def _aggregate_max_files(
     steps: list[RuntimeStep],
     limits: FlowInputLimits,
 ) -> int | None:
+    specs = build_runtime_step_input_specs(steps=steps, limits=limits)
     aggregate: int | None = 0
-    for step in steps:
-        runtime_input = build_runtime_input_config(step.input_config)
-        if not runtime_input.enabled:
-            continue
-        max_files = effective_runtime_max_files(
-            input_type=runtime_input.input_format,
-            step_max_files=runtime_input.max_files,
-            limits=limits,
-        )
-        if max_files is None:
+    for spec in specs.values():
+        if spec.max_files is None:
             return None
-        aggregate = (aggregate or 0) + max_files
+        aggregate = (aggregate or 0) + spec.max_files
     return aggregate
 
 

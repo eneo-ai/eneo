@@ -13,6 +13,7 @@ from intric.database.tables.flow_tables import (
 )
 from intric.database.tables.roles_table import Roles
 from intric.database.tables.users_table import users_roles_table
+from intric.flows.api import flow_router_common
 from intric.flows.enums import FlowRunReviewCheckpointState
 from intric.main.exceptions import ErrorCodes
 from intric.main.models import GeneralError
@@ -349,7 +350,8 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "intric.flows.api.flow_router_common.dispatch_flow_run_after_commit",
+        flow_router_common,
+        "dispatch_flow_run_after_commit",
         _noop_dispatch_flow_run_after_commit,
     )
 
@@ -532,7 +534,8 @@ async def test_flow_run_create_rejects_missing_required_runtime_step_inputs(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "intric.flows.api.flow_router_common.dispatch_flow_run_after_commit",
+        flow_router_common,
+        "dispatch_flow_run_after_commit",
         _noop_dispatch_flow_run_after_commit,
     )
 
@@ -591,7 +594,8 @@ async def test_flow_review_edit_returns_typed_contract_error_for_invalid_payload
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "intric.flows.api.flow_router_common.dispatch_flow_run_after_commit",
+        flow_router_common,
+        "dispatch_flow_run_after_commit",
         _noop_dispatch_flow_run_after_commit,
     )
 
@@ -659,7 +663,8 @@ async def test_flow_consumer_golden_journey_uses_review_runtime_paths(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "intric.flows.api.flow_router_common.dispatch_flow_run_after_commit",
+        flow_router_common,
+        "dispatch_flow_run_after_commit",
         _noop_dispatch_flow_run_after_commit,
     )
 
@@ -808,7 +813,8 @@ async def test_flow_service_key_can_drive_human_review_runtime_paths(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "intric.flows.api.flow_router_common.dispatch_flow_run_after_commit",
+        flow_router_common,
+        "dispatch_flow_run_after_commit",
         _noop_dispatch_flow_run_after_commit,
     )
 

@@ -211,7 +211,6 @@ def _find_parameter(operation: dict, *, name: str, location: str) -> dict:
 
 REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/flows/{id}/published/": {"get"},
-    "/api/v1/flows/{id}/input-policy/": {"get"},
     "/api/v1/flows/{id}/files/": {"post"},
     "/api/v1/flows/{id}/run-contract/": {"get"},
     "/api/v1/flows/{id}/steps/{step_id}/runtime-files/": {"post"},
@@ -246,7 +245,6 @@ REQUIRED_PATHS: dict[str, set[str]] = {
 }
 
 REQUIRED_SCHEMAS = {
-    "FlowInputPolicyPublic",
     "FlowRuntimePublic",
     "FlowReviewCheckpointRuntimePathsPublic",
     "FlowRunContractPublic",
@@ -302,7 +300,6 @@ REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
     ): "upload_flow_runtime_file",
     ("/api/v1/flows/{id}/runs/", "post"): "create_flow_run",
     ("/api/v1/flows/{id}/runs/", "get"): "list_flow_runs_alias",
-    ("/api/v1/flows/{id}/input-policy/", "get"): "get_flow_input_policy",
     ("/api/v1/flows/{id}/files/", "post"): "upload_flow_file",
     ("/api/v1/flows/{id}/runs/{run_id}/", "get"): "get_flow_run_alias",
     (
@@ -405,10 +402,6 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
         "/api/v1/flows/{id}/files/",
         "post",
     ): {"400", "403", "404", "413", "415", "422"},
-    (
-        "/api/v1/flows/{id}/input-policy/",
-        "get",
-    ): {"403", "404"},
     (
         "/api/v1/flows/{id}/runs/{run_id}/steps/",
         "get",
@@ -547,10 +540,6 @@ REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
         "post",
     ): {"400", "403", "404", "413", "415"},
     (
-        "/api/v1/flows/{id}/input-policy/",
-        "get",
-    ): {"403", "404"},
-    (
         "/api/v1/flows/{id}/runs/{run_id}/steps/",
         "get",
     ): {"403", "404"},
@@ -650,6 +639,28 @@ def test_openapi_legacy_flow_run_paths_absent(openapi_spec: dict) -> None:
         path for path in paths if path.startswith("/api/v1/flow-runs")
     )
     assert not legacy_paths, f"Legacy flow-run paths must be absent: {legacy_paths}"
+
+
+def test_openapi_removed_runtime_policy_surface_absent(openapi_spec: dict) -> None:
+    paths = openapi_spec.get("paths", {})
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    # Keep removed public-surface tokens split so the strict absence grep catches
+    # accidental real references while this test still guards the old names.
+    removed_path = "/api/v1/flows/{id}/input" + "-policy/"
+    removed_schema = "FlowInput" + "PolicyPublic"
+    removed_field = "input" + "_policy"
+
+    assert removed_path not in paths
+    assert removed_schema not in schemas
+    runtime_paths = schemas.get("FlowRuntimePathsPublic", {})
+    assert removed_field not in runtime_paths.get("properties", {})
+
+
+def test_flow_routes_removed_runtime_policy_route_absent(
+    flow_route_operations: dict[tuple[str, str], str],
+) -> None:
+    removed_path = "/api/v1/flows/{id}/input" + "-policy/"
+    assert (removed_path, "get") not in flow_route_operations
 
 
 def test_openapi_flow_consumer_operations_have_docs(openapi_spec: dict) -> None:
@@ -1506,75 +1517,6 @@ def test_openapi_flow_pagination_response_shape_is_current(
 
     assert "PaginatedResponse_FlowSparsePublic_" not in schemas
     assert "PaginatedResponse_FlowRunPublic_" not in schemas
-
-
-def test_openapi_flow_input_policy_schema_contains_consumer_hints(
-    openapi_spec: dict,
-) -> None:
-    flow_input_policy = (
-        openapi_spec.get("components", {})
-        .get("schemas", {})
-        .get("FlowInputPolicyPublic", {})
-    )
-    properties = flow_input_policy.get("properties", {})
-    assert "max_files_per_run" in properties
-    assert "runtime_upload_policy" in properties
-    assert "recommended_run_payload" in properties
-
-
-def test_openapi_flow_input_policy_example_matches_runtime_audio_defaults(
-    openapi_spec: dict,
-) -> None:
-    example = (
-        openapi_spec.get("components", {})
-        .get("schemas", {})
-        .get("FlowInputPolicyPublic", {})
-        .get("example", {})
-    )
-    assert isinstance(example, dict)
-    assert example.get("input_type") == "audio"
-    assert example.get("max_files_per_run") == 10
-    assert example.get("runtime_upload_policy") == {
-        "min_timeout_seconds": 120,
-        "seconds_per_mebibyte": 8,
-        "max_timeout_seconds": 600,
-        "idle_timeout_seconds": 120,
-    }
-
-
-def test_openapi_flow_input_policy_schema_exposes_enum_constraints(
-    openapi_spec: dict,
-) -> None:
-    schema = (
-        openapi_spec.get("components", {})
-        .get("schemas", {})
-        .get("FlowInputPolicyPublic", {})
-    )
-    properties = schema.get("properties", {})
-
-    input_type_values = _extract_enum_values(
-        openapi_spec, properties.get("input_type", {})
-    )
-    input_source_values = _extract_enum_values(
-        openapi_spec, properties.get("input_source", {})
-    )
-
-    assert {
-        "text",
-        "json",
-        "image",
-        "audio",
-        "document",
-        "file",
-        "any",
-    } <= input_type_values
-    assert {
-        "flow_input",
-        "previous_step",
-        "all_previous_steps",
-        "http_get",
-        "http_post",
-    } <= input_source_values
 
 
 def test_openapi_flow_run_create_schema_has_request_example(openapi_spec: dict) -> None:

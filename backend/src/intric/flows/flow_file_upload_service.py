@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from enum import Enum
 from typing import Protocol
 from uuid import UUID
 
@@ -12,23 +11,17 @@ from fastapi import UploadFile
 
 from intric.files.file_models import File
 from intric.files.file_service import FileService
-from intric.files.mime_support import (
-    canonicalize_mime,
-    supported_audio_mimes,
-    supported_image_mimes,
-    supported_text_mimes,
-)
-from intric.flows.domain.flow import Flow, FlowStep, FlowVersion
-from intric.flows.flow_input_limits import (
-    FlowInputLimits,
-    effective_flow_input_limit,
-    effective_runtime_max_files,
+from intric.files.mime_support import canonicalize_mime
+from intric.flows.domain.flow import Flow, FlowVersion
+from intric.flows.enums import FlowRuntimeInputFormat
+from intric.flows.flow_input_limits import FlowInputLimits
+from intric.flows.flow_run_step_inputs import (
+    RuntimeStepInputSpec,
+    build_runtime_step_input_specs,
+    first_flow_input_runtime_spec,
 )
 from intric.flows.published_definition import parse_published_runtime_steps
-from intric.flows.runtime_input import (
-    build_runtime_input_config,
-    runtime_input_accept_mimetypes,
-)
+from intric.flows.runtime.models import RuntimeStep
 from intric.main.exceptions import (
     BadRequestException,
     FileNotSupportedException,
@@ -37,7 +30,6 @@ from intric.main.exceptions import (
 
 logger = logging.getLogger(__name__)
 
-_FILE_UPLOAD_INPUT_TYPES = {"audio", "document", "image", "file"}
 _SNIFF_BYTES = 8192
 _UNKNOWN_SNIFFED_TYPES = {"application/octet-stream"}
 
@@ -135,106 +127,10 @@ class _FlowVersionRepositoryProtocol(Protocol):
 @dataclass(frozen=True)
 class FlowFileInputPolicy:
     flow_id: UUID
-    input_type: str | None
-    input_source: str | None
-    accepts_file_upload: bool
+    input_type: FlowRuntimeInputFormat
     accepted_mimetypes: list[str]
-    max_file_size_bytes: int | None
+    max_file_size_bytes: int
     max_files_per_run: int | None
-    recommended_run_payload: dict[str, object] | None
-
-
-def _first_flow_input_step(flow: Flow) -> FlowStep | None:
-    flow_input_steps = [
-        step for step in flow.steps if step.input_source == "flow_input"
-    ]
-    if not flow_input_steps:
-        return None
-
-    flow_input_steps.sort(key=lambda step: (step.step_order, str(step.id or "")))
-    return flow_input_steps[0]
-
-
-def _accepted_mimetypes_for_input_type(input_type: str) -> list[str]:
-    if input_type == "audio":
-        return supported_audio_mimes()
-    if input_type == "image":
-        return supported_image_mimes()
-    if input_type in {"document", "file"}:
-        return supported_text_mimes()
-    return []
-
-
-def _recommended_run_payload_for_input_type(
-    *,
-    input_type: str,
-    accepts_file_upload: bool,
-    step_id: UUID | None,
-) -> dict[str, object]:
-    if accepts_file_upload:
-        resolved_step_id = str(step_id) if step_id is not None else "<step-id-uuid>"
-        base: dict[str, object] = {
-            "step_inputs": {
-                resolved_step_id: {"file_ids": ["<file-id-uuid>"]},
-            }
-        }
-        if input_type == "audio":
-            base["input_payload_json"] = {
-                "text": "optional context for later prompt steps",
-            }
-        return base
-
-    if input_type == "json":
-        return {"input_payload_json": {"data": {"key": "value"}}}
-
-    return {"input_payload_json": {"text": "<text-input>"}}
-
-
-def _build_policy(flow: Flow, limits: FlowInputLimits) -> FlowFileInputPolicy:
-    flow_id = _require_flow_id(flow)
-    step = _first_flow_input_step(flow)
-    if step is None:
-        return FlowFileInputPolicy(
-            flow_id=flow_id,
-            input_type=None,
-            input_source=None,
-            accepts_file_upload=False,
-            accepted_mimetypes=[],
-            max_file_size_bytes=None,
-            max_files_per_run=None,
-            recommended_run_payload=None,
-        )
-
-    input_type = _enum_value(step.input_type)
-    accepts_file_upload = input_type in _FILE_UPLOAD_INPUT_TYPES
-    accepted_mimetypes = _accepted_mimetypes_for_input_type(input_type)
-    max_file_size_bytes = None
-    max_files_per_run = None
-    if accepts_file_upload:
-        max_file_size_bytes = effective_flow_input_limit(
-            input_type=input_type,
-            limits=limits,
-        )
-        max_files_per_run = effective_runtime_max_files(
-            input_type=input_type,
-            step_max_files=None,
-            limits=limits,
-        )
-
-    return FlowFileInputPolicy(
-        flow_id=flow_id,
-        input_type=input_type,
-        input_source=_enum_value(step.input_source),
-        accepts_file_upload=accepts_file_upload,
-        accepted_mimetypes=accepted_mimetypes,
-        max_file_size_bytes=max_file_size_bytes,
-        max_files_per_run=max_files_per_run,
-        recommended_run_payload=_recommended_run_payload_for_input_type(
-            input_type=input_type,
-            accepts_file_upload=accepts_file_upload,
-            step_id=step.id,
-        ),
-    )
 
 
 def _require_flow_id(flow: Flow) -> UUID:
@@ -246,10 +142,18 @@ def _require_flow_id(flow: Flow) -> UUID:
     return flow.id
 
 
-def _enum_value(value: str | Enum) -> str:
-    if isinstance(value, Enum):
-        return str(value.value)
-    return value
+def _policy_from_runtime_spec(
+    *,
+    flow_id: UUID,
+    spec: RuntimeStepInputSpec,
+) -> FlowFileInputPolicy:
+    return FlowFileInputPolicy(
+        flow_id=flow_id,
+        input_type=spec.runtime_input.input_format,
+        accepted_mimetypes=spec.accepted_mimetypes,
+        max_file_size_bytes=spec.max_file_size_bytes,
+        max_files_per_run=spec.max_files,
+    )
 
 
 class FlowFileUploadService:
@@ -266,15 +170,10 @@ class FlowFileUploadService:
         self.settings_service = settings_service
         self.flow_version_repo = flow_version_repo
 
-    async def get_input_policy(self, *, flow_id: UUID) -> FlowFileInputPolicy:
-        flow = await self.flow_service.get_flow(flow_id)
-        limits = await self.settings_service.get_flow_input_limits_resolved()
-        return _build_policy(flow, limits)
-
     async def upload_file_for_flow(
         self, *, flow_id: UUID, upload_file: UploadFile
     ) -> File:
-        policy = await self.get_input_policy(flow_id=flow_id)
+        policy = await self._get_published_flow_upload_policy(flow_id=flow_id)
         return await self._upload_with_policy(
             flow_id=flow_id,
             upload_file=upload_file,
@@ -288,6 +187,49 @@ class FlowFileUploadService:
         step_id: UUID,
         upload_file: UploadFile,
     ) -> File:
+        persisted_flow_id, steps, limits = await self._get_published_runtime_inputs(
+            flow_id=flow_id
+        )
+        runtime_step = next((step for step in steps if step.step_id == step_id), None)
+        if runtime_step is None:
+            raise BadRequestException(
+                "Unknown runtime step id.", code="flow_run_unknown_step_input"
+            )
+
+        specs = build_runtime_step_input_specs(steps=steps, limits=limits)
+        spec = specs.get(step_id)
+        if spec is None:
+            raise BadRequestException(
+                "Runtime input is not enabled for this step.",
+                code="flow_run_runtime_input_disabled",
+            )
+
+        policy = _policy_from_runtime_spec(flow_id=persisted_flow_id, spec=spec)
+        return await self._upload_with_policy(
+            flow_id=persisted_flow_id,
+            upload_file=upload_file,
+            policy=policy,
+        )
+
+    async def _get_published_flow_upload_policy(
+        self, *, flow_id: UUID
+    ) -> FlowFileInputPolicy:
+        persisted_flow_id, steps, limits = await self._get_published_runtime_inputs(
+            flow_id=flow_id
+        )
+        specs = build_runtime_step_input_specs(steps=steps, limits=limits)
+        spec = first_flow_input_runtime_spec(specs)
+        if spec is None:
+            raise BadRequestException(
+                "Flow does not accept file uploads for flow_input. Use step-specific runtime uploads from the run contract.",
+                code="flow_input_upload_not_supported",
+                context={"flow_id": str(persisted_flow_id), "input_type": None},
+            )
+        return _policy_from_runtime_spec(flow_id=persisted_flow_id, spec=spec)
+
+    async def _get_published_runtime_inputs(
+        self, *, flow_id: UUID
+    ) -> tuple[UUID, list[RuntimeStep], FlowInputLimits]:
         if self.flow_version_repo is None:
             raise BadRequestException(
                 "Published flow runtime upload dependencies are unavailable.",
@@ -306,43 +248,8 @@ class FlowFileUploadService:
             tenant_id=flow.tenant_id,
         )
         steps = parse_published_runtime_steps(version.definition_json)
-        runtime_step = next((step for step in steps if step.step_id == step_id), None)
-        if runtime_step is None:
-            raise BadRequestException(
-                "Unknown runtime step id.", code="flow_run_unknown_step_input"
-            )
-
-        runtime_input = build_runtime_input_config(runtime_step.input_config)
-        if not runtime_input.enabled:
-            raise BadRequestException(
-                "Runtime input is not enabled for this step.",
-                code="flow_run_runtime_input_disabled",
-            )
-
         limits = await self.settings_service.get_flow_input_limits_resolved()
-        max_size = effective_flow_input_limit(
-            input_type=runtime_input.input_format,
-            limits=limits,
-        )
-        policy = FlowFileInputPolicy(
-            flow_id=persisted_flow_id,
-            input_type=runtime_input.input_format,
-            input_source=runtime_step.input_source,
-            accepts_file_upload=True,
-            accepted_mimetypes=runtime_input_accept_mimetypes(runtime_input),
-            max_file_size_bytes=max_size,
-            max_files_per_run=effective_runtime_max_files(
-                input_type=runtime_input.input_format,
-                step_max_files=runtime_input.max_files,
-                limits=limits,
-            ),
-            recommended_run_payload=None,
-        )
-        return await self._upload_with_policy(
-            flow_id=persisted_flow_id,
-            upload_file=upload_file,
-            policy=policy,
-        )
+        return persisted_flow_id, steps, limits
 
     async def _upload_with_policy(
         self,
@@ -377,13 +284,6 @@ class FlowFileUploadService:
         upload_file: UploadFile,
         policy: FlowFileInputPolicy,
     ) -> int:
-        if not policy.accepts_file_upload:
-            raise BadRequestException(
-                "Flow does not accept file uploads for flow_input. Use text/json payload for this flow.",
-                code="flow_input_upload_not_supported",
-                context={"flow_id": str(flow_id), "input_type": policy.input_type},
-            )
-
         if await _is_empty_upload_file_async(upload_file):
             raise BadRequestException(
                 "Uploaded file is empty.",
@@ -406,11 +306,11 @@ class FlowFileUploadService:
         if sniffed_canonical and sniffed_canonical not in allowed_canonical_types:
             allowed_types = ", ".join(policy.accepted_mimetypes)
             raise FileNotSupportedException(
-                f"Detected file type '{sniffed_type}' is not allowed for flow input type '{policy.input_type}'. Allowed types: {allowed_types}.",
+                f"Detected file type '{sniffed_type}' is not allowed for flow input type '{policy.input_type.value}'. Allowed types: {allowed_types}.",
                 code="unsupported_media_type",
                 context={
                     "flow_id": str(flow_id),
-                    "input_type": policy.input_type,
+                    "input_type": policy.input_type.value,
                     "received_type": declared_type or "missing",
                     "detected_type": sniffed_type,
                 },
@@ -420,20 +320,13 @@ class FlowFileUploadService:
             received_type = upload_file.content_type or "missing"
             allowed_types = ", ".join(policy.accepted_mimetypes)
             raise FileNotSupportedException(
-                f"Unsupported file type '{received_type}' for flow input type '{policy.input_type}'. Allowed types: {allowed_types}.",
+                f"Unsupported file type '{received_type}' for flow input type '{policy.input_type.value}'. Allowed types: {allowed_types}.",
                 code="unsupported_media_type",
                 context={
                     "flow_id": str(flow_id),
-                    "input_type": policy.input_type,
+                    "input_type": policy.input_type.value,
                     "received_type": received_type,
                 },
             )
 
-        max_size = policy.max_file_size_bytes
-        if max_size is None:
-            raise BadRequestException(
-                "Flow input policy is missing a max file size.",
-                code="flow_input_policy_missing_limit",
-                context={"flow_id": str(flow_id)},
-            )
-        return max_size
+        return policy.max_file_size_bytes

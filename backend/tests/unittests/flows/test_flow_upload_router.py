@@ -17,17 +17,13 @@ from fastapi import UploadFile
 
 from intric.authentication.auth_dependencies import ScopeFilter
 from intric.flows.api import flow_router_common as router_common_module
-from intric.flows.api.flow_models import (
-    FlowInputSource,
-    FlowInputType,
-    FlowRunContractPublic,
-)
+from intric.flows.api.flow_models import FlowRunContractPublic
 from intric.flows.api.flow_upload_router import (
-    get_flow_input_policy,
     get_flow_run_contract,
     upload_flow_file,
     upload_flow_runtime_file,
 )
+from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from intric.main.exceptions import BadRequestException
 from intric.settings.settings import FlowInputLimitsPublic
 from tests.unittests.flows.test_flow_router import (
@@ -36,6 +32,26 @@ from tests.unittests.flows.test_flow_router import (
     _flow,
     _flow_step,
 )
+
+
+def _runtime_definition(flow_id, step):
+    return {
+        "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+        "flow_id": str(flow_id),
+        "steps": [
+            {
+                "step_id": str(step.id),
+                "step_order": step.step_order,
+                "assistant_id": str(step.assistant_id),
+                "input_source": step.input_source,
+                "input_type": step.input_type,
+                "input_config": step.input_config,
+                "output_mode": step.output_mode,
+                "output_type": step.output_type,
+                "mcp_policy": step.mcp_policy,
+            }
+        ],
+    }
 
 
 @pytest.mark.asyncio
@@ -141,147 +157,6 @@ async def test_upload_flow_runtime_file_calls_step_upload_service(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_flow_input_policy_for_audio_step_returns_audio_mime_and_limit(
-    monkeypatch,
-):
-    container = MagicMock()
-    flow_service = AsyncMock()
-    settings_service = AsyncMock()
-    flow_id = uuid4()
-
-    step = _flow_step(uuid4(), 1).model_copy(update={"input_type": "audio"})
-    flow_service.get_flow.return_value = _flow(flow_id).model_copy(
-        update={"steps": [step]}
-    )
-    settings_service.get_flow_input_limits_resolved.return_value = (
-        FlowInputLimitsPublic(
-            file_max_size_bytes=10_000_000,
-            audio_max_size_bytes=25_000_000,
-            max_files_per_run=10,
-            audio_max_files_per_run=10,
-        )
-    )
-    container.flow_service.return_value = flow_service
-    container.settings_service.return_value = settings_service
-
-    monkeypatch.setattr(
-        router_common_module,
-        "get_scope_filter",
-        lambda _request: ScopeFilter(space_id=None),
-    )
-    _enable_space_access(container)
-
-    policy = await get_flow_input_policy(
-        id=flow_id,
-        request=SimpleNamespace(state=SimpleNamespace()),
-        container=container,
-    )
-
-    assert policy.input_type == FlowInputType.AUDIO
-    assert policy.input_source == FlowInputSource.FLOW_INPUT
-    assert policy.accepts_file_upload is True
-    assert policy.max_file_size_bytes == 25_000_000
-    assert policy.max_files_per_run == 10
-    assert policy.recommended_run_payload is not None
-    assert policy.recommended_run_payload["step_inputs"] == {
-        str(step.id): {"file_ids": ["<file-id-uuid>"]}
-    }
-    assert "audio/mpeg" in policy.accepted_mimetypes
-
-
-@pytest.mark.asyncio
-async def test_get_flow_input_policy_tolerates_unexpected_policy_enums(monkeypatch):
-    container = MagicMock()
-    flow_id = uuid4()
-
-    class _BadPolicyService:
-        async def get_input_policy(self, *, flow_id):
-            return SimpleNamespace(
-                flow_id=flow_id,
-                input_type="unexpected",
-                input_source="flow_input",
-                accepts_file_upload=False,
-                accepted_mimetypes=[],
-                max_file_size_bytes=None,
-                max_files_per_run=None,
-                recommended_run_payload=None,
-            )
-
-    monkeypatch.setattr(
-        router_common_module,
-        "get_scope_filter",
-        lambda _request: ScopeFilter(space_id=None),
-    )
-    _enable_space_access(container)
-    monkeypatch.setattr(
-        router_common_module,
-        "flow_upload_service",
-        lambda _container: _BadPolicyService(),
-    )
-    monkeypatch.setattr(
-        router_common_module,
-        "enforce_flow_scope_for_request",
-        AsyncMock(),
-    )
-
-    policy = await get_flow_input_policy(
-        id=flow_id,
-        request=SimpleNamespace(state=SimpleNamespace()),
-        container=container,
-    )
-
-    assert policy.input_type == "unexpected"
-    assert policy.input_source == FlowInputSource.FLOW_INPUT
-
-
-@pytest.mark.asyncio
-async def test_get_flow_input_policy_tolerates_unexpected_input_source(monkeypatch):
-    container = MagicMock()
-    flow_id = uuid4()
-
-    class _BadSourcePolicyService:
-        async def get_input_policy(self, *, flow_id):
-            return SimpleNamespace(
-                flow_id=flow_id,
-                input_type="audio",
-                input_source="unexpected_source",
-                accepts_file_upload=True,
-                accepted_mimetypes=["audio/mpeg"],
-                max_file_size_bytes=25_000_000,
-                max_files_per_run=10,
-                recommended_run_payload={
-                    "step_inputs": {"<step-id-uuid>": {"file_ids": ["<file-id-uuid>"]}}
-                },
-            )
-
-    monkeypatch.setattr(
-        router_common_module,
-        "get_scope_filter",
-        lambda _request: ScopeFilter(space_id=None),
-    )
-    _enable_space_access(container)
-    monkeypatch.setattr(
-        router_common_module,
-        "flow_upload_service",
-        lambda _container: _BadSourcePolicyService(),
-    )
-    monkeypatch.setattr(
-        router_common_module,
-        "enforce_flow_scope_for_request",
-        AsyncMock(),
-    )
-
-    policy = await get_flow_input_policy(
-        id=flow_id,
-        request=SimpleNamespace(state=SimpleNamespace()),
-        container=container,
-    )
-
-    assert policy.input_type == FlowInputType.AUDIO
-    assert policy.input_source == "unexpected_source"
-
-
-@pytest.mark.asyncio
 async def test_upload_flow_file_rejects_when_flow_input_type_not_file_upload(
     monkeypatch,
 ):
@@ -289,11 +164,17 @@ async def test_upload_flow_file_rejects_when_flow_input_type_not_file_upload(
     flow_service = AsyncMock()
     settings_service = AsyncMock()
     file_service = AsyncMock()
+    flow_version_repo = AsyncMock()
     flow_id = uuid4()
 
-    step = _flow_step(uuid4(), 1).model_copy(update={"input_type": "text"})
+    step = _flow_step(uuid4(), 1).model_copy(
+        update={"input_config": {"runtime_input": False}}
+    )
     flow_service.get_flow.return_value = _flow(flow_id).model_copy(
-        update={"steps": [step]}
+        update={"published_version": 1, "steps": [step]}
+    )
+    flow_version_repo.get.return_value = SimpleNamespace(
+        definition_json=_runtime_definition(flow_id, step)
     )
     settings_service.get_flow_input_limits_resolved.return_value = (
         FlowInputLimitsPublic(
@@ -306,6 +187,7 @@ async def test_upload_flow_file_rejects_when_flow_input_type_not_file_upload(
     container.flow_service.return_value = flow_service
     container.settings_service.return_value = settings_service
     container.file_service.return_value = file_service
+    container.flow_version_repo.return_value = flow_version_repo
 
     monkeypatch.setattr(
         router_common_module,
@@ -336,13 +218,27 @@ async def test_upload_flow_file_uses_flow_limit_override(monkeypatch):
     flow_service = AsyncMock()
     settings_service = AsyncMock()
     file_service = AsyncMock()
+    flow_version_repo = AsyncMock()
     flow_id = uuid4()
     file_id = uuid4()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
 
-    step = _flow_step(uuid4(), 1).model_copy(update={"input_type": "audio"})
+    step = _flow_step(uuid4(), 1).model_copy(
+        update={
+            "input_type": "audio",
+            "input_config": {
+                "runtime_input": {
+                    "enabled": True,
+                    "input_format": "audio",
+                }
+            },
+        }
+    )
     flow_service.get_flow.return_value = _flow(flow_id).model_copy(
-        update={"steps": [step]}
+        update={"published_version": 1, "steps": [step]}
+    )
+    flow_version_repo.get.return_value = SimpleNamespace(
+        definition_json=_runtime_definition(flow_id, step)
     )
     settings_service.get_flow_input_limits_resolved.return_value = (
         FlowInputLimitsPublic(
@@ -363,6 +259,7 @@ async def test_upload_flow_file_uses_flow_limit_override(monkeypatch):
     container.flow_service.return_value = flow_service
     container.settings_service.return_value = settings_service
     container.file_service.return_value = file_service
+    container.flow_version_repo.return_value = flow_version_repo
     container.user.return_value = user
     container.audit_service.return_value = AsyncMock()
     _enable_explicit_transaction(container)

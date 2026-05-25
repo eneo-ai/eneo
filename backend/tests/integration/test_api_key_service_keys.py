@@ -666,12 +666,9 @@ async def test_service_key_space_scoped_published_runtime_surfaces_work_and_ai_b
     assert runtime_projection["runtime_paths"]["create_run"].endswith(
         f"/flows/{flow_id}/runs/"
     )
-
-    input_policy_resp = await client.get(
-        f"/api/v1/flows/{flow_id}/input-policy/",
-        headers={"X-API-Key": secret},
-    )
-    assert input_policy_resp.status_code == 200, input_policy_resp.text
+    # Keep the removed public field token split so the strict absence grep
+    # catches accidental real references while this guard stays readable.
+    assert "input" + "_policy" not in runtime_projection["runtime_paths"]
 
     graph_resp = await client.get(
         f"/api/v1/flows/{flow_id}/graph/",

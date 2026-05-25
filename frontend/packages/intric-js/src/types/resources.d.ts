@@ -205,7 +205,6 @@ type WithTypedRunOutput<T extends { output_payload_json?: unknown }> = Omit<
 export type FlowRun = WithTypedRunOutput<components["schemas"]["FlowRunPublic"]>;
 export type FlowRunStepInput = components["schemas"]["StepRunInput"] & { file_ids: string[] };
 export type FlowRunStepInputs = Record<string, FlowRunStepInput>;
-export type FlowInputPolicy = components["schemas"]["FlowInputPolicyPublic"];
 export type FlowRunStep = WithTypedRunOutput<components["schemas"]["FlowRunStepPublic"]>;
 export type FlowGraphNode = components["schemas"]["GraphNode"];
 export type FlowGraphEdge = components["schemas"]["GraphEdge"];

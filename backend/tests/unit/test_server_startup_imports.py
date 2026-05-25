@@ -374,12 +374,6 @@ def test_flow_and_ai_builder_openapi_documents_parameters_and_error_examples() -
     }
     assert run_contract_params["id"]["description"]
 
-    input_policy_operation = schema["paths"]["/api/v1/flows/{id}/input-policy/"]["get"]
-    input_policy_params = {
-        param["name"]: param for param in input_policy_operation["parameters"]
-    }
-    assert input_policy_params["id"]["description"]
-
     upload_flow_file_operation = schema["paths"]["/api/v1/flows/{id}/files/"]["post"]
     upload_flow_file_params = {
         param["name"]: param for param in upload_flow_file_operation["parameters"]

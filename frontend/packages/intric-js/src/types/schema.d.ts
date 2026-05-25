@@ -3996,36 +3996,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/flows/{id}/input-policy/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * Get flow input policy
-     * @description Return effective runtime input policy for a flow's first `flow_input` step.
-     *
-     *     Use this endpoint before upload/run to discover:
-     *     - whether file upload is accepted
-     *     - which mimetypes are allowed
-     *     - the effective max file size limit in bytes
-     *     - max files per run (when constrained)
-     *     - runtime upload timeout policy for browser and API clients
-     *     - recommended run payload shape for API consumers
-     *
-     *     Service-key principals may use this endpoint for published-flow runtime only.
-     */
-    get: operations["get_flow_input_policy"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/flows/{id}/files/": {
     parameters: {
       query?: never;
@@ -13014,61 +12984,6 @@ export interface components {
       audio_max_files_per_run?: number | null;
     };
     /**
-     * FlowInputPolicyPublic
-     * @example {
-     *       "accepted_mimetypes": [
-     *         "audio/wav",
-     *         "audio/mpeg"
-     *       ],
-     *       "accepts_file_upload": true,
-     *       "flow_id": "00000000-0000-0000-0000-000000000001",
-     *       "input_source": "flow_input",
-     *       "input_type": "audio",
-     *       "max_file_size_bytes": 52428800,
-     *       "max_files_per_run": 10,
-     *       "recommended_run_payload": {
-     *         "step_inputs": {
-     *           "00000000-0000-0000-0000-000000000003": {
-     *             "file_ids": [
-     *               "00000000-0000-0000-0000-000000000002"
-     *             ]
-     *           }
-     *         }
-     *       },
-     *       "runtime_upload_policy": {
-     *         "idle_timeout_seconds": 120,
-     *         "max_timeout_seconds": 600,
-     *         "min_timeout_seconds": 120,
-     *         "seconds_per_mebibyte": 8
-     *       }
-     *     }
-     */
-    FlowInputPolicyPublic: {
-      /**
-       * Flow Id
-       * Format: uuid
-       */
-      flow_id: string;
-      /** Input Type */
-      input_type?: components["schemas"]["FlowInputType"] | string | null;
-      /** Input Source */
-      input_source?: components["schemas"]["FlowInputSource"] | string | null;
-      /** Accepts File Upload */
-      accepts_file_upload: boolean;
-      /** Accepted Mimetypes */
-      accepted_mimetypes?: string[];
-      /** Max File Size Bytes */
-      max_file_size_bytes?: number | null;
-      /** Max Files Per Run */
-      max_files_per_run?: number | null;
-      /** @description Client-side timeout policy for runtime file uploads. Consumers should calculate each upload's initial timeout from the actual file size: `clamp(min_timeout_seconds, max_timeout_seconds, ceil(file_size_mib * seconds_per_mebibyte))`, then keep a progressing upload alive until `idle_timeout_seconds` passes without progress. */
-      runtime_upload_policy?: components["schemas"]["FlowRuntimeUploadPolicyPublic"];
-      /** Recommended Run Payload */
-      recommended_run_payload?: {
-        [key: string]: unknown;
-      } | null;
-    };
-    /**
      * FlowInputSource
      * @enum {string}
      */
@@ -16597,11 +16512,6 @@ export interface components {
        */
       run_contract: string;
       /**
-       * Input Policy
-       * @description GET path for the published input policy. Use this to inspect accepted runtime input formats and upload constraints before submitting files.
-       */
-      input_policy: string;
-      /**
        * Graph
        * @description GET path for the published flow graph. Add the optional `run_id` query parameter after run creation to enrich the graph with runtime state.
        */
@@ -16724,7 +16634,6 @@ export interface components {
      *         "get_graph_for_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/?run_id={run_id}",
      *         "get_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/",
      *         "graph": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/",
-     *         "input_policy": "/api/v1/flows/00000000-0000-0000-0000-000000000001/input-policy/",
      *         "list_runs": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
      *         "list_steps_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/",
      *         "review_checkpoints": {
@@ -38449,73 +38358,6 @@ export interface operations {
       };
     };
   };
-  get_flow_input_policy: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Identifier of the flow whose effective input policy should be returned. */
-        id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowInputPolicyPublic"];
-        };
-      };
-      /** @description Forbidden: API key scope does not match flow space. */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "message": "API key space scope does not match requested flow.",
-           *       "intric_error_code": 9001,
-           *       "code": "insufficient_scope",
-           *       "context": {
-           *         "auth_layer": "api_key_scope"
-           *       }
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Flow not found in tenant scope. */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "message": "Flow not found.",
-           *       "intric_error_code": 9000,
-           *       "code": "not_found"
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
   upload_flow_file: {
     parameters: {
       query?: never;
@@ -38541,7 +38383,7 @@ export interface operations {
           "application/json": components["schemas"]["FilePublic"];
         };
       };
-      /** @description Upload request is invalid for this flow input policy. Representative machine-readable codes include: flow_input_upload_not_supported, flow_input_file_empty, flow_input_policy_missing_limit. */
+      /** @description Upload request is invalid for the published flow runtime input contract. Representative machine-readable codes include: flow_input_upload_not_supported, flow_input_file_empty. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -38549,7 +38391,7 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "message": "Flow input policy does not allow file upload.",
+           *       "message": "Published runtime input contract does not allow file upload.",
            *       "intric_error_code": 9007,
            *       "code": "flow_input_upload_not_supported"
            *     }
@@ -38608,7 +38450,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Unsupported media type for this flow input policy. */
+      /** @description Unsupported media type for the published runtime input contract. */
       415: {
         headers: {
           [name: string]: unknown;
@@ -38616,7 +38458,7 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "message": "Unsupported media type for this flow input policy.",
+           *       "message": "Unsupported media type for the published runtime input contract.",
            *       "intric_error_code": 9014,
            *       "code": "unsupported_media_type"
            *     }
@@ -38737,7 +38579,7 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "message": "Unsupported media type for this flow input policy.",
+           *       "message": "Unsupported media type for the selected runtime step.",
            *       "intric_error_code": 9014,
            *       "code": "unsupported_media_type"
            *     }

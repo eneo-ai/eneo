@@ -35,9 +35,6 @@ from intric.flows.flow_run_contract_models import (
     FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE as FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE,
 )
 from intric.flows.flow_run_contract_models import (
-    FLOW_RUNTIME_UPLOAD_POLICY_DESCRIPTION as FLOW_RUNTIME_UPLOAD_POLICY_DESCRIPTION,
-)
-from intric.flows.flow_run_contract_models import (
     FlowFinalOutputContractPublic as FlowFinalOutputContractPublic,
 )
 from intric.flows.flow_run_contract_models import (
@@ -60,9 +57,6 @@ from intric.flows.flow_run_contract_models import (
 )
 from intric.flows.flow_run_contract_models import (
     FormFieldPublic as FormFieldPublic,
-)
-from intric.flows.flow_run_contract_models import (
-    default_runtime_upload_policy_public as default_runtime_upload_policy_public,
 )
 from intric.flows.flow_run_error import FlowRunError
 from intric.flows.flow_run_evidence_export_manifest import EvidenceExportManifest
@@ -130,7 +124,6 @@ FLOW_RUNTIME_PUBLIC_EXAMPLE: dict[str, Any] = {
     "updated_at": "2026-03-17T10:00:00Z",
     "runtime_paths": {
         "run_contract": "/api/v1/flows/00000000-0000-0000-0000-000000000001/run-contract/",
-        "input_policy": "/api/v1/flows/00000000-0000-0000-0000-000000000001/input-policy/",
         "graph": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/",
         "upload_flow_file": "/api/v1/flows/00000000-0000-0000-0000-000000000001/files/",
         "upload_step_runtime_file_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/steps/{step_id}/runtime-files/",
@@ -674,12 +667,6 @@ class FlowRuntimePathsPublic(BaseModel):
             "delivery, and the published version to pin."
         )
     )
-    input_policy: str = Field(
-        description=(
-            "GET path for the published input policy. Use this to inspect accepted "
-            "runtime input formats and upload constraints before submitting files."
-        )
-    )
     graph: str = Field(
         description=(
             "GET path for the published flow graph. Add the optional `run_id` query "
@@ -1164,49 +1151,6 @@ class FlowRunReviewCheckpointResumeResponse(BaseModel):
 
     checkpoint: FlowRunReviewCheckpointPublic
     run: FlowRunPublic
-
-
-class FlowInputPolicyPublic(BaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "flow_id": "00000000-0000-0000-0000-000000000001",
-                "input_type": "audio",
-                "input_source": "flow_input",
-                "accepts_file_upload": True,
-                "accepted_mimetypes": ["audio/wav", "audio/mpeg"],
-                "max_file_size_bytes": 52428800,
-                "max_files_per_run": 10,
-                "runtime_upload_policy": {
-                    "min_timeout_seconds": 120,
-                    "seconds_per_mebibyte": 8,
-                    "max_timeout_seconds": 600,
-                    "idle_timeout_seconds": 120,
-                },
-                "recommended_run_payload": {
-                    "step_inputs": {
-                        "00000000-0000-0000-0000-000000000003": {
-                            "file_ids": ["00000000-0000-0000-0000-000000000002"]
-                        }
-                    }
-                },
-            }
-        }
-    )
-
-    flow_id: UUID
-    # Keep enum docs for known values while accepting policy strings added server-side.
-    input_type: FlowInputType | str | None = None
-    input_source: FlowInputSource | str | None = None
-    accepts_file_upload: bool
-    accepted_mimetypes: list[str] = Field(default_factory=list)
-    max_file_size_bytes: int | None = None
-    max_files_per_run: int | None = None
-    runtime_upload_policy: FlowRuntimeUploadPolicyPublic = Field(
-        default_factory=default_runtime_upload_policy_public,
-        description=FLOW_RUNTIME_UPLOAD_POLICY_DESCRIPTION,
-    )
-    recommended_run_payload: dict[str, Any] | None = None
 
 
 class FlowRunStepPublic(BaseModel):

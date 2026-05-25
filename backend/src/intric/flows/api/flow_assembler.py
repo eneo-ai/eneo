@@ -74,7 +74,6 @@ class FlowAssembler:
         flow_id = str(flow.id)
         runtime_paths = FlowRuntimePathsPublic(
             run_contract=f"/api/v1/flows/{flow_id}/run-contract/",
-            input_policy=f"/api/v1/flows/{flow_id}/input-policy/",
             graph=f"/api/v1/flows/{flow_id}/graph/",
             upload_flow_file=f"/api/v1/flows/{flow_id}/files/",
             upload_step_runtime_file_template=(

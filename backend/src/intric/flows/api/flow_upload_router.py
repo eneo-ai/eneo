@@ -11,11 +11,7 @@ from intric.audit.domain.entity_types import EntityType
 from intric.files.file_models import FilePublic
 from intric.flows.api import flow_router_common as common
 from intric.flows.api.flow_api_common import audit_actor_kwargs, error_response
-from intric.flows.api.flow_models import (
-    FlowInputPolicyPublic,
-    FlowRunContractPublic,
-    default_runtime_upload_policy_public,
-)
+from intric.flows.api.flow_models import FlowRunContractPublic
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
 from intric.server.dependencies.container import get_container
@@ -123,73 +119,6 @@ async def get_flow_run_contract(
     )
 
 
-@router.get(
-    "/{id}/input-policy/",
-    response_model=FlowInputPolicyPublic,
-    status_code=status.HTTP_200_OK,
-    operation_id="get_flow_input_policy",
-    summary="Get flow input policy",
-    description="""
-Return effective runtime input policy for a flow's first `flow_input` step.
-
-Use this endpoint before upload/run to discover:
-- whether file upload is accepted
-- which mimetypes are allowed
-- the effective max file size limit in bytes
-- max files per run (when constrained)
-- runtime upload timeout policy for browser and API clients
-- recommended run payload shape for API consumers
-
-Service-key principals may use this endpoint for published-flow runtime only.
-    """,
-    responses={
-        403: error_response(
-            description="Forbidden: API key scope does not match flow space.",
-            message="API key space scope does not match requested flow.",
-            intric_error_code=ErrorCodes.UNAUTHORIZED,
-            code="insufficient_scope",
-            context={"auth_layer": "api_key_scope"},
-        ),
-        404: error_response(
-            description="Flow not found in tenant scope.",
-            message="Flow not found.",
-            intric_error_code=ErrorCodes.NOT_FOUND,
-            code="not_found",
-        ),
-    },
-)
-async def get_flow_input_policy(
-    id: Annotated[
-        UUID,
-        Path(
-            description="Identifier of the flow whose effective input policy should be returned."
-        ),
-    ],
-    request: Request,
-    container: Container = Depends(get_container(with_user=True)),
-):
-    await common.enforce_flow_scope_for_request(
-        request,
-        container,
-        flow_id=id,
-        required_access=common.FlowApiAction.VIEW,
-        allow_service_key_principals=True,
-        require_published_for_service_key=True,
-    )
-    policy = await common.flow_upload_service(container).get_input_policy(flow_id=id)
-    return FlowInputPolicyPublic(
-        flow_id=id,
-        input_type=common.coerce_input_type(policy.input_type),
-        input_source=common.coerce_input_source(policy.input_source),
-        accepts_file_upload=policy.accepts_file_upload,
-        accepted_mimetypes=policy.accepted_mimetypes,
-        max_file_size_bytes=policy.max_file_size_bytes,
-        max_files_per_run=policy.max_files_per_run,
-        runtime_upload_policy=default_runtime_upload_policy_public(),
-        recommended_run_payload=policy.recommended_run_payload,
-    )
-
-
 @router.post(
     "/{id}/files/",
     response_model=FilePublic,
@@ -198,11 +127,12 @@ async def get_flow_input_policy(
     openapi_extra=_upload_file_multipart_openapi_extra(),
     summary="Upload flow input file",
     description="""
-Upload a file using flow-specific policy checks.
+Upload a file using published runtime input checks.
 
-This endpoint is flow-first and intended for external API consumers that should not call
-generic file routes directly. Validation is based on the first `flow_input` step:
-- accepted input types: audio/document/image/file
+This endpoint is a compatibility shortcut for external API consumers. Validation is based
+on the first `flow_input` runtime step in the published run contract; draft edits take
+effect only after republish.
+- accepted input types: audio/document/file
 - allowed mimetypes
 - effective tenant flow size limits
 - multipart form field name: `upload_file`
@@ -210,12 +140,11 @@ generic file routes directly. Validation is based on the first `flow_input` step
     responses={
         400: error_response(
             description=(
-                "Upload request is invalid for this flow input policy. "
+                "Upload request is invalid for the published runtime input contract. "
                 "Representative machine-readable codes include: "
-                "flow_input_upload_not_supported, flow_input_file_empty, "
-                "flow_input_policy_missing_limit."
+                "flow_input_upload_not_supported and flow_input_file_empty."
             ),
-            message="Flow input policy does not allow file upload.",
+            message="Published runtime input contract does not allow file upload.",
             intric_error_code=ErrorCodes.BAD_REQUEST,
             code="flow_input_upload_not_supported",
         ),
@@ -239,8 +168,8 @@ generic file routes directly. Validation is based on the first `flow_input` step
             code="file_too_large",
         ),
         415: error_response(
-            description="Unsupported media type for this flow input policy.",
-            message="Unsupported media type for this flow input policy.",
+            description="Unsupported media type for the published runtime input contract.",
+            message="Unsupported media type for the published runtime input contract.",
             intric_error_code=ErrorCodes.FILE_NOT_SUPPORTED,
             code="unsupported_media_type",
         ),
@@ -334,7 +263,7 @@ effective size limits for the published flow version before storing the file.
         ),
         415: error_response(
             description="Unsupported media type for the selected runtime step.",
-            message="Unsupported media type for this flow input policy.",
+            message="Unsupported media type for the selected runtime step.",
             intric_error_code=ErrorCodes.FILE_NOT_SUPPORTED,
             code="unsupported_media_type",
         ),

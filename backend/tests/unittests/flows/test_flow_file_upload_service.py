@@ -10,11 +10,9 @@ import pytest
 from fastapi import UploadFile
 
 from intric.flows.flow import Flow, FlowStep
-from intric.flows.flow_file_upload_service import (
-    FlowFileInputPolicy,
-    FlowFileUploadService,
-)
+from intric.flows.flow_file_upload_service import FlowFileUploadService
 from intric.flows.flow_input_limits import FlowInputLimits
+from intric.flows.flow_run_contract_service import FlowRunContractService
 from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from intric.main.exceptions import (
     BadRequestException,
@@ -31,87 +29,129 @@ def _flow(*, step: FlowStep) -> Flow:
         space_id=uuid4(),
         name="Flow",
         steps=[step],
+        published_version=1,
         created_at=now,
         updated_at=now,
     )
 
 
 def _step(*, step_order: int, input_type: str) -> FlowStep:
+    input_config = None
+    if input_type in {"audio", "document", "file"}:
+        input_config = {
+            "runtime_input": {
+                "enabled": True,
+                "input_format": input_type,
+            }
+        }
     return FlowStep(
         id=uuid4(),
         assistant_id=uuid4(),
         step_order=step_order,
         input_source="flow_input",
         input_type=input_type,
+        input_config=input_config,
         output_mode="pass_through",
         output_type="text",
         mcp_policy="inherit",
     )
 
 
+def _definition_json(flow: Flow, step: FlowStep) -> dict[str, object]:
+    return {
+        "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+        "flow_id": str(flow.id),
+        "steps": [
+            {
+                "step_id": str(step.id),
+                "step_order": step.step_order,
+                "assistant_id": str(step.assistant_id),
+                "input_source": step.input_source,
+                "input_type": step.input_type,
+                "input_config": step.input_config,
+                "output_mode": step.output_mode,
+                "output_type": step.output_type,
+                "mcp_policy": step.mcp_policy,
+            }
+        ],
+    }
+
+
+def _version_repo(flow: Flow, published_step: FlowStep | None = None) -> AsyncMock:
+    repo = AsyncMock()
+    repo.get.return_value = SimpleNamespace(
+        definition_json=_definition_json(flow, published_step or flow.steps[0])
+    )
+    return repo
+
+
+def _service(
+    *,
+    flow_service: AsyncMock,
+    file_service: AsyncMock,
+    settings_service: AsyncMock,
+    flow_version_repo: AsyncMock,
+) -> FlowFileUploadService:
+    return FlowFileUploadService(
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+    )
+
+
 @pytest.mark.asyncio
-async def test_policy_uses_first_flow_input_step_by_order() -> None:
+async def test_flow_upload_and_run_contract_share_runtime_input_spec() -> None:
     flow_service = AsyncMock()
     file_service = AsyncMock()
     settings_service = AsyncMock()
 
-    audio_step = _step(step_order=2, input_type="audio")
-    text_step = _step(step_order=1, input_type="text")
-    flow = _flow(step=audio_step).model_copy(update={"steps": [audio_step, text_step]})
+    runtime_step = _step(step_order=1, input_type="audio").model_copy(
+        update={
+            "input_config": {
+                "runtime_input": {
+                    "enabled": True,
+                    "required": True,
+                    "input_format": "audio",
+                    "max_files": 4,
+                    "label": "Recording",
+                }
+            }
+        }
+    )
+    flow = _flow(step=runtime_step)
     flow_service.get_flow.return_value = flow
-    settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
+    limits = FlowInputLimits(
         file_max_size_bytes=10_000_000,
         audio_max_size_bytes=25_000_000,
+        audio_max_files_per_run=20,
     )
+    settings_service.get_flow_input_limits_resolved.return_value = limits
+    flow_version_repo = _version_repo(flow, published_step=runtime_step)
 
-    service = FlowFileUploadService(
+    contract = await FlowRunContractService(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+        template_asset_repo=AsyncMock(),
+    ).get_run_contract(flow_id=flow.id)
+    upload_policy = await _service(
         flow_service=flow_service,
         file_service=file_service,
         settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+    )._get_published_flow_upload_policy(flow_id=flow.id)
+
+    [runtime_input] = contract.steps_requiring_input
+    assert runtime_input.max_files == upload_policy.max_files_per_run == 4
+    assert (
+        runtime_input.max_file_size_bytes
+        == upload_policy.max_file_size_bytes
+        == 25_000_000
     )
-
-    policy = await service.get_input_policy(flow_id=flow.id)
-
-    # First flow_input step is text => no file upload accepted.
-    assert policy.input_type == "text"
-    assert policy.accepts_file_upload is False
-    assert policy.max_file_size_bytes is None
-    assert policy.max_files_per_run is None
-    assert policy.recommended_run_payload == {
-        "input_payload_json": {"text": "<text-input>"}
-    }
-
-
-@pytest.mark.asyncio
-async def test_policy_for_audio_includes_max_files_and_recommended_payload() -> None:
-    flow_service = AsyncMock()
-    file_service = AsyncMock()
-    settings_service = AsyncMock()
-
-    audio_step = _step(step_order=1, input_type="audio")
-    flow = _flow(step=audio_step).model_copy(update={"steps": [audio_step]})
-    flow_service.get_flow.return_value = flow
-    settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
-        file_max_size_bytes=10_000_000,
-        audio_max_size_bytes=25_000_000,
+    assert sorted(runtime_input.accepted_mimetypes) == sorted(
+        upload_policy.accepted_mimetypes
     )
-
-    service = FlowFileUploadService(
-        flow_service=flow_service,
-        file_service=file_service,
-        settings_service=settings_service,
-    )
-
-    policy = await service.get_input_policy(flow_id=flow.id)
-
-    assert policy.input_type == "audio"
-    assert policy.accepts_file_upload is True
-    assert policy.max_file_size_bytes == 25_000_000
-    assert policy.max_files_per_run == 10
-    assert policy.recommended_run_payload == {
-        "step_inputs": {str(audio_step.id): {"file_ids": ["<file-id-uuid>"]}},
-        "input_payload_json": {"text": "optional context for later prompt steps"},
-    }
 
 
 @pytest.mark.asyncio
@@ -127,10 +167,11 @@ async def test_upload_rejects_mimetype_not_allowed_for_step_type(monkeypatch) ->
         audio_max_size_bytes=25_000_000,
     )
 
-    service = FlowFileUploadService(
+    service = _service(
         flow_service=flow_service,
         file_service=file_service,
         settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
     )
 
     upload = UploadFile(
@@ -174,10 +215,11 @@ async def test_upload_without_content_type_is_rejected_with_allowed_types_hint(
         audio_max_size_bytes=25_000_000,
     )
 
-    service = FlowFileUploadService(
+    service = _service(
         flow_service=flow_service,
         file_service=file_service,
         settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
     )
 
     upload = UploadFile(
@@ -221,10 +263,11 @@ async def test_upload_wraps_file_too_large_with_effective_limit_message(
     )
     file_service.save_file.side_effect = FileTooLargeException("File too large.")
 
-    service = FlowFileUploadService(
+    service = _service(
         flow_service=flow_service,
         file_service=file_service,
         settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
     )
     upload = UploadFile(
         filename="audio.mp3",
@@ -264,10 +307,11 @@ async def test_upload_document_input_uses_file_limit_not_audio_limit(
     )
     file_service.save_file.return_value = AsyncMock()
 
-    service = FlowFileUploadService(
+    service = _service(
         flow_service=flow_service,
         file_service=file_service,
         settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
     )
     upload = UploadFile(
         filename="doc.pdf",
@@ -299,10 +343,11 @@ async def test_upload_accepts_content_type_with_parameters(monkeypatch) -> None:
     )
     file_service.save_file.return_value = AsyncMock()
 
-    service = FlowFileUploadService(
+    service = _service(
         flow_service=flow_service,
         file_service=file_service,
         settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
     )
     upload = UploadFile(
         filename="audio.mp3",
@@ -333,10 +378,11 @@ async def test_upload_offloads_file_inspection_to_thread(monkeypatch) -> None:
     )
     file_service.save_file.return_value = AsyncMock()
 
-    service = FlowFileUploadService(
+    service = _service(
         flow_service=flow_service,
         file_service=file_service,
         settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
     )
     upload = UploadFile(
         filename="audio.mp3",
@@ -380,10 +426,11 @@ async def test_upload_rejects_when_sniffed_content_type_is_not_allowed(
         audio_max_size_bytes=25_000_000,
     )
 
-    service = FlowFileUploadService(
+    service = _service(
         flow_service=flow_service,
         file_service=file_service,
         settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
     )
     upload = UploadFile(
         filename="spoofed.mp3",
@@ -422,10 +469,11 @@ async def test_upload_rejects_zero_byte_file_with_clear_error(monkeypatch) -> No
         audio_max_size_bytes=25_000_000,
     )
 
-    service = FlowFileUploadService(
+    service = _service(
         flow_service=flow_service,
         file_service=file_service,
         settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
     )
     upload = UploadFile(
         filename="empty.wav",
@@ -460,10 +508,11 @@ async def test_upload_rejects_declared_type_even_if_sniffed_type_is_allowed(
         audio_max_size_bytes=25_000_000,
     )
 
-    service = FlowFileUploadService(
+    service = _service(
         flow_service=flow_service,
         file_service=file_service,
         settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
     )
     upload = UploadFile(
         filename="declared-pdf-but-audio.mp3",
@@ -499,10 +548,11 @@ async def test_upload_uses_declared_type_when_sniffer_returns_unknown(
     )
     file_service.save_file.return_value = AsyncMock()
 
-    service = FlowFileUploadService(
+    service = _service(
         flow_service=flow_service,
         file_service=file_service,
         settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
     )
     upload = UploadFile(
         filename="audio.mp3",
@@ -533,10 +583,11 @@ async def test_upload_accepts_declared_audio_mp3_alias(monkeypatch) -> None:
     )
     file_service.save_file.return_value = AsyncMock()
 
-    service = FlowFileUploadService(
+    service = _service(
         flow_service=flow_service,
         file_service=file_service,
         settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
     )
     upload = UploadFile(
         filename="audio.mp3",
@@ -566,10 +617,11 @@ async def test_upload_rejects_flows_without_file_upload_input() -> None:
         audio_max_size_bytes=25_000_000,
     )
 
-    service = FlowFileUploadService(
+    service = _service(
         flow_service=flow_service,
         file_service=file_service,
         settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
     )
     upload = UploadFile(
         filename="audio.mp3",
@@ -587,104 +639,87 @@ async def test_upload_rejects_flows_without_file_upload_input() -> None:
 
 
 @pytest.mark.asyncio
-async def test_upload_rejects_when_policy_limit_is_missing(monkeypatch) -> None:
+async def test_flow_upload_uses_published_input_not_draft_input(
+    monkeypatch,
+) -> None:
     flow_service = AsyncMock()
     file_service = AsyncMock()
     settings_service = AsyncMock()
 
-    flow = _flow(step=_step(step_order=1, input_type="audio"))
+    draft_step = _step(step_order=1, input_type="audio")
+    published_step = _step(step_order=1, input_type="document")
+    flow = _flow(step=draft_step).model_copy(update={"steps": [draft_step]})
     flow_service.get_flow.return_value = flow
     settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
-        file_max_size_bytes=10_000_000,
+        file_max_size_bytes=11_000_000,
         audio_max_size_bytes=25_000_000,
     )
+    file_service.save_file.return_value = AsyncMock()
 
-    service = FlowFileUploadService(
+    service = _service(
         flow_service=flow_service,
         file_service=file_service,
         settings_service=settings_service,
-    )
-    service.get_input_policy = AsyncMock(
-        return_value=FlowFileInputPolicy(
-            flow_id=flow.id,
-            input_type="audio",
-            input_source="flow_input",
-            accepts_file_upload=True,
-            accepted_mimetypes=["audio/mpeg"],
-            max_file_size_bytes=None,
-            max_files_per_run=10,
-            recommended_run_payload={
-                "step_inputs": {str(flow.steps[0].id): {"file_ids": ["<file-id-uuid>"]}}
-            },
-        )
+        flow_version_repo=_version_repo(flow, published_step=published_step),
     )
     upload = UploadFile(
-        filename="audio.mp3",
-        file=BytesIO(b"fake"),
-        headers={"content-type": "audio/mpeg"},
+        filename="published.pdf",
+        file=BytesIO(b"%PDF-1.4 fake"),
+        headers={"content-type": "application/pdf"},
     )
     monkeypatch.setattr(
         "intric.flows.flow_file_upload_service._sniff_mimetype",
-        lambda _upload_file: None,
+        lambda _upload_file: "application/pdf",
     )
 
-    with pytest.raises(BadRequestException) as exc_info:
+    await service.upload_file_for_flow(flow_id=flow.id, upload_file=upload)
+
+    file_service.save_file.assert_awaited_once()
+    assert file_service.save_file.await_args.kwargs["max_size"] == 11_000_000
+
+
+@pytest.mark.asyncio
+async def test_flow_upload_rejects_when_published_input_rejects_draft_allowed_file(
+    monkeypatch,
+) -> None:
+    flow_service = AsyncMock()
+    file_service = AsyncMock()
+    settings_service = AsyncMock()
+
+    draft_step = _step(step_order=1, input_type="document")
+    published_step = _step(step_order=1, input_type="audio")
+    flow = _flow(step=draft_step).model_copy(update={"steps": [draft_step]})
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
+        file_max_size_bytes=11_000_000,
+        audio_max_size_bytes=25_000_000,
+    )
+
+    service = _service(
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=settings_service,
+        flow_version_repo=_version_repo(flow, published_step=published_step),
+    )
+    upload = UploadFile(
+        filename="draft-allowed.pdf",
+        file=BytesIO(b"%PDF-1.4 fake"),
+        headers={"content-type": "application/pdf"},
+    )
+    monkeypatch.setattr(
+        "intric.flows.flow_file_upload_service._sniff_mimetype",
+        lambda _upload_file: "application/pdf",
+    )
+
+    with pytest.raises(FileNotSupportedException) as exc_info:
         await service.upload_file_for_flow(flow_id=flow.id, upload_file=upload)
-    assert exc_info.value.code == "flow_input_policy_missing_limit"
-    assert exc_info.value.context == {"flow_id": str(flow.id)}
+    assert exc_info.value.context == {
+        "flow_id": str(flow.id),
+        "input_type": "audio",
+        "received_type": "application/pdf",
+        "detected_type": "application/pdf",
+    }
     file_service.save_file.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_policy_for_audio_uses_tenant_audio_max_files() -> None:
-    flow_service = AsyncMock()
-    file_service = AsyncMock()
-    settings_service = AsyncMock()
-
-    audio_step = _step(step_order=1, input_type="audio")
-    flow = _flow(step=audio_step).model_copy(update={"steps": [audio_step]})
-    flow_service.get_flow.return_value = flow
-    settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
-        file_max_size_bytes=10_000_000,
-        audio_max_size_bytes=25_000_000,
-        audio_max_files_per_run=20,
-    )
-
-    service = FlowFileUploadService(
-        flow_service=flow_service,
-        file_service=file_service,
-        settings_service=settings_service,
-    )
-
-    policy = await service.get_input_policy(flow_id=flow.id)
-
-    assert policy.max_files_per_run == 20
-
-
-@pytest.mark.asyncio
-async def test_policy_for_document_with_file_count_limit() -> None:
-    flow_service = AsyncMock()
-    file_service = AsyncMock()
-    settings_service = AsyncMock()
-
-    doc_step = _step(step_order=1, input_type="document")
-    flow = _flow(step=doc_step).model_copy(update={"steps": [doc_step]})
-    flow_service.get_flow.return_value = flow
-    settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
-        file_max_size_bytes=10_000_000,
-        audio_max_size_bytes=25_000_000,
-        max_files_per_run=5,
-    )
-
-    service = FlowFileUploadService(
-        flow_service=flow_service,
-        file_service=file_service,
-        settings_service=settings_service,
-    )
-
-    policy = await service.get_input_policy(flow_id=flow.id)
-
-    assert policy.max_files_per_run == 5
 
 
 @pytest.mark.asyncio
@@ -717,7 +752,7 @@ async def test_upload_runtime_file_for_step_rejects_unknown_step_id() -> None:
                     "output_type": "json",
                     "mcp_policy": "inherit",
                 }
-            ]
+            ],
         }
     )
 
