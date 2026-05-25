@@ -11,6 +11,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
     computed_field,
     field_validator,
 )
@@ -113,52 +114,59 @@ class AssistantBase(BaseModel):
         return model_kwargs or ModelKwargs()
 
 
+_DEPRECATED_DESCRIPTION = "This field is deprecated and will be ignored"
+_DEPRECATED_JSON_SCHEMA: dict[str, JsonValue] = {"deprecated": True}
+
+
+# Pydantic v2 emits UnsupportedFieldAttributeWarning when `deprecated=True` is
+# attached to a `Field()` on a Union (incl. Optional). Routing the flag through
+# `json_schema_extra` keeps the OpenAPI spec marking the field deprecated.
 class AssistantCreatePublic(AssistantBase):
     space_id: UUID
     prompt: Optional[PromptCreate] = Field(
         default=None,
-        deprecated=True,
-        description="This field is deprecated and will be ignored",
+        description=_DEPRECATED_DESCRIPTION,
+        json_schema_extra=_DEPRECATED_JSON_SCHEMA,
     )
     groups: list[ModelId] = Field(
         default_factory=lambda: list[ModelId](),
-        deprecated=True,
-        description="This field is deprecated and will be ignored",
+        description=_DEPRECATED_DESCRIPTION,
+        json_schema_extra=_DEPRECATED_JSON_SCHEMA,
     )
     websites: list[ModelId] = Field(
         default_factory=lambda: list[ModelId](),
-        deprecated=True,
-        description="This field is deprecated and will be ignored",
+        description=_DEPRECATED_DESCRIPTION,
+        json_schema_extra=_DEPRECATED_JSON_SCHEMA,
     )
     integration_knowledge_list: list[ModelId] = Field(
         default_factory=lambda: list[ModelId](),
-        deprecated=True,
-        description="This field is deprecated and will be ignored",
+        description=_DEPRECATED_DESCRIPTION,
+        json_schema_extra=_DEPRECATED_JSON_SCHEMA,
     )
     mcp_servers: list[ModelId] = Field(
         default_factory=lambda: list[ModelId](),
-        deprecated=True,
-        description="This field is deprecated and will be ignored",
+        description=_DEPRECATED_DESCRIPTION,
+        json_schema_extra=_DEPRECATED_JSON_SCHEMA,
     )
     guardrail: Optional[AssistantGuard] = Field(
         default=None,
-        deprecated=True,
-        description="This field is deprecated and will be ignored",
+        description=_DEPRECATED_DESCRIPTION,
+        json_schema_extra=_DEPRECATED_JSON_SCHEMA,
     )
     completion_model: Optional[ModelId] = Field(
         default=None,
-        deprecated=True,
-        description="This field is deprecated and will be ignored",
+        description=_DEPRECATED_DESCRIPTION,
+        json_schema_extra=_DEPRECATED_JSON_SCHEMA,
     )
     logging_enabled: Optional[bool] = Field(
         default=None,
-        deprecated=True,
-        description="This field is deprecated and will be ignored",
+        description=_DEPRECATED_DESCRIPTION,
+        json_schema_extra=_DEPRECATED_JSON_SCHEMA,
     )
     completion_model_kwargs: Optional[ModelKwargs] = Field(
         default=None,
-        deprecated=True,
-        description="This field is deprecated and will be ignored",
+        description=_DEPRECATED_DESCRIPTION,
+        json_schema_extra=_DEPRECATED_JSON_SCHEMA,
     )
 
 
@@ -171,13 +179,13 @@ class AssistantUpdatePublic(AssistantCreatePublic):
     integration_knowledge_list: Optional[list[ModelId]] = None  # type: ignore[assignment]
     mcp_servers: Optional[list[ModelId]] = None  # type: ignore[assignment]
     mcp_tools: Optional[list[MCPToolSetting]] = None
-    description: Optional[str] = Field(  # type: ignore[call-overload]
+    description: Optional[str] = Field(  # type: ignore[assignment]  # NOT_PROVIDED sentinel default
         default=NOT_PROVIDED,
         description=(
             "A description of the assitant that will be used as "
             "default description in GroupChatAssistantPublic"
         ),
-        example="This is a helpful AI assistant",
+        json_schema_extra={"example": "This is a helpful AI assistant"},
     )
     insight_enabled: Optional[bool] = Field(
         default=None,
@@ -291,13 +299,13 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     tools: UseTools
     type: AssistantType
     model_info: Optional[ModelInfo] = None
-    description: Optional[str] = Field(  # type: ignore[call-overload]
+    description: Optional[str] = Field(
         default=None,
         description=(
             "A description of the assitant that will be used "
             "as default description in GroupChatAssistantPublic"
         ),
-        example="This is a helpful AI assistant",
+        json_schema_extra={"example": "This is a helpful AI assistant"},
     )
     icon_id: Optional[UUID] = Field(
         default=None,

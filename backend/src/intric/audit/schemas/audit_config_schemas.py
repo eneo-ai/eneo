@@ -1,6 +1,6 @@
 """Pydantic schemas for audit category configuration."""
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from intric.audit.domain.action_types import ActionType
 
@@ -36,8 +36,8 @@ class CategoryConfig(BaseModel):
         ..., description="Sample action types (max 3) for UI display"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "category": "admin_actions",
                 "enabled": True,
@@ -50,6 +50,7 @@ class CategoryConfig(BaseModel):
                 ],
             }
         }
+    )
 
 
 class CategoryUpdate(BaseModel):
@@ -69,8 +70,9 @@ class CategoryUpdate(BaseModel):
             raise ValueError(f"Invalid category '{v}'. Must be one of: {valid_list}")
         return v
 
-    class Config:
-        json_schema_extra = {"example": {"category": "admin_actions", "enabled": False}}
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"category": "admin_actions", "enabled": False}}
+    )
 
 
 class AuditConfigResponse(BaseModel):
@@ -83,8 +85,8 @@ class AuditConfigResponse(BaseModel):
         ..., description="List of all audit categories with configuration and metadata"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "categories": [
                     {
@@ -112,6 +114,7 @@ class AuditConfigResponse(BaseModel):
                 ]
             }
         }
+    )
 
 
 class AuditConfigUpdateRequest(BaseModel):
@@ -127,8 +130,8 @@ class AuditConfigUpdateRequest(BaseModel):
         max_length=7,
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "updates": [
                     {"category": "admin_actions", "enabled": False},
@@ -136,6 +139,7 @@ class AuditConfigUpdateRequest(BaseModel):
                 ]
             }
         }
+    )
 
 
 class ActionConfig(BaseModel):
@@ -149,8 +153,8 @@ class ActionConfig(BaseModel):
     name_sv: str = Field(..., description="Swedish display name")
     description_sv: str = Field(..., description="Swedish description")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "action": "user_created",
                 "enabled": True,
@@ -159,6 +163,7 @@ class ActionConfig(BaseModel):
                 "description_sv": "Loggar när en ny användare skapas",
             }
         }
+    )
 
 
 class ActionConfigResponse(BaseModel):
@@ -171,8 +176,8 @@ class ActionConfigResponse(BaseModel):
         ..., description="List of all actions with configuration and Swedish metadata"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "actions": [
                     {
@@ -192,6 +197,7 @@ class ActionConfigResponse(BaseModel):
                 ]
             }
         }
+    )
 
 
 class ActionUpdate(BaseModel):
@@ -213,8 +219,9 @@ class ActionUpdate(BaseModel):
             )
         return v
 
-    class Config:
-        json_schema_extra = {"example": {"action": "user_created", "enabled": False}}
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"action": "user_created", "enabled": False}}
+    )
 
 
 class ActionConfigUpdateRequest(BaseModel):
@@ -230,8 +237,8 @@ class ActionConfigUpdateRequest(BaseModel):
         max_length=65,
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "updates": [
                     {"action": "user_created", "enabled": False},
@@ -239,3 +246,4 @@ class ActionConfigUpdateRequest(BaseModel):
                 ]
             }
         }
+    )
