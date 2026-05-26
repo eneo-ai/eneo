@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
 
 
-def is_authored_config(raw: dict[str, Any] | None) -> bool:
+def is_authored_config(raw: Mapping[str, object] | None) -> bool:
     """Check if config is in authored format (has ``auth`` key)."""
-    return isinstance(raw, dict) and "auth" in raw
+    return isinstance(raw, Mapping) and "auth" in raw

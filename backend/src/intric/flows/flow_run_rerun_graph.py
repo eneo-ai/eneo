@@ -7,7 +7,7 @@ from typing import cast
 from uuid import UUID
 
 from intric.flows.enums import FlowInputSource, RerunDependencyKind
-from intric.flows.http_transport import is_authored_config
+from intric.flows.http_transport import HttpAuthMode, HttpBodyMode, is_authored_config
 from intric.flows.runtime.models import RuntimeStep
 from intric.flows.step_lineage import build_step_ref_mapping
 from intric.flows.template_reference_analyzer import (
@@ -234,7 +234,7 @@ def _http_config_templates(
         body_template_kind = RerunDependencyKind.OUTPUT_CONFIG_BODY_TEMPLATE
         body_json_kind = RerunDependencyKind.OUTPUT_CONFIG_BODY_JSON
 
-    if is_authored_config(dict(config_mapping)):
+    if is_authored_config(config_mapping):
         return _authored_http_config_templates(
             config_mapping=config_mapping,
             url_kind=url_kind,
@@ -316,7 +316,10 @@ def _authored_http_config_templates(
             )
 
     body = _mapping(config_mapping.get("body"))
-    if body is not None and body.get("mode") in {"json_template", "text_template"}:
+    if body is not None and body.get("mode") in {
+        HttpBodyMode.JSON_TEMPLATE.value,
+        HttpBodyMode.TEXT_TEMPLATE.value,
+    }:
         _append_string_template(
             templates=templates,
             value=body.get("template"),
@@ -334,37 +337,35 @@ def _extend_authored_auth_templates(
     auth_mapping = _mapping(auth)
     if auth_mapping is None:
         return
-    match auth_mapping.get("mode"):
-        case "bearer_token":
-            _append_string_template(
-                templates=templates,
-                value=auth_mapping.get("token"),
-                dependency_kind=dependency_kind,
-            )
-        case "api_key":
-            _append_string_template(
-                templates=templates,
-                value=auth_mapping.get("header_name"),
-                dependency_kind=dependency_kind,
-            )
-            _append_string_template(
-                templates=templates,
-                value=auth_mapping.get("key"),
-                dependency_kind=dependency_kind,
-            )
-        case "basic_auth":
-            _append_string_template(
-                templates=templates,
-                value=auth_mapping.get("username"),
-                dependency_kind=dependency_kind,
-            )
-            _append_string_template(
-                templates=templates,
-                value=auth_mapping.get("password"),
-                dependency_kind=dependency_kind,
-            )
-        case _:
-            pass
+    mode = auth_mapping.get("mode")
+    if mode == HttpAuthMode.BEARER_TOKEN.value:
+        _append_string_template(
+            templates=templates,
+            value=auth_mapping.get("token"),
+            dependency_kind=dependency_kind,
+        )
+    elif mode == HttpAuthMode.API_KEY.value:
+        _append_string_template(
+            templates=templates,
+            value=auth_mapping.get("header_name"),
+            dependency_kind=dependency_kind,
+        )
+        _append_string_template(
+            templates=templates,
+            value=auth_mapping.get("key"),
+            dependency_kind=dependency_kind,
+        )
+    elif mode == HttpAuthMode.BASIC_AUTH.value:
+        _append_string_template(
+            templates=templates,
+            value=auth_mapping.get("username"),
+            dependency_kind=dependency_kind,
+        )
+        _append_string_template(
+            templates=templates,
+            value=auth_mapping.get("password"),
+            dependency_kind=dependency_kind,
+        )
 
 
 def _append_string_template(

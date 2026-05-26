@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T071
+active_task: T073
 
 tasks:
   - id: T001
@@ -7163,7 +7163,7 @@ tasks:
   - id: T071
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe Flow clean-architecture task after T070, respecting reuse-before-inventing, product/data gates, and current source evidence."
     inputs:
@@ -7184,6 +7184,157 @@ tasks:
       - "If a Worker is chosen: objective, allowed_files, verification commands, consolidation effect, and peer-review tier."
       - "If a Scout is chosen: exact evidence questions and source files."
       - "Blocked tasks with the specific missing product/data decision."
+    receipt:
+      result: done
+      summary: "Chose a small post-T070 cleanup before broader runtime architecture work: T072 should deepen the existing authored HTTP normalizer owner so rerun graph can call is_authored_config without copying Mapping data, and should compare authored rerun extraction against existing HttpAuthMode/HttpBodyMode enum values instead of bare wire strings. This is not product/data gated and does not touch API/OpenAPI, persistence, retention, service-key identity, webhook outbox, or Flow AI Builder."
+      evidence:
+        - "backend/src/intric/flows/http_transport/normalizer.py:6"
+        - "backend/src/intric/flows/http_transport/authored_config.py:9"
+        - "backend/src/intric/flows/http_transport/authored_config.py:43"
+        - "backend/src/intric/flows/flow_run_rerun_graph.py:237"
+        - "backend/src/intric/flows/flow_run_rerun_graph.py:319"
+        - "backend/src/intric/flows/flow_run_rerun_graph.py:337"
+        - ".codex/artifacts/claude-peer-loop-t070-authored-http-runtime-implementation-review-20260526T190318Z.md"
+      commands:
+        - cmd: "rg -n \"is_authored_config\\(|HttpAuthMode|HttpBodyMode|body\\.get\\(\\\"mode\\\"|auth_mapping\\.get\\(\\\"mode\\\"\" backend/src/intric/flows backend/tests/unittests/flows -g '*.py'"
+          status: pass
+        - cmd: "sed -n '1,120p' backend/src/intric/flows/http_transport/normalizer.py && sed -n '1,95p' backend/src/intric/flows/http_transport/authored_config.py && sed -n '286,370p' backend/src/intric/flows/flow_run_rerun_graph.py"
+          status: pass
+        - cmd: "git status --short --branch"
+          status: pass
+      decision: "Activate T072."
+      blocked_tasks:
+        - "retention: blocked until state.yaml records product/data retention decision."
+        - "service-key identity/review/rerun: blocked until state.yaml records product/API decision."
+        - "schema migrations and webhook outbox: not selected by this Judge because T072 is a smaller safe source-only cleanup and those tasks remain higher-risk/gated."
+      consolidation_effect:
+        reused_existing_owner: "is_authored_config in http_transport.normalizer and HttpAuthMode/HttpBodyMode in authored_config."
+        logic_moved_from: "No behavior moves; remove the rerun graph's temporary mapping-copy workaround and string-mode coupling."
+        logic_deleted: "The dict(config_mapping) copy and bare authored mode string comparisons, if T072 succeeds."
+        duplicate_path_removed: "No duplicate path; this deepens existing owners."
+        new_code_added: "No new module/class/function expected."
+        why_existing_owners_were_insufficient: "The normalizer signature currently accepts dict only, forcing rerun graph to copy a read-only Mapping before calling the owner."
+        guard_preventing_duplicate_logic_from_returning: "Normalizer mapping test, rerun dependency tests, pyright, and added-line anti-leak guard."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+
+  - id: T072
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "refactor(flows-http): deepen authored config detection and rerun mode ownership."
+    inputs:
+      - "T070 receipt"
+      - "T071 receipt"
+      - "backend/src/intric/flows/http_transport/normalizer.py"
+      - "backend/src/intric/flows/http_transport/authored_config.py"
+      - "backend/src/intric/flows/flow_run_rerun_graph.py"
+      - "backend/tests/unittests/flows/http_transport/test_normalizer.py"
+      - "backend/tests/unittests/flows/test_flow_rerun_graph.py"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "backend/src/intric/flows/http_transport/normalizer.py"
+      - "backend/src/intric/flows/flow_run_rerun_graph.py"
+      - "backend/tests/unittests/flows/http_transport/test_normalizer.py"
+      - "backend/tests/unittests/flows/test_flow_rerun_graph.py"
+    constraints:
+      - "Before starting implementation and before committing, check the watchdog blocker file and verify any halt-worthy blocker against source/state/git evidence."
+      - "Local-validation tier only if the diff remains mechanical and behavior-preserving; stop and run Claude if behavior changes, API/data/runtime semantics widen, or ownership becomes uncertain."
+      - "Reuse existing owners: is_authored_config, HttpAuthMode, HttpBodyMode, and flow_run_rerun_graph.py."
+      - "Do not add modules, interfaces, generic helpers, adapters, or new RerunDependencyKind values."
+      - "Do not touch API routers, OpenAPI/generated files, migrations, schema, retention, service-key identity, webhook outbox, Flow AI Builder, or docs/flows/architecture.md."
+      - "Do not change runtime behavior or authored config wire values."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/http_transport/test_normalizer.py tests/unittests/flows/test_flow_rerun_graph.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/http_transport/normalizer.py src/intric/flows/flow_run_rerun_graph.py tests/unittests/flows/http_transport/test_normalizer.py tests/unittests/flows/test_flow_rerun_graph.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/http_transport/normalizer.py src/intric/flows/flow_run_rerun_graph.py tests/unittests/flows/http_transport/test_normalizer.py tests/unittests/flows/test_flow_rerun_graph.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/http_transport/normalizer.py src/intric/flows/flow_run_rerun_graph.py tests/unittests/flows/http_transport/test_normalizer.py tests/unittests/flows/test_flow_rerun_graph.py"
+      - "git diff --check"
+      - "! git diff -- backend/src/intric/flows/http_transport/normalizer.py backend/src/intric/flows/flow_run_rerun_graph.py backend/tests/unittests/flows/http_transport/test_normalizer.py backend/tests/unittests/flows/test_flow_rerun_graph.py | rg -n '^\\+.*(pyright: ignore|type: ignore|cast\\(Any|dict\\[str, Any\\]|\\bAny\\b|helper|manager|processor|INPUT_CONFIG_AUTH|OUTPUT_CONFIG_AUTH|RerunDependencyKind\\.[A-Z_]+ =|T0[0-9][0-9]|Phase [0-9A-G]\\b)'"
+    stop_if:
+      - "The watchdog has a halt-worthy blocker that cannot be resolved or source-evidence-disagreed."
+      - "Changing is_authored_config requires API/schema/generated-client changes."
+      - "Enum-value reuse changes behavior or produces different rerun dependencies."
+      - "The diff grows beyond the allowed files or needs new abstractions."
+      - "Focused verification fails twice for reasons unrelated to this task."
+    consolidation_effect:
+      reused_existing_owner: "is_authored_config, HttpAuthMode, HttpBodyMode, and flow_run_rerun_graph.py."
+      logic_moved_from: "Temporary T070 local workarounds in rerun graph."
+      logic_deleted: "Mapping copy before is_authored_config and bare authored mode string comparisons."
+      duplicate_path_removed: "No duplicate path expected; this removes coupling to duplicated wire strings."
+      new_code_added: "A normalizer mapping test and enum-value comparisons only."
+      why_existing_owners_were_insufficient: "The current is_authored_config signature accepts only dict, while rerun graph owns read-only Mapping-shaped config evidence."
+      guard_preventing_duplicate_logic_from_returning: "Normalizer mapping test, exact rerun dependency tests, pyright, and anti-leak guard."
+      net_flow_logic_surface_area: "reduced"
+      if_increased_why: "N/A"
+    receipt:
+      result: done
+      summary: "Deepened the authored HTTP normalizer owner and removed T070's temporary rerun graph copy/string coupling. is_authored_config now accepts read-only Mapping inputs, flow_run_rerun_graph calls it directly without dict(config_mapping), and authored rerun extraction compares mode fields against HttpAuthMode/HttpBodyMode enum values."
+      evidence:
+        - "backend/src/intric/flows/http_transport/normalizer.py:6"
+        - "backend/src/intric/flows/flow_run_rerun_graph.py:237"
+        - "backend/src/intric/flows/flow_run_rerun_graph.py:319"
+        - "backend/src/intric/flows/flow_run_rerun_graph.py:341"
+        - "backend/tests/unittests/flows/http_transport/test_normalizer.py:21"
+      commands:
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/http_transport/test_normalizer.py::test_is_authored_config_accepts_read_only_mapping -q"
+          status: pass
+          output: "Pre-implementation red check failed as expected; after implementation covered by full focused suite."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/http_transport/test_normalizer.py tests/unittests/flows/test_flow_rerun_graph.py -q"
+          status: pass
+          output: "25 passed."
+        - cmd: "cd backend && uv run ruff check src/intric/flows/http_transport/normalizer.py src/intric/flows/flow_run_rerun_graph.py tests/unittests/flows/http_transport/test_normalizer.py tests/unittests/flows/test_flow_rerun_graph.py"
+          status: pass
+          output: "All checks passed."
+        - cmd: "cd backend && uv run ruff format --check src/intric/flows/http_transport/normalizer.py src/intric/flows/flow_run_rerun_graph.py tests/unittests/flows/http_transport/test_normalizer.py tests/unittests/flows/test_flow_rerun_graph.py"
+          status: pass
+          output: "4 files already formatted."
+        - cmd: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/http_transport/normalizer.py src/intric/flows/flow_run_rerun_graph.py tests/unittests/flows/http_transport/test_normalizer.py tests/unittests/flows/test_flow_rerun_graph.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations."
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "! git diff -- backend/src/intric/flows/http_transport/normalizer.py backend/src/intric/flows/flow_run_rerun_graph.py backend/tests/unittests/flows/http_transport/test_normalizer.py backend/tests/unittests/flows/test_flow_rerun_graph.py | rg -n '^\\+.*(pyright: ignore|type: ignore|cast\\(Any|dict\\[str, Any\\]|\\bAny\\b|helper|manager|processor|INPUT_CONFIG_AUTH|OUTPUT_CONFIG_AUTH|RerunDependencyKind\\.[A-Z_]+ =|T0[0-9][0-9]|Phase [0-9A-G]\\b)'"
+          status: pass
+          output: "No added-line matches."
+      review_tier: "local validation only; low-risk mechanical owner/type cleanup with no API/data/runtime behavior change."
+      complexity_note: "Used complexity-optimizer guidance lightly. The old rerun path copied each config mapping before detection, an avoidable O(config fields) allocation inside an O(steps) graph scan. T072 removes that constant-factor copy while preserving overall O(steps * config fields) extraction behavior."
+      consolidation_effect:
+        reused_existing_owner: "is_authored_config, HttpAuthMode, HttpBodyMode, and flow_run_rerun_graph.py."
+        logic_moved_from: "Temporary T070 rerun graph workarounds."
+        logic_deleted: "dict(config_mapping) copy and bare authored mode string comparisons."
+        duplicate_path_removed: "No duplicate path; duplicated wire-string ownership reduced."
+        new_code_added: "One normalizer MappingProxyType regression test."
+        why_existing_owners_were_insufficient: "The normalizer accepted only dict even though rerun graph owned Mapping-shaped config evidence."
+        guard_preventing_duplicate_logic_from_returning: "Normalizer read-only mapping test, exact rerun dependency tests, pyright, and added-line anti-leak guard."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+
+  - id: T073
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe architecture tranche after T072, with preference for read-only source mapping before any larger StepHandler/OutputFormatSpec implementation."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/step-handler-and-renderer-architecture.md"
+      - "T070 receipt"
+      - "T072 receipt"
+    constraints:
+      - "Read-only."
+      - "Check the watchdog before starting and before any task transition."
+      - "Do not activate product/data-gated tasks without recorded owner decisions."
+      - "Do not write docs/flows/architecture.md before final docs Worker T901."
+      - "Do not jump into StepHandler/OutputFormatSpec implementation before source mapping and Judge design approval."
+      - "Prefer T017-style source mapping of duplicate/scattered output behavior if no smaller safe bugfix exists."
+    expected_output:
+      - "Next task decision or stop rule."
+      - "If selecting a Scout: exact mapping questions, files, and output table."
+      - "If selecting a Worker: allowed_files, verification, consolidation effect, and review tier."
     receipt: null
 
   - id: T901
