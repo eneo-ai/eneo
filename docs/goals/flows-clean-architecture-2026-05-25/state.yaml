@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T064
+active_task: T066
 
 tasks:
   - id: T001
@@ -6452,7 +6452,7 @@ tasks:
   - id: T064
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "judge(flows): choose the next safe tranche after frontend HTTP config typing."
     inputs:
@@ -6475,6 +6475,201 @@ tasks:
       - "Decision: activate the next exact Worker/Judge/Scout or block with reason."
       - "Disposition of T014/T015/T016/T901 and blocked T009/T010/T011."
       - "Whether the next task should address template-fill config typing, HTTP config backend JSONB ownership preflight, frontend state ownership, API DX, or wait for Docker/Postgres."
+      - "Allowed files, verification commands, stop_if, consolidation effect, naming-gate answer, and maintainer-doc readiness for the chosen next task."
+    stop_if:
+      - "The next highest-ROI task requires unavailable Docker/DB verification and cannot be narrowed to read-only preflight."
+      - "The next task would require retention or service-key product/data decisions that remain blocked."
+      - "The next task would combine final architecture docs with unresolved implementation work."
+    receipt:
+      result: done
+      decision: "activate T065"
+      summary: "Chose the next narrow T016 frontend state ownership sub-slice: parse template-fill output_config through the existing templateFillConfig.ts owner. T014 schema work remains queued until Docker/Postgres verification is available; T015 API consumer DX remains queued until a source-backed Judge split; T901 remains final-docs-only; T009/T010/T011 remain blocked by product/data decisions."
+      decision_artifact: "docs/goals/flows-clean-architecture-2026-05-25/notes/t064-next-safe-after-http-config-judge.md"
+      evidence:
+        - "frontend/apps/web/src/lib/features/flows/templateFillConfig.ts:65"
+        - "frontend/apps/web/src/lib/features/flows/templateFillConfig.ts:90"
+        - "frontend/apps/web/src/lib/features/flows/templateFillConfig.ts:100"
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts:210"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowStepEditPanel.svelte:645"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowTemplateState.svelte.ts:103"
+      candidate_disposition:
+        T014: "queued; schema/migration invariants still require Docker/Postgres-backed verification or a separate read-only preflight."
+        T015: "queued; public API/OpenAPI/generated-client work should be split by exact Judge evidence before implementation."
+        T016: "queued broad placeholder; T065 is activated as the next narrow frontend state ownership sub-slice."
+        T901: "queued final docs Worker; do not start while implementation architecture is still changing."
+        T009_T010_T011: "blocked by product/data decisions."
+      review_tier:
+        selected_tier: "medium"
+        plan_gate: "skipped; ownership is clear because templateFillConfig.ts already owns the concept and the Worker is constrained to deepen it."
+        implementation_gate: "Claude-only after the diff is stable."
+        antigravity: "skip unless Claude and Codex disagree or the slice expands into API/runtime/data/schema/final-audit work."
+      consolidation_effect:
+        reused_existing_owner: "frontend/apps/web/src/lib/features/flows/templateFillConfig.ts"
+        logic_moved_from: "unchecked step.output_config as TemplateFillOutputConfig boundary"
+        logic_deleted: "trusted production cast should be removed in T065"
+        duplicate_path_removed: "none yet; T065 prevents consumer-local shape guards from returning"
+        new_code_added: "only boundary parsing/sanitizing inside the existing owner, if needed"
+        why_existing_owners_were_insufficient: "The owner exists but currently trusts generated JSON by assertion rather than validating field types."
+        guard_preventing_duplicate_logic_from_returning: "Parser tests and anti-leak grep over touched template-fill files."
+        net_flow_logic_surface_area: "preserved to slightly reduced"
+        if_increased_why: "Any added parser branches replace an unsafe cast and stay inside the canonical owner."
+      naming_gate:
+        new_names: "No new module/class names approved; any private helper must be domain-specific to template-fill parsing."
+        architecture_doc_readiness: "Final docs can map template-fill frontend authored output config and UI-derived binding state to templateFillConfig.ts."
+      commands:
+        - command: "jq '.' /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1 status=ok blockers=[]; stale active_task T039 advisory."
+        - command: "git status --short --branch"
+          status: pass
+          output: "Unrelated dirty/untracked files preserved."
+        - command: "rg -n 'templateFill|template_fill|TemplateFill|output_config' frontend/apps/web/src/lib/features/flows backend/src/intric/flows backend/tests -g '*.{ts,svelte,py}'"
+          status: pass
+        - command: "nl -ba frontend/apps/web/src/lib/features/flows/templateFillConfig.ts"
+          status: pass
+          output: "Existing owner and unchecked cast identified."
+      next_task: T065
+
+  - id: T065
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "refactor(flows-ui): parse template-fill output config through typed owner."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t064-next-safe-after-http-config-judge.md"
+      - "frontend/apps/web/src/lib/features/flows/templateFillConfig.ts"
+      - "frontend/apps/web/src/lib/features/flows/templateFillConfig.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.ts"
+      - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowTemplateState.svelte.ts"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t065-template-fill-output-config-typing.md"
+      - "frontend/apps/web/src/lib/features/flows/templateFillConfig.ts"
+      - "frontend/apps/web/src/lib/features/flows/templateFillConfig.test.ts"
+    constraints:
+      - "Before implementation and before commit, check the watchdog blocker file and verify halt-worthy blockers against source/state/git evidence."
+      - "Deepen the existing templateFillConfig.ts owner; do not create a new module or parallel template-fill contract shape."
+      - "Preserve valid legacy template_file_id-only config behavior."
+      - "Frontend Flow-proper only: no backend, API/OpenAPI/generated-client, migration, retention, service-key identity/review/rerun, webhook outbox, Flow AI Builder, docs/flows/architecture.md, or unrelated cleanup edits."
+      - "No generic helpers, managers, processors, pass-through layers, fake interfaces, or speculative compatibility paths."
+      - "Claude-only implementation gate for this medium-risk frontend state ownership Worker; do not run Antigravity unless Claude and Codex disagree or the slice crosses API/runtime/data/schema/final-audit boundaries."
+      - "Do not hide typing with as any, as never, @ts-ignore, broad unknown-to-domain casts, or a new fallback that masks invalid state."
+    expected_output:
+      - "Production template-fill output_config parsing no longer returns an unchecked TemplateFillOutputConfig assertion."
+      - "Malformed persisted/generated template-fill output_config values are dropped or sanitized at the canonical frontend owner boundary."
+      - "Valid template_asset_id, template_file_id, template_name, template_checksum, placeholders, and bindings behavior remains covered."
+      - "T065 receipt with consolidation effect, naming-gate answer, maintainer-doc readiness, commands run, pass/fail, and Claude implementation-gate verdict."
+    verify:
+      - "cd frontend/apps/web && ../../node_modules/.bin/vitest run src/lib/features/flows/templateFillConfig.test.ts src/lib/features/flows/flowStepTransitionPolicy.test.ts src/lib/features/flows/FlowEditor.test.ts"
+      - "cd frontend/apps/web && ../../node_modules/.bin/eslint src/lib/features/flows/templateFillConfig.ts src/lib/features/flows/templateFillConfig.test.ts"
+      - "cd frontend/apps/web && ../../node_modules/.bin/prettier --check src/lib/features/flows/templateFillConfig.ts src/lib/features/flows/templateFillConfig.test.ts"
+      - "cd frontend/apps/web && tmp_config=.t065-template-fill-tsconfig.json && printf '%s\\n' '{' '  \"extends\": \"./tsconfig.json\",' '  \"compilerOptions\": {' '    \"allowJs\": false,' '    \"checkJs\": false' '  },' '  \"include\": [' '    \"src/lib/features/flows/templateFillConfig.ts\",' '    \"src/lib/features/flows/templateFillConfig.test.ts\",' '    \"src/lib/features/flows/flowStepTransitionPolicy.ts\"' '  ],' '  \"exclude\": []' '}' > \"$tmp_config\" && ../../node_modules/.bin/tsc --project \"$tmp_config\" --noEmit; rc=$?; rm -f \"$tmp_config\"; exit $rc"
+      - "! git diff -- frontend/apps/web/src/lib/features/flows/templateFillConfig.ts frontend/apps/web/src/lib/features/flows/templateFillConfig.test.ts | rg -n '^\\+.*(as any|as never|@ts-ignore|as TemplateFillOutputConfig)'"
+      - "git diff --check"
+      - "scripts/gate-local/anti_slippage.sh"
+    stop_if:
+      - "Correct parsing requires generated client, backend API, persisted-data migration, or runtime changes."
+      - "Valid legacy template_file_id-only behavior cannot be preserved without a product/API decision."
+      - "The implementation needs files outside allowed_files."
+      - "The slice would duplicate template-fill config logic in a consumer instead of deepening templateFillConfig.ts."
+      - "Claude finds a concrete implementation blocker that cannot be resolved inside allowed_files."
+      - "Verification fails twice for reasons caused by this task."
+    receipt:
+      result: done
+      summary: "Deepened the existing frontend template-fill config owner. getTemplateFillOutputConfig now parses unknown generated/persisted output_config shapes, copies only supported string fields, filters placeholders and bindings to strings, and no longer returns an unchecked TemplateFillOutputConfig assertion. Added behavior tests for supported-field parsing and malformed dry-run config, and removed touched-test as-never casts."
+      note: "docs/goals/flows-clean-architecture-2026-05-25/notes/t065-template-fill-output-config-typing.md"
+      evidence:
+        - "frontend/apps/web/src/lib/features/flows/templateFillConfig.ts:90"
+        - "frontend/apps/web/src/lib/features/flows/templateFillConfig.ts:99"
+        - "frontend/apps/web/src/lib/features/flows/templateFillConfig.ts:111"
+        - "frontend/apps/web/src/lib/features/flows/templateFillConfig.ts:117"
+        - "frontend/apps/web/src/lib/features/flows/templateFillConfig.test.ts:44"
+        - "frontend/apps/web/src/lib/features/flows/templateFillConfig.test.ts:405"
+      commands:
+        - command: "cd frontend/apps/web && ../../node_modules/.bin/vitest run src/lib/features/flows/templateFillConfig.test.ts"
+          status: pass
+          output: "22 tests passed."
+        - command: "cd frontend/apps/web && ../../node_modules/.bin/vitest run src/lib/features/flows/templateFillConfig.test.ts src/lib/features/flows/flowStepTransitionPolicy.test.ts src/lib/features/flows/FlowEditor.test.ts"
+          status: pass
+          output: "3 files, 64 tests passed."
+        - command: "cd frontend/apps/web && ../../node_modules/.bin/eslint src/lib/features/flows/templateFillConfig.ts src/lib/features/flows/templateFillConfig.test.ts"
+          status: pass
+        - command: "cd frontend/apps/web && ../../node_modules/.bin/prettier --check src/lib/features/flows/templateFillConfig.ts src/lib/features/flows/templateFillConfig.test.ts"
+          status: pass
+          output: "All matched files use Prettier code style."
+        - command: "cd frontend/apps/web && tmp_config=.t065-template-fill-tsconfig.json && jq '.include=[...]' tsconfig.json > \"$tmp_config\" && ../../node_modules/.bin/tsc --project \"$tmp_config\" --noEmit; status=$?; rm -f \"$tmp_config\"; exit $status"
+          status: fail_command_shape
+          output: "jq parse error on JSONC tsconfig and zsh read-only status variable; command replaced."
+        - command: "cd frontend/apps/web && tmp_config=.t065-template-fill-tsconfig.json && printf ... include templateFillConfig.ts, templateFillConfig.test.ts, flowStepTransitionPolicy.ts, FlowEditor.ts ... && ../../node_modules/.bin/tsc --project \"$tmp_config\" --noEmit; rc=$?; rm -f \"$tmp_config\"; exit $rc"
+          status: blocked_existing
+          output: "Existing unrelated diagnostics in FlowEditor.ts:309, getErrorMessage.ts, and generated JS/module declarations."
+        - command: "cd frontend/apps/web && tmp_config=.t065-template-fill-tsconfig.json && printf ... include templateFillConfig.ts, templateFillConfig.test.ts, flowStepTransitionPolicy.ts ... && ../../node_modules/.bin/tsc --project \"$tmp_config\" --noEmit; rc=$?; rm -f \"$tmp_config\"; exit $rc"
+          status: pass
+        - command: "! git diff -- frontend/apps/web/src/lib/features/flows/templateFillConfig.ts frontend/apps/web/src/lib/features/flows/templateFillConfig.test.ts | rg -n '^\\+.*(as any|as never|@ts-ignore|as TemplateFillOutputConfig)'"
+          status: pass
+        - command: "git diff --check -- docs/goals/flows-clean-architecture-2026-05-25/state.yaml docs/goals/flows-clean-architecture-2026-05-25/notes/t064-next-safe-after-http-config-judge.md frontend/apps/web/src/lib/features/flows/templateFillConfig.ts frontend/apps/web/src/lib/features/flows/templateFillConfig.test.ts"
+          status: pass
+        - command: "scripts/gate-local/anti_slippage.sh"
+          status: pass
+          output: "anti-slippage: nothing staged (code files)."
+      peer_review:
+        claude:
+          artifact: ".codex/artifacts/claude-peer-loop-t065-template-fill-output-config-typing-implementation-review-20260526T180749Z.md"
+          verdict: "green"
+          green_light: true
+          min_score: 9
+          valid_concerns_addressed:
+            - "Stage exact allowed files only before commit."
+          disagreements:
+            - "Did not rename the private predicate to generic isPlainObject; the board naming gate favors domain-specific local names over generic helpers."
+        antigravity:
+          status: skipped
+          reason: "Tiered review rule: medium-risk frontend state ownership; Claude was green; no disputed API/runtime/data/schema/final-audit boundary."
+      consolidation_effect:
+        reused_existing_owner: "frontend/apps/web/src/lib/features/flows/templateFillConfig.ts"
+        logic_moved_from: "unchecked production step.output_config as TemplateFillOutputConfig assertion"
+        logic_deleted: "unchecked production TemplateFillOutputConfig cast and touched-test as-never casts"
+        duplicate_path_removed: "no duplicate module existed; parser hardening prevents consumer-local guards from returning"
+        new_code_added: "small field parser inside the canonical owner"
+        why_existing_owners_were_insufficient: "The owner existed but trusted generated JSON by assertion."
+        guard_preventing_duplicate_logic_from_returning: "Supported-field parser test, malformed dry-run parser test, and added-line anti-leak grep."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "Only explicit boundary parsing branches were added to replace an unsafe cast."
+      naming_gate:
+        new_names: "No new public module/class/type/status/file names. The private predicate is scoped to template-fill config parsing."
+        architecture_doc_readiness: "Final docs can map template-fill frontend authored output config and UI-derived binding state to templateFillConfig.ts."
+      next_task: T066
+
+  - id: T066
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: medium
+    objective: "judge(flows): choose the next safe tranche after template-fill config typing."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t065-template-fill-output-config-typing.md"
+      - ".codex/artifacts/claude-peer-loop-t065-template-fill-output-config-typing-implementation-review-20260526T180749Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t066-next-safe-after-template-fill-config-judge.md"
+    constraints:
+      - "Read-only Judge task; no source edits, test edits, migrations, generated-client edits, frontend edits, deletion, or docs/flows/architecture.md edits."
+      - "Before starting, check the watchdog blocker file and verify any halt-worthy blocker against source/state/git evidence."
+      - "Apply tiered review: Claude-only for medium-risk frontend/API/refactor/guard tasks; Antigravity only for high-risk/disputed/runtime/API/data/final-audit work."
+      - "Do not start T014 schema/migration work unless Docker/Postgres verification is available or the task can be safely preflighted read-only."
+      - "Do not start retention, service-key identity/review/rerun, schema migration, materialized webhook request snapshots, or other blocked product/data work without recorded decisions."
+      - "Do not activate T901 final architecture docs while runtime/API/schema/frontend architecture is still changing."
+      - "If choosing a Worker, include consolidation effect, naming-gate answer, maintainer-doc readiness, allowed_files, verify commands, and stop_if."
+    expected_output:
+      - "Decision: activate the next exact Worker/Judge/Scout or block with reason."
+      - "Disposition of T014/T015/T016/T901 and blocked T009/T010/T011."
+      - "Whether the next task should address HTTP runtime/backend JSONB ownership preflight, another frontend state ownership slice, API DX, schema verification, or wait for Docker/Postgres."
       - "Allowed files, verification commands, stop_if, consolidation effect, naming-gate answer, and maintainer-doc readiness for the chosen next task."
     stop_if:
       - "The next highest-ROI task requires unavailable Docker/DB verification and cannot be narrowed to read-only preflight."

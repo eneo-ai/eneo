@@ -31,14 +31,44 @@ const labels = {
 
 describe("templateFillConfig", () => {
   it("recognizes template_fill steps", () => {
-    expect(isTemplateFillStep({ output_mode: "template_fill" } as never)).toBe(true);
-    expect(isTemplateFillStep({ output_mode: "pass_through" } as never)).toBe(false);
+    expect(isTemplateFillStep({ output_mode: "template_fill" })).toBe(true);
+    expect(isTemplateFillStep({ output_mode: "pass_through" })).toBe(false);
   });
 
   it("returns an empty config for invalid output_config payloads", () => {
     expect(getTemplateFillOutputConfig(null)).toEqual({});
-    expect(getTemplateFillOutputConfig({ output_config: null } as never)).toEqual({});
-    expect(getTemplateFillOutputConfig({ output_config: [] } as never)).toEqual({});
+    expect(getTemplateFillOutputConfig({ output_config: null })).toEqual({});
+    expect(getTemplateFillOutputConfig({ output_config: [] })).toEqual({});
+  });
+
+  it("parses only supported template-fill output_config fields", () => {
+    expect(
+      getTemplateFillOutputConfig({
+        output_config: {
+          template_asset_id: "asset-1",
+          template_file_id: "file-1",
+          template_name: "rapport.docx",
+          template_checksum: "sha256:abc",
+          placeholders: ["Body", 7, "Author"],
+          bindings: {
+            Body: "{{step_1.output.text}}",
+            Count: 42,
+            Optional: ""
+          },
+          extra: "ignored"
+        }
+      })
+    ).toEqual({
+      template_asset_id: "asset-1",
+      template_file_id: "file-1",
+      template_name: "rapport.docx",
+      template_checksum: "sha256:abc",
+      placeholders: ["Body", "Author"],
+      bindings: {
+        Body: "{{step_1.output.text}}",
+        Optional: ""
+      }
+    });
   });
 
   it("creates a draft-safe template config with default bindings and placeholders", () => {
@@ -166,7 +196,7 @@ describe("templateFillConfig", () => {
         { step_order: 1, user_description: "Inledning", output_type: "text" },
         { step_order: 2, user_description: "Analys", output_type: "json" },
         { step_order: 4, user_description: "Final", output_type: "docx" }
-      ] as never
+      ]
     });
 
     expect(suggestions).toEqual(
@@ -207,7 +237,7 @@ describe("templateFillConfig", () => {
         currentStepOrder: 3,
         labels,
         formSchema: { fields: [{ name: "författare", type: "text" }] },
-        steps: [{ step_order: 1, user_description: "Bakgrund", output_type: "text" }] as never
+        steps: [{ step_order: 1, user_description: "Bakgrund", output_type: "text" }]
       }),
       labels
     );
@@ -247,7 +277,7 @@ describe("templateFillConfig", () => {
           { step_order: 1, user_description: "Transkribera", output_type: "text" },
           { step_order: 2, user_description: "Sammanfatta", output_type: "json" },
           { step_order: 4, user_description: "Final", output_type: "docx" }
-        ] as never
+        ]
       })
     ).toEqual({
       författare: "{{flow_input.Författare}}",
@@ -306,7 +336,7 @@ describe("templateFillConfig", () => {
               bakgrund: "{{step_1.output.text}}"
             }
           }
-        } as never
+        }
       })
     ).toEqual(["Missing DOCX template.", "Missing mapping for template placeholder 'analys'."]);
   });
@@ -326,7 +356,7 @@ describe("templateFillConfig", () => {
               borttagen: "{{step_1.output.text}}"
             }
           }
-        } as never
+        }
       })
     ).toEqual([
       "Template placeholder 'bakgrund' references step 3, which is not available before step 3.",
@@ -345,7 +375,7 @@ describe("templateFillConfig", () => {
             template_file_id: "file-1",
             bindings: {}
           }
-        } as never
+        }
       })
     ).toEqual([
       "Template fill requires Word output.",
@@ -367,9 +397,29 @@ describe("templateFillConfig", () => {
               valfri_del: ""
             }
           }
-        } as never
+        }
       })
     ).toEqual([]);
+  });
+
+  it("sanitizes malformed template-fill config before dry-run validation", () => {
+    expect(
+      getTemplateFillDryRunIssues({
+        step: {
+          step_order: 2,
+          output_mode: "template_fill",
+          output_type: "docx",
+          output_config: {
+            template_file_id: 7,
+            placeholders: [7, "Body"],
+            bindings: {
+              Body: "{{step_1.output.text}}",
+              Invalid: 9
+            }
+          }
+        }
+      })
+    ).toEqual(["Missing DOCX template."]);
   });
 
   it("builds rows with missing, matched, and orphaned states", () => {
@@ -382,7 +432,7 @@ describe("templateFillConfig", () => {
       steps: [
         { step_order: 1, user_description: "Bakgrund", output_type: "text" },
         { step_order: 2, user_description: "Kvalitetsgranskning", output_type: "json" }
-      ] as never
+      ]
     });
 
     const rows = listTemplateBindingRows({

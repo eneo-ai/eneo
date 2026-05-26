@@ -88,16 +88,46 @@ export function isTemplateFillStep(
 }
 
 export function getTemplateFillOutputConfig(
-  step: Pick<FlowStep, "output_config"> | null | undefined
+  step: { output_config?: unknown } | null | undefined
 ): TemplateFillOutputConfig {
-  if (
-    !step?.output_config ||
-    typeof step.output_config !== "object" ||
-    Array.isArray(step.output_config)
-  ) {
+  const outputConfig = step?.output_config;
+  if (!isTemplateFillConfigRecord(outputConfig)) {
     return {};
   }
-  return step.output_config as TemplateFillOutputConfig;
+  const parsedConfig: TemplateFillOutputConfig = {};
+
+  for (const key of [
+    "template_asset_id",
+    "template_file_id",
+    "template_name",
+    "template_checksum"
+  ] as const) {
+    const value = outputConfig[key];
+    if (typeof value === "string") {
+      parsedConfig[key] = value;
+    }
+  }
+
+  if (Array.isArray(outputConfig.placeholders)) {
+    parsedConfig.placeholders = outputConfig.placeholders.filter(
+      (value) => typeof value === "string"
+    );
+  }
+
+  if (isTemplateFillConfigRecord(outputConfig.bindings)) {
+    parsedConfig.bindings = Object.fromEntries(
+      Object.entries(outputConfig.bindings).filter((entry): entry is [string, string] => {
+        const [, value] = entry;
+        return typeof value === "string";
+      })
+    );
+  }
+
+  return parsedConfig;
+}
+
+function isTemplateFillConfigRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 export function resolveTemplateAssetSelection(
@@ -114,7 +144,7 @@ export function resolveTemplateAssetSelection(
 
   const legacyMatch =
     !config.template_asset_id && config.template_file_id
-      ? assets.find((asset) => asset.file_id === config.template_file_id) ?? null
+      ? (assets.find((asset) => asset.file_id === config.template_file_id) ?? null)
       : null;
   if (legacyMatch) {
     return { asset: legacyMatch, assetId: legacyMatch.id };
