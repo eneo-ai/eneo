@@ -188,6 +188,9 @@ jobs:
       - name: Run package lint
         run: FORCE_COLOR=1 bun run --filter '@intric/*' lint
 
+      - name: Run package tests
+        run: FORCE_COLOR=1 bun run --filter '@intric/eslint-plugin' test
+
       - name: Build frontend
         run: bun run build
         env:
