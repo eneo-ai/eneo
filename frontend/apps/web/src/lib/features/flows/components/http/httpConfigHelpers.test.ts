@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { HttpAuthoredConfig, HttpAuth } from "./httpConfigTypes";
+import type { HttpAuthoredConfig } from "./httpConfigTypes";
 import { getHttpSummaryText, getAuthLabel, getAuthLabelEn } from "./httpConfigHelpers";
 
 function makeConfig(overrides: Partial<HttpAuthoredConfig> = {}): HttpAuthoredConfig {
@@ -11,7 +11,7 @@ function makeConfig(overrides: Partial<HttpAuthoredConfig> = {}): HttpAuthoredCo
     body: { mode: "none" },
     custom_headers: [],
     response_format: null,
-    ...overrides,
+    ...overrides
   };
 }
 
@@ -46,7 +46,7 @@ describe("getHttpSummaryText", () => {
   it("includes body label for text_template mode", () => {
     const text = getHttpSummaryText(
       makeConfig({ body: { mode: "text_template", template: "hello" } }),
-      "POST",
+      "POST"
     );
 
     expect(text).toContain("Text");
@@ -74,8 +74,8 @@ describe("getHttpSummaryText", () => {
 
   it("shows bearer auth label", () => {
     const text = getHttpSummaryText(
-      makeConfig({ auth: { mode: "bearer_token", token: "tok" } as any }),
-      "POST",
+      makeConfig({ auth: { mode: "bearer_token", token: "tok" } }),
+      "POST"
     );
 
     expect(text).toContain("Bearer");
@@ -84,15 +84,15 @@ describe("getHttpSummaryText", () => {
 
 describe("getAuthLabel", () => {
   it("returns Bearer for bearer_token", () => {
-    expect(getAuthLabel({ mode: "bearer_token", token: "x" } as HttpAuth)).toBe("Bearer");
+    expect(getAuthLabel({ mode: "bearer_token", token: "x" })).toBe("Bearer");
   });
 
   it("returns API-nyckel for api_key", () => {
-    expect(getAuthLabel({ mode: "api_key", header_name: "X-Key", key: "x" } as HttpAuth)).toBe("API-nyckel");
+    expect(getAuthLabel({ mode: "api_key", header_name: "X-Key", key: "x" })).toBe("API-nyckel");
   });
 
   it("returns Basic for basic_auth", () => {
-    expect(getAuthLabel({ mode: "basic_auth", username: "u", password: "p" } as HttpAuth)).toBe("Basic");
+    expect(getAuthLabel({ mode: "basic_auth", username: "u", password: "p" })).toBe("Basic");
   });
 
   it("returns Ingen for none", () => {
@@ -102,15 +102,15 @@ describe("getAuthLabel", () => {
 
 describe("getAuthLabelEn", () => {
   it("returns Bearer token for bearer_token", () => {
-    expect(getAuthLabelEn({ mode: "bearer_token", token: "x" } as HttpAuth)).toBe("Bearer token");
+    expect(getAuthLabelEn({ mode: "bearer_token", token: "x" })).toBe("Bearer token");
   });
 
   it("returns API key for api_key", () => {
-    expect(getAuthLabelEn({ mode: "api_key", header_name: "X-Key", key: "x" } as HttpAuth)).toBe("API key");
+    expect(getAuthLabelEn({ mode: "api_key", header_name: "X-Key", key: "x" })).toBe("API key");
   });
 
   it("returns Basic auth for basic_auth", () => {
-    expect(getAuthLabelEn({ mode: "basic_auth", username: "u", password: "p" } as HttpAuth)).toBe("Basic auth");
+    expect(getAuthLabelEn({ mode: "basic_auth", username: "u", password: "p" })).toBe("Basic auth");
   });
 
   it("returns None for none", () => {

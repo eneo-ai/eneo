@@ -21,7 +21,7 @@
   } from "$lib/features/flows/flowRuntimeInputConfig";
   import type { FlowSourceHintKind } from "$lib/features/flows/flowStepPresentation";
   import HttpConfigPanel from "./http/HttpConfigPanel.svelte";
-  import type { HttpAuthoredConfig } from "./http/httpConfigTypes";
+  import { parseHttpAuthoredConfig, type HttpAuthoredConfig } from "./http/httpConfigTypes";
   import { createDefaultHttpConfig } from "./http/httpConfigDefaults";
 
   let {
@@ -79,10 +79,9 @@
   const httpMethod = $derived(
     step.input_source === "http_get" ? ("GET" as const) : ("POST" as const)
   );
+  const defaultHttpConfig = $derived(createDefaultHttpConfig("input", httpMethod));
   const httpConfig = $derived(
-    isHttpSource && step.input_config?.auth
-      ? (step.input_config as unknown as HttpAuthoredConfig)
-      : createDefaultHttpConfig("input", httpMethod)
+    isHttpSource ? parseHttpAuthoredConfig(step.input_config, defaultHttpConfig) : defaultHttpConfig
   );
 
   let showRuntimeInputAdvanced = $state(false);

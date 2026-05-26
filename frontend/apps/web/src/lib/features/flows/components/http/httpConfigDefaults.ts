@@ -1,14 +1,17 @@
-import type { HttpAuthoredConfig, HttpDirection, HttpMethod, HttpAuth, HttpBody, CustomHeader } from "./httpConfigTypes";
+import type { HttpAuthoredConfig, HttpDirection, HttpMethod } from "./httpConfigTypes";
 import { isSecretSentinel } from "./httpConfigTypes";
 
-export function createDefaultHttpConfig(direction: HttpDirection, method: HttpMethod): HttpAuthoredConfig {
+export function createDefaultHttpConfig(
+  direction: HttpDirection,
+  _method: HttpMethod
+): HttpAuthoredConfig {
   return {
     url: "",
     auth: { mode: "none" },
     timeout_seconds: 30,
     body: { mode: direction === "output" ? "auto" : "none" },
     custom_headers: [],
-    response_format: direction === "input" ? "text" : null,
+    response_format: direction === "input" ? "text" : null
   };
 }
 
@@ -21,7 +24,7 @@ export interface HttpValidationError {
 export function validateHttpConfig(
   config: HttpAuthoredConfig,
   direction: HttpDirection,
-  method: HttpMethod,
+  method: HttpMethod
 ): HttpValidationError[] {
   const errors: HttpValidationError[] = [];
 
@@ -41,18 +44,17 @@ export function validateHttpConfig(
 
   // Auth credentials (skip sentinel)
   if (config.auth.mode === "bearer_token") {
-    const token = (config.auth as any).token;
+    const token = config.auth.token;
     if (!token && !isSecretSentinel(token)) {
       errors.push({ field: "auth", code: "HTTP_MISSING_AUTH", message: "" });
     }
   } else if (config.auth.mode === "api_key") {
-    const key = (config.auth as any).key;
+    const key = config.auth.key;
     if (!key && !isSecretSentinel(key)) {
       errors.push({ field: "auth", code: "HTTP_MISSING_AUTH", message: "" });
     }
   } else if (config.auth.mode === "basic_auth") {
-    const auth = config.auth as any;
-    if (!auth.username && !auth.password && !isSecretSentinel(auth.password)) {
+    if (!config.auth.username && !config.auth.password && !isSecretSentinel(config.auth.password)) {
       errors.push({ field: "auth", code: "HTTP_MISSING_AUTH", message: "" });
     }
   }

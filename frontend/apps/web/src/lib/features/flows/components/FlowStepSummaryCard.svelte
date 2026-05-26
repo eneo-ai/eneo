@@ -10,8 +10,9 @@
     getSummaryNextChannelText,
     hasAdvancedSettingsActive
   } from "./flowStepEditHelpers";
+  import { createDefaultHttpConfig } from "./http/httpConfigDefaults";
   import { getHttpSummaryText } from "./http/httpConfigHelpers";
-  import type { HttpAuthoredConfig, HttpMethod } from "./http/httpConfigTypes";
+  import { parseHttpAuthoredConfig, type HttpMethod } from "./http/httpConfigTypes";
 
   let {
     step,
@@ -32,18 +33,17 @@
     hasInputTemplateOverride: boolean;
   } = $props();
 
+  const httpMethod = $derived((step.input_source === "http_get" ? "GET" : "POST") as HttpMethod);
   const httpOutputConfig = $derived(
-    step.output_mode === "http_post" && step.output_config?.auth
-      ? (step.output_config as unknown as HttpAuthoredConfig)
+    step.output_mode === "http_post"
+      ? parseHttpAuthoredConfig(step.output_config, createDefaultHttpConfig("output", "POST"))
       : null
   );
   const httpInputConfig = $derived(
-    (step.input_source === "http_get" || step.input_source === "http_post") &&
-      step.input_config?.auth
-      ? (step.input_config as unknown as HttpAuthoredConfig)
+    step.input_source === "http_get" || step.input_source === "http_post"
+      ? parseHttpAuthoredConfig(step.input_config, createDefaultHttpConfig("input", httpMethod))
       : null
   );
-  const httpMethod = $derived((step.input_source === "http_get" ? "GET" : "POST") as HttpMethod);
   const httpSummary = $derived(
     httpOutputConfig
       ? getHttpSummaryText(httpOutputConfig, "POST")

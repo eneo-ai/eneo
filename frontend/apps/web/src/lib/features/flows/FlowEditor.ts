@@ -27,6 +27,8 @@ import {
 import { remapStepOrderTemplateTokens, replaceExactTemplateToken } from "./flowVariableTokens";
 import { getFlowStepValidationIssues, mapOutputToInputType } from "./flowStepTypes";
 import { getTemplateFillOutputConfig } from "./templateFillConfig";
+import { createDefaultHttpConfig } from "./components/http/httpConfigDefaults";
+import { parseHttpAuthoredConfig } from "./components/http/httpConfigTypes";
 
 type FlowEditorInitData = {
   flow: Flow;
@@ -213,22 +215,23 @@ function createFlowEditor(data: FlowEditorInitData) {
           ]);
         }
       }
-      // HTTP output config: URL required
-      if (step.output_mode === "http_post" && step.output_config?.auth) {
-        const url = typeof step.output_config.url === "string" ? step.output_config.url : "";
-        if (!url.trim()) {
+      if (step.output_mode === "http_post") {
+        const config = parseHttpAuthoredConfig(
+          step.output_config,
+          createDefaultHttpConfig("output", "POST")
+        );
+        if (!config.url.trim()) {
           entries.set(`${stepConfigValidationPrefix}http_missing_url:${step.step_order}`, [
             "http_missing_url"
           ]);
         }
       }
-      // HTTP input config: URL required
-      if (
-        (step.input_source === "http_get" || step.input_source === "http_post") &&
-        step.input_config?.auth
-      ) {
-        const url = typeof step.input_config.url === "string" ? step.input_config.url : "";
-        if (!url.trim()) {
+      if (step.input_source === "http_get" || step.input_source === "http_post") {
+        const config = parseHttpAuthoredConfig(
+          step.input_config,
+          createDefaultHttpConfig("input", step.input_source === "http_get" ? "GET" : "POST")
+        );
+        if (!config.url.trim()) {
           entries.set(`${stepConfigValidationPrefix}http_missing_url:${step.step_order}`, [
             "http_missing_url"
           ]);

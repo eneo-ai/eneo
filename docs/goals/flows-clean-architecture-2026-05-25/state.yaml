@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T062
+active_task: T064
 
 tasks:
   - id: T001
@@ -6203,7 +6203,7 @@ tasks:
   - id: T062
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "judge(flows): choose the next safe post-step-identity tranche."
     inputs:
@@ -6229,6 +6229,255 @@ tasks:
       - "Whether local Docker/DB unavailability blocks the chosen next task."
     stop_if:
       - "The next highest-ROI task requires Docker/DB verification that is unavailable and cannot be deferred to CI."
+      - "The next task would require retention or service-key product/data decisions that remain blocked."
+      - "The next task would combine final architecture docs with unresolved implementation work."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T19:31:31+02:00"
+      decision: "activate T063"
+      summary: "Chose a narrow T016 sub-slice: centralize frontend HTTP authored config typing. T014 schema/migration work is deferred because Docker/Postgres is unavailable locally and database-backed verification is required. T009/T010/T011 remain product/data-decision blocked. T901 remains queued as final maintainer documentation and must not start during active runtime/API/schema/frontend work."
+      note: "docs/goals/flows-clean-architecture-2026-05-25/notes/t062-next-safe-after-step-identity-judge.md"
+      evidence:
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts:205-236 has HTTP config shape-sniffing and direct JSON URL reads in the frontend Flow state owner."
+        - "frontend/apps/web/src/lib/features/flows/components/FlowStepInputSection.svelte:84 casts generated JSON config to HttpAuthoredConfig."
+        - "frontend/apps/web/src/lib/features/flows/components/FlowStepOutputSection.svelte:52 casts generated JSON config to HttpAuthoredConfig."
+        - "frontend/apps/web/src/lib/features/flows/components/FlowStepSummaryCard.svelte:37 and :43 cast generated JSON config to HttpAuthoredConfig."
+        - "frontend/apps/web/src/lib/features/flows/components/http/httpConfigTypes.ts:14-15 uses an unnecessary any-cast in isSecretSentinel."
+        - "frontend/apps/web/src/lib/features/flows/components/http/httpConfigDefaults.ts:43-55 uses any-casts despite HttpAuth discriminated-union narrowing."
+        - "frontend/apps/web/src/lib/features/flows/components/http/httpConfigDefaults.test.ts and httpConfigHelpers.test.ts use unnecessary casts for valid union values."
+      disposition:
+        T014: "queued; not safe to start while Docker/Postgres is unavailable because migration/schema verification is required."
+        T015: "queued; broad API consumer DX task should be split only after an exact source-backed Judge decision."
+        T016: "queued broad placeholder; T063 is activated as the first narrow Worker under it."
+        T901: "queued final docs Worker; do not start while architecture is still changing."
+        T009_T010_T011: "blocked by product/data decisions."
+      commands:
+        - command: "jq '{schema_version,status,active_task,blockers}' /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1 status=ok blockers=[]; stale active_task T039 advisory."
+        - command: "docker ps --format '{{.Names}}' | head -20"
+          status: blocked_environment
+          output: "Docker API unavailable at /Users/ccimen/.orbstack/run/docker.sock."
+        - command: "docker exec eneo-41ae93-db-1 psql -U postgres -d postgres -c 'select 1 as ok;'"
+          status: blocked_environment
+          output: "Docker API unavailable at /Users/ccimen/.orbstack/run/docker.sock."
+        - command: "rg/nl source reads for FlowEditor.ts, FlowStepInputSection.svelte, FlowStepOutputSection.svelte, FlowStepSummaryCard.svelte, and components/http files"
+          status: pass
+          output: "Verified repeated HTTP config casts, FlowEditor shape-sniffing, any-casts in HTTP auth validation, and missing HTTP config FlowEditor test coverage."
+      peer_review:
+        claude_initial:
+          artifact: ".codex/artifacts/claude-peer-loop-t062-next-safe-post-step-identity-tranche-20260526T172656Z.md"
+          verdict: "GREEN_LIGHT no; MIN_SCORE 6. Valid blockers: include FlowEditor.ts/test, declare parser recovery semantics, remove isSecretSentinel/test casts, and add clean-checkout verification."
+        claude_final:
+          artifact: ".codex/artifacts/claude-peer-loop-t062-next-safe-post-step-identity-tranche-revised-20260526T173115Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+        antigravity:
+          status: skipped
+          reason: "Tiered review rule: T063 is medium-risk frontend state ownership work; Claude and Codex agree and no runtime/API/data boundary is crossed."
+      consolidation_effect:
+        reused_existing_owner: "frontend Flow HTTP config owner under components/http, plus FlowEditor as frontend Flow state owner."
+        logic_moved_from: "Repeated component/controller JSON shape sniffing to one typed HTTP config boundary."
+        logic_deleted: "T063 will delete production as-any auth access, repeated as-unknown-as-HttpAuthoredConfig casts, and unnecessary HTTP config test casts."
+        duplicate_path_removed: "T063 will remove each component/controller deciding generated JSON shape locally."
+        new_code_added: "One domain-specific parser/type boundary in the existing HTTP config owner."
+        why_existing_owners_were_insufficient: "HttpAuthoredConfig existed but had no public parser from generated JSONB-shaped contract, so each caller cast locally."
+        guard_preventing_duplicate_logic_from_returning: "Parser recovery tests, FlowEditor validation test, focused cast anti-leak rg, and clean-checkout verification."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: ""
+      naming_gate:
+        result: pass
+        notes:
+          - "Use a domain-specific name such as parseHttpAuthoredConfig; reject generic helper/coerce/manager naming unless source evidence demands it."
+          - "The concept belongs clearly in the final maintainer map as frontend authored HTTP config typed boundary."
+      architecture_doc_readiness: "HTTP authored config JSON from generated Flow step config crosses into typed frontend state through the components/http owner; FlowEditor and step section/summary components consume it."
+      followups:
+        - "Template-fill output config has a sibling broad cast in templateFillConfig.ts and should be judged separately; do not broaden T063."
+        - "Backend JSONB ownership for HTTP authored config remains unsolved and belongs to a future backend typed-config/schema-version task."
+      next_task: T063
+
+  - id: T063
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "refactor(flows-ui): centralize HTTP authored config typing."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t062-next-safe-after-step-identity-judge.md"
+      - ".codex/artifacts/claude-peer-loop-t062-next-safe-post-step-identity-tranche-revised-20260526T173115Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t063-http-authored-config-typing.md"
+      - "frontend/apps/web/src/lib/features/flows/components/http/httpConfigTypes.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/http/httpConfigDefaults.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/http/httpConfigDefaults.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/http/httpConfigHelpers.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowStepInputSection.svelte"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowStepOutputSection.svelte"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowStepSummaryCard.svelte"
+      - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts"
+      - "frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts"
+    constraints:
+      - "Before implementation and before commit, check the watchdog blocker file and verify any halt-worthy blocker against source/state/git evidence."
+      - "Claude-only review for this medium-risk frontend state ownership Worker; do not run Antigravity unless Claude and Codex disagree or the slice expands into runtime/API/data boundaries."
+      - "Do not edit backend, API/OpenAPI/generated client, migrations, retention, service-key identity/review/rerun, webhook outbox, Flow AI Builder, docs/flows/architecture.md, or unrelated frontend cleanup."
+      - "Reuse/deepen the existing components/http owner and FlowEditor state owner; do not create generic helpers, managers, processors, adapters, or a second HTTP config parser."
+      - "The parser must be structural-and-recovering: callers pass a default HttpAuthoredConfig, valid fields are preserved, missing/malformed fields fall back field-by-field, and malformed auth.mode falls back to the default auth arm."
+      - "The step input_source/output_mode decides whether a step is HTTP; do not use presence of ?.auth as the HTTP-step discriminator."
+      - "This Worker centralizes frontend recovery from untyped backend JSONB; it must not claim backend JSONB ownership is solved."
+      - "Removing casts in httpConfigDefaults.ts must not require changing the HttpAuth union shape; stop if it does."
+      - "Bounded narrowing reads inside the parser are allowed, but production/test any-casts and component-level HttpAuthoredConfig casts must be removed."
+    expected_output:
+      - "One domain-specific parser/type boundary, preferably parseHttpAuthoredConfig(value: unknown, defaults: HttpAuthoredConfig): HttpAuthoredConfig, in the existing HTTP config owner."
+      - "FlowEditor.syncStepConfigValidation validates HTTP URLs through that boundary and no longer shape-sniffs step input_config/output_config with ?.auth."
+      - "FlowStepInputSection, FlowStepOutputSection, and FlowStepSummaryCard consume the centralized boundary instead of casting generated JSON config."
+      - "httpConfigTypes.ts and httpConfigDefaults.ts no longer use as any in production code."
+      - "Focused HTTP config tests no longer use unnecessary as any/as HttpAuth casts."
+      - "Tests cover valid config, missing url, non-string url, non-number timeout_seconds, missing auth, unknown auth.mode, unknown body.mode, non-array custom_headers, malformed custom header entries, response_format outside text/json/null, isSecretSentinel edge cases, and FlowEditor malformed HTTP config validation."
+      - "T063 receipt records consolidation effect, naming-gate answer, final-doc readiness, commands run, pass/fail, and Claude commit-gate verdict."
+    verify:
+      - "cd frontend/apps/web && ../../node_modules/.bin/vitest run src/lib/features/flows/components/http/httpConfigDefaults.test.ts src/lib/features/flows/components/http/httpConfigHelpers.test.ts src/lib/features/flows/FlowEditor.test.ts"
+      - "cd frontend/apps/web && ../../node_modules/.bin/eslint src/lib/features/flows/components/http/httpConfigTypes.ts src/lib/features/flows/components/http/httpConfigDefaults.ts src/lib/features/flows/components/http/httpConfigDefaults.test.ts src/lib/features/flows/components/http/httpConfigHelpers.test.ts src/lib/features/flows/components/FlowStepInputSection.svelte src/lib/features/flows/components/FlowStepOutputSection.svelte src/lib/features/flows/components/FlowStepSummaryCard.svelte src/lib/features/flows/FlowEditor.ts src/lib/features/flows/FlowEditor.test.ts"
+      - "cd frontend/apps/web && ../../node_modules/.bin/prettier --check src/lib/features/flows/components/http/httpConfigTypes.ts src/lib/features/flows/components/http/httpConfigDefaults.ts src/lib/features/flows/components/http/httpConfigDefaults.test.ts src/lib/features/flows/components/http/httpConfigHelpers.test.ts src/lib/features/flows/components/FlowStepInputSection.svelte src/lib/features/flows/components/FlowStepOutputSection.svelte src/lib/features/flows/components/FlowStepSummaryCard.svelte src/lib/features/flows/FlowEditor.ts src/lib/features/flows/FlowEditor.test.ts"
+      - "cd frontend/apps/web && bun run check, or if blocked by unrelated existing diagnostics, a focused TS/Svelte check over the touched files must pass."
+      - "git diff -- frontend/apps/web/src/lib/features/flows/components/http frontend/apps/web/src/lib/features/flows/components/FlowStepInputSection.svelte frontend/apps/web/src/lib/features/flows/components/FlowStepOutputSection.svelte frontend/apps/web/src/lib/features/flows/components/FlowStepSummaryCard.svelte frontend/apps/web/src/lib/features/flows/FlowEditor.ts frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts | rg -n '^\\+.*(as any|as unknown as HttpAuthoredConfig|as HttpAuth\\b)' should return no matches."
+      - "rg -n 'as any|as unknown as HttpAuthoredConfig|as HttpAuth\\b' frontend/apps/web/src/lib/features/flows/components/http/httpConfigTypes.ts frontend/apps/web/src/lib/features/flows/components/http/httpConfigDefaults.ts frontend/apps/web/src/lib/features/flows/components/http/httpConfigDefaults.test.ts frontend/apps/web/src/lib/features/flows/components/http/httpConfigHelpers.test.ts frontend/apps/web/src/lib/features/flows/components/FlowStepInputSection.svelte frontend/apps/web/src/lib/features/flows/components/FlowStepOutputSection.svelte frontend/apps/web/src/lib/features/flows/components/FlowStepSummaryCard.svelte frontend/apps/web/src/lib/features/flows/FlowEditor.ts frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts should return no matches."
+      - "Clean-checkout verification with only the T063 patch applied."
+      - "git diff --check"
+      - "scripts/gate-local/anti_slippage.sh"
+    stop_if:
+      - "Parser behavior requires backend/generated schema changes, persisted-data migration, product behavior decision, or Flow AI Builder/API/retention/service-key/webhook work."
+      - "Malformed persisted HTTP config semantics cannot be kept structural-and-recovering with focused tests."
+      - "The implementation needs a generic helper/manager/adapter or a second HTTP config parser."
+      - "Touching HttpAuthSection.svelte or broader HTTP editor state becomes necessary; that should be judged as a separate slice unless directly required."
+      - "Project-wide TS/Svelte check reveals unrelated failures and focused checks also fail on touched files."
+      - "Removing casts in httpConfigDefaults.ts requires changing the HttpAuth union shape."
+      - "FlowEditor refactor requires changing syncStepConfigValidation signature or validationErrors Map structure."
+    consolidation_effect:
+      reused_existing_owner: "frontend Flow HTTP config owner under components/http, plus FlowEditor as frontend Flow state owner."
+      logic_moved_from: "Repeated component/controller JSON shape sniffing to one typed HTTP config boundary."
+      logic_deleted: "Production as-any auth access, repeated as-unknown-as-HttpAuthoredConfig casts, and unnecessary HTTP config test casts."
+      duplicate_path_removed: "Each component/controller deciding generated JSON shape locally."
+      new_code_added: "One domain-specific parser/type boundary in the existing HTTP config owner."
+      why_existing_owners_were_insufficient: "HttpAuthoredConfig existed but had no public parser from generated JSONB-shaped contract, so each caller cast locally."
+      guard_preventing_duplicate_logic_from_returning: "Parser recovery tests, FlowEditor validation test, focused cast anti-leak rg, and clean-checkout verification."
+      net_flow_logic_surface_area: "reduced"
+      if_increased_why: ""
+    receipt:
+      result: done
+      completed_at: "2026-05-26T19:52:32+02:00"
+      summary: "Centralized frontend HTTP authored config typing through `parseHttpAuthoredConfig` in the existing components/http owner. FlowEditor and the three step view components now consume one structural-and-recovering JSON-to-typed boundary instead of shape-sniffing `?.auth` or casting generated JSON as HttpAuthoredConfig. Removed production `as any` auth access and focused test casts."
+      note: "docs/goals/flows-clean-architecture-2026-05-25/notes/t063-http-authored-config-typing.md"
+      changed_files:
+        - "frontend/apps/web/src/lib/features/flows/components/http/httpConfigTypes.ts"
+        - "frontend/apps/web/src/lib/features/flows/components/http/httpConfigDefaults.ts"
+        - "frontend/apps/web/src/lib/features/flows/components/http/httpConfigDefaults.test.ts"
+        - "frontend/apps/web/src/lib/features/flows/components/http/httpConfigHelpers.test.ts"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowStepInputSection.svelte"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowStepOutputSection.svelte"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowStepSummaryCard.svelte"
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts"
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts"
+      commands:
+        - command: "cd frontend/apps/web && ../../node_modules/.bin/vitest run src/lib/features/flows/components/http/httpConfigDefaults.test.ts src/lib/features/flows/components/http/httpConfigHelpers.test.ts src/lib/features/flows/FlowEditor.test.ts"
+          status: pass
+          output: "3 passed; 81 tests passed"
+        - command: "cd frontend/apps/web && ../../node_modules/.bin/eslint src/lib/features/flows/components/http/httpConfigTypes.ts src/lib/features/flows/components/http/httpConfigDefaults.ts src/lib/features/flows/components/http/httpConfigDefaults.test.ts src/lib/features/flows/components/http/httpConfigHelpers.test.ts src/lib/features/flows/components/FlowStepInputSection.svelte src/lib/features/flows/components/FlowStepOutputSection.svelte src/lib/features/flows/components/FlowStepSummaryCard.svelte src/lib/features/flows/FlowEditor.ts src/lib/features/flows/FlowEditor.test.ts"
+          status: pass
+        - command: "cd frontend/apps/web && ../../node_modules/.bin/prettier --check src/lib/features/flows/components/http/httpConfigTypes.ts src/lib/features/flows/components/http/httpConfigDefaults.ts src/lib/features/flows/components/http/httpConfigDefaults.test.ts src/lib/features/flows/components/http/httpConfigHelpers.test.ts src/lib/features/flows/components/FlowStepInputSection.svelte src/lib/features/flows/components/FlowStepOutputSection.svelte src/lib/features/flows/components/FlowStepSummaryCard.svelte src/lib/features/flows/FlowEditor.ts src/lib/features/flows/FlowEditor.test.ts"
+          status: pass
+          output: "All matched files use Prettier code style."
+        - command: "cd frontend/apps/web && ../../node_modules/.bin/tsc --project .t063-http-tsconfig.json --noEmit"
+          status: pass
+          output: "Focused temporary tsconfig over HTTP config TS/test files; temp file removed."
+        - command: "cd frontend/apps/web && ../../node_modules/.bin/svelte-check --workspace src/lib/features/flows/components --no-tsconfig --threshold error --diagnostic-sources svelte,css"
+          status: pass
+          output: "0 errors, 0 warnings."
+        - command: "rg -n 'as any|as unknown as HttpAuthoredConfig|as HttpAuth\\b' <T063 files>"
+          status: pass
+          output: "No matches."
+        - command: "git diff -- frontend/apps/web/src/lib/features/flows/components/http frontend/apps/web/src/lib/features/flows/components/FlowStepInputSection.svelte frontend/apps/web/src/lib/features/flows/components/FlowStepOutputSection.svelte frontend/apps/web/src/lib/features/flows/components/FlowStepSummaryCard.svelte frontend/apps/web/src/lib/features/flows/FlowEditor.ts frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts | rg -n '^\\+.*(as any|as unknown as HttpAuthoredConfig|as HttpAuth\\b)'"
+          status: pass
+          output: "No matches."
+        - command: "Clean-checkout verification over detached HEAD with only T063 code patch applied"
+          status: pass
+          output: "Vitest, ESLint, Prettier, focused TypeScript, Svelte compiler diagnostics, target cast guard, and git diff --check passed."
+        - command: "cd frontend/apps/web && bun run check"
+          status: blocked_existing
+          output: "Existing unrelated diagnostics in packages/intric-js/src/client/stream.js, flowRunProgress.test.ts, route Locals/env globals, routeParams, and page state."
+        - command: "broader temporary tsc including FlowEditor.ts"
+          status: blocked_existing
+          output: "Pulled unrelated route/env diagnostics plus pre-existing FlowEditor.ts:309 unknown-error diagnostic; focused TS/Svelte/ESLint/Vitest checks passed."
+        - command: "git diff --check"
+          status: pass
+        - command: "scripts/gate-local/anti_slippage.sh"
+          status: pass
+          output: "nothing staged"
+      peer_review:
+        claude_plan_initial:
+          artifact: ".codex/artifacts/claude-peer-loop-t062-next-safe-post-step-identity-tranche-20260526T172656Z.md"
+          verdict: "GREEN_LIGHT no; MIN_SCORE 6. Valid blockers addressed."
+        claude_plan_final:
+          artifact: ".codex/artifacts/claude-peer-loop-t062-next-safe-post-step-identity-tranche-revised-20260526T173115Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+        claude_commit_gate:
+          artifact: ".codex/artifacts/claude-peer-loop-t063-http-authored-config-typing-implementation-review-20260526T174914Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+        antigravity:
+          status: skipped
+          reason: "Tiered review rule: medium-risk frontend state ownership; Claude and Codex agreed; no runtime/API/data boundary crossed."
+      consolidation_effect:
+        reused_existing_owner: "components/http/httpConfigTypes.ts as frontend HTTP config type/boundary owner, and FlowEditor as frontend Flow state owner."
+        logic_moved_from: "Repeated view/controller JSON shape checks into one typed HTTP config boundary."
+        logic_deleted: "Production as-any auth access, repeated as-unknown-as-HttpAuthoredConfig casts, and unnecessary focused HTTP test casts."
+        duplicate_path_removed: "Four callers no longer decide generated JSON shape locally."
+        new_code_added: "parseHttpAuthoredConfig, a domain-specific parser in the existing HTTP config owner."
+        why_existing_owners_were_insufficient: "HttpAuthoredConfig existed but had no public parser from the generated JSONB-shaped contract."
+        guard_preventing_duplicate_logic_from_returning: "Parser recovery tests, FlowEditor HTTP validation tests, cast anti-leak rg, and clean-checkout verification."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: ""
+      naming_gate:
+        result: pass
+        notes:
+          - "`parseHttpAuthoredConfig` names the frontend authored HTTP config boundary directly."
+          - "No generic helper/manager/processor/adapter module was added."
+      architecture_doc_readiness: "HTTP authored config JSON from generated Flow step config crosses into typed frontend state through components/http/httpConfigTypes.ts; FlowEditor and step section/summary components consume that owner for validation and display."
+      followups:
+        - "templateFillConfig.ts has a sibling config-cast pattern and should be judged separately."
+        - "httpConfigDefaults.ts still has cleanup-eligible dead clauses around secret sentinel checks after cast removal; this existed before T063."
+        - "Backend JSONB ownership for HTTP authored config remains unsolved and belongs to a future backend typed-config/schema-version task."
+      next_task: T064
+
+  - id: T064
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: medium
+    objective: "judge(flows): choose the next safe tranche after frontend HTTP config typing."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t063-http-authored-config-typing.md"
+      - ".codex/artifacts/claude-peer-loop-t063-http-authored-config-typing-implementation-review-20260526T174914Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t064-next-safe-after-http-config-judge.md"
+    constraints:
+      - "Read-only Judge task; no source edits, test edits, migrations, generated-client edits, frontend edits, deletion, or docs/flows/architecture.md edits."
+      - "Before starting, check the watchdog blocker file and verify any halt-worthy blocker against source/state/git evidence."
+      - "Apply tiered review: Claude-only for medium-risk frontend/API/refactor/guard tasks; Antigravity only for high-risk/disputed/runtime/API/data/final-audit work."
+      - "Do not start T014 schema/migration work unless Docker/Postgres verification is available or the task can be safely preflighted read-only."
+      - "Do not start retention, service-key identity/review/rerun, schema migration, materialized webhook request snapshots, or other blocked product/data work without recorded decisions."
+      - "Do not activate T901 final architecture docs while runtime/API/schema/frontend architecture is still changing."
+      - "If choosing a Worker, include consolidation effect, naming-gate answer, maintainer-doc readiness, allowed_files, verify commands, and stop_if."
+    expected_output:
+      - "Decision: activate the next exact Worker/Judge/Scout or block with reason."
+      - "Disposition of T014/T015/T016/T901 and blocked T009/T010/T011."
+      - "Whether the next task should address template-fill config typing, HTTP config backend JSONB ownership preflight, frontend state ownership, API DX, or wait for Docker/Postgres."
+      - "Allowed files, verification commands, stop_if, consolidation effect, naming-gate answer, and maintainer-doc readiness for the chosen next task."
+    stop_if:
+      - "The next highest-ROI task requires unavailable Docker/DB verification and cannot be narrowed to read-only preflight."
       - "The next task would require retention or service-key product/data decisions that remain blocked."
       - "The next task would combine final architecture docs with unresolved implementation work."
     receipt: null

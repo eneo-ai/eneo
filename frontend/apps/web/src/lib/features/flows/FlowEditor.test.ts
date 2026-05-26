@@ -638,6 +638,60 @@ describe("FlowEditor active step selection commands", () => {
   });
 });
 
+describe("FlowEditor HTTP step config validation", () => {
+  it("recovers malformed HTTP config and reports missing URLs", () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, {
+        steps: [
+          makeStep(1, {
+            output_mode: "http_post",
+            output_config: { auth: { mode: "oauth" }, url: 7 }
+          }),
+          makeStep(2, {
+            input_source: "http_get",
+            input_config: { auth: { mode: "oauth" }, url: 7 }
+          })
+        ]
+      }),
+      intric: makeIntric()
+    });
+    try {
+      const errors = get(editor.state.validationErrors);
+
+      expect(errors.get("flow:step-config:http_missing_url:1")).toEqual(["http_missing_url"]);
+      expect(errors.get("flow:step-config:http_missing_url:2")).toEqual(["http_missing_url"]);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("reports missing URLs for HTTP steps without persisted auth shape", () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, {
+        steps: [
+          makeStep(1, {
+            output_mode: "http_post",
+            output_config: {}
+          }),
+          makeStep(2, {
+            input_source: "http_post",
+            input_config: null
+          })
+        ]
+      }),
+      intric: makeIntric()
+    });
+    try {
+      const errors = get(editor.state.validationErrors);
+
+      expect(errors.get("flow:step-config:http_missing_url:1")).toEqual(["http_missing_url"]);
+      expect(errors.get("flow:step-config:http_missing_url:2")).toEqual(["http_missing_url"]);
+    } finally {
+      editor.destroy();
+    }
+  });
+});
+
 describe("FlowEditor save flushing", () => {
   it("persists pending flow step bindings before explicit navigation or publish actions continue", async () => {
     const flowUpdate = vi.fn(async ({ flow, update }) => ({

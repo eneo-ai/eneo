@@ -13,7 +13,7 @@
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { getOutputHintText } from "./flowStepEditHelpers";
   import HttpConfigPanel from "./http/HttpConfigPanel.svelte";
-  import type { HttpAuthoredConfig } from "./http/httpConfigTypes";
+  import { parseHttpAuthoredConfig, type HttpAuthoredConfig } from "./http/httpConfigTypes";
   import { createDefaultHttpConfig } from "./http/httpConfigDefaults";
   import type { FlowOutputHintKind } from "$lib/features/flows/flowStepPresentation";
 
@@ -47,10 +47,11 @@
     onSwitchToTemplateFill?: () => void;
   } = $props();
 
+  const defaultHttpConfig = $derived(createDefaultHttpConfig("output", "POST"));
   const httpConfig = $derived(
-    step.output_mode === "http_post" && step.output_config?.auth
-      ? (step.output_config as unknown as HttpAuthoredConfig)
-      : createDefaultHttpConfig("output", "POST")
+    step.output_mode === "http_post"
+      ? parseHttpAuthoredConfig(step.output_config, defaultHttpConfig)
+      : defaultHttpConfig
   );
   const citationMode = $derived(resolveFlowCitationMode(step.output_config));
   const supportsCitationMode = $derived(supportsFlowCitationMode(step));
