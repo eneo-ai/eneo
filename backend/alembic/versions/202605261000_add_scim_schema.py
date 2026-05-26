@@ -1,14 +1,14 @@
 """add scim schema: external_id on users and user_groups, scim_token_hash on tenants
 
-Revision ID: 202605181000
+Revision ID: 202605261000
 Revises: 202605061100
-Create Date: 2026-05-18
+Create Date: 2026-05-26
 """
 
 from alembic import op
 
 # revision identifiers, used by Alembic
-revision = '202605181000'
+revision = '202605261000'
 down_revision = '202605061100'
 branch_labels = None
 depends_on = None
