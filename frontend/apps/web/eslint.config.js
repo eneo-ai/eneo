@@ -30,7 +30,7 @@ export default ts.config(
     }
   },
   {
-    ignores: ["build/", ".svelte-kit/", "dist/", "src/lib/paraglide/"]
+    ignores: ["build/", ".svelte-kit/", "dist/", "**/paraglide/"]
   },
   {
     // Block hardcoded human-facing text — every human-facing string must go
