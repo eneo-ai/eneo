@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T042
+active_task: T043
 
 tasks:
   - id: T001
@@ -3867,7 +3867,7 @@ tasks:
   - id: T042
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the first T013 durable outbound webhook Worker slice from T041 evidence. Adjudicate ref-only reconstruction versus materialized encrypted request storage, run terminalization semantics, rerun-with-pending-delivery policy, idempotency header shape, and whether the first Worker must include enqueue + worker delivery + inline deletion rather than standalone groundwork."
     inputs:
@@ -3911,14 +3911,159 @@ tasks:
       - "The Worker would bypass WebhookDeliveryIntent or keep only the should_deliver_webhook boolean handoff."
       - "The Worker would hold a DB transaction/row lock while sending external HTTP."
       - "The Worker requires retention, service-key identity, Flow AI Builder, broad schema hardening, or frontend state cleanup."
+    receipt:
+      result: done
+      summary: "Chose ref-only pending-run reconstruction for durable webhook delivery. Materialized resolved request snapshots remain blocked until a data/security owner approves encrypted storage and retention. Approved coupled run semantics: pending webhook keeps the run non-terminal; success completes; dead-letter fails. Tightened the Worker contract with exact table vocabulary, claim metadata instead of an in_progress status, stale-running NOT EXISTS exclusion plus partial index, typed WebhookDeliveryIntent handoff, attempt-aware idempotency header, cancel/rerun behavior, and required red tests."
+      artifact: "docs/goals/flows-clean-architecture-2026-05-25/notes/t042-webhook-outbox-judge.md"
+      decisions:
+        storage_shape: "Ref-only outbox. Do not store resolved URL, headers, body, decrypted secret values, or request snapshots."
+        run_semantics: "Coupled delivery semantics using existing running status; no new public pending_delivery status in first Worker."
+        stale_running: "Exclude running runs with pending webhook delivery rows via NOT EXISTS on flow_run_webhook_deliveries, supported by ix_flow_run_webhook_deliveries_pending_run_tenant."
+        rerun_resume_cancel: "Rerun/resume remains blocked while run is running; worker must not claim rows for terminal runs."
+        idempotency: "Persist WebhookDeliveryIntent.idempotency_key and send sha256(idempotency_key).hexdigest(); value intentionally changes from the old attempt-blind run/step hash."
+        first_worker: "T043 fix(flows-runtime): deliver webhooks through durable ref-only outbox."
+      evidence:
+        - "backend/src/intric/flows/runtime/executor.py:862 inline webhook delivery branch."
+        - "backend/src/intric/flows/runtime/executor.py:1579 direct webhook context/delivery helper."
+        - "backend/src/intric/flows/runtime/executor.py:1603 failure helper terminalizes failed."
+        - "backend/src/intric/flows/runtime/executor.py:1642 success helper projects webhook_delivered."
+        - "backend/src/intric/flows/runtime/http_orchestration.py:331 attempt-blind outgoing Idempotency-Key."
+        - "backend/src/intric/flows/runtime/step_handlers/http_post.py:39 typed WebhookDeliveryIntent producer."
+        - "backend/src/intric/flows/runtime/step_attempt_runtime.py:53 boolean-only success plan."
+        - "backend/src/intric/flows/infrastructure/flow_run_repo.py:1640 stale-running query."
+        - "backend/src/intric/flows/application/flow_run_service.py:607 stale-running reconciliation."
+        - "backend/src/intric/flows/application/flow_run_terminalization.py:72 stale-running terminalization."
+        - "backend/src/intric/database/tables/flow_tables.py:1431 audit outbox delivery-shape precedent."
+      peer_review:
+        claude_iteration_1:
+          artifact: ".codex/artifacts/claude-peer-loop-t042-webhook-outbox-judge-decision-20260526T094531Z.md"
+          verdict: "changes_required"
+          valid_concerns_addressed:
+            - "Specified stale-running NOT EXISTS predicate and partial index."
+            - "Pinned lifecycle states to pending/delivered/dead_lettered and represented claims with metadata."
+            - "Made compare-and-set and claim transaction boundaries explicit."
+            - "Acknowledged Idempotency-Key wire value change."
+            - "Named required red tests and the pure policy boundary."
+        claude_iteration_2:
+          artifact: ".codex/artifacts/claude-peer-loop-t042-webhook-outbox-judge-decision-verification-20260526T095140Z.md"
+          verdict: "GREEN_LIGHT yes, MIN_SCORE 8"
+          remaining_non_blocking_notes:
+            - "Worker must thread typed WebhookDeliveryIntent through success-plan/enqueue."
+            - "Worker should mirror audit-outbox retry constants unless source evidence justifies a difference."
+            - "Worker should not add FlowRuns.updated_at heartbeats for webhook-gated runs."
+        antigravity_disposition: "T041 Antigravity preferred materialized encrypted request snapshots. Kept as valid risk, but not accepted as Worker approval because resolved request storage requires explicit data/security approval."
+      commands:
+        - command: "rg -n \"_deliver_step_webhook|_handle_webhook_delivery_failure|_mark_webhook_delivery_success\" backend/src/intric backend/tests -g '*.py'"
+          result: pass
+          notes: "Only executor branch and private helper definitions found."
+        - command: "rg -n \"Idempotency-Key|idempotency_key|run.id.*step.step_id|step_id.*idempotency|webhook.*idempotency|sha256\" backend/src/intric backend/tests docs flows-clean-architecture-2026-05-25 -g '*.*'"
+          result: pass
+          notes: "Found old runtime hash and tests asserting header presence/length/stability, not a published old-value contract."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t042-webhook-outbox-judge --phase plan --iteration 1 --timeout-seconds 1200 ..."
+          result: pass
+          notes: "Returned changes_required with concrete Judge-note blockers."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t042-webhook-outbox-judge --phase verification --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          result: pass
+          notes: "GREEN_LIGHT yes, MIN_SCORE 8."
+      consolidation_effect:
+        reused_existing_owner: "WebhookDeliveryIntent remains producer boundary; http_orchestration/FlowHttpRuntimeHelper stay HTTP behavior owners; audit outbox shape reused as pattern only."
+        logic_moved_from: "Future Worker moves webhook context/request/delivery orchestration out of FlowRunExecutor."
+        logic_deleted: "Future Worker must delete direct executor webhook helper methods and inline-delivery tests in same slice."
+        duplicate_path_removed: "Future Worker must replace inline executor delivery plus step-result payload lifecycle flags with one webhook delivery outbox owner."
+        new_code_added: "Future Worker may add webhook-specific table/repo/pure retry policy/worker because audit outbox is lifecycle-audit-specific."
+        why_existing_owners_were_insufficient: "Audit outbox owns audit-log delivery, not external HTTP side effects; executor is not a durable side-effect owner."
+        guard_preventing_duplicate_logic_from_returning: "Architecture guard plus required red tests for stale-running skip, duplicate enqueue, cancel race, no HTTP under lock, and wire idempotency."
+        net_flow_logic_surface_area: "reduced after T043"
+      next_required_task: T043
+
+  - id: T043
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "fix(flows-runtime): deliver webhooks through durable ref-only outbox."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t041-webhook-outbox-preflight.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t042-webhook-outbox-judge.md"
+      - ".codex/artifacts/claude-peer-loop-t042-webhook-outbox-judge-decision-verification-20260526T095140Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t043-webhook-outbox-worker.md"
+      - "backend/alembic/versions/*flow_run_webhook_deliveries*.py"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/src/intric/main/container/container.py"
+      - "backend/src/intric/flows/runtime/celery_app.py"
+      - "backend/src/intric/flows/runtime/tasks.py"
+      - "backend/src/intric/flows/runtime/executor.py"
+      - "backend/src/intric/flows/runtime/http_orchestration.py"
+      - "backend/src/intric/flows/runtime/step_attempt_runtime.py"
+      - "backend/src/intric/flows/runtime/step_execution_result.py"
+      - "backend/src/intric/flows/runtime/step_result_builder.py"
+      - "backend/src/intric/flows/runtime/step_handlers/http_post.py"
+      - "backend/src/intric/flows/runtime/flow_webhook_delivery.py"
+      - "backend/src/intric/flows/application/flow_webhook_delivery_policy.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_webhook_delivery_repo.py"
+      - "backend/tests/integration/flows/test_flow_webhook_outbox_repository.py"
+      - "backend/tests/integration/flows/test_flow_webhook_outbox_delivery.py"
+      - "backend/tests/integration/flows/test_flow_runtime_worker_contract.py"
+      - "backend/tests/unittests/flows/test_flow_runtime_step_handlers.py"
+      - "backend/tests/unittests/flows/test_step_attempt_runtime.py"
+      - "backend/tests/unittests/flows/test_http_orchestration.py"
+      - "backend/tests/unittests/flows/test_celery_runtime.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+    constraints:
+      - "Check watchdog before starting implementation and before committing."
+      - "Use Postgres/Alembic and complexity guidance before migration/schema/query work."
+      - "Run Claude plan gate before implementation and commit gate after implementation with 20-minute timeout."
+      - "Use Antigravity only if Claude and Codex disagree or a high-risk storage/lifecycle dispute remains."
+      - "No router/API/OpenAPI/frontend changes in this slice."
+      - "Do not persist resolved URL, headers, body, decrypted secret values, or request snapshots."
+      - "Do not create a generic outbox base class, event bus, plugin system, manager, processor, or one-implementation port."
+      - "Do not keep inline executor webhook delivery and outbox delivery live without deleting the inline path in the same slice."
+      - "Do not add FlowRuns.updated_at heartbeats for webhook-gated runs."
+      - "Do not add a new public run status."
+      - "Do not start retention, service-key identity, Flow AI Builder, frontend state cleanup, or broad schema hardening."
+    expected_output:
+      - "Persist completed HTTP-post step result and pending webhook row in one transaction."
+      - "Thread typed WebhookDeliveryIntent through success-plan/enqueue; do not rely on a boolean-only handoff."
+      - "Create flow_run_webhook_deliveries with audit-shaped delivery lifecycle columns, webhook identity columns, claim metadata, constraints, and partial indexes."
+      - "Claim due rows with a short transaction and commit before external HTTP."
+      - "Deliver via existing HTTP orchestration owners without importing FlowRunExecutor."
+      - "Mark success/failure/dead-letter with compare-and-set on row id and claim token."
+      - "Use sha256(stored idempotency_key).hexdigest() for outgoing Idempotency-Key."
+      - "Teach stale-running reconciliation to skip runs with pending webhook delivery rows via NOT EXISTS and partial index."
+      - "Delete inline executor webhook delivery helpers/branch and rewrite inline-delivery tests against durable outbox behavior."
+      - "Worker receipt with consolidation effect and commands run."
+    verify:
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_webhook_outbox_repository.py -q"
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_webhook_outbox_delivery.py -q"
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py::test_webhook_delivery_success_uses_handler_intent_for_fresh_sessions tests/integration/flows/test_flow_runtime_worker_contract.py::test_webhook_delivery_failure_persists_failed_state_for_fresh_sessions -q"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_step_attempt_runtime.py tests/unittests/flows/test_http_orchestration.py tests/unittests/flows/test_celery_runtime.py tests/unittests/flows/test_flow_architecture_guards.py -q"
+      - "cd backend && uv run ruff check src/intric/flows src/intric/database/tables/flow_tables.py src/intric/main/container/container.py tests/integration/flows tests/unittests/flows"
+      - "cd backend && uv run pyright src/intric/flows src/intric/database/tables/flow_tables.py src/intric/main/container/container.py tests/integration/flows tests/unittests/flows"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Implementation needs to persist resolved URL, headers, body, decrypted secret values, or request snapshots."
+      - "Cannot remove or hard-disable inline executor webhook delivery in the same slice."
+      - "Cannot thread typed WebhookDeliveryIntent to the enqueue site."
+      - "Cannot prove stale-running reconciliation skips runs whose pending work is owned by webhook delivery."
+      - "Would hold a database transaction or row lock during external HTTP."
+      - "Would import or instantiate FlowRunExecutor to deliver a webhook row."
+      - "flow_webhook_delivery_policy.py would become a pass-through wrapper instead of pure retry/dead-letter policy."
+      - "Requires router/API/OpenAPI/frontend changes."
+      - "Requires retention, service-key identity, Flow AI Builder, frontend state cleanup, or broad schema hardening."
     receipt: null
 
 checks:
   dirty_fingerprint: unknown
   last_verification:
     result: pass
-    task: T041
+    task: T042
     commands:
-      - "rg -n \"webhook.*outbox|outbox.*webhook|WebhookOutbox|FlowWebhook|webhook_delivery|delivery_intent|WebhookDelivery\" backend/src/intric backend/tests -g '*.py'"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t041-webhook-outbox-preflight --phase plan --iteration 1 --timeout-seconds 1200 ..."
-      - "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t041-webhook-outbox-synthesis-retry --phase synthesis --iteration 1 --timeout-seconds 1200 ..."
+      - "rg -n \"_deliver_step_webhook|_handle_webhook_delivery_failure|_mark_webhook_delivery_success\" backend/src/intric backend/tests -g '*.py'"
+      - "rg -n \"Idempotency-Key|idempotency_key|run.id.*step.step_id|step_id.*idempotency|webhook.*idempotency|sha256\" backend/src/intric backend/tests docs flows-clean-architecture-2026-05-25 -g '*.*'"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t042-webhook-outbox-judge --phase plan --iteration 1 --timeout-seconds 1200 ..."
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t042-webhook-outbox-judge --phase verification --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
