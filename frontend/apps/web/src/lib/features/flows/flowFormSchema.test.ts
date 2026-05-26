@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type { FlowRunContract } from "@intric/intric-js";
 
 import {
   buildFlowFormSchemaMetadata,
@@ -60,6 +61,33 @@ describe("flowFormSchema", () => {
         required: true,
         options: ["A", "B"],
         order: 2
+      }
+    ]);
+  });
+
+  it("accepts generated runtime contract fields with nullable option metadata", () => {
+    type GeneratedFormFields = NonNullable<FlowRunContract["form_fields"]>;
+
+    expectTypeOf<GeneratedFormFields>().toExtend<Parameters<typeof normalizeFlowFormFields>[0]>();
+    expect(
+      normalizeFlowFormFields([
+        {
+          name: " generated ",
+          label: null,
+          type: "select",
+          required: null,
+          options: null,
+          order: null
+        }
+      ])
+    ).toEqual([
+      {
+        name: " generated ",
+        label: "generated",
+        type: "select",
+        required: false,
+        options: [],
+        order: 1
       }
     ]);
   });

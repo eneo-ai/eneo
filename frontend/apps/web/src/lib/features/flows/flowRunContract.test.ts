@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type { FlowRunContract, FlowRunContractTemplateReadiness } from "@intric/intric-js";
 
 import {
   buildFlowRunIntent,
@@ -8,7 +9,6 @@ import {
   getBlockingTemplateReadinessItems,
   getFlowRunReviewFieldValue,
   getMissingFlowRunRequiredFields,
-  normalizeTemplateReadiness,
   readFlowRunFieldMultiValue,
   readFlowRunFieldValue
 } from "./flowRunContract";
@@ -59,14 +59,14 @@ describe("flowRunContract helpers", () => {
     });
   });
 
-  it("normalizes template readiness values into a list", () => {
-    expect(normalizeTemplateReadiness(null)).toEqual([]);
-    expect(
-      normalizeTemplateReadiness({
-        step_id: "step-1",
-        status: "ready"
-      })
-    ).toHaveLength(1);
+  it("keeps generated run contract collections as arrays", () => {
+    type ContractFormFields = NonNullable<FlowRunContract["form_fields"]>;
+    type ContractTemplateReadiness = NonNullable<FlowRunContract["template_readiness"]>;
+
+    expectTypeOf<ContractFormFields>().toMatchTypeOf<readonly unknown[]>();
+    expectTypeOf<{ fields: ContractFormFields }>().not.toMatchTypeOf<ContractFormFields>();
+    expectTypeOf<ContractTemplateReadiness>().toEqualTypeOf<FlowRunContractTemplateReadiness[]>();
+    expectTypeOf<FlowRunContractTemplateReadiness>().not.toMatchTypeOf<ContractTemplateReadiness>();
   });
 
   it("marks unavailable and needs_action template states as blocking", () => {

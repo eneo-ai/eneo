@@ -110,7 +110,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T008
+active_task: T022
 
 tasks:
   - id: T001
@@ -1340,26 +1340,101 @@ tasks:
   - id: T008
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Remove obsolete frontend generated-contract fallbacks once backend runtime contract ownership is canonical."
     allowed_files:
       - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte"
+      - "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts"
+      - "frontend/apps/web/src/lib/features/flows/flowFormSchema.test.ts"
       - "frontend/apps/web/src/lib/features/flows/flowRunContract.ts"
       - "frontend/apps/web/src/lib/features/flows/flowRunContract.test.ts"
     verify:
-      - "cd frontend/apps/web && ../../node_modules/.bin/vitest run src/lib/features/flows/flowRunContract.test.ts"
-      - "cd frontend/apps/web && ../../node_modules/.bin/eslint src/lib/features/flows/components/FlowRunDialog.svelte src/lib/features/flows/flowRunContract.ts src/lib/features/flows/flowRunContract.test.ts"
-      - "cd frontend/apps/web && ../../node_modules/.bin/prettier --check src/lib/features/flows/components/FlowRunDialog.svelte src/lib/features/flows/flowRunContract.ts src/lib/features/flows/flowRunContract.test.ts"
+      - "cd frontend/apps/web && ../../node_modules/.bin/vitest run src/lib/features/flows/flowRunContract.test.ts src/lib/features/flows/flowFormSchema.test.ts"
+      - "cd frontend/apps/web && ../../node_modules/.bin/eslint src/lib/features/flows/components/FlowRunDialog.svelte src/lib/features/flows/flowRunContract.ts src/lib/features/flows/flowRunContract.test.ts src/lib/features/flows/flowFormSchema.ts src/lib/features/flows/flowFormSchema.test.ts"
+      - "cd frontend/apps/web && ../../node_modules/.bin/prettier --check src/lib/features/flows/components/FlowRunDialog.svelte src/lib/features/flows/flowRunContract.ts src/lib/features/flows/flowRunContract.test.ts src/lib/features/flows/flowFormSchema.ts src/lib/features/flows/flowFormSchema.test.ts"
+      - "cd frontend/apps/web && tmp=.t008-tsconfig.json && printf '%s\\n' '{' '  \"extends\": \"./tsconfig.json\",' '  \"compilerOptions\": {' '    \"allowJs\": false,' '    \"checkJs\": false,' '    \"noEmit\": true' '  },' '  \"include\": [' '    \"src/lib/features/flows/flowRunContract.ts\",' '    \"src/lib/features/flows/flowFormSchema.ts\",' '    \"src/lib/features/flows/flowRunContract.test.ts\",' '    \"src/lib/features/flows/flowFormSchema.test.ts\"' '  ],' '  \"exclude\": []' '}' > \"$tmp\" && ../../node_modules/.bin/tsc --project \"$tmp\" --noEmit; rc=$?; rm -f \"$tmp\"; exit $rc"
+      - "cd frontend/apps/web && ../../node_modules/.bin/svelte-check --workspace . --no-tsconfig --threshold error --diagnostic-sources svelte,css"
+      - "git diff --check"
+    judge_adjustment:
+      reason: "Claude plan gate rejected a dialog-local FormFieldPublic projection as a new parallel transformation path. Expanded T008 to include the existing form-field normalization owner and its test so the Worker can deepen the owner instead of encoding an allowed_files artifact in runtime code."
+      evidence:
+        - "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts:62"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:124"
+        - ".codex/artifacts/claude-peer-loop-t008-generated-contract-fallbacks-revised-plan-20260525T234234Z.md"
     stop_if:
       - "Backend generated types are stale."
       - "Runtime contract shape is not canonical yet."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Removed obsolete frontend generated-contract fallbacks for Flow run contracts. The dialog now consumes generated form_fields and template_readiness array shapes directly; form-field normalization ownership was deepened in flowFormSchema instead of adding a dialog-local adapter; the single-object template_readiness compatibility helper and stale compatibility test were deleted."
+      evidence:
+        - "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts:22"
+        - "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts:73"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:123"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:138"
+        - "frontend/apps/web/src/lib/features/flows/flowRunContract.ts:37"
+        - "frontend/apps/web/src/lib/features/flows/flowRunContract.test.ts:62"
+        - "frontend/apps/web/src/lib/features/flows/flowFormSchema.test.ts:68"
+      consolidation_effect:
+        reused_existing_owner: "normalizeFlowFormFields in flowFormSchema.ts; generated FlowRunContract from @intric/intric-js remains the runtime contract owner."
+        logic_moved_from: "No runtime logic moved; the type boundary was deepened at the existing owner."
+        logic_deleted: "FlowRunDialog form_fields.fields fallback, FlowFormField[] cast, normalizeTemplateReadiness helper, and single-object template_readiness compatibility test."
+        duplicate_path_removed: "Frontend mirror of old run-contract wrapper/single-object shapes."
+        new_code_added: "FlowFormFieldInput structural input type plus type-level and runtime tests for generated contract compatibility."
+        why_existing_owners_were_insufficient: "Existing owners were sufficient after T008 allowed_files expanded to include flowFormSchema.ts; a dialog-local projection was rejected by Claude as parallel logic."
+        guard_test_preventing_duplicate_logic_from_returning: "expectTypeOf assertions in flowRunContract.test.ts and flowFormSchema.test.ts, runtime nullable-form-field normalization test, focused TS check, and added-line anti-leak grep."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: null
+      commands:
+        - cmd: "cd frontend/apps/web && ../../node_modules/.bin/vitest run src/lib/features/flows/flowRunContract.test.ts src/lib/features/flows/flowFormSchema.test.ts"
+          status: pass
+          output: "2 files passed, 24 tests passed"
+        - cmd: "cd frontend/apps/web && ../../node_modules/.bin/eslint src/lib/features/flows/components/FlowRunDialog.svelte src/lib/features/flows/flowRunContract.ts src/lib/features/flows/flowRunContract.test.ts src/lib/features/flows/flowFormSchema.ts src/lib/features/flows/flowFormSchema.test.ts"
+          status: pass
+        - cmd: "cd frontend/apps/web && ../../node_modules/.bin/prettier --check src/lib/features/flows/components/FlowRunDialog.svelte src/lib/features/flows/flowRunContract.ts src/lib/features/flows/flowRunContract.test.ts src/lib/features/flows/flowFormSchema.ts src/lib/features/flows/flowFormSchema.test.ts"
+          status: pass
+        - cmd: "cd frontend/apps/web && tmp=.t008-tsconfig.json && ... && ../../node_modules/.bin/tsc --project \"$tmp\" --noEmit"
+          status: pass
+          output: "Focused temporary tsconfig included touched TS/test files with allowJs=false and checkJs=false."
+        - cmd: "cd frontend/apps/web && ../../node_modules/.bin/svelte-check --workspace . --no-tsconfig --threshold error --diagnostic-sources svelte,css"
+          status: pass
+          output: "0 errors, 1 warning"
+        - cmd: "cd frontend/apps/web && NODE_ENV=production ../../node_modules/.bin/svelte-kit sync && ../../node_modules/.bin/svelte-check --tsconfig ./tsconfig.json --threshold error"
+          status: fail
+          output: "Existing unrelated diagnostics: frontend/packages/intric-js/src/client/stream.js implicit-any parameters plus generated/JS declaration issues. Focused TS and Svelte compiler checks passed."
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "git diff -- frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte frontend/apps/web/src/lib/features/flows/flowRunContract.ts frontend/apps/web/src/lib/features/flows/flowFormSchema.ts | rg -n '^\\+.*(as any|@ts-ignore|as \\{ fields\\?:|as FlowFormField\\[\\]|as components\\[|as unknown as|as Pick<|as ReadonlyArray<|FlowRunContract\\[\"template_readiness\"\\]|normalizeTemplateReadiness)'"
+          status: pass
+          output: "No matches."
+        - cmd: "Temporary clean checkout verification with only the five T008 source/test files patched"
+          status: pass
+          output: "Vitest, ESLint, Prettier, focused TS check, and Svelte compiler diagnostics passed; /tmp/eneo-t008-clean and /tmp/t008-source.patch removed."
+      peer_review:
+        claude_plan:
+          artifacts:
+            - ".codex/artifacts/claude-peer-loop-t008-generated-contract-fallbacks-plan-20260525T233756Z.md"
+            - ".codex/artifacts/claude-peer-loop-t008-generated-contract-fallbacks-revised-plan-20260525T234234Z.md"
+            - ".codex/artifacts/claude-peer-loop-t008-generated-contract-fallbacks-owner-based-plan-20260525T234749Z.md"
+          verdict: "Final plan GREEN_LIGHT yes; MIN_SCORE 8 after expanding allowed_files to deepen flowFormSchema owner."
+        claude_commit_gate:
+          artifact: ".codex/artifacts/claude-peer-loop-t008-generated-contract-fallbacks-implementation-review-20260525T235846Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8; no blockers."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t008-generated-contract-fallbacks-antigravity-synthesis-20260526T000047Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 9; no blockers."
+      notes:
+        - "Accepted Claude's blocker that a dialog-local FormFieldPublic projection would encode allowed_files process as runtime code; expanded T008 to include the canonical form-field owner instead."
+        - "Antigravity's concrete full-svelte-check comments were treated as advisory and verified locally. The real full TS-backed check remains blocked by unrelated JS/package declaration diagnostics; focused TS/type tests and Svelte compiler diagnostics passed."
+        - "Clean checkout verification used a symlink to frontend/node_modules. The current verify commands do not write snapshots or other artifacts through that symlink."
+        - "Kept accepted_mimetypes normalization unchanged because generated FlowRuntimeInputContractPublic.accepted_mimetypes is still optional."
+      next_task: T022
 
   - id: T022
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: medium
     objective: "Add a minimal API consumer journey contract test after published runtime contract ownership is canonical."
     allowed_files:

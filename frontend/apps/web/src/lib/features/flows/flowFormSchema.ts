@@ -19,6 +19,15 @@ export type FlowFormField = {
   order?: number;
 };
 
+export type FlowFormFieldInput = {
+  name: string;
+  label?: string | null;
+  type?: FlowFormFieldType | string | null;
+  required?: boolean | null;
+  options?: string[] | null;
+  order?: number | null;
+};
+
 export type FlowFormSchemaMetadata = {
   fields: FlowFormField[];
 };
@@ -44,7 +53,7 @@ const FLOW_FORM_STEP_ALIAS_PATTERN = /^step_\d+($|[._])/i;
 export type FlowFormFieldNameIssue = "namespace_head" | "primary_input_key" | "step_alias" | "dot";
 
 export function normalizeFlowFormFieldType(
-  type: FlowFormFieldType | string | undefined
+  type: FlowFormFieldType | string | null | undefined
 ): NormalizedFlowFormFieldType {
   const normalized = (type ?? "text").trim().toLowerCase();
   if (LEGACY_TEXT_TYPES.has(normalized)) return "text";
@@ -55,11 +64,15 @@ export function normalizeFlowFormFieldType(
   return "text";
 }
 
-export function flowFormFieldHasOptions(type: FlowFormFieldType | string | undefined): boolean {
+export function flowFormFieldHasOptions(
+  type: FlowFormFieldType | string | null | undefined
+): boolean {
   return OPTION_FIELD_TYPES.has(normalizeFlowFormFieldType(type));
 }
 
-export function normalizeFlowFormFields(fields: FlowFormField[]): NormalizedFlowFormField[] {
+export function normalizeFlowFormFields(
+  fields: ReadonlyArray<FlowFormFieldInput>
+): NormalizedFlowFormField[] {
   return [...fields]
     .map((field, index) => ({
       name: typeof field.name === "string" ? field.name : "",

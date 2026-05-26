@@ -1,8 +1,4 @@
-import type {
-  FlowRunContract,
-  FlowRunContractTemplateReadiness,
-  FlowRunStepInputs
-} from "@intric/intric-js";
+import type { FlowRunContractTemplateReadiness, FlowRunStepInputs } from "@intric/intric-js";
 import {
   getFlowFormFieldRuntimeKey,
   type NormalizedFlowFormField
@@ -37,17 +33,6 @@ export type ReusedFlowRunInput = {
   formValues: Record<string, unknown>;
   freeformText: string;
 };
-
-export function normalizeTemplateReadiness(
-  templateReadiness:
-    | FlowRunContract["template_readiness"]
-    | FlowRunContractTemplateReadiness
-    | null
-    | undefined
-): FlowRunContractTemplateReadiness[] {
-  if (!templateReadiness) return [];
-  return Array.isArray(templateReadiness) ? templateReadiness : [templateReadiness];
-}
 
 export function getBlockingTemplateReadinessItems(
   readinessItems: FlowRunContractTemplateReadiness[]

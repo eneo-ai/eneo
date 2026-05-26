@@ -46,15 +46,14 @@
   } from "$lib/features/audio/flowRunRecordingSession";
   import { diffContractSnapshot } from "$lib/features/audio/recordingSession";
   import type { FlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
-  import { normalizeFlowFormFields, type FlowFormField } from "$lib/features/flows/flowFormSchema";
+  import { normalizeFlowFormFields } from "$lib/features/flows/flowFormSchema";
   import {
     buildFlowRunInputPayload,
     buildFlowRunIntent,
     buildStepInputsPayload,
     computeReusedFlowRunInput,
     getFlowRunReviewFieldValue,
-    getMissingFlowRunRequiredFields,
-    normalizeTemplateReadiness
+    getMissingFlowRunRequiredFields
   } from "$lib/features/flows/flowRunContract";
   import {
     buildFlowRunBlockers,
@@ -121,13 +120,7 @@
   const locale = (getLocale() === "en" ? "en" : "sv") as FlowLocale;
   const labels = getFlowRunDialogLabels(locale);
 
-  const formFields = $derived.by(() =>
-    normalizeFlowFormFields(
-      ((runContract?.form_fields as { fields?: FlowFormField[] } | undefined)?.fields ??
-        runContract?.form_fields ??
-        []) as FlowFormField[]
-    )
-  );
+  const formFields = $derived.by(() => normalizeFlowFormFields(runContract?.form_fields ?? []));
   const hasFormFields = $derived(formFields.length > 0);
   const hasRequiredFormFields = $derived(formFields.some((field) => field.required));
   const missingRequiredFields = $derived.by(() =>
@@ -142,9 +135,7 @@
   const stepsRequiringInput = $derived(
     (runContract?.steps_requiring_input ?? []).map(normalizeRuntimeStepInput)
   );
-  const templateReadinessItems = $derived(
-    normalizeTemplateReadiness(runContract?.template_readiness)
-  );
+  const templateReadinessItems = $derived(runContract?.template_readiness ?? []);
   const hasRuntimeFileInputs = $derived(stepsRequiringInput.length > 0);
   const showFreeformTextInput = $derived(!hasFormFields && !hasRuntimeFileInputs);
   const hasTemplateOverview = $derived(templateReadinessItems.length > 0);
