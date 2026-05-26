@@ -110,10 +110,6 @@ async def _create_published_flow(
         ),
         tenant_id=admin_user.tenant_id,
     )
-    flow = await flow_repo.update(
-        flow=flow.model_copy(update={"published_version": 1}),
-        tenant_id=admin_user.tenant_id,
-    )
     await version_repo.create(
         flow_id=flow.id,
         version=1,
@@ -129,6 +125,10 @@ async def _create_published_flow(
         },
         tenant_id=admin_user.tenant_id,
     )
+    flow = await flow_repo.update(
+        flow=flow.model_copy(update={"published_version": 1}),
+        tenant_id=admin_user.tenant_id,
+    )
     return flow
 
 
@@ -142,7 +142,7 @@ async def _create_run(
     return await run_repo.create(
         flow_id=flow.id,
         flow_version=1,
-        user_id=admin_user.id,
+        principal_user_id=admin_user.id,
         tenant_id=admin_user.tenant_id,
         input_payload_json={"case": case},
         preseed_steps=[

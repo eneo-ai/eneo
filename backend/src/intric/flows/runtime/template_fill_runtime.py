@@ -40,10 +40,9 @@ class TemplateFillRuntimeDeps:
     variable_resolver: FlowVariableResolver
     file_repo: FileRepository
     apply_output_cap: ApplyOutputCap
-    user_id: UUID
+    principal: FlowPrincipal
     logger: logging.Logger
     template_asset_service: Any | None = None
-    principal: FlowPrincipal | None = None
 
 
 async def execute_template_fill_step(
@@ -162,11 +161,7 @@ async def execute_template_fill_step(
                     "mimetype": mimetype,
                     "checksum": output_checksum,
                     "size": len(blob),
-                    **(
-                        deps.principal.file_owner_fields()
-                        if deps.principal is not None
-                        else {"user_id": deps.user_id}
-                    ),
+                    **deps.principal.file_owner_fields(),
                     "tenant_id": run.tenant_id,
                 }
             )

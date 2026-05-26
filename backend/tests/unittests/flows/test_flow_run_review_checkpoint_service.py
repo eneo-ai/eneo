@@ -35,7 +35,6 @@ def _run(user, flow_id) -> FlowRun:
         flow_version=1,
         principal_type="user",
         principal_user_id=user.id,
-        user_id=user.id,
         tenant_id=user.tenant_id,
         trace_id=uuid4(),
         status=FlowRunStatus.AWAITING_REVIEW,

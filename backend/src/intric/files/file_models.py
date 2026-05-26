@@ -65,7 +65,6 @@ class FileInfo(InDB, FileBase):
     owner_type: PrincipalType | None = None
     owner_user_id: UUID | None = None
     owner_api_key_id: UUID | None = None
-    user_id: UUID | None = None
     tenant_id: UUID
 
 
@@ -73,7 +72,6 @@ class FileCreate(FileBaseWithContent):
     owner_type: PrincipalType | None = None
     owner_user_id: UUID | None = None
     owner_api_key_id: UUID | None = None
-    user_id: UUID | None = None
     tenant_id: UUID
 
 
@@ -124,7 +122,9 @@ class SignedURLRequest(BaseModel):
 
 
 class SignedURLResponse(BaseModel):
-    model_config = ConfigDict(json_schema_extra={"example": SIGNED_URL_RESPONSE_EXAMPLE})
+    model_config = ConfigDict(
+        json_schema_extra={"example": SIGNED_URL_RESPONSE_EXAMPLE}
+    )
 
     url: str
     expires_at: int  # Unix timestamp when the URL will expire

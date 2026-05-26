@@ -161,10 +161,6 @@ async def _create_review_checkpoint_scenario(
         ),
         tenant_id=admin_user.tenant_id,
     )
-    flow = await flow_repo.update(
-        flow=flow.model_copy(update={"published_version": 1}),
-        tenant_id=admin_user.tenant_id,
-    )
     first_step, second_step = flow.steps
     assert first_step.review_policy == FlowStepReviewPolicy(
         mode=FlowStepReviewMode.VIEW
@@ -190,12 +186,16 @@ async def _create_review_checkpoint_scenario(
         },
         tenant_id=admin_user.tenant_id,
     )
+    flow = await flow_repo.update(
+        flow=flow.model_copy(update={"published_version": 1}),
+        tenant_id=admin_user.tenant_id,
+    )
 
     run_repo = FlowRunRepository(session=session, factory=FlowFactory())
     run = await run_repo.create(
         flow_id=_require_uuid(flow.id),
         flow_version=1,
-        user_id=admin_user.id,
+        principal_user_id=admin_user.id,
         tenant_id=admin_user.tenant_id,
         input_payload_json={"question": "Needs review"},
         preseed_steps=[

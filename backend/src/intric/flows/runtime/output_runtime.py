@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Protocol
+from uuid import UUID
 
 from intric.files.file_models import FileCreate, FileType
 from intric.flows.domain.flow import JsonObject
@@ -24,6 +25,9 @@ from intric.flows.runtime.output_formats.base import (
     ValidateAgainstContractFn,
 )
 
+if TYPE_CHECKING:
+    from intric.files.file_models import File
+
 
 class RuntimeOutputStep(Protocol):
     @property
@@ -38,27 +42,30 @@ class RuntimeOutputStep(Protocol):
 
 class RuntimeOutputRun(Protocol):
     @property
-    def tenant_id(self) -> Any: ...
+    def tenant_id(self) -> UUID: ...
+
+
+class RuntimeOutputFileRepository(Protocol):
+    async def add(self, file: FileCreate) -> "File": ...
 
 
 @dataclass(frozen=True, slots=True)
 class TypedOutputProcessingResult:
     structured_output: JsonStructuredValue | None
-    artifacts: list[dict[str, Any]] | None
+    artifacts: list[dict[str, str | int]] | None
     diagnostics: list[StepDiagnostic]
 
 
 @dataclass(frozen=True)
 class OutputRuntimeDeps:
-    file_repo: Any
-    user_id: Any
+    file_repo: RuntimeOutputFileRepository
+    principal: FlowPrincipal
     compile_validators: Callable[[list[Any]], dict[tuple[str, int], Any]]
     parse_json_output: ParseJsonOutputFn
     validate_against_contract: ValidateAgainstContractFn
     render_document: RenderDocumentFn
     render_structured_document: RenderStructuredDocumentFn
     document_render_limits: DocumentRenderLimits = DEFAULT_DOCUMENT_RENDER_LIMITS
-    principal: FlowPrincipal | None = None
 
 
 async def process_typed_output(
@@ -118,11 +125,7 @@ async def _persist_rendered_artifact(
                 "mimetype": artifact.mimetype,
                 "checksum": checksum,
                 "size": len(artifact.blob),
-                **(
-                    deps.principal.file_owner_fields()
-                    if deps.principal is not None
-                    else {"user_id": deps.user_id}
-                ),
+                **deps.principal.file_owner_fields(),
                 "tenant_id": run.tenant_id,
             }
         )

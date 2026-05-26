@@ -91,7 +91,7 @@ async def test_rerun_step_builds_repository_command(user):
     file_a_id = uuid4()
     file_b_id = uuid4()
     expected_file_ids = sorted({file_a_id, file_b_id}, key=str)
-    file_repo.get_list_by_id_and_user.return_value = [
+    file_repo.get_list_by_id_for_owner.return_value = [
         SimpleNamespace(id=file_id, mimetype="application/pdf")
         for file_id in expected_file_ids
     ]
@@ -127,9 +127,11 @@ async def test_rerun_step_builds_repository_command(user):
         tenant_id=user.tenant_id,
         step_id=root_step.id,
     )
-    file_repo.get_list_by_id_and_user.assert_awaited_once_with(
+    file_repo.get_list_by_id_for_owner.assert_awaited_once_with(
         ids=expected_file_ids,
-        user_id=user.id,
+        owner_type="user",
+        owner_user_id=user.id,
+        owner_api_key_id=None,
         include_transcription=False,
     )
     expected_fingerprint = build_rerun_request_fingerprint(

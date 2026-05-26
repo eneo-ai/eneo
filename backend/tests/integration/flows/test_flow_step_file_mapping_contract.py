@@ -93,7 +93,6 @@ def _file(
         owner_type="user",
         owner_user_id=user_id,
         owner_api_key_id=None,
-        user_id=user_id,
         tenant_id=tenant_id,
     )
 
@@ -157,13 +156,13 @@ async def _create_running_step_file_flow(
         ),
         tenant_id=admin_user.tenant_id,
     )
-    flow = await flow_repo.update(
-        flow=flow.model_copy(update={"published_version": 1}),
-        tenant_id=admin_user.tenant_id,
-    )
     await _create_version(
         session=session,
         flow=flow,
+        tenant_id=admin_user.tenant_id,
+    )
+    flow = await flow_repo.update(
+        flow=flow.model_copy(update={"published_version": 1}),
         tenant_id=admin_user.tenant_id,
     )
     step = flow.steps[0]
@@ -171,7 +170,6 @@ async def _create_running_step_file_flow(
     run = await run_repo.create(
         flow_id=flow.id,
         flow_version=1,
-        user_id=admin_user.id,
         principal_user_id=admin_user.id,
         tenant_id=admin_user.tenant_id,
         input_payload_json={"expected_flow_version": 1},
@@ -249,20 +247,19 @@ async def test_step_inputs_snapshot_matches_input_file_projection(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        flow = flow.model_copy(update={"published_version": 1})
-        flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
         await _create_version(
             session=session,
             flow=flow,
             tenant_id=admin_user.tenant_id,
         )
+        flow = flow.model_copy(update={"published_version": 1})
+        flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
         step = flow.steps[0]
 
         run_repo = FlowRunRepository(session=session, factory=FlowFactory())
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
             principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={
@@ -378,20 +375,19 @@ async def test_step_result_files_are_attempt_scoped_and_deduplicated(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        flow = flow.model_copy(update={"published_version": 1})
-        flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
         await _create_version(
             session=session,
             flow=flow,
             tenant_id=admin_user.tenant_id,
         )
+        flow = flow.model_copy(update={"published_version": 1})
+        flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
         step = flow.steps[0]
 
         run_repo = FlowRunRepository(session=session, factory=FlowFactory())
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
             principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"expected_flow_version": 1},

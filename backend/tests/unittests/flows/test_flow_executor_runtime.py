@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 import pytest
 
 import intric.flows.runtime.executor as executor_module
+from intric.authentication.principal_types import PrincipalType
 from intric.flows.assistant_execution_snapshot import (
     build_assistant_execution_snapshot,
     stable_hash,
@@ -64,7 +65,8 @@ def _run(*, status: FlowRunStatus, user) -> FlowRun:
         id=uuid4(),
         flow_id=uuid4(),
         flow_version=1,
-        user_id=user.id,
+        principal_type=PrincipalType.USER,
+        principal_user_id=user.id,
         tenant_id=user.tenant_id,
         trace_id=uuid4(),
         status=status,
@@ -1505,9 +1507,9 @@ async def test_apply_output_cap_persists_file_when_over_limit(user):
 async def test_apply_output_cap_handles_utf8_byte_limit(user):
     executor, _, _, _ = _build_executor(user)
     executor.max_inline_text_bytes = 5
-    run = _run(status=FlowRunStatus.RUNNING, user=user).model_copy(
-        update={"user_id": None}
-    )
+    file_id = uuid4()
+    executor.file_repo.add = AsyncMock(return_value=SimpleNamespace(id=file_id))
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
     step = SimpleNamespace(step_order=1)
     utf8_text = "ååå"  # 6 bytes in UTF-8, exceeds 5-byte cap.
 
@@ -1518,7 +1520,10 @@ async def test_apply_output_cap_handles_utf8_byte_limit(user):
     )
 
     assert persisted_text == utf8_text[:4096]
-    assert file_ids == []
+    assert file_ids == [file_id]
+    create_arg = executor.file_repo.add.await_args.args[0]
+    assert create_arg.owner_type == PrincipalType.USER
+    assert create_arg.owner_user_id == user.id
 
 
 @pytest.mark.asyncio
@@ -3607,7 +3612,7 @@ async def test_file_cache_hit(user):
     step_id = uuid4()
     file_id = uuid4()
     fake_file = SimpleNamespace(id=file_id, text="doc text")
-    executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[fake_file])
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
 
     state = RunExecutionState(
         completed_by_order={},
@@ -3647,7 +3652,7 @@ async def test_file_cache_hit(user):
         step=step, context=context, run=run, prior_results=[], state=state
     )
 
-    assert executor.file_repo.get_list_by_id_and_user.call_count == 1
+    assert executor.file_repo.get_list_by_id_for_owner.call_count == 1
 
 
 def _make_audit_service():

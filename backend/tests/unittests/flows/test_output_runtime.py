@@ -8,7 +8,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from intric.authentication.principal_types import PrincipalType
 from intric.files.file_models import FileType
+from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from intric.flows.runtime.output_runtime import (
     OutputRuntimeDeps,
@@ -30,6 +32,13 @@ class _Run:
     tenant_id: UUID
 
 
+def _user_principal(user_id: UUID | None = None) -> FlowPrincipal:
+    return FlowPrincipal(
+        principal_type=PrincipalType.USER,
+        principal_user_id=user_id or uuid4(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_process_typed_output_json_with_contract_validation() -> None:
     step = _Step(step_order=1, output_type="json", output_contract={"type": "object"})
@@ -37,7 +46,7 @@ async def test_process_typed_output_json_with_contract_validation() -> None:
 
     deps = OutputRuntimeDeps(
         file_repo=SimpleNamespace(add=AsyncMock()),
-        user_id=uuid4(),
+        principal=_user_principal(),
         compile_validators=lambda steps: {("output", 1): object()},
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -74,7 +83,7 @@ async def test_process_typed_output_json_without_compiled_validator_skips_contra
 
     deps = OutputRuntimeDeps(
         file_repo=SimpleNamespace(add=AsyncMock()),
-        user_id=uuid4(),
+        principal=_user_principal(),
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=_unexpected_validate,
@@ -107,10 +116,11 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
     mimetype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     filename = "step-3-output.docx"
     user_id = uuid4()
+    principal = _user_principal(user_id)
 
     deps = OutputRuntimeDeps(
         file_repo=file_repo,
-        user_id=user_id,
+        principal=principal,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -148,7 +158,9 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
     file_create = file_repo.add.await_args.args[0]
     assert file_create.file_type == FileType.DOCUMENT
     assert file_create.blob == blob
-    assert file_create.user_id == user_id
+    assert file_create.owner_type == PrincipalType.USER
+    assert file_create.owner_user_id == user_id
+    assert file_create.owner_api_key_id is None
     assert file_create.tenant_id == run.tenant_id
 
 
@@ -165,7 +177,7 @@ async def test_process_typed_output_pdf_preserves_pdf_bytes_from_model() -> None
 
     deps = OutputRuntimeDeps(
         file_repo=file_repo,
-        user_id=uuid4(),
+        principal=_user_principal(),
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -200,7 +212,7 @@ async def test_process_typed_output_pdf_bytes_obeys_document_render_limits() -> 
 
     deps = OutputRuntimeDeps(
         file_repo=file_repo,
-        user_id=uuid4(),
+        principal=_user_principal(),
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -253,7 +265,7 @@ async def test_process_typed_output_docx_renders_validated_structured_contract()
 
     deps = OutputRuntimeDeps(
         file_repo=file_repo,
-        user_id=uuid4(),
+        principal=_user_principal(),
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"structured": 1},
         validate_against_contract=_validate,
@@ -320,7 +332,7 @@ async def test_process_typed_output_prunes_extra_item_properties_before_validati
 
     deps = OutputRuntimeDeps(
         file_repo=SimpleNamespace(add=AsyncMock()),
-        user_id=uuid4(),
+        principal=_user_principal(),
         compile_validators=lambda steps: {("output", 4): object()},
         parse_json_output=lambda text: parsed,
         validate_against_contract=_validate,
@@ -366,7 +378,7 @@ async def test_process_typed_output_docx_treats_empty_contract_as_structured() -
 
     deps = OutputRuntimeDeps(
         file_repo=file_repo,
-        user_id=uuid4(),
+        principal=_user_principal(),
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: ["legacy", "data"],
         validate_against_contract=lambda data, schema, label: None,
@@ -401,7 +413,7 @@ async def test_process_typed_output_docx_without_contract_does_not_parse_json() 
 
     deps = OutputRuntimeDeps(
         file_repo=file_repo,
-        user_id=uuid4(),
+        principal=_user_principal(),
         compile_validators=lambda steps: {},
         parse_json_output=_parse_not_expected,
         validate_against_contract=lambda data, schema, label: None,
@@ -437,7 +449,7 @@ async def test_process_typed_output_unknown_type_returns_empty() -> None:
 
     deps = OutputRuntimeDeps(
         file_repo=file_repo,
-        user_id=uuid4(),
+        principal=_user_principal(),
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -474,7 +486,7 @@ async def test_process_typed_output_json_contract_violation_propagates() -> None
 
     deps = OutputRuntimeDeps(
         file_repo=file_repo,
-        user_id=uuid4(),
+        principal=_user_principal(),
         compile_validators=lambda steps: {("output", 7): object()},
         parse_json_output=lambda text: {"ok": True},
         validate_against_contract=_raise_contract,
@@ -508,7 +520,7 @@ async def test_process_typed_output_render_failure_propagates() -> None:
 
     deps = OutputRuntimeDeps(
         file_repo=file_repo,
-        user_id=uuid4(),
+        principal=_user_principal(),
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
@@ -539,7 +551,7 @@ async def test_process_typed_output_file_repo_failure_propagates() -> None:
 
     deps = OutputRuntimeDeps(
         file_repo=file_repo,
-        user_id=uuid4(),
+        principal=_user_principal(),
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,

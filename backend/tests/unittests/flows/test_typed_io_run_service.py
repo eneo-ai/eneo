@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 
+from intric.authentication.principal_types import PrincipalType
 from intric.flows.application.flow_run_service import FlowRunService
 from intric.flows.flow import (
     Flow,
@@ -137,7 +138,8 @@ async def test_create_run_stores_step_inputs_without_top_level_file_ids(user):
         id=uuid4(),
         flow_id=flow.id,
         flow_version=1,
-        user_id=user.id,
+        principal_type=PrincipalType.USER,
+        principal_user_id=user.id,
         tenant_id=user.tenant_id,
         trace_id=uuid4(),
         status=FlowRunStatus.QUEUED,
@@ -200,7 +202,8 @@ async def test_create_run_without_step_inputs_preserves_inline_payload(user):
         id=uuid4(),
         flow_id=flow.id,
         flow_version=1,
-        user_id=user.id,
+        principal_type=PrincipalType.USER,
+        principal_user_id=user.id,
         tenant_id=user.tenant_id,
         trace_id=uuid4(),
         status=FlowRunStatus.QUEUED,

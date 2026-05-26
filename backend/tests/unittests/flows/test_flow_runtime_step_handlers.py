@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 
+from intric.authentication.principal_types import PrincipalType
 from intric.flows.domain.flow import FlowRun, FlowRunStatus
 from intric.flows.enums import FlowOutputMode
 from intric.flows.runtime.models import (
@@ -43,7 +44,8 @@ def _run() -> FlowRun:
         id=uuid4(),
         flow_id=uuid4(),
         flow_version=1,
-        user_id=uuid4(),
+        principal_type=PrincipalType.USER,
+        principal_user_id=uuid4(),
         tenant_id=uuid4(),
         trace_id=uuid4(),
         status=FlowRunStatus.RUNNING,

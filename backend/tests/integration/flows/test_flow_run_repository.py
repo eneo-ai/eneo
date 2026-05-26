@@ -124,8 +124,6 @@ async def test_create_run_preseeds_pending_step_results(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        flow = flow.model_copy(update={"published_version": 1})
-        flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
         version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
         await version_repo.create(
             flow_id=flow.id,
@@ -147,12 +145,14 @@ async def test_create_run_preseeds_pending_step_results(
             },
             tenant_id=admin_user.tenant_id,
         )
+        flow = flow.model_copy(update={"published_version": 1})
+        flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
 
         run_repo = FlowRunRepository(session=session, factory=FlowFactory())
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"question": "What happened?"},
             preseed_steps=[
@@ -268,7 +268,7 @@ async def test_list_runs_filters_by_flow_id(
         await run_repo.create(
             flow_id=first_flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "one"},
             preseed_steps=[
@@ -282,7 +282,7 @@ async def test_list_runs_filters_by_flow_id(
         await run_repo.create(
             flow_id=second_flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "two"},
             preseed_steps=[
@@ -358,7 +358,7 @@ async def test_list_token_usage_for_runs_sums_provider_usage_across_attempts(
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "token-usage"},
             preseed_steps=[
@@ -496,7 +496,7 @@ async def test_list_token_usage_for_runs_returns_sparse_map_when_usage_is_empty(
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "empty-token-usage"},
             preseed_steps=[
@@ -565,8 +565,6 @@ async def test_get_idempotent_run_returns_existing_run_and_fingerprint(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        flow = flow.model_copy(update={"published_version": 1})
-        flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
         version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
         await version_repo.create(
             flow_id=flow.id,
@@ -575,12 +573,14 @@ async def test_get_idempotent_run_returns_existing_run_and_fingerprint(
             definition_json={"steps": []},
             tenant_id=admin_user.tenant_id,
         )
+        flow = flow.model_copy(update={"published_version": 1})
+        flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
 
         run_repo = FlowRunRepository(session=session, factory=FlowFactory())
         created = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"question": "What happened?"},
             preseed_steps=[],
@@ -591,7 +591,10 @@ async def test_get_idempotent_run_returns_existing_run_and_fingerprint(
         existing = await run_repo.get_idempotent_run(
             tenant_id=admin_user.tenant_id,
             flow_id=flow.id,
-            user_id=admin_user.id,
+            principal=FlowPrincipal(
+                principal_type=PrincipalType.USER,
+                principal_user_id=admin_user.id,
+            ),
             idempotency_key="idem-123",
         )
 
@@ -633,8 +636,6 @@ async def test_idempotency_key_isolated_between_user_and_service_key_principals(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        flow = flow.model_copy(update={"published_version": 1})
-        flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
         version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
         await version_repo.create(
             flow_id=flow.id,
@@ -643,6 +644,8 @@ async def test_idempotency_key_isolated_between_user_and_service_key_principals(
             definition_json={"steps": []},
             tenant_id=admin_user.tenant_id,
         )
+        flow = flow.model_copy(update={"published_version": 1})
+        flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
 
         service_key_id = uuid4()
         await session.execute(
@@ -670,7 +673,6 @@ async def test_idempotency_key_isolated_between_user_and_service_key_principals(
         user_run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
             principal_type=PrincipalType.USER.value,
             principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
@@ -682,7 +684,6 @@ async def test_idempotency_key_isolated_between_user_and_service_key_principals(
         service_key_run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=None,
             principal_type=PrincipalType.SERVICE_KEY.value,
             principal_user_id=None,
             principal_api_key_id=service_key_id,
@@ -771,7 +772,7 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
         queued_run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "queued"},
             preseed_steps=[
@@ -785,7 +786,7 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
         running_run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "running"},
             preseed_steps=[
@@ -799,7 +800,7 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
         completed_run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "completed"},
             preseed_steps=[
@@ -895,7 +896,7 @@ async def test_create_run_rejects_cross_tenant_flow_reference(
         await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "tenant-a"},
             preseed_steps=[
@@ -911,7 +912,7 @@ async def test_create_run_rejects_cross_tenant_flow_reference(
             await run_repo.create(
                 flow_id=flow.id,
                 flow_version=1,
-                user_id=admin_user.id,
+                principal_user_id=admin_user.id,
                 tenant_id=other_tenant_id,
                 input_payload_json={"case": "tenant-b"},
                 preseed_steps=[
@@ -975,7 +976,7 @@ async def test_terminalization_is_idempotent_after_terminal_transition(
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "status-race"},
             preseed_steps=[
@@ -1068,7 +1069,7 @@ async def test_claim_step_result_is_single_winner(
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "cas"},
             preseed_steps=[
@@ -1144,7 +1145,7 @@ async def test_claim_step_result_is_single_winner_under_concurrency(
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "concurrent-claim"},
             preseed_steps=[
@@ -1234,7 +1235,7 @@ async def test_mark_running_if_claimable_is_single_winner(
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "claim-run"},
             preseed_steps=[
@@ -1310,7 +1311,7 @@ async def test_mark_running_if_claimable_is_single_winner_under_concurrency(
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "concurrent-claim-run"},
             preseed_steps=[
@@ -1393,7 +1394,7 @@ async def test_update_input_payload_merges_audio_patch_without_clobbering_claime
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"file_ids": ["f-1"], "case": "audio-case"},
             preseed_steps=[
@@ -1483,7 +1484,7 @@ async def test_list_runs_supports_limit_and_offset(
             await run_repo.create(
                 flow_id=flow.id,
                 flow_version=1,
-                user_id=admin_user.id,
+                principal_user_id=admin_user.id,
                 tenant_id=admin_user.tenant_id,
                 input_payload_json={"case": f"run-{index}"},
                 preseed_steps=[
@@ -1565,7 +1566,7 @@ async def test_claim_step_result_returns_none_for_wrong_tenant(
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "wrong-tenant-claim"},
             preseed_steps=[
@@ -1637,7 +1638,7 @@ async def test_create_or_get_attempt_started_is_idempotent(
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "attempt-idempotency"},
             preseed_steps=[
@@ -1731,7 +1732,7 @@ async def test_create_or_get_attempt_started_is_single_row_under_concurrency(
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "concurrent-attempt"},
             preseed_steps=[
@@ -1835,7 +1836,7 @@ async def test_cancel_terminalization_only_updates_pending_or_running_steps(
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "mark-cancelled"},
             preseed_steps=[
@@ -1942,7 +1943,7 @@ async def test_finish_attempt_is_idempotent(
         run = await run_repo.create(
             flow_id=flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "finish-attempt"},
             preseed_steps=[
@@ -2061,7 +2062,7 @@ async def test_list_and_claim_stale_queued_runs_supports_scope_filters_and_coold
         stale_first_flow = await run_repo.create(
             flow_id=first_flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "stale-first"},
             preseed_steps=[
@@ -2075,7 +2076,7 @@ async def test_list_and_claim_stale_queued_runs_supports_scope_filters_and_coold
         fresh_first_flow = await run_repo.create(
             flow_id=first_flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "fresh-first"},
             preseed_steps=[
@@ -2089,7 +2090,7 @@ async def test_list_and_claim_stale_queued_runs_supports_scope_filters_and_coold
         stale_second_flow = await run_repo.create(
             flow_id=second_flow.id,
             flow_version=1,
-            user_id=admin_user.id,
+            principal_user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             input_payload_json={"case": "stale-second"},
             preseed_steps=[

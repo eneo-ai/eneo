@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T102
+active_task: T103
 
 tasks:
   - id: T001
@@ -2256,7 +2256,7 @@ tasks:
   - id: T014
     type: worker
     assignee: Worker
-    status: queued
+    status: done
     reasoning_hint: medium
     objective: "Strengthen schema invariants: published pointer FK, files.user_id FK drift, measured queued/stale indexes, and only tenant FKs that clarify normal correctness."
     allowed_files: []
@@ -2266,7 +2266,43 @@ tasks:
       - "The FK design requires broad tenant-hardening beyond the approved scope."
       - "Index additions are not backed by source query shape or EXPLAIN/catalog evidence."
       - "A new idempotency unique-index migration is proposed without current schema inspection proving the existing partial unique indexes are absent."
-    receipt: null
+    receipt:
+      result: done
+      completed_by_subtasks:
+        - id: T094
+          summary: "Read-only DB/catalog preflight split the schema scope into published pointer FK, owner mirror cleanup, stale/recovery indexes, and tenant FK evidence."
+        - id: T095
+          summary: "Approved only the published Flow pointer FK Worker from the first T014 tranche."
+        - id: T096
+          summary: "Implemented fk_flows_published_version with migration, model declaration, and behavior-focused integration tests."
+        - id: T097
+          summary: "Rejected another immediate T014 Worker and chose a read-only owner-mirror Scout."
+        - id: T098
+          summary: "Mapped typed file ownership and files.user_id drift; found typed owner data clean and no index evidence."
+        - id: T099
+          summary: "Rejected FK-only legacy alignment after owner clarification; chose clean typed-owner consolidation instead."
+        - id: T100
+          summary: "Mapped paired files.user_id and flow_runs.user_id blast radius across DB, source, tests, runtime, and public/generated contract."
+        - id: T101
+          summary: "Approved paired mirror deletion through T102 with Claude and Antigravity green plan gates."
+        - id: T102
+          summary: "Deleted legacy file/run user_id mirrors and consolidated source/runtime/API/generated-client paths on typed owners."
+      disposition:
+        published_pointer_fk: "done in T096."
+        files_user_id_drift: "superseded by cleaner T102 deletion because Flows has no production users and duplicate legacy owner mirrors should not be preserved."
+        queued_stale_indexes: "rejected for now; T094/T097 found no queued/running data and no EXPLAIN/catalog evidence justifying new indexes."
+        tenant_fks: "kept temporarily; existing runtime composite constraints cover current source-backed correctness and broad tenant-hardening was not justified."
+      consolidation_effect:
+        reused_existing_owner: "Database schema for referential integrity plus typed file owner and FlowPrincipal/run principal fields."
+        logic_moved_from: "Application convention and legacy mirror/fallback paths into DB-enforced FK and typed owner/principal paths."
+        logic_deleted: "Legacy files.user_id and flow_runs.user_id mirrors plus wrappers/fallbacks in T102."
+        duplicate_path_removed: "Published pointer convention vs FK; files.user_id vs owner_*; flow_runs.user_id vs principal_*."
+        new_code_added: "Focused migrations/tests and guard coverage for the two approved schema slices."
+        why_existing_owners_were_insufficient: "The owners existed but were not enforced or were shadowed by legacy mirrors."
+        guard_preventing_duplicate_logic_from_returning: "Published FK integration test, legacy mirror migration tests, OpenAPI guard, and source-ban guard."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+      naming_gate: "All new schema names are domain-specific and fit the final docs/flows/architecture.md where-to-change-X table."
 
   - id: T015
     type: worker
@@ -10179,7 +10215,7 @@ tasks:
   - id: T102
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Delete legacy `files.user_id` and `flow_runs.user_id` mirrors and make typed file ownership plus typed Flow run principal identity the only owner paths."
     allowed_files:
@@ -10209,6 +10245,23 @@ tasks:
       - "backend/tests/integration/flows/test_flow_step_file_mapping_contract.py"
       - "backend/tests/unit/test_flow_openapi_contract.py"
       - "backend/tests/unittests/flows/test_flow_access_policy.py"
+      - "backend/tests/unittests/flows/test_flow_router.py"
+      - "backend/tests/unittests/flows/test_flow_run_evidence.py"
+      - "backend/tests/integration/flows/test_flow_repository.py"
+      - "backend/tests/integration/flows/test_flow_evidence_api_contracts.py"
+      - "backend/tests/integration/flows/test_flow_run_repository.py"
+      - "backend/tests/integration/flows/test_flow_run_review_checkpoint_repository.py"
+      - "backend/tests/integration/flows/test_flow_run_rerun_repository.py"
+      - "backend/tests/integration/flows/test_flow_audit_outbox_delivery.py"
+      - "backend/tests/integration/flows/test_flow_runtime_health.py"
+      - "backend/tests/integration/flows/test_flow_terminalization_contract.py"
+      - "backend/tests/integration/flows/test_flow_webhook_outbox_delivery.py"
+      - "backend/tests/unittests/flows/test_step_execution_runtime.py"
+      - "backend/tests/unittests/flows/test_flow_runtime_step_handlers.py"
+      - "backend/tests/unittests/flows/test_typed_io_run_service.py"
+      - "backend/tests/unittests/flows/test_flow_run_access_policy.py"
+      - "backend/tests/unittests/flows/test_flow_run_review_checkpoint_service.py"
+      - "backend/tests/unittests/flows/test_flow_run_lifecycle_events.py"
       - "backend/tests/unittests/flows/test_flow_run_service.py"
       - "backend/tests/unittests/flows/test_flow_run_rerun_service.py"
       - "backend/tests/unittests/flows/test_flow_transcription.py"
@@ -10230,6 +10283,7 @@ tasks:
       - "No speculative indexes."
       - "No pyright/type ignores, Any widening, generic helpers, fake interfaces, or tutorial comments."
       - "Delete compatibility tests only in the same Worker as the behavior/wrapper they protected."
+      - "Scope includes additional Flow proper tests only for replacing direct FlowRun.user_id/FlowRuns.user_id references discovered during T102 implementation evidence."
     implementation_requirements:
       - "Remove `files.user_id` and `flow_runs.user_id` columns and FKs in the migration."
       - "Upgrade preflight must run in the same transaction before drops and abort on any files/flow_runs drift or missing typed identity."
@@ -10248,10 +10302,10 @@ tasks:
       - "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
       - "cd backend && uv run alembic upgrade head"
       - "cd backend && uv run pytest tests/integration/migrations/test_flow_legacy_user_id_mirrors_removed.py -q"
-      - "cd backend && uv run pytest tests/unittests/files/test_file_service.py tests/unit/test_file_service.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_run_rerun_service.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_template_fill_runtime.py tests/unittests/flows/test_celery_runtime.py -q"
+      - "cd backend && uv run pytest tests/unittests/files/test_file_service.py tests/unit/test_file_service.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/integration/flows/test_flow_repository.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_run_evidence.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_typed_io_run_service.py tests/unittests/flows/test_flow_run_access_policy.py tests/unittests/flows/test_flow_run_review_checkpoint_service.py tests/unittests/flows/test_flow_run_lifecycle_events.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_run_rerun_service.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_template_fill_runtime.py tests/unittests/flows/test_celery_runtime.py -q"
       - "cd backend && uv run pyright src/intric/database/tables/files_table.py src/intric/database/tables/flow_tables.py src/intric/files/file_models.py src/intric/files/file_service.py src/intric/files/file_repo.py src/intric/flows/principal.py src/intric/flows/domain/flow.py src/intric/flows/api/flow_models.py src/intric/flows/application/flow_run_service.py src/intric/flows/application/flow_run_rerun_service.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/flow_run_step_inputs.py src/intric/flows/runtime/executor.py src/intric/flows/runtime/input_files.py src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/template_fill_runtime.py src/intric/flows/runtime/step_input_resolution.py src/intric/flows/runtime/tasks.py src/intric/flows/runtime/flow_webhook_delivery.py"
-      - "cd backend && uv run ruff check backend/alembic/versions/20260526_flow_remove_legacy_user_id_mirrors.py src/intric/database/tables/files_table.py src/intric/database/tables/flow_tables.py src/intric/files/file_models.py src/intric/files/file_service.py src/intric/files/file_repo.py src/intric/flows/principal.py src/intric/flows/domain/flow.py src/intric/flows/api/flow_models.py src/intric/flows/application/flow_run_service.py src/intric/flows/application/flow_run_rerun_service.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/flow_run_step_inputs.py src/intric/flows/runtime/executor.py src/intric/flows/runtime/input_files.py src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/template_fill_runtime.py src/intric/flows/runtime/step_input_resolution.py src/intric/flows/runtime/tasks.py src/intric/flows/runtime/flow_webhook_delivery.py tests/integration/migrations/test_flow_legacy_user_id_mirrors_removed.py tests/unittests/files/test_file_service.py tests/unit/test_file_service.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_run_rerun_service.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_template_fill_runtime.py tests/unittests/flows/test_celery_runtime.py"
-      - "cd backend && uv run ruff format --check backend/alembic/versions/20260526_flow_remove_legacy_user_id_mirrors.py src/intric/database/tables/files_table.py src/intric/database/tables/flow_tables.py src/intric/files/file_models.py src/intric/files/file_service.py src/intric/files/file_repo.py src/intric/flows/principal.py src/intric/flows/domain/flow.py src/intric/flows/api/flow_models.py src/intric/flows/application/flow_run_service.py src/intric/flows/application/flow_run_rerun_service.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/flow_run_step_inputs.py src/intric/flows/runtime/executor.py src/intric/flows/runtime/input_files.py src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/template_fill_runtime.py src/intric/flows/runtime/step_input_resolution.py src/intric/flows/runtime/tasks.py src/intric/flows/runtime/flow_webhook_delivery.py tests/integration/migrations/test_flow_legacy_user_id_mirrors_removed.py tests/unittests/files/test_file_service.py tests/unit/test_file_service.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_run_rerun_service.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_template_fill_runtime.py tests/unittests/flows/test_celery_runtime.py"
+      - "cd backend && uv run ruff check backend/alembic/versions/20260526_flow_remove_legacy_user_id_mirrors.py src/intric/database/tables/files_table.py src/intric/database/tables/flow_tables.py src/intric/files/file_models.py src/intric/files/file_service.py src/intric/files/file_repo.py src/intric/flows/principal.py src/intric/flows/domain/flow.py src/intric/flows/api/flow_models.py src/intric/flows/application/flow_run_service.py src/intric/flows/application/flow_run_rerun_service.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/flow_run_step_inputs.py src/intric/flows/runtime/executor.py src/intric/flows/runtime/input_files.py src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/template_fill_runtime.py src/intric/flows/runtime/step_input_resolution.py src/intric/flows/runtime/tasks.py src/intric/flows/runtime/flow_webhook_delivery.py tests/integration/migrations/test_flow_legacy_user_id_mirrors_removed.py tests/unittests/files/test_file_service.py tests/unit/test_file_service.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/integration/flows/test_flow_repository.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_run_evidence.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_typed_io_run_service.py tests/unittests/flows/test_flow_run_access_policy.py tests/unittests/flows/test_flow_run_review_checkpoint_service.py tests/unittests/flows/test_flow_run_lifecycle_events.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_run_rerun_service.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_template_fill_runtime.py tests/unittests/flows/test_celery_runtime.py"
+      - "cd backend && uv run ruff format --check backend/alembic/versions/20260526_flow_remove_legacy_user_id_mirrors.py src/intric/database/tables/files_table.py src/intric/database/tables/flow_tables.py src/intric/files/file_models.py src/intric/files/file_service.py src/intric/files/file_repo.py src/intric/flows/principal.py src/intric/flows/domain/flow.py src/intric/flows/api/flow_models.py src/intric/flows/application/flow_run_service.py src/intric/flows/application/flow_run_rerun_service.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/flow_run_step_inputs.py src/intric/flows/runtime/executor.py src/intric/flows/runtime/input_files.py src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/template_fill_runtime.py src/intric/flows/runtime/step_input_resolution.py src/intric/flows/runtime/tasks.py src/intric/flows/runtime/flow_webhook_delivery.py tests/integration/migrations/test_flow_legacy_user_id_mirrors_removed.py tests/unittests/files/test_file_service.py tests/unit/test_file_service.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/integration/flows/test_flow_repository.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_run_evidence.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_typed_io_run_service.py tests/unittests/flows/test_flow_run_access_policy.py tests/unittests/flows/test_flow_run_review_checkpoint_service.py tests/unittests/flows/test_flow_run_lifecycle_events.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_run_rerun_service.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_template_fill_runtime.py tests/unittests/flows/test_celery_runtime.py"
       - "cd frontend/packages/intric-js && bun run update"
       - "cd frontend/apps/web && bun run check"
       - "rg -n 'Files\\.user_id|files\\.user_id|FlowRuns\\.user_id|flow_runs\\.user_id|get_list_by_id_and_user|delete_by_owner\\(|legacy_user_id|\\{\"user_id\": deps\\.user_id\\}' backend/src/intric/files backend/src/intric/flows"
@@ -10267,6 +10321,134 @@ tasks:
       - "Strict typing cannot be maintained without ignores, broad Any, or fake abstractions."
       - "A needed file is outside allowed_files."
       - "Verification fails twice for in-scope reasons that require widening the task."
+    receipt:
+      result: done
+      completed_at: "2026-05-27T01:23:12+02:00"
+      summary: "Deleted the legacy `files.user_id` and `flow_runs.user_id` mirrors and made typed file ownership plus typed Flow run principal identity the only source/runtime/API owner paths. Because Flows has no production users, this intentionally removed the local Celery `user_id` wire fallback instead of preserving a stale compatibility path."
+      implementation:
+        - "Added migration `20260526_flow_user_mirror_drop` with fail-loud typed-identity preflight, column/FK drops on upgrade, and nullable legacy-column recreation/backfill on downgrade."
+        - "Removed FileCreate/FileInfo/File/FlowRun/FlowRunPublic user_id fields, repository wrappers, source mappings, runtime fallback dicts, FlowPrincipal.legacy_user_id, and FlowRunRepository user_id fallback args."
+        - "Collapsed Flow runtime file loading and output/template file persistence onto required FlowPrincipal and typed FileRepository owner queries."
+        - "Updated generated intric-js OpenAPI types so FlowRunPublic no longer exposes user_id."
+        - "Extended the existing Flow access-policy guard and added/updated behavior tests for the typed-owner path."
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1, status=ok, blockers=[]"
+        - cmd: "cd backend && uv run ruff check <T102 backend files>"
+          status: pass
+        - cmd: "cd backend && uv run ruff format --check <T102 backend files>"
+          status: pass
+          output: "51 files already formatted"
+        - cmd: "cd backend && uv run pyright <T102 backend source files>"
+          status: pass
+          output: "0 errors, 0 warnings"
+        - cmd: "cd backend && uv run pyright tests/integration/migrations/test_flow_legacy_user_id_mirrors_removed.py"
+          status: pass
+          output: "0 errors, 0 warnings"
+        - cmd: "cd backend && uv run alembic current"
+          status: pass
+          output: "20260526_flow_user_mirror_drop (head)"
+        - cmd: "cd backend && uv run alembic upgrade head"
+          status: pass
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql ... legacy user_id catalog probe"
+          status: pass
+          output: "files.user_id, flow_runs.user_id, files_users_fkey, and flow_runs_user_id_fkey absent after upgrade."
+        - cmd: "cd backend && uv run pytest -m migration_isolation tests/integration/migrations/test_flow_legacy_user_id_mirrors_removed.py -q"
+          status: pass
+          output: "4 passed"
+        - cmd: "cd backend && uv run pytest <focused Flow unit/runtime/API bundle> -q"
+          status: pass
+          output: "537 passed"
+        - cmd: "cd backend && uv run pytest -m integration <focused Flow integration bundle> -q"
+          status: pass
+          output: "111 passed"
+        - cmd: "cd backend && uv run python - <<'PY' ... app.openapi() FlowRunPublic.user_id probe ... PY"
+          status: pass
+          output: "FlowRunPublic.user_id present: False; schemas: 717"
+        - cmd: "cd frontend/packages/intric-js && bun run update --schema-file /tmp/eneo-openapi-t102.json"
+          status: pass
+        - cmd: "cd frontend/packages/intric-js && bun run check"
+          status: pass
+        - cmd: "cd frontend/apps/web && bun run check"
+          status: fail_unrelated
+          output: "Pre-existing diagnostics in frontend/packages/intric-js/src/client/stream.js and frontend/apps/web/src/lib/features/api-keys/ExtendExpirationDialog.svelte; T102 did not touch these files."
+        - cmd: "rg -n 'Files\\.user_id|files\\.user_id|FlowRuns\\.user_id|flow_runs\\.user_id|get_list_by_id_and_user|delete_by_owner\\(|legacy_user_id|\\{\"user_id\": deps\\.user_id\\}' backend/src/intric/files backend/src/intric/flows"
+          status: pass
+          output: "No matches."
+        - cmd: "rg -n 'run\\.user_id|FlowRun[^\\n]*user_id|user_id[^\\n]*FlowRun' frontend/apps/web/src frontend/packages/intric-js/src -g '*.{ts,svelte,js}'"
+          status: pass
+          output: "No matches."
+        - cmd: "docker exec eneo-41ae93-redis-1 redis-cli --scan | rg 'celery|flows|queue|kombu' || true"
+          status: pass
+          output: "No local stale Celery/Flow queue keys."
+        - cmd: "git diff --check"
+          status: pass
+      peer_review:
+        claude_iteration_3:
+          artifact: ".codex/artifacts/claude-peer-loop-t102-legacy-user-id-mirror-cleanup-implementation-review-20260526T231313Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8 with P2 request for service-key-owned migration fixture."
+        claude_iteration_4:
+          artifact: ".codex/artifacts/claude-peer-loop-t102-legacy-user-id-mirror-cleanup-post-p2-verification-20260526T231735Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 9 after service-key fixture and abort tests."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t102-legacy-user-id-mirror-cleanup-antigravity-synthesis-20260526T231918Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 9."
+        local_claim_verification:
+          - "Addressed Claude's concrete service-key migration concern with user-owned and service-key-owned fixture coverage."
+          - "Verified Antigravity's stale Celery-message concern locally; Redis queue scan returned no Celery/Flow queue keys, and the no-production-users constraint makes compatibility removal intentional."
+      consolidation_effect:
+        reused_existing_owner: "FlowPrincipal, typed `flow_runs.principal_*`, typed `files.owner_*`, FileRepository.get_list_by_id_for_owner, and the existing Flow access-policy guard."
+        logic_moved_from: "Legacy `user_id` mirror writes/fallback branches and compatibility wrappers into typed owner/principal calls."
+        logic_deleted: "files.user_id, flow_runs.user_id, FileRepository.get_list_by_id_and_user, FileRepository.delete_by_owner, FlowPrincipal.legacy_user_id, FlowRunPublic.user_id, Celery user_id fallback, webhook audit fallback, and user_id-only runtime persistence fallbacks."
+        duplicate_path_removed: "files.user_id versus owner_* and flow_runs.user_id versus principal_*."
+        new_code_added: "One focused Alembic migration, migration tests, narrowed runtime file repository protocols, and source/OpenAPI guard coverage."
+        why_existing_owners_were_insufficient: "The typed owners were sufficient, but legacy mirrors let callers bypass the canonical owner and made debugging identity harder."
+        guard_preventing_duplicate_logic_from_returning: "Migration tests, OpenAPI guard, source-ban guard, and focused runtime/API tests."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+      naming_gate: "New names are domain-specific and architecture-doc-friendly: `flow_remove_legacy_user_id_mirrors`, `RuntimeInputFileRepository`, and `RuntimeOutputFileRepository` clearly map to file ownership/run principal cleanup."
+      followups:
+        - "Optional P3: replace FlowPrincipal.from_run/matches_run object parameters with a narrow protocol."
+        - "Optional P3: make FlowRun.principal_type non-optional after confirming all construction paths."
+        - "Optional P3: make the legacy user_id source-ban guard less whitespace-sensitive."
+      next_task: T103
+
+  - id: T103
+    type: scout
+    assignee: Scout
+    status: active
+    reasoning_hint: high
+    objective: "Re-scout T015 API consumer DX after the schema/runtime cleanup and identify the next smallest safe API/contract Worker, or block product-gated service-key/review/rerun work."
+    inputs:
+      - "T015 queued API consumer DX task"
+      - "T085 receipt"
+      - "T102 receipt"
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+      - "backend/src/intric/flows/api"
+      - "backend/src/intric/flows/application"
+      - "backend/tests/unittests/flows"
+      - "backend/tests/integration/flows"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+    constraints:
+      - "Before this task transition, verify the watchdog state file."
+      - "Read-only Scout only: no source edits, test edits, generated-client edits, frontend edits, migrations, or docs/flows/architecture.md."
+      - "Use FastAPI guidance if proposing router, dependency, Pydantic schema, OpenAPI, response filtering, or HTTP error translation work."
+      - "Do not activate service-key identity/review/rerun, retention, materialized webhook request snapshots, webhook outbox, schema migrations, T901 final docs, or Flow AI Builder cleanup."
+      - "Apply reuse-before-inventing: find the current API error/contract owners before proposing any new module or schema."
+      - "No Worker may be proposed without exact allowed_files, verification commands, stop_if conditions, generated-client impact, and review tier."
+    expected_output:
+      - "Current Flow API consumer journey map: list/inspect contract/upload/start/poll/read result/evidence/error handling."
+      - "Stable error-code and GeneralError owner inventory, including any remaining raw HTTPException leaks in Flow proper."
+      - "Generated-client/OpenAPI drift evidence after T102."
+      - "Classification of service-key journey work as safe_now, blocked_product_decision, or needs_scout."
+      - "Next recommendation: approve Judge for a narrow T015 Worker | block | choose T016 preflight."
+      - "Consolidation effect and naming-gate answer."
+    stop_if:
+      - "The next API change requires service-key review/resume/rerun or retention product decisions."
+      - "OpenAPI/generated-client pipeline is red for in-scope reasons that need source edits."
+      - "The smallest useful API Worker would cross schema/runtime/frontend boundaries without a Judge plan gate."
     receipt: null
 
   - id: T901

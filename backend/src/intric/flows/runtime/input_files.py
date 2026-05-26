@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Protocol, cast
 from uuid import UUID
 
 from intric.flows.principal import FlowPrincipal
@@ -10,7 +10,19 @@ if TYPE_CHECKING:
     from intric.files.file_models import File
 
 
-def parse_requested_file_ids(*, raw_file_ids: Any) -> list[UUID]:
+class RuntimeInputFileRepository(Protocol):
+    async def get_list_by_id_for_owner(
+        self,
+        *,
+        ids: list[UUID],
+        owner_type: str,
+        owner_user_id: UUID | None = None,
+        owner_api_key_id: UUID | None = None,
+        include_transcription: bool = True,
+    ) -> list["File"]: ...
+
+
+def parse_requested_file_ids(*, raw_file_ids: object) -> list[UUID]:
     if raw_file_ids is None:
         return []
     if not isinstance(raw_file_ids, list):
@@ -30,24 +42,20 @@ def parse_requested_file_ids(*, raw_file_ids: Any) -> list[UUID]:
 
 async def load_files_by_requested_ids(
     *,
-    file_repo: Any,
+    file_repo: RuntimeInputFileRepository,
     requested_ids: list[UUID],
-    user_id: UUID,
-    principal: FlowPrincipal | None = None,
+    principal: FlowPrincipal,
     file_cache: dict[frozenset[UUID], list["File"]] | None = None,
 ) -> list["File"]:
     cache_key = frozenset(requested_ids)
     if file_cache is not None and cache_key in file_cache:
         return file_cache[cache_key]
-    if principal is not None and principal.is_service_key:
-        files = await file_repo.get_list_by_id_for_owner(
-            ids=requested_ids,
-            owner_type=principal.principal_type.value,
-            owner_user_id=principal.principal_user_id,
-            owner_api_key_id=principal.principal_api_key_id,
-        )
-    else:
-        files = await file_repo.get_list_by_id_and_user(requested_ids, user_id=user_id)
+    files = await file_repo.get_list_by_id_for_owner(
+        ids=requested_ids,
+        owner_type=principal.principal_type.value,
+        owner_user_id=principal.principal_user_id,
+        owner_api_key_id=principal.principal_api_key_id,
+    )
     if file_cache is not None:
         file_cache[cache_key] = files
     return files

@@ -9,12 +9,14 @@ from uuid import uuid4
 import pytest
 from docx import Document
 
+from intric.authentication.principal_types import PrincipalType
 from intric.flows.flow import (
     FlowRun,
     FlowRunStatus,
     FlowStepResult,
     FlowStepResultStatus,
 )
+from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime import template_fill_runtime as template_fill_runtime_module
 from intric.flows.runtime.models import RunExecutionState, RuntimeStep
 from intric.flows.runtime.template_fill_runtime import (
@@ -59,7 +61,8 @@ def _run() -> FlowRun:
         id=uuid4(),
         flow_id=uuid4(),
         flow_version=3,
-        user_id=uuid4(),
+        principal_type=PrincipalType.USER,
+        principal_user_id=uuid4(),
         tenant_id=uuid4(),
         trace_id=uuid4(),
         status=FlowRunStatus.RUNNING,
@@ -160,7 +163,7 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         apply_output_cap=apply_output_cap,
-        user_id=run.user_id,
+        principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
 
@@ -220,7 +223,7 @@ async def test_execute_template_fill_step_rejects_checksum_drift() -> None:
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         apply_output_cap=AsyncMock(),
-        user_id=run.user_id,
+        principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
 
@@ -256,7 +259,7 @@ async def test_execute_template_fill_step_allows_explicit_empty_binding() -> Non
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         apply_output_cap=AsyncMock(),
-        user_id=run.user_id,
+        principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
 
@@ -321,7 +324,7 @@ async def test_execute_template_fill_step_strips_duplicate_leading_heading_from_
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         apply_output_cap=AsyncMock(),
-        user_id=run.user_id,
+        principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
     step = _step(template_file_id=template_file_id)
@@ -386,7 +389,7 @@ async def test_execute_template_fill_step_reports_failed_upstream_step_clearly()
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         apply_output_cap=AsyncMock(),
-        user_id=run.user_id,
+        principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
 
@@ -419,7 +422,7 @@ async def test_execute_template_fill_step_reports_missing_template_blob_clearly(
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         apply_output_cap=AsyncMock(),
-        user_id=run.user_id,
+        principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
 
@@ -456,7 +459,7 @@ async def test_execute_template_fill_step_reports_generated_document_save_failur
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         apply_output_cap=AsyncMock(),
-        user_id=run.user_id,
+        principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
 
@@ -495,7 +498,7 @@ async def test_execute_template_fill_step_reports_generated_document_read_failur
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         apply_output_cap=AsyncMock(),
-        user_id=run.user_id,
+        principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
 
@@ -519,7 +522,7 @@ async def test_execute_template_fill_step_rejects_invalid_template_file_id() -> 
         variable_resolver=FlowVariableResolver(),
         file_repo=AsyncMock(),
         apply_output_cap=AsyncMock(),
-        user_id=run.user_id,
+        principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
 
@@ -543,7 +546,7 @@ async def test_execute_template_fill_step_rejects_non_string_binding_values() ->
         variable_resolver=FlowVariableResolver(),
         file_repo=AsyncMock(),
         apply_output_cap=AsyncMock(),
-        user_id=run.user_id,
+        principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
 
@@ -570,7 +573,7 @@ async def test_execute_template_fill_step_reports_missing_published_template_fil
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         apply_output_cap=AsyncMock(),
-        user_id=run.user_id,
+        principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
 
@@ -608,7 +611,7 @@ async def test_execute_template_fill_step_reports_render_stage_failure(
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         apply_output_cap=AsyncMock(),
-        user_id=run.user_id,
+        principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
 
@@ -640,7 +643,7 @@ async def test_execute_template_fill_step_supports_datum_system_variable() -> No
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         apply_output_cap=AsyncMock(),
-        user_id=run.user_id,
+        principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
     step = _step(template_file_id=template_file_id)
@@ -684,7 +687,7 @@ async def test_execute_template_fill_step_formats_json_binding_in_summary() -> N
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         apply_output_cap=AsyncMock(),
-        user_id=run.user_id,
+        principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
     step = _step(template_file_id=template_file_id)
@@ -716,7 +719,7 @@ async def test_execute_template_fill_step_supports_unicode_placeholder_names() -
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         apply_output_cap=AsyncMock(),
-        user_id=run.user_id,
+        principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
     step = _step(template_file_id=template_file_id)
@@ -759,7 +762,7 @@ async def test_execute_template_fill_step_bypasses_output_cap_for_long_summary()
         variable_resolver=FlowVariableResolver(),
         file_repo=file_repo,
         apply_output_cap=apply_output_cap,
-        user_id=run.user_id,
+        principal=FlowPrincipal.from_run(run),
         logger=_logger(),
     )
 

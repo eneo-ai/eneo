@@ -74,7 +74,8 @@ def _run(flow_id, tenant_id):
         id=uuid4(),
         flow_id=flow_id,
         flow_version=1,
-        user_id=uuid4(),
+        principal_type=PrincipalType.USER,
+        principal_user_id=uuid4(),
         tenant_id=tenant_id,
         trace_id=uuid4(),
         status=FlowRunStatus.COMPLETED,
@@ -167,6 +168,8 @@ def _result_file(*, run: FlowRun, step_result_id=None) -> FlowRunStepResultFile:
 def _evidence_export_payload(run: FlowRun) -> dict:
     generated_at = datetime.now(timezone.utc).isoformat()
     content_hash = "abc123"
+    exported_by_user_id = run.principal_user_id
+    assert exported_by_user_id is not None
     summary = {
         "status": run.status.value,
         "trace_id": str(run.trace_id),
@@ -190,7 +193,7 @@ def _evidence_export_payload(run: FlowRun) -> dict:
             "content_hash": content_hash,
             "content_hash_input": "redacted",
             "exported_at": generated_at,
-            "exported_by_user_id": str(run.user_id),
+            "exported_by_user_id": str(exported_by_user_id),
             "export_reason": "support_debug",
             "detail_mode": "redacted",
             "redaction_applied": True,

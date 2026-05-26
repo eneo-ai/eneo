@@ -585,10 +585,6 @@ class FlowRuns(BasePublic):
         ForeignKey("api_keys_v2.id", ondelete="RESTRICT"),
         nullable=True,
     )
-    user_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(Users.id, ondelete="SET NULL"),
-        nullable=True,
-    )
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey(Tenants.id, ondelete="CASCADE"),
         nullable=False,

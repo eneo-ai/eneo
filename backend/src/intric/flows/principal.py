@@ -33,12 +33,6 @@ class FlowPrincipal:
             raise ValueError("flow principals must not set both principal ids")
 
     @property
-    def legacy_user_id(self) -> UUID | None:
-        if self.principal_type == PrincipalType.USER:
-            return self.principal_user_id
-        return None
-
-    @property
     def is_service_key(self) -> bool:
         return self.principal_type == PrincipalType.SERVICE_KEY
 
@@ -64,11 +58,7 @@ class FlowPrincipal:
         principal_user_id = getattr(run, "principal_user_id", None)
         principal_api_key_id = getattr(run, "principal_api_key_id", None)
         if principal_type is None:
-            legacy_user_id = getattr(run, "user_id", None)
-            return cls(
-                principal_type=PrincipalType.USER,
-                principal_user_id=legacy_user_id,
-            )
+            raise ValueError("principal_type required for Flow run principals")
 
         resolved_type = (
             principal_type
@@ -86,7 +76,6 @@ class FlowPrincipal:
             "principal_type": self.principal_type.value,
             "principal_user_id": self.principal_user_id,
             "principal_api_key_id": self.principal_api_key_id,
-            "user_id": self.legacy_user_id,
         }
 
     def file_owner_fields(self) -> dict[str, object | None]:
@@ -94,7 +83,6 @@ class FlowPrincipal:
             "owner_type": self.principal_type.value,
             "owner_user_id": self.principal_user_id,
             "owner_api_key_id": self.principal_api_key_id,
-            "user_id": self.legacy_user_id,
         }
 
     def audit_actor_fields(self) -> FlowAuditActorFields:

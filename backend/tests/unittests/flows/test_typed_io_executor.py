@@ -19,12 +19,14 @@ import pytest
 import intric.flows.runtime.executor as executor_module
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.outcome import Outcome
+from intric.authentication.principal_types import PrincipalType
 from intric.flows.flow import (
     FlowRun,
     FlowRunStatus,
     FlowStepResult,
     FlowStepResultStatus,
 )
+from intric.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from intric.flows.runtime.executor import (
     FlowRunExecutor,
     RunExecutionState,
@@ -42,7 +44,8 @@ def _run(*, status: FlowRunStatus, user, input_payload=None) -> FlowRun:
         id=uuid4(),
         flow_id=uuid4(),
         flow_version=1,
-        user_id=user.id,
+        principal_type=PrincipalType.USER,
+        principal_user_id=user.id,
         tenant_id=user.tenant_id,
         trace_id=uuid4(),
         status=status,
@@ -416,7 +419,7 @@ async def test_resolve_step_input_document_loads_files(user):
         file_type="document",
         transcription=None,
     )
-    executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[fake_file])
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
 
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
@@ -468,7 +471,7 @@ async def test_resolve_step_input_document_rejects_extracted_text_over_inline_ca
         ),
     )
     fake_file = SimpleNamespace(id=file_id, text="detta ar mycket langre an atta bytes")
-    executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[fake_file])
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
 
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
@@ -501,7 +504,7 @@ async def test_resolve_step_input_file_ids_full_match_enforcement(user):
     )
     # Only return one of the two requested files
     fake_file = SimpleNamespace(id=file_id_1, text="doc")
-    executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[fake_file])
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
 
     context = executor.variable_resolver.build_context(run.input_payload_json, [])
 
@@ -1076,7 +1079,7 @@ async def test_resolve_step_input_rejects_literal_step_input_substring_when_runt
 ):
     executor, _, _, _ = _build_executor(user)
     file = SimpleNamespace(id=uuid4(), text="transkriberat innehåll")
-    executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[file])
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file])
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
@@ -1112,7 +1115,7 @@ async def test_resolve_step_input_runtime_input_does_not_append_internal_orchest
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4(), active_api_key=None)
     executor, _, _, _ = _build_executor(user)
     file = SimpleNamespace(id=uuid4(), text="runtime step upload test")
-    executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[file])
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file])
     step = _runtime_step(
         step_order=1,
         input_source="flow_input",
@@ -1146,7 +1149,7 @@ async def test_resolve_step_input_runtime_input_does_not_append_internal_orchest
 async def test_resolve_step_input_adds_underlag_summary_diagnostic(user):
     executor, _, _, _ = _build_executor(user)
     file = SimpleNamespace(id=uuid4(), text="transkriberat innehåll")
-    executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[file])
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file])
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,
@@ -1460,7 +1463,7 @@ async def test_empty_document_extraction_fails(user):
     )
     # File exists but has no extracted text
     fake_file = SimpleNamespace(id=file_id, text="")
-    executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[fake_file])
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
 
     mock_assistant = MagicMock()
     mock_assistant.get_prompt_text.return_value = ""
@@ -1494,7 +1497,7 @@ async def test_document_extraction_does_not_fallback_to_payload_text(user):
         ),
     )
     fake_file = SimpleNamespace(id=file_id, text="")
-    executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[fake_file])
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
     executor._load_assistant = AsyncMock(
         return_value=_mock_assistant_for_execute_step()
     )
@@ -1520,7 +1523,7 @@ async def test_file_input_uses_extracted_file_text(user):
         ),
     )
     fake_file = SimpleNamespace(id=file_id, text="Extracted file text")
-    executor.file_repo.get_list_by_id_and_user = AsyncMock(return_value=[fake_file])
+    executor.file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[fake_file])
     executor._load_assistant = AsyncMock(
         return_value=_mock_assistant_for_execute_step()
     )
@@ -1845,6 +1848,17 @@ async def test_document_outputs_generate_downloadable_artifacts(
 ):
     """PDF/DOCX output types should persist artifact files with download metadata."""
     executor, _, _, _ = _build_executor(user)
+    executor.document_render_service = SimpleNamespace(
+        render_document=lambda text, output_type, step_order: (
+            f"{output_type}:{text}".encode("utf-8"),
+            expected_mimetype,
+            f"flow-step-{step_order}{expected_ext}",
+        ),
+        render_structured_document=MagicMock(
+            side_effect=AssertionError("structured rendering is not used here")
+        ),
+        limits=DocumentRenderLimits(),
+    )
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     step = _runtime_step(output_type=output_type)
 

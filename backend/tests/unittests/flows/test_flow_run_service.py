@@ -138,7 +138,6 @@ def _run(user, flow_id) -> FlowRun:
         flow_version=1,
         principal_type="user",
         principal_user_id=user.id,
-        user_id=user.id,
         tenant_id=user.tenant_id,
         trace_id=uuid4(),
         status=FlowRunStatus.QUEUED,
@@ -704,7 +703,6 @@ async def test_create_run_persists_service_key_principal(user):
     flow = _flow(user=service_user, published_version=1)
     created_run = _run(user=user, flow_id=flow.id).model_copy(
         update={
-            "user_id": None,
             "principal_type": "service_key",
             "principal_user_id": None,
             "principal_api_key_id": service_user.active_api_key.id,
@@ -734,7 +732,6 @@ async def test_create_run_persists_service_key_principal(user):
     assert result == created_run
     flow_run_repo.create.assert_awaited_once()
     kwargs = flow_run_repo.create.await_args.kwargs
-    assert kwargs["user_id"] is None
     assert kwargs["principal_type"] == "service_key"
     assert kwargs["principal_user_id"] is None
     assert kwargs["principal_api_key_id"] == service_user.active_api_key.id
@@ -1279,7 +1276,7 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
     flow_run_repo.count_active_runs.return_value = 0
     flow_run_repo.create.return_value = created_run
     file_id = uuid4()
-    file_repo.get_list_by_id_and_user.return_value = [
+    file_repo.get_list_by_id_for_owner.return_value = [
         SimpleNamespace(id=file_id, mimetype="application/pdf")
     ]
     flow_version_repo.get.return_value = FlowVersion(
@@ -1366,7 +1363,6 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
     flow = flow.model_copy(update={"steps": [runtime_step, flow.steps[1]]})
     created_run = _run(user=user, flow_id=flow.id).model_copy(
         update={
-            "user_id": None,
             "principal_type": "service_key",
             "principal_user_id": None,
             "principal_api_key_id": service_user.active_api_key.id,
@@ -1426,10 +1422,8 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
         owner_api_key_id=service_user.active_api_key.id,
         include_transcription=False,
     )
-    file_repo.get_list_by_id_and_user.assert_not_called()
 
 
-@pytest.mark.asyncio
 @pytest.mark.asyncio
 async def test_create_run_rejects_runtime_step_input_mimetype(user):
     flow_repo = _flow_repo()
@@ -1484,7 +1478,7 @@ async def test_create_run_rejects_runtime_step_input_mimetype(user):
         updated_at=datetime.now(timezone.utc),
     )
     file_id = uuid4()
-    file_repo.get_list_by_id_and_user.return_value = [
+    file_repo.get_list_by_id_for_owner.return_value = [
         SimpleNamespace(id=file_id, mimetype="application/pdf")
     ]
 
@@ -1525,7 +1519,7 @@ async def test_list_runs_delegates_to_repo(user):
     flow_run_repo.list_runs.assert_awaited_once_with(
         tenant_id=user.tenant_id,
         flow_id=flow_id,
-        user_id=user.id,
+        principal_user_id=user.id,
         principal_api_key_id=None,
         limit=None,
         offset=None,
@@ -1557,7 +1551,7 @@ async def test_list_runs_allows_tenant_admin_to_see_all_runs(user):
     flow_run_repo.list_runs.assert_awaited_once_with(
         tenant_id=admin_user.tenant_id,
         flow_id=flow_id,
-        user_id=None,
+        principal_user_id=None,
         principal_api_key_id=None,
         limit=None,
         offset=None,
@@ -1574,7 +1568,6 @@ async def test_list_runs_filters_service_key_runs_by_api_key(user):
     expected = [
         _run(user=user, flow_id=flow_id).model_copy(
             update={
-                "user_id": None,
                 "principal_type": "service_key",
                 "principal_user_id": None,
                 "principal_api_key_id": service_user.active_api_key.id,
@@ -1596,7 +1589,7 @@ async def test_list_runs_filters_service_key_runs_by_api_key(user):
     flow_run_repo.list_runs.assert_awaited_once_with(
         tenant_id=service_user.tenant_id,
         flow_id=flow_id,
-        user_id=None,
+        principal_user_id=None,
         principal_api_key_id=service_user.active_api_key.id,
         limit=None,
         offset=None,
@@ -1636,7 +1629,7 @@ async def test_list_runs_keeps_service_keys_scoped_even_with_space_admin_role(us
     flow_run_repo.list_runs.assert_awaited_once_with(
         tenant_id=service_user.tenant_id,
         flow_id=flow.id,
-        user_id=None,
+        principal_user_id=None,
         principal_api_key_id=service_user.active_api_key.id,
         limit=None,
         offset=None,
@@ -1657,7 +1650,6 @@ async def test_get_evidence_rejects_service_key_even_for_own_run(user):
     )
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
-            "user_id": None,
             "principal_type": "service_key",
             "principal_user_id": None,
             "principal_api_key_id": service_user.active_api_key.id,
@@ -1682,7 +1674,6 @@ async def test_get_evidence_allows_service_key_with_view_capability(user):
     flow_version_repo = AsyncMock()
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
-            "user_id": None,
             "principal_type": "service_key",
             "principal_user_id": None,
             "principal_api_key_id": service_user.active_api_key.id,
@@ -1722,7 +1713,6 @@ async def test_export_evidence_json_allows_service_key_redacted_export_with_writ
     flow_version_repo = AsyncMock()
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
-            "user_id": None,
             "principal_type": "service_key",
             "principal_user_id": None,
             "principal_api_key_id": service_user.active_api_key.id,
@@ -1768,7 +1758,6 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
     flow = _flow(user=user)
     run = _run(user=user, flow_id=flow.id).model_copy(
         update={
-            "user_id": None,
             "principal_type": "service_key",
             "principal_user_id": None,
             "principal_api_key_id": service_user.active_api_key.id,
@@ -2029,7 +2018,6 @@ async def test_service_key_unknown_access_kind_fails_closed(user):
     flow_version_repo = AsyncMock()
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
-            "user_id": None,
             "principal_type": "service_key",
             "principal_user_id": None,
             "principal_api_key_id": service_user.active_api_key.id,
@@ -2104,7 +2092,6 @@ async def test_get_run_rejects_service_key_for_other_principals_run(user):
     other_key_id = uuid4()
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
-            "user_id": None,
             "principal_type": "service_key",
             "principal_user_id": None,
             "principal_api_key_id": other_key_id,
@@ -2438,7 +2425,6 @@ def test_build_dispatch_request_uses_service_key_identity(user):
     api_key_id = uuid4()
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
-            "user_id": None,
             "principal_type": PrincipalType.SERVICE_KEY.value,
             "principal_user_id": None,
             "principal_api_key_id": api_key_id,
@@ -2529,7 +2515,6 @@ async def test_redispatch_stale_queued_runs_skips_runs_without_user_id(user):
     flow_id = uuid4()
     missing_user_run = _run(user=user, flow_id=flow_id).model_copy(
         update={
-            "user_id": None,
             "principal_type": None,
             "principal_user_id": None,
         }

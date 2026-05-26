@@ -216,7 +216,6 @@ class FlowRunRepository:
         *,
         flow_id: UUID,
         flow_version: int,
-        user_id: UUID | None,
         principal_type: str = "user",
         principal_user_id: UUID | None = None,
         principal_api_key_id: UUID | None = None,
@@ -227,17 +226,19 @@ class FlowRunRepository:
         idempotency_key: str | None = None,
         request_fingerprint: str | None = None,
     ) -> FlowRun:
-        if principal_type == PrincipalType.USER.value and principal_user_id is None:
-            principal_user_id = user_id
+        principal = FlowPrincipal(
+            principal_type=PrincipalType(principal_type),
+            principal_user_id=principal_user_id,
+            principal_api_key_id=principal_api_key_id,
+        )
         run_row = await self.session.scalar(
             sa.insert(FlowRuns)
             .values(
                 flow_id=flow_id,
                 flow_version=flow_version,
-                user_id=user_id,
-                principal_type=principal_type,
-                principal_user_id=principal_user_id,
-                principal_api_key_id=principal_api_key_id,
+                principal_type=principal.principal_type.value,
+                principal_user_id=principal.principal_user_id,
+                principal_api_key_id=principal.principal_api_key_id,
                 tenant_id=tenant_id,
                 trace_id=uuid4(),
                 idempotency_key=idempotency_key,
@@ -1500,16 +1501,8 @@ class FlowRunRepository:
         tenant_id: UUID,
         flow_id: UUID,
         idempotency_key: str,
-        principal: FlowPrincipal | None = None,
-        user_id: UUID | None = None,
+        principal: FlowPrincipal,
     ) -> tuple[FlowRun, str | None] | None:
-        if principal is None:
-            if user_id is None:
-                raise ValueError("principal or user_id is required")
-            principal = FlowPrincipal(
-                principal_type=PrincipalType.USER,
-                principal_user_id=user_id,
-            )
         stmt = (
             sa.select(FlowRuns)
             .where(FlowRuns.tenant_id == tenant_id)
@@ -1549,7 +1542,6 @@ class FlowRunRepository:
         flow_id: UUID | None = None,
         principal_user_id: UUID | None = None,
         principal_api_key_id: UUID | None = None,
-        user_id: UUID | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[FlowRun]:
@@ -1560,9 +1552,8 @@ class FlowRunRepository:
         )
         if flow_id is not None:
             stmt = stmt.where(FlowRuns.flow_id == flow_id)
-        resolved_principal_user_id = principal_user_id or user_id
-        if resolved_principal_user_id is not None:
-            stmt = stmt.where(FlowRuns.principal_user_id == resolved_principal_user_id)
+        if principal_user_id is not None:
+            stmt = stmt.where(FlowRuns.principal_user_id == principal_user_id)
         if principal_api_key_id is not None:
             stmt = stmt.where(FlowRuns.principal_api_key_id == principal_api_key_id)
         if offset is not None:

@@ -158,7 +158,6 @@ class FlowRun(BaseModel):
     principal_type: PrincipalType | None = None
     principal_user_id: Optional[UUID] = None
     principal_api_key_id: Optional[UUID] = None
-    user_id: Optional[UUID] = None
     tenant_id: UUID
     trace_id: UUID
     revision: int = 1

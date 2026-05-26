@@ -1476,6 +1476,15 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
     assert set(details_schema.get("properties", {})) == {"step_description"}
 
 
+def test_openapi_flow_run_public_does_not_expose_legacy_user_mirror(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    run_properties = schemas.get("FlowRunPublic", {}).get("properties", {})
+
+    assert "user_id" not in run_properties
+
+
 def test_openapi_flow_run_evidence_response_exposes_rerun_lineage(
     openapi_spec: dict,
 ) -> None:

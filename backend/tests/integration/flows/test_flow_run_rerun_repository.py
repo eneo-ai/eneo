@@ -215,11 +215,6 @@ async def _create_completed_rerun_scenario(
         ),
         tenant_id=admin_user.tenant_id,
     )
-    flow = await flow_repo.update(
-        flow=flow.model_copy(update={"published_version": 1}),
-        tenant_id=admin_user.tenant_id,
-    )
-
     definition_json = _published_definition_for_flow(flow)
     await FlowVersionRepository(session=session, factory=FlowFactory()).create(
         flow_id=_require_uuid(flow.id),
@@ -228,12 +223,15 @@ async def _create_completed_rerun_scenario(
         definition_json=definition_json,
         tenant_id=admin_user.tenant_id,
     )
+    flow = await flow_repo.update(
+        flow=flow.model_copy(update={"published_version": 1}),
+        tenant_id=admin_user.tenant_id,
+    )
 
     run_repo = FlowRunRepository(session=session, factory=FlowFactory())
     run = await run_repo.create(
         flow_id=_require_uuid(flow.id),
         flow_version=1,
-        user_id=admin_user.id,
         principal_type=PrincipalType.USER.value,
         principal_user_id=admin_user.id,
         tenant_id=admin_user.tenant_id,

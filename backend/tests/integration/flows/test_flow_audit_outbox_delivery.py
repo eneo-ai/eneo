@@ -100,10 +100,6 @@ async def _create_flow_and_run(
         ),
         tenant_id=admin_user.tenant_id,
     )
-    flow = await flow_repo.update(
-        flow=flow.model_copy(update={"published_version": 1}),
-        tenant_id=admin_user.tenant_id,
-    )
     await version_repo.create(
         flow_id=flow.id,
         version=1,
@@ -119,11 +115,15 @@ async def _create_flow_and_run(
         },
         tenant_id=admin_user.tenant_id,
     )
+    flow = await flow_repo.update(
+        flow=flow.model_copy(update={"published_version": 1}),
+        tenant_id=admin_user.tenant_id,
+    )
     run_repo = FlowRunRepository(session=session, factory=FlowFactory())
     run = await run_repo.create(
         flow_id=flow.id,
         flow_version=1,
-        user_id=admin_user.id,
+        principal_user_id=admin_user.id,
         tenant_id=admin_user.tenant_id,
         input_payload_json={"question": "What happened?"},
         preseed_steps=[

@@ -249,18 +249,28 @@ def test_flow_routers_do_not_read_raw_api_key_scope_state() -> None:
     assert offenders == []
 
 
-def test_flow_run_user_id_is_not_used_as_a_read_filter() -> None:
-    flow_root = Path(__file__).parents[3] / "src" / "intric" / "flows"
-    read_filter = re.compile(
-        r"\.(?:where|filter)\(\s*(?:FlowRuns|flow_runs(?:\.c)?)\.user_id\b",
-        re.MULTILINE,
-    )
+def test_flow_run_user_id_is_not_used_as_a_canonical_owner_path() -> None:
+    src_root = Path(__file__).parents[3] / "src" / "intric"
+    searched_roots = [src_root / "flows", src_root / "files"]
+    legacy_owner_patterns = [
+        re.compile(pattern, re.MULTILINE)
+        for pattern in (
+            r"\bFlowRuns\.user_id\b",
+            r"\bflow_runs(?:\.c)?\.user_id\b",
+            r"\bFiles\.user_id\b",
+            r"\bfiles(?:\.c)?\.user_id\b",
+            r"\brun\.user_id\b",
+            r"\bget_list_by_id_and_user\b",
+            r"\bdelete_by_owner\(",
+            r"\blegacy_user_id\b",
+            r'\{"user_id": deps\.user_id\}',
+        )
+    ]
     offenders: list[str] = []
-    for path in flow_root.rglob("*.py"):
-        if path.name == "principal.py":
-            continue
-        text = path.read_text()
-        if read_filter.search(text):
-            offenders.append(str(path.relative_to(flow_root)))
+    for root in searched_roots:
+        for path in root.rglob("*.py"):
+            text = path.read_text()
+            if any(pattern.search(text) for pattern in legacy_owner_patterns):
+                offenders.append(str(path.relative_to(src_root)))
 
     assert offenders == []

@@ -31,7 +31,6 @@ def _run(user, flow_id) -> FlowRun:
         principal_type=PrincipalType.USER.value,
         principal_user_id=user.id,
         principal_api_key_id=None,
-        user_id=user.id,
         tenant_id=user.tenant_id,
         trace_id=uuid4(),
         status=FlowRunStatus.COMPLETED,

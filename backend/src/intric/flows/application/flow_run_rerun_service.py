@@ -268,7 +268,6 @@ class FlowRunRerunService:
             specs=root_specs,
             normalized_step_inputs=normalized_step_inputs,
             file_repo=self.file_repo,
-            user_id=self.user.id,
             principal=self._principal(),
         )
         return normalized_step_inputs

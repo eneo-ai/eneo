@@ -197,7 +197,6 @@ def execute_flow_run(
     principal_type: str | None = None,
     principal_user_id: str | None = None,
     principal_api_key_id: str | None = None,
-    user_id: str | None = None,
 ) -> dict[str, str]:
     return _execute_flow_run_task(
         run_id=run_id,
@@ -206,7 +205,6 @@ def execute_flow_run(
         principal_type=principal_type,
         principal_user_id=principal_user_id,
         principal_api_key_id=principal_api_key_id,
-        user_id=user_id,
         task_id=self.request.id,
         retry_count=self.request.retries,
     )
@@ -220,13 +218,9 @@ def _execute_flow_run_task(
     principal_type: str | None = None,
     principal_user_id: str | None = None,
     principal_api_key_id: str | None = None,
-    user_id: str | None = None,
     task_id: str | None,
     retry_count: int,
 ) -> dict[str, str]:
-    if principal_type is None:
-        principal_type = "user"
-        principal_user_id = user_id
     run_id_uuid = UUID(run_id)
     tenant_id_uuid = UUID(tenant_id)
     logger.info(
@@ -242,9 +236,12 @@ def _execute_flow_run_task(
             "principal_api_key_id": principal_api_key_id,
         },
     )
-    resolved_principal_type = PrincipalType(principal_type)
+    resolved_principal_type = (
+        PrincipalType(principal_type) if principal_type is not None else None
+    )
     if (
-        resolved_principal_type == PrincipalType.USER and principal_user_id is None
+        resolved_principal_type is None
+        or (resolved_principal_type == PrincipalType.USER and principal_user_id is None)
     ) or (
         resolved_principal_type == PrincipalType.SERVICE_KEY
         and principal_api_key_id is None

@@ -15,6 +15,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from intric.authentication.principal_types import PrincipalType
 from intric.files.file_models import File, FileType
 from intric.files.file_service import FileService
 from intric.main.exceptions import NotFoundException
@@ -25,7 +26,6 @@ from intric.main.exceptions import NotFoundException
 
 
 def _make_file(*, user_id: UUID, file_id: UUID | None = None) -> File:
-    """Build a minimal File domain object."""
     return File(
         id=file_id or uuid4(),
         name="test.txt",
@@ -36,13 +36,14 @@ def _make_file(*, user_id: UUID, file_id: UUID | None = None) -> File:
         text="hello",
         blob=None,
         transcription=None,
-        user_id=user_id,
+        owner_type=PrincipalType.USER,
+        owner_user_id=user_id,
+        owner_api_key_id=None,
         tenant_id=uuid4(),
     )
 
 
 def _make_service(*, user_id: UUID | None = None) -> tuple[FileService, AsyncMock]:
-    """Build FileService with mocked repo. Returns (service, mock_repo)."""
     uid = user_id or uuid4()
     user = SimpleNamespace(id=uid, tenant_id=uuid4())
     repo = AsyncMock()
@@ -60,7 +61,7 @@ class TestDeleteFile:
     """FileService.delete_file() unit tests."""
 
     @pytest.mark.asyncio
-    async def test_delete_file_calls_delete_by_owner_with_user_id(self):
+    async def test_delete_file_calls_delete_by_owner_with_typed_owner(self):
         """delete_file must use principal-aware delete (atomic), not plain delete."""
         svc, repo = _make_service()
         file_id = uuid4()
@@ -69,14 +70,12 @@ class TestDeleteFile:
 
         await svc.delete_file(file_id)
 
-        # Verify delete_by_owner is called with both id and user_id
         repo.delete_by_owner_principal.assert_awaited_once_with(
             id=file_id,
             owner_type="user",
             owner_user_id=svc.user.id,
             owner_api_key_id=None,
         )
-        # Verify plain delete is NOT called
         repo.delete.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -117,7 +116,7 @@ class TestDeleteFile:
 
         assert result is expected_file
         assert result.id == file_id
-        assert result.user_id == svc.user.id
+        assert result.owner_user_id == svc.user.id
 
     @pytest.mark.asyncio
     async def test_delete_unexpected_error_propagates(self):
@@ -136,19 +135,19 @@ class TestDeleteFile:
 
 
 # ---------------------------------------------------------------------------
-# Tests — Repo layer (delete_by_owner SQL pattern)
+# Tests — Repo layer (delete_by_owner_principal SQL pattern)
 # ---------------------------------------------------------------------------
 
 
 class TestDeleteByOwnerRepo:
-    """FileRepository.delete_by_owner() SQL pattern verification.
+    """FileRepository.delete_by_owner_principal() SQL pattern verification.
 
     Tests that the repo method issues the correct atomic SQL and interprets results.
     Uses a mocked session to verify the SQL statement structure.
     """
 
     @pytest.mark.asyncio
-    async def test_delete_by_owner_returns_none_when_no_match(self):
+    async def test_delete_by_owner_principal_returns_none_when_no_match(self):
         """When DELETE RETURNING yields no row, returns None (not exception)."""
         from intric.files.file_repo import FileRepository
 
@@ -159,13 +158,17 @@ class TestDeleteByOwnerRepo:
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         repo = FileRepository(session=mock_session)
-        result = await repo.delete_by_owner(id=uuid4(), user_id=uuid4())
+        result = await repo.delete_by_owner_principal(
+            id=uuid4(),
+            owner_type="user",
+            owner_user_id=uuid4(),
+        )
 
         assert result is None
         mock_session.execute.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_delete_by_owner_returns_file_when_match(self):
+    async def test_delete_by_owner_principal_returns_file_when_match(self):
         """When DELETE RETURNING yields a row, returns a validated File model."""
         from intric.files.file_repo import FileRepository
 
@@ -176,7 +179,6 @@ class TestDeleteByOwnerRepo:
         # Create a mock row that model_validate can consume
         mock_row = MagicMock()
         mock_row.id = file_id
-        mock_row.user_id = user_id
         mock_row.tenant_id = tenant_id
         mock_row.name = "test.txt"
         mock_row.checksum = "abc"
@@ -186,6 +188,9 @@ class TestDeleteByOwnerRepo:
         mock_row.text = "content"
         mock_row.blob = None
         mock_row.transcription = None
+        mock_row.owner_type = PrincipalType.USER
+        mock_row.owner_user_id = user_id
+        mock_row.owner_api_key_id = None
         mock_row.created_at = None
         mock_row.updated_at = None
 
@@ -202,16 +207,20 @@ class TestDeleteByOwnerRepo:
             "model_validate",
             return_value=_make_file(user_id=user_id, file_id=file_id),
         ) as mock_validate:
-            result = await repo.delete_by_owner(id=file_id, user_id=user_id)
+            result = await repo.delete_by_owner_principal(
+                id=file_id,
+                owner_type="user",
+                owner_user_id=user_id,
+            )
 
         assert result is not None
         assert result.id == file_id
-        assert result.user_id == user_id
+        assert result.owner_user_id == user_id
         mock_validate.assert_called_once_with(mock_row)
 
     @pytest.mark.asyncio
-    async def test_delete_by_owner_sql_includes_both_where_clauses(self):
-        """The DELETE statement must include BOTH id AND user_id in WHERE clause.
+    async def test_delete_by_owner_principal_sql_includes_owner_predicates(self):
+        """The DELETE statement must include id and typed owner predicates.
 
         This verifies the atomic pattern — ownership is checked in SQL, not
         in a separate Python check that could race.
@@ -228,7 +237,11 @@ class TestDeleteByOwnerRepo:
         file_id = uuid4()
         user_id = uuid4()
 
-        await repo.delete_by_owner(id=file_id, user_id=user_id)
+        await repo.delete_by_owner_principal(
+            id=file_id,
+            owner_type="user",
+            owner_user_id=user_id,
+        )
 
         # Inspect the SQL statement that was executed
         call_args = mock_session.execute.call_args
@@ -236,12 +249,11 @@ class TestDeleteByOwnerRepo:
         compiled = stmt.compile(compile_kwargs={"literal_binds": False})
         sql_text = str(compiled)
 
-        # Verify the SQL is a DELETE with RETURNING and includes both WHERE predicates
         assert "DELETE FROM" in sql_text.upper()
         assert "RETURNING" in sql_text.upper()
-        # The WHERE clause should reference both the id and user_id columns
         assert "files.id" in sql_text or "id" in sql_text
-        assert "user_id" in sql_text
+        assert "owner_type" in sql_text
+        assert "owner_user_id" in sql_text
 
 
 class TestGetByIdRepo:

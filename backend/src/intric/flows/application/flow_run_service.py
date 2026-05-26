@@ -294,7 +294,6 @@ class FlowRunService:
                 specs=runtime_specs,
                 normalized_step_inputs=normalized_step_inputs,
                 file_repo=self.file_repo,
-                user_id=self.user.id,
                 principal=principal,
             )
             step_order_by_id = {
@@ -389,7 +388,6 @@ class FlowRunService:
         return await self.flow_run_repo.create(
             flow_id=flow.id,
             flow_version=flow_version,
-            user_id=principal.legacy_user_id,
             principal_type=principal.principal_type.value,
             principal_user_id=principal.principal_user_id,
             principal_api_key_id=principal.principal_api_key_id,
@@ -466,7 +464,7 @@ class FlowRunService:
                 return await self.flow_run_repo.list_runs(
                     tenant_id=self.user.tenant_id,
                     flow_id=flow_id,
-                    user_id=None,
+                    principal_user_id=None,
                     principal_api_key_id=None,
                     limit=limit,
                     offset=offset,
@@ -474,7 +472,7 @@ class FlowRunService:
         return await self.flow_run_repo.list_runs(
             tenant_id=self.user.tenant_id,
             flow_id=flow_id,
-            user_id=(
+            principal_user_id=(
                 None
                 if is_tenant_admin or principal.is_service_key
                 else principal.principal_user_id

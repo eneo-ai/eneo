@@ -14559,8 +14559,7 @@ export interface components {
      *           "status": "queued",
      *           "tenant_id": "00000000-0000-0000-0000-000000000010",
      *           "trace_id": "00000000-0000-0000-0000-000000000302",
-     *           "updated_at": "2026-03-17T10:05:00Z",
-     *           "user_id": "00000000-0000-0000-0000-000000000030"
+     *           "updated_at": "2026-03-17T10:05:00Z"
      *         },
      *         "step_attempts": [],
      *         "step_results": [
@@ -15215,8 +15214,7 @@ export interface components {
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
-     *         "updated_at": "2026-03-17T10:05:00Z",
-     *         "user_id": "00000000-0000-0000-0000-000000000030"
+     *         "updated_at": "2026-03-17T10:05:00Z"
      *       },
      *       "step_attempts": [],
      *       "step_results": [
@@ -15321,8 +15319,7 @@ export interface components {
      *       "status": "queued",
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "trace_id": "00000000-0000-0000-0000-000000000302",
-     *       "updated_at": "2026-03-17T10:05:00Z",
-     *       "user_id": "00000000-0000-0000-0000-000000000030"
+     *       "updated_at": "2026-03-17T10:05:00Z"
      *     }
      */
     FlowRunPublic: {
@@ -15339,8 +15336,6 @@ export interface components {
       /** Flow Version */
       flow_version: number;
       principal_type?: components["schemas"]["PrincipalType"] | null;
-      /** User Id */
-      user_id?: string | null;
       /**
        * Tenant Id
        * Format: uuid
@@ -15408,8 +15403,7 @@ export interface components {
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
-     *         "updated_at": "2026-03-17T10:05:00Z",
-     *         "user_id": "00000000-0000-0000-0000-000000000030"
+     *         "updated_at": "2026-03-17T10:05:00Z"
      *       }
      *     }
      */
@@ -15985,8 +15979,7 @@ export interface components {
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
-     *         "updated_at": "2026-03-17T10:05:00Z",
-     *         "user_id": "00000000-0000-0000-0000-000000000030"
+     *         "updated_at": "2026-03-17T10:05:00Z"
      *       }
      *     }
      */
@@ -16305,8 +16298,7 @@ export interface components {
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
-     *         "updated_at": "2026-03-17T10:05:00Z",
-     *         "user_id": "00000000-0000-0000-0000-000000000030"
+     *         "updated_at": "2026-03-17T10:05:00Z"
      *       },
      *       "status": "queued"
      *     }
@@ -38725,7 +38717,6 @@ export interface operations {
            *           "id": "00000000-0000-0000-0000-000000000301",
            *           "flow_id": "00000000-0000-0000-0000-000000000001",
            *           "flow_version": 3,
-           *           "user_id": "00000000-0000-0000-0000-000000000030",
            *           "tenant_id": "00000000-0000-0000-0000-000000000010",
            *           "trace_id": "00000000-0000-0000-0000-000000000302",
            *           "revision": 1,
@@ -39481,7 +39472,6 @@ export interface operations {
            *         "id": "00000000-0000-0000-0000-000000000301",
            *         "flow_id": "00000000-0000-0000-0000-000000000001",
            *         "flow_version": 3,
-           *         "user_id": "00000000-0000-0000-0000-000000000030",
            *         "tenant_id": "00000000-0000-0000-0000-000000000010",
            *         "trace_id": "00000000-0000-0000-0000-000000000302",
            *         "revision": 2,

@@ -22,16 +22,6 @@ class FileRepository:
     async def add(self, file: FileCreate) -> File:
         return await self._delegate.add(file)
 
-    async def get_list_by_id_and_user(
-        self, ids: list[UUID], user_id: UUID, include_transcription: bool = True
-    ) -> list[File]:
-        return await self.get_list_by_id_for_owner(
-            ids=ids,
-            owner_type="user",
-            owner_user_id=user_id,
-            include_transcription=include_transcription,
-        )
-
     async def get_list_by_id_for_owner(
         self,
         *,
@@ -121,14 +111,6 @@ class FileRepository:
     async def delete(self, id: UUID) -> File:
         return cast(File, await self._delegate.delete(id))
 
-    async def delete_by_owner(self, id: UUID, user_id: UUID) -> File | None:
-        """Atomic owner-bound delete. Returns None if no matching row."""
-        return await self.delete_by_owner_principal(
-            id=id,
-            owner_type="user",
-            owner_user_id=user_id,
-        )
-
     async def delete_by_owner_principal(
         self,
         *,
@@ -192,7 +174,6 @@ class FileRepository:
                 "owner_type": file.owner_type,
                 "owner_user_id": file.owner_user_id,
                 "owner_api_key_id": file.owner_api_key_id,
-                "user_id": file.user_id,
                 "tenant_id": file.tenant_id,
             }
         )

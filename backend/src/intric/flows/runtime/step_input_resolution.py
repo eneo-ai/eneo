@@ -39,7 +39,7 @@ class StepInputResolutionDeps:
         ..., Awaitable[tuple[str, dict[str, Any] | list[Any] | None]]
     ]
     file_repo: Any
-    user_id: Any
+    principal: FlowPrincipal
     transcriber: Any | None
     space_repo: Any
     flow_run_repo: Any
@@ -49,7 +49,6 @@ class StepInputResolutionDeps:
     max_audio_files: int | None
     max_inline_text_bytes: int
     logger: Any
-    principal: FlowPrincipal | None = None
 
 
 async def resolve_step_input(
@@ -331,7 +330,6 @@ async def _load_runtime_files(
     files = await load_files_by_requested_ids(
         file_repo=deps.file_repo,
         requested_ids=requested_ids,
-        user_id=deps.user_id,
         principal=deps.principal,
         file_cache=file_cache,
     )

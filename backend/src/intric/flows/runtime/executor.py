@@ -1047,7 +1047,6 @@ class FlowRunExecutor:
             file_repo=self.file_repo,
             template_asset_service=self.template_asset_service,
             apply_output_cap=self._apply_output_cap_positional,
-            user_id=self.user.id,
             principal=self.principal,
             logger=logger,
         )
@@ -1558,7 +1557,6 @@ class FlowRunExecutor:
             variable_resolver=self.variable_resolver,
             resolve_http_input_source_text=self._resolve_http_input_source_text,
             file_repo=self.file_repo,
-            user_id=self.user.id,
             principal=self.principal,
             transcriber=self.transcriber,
             space_repo=self.space_repo,
@@ -1771,7 +1769,6 @@ class FlowRunExecutor:
 
         deps = OutputRuntimeDeps(
             file_repo=self.file_repo,
-            user_id=self.user.id,
             principal=self.principal,
             compile_validators=compile_validators,
             parse_json_output=parse_json_output,
@@ -1800,11 +1797,7 @@ class FlowRunExecutor:
         if len(encoded) <= self.max_inline_text_bytes:
             return text, []
 
-        try:
-            owner_fields = FlowPrincipal.from_run(run).file_owner_fields()
-        except ValueError:
-            return text[:4096], []
-
+        owner_fields = FlowPrincipal.from_run(run).file_owner_fields()
         file_row = await self.file_repo.add(
             FileCreate.model_validate(
                 {

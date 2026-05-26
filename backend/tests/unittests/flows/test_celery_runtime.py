@@ -225,7 +225,6 @@ def test_execute_flow_run_marks_failed_when_user_id_is_missing(monkeypatch):
         run_id=str(uuid4()),
         flow_id=str(uuid4()),
         tenant_id=str(uuid4()),
-        user_id=None,
         task_id="task-1",
         retry_count=0,
     )
@@ -291,7 +290,8 @@ def test_execute_flow_run_handles_timeout_and_marks_run_failed(monkeypatch):
         run_id=str(uuid4()),
         flow_id=str(uuid4()),
         tenant_id=str(uuid4()),
-        user_id=str(uuid4()),
+        principal_type="user",
+        principal_user_id=str(uuid4()),
         task_id="task-1",
         retry_count=0,
     )
@@ -349,7 +349,8 @@ def test_execute_flow_run_handles_generic_exception(monkeypatch):
         run_id=str(uuid4()),
         flow_id=str(uuid4()),
         tenant_id=str(uuid4()),
-        user_id=str(uuid4()),
+        principal_type="user",
+        principal_user_id=str(uuid4()),
         task_id="task-1",
         retry_count=0,
     )

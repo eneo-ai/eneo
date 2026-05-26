@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from intric.authentication.principal_types import PrincipalType
 from intric.flows.application.flow_run_lifecycle_events import (
     FLOW_RUN_LIFECYCLE_EVENT_NAME,
     FLOW_RUN_LIFECYCLE_EVENT_SCHEMA_VERSION,
@@ -26,7 +27,8 @@ def _run() -> FlowRun:
         id=uuid4(),
         flow_id=uuid4(),
         flow_version=2,
-        user_id=uuid4(),
+        principal_type=PrincipalType.USER,
+        principal_user_id=uuid4(),
         tenant_id=uuid4(),
         trace_id=uuid4(),
         revision=4,

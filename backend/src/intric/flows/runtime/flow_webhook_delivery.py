@@ -423,11 +423,9 @@ class FlowRunWebhookDeliveryService:
         if self.audit_service is None:
             return None
 
-        principal_type = (
-            run.principal_type if run.principal_type is not None else PrincipalType.USER
-        )
+        principal_type = run.principal_type
         if principal_type == PrincipalType.USER:
-            user_id = run.principal_user_id or run.user_id
+            user_id = run.principal_user_id
             if user_id is None:
                 raise ValueError("Webhook delivery run has no user principal.")
             user = await self.user_repo.get_user_by_id_and_tenant_id(

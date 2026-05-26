@@ -171,7 +171,6 @@ FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "id": "00000000-0000-0000-0000-000000000301",
     "flow_id": "00000000-0000-0000-0000-000000000001",
     "flow_version": 3,
-    "user_id": "00000000-0000-0000-0000-000000000030",
     "tenant_id": "00000000-0000-0000-0000-000000000010",
     "trace_id": "00000000-0000-0000-0000-000000000302",
     "revision": 1,
@@ -950,7 +949,6 @@ class FlowRunPublic(BaseModel):
     flow_id: UUID
     flow_version: int
     principal_type: PrincipalType | None = None
-    user_id: UUID | None = None
     tenant_id: UUID
     trace_id: UUID
     revision: int = Field(

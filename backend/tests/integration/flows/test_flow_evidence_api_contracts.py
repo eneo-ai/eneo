@@ -232,9 +232,6 @@ async def _seed_flow_run_contract_data(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        flow = flow.model_copy(update={"published_version": 1})
-        flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
-
         step = flow.steps[0]
         await version_repo.create(
             flow_id=flow.id,
@@ -265,6 +262,8 @@ async def _seed_flow_run_contract_data(
             },
             tenant_id=admin_user.tenant_id,
         )
+        flow = flow.model_copy(update={"published_version": 1})
+        flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
 
         started_at = datetime.now(timezone.utc) - timedelta(seconds=5)
         finished_at = datetime.now(timezone.utc)
@@ -273,7 +272,6 @@ async def _seed_flow_run_contract_data(
             flow_version=1,
             principal_type="user",
             principal_user_id=admin_user.id,
-            user_id=admin_user.id,
             tenant_id=admin_user.tenant_id,
             trace_id=uuid4(),
             status="completed",

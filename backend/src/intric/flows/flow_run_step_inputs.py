@@ -26,13 +26,6 @@ FLOW_RUN_ORCHESTRATION_INPUT_KEYS = frozenset(
 
 
 class _FileRepositoryProtocol(Protocol):
-    async def get_list_by_id_and_user(
-        self,
-        ids: list[UUID],
-        user_id: UUID,
-        include_transcription: bool = True,
-    ) -> list[File]: ...
-
     async def get_list_by_id_for_owner(
         self,
         *,
@@ -129,8 +122,7 @@ async def validate_submitted_step_inputs(
     specs: dict[UUID, RuntimeStepInputSpec],
     normalized_step_inputs: dict[UUID, list[UUID]],
     file_repo: _FileRepositoryProtocol | None,
-    user_id: UUID,
-    principal: FlowPrincipal | None = None,
+    principal: FlowPrincipal,
 ) -> None:
     step_by_id = {step.step_id: step for step in steps}
     aggregate_count = 0
@@ -167,20 +159,13 @@ async def validate_submitted_step_inputs(
         if file_repo is None or not requested_file_ids:
             continue
 
-        if principal is not None and principal.is_service_key:
-            files = await file_repo.get_list_by_id_for_owner(
-                ids=requested_file_ids,
-                owner_type=principal.principal_type.value,
-                owner_user_id=principal.principal_user_id,
-                owner_api_key_id=principal.principal_api_key_id,
-                include_transcription=False,
-            )
-        else:
-            files = await file_repo.get_list_by_id_and_user(
-                ids=requested_file_ids,
-                user_id=user_id,
-                include_transcription=False,
-            )
+        files = await file_repo.get_list_by_id_for_owner(
+            ids=requested_file_ids,
+            owner_type=principal.principal_type.value,
+            owner_user_id=principal.principal_user_id,
+            owner_api_key_id=principal.principal_api_key_id,
+            include_transcription=False,
+        )
         resolved_ids = {file.id for file in files}
         missing_ids = [
             str(file_id)

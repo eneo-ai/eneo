@@ -68,7 +68,9 @@ async def test_save_file_passes_result_to_repo(service, protocol, repo, user):
 
     repo.add.assert_called_once()
     create_arg = repo.add.call_args[0][0]
-    assert create_arg.user_id == user.id
+    assert create_arg.owner_type.value == "user"
+    assert create_arg.owner_user_id == user.id
+    assert create_arg.owner_api_key_id is None
     assert create_arg.tenant_id == user.tenant_id
     assert create_arg.name == "test.txt"
 
@@ -112,5 +114,7 @@ async def test_save_file_content_persists_blob(service, repo, user):
     assert create_arg.file_type == FileType.DOCUMENT
     assert create_arg.blob == b"docx-bytes"
     assert create_arg.text is None
-    assert create_arg.user_id == user.id
+    assert create_arg.owner_type.value == "user"
+    assert create_arg.owner_user_id == user.id
+    assert create_arg.owner_api_key_id is None
     assert create_arg.tenant_id == user.tenant_id

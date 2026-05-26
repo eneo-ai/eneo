@@ -1,7 +1,6 @@
 import hashlib
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -233,18 +232,17 @@ class FileService:
             return self.user.id
         return None
 
-    def _owner_fields(self) -> dict[str, Any]:
+    def _owner_fields(self) -> dict[str, PrincipalType | UUID | None]:
         return {
             "owner_type": self._owner_type(),
             "owner_user_id": self._owner_user_id(),
             "owner_api_key_id": self._owner_api_key_id(),
-            "user_id": self._owner_user_id(),
         }
 
     def _owns_file(self, file: File | FileInfo) -> bool:
         owner_type = file.owner_type
         if owner_type is None:
-            return file.user_id == self.user.id
+            return False
         if owner_type == PrincipalType.USER:
             return file.owner_user_id == self.user.id
         return file.owner_api_key_id == self._owner_api_key_id()
