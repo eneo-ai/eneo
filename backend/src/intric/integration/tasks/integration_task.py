@@ -9,6 +9,7 @@ from intric.main.config import get_settings
 from intric.main.exceptions import NotFoundException
 from intric.main.logging import get_logger
 from intric.main.models import ChannelType
+from intric.worker.redis import redis_lease
 from intric.worker.worker import Worker
 
 if TYPE_CHECKING:
@@ -25,6 +26,11 @@ if TYPE_CHECKING:
 
 worker = Worker()
 logger = get_logger(__name__)
+
+# Lock TTL is a crash-detection window, not a cap on sync duration: a watchdog
+# in redis_lease keeps refreshing it while the sync runs (which can take longer
+# under Graph throttling), and it only lapses if the worker dies.
+SHAREPOINT_SYNC_LOCK_TTL_SECONDS = 300
 
 
 async def _get_knowledge_with_retry(
@@ -100,10 +106,8 @@ async def pull_sharepoint_content(
     # Redis-based deduplication to prevent duplicate syncs from concurrent webhooks
     knowledge_id_str = str(params.integration_knowledge_id)
     lock_key = f"sharepoint_sync_lock:{knowledge_id_str}"
-    lock_ttl_seconds = 300  # Lock expires after 5 minutes
 
     try:
-        # Try to acquire the lock in Redis (SET only if not exists)
         settings = get_settings()
         redis_client = await redis.from_url(  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
             f"redis://{settings.redis_host}:{settings.redis_port}",
@@ -111,47 +115,42 @@ async def pull_sharepoint_content(
             decode_responses=True,
         )
 
-        # SET NX EX - Set if Not eXists with EXpiration
-        lock_acquired = await redis_client.set(
-            lock_key, "locked", nx=True, ex=lock_ttl_seconds
-        )
-
-        if not lock_acquired:
-            logger.info(
-                f"Skipping full sync for knowledge {knowledge_id_str} - "
-                f"another sync is already in progress (Redis lock active)"
-            )
-            await redis_client.close()
-            return "Skipped: Duplicate sync blocked by Redis lock"
-
-        logger.info(f"Acquired sync lock for knowledge {knowledge_id_str}")
-
         try:
-            knowledge = await _get_knowledge_with_retry(
-                container, params.integration_knowledge_id
-            )
-            assert knowledge is not None
-            await _validate_embedding_provider(container, knowledge)
-            service = container.sharepoint_content_service()
+            async with redis_lease(
+                redis_client,
+                lock_key,
+                ttl_seconds=SHAREPOINT_SYNC_LOCK_TTL_SECONDS,
+            ) as acquired:
+                if not acquired:
+                    logger.info(
+                        f"Skipping full sync for knowledge {knowledge_id_str} - "
+                        f"another sync is already in progress (Redis lock active)"
+                    )
+                    return "Skipped: Duplicate sync blocked by Redis lock"
 
-            result = await service.pull_content(
-                token_id=params.token_id,
-                tenant_app_id=params.tenant_app_id,
-                integration_knowledge_id=knowledge.id,
-                site_id=params.site_id,
-                drive_id=params.drive_id,
-                folder_id=params.folder_id,
-                folder_path=params.folder_path,
-                resource_type=params.resource_type,
-            )
+                logger.info(f"Acquired sync lock for knowledge {knowledge_id_str}")
 
-            logger.info(f"Completed full sync for knowledge {knowledge_id_str}")
-            return result
+                knowledge = await _get_knowledge_with_retry(
+                    container, params.integration_knowledge_id
+                )
+                assert knowledge is not None
+                await _validate_embedding_provider(container, knowledge)
+                service = container.sharepoint_content_service()
 
+                result = await service.pull_content(
+                    token_id=params.token_id,
+                    tenant_app_id=params.tenant_app_id,
+                    integration_knowledge_id=knowledge.id,
+                    site_id=params.site_id,
+                    drive_id=params.drive_id,
+                    folder_id=params.folder_id,
+                    folder_path=params.folder_path,
+                    resource_type=params.resource_type,
+                )
+
+                logger.info(f"Completed full sync for knowledge {knowledge_id_str}")
+                return result
         finally:
-            # Release lock after sync completes (or fails)
-            await redis_client.delete(lock_key)
-            logger.info(f"Released sync lock for knowledge {knowledge_id_str}")
             await redis_client.close()
 
     except Exception as exc:
@@ -174,12 +173,8 @@ async def sync_sharepoint_delta(
     # This lock persists across the webhook handler and worker task boundary
     knowledge_id_str = str(params.integration_knowledge_id)
     lock_key = f"sharepoint_sync_lock:{knowledge_id_str}"
-    lock_ttl_seconds = (
-        300  # Lock expires after 5 minutes (longer than any sync should take)
-    )
 
     try:
-        # Try to acquire the lock in Redis (SET only if not exists)
         settings = get_settings()
         redis_client = await redis.from_url(  # pyright: ignore[reportUnknownMemberType]  # redis stubs incomplete
             f"redis://{settings.redis_host}:{settings.redis_port}",
@@ -187,43 +182,39 @@ async def sync_sharepoint_delta(
             decode_responses=True,
         )
 
-        # SET NX EX - Set if Not eXists with EXpiration
-        lock_acquired = await redis_client.set(
-            lock_key, "locked", nx=True, ex=lock_ttl_seconds
-        )
-
-        if not lock_acquired:
-            logger.info(
-                f"Skipping sync for knowledge {knowledge_id_str} - "
-                f"another sync is already in progress (Redis lock active)"
-            )
-            await redis_client.close()
-            return "Skipped: Duplicate sync blocked by Redis lock"
-
-        logger.info(f"Acquired sync lock for knowledge {knowledge_id_str}")
-
         try:
-            knowledge = await _get_knowledge_with_retry(
-                container, params.integration_knowledge_id
-            )
-            assert knowledge is not None
-            await _validate_embedding_provider(container, knowledge)
-            service = container.sharepoint_content_service()
+            async with redis_lease(
+                redis_client,
+                lock_key,
+                ttl_seconds=SHAREPOINT_SYNC_LOCK_TTL_SECONDS,
+            ) as acquired:
+                if not acquired:
+                    logger.info(
+                        f"Skipping sync for knowledge {knowledge_id_str} - "
+                        f"another sync is already in progress (Redis lock active)"
+                    )
+                    return "Skipped: Duplicate sync blocked by Redis lock"
 
-            result = await service.process_delta_changes(
-                token_id=params.token_id,
-                tenant_app_id=params.tenant_app_id,
-                integration_knowledge_id=knowledge.id,
-                site_id=params.site_id,
-                drive_id=params.drive_id,
-                resource_type=params.resource_type,
-            )
-            return result
+                logger.info(f"Acquired sync lock for knowledge {knowledge_id_str}")
+
+                knowledge = await _get_knowledge_with_retry(
+                    container, params.integration_knowledge_id
+                )
+                assert knowledge is not None
+                await _validate_embedding_provider(container, knowledge)
+                service = container.sharepoint_content_service()
+
+                result = await service.process_delta_changes(
+                    token_id=params.token_id,
+                    tenant_app_id=params.tenant_app_id,
+                    integration_knowledge_id=knowledge.id,
+                    site_id=params.site_id,
+                    drive_id=params.drive_id,
+                    resource_type=params.resource_type,
+                )
+                return result
         finally:
-            # Release the lock
-            await redis_client.delete(lock_key)
             await redis_client.close()
-            logger.info(f"Released sync lock for knowledge {knowledge_id_str}")
 
     except Exception as e:
         logger.error(f"Error in sync_sharepoint_delta: {e}")
