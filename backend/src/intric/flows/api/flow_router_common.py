@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Any, cast
 from uuid import UUID
 
 from fastapi import HTTPException, Request, status
@@ -23,7 +22,6 @@ from intric.flows.api.flow_models import (
 from intric.flows.application import flow_dispatch
 from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
 from intric.flows.flow_access_policy import FlowApiAction
-from intric.flows.flow_file_upload_service import FlowFileUploadService
 from intric.flows.flow_run_contract_service import FlowRunContractService
 from intric.main.container.container import Container
 
@@ -110,15 +108,6 @@ def required_uuid(value: UUID | None, *, field: str) -> UUID:
             detail=f"Expected non-null UUID for {field}.",
         )
     return value
-
-
-def flow_upload_service(container: Container) -> FlowFileUploadService:
-    return FlowFileUploadService(
-        flow_service=cast(Any, container.flow_service()),  # pyright: ignore[reportUnknownMemberType]
-        file_service=container.file_service(),
-        settings_service=cast(Any, container.settings_service()),  # pyright: ignore[reportUnknownMemberType]
-        flow_version_repo=cast(Any, container.flow_version_repo()),  # pyright: ignore[reportUnknownMemberType]
-    )
 
 
 def flow_run_contract_service(container: Container) -> FlowRunContractService:

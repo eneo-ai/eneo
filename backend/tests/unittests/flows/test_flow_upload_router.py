@@ -23,6 +23,7 @@ from intric.flows.api.flow_upload_router import (
     upload_flow_file,
     upload_flow_runtime_file,
 )
+from intric.flows.flow_file_upload_service import FlowFileUploadService
 from intric.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from intric.main.exceptions import BadRequestException
 from intric.settings.settings import FlowInputLimitsPublic
@@ -114,9 +115,7 @@ async def test_upload_flow_runtime_file_calls_step_upload_service(monkeypatch):
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
     container.audit_service.return_value = audit_service
     container.user.return_value = user
-    monkeypatch.setattr(
-        router_common_module, "flow_upload_service", lambda _container: upload_service
-    )
+    container.flow_file_upload_service.return_value = upload_service
 
     async def fake_enforce(
         request,
@@ -188,6 +187,12 @@ async def test_upload_flow_file_rejects_when_flow_input_type_not_file_upload(
     container.settings_service.return_value = settings_service
     container.file_service.return_value = file_service
     container.flow_version_repo.return_value = flow_version_repo
+    container.flow_file_upload_service.side_effect = lambda: FlowFileUploadService(
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+    )
 
     monkeypatch.setattr(
         router_common_module,
@@ -260,6 +265,12 @@ async def test_upload_flow_file_uses_flow_limit_override(monkeypatch):
     container.settings_service.return_value = settings_service
     container.file_service.return_value = file_service
     container.flow_version_repo.return_value = flow_version_repo
+    container.flow_file_upload_service.side_effect = lambda: FlowFileUploadService(
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+    )
     container.user.return_value = user
     container.audit_service.return_value = AsyncMock()
     _enable_explicit_transaction(container)

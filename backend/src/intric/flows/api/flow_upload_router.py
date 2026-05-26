@@ -194,7 +194,7 @@ async def upload_flow_file(
         allow_service_key_principals=True,
         require_published_for_service_key=True,
     )
-    file = await common.flow_upload_service(container).upload_file_for_flow(
+    file = await container.flow_file_upload_service().upload_file_for_flow(
         flow_id=id,
         upload_file=upload_file,
     )
@@ -294,7 +294,7 @@ async def upload_flow_runtime_file(
         allow_service_key_principals=True,
         require_published_for_service_key=True,
     )
-    file = await common.flow_upload_service(container).upload_runtime_file_for_step(
+    file = await container.flow_file_upload_service().upload_runtime_file_for_step(
         flow_id=id,
         step_id=step_id,
         upload_file=upload_file,

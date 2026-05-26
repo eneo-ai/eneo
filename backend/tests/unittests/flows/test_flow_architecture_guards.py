@@ -1,7 +1,7 @@
-"""AST guards keep runtime output-axis dispatch at registered owners.
+"""AST guards keep Flow architecture ownership rules from drifting.
 
-The scanner covers Compare and Match nodes that reference output-mode or
-output-type attributes, local names, or enum members.
+The guards cover output-axis dispatch, outbox delivery vocabulary, and
+container-provider wiring that must stay behind canonical owners.
 """
 
 from __future__ import annotations
@@ -23,7 +23,12 @@ from intric.database.tables.flow_tables import (
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 FLOW_SOURCE_ROOT = BACKEND_ROOT / "src" / "intric" / "flows"
 FLOW_RUNTIME_ROOT = FLOW_SOURCE_ROOT / "runtime"
+FLOW_API_ROOT = FLOW_SOURCE_ROOT / "api"
 FLOW_TASKS_PATH = FLOW_RUNTIME_ROOT / "tasks.py"
+FLOW_API_UPLOAD_PROVIDER_FILES = (
+    FLOW_API_ROOT / "flow_router_common.py",
+    FLOW_API_ROOT / "flow_upload_router.py",
+)
 FLOW_API_PACKAGES = {"api", "ai_builder"}
 OUTPUT_FORMATS_ROOT = FLOW_RUNTIME_ROOT / "output_formats"
 DATA_RETENTION_ROOT = BACKEND_ROOT / "src" / "intric" / "data_retention"
@@ -208,6 +213,43 @@ def _is_container_provider_call(node: ast.AST) -> bool:
 
 def _contains_container_provider_call(node: ast.AST) -> bool:
     return any(_is_container_provider_call(child) for child in ast.walk(node))
+
+
+def _container_provider_any_erasure_offenders(path: Path) -> list[str]:
+    source = path.read_text()
+    tree = ast.parse(source, filename=str(path))
+    offenders: list[str] = []
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Name) or node.func.id != "cast":
+            continue
+        if len(node.args) < 2:
+            continue
+        type_arg = node.args[0]
+        if (
+            isinstance(type_arg, ast.Name)
+            and type_arg.id == "Any"
+            and _contains_container_provider_call(node.args[1])
+        ):
+            offenders.append(f"cast(Any):{node.lineno}")
+
+    container_provider_lines = {
+        node.lineno for node in ast.walk(tree) if _is_container_provider_call(node)
+    }
+    for line_number, line in enumerate(source.splitlines(), start=1):
+        if (
+            "pyright: ignore" in line
+            and "reportUnknownMemberType" in line
+            and any(
+                provider_line <= line_number <= provider_line + 2
+                for provider_line in container_provider_lines
+            )
+        ):
+            offenders.append(f"pyright-ignore:{line_number}")
+
+    return offenders
 
 
 def _should_scan_path_for_axis(path: Path, *, axis: str) -> bool:
@@ -575,40 +617,38 @@ def test_flow_outbox_delivery_status_literals_use_canonical_vocabulary():
 
 
 def test_flow_celery_task_provider_wiring_is_not_erased_to_any():
-    source = FLOW_TASKS_PATH.read_text()
-    tree = ast.parse(source, filename=str(FLOW_TASKS_PATH))
-    offenders: list[str] = []
-
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        if not isinstance(node.func, ast.Name) or node.func.id != "cast":
-            continue
-        if len(node.args) < 2:
-            continue
-        type_arg = node.args[0]
-        if (
-            isinstance(type_arg, ast.Name)
-            and type_arg.id == "Any"
-            and _contains_container_provider_call(node.args[1])
-        ):
-            offenders.append(f"cast(Any):{node.lineno}")
-
-    container_provider_lines = {
-        node.lineno for node in ast.walk(tree) if _is_container_provider_call(node)
-    }
-    for line_number, line in enumerate(source.splitlines(), start=1):
-        if (
-            "pyright: ignore" in line
-            and "reportUnknownMemberType" in line
-            and any(
-                provider_line <= line_number <= provider_line + 2
-                for provider_line in container_provider_lines
-            )
-        ):
-            offenders.append(f"pyright-ignore:{line_number}")
+    offenders = _container_provider_any_erasure_offenders(FLOW_TASKS_PATH)
 
     assert offenders == [], (
         "Flow Celery task wiring must preserve typed Container provider "
         "contracts instead of erasing them to Any: " + ", ".join(offenders)
+    )
+
+
+def test_flow_api_upload_service_uses_container_provider_without_any_erasure():
+    offenders: list[str] = []
+
+    for path in FLOW_API_UPLOAD_PROVIDER_FILES:
+        relative_path = path.relative_to(BACKEND_ROOT)
+        offenders.extend(
+            f"{relative_path}:{offender}"
+            for offender in _container_provider_any_erasure_offenders(path)
+        )
+
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "flow_upload_service":
+                offenders.append(f"{relative_path}:helper:{node.lineno}")
+            if not isinstance(node, ast.Call):
+                continue
+            if (
+                isinstance(node.func, ast.Name)
+                and node.func.id == "FlowFileUploadService"
+            ):
+                offenders.append(f"{relative_path}:manual-construction:{node.lineno}")
+
+    assert offenders == [], (
+        "Flow API upload wiring must use Container.flow_file_upload_service "
+        "instead of reconstructing FlowFileUploadService or erasing provider "
+        "types: " + ", ".join(offenders)
     )
