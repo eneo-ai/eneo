@@ -23,50 +23,91 @@ _RESULTS_TABLE = "flow_step_results"
 _ATTEMPTS_TABLE = "flow_step_attempts"
 _RESULTS_STEP_FK = "flow_step_results_step_id_fkey"
 _ATTEMPTS_STEP_FK = "flow_step_attempts_step_id_fkey"
+_RESULTS_RECOVERED_TABLE = "_flow_step_results_recovered_step_ids"
+_ATTEMPTS_RECOVERED_TABLE = "_flow_step_attempts_recovered_step_ids"
 _UUID_PATTERN = (
     "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
 
 
-def _recovered_step_ids_sql(table_name: str) -> str:
-    return f"""
-        SELECT
-            runtime_row.id AS runtime_row_id,
-            runtime_row.flow_run_id,
-            runtime_row.step_order,
-            (published_step.value ->> 'step_id')::uuid AS snapshot_step_id
-        FROM {table_name} AS runtime_row
-        JOIN flow_runs AS runtime_run
-          ON runtime_run.id = runtime_row.flow_run_id
-         AND runtime_run.flow_id = runtime_row.flow_id
-         AND runtime_run.tenant_id = runtime_row.tenant_id
-        JOIN flow_versions AS published_version
-          ON published_version.flow_id = runtime_run.flow_id
-         AND published_version.tenant_id = runtime_run.tenant_id
-         AND published_version.version = runtime_run.flow_version
-        CROSS JOIN LATERAL jsonb_array_elements(
-            CASE
-                WHEN jsonb_typeof(published_version.definition_json -> 'steps') = 'array'
-                THEN published_version.definition_json -> 'steps'
-                ELSE '[]'::jsonb
-            END
-        ) AS published_step(value)
-        WHERE runtime_row.step_id IS NULL
-          AND published_step.value ? 'step_id'
-          AND (published_step.value ->> 'step_id') ~ '{_UUID_PATTERN}'
-          AND published_step.value ? 'step_order'
-          AND (published_step.value ->> 'step_order') ~ '^[0-9]+$'
-          AND (published_step.value ->> 'step_order')::integer = runtime_row.step_order
-    """
+def _materialize_recovered_mapping(
+    bind: Connection,
+    *,
+    source_table: str,
+    temp_table_name: str,
+) -> None:
+    bind.execute(
+        sa.text(
+            f"""
+            CREATE TEMP TABLE {temp_table_name} ON COMMIT DROP AS
+            WITH nullable_runtime_rows AS (
+                SELECT
+                    runtime_row.id AS runtime_row_id,
+                    runtime_row.flow_run_id,
+                    runtime_row.flow_id,
+                    runtime_row.tenant_id,
+                    runtime_run.flow_version,
+                    runtime_row.step_order
+                FROM {source_table} AS runtime_row
+                JOIN flow_runs AS runtime_run
+                  ON runtime_run.id = runtime_row.flow_run_id
+                 AND runtime_run.flow_id = runtime_row.flow_id
+                 AND runtime_run.tenant_id = runtime_row.tenant_id
+                WHERE runtime_row.step_id IS NULL
+            ),
+            referenced_versions AS (
+                SELECT flow_id, tenant_id, flow_version
+                FROM nullable_runtime_rows
+                GROUP BY flow_id, tenant_id, flow_version
+            ),
+            published_steps AS (
+                SELECT
+                    referenced_version.flow_id,
+                    referenced_version.tenant_id,
+                    referenced_version.flow_version,
+                    (published_step.value ->> 'step_order')::integer AS step_order,
+                    (published_step.value ->> 'step_id')::uuid AS snapshot_step_id
+                FROM referenced_versions AS referenced_version
+                JOIN flow_versions AS published_version
+                  ON published_version.flow_id = referenced_version.flow_id
+                 AND published_version.tenant_id = referenced_version.tenant_id
+                 AND published_version.version = referenced_version.flow_version
+                CROSS JOIN LATERAL jsonb_array_elements(
+                    CASE
+                        WHEN jsonb_typeof(published_version.definition_json -> 'steps') = 'array'
+                        THEN published_version.definition_json -> 'steps'
+                        ELSE '[]'::jsonb
+                    END
+                ) AS published_step(value)
+                WHERE published_step.value ? 'step_id'
+                  AND (published_step.value ->> 'step_id') ~ '{_UUID_PATTERN}'
+                  AND published_step.value ? 'step_order'
+                  AND (published_step.value ->> 'step_order') ~ '^[0-9]+$'
+            )
+            -- Preserve duplicate matches so the ambiguity preflight can reject them.
+            SELECT
+                runtime_row.runtime_row_id,
+                runtime_row.flow_run_id,
+                runtime_row.step_order,
+                published_step.snapshot_step_id
+            FROM nullable_runtime_rows AS runtime_row
+            JOIN published_steps AS published_step
+              ON published_step.flow_id = runtime_row.flow_id
+             AND published_step.tenant_id = runtime_row.tenant_id
+             AND published_step.flow_version = runtime_row.flow_version
+             AND published_step.step_order = runtime_row.step_order
+            """
+        )
+    )
 
 
 def _preflight_recoverable_runtime_rows(
     bind: Connection,
     *,
     table_name: str,
+    temp_table_name: str,
     label: str,
 ) -> None:
-    recovered_step_ids = _recovered_step_ids_sql(table_name)
     bind.execute(
         sa.text(
             f"""
@@ -78,7 +119,7 @@ def _preflight_recoverable_runtime_rows(
                     WHERE runtime_row.step_id IS NULL
                       AND NOT EXISTS (
                           SELECT 1
-                          FROM ({recovered_step_ids}) AS recovered
+                          FROM {temp_table_name} AS recovered
                           WHERE recovered.runtime_row_id = runtime_row.id
                       )
                 ) THEN
@@ -89,7 +130,7 @@ def _preflight_recoverable_runtime_rows(
 
                 IF EXISTS (
                     SELECT 1
-                    FROM ({recovered_step_ids}) AS recovered
+                    FROM {temp_table_name} AS recovered
                     GROUP BY recovered.runtime_row_id
                     HAVING count(*) <> 1
                 ) THEN
@@ -104,23 +145,19 @@ def _preflight_recoverable_runtime_rows(
 
 
 def _preflight_result_unique_keys(bind: Connection) -> None:
-    recovered_step_ids = _recovered_step_ids_sql(_RESULTS_TABLE)
     bind.execute(
         sa.text(
             f"""
             DO $$
             BEGIN
                 IF EXISTS (
-                    WITH recovered AS (
-                        {recovered_step_ids}
-                    ),
-                    final_keys AS (
+                    WITH final_keys AS (
                         SELECT flow_run_id, step_id
                         FROM {_RESULTS_TABLE}
                         WHERE step_id IS NOT NULL
                         UNION ALL
                         SELECT flow_run_id, snapshot_step_id AS step_id
-                        FROM recovered
+                        FROM {_RESULTS_RECOVERED_TABLE}
                     )
                     SELECT 1
                     FROM final_keys
@@ -137,17 +174,13 @@ def _preflight_result_unique_keys(bind: Connection) -> None:
 
 
 def _preflight_attempt_unique_keys(bind: Connection) -> None:
-    recovered_step_ids = _recovered_step_ids_sql(_ATTEMPTS_TABLE)
     bind.execute(
         sa.text(
             f"""
             DO $$
             BEGIN
                 IF EXISTS (
-                    WITH recovered AS (
-                        {recovered_step_ids}
-                    ),
-                    final_keys AS (
+                    WITH final_keys AS (
                         SELECT flow_run_id, step_id, attempt_no
                         FROM {_ATTEMPTS_TABLE}
                         WHERE step_id IS NOT NULL
@@ -157,7 +190,7 @@ def _preflight_attempt_unique_keys(bind: Connection) -> None:
                             recovered.snapshot_step_id AS step_id,
                             runtime_row.attempt_no
                         FROM {_ATTEMPTS_TABLE} AS runtime_row
-                        JOIN recovered
+                        JOIN {_ATTEMPTS_RECOVERED_TABLE} AS recovered
                           ON recovered.runtime_row_id = runtime_row.id
                     )
                     SELECT 1
@@ -174,17 +207,18 @@ def _preflight_attempt_unique_keys(bind: Connection) -> None:
     )
 
 
-def _backfill_step_ids(bind: Connection, *, table_name: str) -> None:
-    recovered_step_ids = _recovered_step_ids_sql(table_name)
+def _backfill_step_ids(
+    bind: Connection,
+    *,
+    table_name: str,
+    temp_table_name: str,
+) -> None:
     bind.execute(
         sa.text(
             f"""
-            WITH recovered AS (
-                {recovered_step_ids}
-            )
             UPDATE {table_name} AS runtime_row
             SET step_id = recovered.snapshot_step_id
-            FROM recovered
+            FROM {temp_table_name} AS recovered
             WHERE runtime_row.id = recovered.runtime_row_id
               AND runtime_row.step_id IS NULL
             """
@@ -194,14 +228,26 @@ def _backfill_step_ids(bind: Connection, *, table_name: str) -> None:
 
 def upgrade() -> None:
     bind = op.get_bind()
+    _materialize_recovered_mapping(
+        bind,
+        source_table=_RESULTS_TABLE,
+        temp_table_name=_RESULTS_RECOVERED_TABLE,
+    )
+    _materialize_recovered_mapping(
+        bind,
+        source_table=_ATTEMPTS_TABLE,
+        temp_table_name=_ATTEMPTS_RECOVERED_TABLE,
+    )
     _preflight_recoverable_runtime_rows(
         bind,
         table_name=_RESULTS_TABLE,
+        temp_table_name=_RESULTS_RECOVERED_TABLE,
         label="result",
     )
     _preflight_recoverable_runtime_rows(
         bind,
         table_name=_ATTEMPTS_TABLE,
+        temp_table_name=_ATTEMPTS_RECOVERED_TABLE,
         label="attempt",
     )
     _preflight_result_unique_keys(bind)
@@ -211,8 +257,16 @@ def upgrade() -> None:
     op.drop_constraint(_RESULTS_STEP_FK, _RESULTS_TABLE, type_="foreignkey")
     op.drop_constraint(_ATTEMPTS_STEP_FK, _ATTEMPTS_TABLE, type_="foreignkey")
 
-    _backfill_step_ids(bind, table_name=_RESULTS_TABLE)
-    _backfill_step_ids(bind, table_name=_ATTEMPTS_TABLE)
+    _backfill_step_ids(
+        bind,
+        table_name=_RESULTS_TABLE,
+        temp_table_name=_RESULTS_RECOVERED_TABLE,
+    )
+    _backfill_step_ids(
+        bind,
+        table_name=_ATTEMPTS_TABLE,
+        temp_table_name=_ATTEMPTS_RECOVERED_TABLE,
+    )
 
     op.alter_column(
         _RESULTS_TABLE,

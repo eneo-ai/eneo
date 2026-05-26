@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T038
+active_task: T039
 
 tasks:
   - id: T001
@@ -3295,7 +3295,7 @@ tasks:
   - id: T038
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Improve the runtime step identity Alembic migration's production query shape and migration safety using DB/performance/Alembic guidance, without changing Flow runtime/API behavior."
     allowed_files:
@@ -3336,6 +3336,131 @@ tasks:
       guard_preventing_duplicate_return: "Migration isolation tests plus SQL-shape/source guards if peer review approves them."
       net_flow_logic_surface_area: "preserved"
       if_increased_why: ""
+    receipt:
+      result: done
+      completed_at: "2026-05-26T07:50:00+02:00"
+      summary: "Improved the runtime step identity migration's structural data-move quality without changing Flow runtime/API behavior. Replaced the repeated recovered-step SQL fragment with one transaction-scoped temp recovered-mapping table per runtime table, preserved ambiguity detection by keeping duplicate matches visible, kept direct downgrade FK recreation after peer review rejected NOT VALID inside one transaction, and added a multi-row migration test across independent flow/version snapshots."
+      evidence:
+        - "backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py:33 materializes recovered runtime step mappings once per source table."
+        - "backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py:42 uses CREATE TEMP TABLE ... ON COMMIT DROP for transaction-pool-safe cleanup."
+        - "backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py:58 groups referenced versions before JSON expansion."
+        - "backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py:87 preserves duplicate matches so the ambiguity preflight can reject invalid snapshots."
+        - "backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py:131 keeps the existing count-based ambiguous mapping preflight."
+        - "backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py:147 and :176 keep unique-key preflights reading from the recovered mapping tables."
+        - "backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py:210 backfills from the recovered mapping table instead of re-expanding JSON."
+        - "backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py:285 leaves direct downgrade FK recreation unchanged."
+        - "backend/tests/integration/migrations/test_flow_runtime_step_identity_migration.py:138 adds run-scoped runtime step-id assertions."
+        - "backend/tests/integration/migrations/test_flow_runtime_step_identity_migration.py:406 verifies multiple nullable rows across independent published snapshots."
+      skills_used:
+        - "complexity-optimizer: scanner was noisy over historical migrations; manual query-shape review identified repeated JSON expansion as the real issue."
+        - "supabase-postgres-best-practices: checked missing-index/partial-index guidance; did not add an in-transaction partial index."
+        - "sqlalchemy-alembic-expert-best-practices-code-review: checked FK/index/transaction guidance; kept direct downgrade FK recreation because NOT VALID plus validation in one transaction gives no lock benefit."
+      commands:
+        - command: "cd backend && uv run pytest -m migration_isolation tests/integration/migrations/test_flow_runtime_step_identity_migration.py -q"
+          status: pass
+          output: "8 passed, 16 warnings."
+        - command: "cd backend && uv run ruff check alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py tests/integration/migrations/test_flow_runtime_step_identity_migration.py"
+          status: pass
+          output: "All checks passed."
+        - command: "cd backend && uv run ruff format --check alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py tests/integration/migrations/test_flow_runtime_step_identity_migration.py"
+          status: pass
+          output: "2 files already formatted."
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py tests/integration/migrations/test_flow_runtime_step_identity_migration.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations."
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run python -m py_compile alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py"
+          status: pass
+        - command: "git diff --check"
+          status: pass
+        - command: "test \"$(rg -n \"_recovered_step_ids_sql|DISTINCT|DISTINCT ON\" backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py | wc -l | tr -d ' ')\" = \"0\" && rg -n \"CREATE TEMP TABLE .* ON COMMIT DROP|Preserve duplicate matches\" backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py"
+          status: pass
+          output: "No old helper or DISTINCT; ON COMMIT DROP and duplicate-preservation comment present."
+        - command: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -c '<local null row count query>'"
+          status: pass
+          output: "flow_step_results total=581 null_step_id=4; flow_step_attempts total=484 null_step_id=2."
+        - command: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d flows_migration_smoke -c '<local null row count query>'"
+          status: pass
+          output: "flow_step_results total=0 null_step_id=0; flow_step_attempts total=0 null_step_id=0."
+        - command: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -c '<EXPLAIN ANALYZE new results mapping query>'"
+          status: pass
+          output: "Execution Time 0.324 ms; uses bitmap index scan on uq_flow_step_results_run_step for step_id IS NULL and uq_flow_versions_flow_version for published version lookup."
+        - command: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -c '<EXPLAIN ANALYZE new attempts mapping query>'"
+          status: pass
+          output: "Execution Time 0.257 ms; local 484-row attempt table uses seq scan for step_id IS NULL and uq_flow_versions_flow_version for published version lookup."
+      peer_review:
+        claude_plan_initial:
+          artifact: ".codex/artifacts/claude-peer-loop-t038-runtime-step-identity-migration-quality-plan-20260526T073421Z.md"
+          verdict: "GREEN_LIGHT no; MIN_SCORE 6. Valid blockers: do not use NOT VALID in one transaction, do not add SQL-source-shape guard, provide row counts, and prefer materialized mapping."
+        claude_plan_revised:
+          artifact: ".codex/artifacts/claude-peer-loop-t038-runtime-step-identity-migration-quality-revised-plan-20260526T073741Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+        antigravity_plan:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t038-runtime-step-identity-migration-quality-antigravity-plan-20260526T073856Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8. Added PgBouncer/transaction-pool ON COMMIT DROP emphasis."
+        claude_commit:
+          artifact: ".codex/artifacts/claude-peer-loop-t038-runtime-step-identity-migration-quality-implementation-review-20260526T074634Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8. Verified lifecycle, duplicate preservation, exception strings, and multi-row test."
+        antigravity_commit:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t038-runtime-step-identity-migration-quality-antigravity-implementation-20260526T074754Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8. Confirmed commit-safe."
+      reviewer_concerns_addressed:
+        - "Rejected NOT VALID plus validation inside one transaction as fake safety; kept direct downgrade FK recreation."
+        - "Rejected a brittle SQL-source-shape test; added behavior-focused multi-row migration coverage instead."
+        - "Deleted `_recovered_step_ids_sql(...)` rather than retaining two query patterns."
+        - "Used ON COMMIT DROP for temp tables."
+        - "Avoided DISTINCT in the temp table population so duplicate snapshot matches remain visible to the ambiguity preflight."
+      consolidation_effect:
+        reused_existing_owner: "The existing T033 Alembic migration remains the canonical owner of runtime result/attempt step identity backfill."
+        logic_moved_from: "Repeated SQL-fragment expansion in each preflight/backfill call into one temp recovered-mapping table per runtime table."
+        logic_deleted: "`_recovered_step_ids_sql(...)`."
+        duplicate_path_removed: "No second recovered-step SQL-fragment path remains."
+        new_code_added: "A materialization helper, temp table constants, and one multi-row migration behavior test."
+        why_existing_owners_were_insufficient: "The migration owner was correct, but the helper represented the reusable concept at the wrong level; preflights and backfill needed a concrete recovered mapping, not repeated SQL text."
+        guard_preventing_duplicate_logic_from_returning: "Migration-isolation suite plus source guard command for no old helper/no DISTINCT/ON COMMIT DROP."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "Runtime behavior is unchanged; migration-local code increased slightly to reduce repeated data-move paths and improve reviewability."
+      residual_risk:
+        - "Local row counts are tiny, so this is not claimed as a measured production performance fix; it is a structural safety/readability improvement with better scaling."
+        - "The attempts null-row query uses a seq scan locally on 484 rows. A partial index was not added because doing that safely would require a separate concurrent-index migration/deploy decision and current row counts do not justify it."
+      unrelated_files_preserved:
+        - ".devcontainer/docker-compose.yml"
+        - ".gitignore"
+        - "AGENTS.md"
+        - "frontend/packages/ui/src/icons/types.d.ts"
+        - ".devcontainer/devcontainer-lock.json and other untracked root/doc artifacts"
+      next_task: T039
+
+  - id: T039
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe post-step-identity Flow architecture task after T038: decide whether to prioritize public runtime step_id nullability, a checked-in published-snapshot preflight script, the 34 full-runtime-parser failures, sparse runtime loading, or draft id-owned persistence."
+    inputs:
+      - "T033 receipt"
+      - "T036 receipt"
+      - "T037 receipt"
+      - "T038 receipt"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only."
+      - "Before starting and before any task transition, re-check the watchdog file."
+      - "Do not edit source, tests, migrations, generated frontend files, or docs other than the board receipt."
+      - "Do not start retention, service-key identity, webhook outbox, Flow AI Builder cleanup, runtime input retention, schema hardening, new schema migrations, or flow_version_steps unless the board records the required decision and allowed_files."
+      - "Approve a Worker only with exact allowed_files, verification commands, stop_if, and consolidation_effect."
+      - "Apply reuse-before-inventing: deepen existing owners and reduce duplicate paths; do not create a parallel implementation."
+    expected_output:
+      - "Decision: approve_worker | scout_first | blocked | final_audit_not_ready"
+      - "Exact next Worker or Scout objective."
+      - "Allowed files, verification commands, and stop conditions if approving a Worker."
+      - "Source/data evidence for why this is the smallest safe next task."
+      - "Consolidation effect section."
+      - "Public API/generated-client disposition."
+    stop_if:
+      - "The next task requires a product/data decision not encoded in the board."
+      - "The next task requires retention, service-key identity, webhook outbox, Flow AI Builder, runtime input retention, schema migrations, or flow_version_steps."
+      - "The next task cannot be scoped to reviewable allowed_files and behavior-focused tests."
+    receipt: null
 
   - id: T999
     type: judge

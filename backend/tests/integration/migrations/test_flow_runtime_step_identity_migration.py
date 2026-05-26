@@ -135,6 +135,30 @@ def _runtime_step_ids(conn, table_name: str) -> list[str | None]:
         return [row[0] for row in cur.fetchall()]
 
 
+def _runtime_step_ids_for_run(
+    conn,
+    *,
+    table_name: str,
+    run_id: str,
+) -> list[str | None]:
+    order_by = (
+        "step_order, attempt_no, id"
+        if table_name == "flow_step_attempts"
+        else "step_order, id"
+    )
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT step_id::text
+            FROM {table_name}
+            WHERE flow_run_id = %s
+            ORDER BY {order_by}
+            """,
+            (run_id,),
+        )
+        return [row[0] for row in cur.fetchall()]
+
+
 def _insert_runtime_fixture(
     conn,
     *,
@@ -377,6 +401,87 @@ def test_upgrade_backfills_snapshot_ids_without_draft_step_fk(migration_db):
     assert _row_count(conn, "flow_steps") == 0
     assert _runtime_step_ids(conn, "flow_step_results") == [str(result_step_id)]
     assert _runtime_step_ids(conn, "flow_step_attempts") == [str(attempt_step_id)]
+
+
+def test_upgrade_backfills_multiple_rows_across_published_versions(migration_db):
+    conn = migration_db["conn"]
+    cfg = migration_db["cfg"]
+    first_result_step_ids = [uuid4(), uuid4(), uuid4()]
+    first_attempt_step_ids = [uuid4(), uuid4()]
+    second_result_step_id = uuid4()
+    second_attempt_step_id = uuid4()
+
+    first = _insert_runtime_fixture(
+        conn,
+        definition_steps=[
+            {
+                "step_id": str(first_result_step_ids[0]),
+                "assistant_id": str(uuid4()),
+                "step_order": 1,
+            },
+            {
+                "step_id": str(first_result_step_ids[1]),
+                "assistant_id": str(uuid4()),
+                "step_order": 2,
+            },
+            {
+                "step_id": str(first_result_step_ids[2]),
+                "assistant_id": str(uuid4()),
+                "step_order": 3,
+            },
+            {
+                "step_id": str(first_attempt_step_ids[0]),
+                "assistant_id": str(uuid4()),
+                "step_order": 4,
+            },
+            {
+                "step_id": str(first_attempt_step_ids[1]),
+                "assistant_id": str(uuid4()),
+                "step_order": 5,
+            },
+        ],
+        result_rows=[
+            {"step_order": 1},
+            {"step_order": 2},
+            {"step_order": 3},
+        ],
+        attempt_rows=[
+            {"step_order": 4, "attempt_no": 1},
+            {"step_order": 5, "attempt_no": 2},
+        ],
+    )
+    second = _insert_runtime_fixture(
+        conn,
+        definition_steps=[
+            {
+                "step_id": str(second_result_step_id),
+                "assistant_id": str(uuid4()),
+                "step_order": 1,
+            },
+            {
+                "step_id": str(second_attempt_step_id),
+                "assistant_id": str(uuid4()),
+                "step_order": 2,
+            },
+        ],
+        result_rows=[{"step_order": 1}],
+        attempt_rows=[{"step_order": 2}],
+    )
+
+    command.upgrade(cfg, MIGRATION_REVISION)
+
+    assert _runtime_step_ids_for_run(
+        conn, table_name="flow_step_results", run_id=first["run_id"]
+    ) == [str(step_id) for step_id in first_result_step_ids]
+    assert _runtime_step_ids_for_run(
+        conn, table_name="flow_step_attempts", run_id=first["run_id"]
+    ) == [str(step_id) for step_id in first_attempt_step_ids]
+    assert _runtime_step_ids_for_run(
+        conn, table_name="flow_step_results", run_id=second["run_id"]
+    ) == [str(second_result_step_id)]
+    assert _runtime_step_ids_for_run(
+        conn, table_name="flow_step_attempts", run_id=second["run_id"]
+    ) == [str(second_attempt_step_id)]
 
 
 def test_upgrade_aborts_when_null_step_id_cannot_be_recovered(migration_db):
