@@ -169,6 +169,13 @@ class Flows(BasePublic):
 
     __table_args__ = (
         UniqueConstraint("id", "tenant_id", name="uq_flows_id_tenant_id"),
+        ForeignKeyConstraint(
+            ["id", "published_version"],
+            ["flow_versions.flow_id", "flow_versions.version"],
+            ondelete="NO ACTION",
+            onupdate="NO ACTION",
+            name="fk_flows_published_version",
+        ),
         # W13: active flow names are unique per space.
         Index(
             "uq_flows_space_id_name_active",

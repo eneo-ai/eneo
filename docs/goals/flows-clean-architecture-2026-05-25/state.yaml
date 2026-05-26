@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T096
+active_task: T097
 
 tasks:
   - id: T001
@@ -9390,7 +9390,7 @@ tasks:
   - id: T096
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Add the published Flow pointer FK invariant from flows.published_version to flow_versions."
     inputs:
@@ -9452,6 +9452,130 @@ tasks:
       guard_preventing_duplicate_logic_from_returning: "FK integration test plus pg_constraint verification."
       net_flow_logic_surface_area: "reduced"
       if_increased_why: "N/A"
+    receipt:
+      result: done
+      summary: "Added the published Flow pointer FK invariant at the schema owner. flows(id, published_version) now references flow_versions(flow_id, version) with NO ACTION/NO ACTION semantics, non-deferrable, and validated. The migration fails loudly on orphaned published pointers, downgrades by dropping only fk_flows_published_version, and the integration test covers valid publish, invalid publish, protected version delete, and unpublish-then-delete."
+      evidence:
+        - "backend/src/intric/database/tables/flow_tables.py:170"
+        - "backend/src/intric/database/tables/flow_tables.py:172"
+        - "backend/src/intric/database/tables/flow_tables.py:175"
+        - "backend/src/intric/database/tables/flow_tables.py:177"
+        - "backend/alembic/versions/20260526_flow_published_version_fk.py:14"
+        - "backend/alembic/versions/20260526_flow_published_version_fk.py:15"
+        - "backend/alembic/versions/20260526_flow_published_version_fk.py:23"
+        - "backend/alembic/versions/20260526_flow_published_version_fk.py:41"
+        - "backend/alembic/versions/20260526_flow_published_version_fk.py:47"
+        - "backend/alembic/versions/20260526_flow_published_version_fk.py:57"
+        - "backend/alembic/versions/20260526_flow_published_version_fk.py:60"
+        - "backend/tests/integration/flows/test_flow_published_version_fk.py:14"
+        - "backend/tests/integration/flows/test_flow_published_version_fk.py:53"
+        - "backend/tests/integration/flows/test_flow_published_version_fk.py:62"
+        - "backend/tests/integration/flows/test_flow_published_version_fk.py:71"
+        - "backend/tests/integration/flows/test_flow_published_version_fk.py:80"
+        - "backend/tests/integration/flows/test_flow_published_version_fk.py:90"
+        - "backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py:3"
+        - "backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py:16"
+      revision_id_note: "The migration filename remains descriptive, but the Alembic revision id is 20260526_flow_published_fk because Alembic's local version_num column is varchar(32). The originally requested 20260526_flow_published_version_fk is 34 characters and failed during the version marker update. This follows the existing repo convention of longer descriptive filenames with shorter revision ids."
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "status ok; blockers empty"
+        - cmd: "cd backend && uv run alembic current"
+          status: pass
+          output: "initially 20260522_builder_lock; final 20260526_flow_published_fk (head)"
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -At -c \"select count(*) from flows f left join flow_versions v on v.flow_id = f.id and v.version = f.published_version where f.published_version is not null and v.flow_id is null;\""
+          status: pass
+          output: "0"
+        - cmd: "cd backend && uv run alembic upgrade head"
+          status: fail
+          output: "First run failed because requested revision id 20260526_flow_published_version_fk exceeded alembic_version.version_num varchar(32)."
+        - cmd: "docker catalog recovery checks for alembic_version, fk_flows_published_version, and flow_run_webhook_deliveries"
+          status: pass
+          output: "No published FK existed; webhook table existed; Alembic marker still showed 20260526_flow_step_identity."
+        - cmd: "cd backend && uv run alembic stamp 20260526_flow_webhook_deliveries"
+          status: pass
+          output: "Recovered local marker for the already-applied webhook migration after the failed overlong revision update."
+        - cmd: "cd backend && uv run alembic upgrade head"
+          status: pass
+          output: "Applied 20260526_flow_published_fk."
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -At -c \"select confdeltype, confupdtype, condeferrable, convalidated from pg_constraint where conname = 'fk_flows_published_version';\""
+          status: pass
+          output: "a|a|f|t"
+        - cmd: "cd backend && uv run pytest tests/integration/flows/test_flow_published_version_fk.py -q"
+          status: pass
+          output: "1 passed, 16 warnings"
+        - cmd: "cd backend && uv run pyright src/intric/database/tables/flow_tables.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "cd backend && uv run ruff check src/intric/database/tables/flow_tables.py alembic/versions/20260526_flow_published_version_fk.py tests/integration/flows/test_flow_published_version_fk.py"
+          status: pass
+          output: "All checks passed"
+        - cmd: "cd backend && uv run ruff format --check src/intric/database/tables/flow_tables.py alembic/versions/20260526_flow_published_version_fk.py tests/integration/flows/test_flow_published_version_fk.py"
+          status: pass
+          output: "3 files already formatted"
+        - cmd: "cd backend && uv run alembic downgrade 20260526_flow_webhook_deliveries && cd backend && uv run alembic upgrade head"
+          status: fail
+          output: "Downgrade half passed; the second cd backend failed because the shell was already in backend."
+        - cmd: "cd backend && uv run alembic upgrade head"
+          status: pass
+          output: "Round-trip upgrade reapplied the published pointer FK."
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -At -c \"select confdeltype, confupdtype, condeferrable, convalidated from pg_constraint where conname = 'fk_flows_published_version';\""
+          status: pass
+          output: "post-round-trip a|a|f|t"
+        - cmd: "cd backend && uv run pytest tests/integration/flows/test_flow_published_version_fk.py -q"
+          status: pass
+          output: "post-round-trip 1 passed, 16 warnings"
+        - cmd: "git diff --check"
+          status: pass
+      review:
+        claude_commit_gate:
+          artifact: ".codex/artifacts/claude-peer-loop-t096-published-pointer-fk-implementation-review-20260526T211629Z.md"
+          green_light: true
+          min_score: 8
+          valid_concerns_addressed:
+            - "Re-ran pg_constraint probe after downgrade/upgrade: a|a|f|t."
+            - "Re-ran the focused integration test after downgrade/upgrade: 1 passed."
+            - "Recorded that the shorter revision id is a repo-conventional necessity due to Alembic version_num varchar(32), not an architecture exception."
+          antigravity: "Skipped; Claude and Codex agreed and no new disputed high-risk design decision remained after the full schema commit gate."
+      consolidation_effect:
+        reused_existing_owner: "Database schema / Flow table definitions."
+        logic_moved_from: "Unenforced application convention for published_version pointer integrity."
+        logic_deleted: "None."
+        duplicate_path_removed: "Prevents future service-layer orphan checks from becoming the invariant owner."
+        new_code_added: "One FK model declaration, one Alembic migration, and one behavior integration test."
+        why_existing_owners_were_insufficient: "flows.published_version was a nullable integer with no DB-enforced relationship to flow_versions."
+        guard_preventing_duplicate_logic_from_returning: "Integration test plus pg_constraint verification prove the database owns the invariant."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+      next_task: T097
+
+  - id: T097
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe task after T096 from remaining queued Flows work, with special attention to deferred T014 schema sub-scopes and product/data gates."
+    inputs:
+      - "T094 receipt"
+      - "T095 receipt"
+      - "T096 receipt"
+      - "T014 queued schema task"
+      - "T015 queued API task and T085 receipt"
+      - "T016 queued frontend task and T091 receipt"
+      - "T901 final docs task"
+    constraints:
+      - "Before this task transition, verify the watchdog state file."
+      - "Read-only Judge; do not edit source, tests, migrations, frontend, OpenAPI/generated client, or docs/flows/architecture.md."
+      - "Do not activate T901 final docs while runtime/API/schema/frontend architecture is still changing."
+      - "Do not activate T009/T010/T011 or any retention, service-key identity, schema-migration, review/rerun, or other product/data-decision-gated work unless state.yaml records the required decision."
+      - "If choosing another T014 Worker, produce exact allowed_files, verification commands, rollback notes, stop_if conditions, and full Claude review requirement before implementation."
+      - "Apply reuse-before-inventing and canonical-owner rules; prefer merge/delete/deepen existing owners over new logic."
+      - "Preserve unrelated dirty/untracked files."
+    expected_output:
+      - "Decision: approve next Worker | scout_first | block."
+      - "Disposition of deferred T014 sub-scopes: files.user_id drift, queued/stale indexes, tenant FK candidates."
+      - "Disposition of T015/T016/T901 and blocked T009/T010/T011."
+      - "If approving a Worker: objective, allowed_files, verification commands, rollback notes, stop_if, review tier, and consolidation effect."
     receipt: null
 
   - id: T901
