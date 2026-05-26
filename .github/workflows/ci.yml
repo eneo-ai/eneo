@@ -170,6 +170,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Enforced in pre-commit too, but pre-commit can be bypassed; CI is the
+      # backstop that keeps the i18n catalogs duplicate-free and in key parity.
+      - name: Check i18n message catalogs
+        run: |
+          python3 apps/web/scripts/check-i18n-duplicates.py
+          python3 apps/web/scripts/check-i18n-parity.py
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:

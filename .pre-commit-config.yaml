@@ -86,6 +86,14 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      - id: i18n-key-parity
+        name: i18n-key-parity
+        entry: python3 frontend/apps/web/scripts/check-i18n-parity.py
+        language: system
+        files: ^frontend/apps/web/messages/.*\.json$
+        pass_filenames: false
+        stages: [pre-commit]
+
       - id: commit-msg-check
         name: commit-msg-check
         entry: python3 scripts/commit_msg_check.py

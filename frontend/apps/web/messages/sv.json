@@ -1473,7 +1473,6 @@
   "eneo_logo": "Eneo-logotyp",
   "intric_logo": "Eneo-logotyp",
   "eneo_icon": "Eneo-ikon",
-  "intric_icon": "Eneo-ikon",
   "assistant": "Assistent",
   "download": "Ladda ner",
   "mentions": "Omnämnanden",
@@ -3138,5 +3137,7 @@
   "model_capabilities_label": "Modellförmågor",
   "chat_tokens_separator": "token ·",
   "pagination_showing_range": "{start}–{end} av {total}",
-  "spaces_more_members": "+{count} till"
+  "spaces_more_members": "+{count} till",
+  "could_not_delete_crawl": "Kunde inte ta bort genomsökningen.",
+  "this_run_did_not_receive_any_inputs": "Den här körningen tog inte emot några indata."
 }
