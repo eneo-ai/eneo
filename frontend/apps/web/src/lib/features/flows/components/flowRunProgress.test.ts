@@ -30,6 +30,10 @@ describe("flowRunProgress helpers", () => {
       },
       [
         {
+          flow_run_id: "run-1",
+          flow_id: "flow-1",
+          tenant_id: "tenant-1",
+          step_id: "step-1",
           step_order: 1,
           status: "completed",
           error_message: null,
@@ -59,6 +63,10 @@ describe("flowRunProgress helpers", () => {
           updated_at: "2026-01-01T00:00:01Z"
         },
         {
+          flow_run_id: "run-1",
+          flow_id: "flow-1",
+          tenant_id: "tenant-1",
+          step_id: "step-2",
           step_order: 2,
           status: "running",
           error_message: null,
@@ -130,6 +138,10 @@ describe("flowRunProgress helpers", () => {
   test("falls back to generic step labels when graph data is missing", () => {
     const snapshot = buildFlowRunProgressSnapshot(null, [
       {
+        flow_run_id: "run-1",
+        flow_id: "flow-1",
+        tenant_id: "tenant-1",
+        step_id: "step-3",
         step_order: 3,
         status: "pending",
         error_message: null,

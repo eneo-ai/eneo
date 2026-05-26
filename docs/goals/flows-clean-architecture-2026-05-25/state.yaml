@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T088
+active_task: T090
 
 tasks:
   - id: T001
@@ -8609,7 +8609,7 @@ tasks:
   - id: T088
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Choose the next safe task after T087 step-list ownership consolidation."
     inputs:
@@ -8634,6 +8634,165 @@ tasks:
     stop_if:
       - "The next task requires Docker/Postgres, product/data owner decisions, or public API/OpenAPI/generated-client work that lacks a current source-backed brief."
       - "The next frontend slice cannot be narrowed below a broad sweep."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T22:21:06+02:00"
+      decision: approve_worker
+      summary: "Chose a low-risk generated-contract fixture alignment slice: update Flow run progress tests to use the current generated FlowRunStep shape instead of sparse stale objects."
+      evidence:
+        - "frontend/apps/web/src/lib/features/flows/components/flowRunProgress.test.ts:31"
+        - "frontend/apps/web/src/lib/features/flows/components/flowRunProgress.test.ts:61"
+        - "frontend/apps/web/src/lib/features/flows/components/flowRunProgress.test.ts:131"
+        - "frontend/apps/web/src/lib/features/flows/components/flowRunProgress.ts:42"
+        - "frontend/packages/intric-js/src/types/resources.d.ts:208"
+        - "frontend/packages/intric-js/src/types/schema.d.ts:16168"
+        - "frontend/packages/intric-js/src/types/schema.d.ts:16175"
+        - "frontend/packages/intric-js/src/types/schema.d.ts:16180"
+        - "frontend/packages/intric-js/src/types/schema.d.ts:16185"
+        - "frontend/packages/intric-js/src/types/schema.d.ts:16190"
+      commands:
+        - cmd: "python3 watchdog check"
+          status: pass
+          output: "schema_version=1 status=ok halt_blockers=[]"
+        - cmd: "sed/rg/nl reads for T088, flowRunProgress, current generated FlowRunStep schema, and full-check diagnostics"
+          status: pass
+      next_task: T089
+      review_tier: "Local validation only: test fixture/generated-contract usage alignment; no source behavior, API, runtime, schema, or broad frontend state boundary change."
+      disposition:
+        T014: "queued/environment-blocked until database preflight is available."
+        T015: "queued; service-key/review/rerun API policy remains product-gated unless a new source-backed API gap appears."
+        T016: "queued broad placeholder; T089 handles one narrow generated-type fixture drift discovered during T087 validation."
+        T901: "queued final docs Worker; do not start while implementation architecture is still changing."
+        product_data_gated_tasks: "Remain blocked until owner decisions are recorded."
+      consolidation_effect:
+        reused_existing_owner: "Generated @intric/intric-js FlowRunStep type and flowRunProgress test owner."
+        logic_moved_from: "N/A."
+        logic_deleted: "N/A."
+        duplicate_path_removed: "Sparse hand-written FlowRunStep fixture shape that no longer matched the generated public contract."
+        new_code_added: "Only test fixture fields required by the generated contract."
+        why_existing_owners_were_insufficient: "The existing test fixtures predated the generated runtime step identity fields and no longer satisfied FlowRunStep."
+        guard_preventing_duplicate_logic_from_returning: "Type-checking the test under the generated FlowRunStep type and focused flowRunProgress tests."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+
+  - id: T089
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Align Flow run progress test fixtures with the generated FlowRunStep contract."
+    inputs:
+      - "T088 receipt"
+      - "frontend/apps/web/src/lib/features/flows/components/flowRunProgress.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/flowRunProgress.ts"
+      - "frontend/packages/intric-js/src/types/resources.d.ts"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "frontend/apps/web/src/lib/features/flows/components/flowRunProgress.test.ts"
+    constraints:
+      - "Before implementation and before commit, check the watchdog blocker file."
+      - "Do not edit Flow runtime/frontend source, generated SDK, API/OpenAPI, schema/migrations, Flow AI Builder, or docs/flows/architecture.md."
+      - "Do not add casts, any, @ts-ignore, compatibility fallbacks, or new helpers."
+      - "Keep this to fixture shape alignment; no behavior assertion changes unless the generated contract makes a previously impossible fixture explicit."
+    verify:
+      - "cd frontend/apps/web && bun test src/lib/features/flows/components/flowRunProgress.test.ts"
+      - "cd frontend/apps/web && bunx prettier --check src/lib/features/flows/components/flowRunProgress.test.ts"
+      - "cd frontend/apps/web && bunx eslint src/lib/features/flows/components/flowRunProgress.test.ts"
+      - "cd frontend/apps/web && bun run check"
+      - "git diff --check"
+      - "git diff -- frontend/apps/web/src/lib/features/flows/components/flowRunProgress.test.ts | rg -n '^\\+.*(as any|@ts-ignore|TODO|helper|manager|processor|common|misc|dict\\[str, Any\\]|Any\\b)'"
+    review:
+      tier: "Local validation only."
+      antigravity: "Not applicable."
+    stop_if:
+      - "Fixing the Flow fixture requires changing source behavior or generated types."
+      - "Full frontend check still has Flow-owned diagnostics in files outside the allowed scope."
+      - "The remaining check failure is only the unrelated SDK stream.js implicit-any issue."
+    consolidation_effect:
+      reused_existing_owner: "Generated FlowRunStep contract and flowRunProgress test file."
+      logic_moved_from: "N/A."
+      logic_deleted: "N/A."
+      duplicate_path_removed: "Sparse stale FlowRunStep test fixture shape."
+      new_code_added: "Required fixture identity fields only."
+      why_existing_owners_were_insufficient: "The current fixtures are stale relative to generated FlowRunStep."
+      guard_preventing_duplicate_logic_from_returning: "Type-checking and focused flowRunProgress tests."
+      net_flow_logic_surface_area: "preserved"
+      if_increased_why: "N/A"
+    receipt:
+      result: done
+      completed_at: "2026-05-26T22:22:41+02:00"
+      summary: "Updated Flow run progress test fixtures to satisfy the current generated FlowRunStep contract by adding the required run/flow/tenant/step identity fields. No source behavior or assertions changed."
+      files_changed:
+        - "frontend/apps/web/src/lib/features/flows/components/flowRunProgress.test.ts"
+        - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      commands:
+        - cmd: "python3 watchdog check"
+          status: pass
+          output: "schema_version=1 status=ok halt_blockers=[]"
+        - cmd: "cd frontend/apps/web && bun test src/lib/features/flows/components/flowRunProgress.test.ts"
+          status: pass
+          output: "5 pass, 0 fail"
+        - cmd: "cd frontend/apps/web && bunx prettier --check src/lib/features/flows/components/flowRunProgress.test.ts"
+          status: pass
+          output: "All matched files use Prettier code style."
+        - cmd: "cd frontend/apps/web && bunx eslint src/lib/features/flows/components/flowRunProgress.test.ts"
+          status: pass
+        - cmd: "git diff -- frontend/apps/web/src/lib/features/flows/components/flowRunProgress.test.ts | rg -n '^\\+.*(as any|@ts-ignore|TODO|helper|manager|processor|common|misc|dict\\[str, Any\\]|Any\\b)'"
+          status: pass
+          output: "No matches."
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "cd frontend/apps/web && bun run check"
+          status: fail
+          output: "Flow-owned flowRunProgress fixture errors are gone; remaining errors are ../../packages/intric-js/src/client/stream.js implicit-any parameters plus an unrelated api-keys warning."
+      review:
+        tier: "Local validation only."
+        claude: "Skipped by tiered review rule for low-risk fixture alignment."
+        antigravity: "Skipped."
+      consolidation_effect:
+        reused_existing_owner: "Generated FlowRunStep contract."
+        logic_moved_from: "N/A."
+        logic_deleted: "N/A."
+        duplicate_path_removed: "Sparse stale FlowRunStep fixtures in flowRunProgress.test.ts."
+        new_code_added: "Required identity fields in existing fixtures only."
+        why_existing_owners_were_insufficient: "The generated contract is the owner; the test fixture had drifted from it."
+        guard_preventing_duplicate_logic_from_returning: "Focused test and full app check now type-check this Flow fixture; remaining full-check errors are outside Flow proper."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+      naming_gate:
+        new_names_clear_for_architecture_doc: true
+        notes: "No new names."
+
+  - id: T090
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: medium
+    objective: "Choose the next safe Flow clean-architecture task after T089."
+    inputs:
+      - "T087 receipt"
+      - "T089 receipt"
+      - "T016 broad frontend state brief"
+      - "T014/T015 receipts"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only except this board receipt/task transition."
+      - "Before activating any Worker, check the watchdog blocker file."
+      - "Do not activate work outside Flows proper merely to make broad frontend check green."
+      - "Do not start retention, service-key identity/review/rerun, schema migration, webhook outbox, Flow AI Builder cleanup, or docs/flows/architecture.md unless the board explicitly unblocks it."
+      - "Prefer a Scout if the next frontend-state slice is not source-narrowed."
+    expected_output:
+      - "Decision: approve_worker | scout_first | blocked."
+      - "Exact next task objective, allowed_files, verification commands, review tier, stop_if, and consolidation effect."
+      - "Disposition of T014/T015/T016/T901 and blocked product/data tasks."
+    stop_if:
+      - "The only remaining actionable work is outside Flows proper or requires owner/product/data decisions."
+      - "The next safe Flow task cannot be narrowed below a broad sweep."
     receipt: null
 
   - id: T901
