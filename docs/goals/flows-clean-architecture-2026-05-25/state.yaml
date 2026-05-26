@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T054
+active_task: T055
 
 tasks:
   - id: T001
@@ -5197,7 +5197,7 @@ tasks:
   - id: T053
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "refactor(flows-api): delete typed API provider pass-through helpers."
     inputs:
@@ -5336,6 +5336,104 @@ tasks:
       - "Choosing a Worker requires retention, service-key identity/review/rerun, schema migration, webhook outbox, or other blocked product/data decisions."
       - "Choosing a Worker requires files outside a reviewable Flow proper scope."
       - "Evidence is insufficient to choose between remaining safe runtime reliability, API DX, frontend DX, schema/preflight, output-format, or provider-typing candidates."
+    receipt:
+      result: done
+      summary: "Chose T055 as the next safe Worker: remove the remaining Flow API provider typing exceptions by deleting _get_flow_version_repo, removing four flow_api_common provider pyright-ignore comments, and broadening the existing provider guard across all Flow API Python files. Claude green-lit the plan after correcting the red guard contract to six offender records."
+      decision: "activate T055"
+      evidence:
+        - "docs/goals/flows-clean-architecture-2026-05-25/notes/t054-next-safe-judge.md"
+        - "backend/src/intric/flows/api/flow_api_common.py:239"
+        - "backend/src/intric/flows/api/flow_api_common.py:240"
+        - "backend/src/intric/flows/api/flow_api_common.py:280"
+        - "backend/src/intric/flows/api/flow_api_common.py:281"
+        - "backend/src/intric/flows/api/flow_run_steps_router.py:66"
+        - "backend/src/intric/flows/api/flow_run_steps_router.py:67"
+        - ".codex/artifacts/claude-peer-loop-t054-next-safe-flow-task-judge-20260526T144433Z.md"
+      candidate_classification:
+        safe_now:
+          - "Remove remaining Flow API provider pass-through and provider-erasure exceptions."
+        needs_preflight:
+          - "Runtime/Celery provider/library reportUnknownMemberType ignores outside Flow API."
+          - "AI Builder provider pass-through helpers, out of Flows proper scope unless directly coupled."
+          - "Broader Container/dependency-injector typing changes if direct provider calls fail in-place pyright."
+        blocked_on_decision:
+          - "Retention behavior."
+          - "Service-key identity model."
+          - "Review/rerun service-key capability policy."
+          - "Schema migrations, webhook outbox changes, and other product/data decisions not recorded as unblocked."
+        final_docs_only:
+          - "T901 docs/flows/architecture.md maintainer map; do not start during active runtime/API/schema work."
+      consolidation_effect:
+        reused_existing_owner: "Container.flow_version_repo, Container.space_service, and Container.actor_manager."
+        logic_moved_from: "_get_flow_version_repo helper to direct provider call."
+        logic_deleted: "T055 will delete _get_flow_version_repo, its annotation-only import, five provider pyright-ignore records, and the guard's provider-typing exception mechanism."
+        duplicate_path_removed: "No Flow API provider pass-through exception remains."
+        new_code_added: "Guard scan scope broadens to all Flow API Python files; no production abstraction."
+        why_existing_owners_were_insufficient: "Existing owners are sufficient; temp-copy pyright proof indicates direct provider calls are clean, and T055 must reproduce this in place."
+        guard_preventing_duplicate_logic_from_returning: "Structural provider pass-through and provider-erasure guard over Flow API Python files."
+        net_flow_logic_surface_area: "reduced"
+      naming_gate:
+        new_production_names: "None."
+        architecture_doc_readiness: "The final docs can state Flow API has no provider pass-through helpers and no provider Any/pyright-ignore erasure."
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1 status=ok blockers=[]"
+        - cmd: "rg -n \"pyright: ignore\\[reportUnknownMemberType\\]|cast\\(\\s*Any\\s*,\\s*container\\.|def _get_.*\\(|return container\\.\" backend/src/intric/flows backend/tests/unittests/flows -g '*.py'"
+          status: pass
+          output: "Flow API provider exceptions are flow_api_common.py:239,240,280,281 and flow_run_steps_router.py:66-67."
+        - cmd: "cd backend && uv run pyright src/intric/flows/api/flow_api_common.py src/intric/flows/api/flow_run_steps_router.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations on current source with existing ignores/helper."
+        - cmd: "cd backend && uv run pyright /private/tmp/<temp>/backend/src/intric/flows/api/flow_api_common.py /private/tmp/<temp>/backend/src/intric/flows/api/flow_run_steps_router.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations after temp-copy removal of the four ignores and _get_flow_version_repo."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t054-next-safe-judge --phase plan --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT: yes; MIN_SCORE: 8; required correction: red guard should expect six offender records."
+      next_task: T055
+
+  - id: T055
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "refactor(flows-api): remove remaining Flow API provider typing exceptions."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t054-next-safe-judge.md"
+      - ".codex/artifacts/claude-peer-loop-t054-next-safe-flow-task-judge-20260526T144433Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t055-flow-api-provider-typing-exceptions.md"
+      - "backend/src/intric/flows/api/flow_api_common.py"
+      - "backend/src/intric/flows/api/flow_run_steps_router.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+    constraints:
+      - "Check watchdog before starting implementation and before committing."
+      - "FastAPI adapter-only refactor: do not change endpoint signatures, decorators, request/response models, OpenAPI shape, generated clients, auth policy, or endpoint behavior."
+      - "Deepen the existing provider guard; do not add a parallel guard."
+      - "Red guard must report exactly six offender records before source edits: five pyright-ignore records plus _get_flow_version_repo helper."
+      - "Delete the provider-typing exception mechanism instead of leaving an empty exception set."
+      - "Delete the bounded provider Any-erasure file tuple after broadening the scan to all Flow API Python files."
+      - "Reproduce direct-provider pyright proof in place on real edited files before committing."
+      - "Do not create typed accessors, helper functions, protocols, or Container provider definition changes unless direct-provider pyright unexpectedly fails."
+      - "Do not expand into retention, service-key identity/review/rerun capability policy, schema migrations, webhook outbox, output-format architecture, final architecture docs, or Flow AI Builder."
+      - "Preserve unrelated dirty/untracked files."
+    expected_output:
+      - "T055 task note with red/green verification, Claude implementation-gate receipt, consolidation effect, naming-gate answer, and no retained Flow API provider exceptions."
+      - "No Flow API provider pass-through helpers."
+      - "No Flow API provider Any/cast/pyright-ignore erasure."
+      - "Structural provider guard scans all Flow API Python files."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "Red guard reports anything other than six offender records before source edits."
+      - "Direct provider calls introduce pyright errors."
+      - "The fix requires a new helper, typed accessor, protocol, or Container provider definition change."
+      - "The fix requires changing endpoint decorators, signatures, response models, OpenAPI, generated clients, auth policy, behavior, tests outside allowed files, or non-Flow API files."
+      - "Staged files include anything outside allowed_files."
+      - "Claude implementation gate is not green and the disagreement cannot be resolved with source evidence."
     receipt: null
 
   - id: T901
