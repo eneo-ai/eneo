@@ -5,7 +5,7 @@ import json
 import pytest
 
 from intric.flows.enums import FlowOutputType
-from intric.flows.runtime.output_formats import resolve_format_spec
+from intric.flows.runtime.output_formats import OUTPUT_FORMAT_SPECS, resolve_format_spec
 from intric.flows.runtime.output_formats.base import append_output_format_instructions
 from intric.main.exceptions import TypedIOValidationException
 
@@ -23,8 +23,15 @@ def _prompt_for(
 
 
 def test_output_format_registry_is_total_for_flow_output_types() -> None:
+    assert set(OUTPUT_FORMAT_SPECS) == set(FlowOutputType), (
+        "runtime/output_formats.OUTPUT_FORMAT_SPECS is the canonical output_type "
+        "policy owner. Add one spec entry for every FlowOutputType instead of "
+        "branching in generic runtime code."
+    )
     for output_type in FlowOutputType:
-        assert resolve_format_spec(output_type.value) is not None
+        assert (
+            resolve_format_spec(output_type.value) is OUTPUT_FORMAT_SPECS[output_type]
+        )
 
 
 def test_resolve_format_spec_rejects_unknown_output_type() -> None:

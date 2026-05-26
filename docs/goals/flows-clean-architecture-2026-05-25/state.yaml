@@ -110,7 +110,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T021
+active_task: T900
 
 tasks:
   - id: T001
@@ -2042,7 +2042,7 @@ tasks:
   - id: T021
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Add AST/import/enum-based architecture guard tests that enforce one runtime owner, no scattered output_mode/output_type branching, registry totality, and no duplicate DOCX/PDF rendering path."
     allowed_files:
@@ -2057,7 +2057,68 @@ tasks:
       - "T020 is not complete."
       - "Guard tests require brittle grep or line-number assertions instead of AST/import/enum-based checks with allowlists."
       - "Allowed exceptions cannot be stated clearly."
-    receipt: null
+    consolidation_effect:
+      reused_existing_owner: "Guard tests reuse the runtime owners established by T019/T020: STEP_HANDLER_REGISTRY for output_mode dispatch, OUTPUT_FORMAT_SPECS for output_type policy, output_runtime as the current typed-output validation/rendering bridge, and document_rendering/docx_template_runtime/celery_preflight as byte-rendering dependency leaves."
+      logic_moved_from: "None; this was a test-only guard slice."
+      logic_deleted: "None; source behavior was unchanged."
+      duplicate_path_removed: "None directly; the guards make new duplicate output_mode/output_type dispatch and new document-rendering dependency paths fail loudly."
+      new_code_added: "AST/import/enum guard tests, registry-totality assertions, and negative scanner tests in Flow runtime unit tests."
+      why_existing_owners_were_insufficient: "Existing runtime owners were sufficient for production behavior, but there was no guard proving future branches stay behind those owners."
+      guard_preventing_duplicate_logic_from_returning: "T021 guard tests fail on scattered output_mode/output_type Compare/Match branches, incomplete handler/format registries, resurrected typed-output helper owners, and DOCX/PDF/Markdown rendering dependencies outside leaf rendering modules."
+      net_flow_logic_surface_area: "preserved"
+      if_increased_why: "Only test guard surface increased; runtime/source logic surface was unchanged."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T04:59:45+02:00"
+      summary: "Added test-only Flow runtime architecture guards for output_mode/output_type ownership, handler and output-format registry totality, removed typed-output helper owners, and DOCX/PDF/Markdown rendering dependency locality. No runtime, API, persistence, router, or Flow AI Builder source behavior changed."
+      evidence:
+        - "backend/tests/unittests/flows/test_flow_architecture_guards.py keeps output_mode branches behind runtime/step_handlers and output_type branches behind runtime/output_formats or runtime/output_runtime allowlisted owners."
+        - "backend/tests/unittests/flows/test_flow_architecture_guards.py scans output_mode inside runtime/output_formats while excluding output_type there, matching the OutputFormatSpec ownership boundary."
+        - "backend/tests/unittests/flows/test_flow_runtime_step_handlers.py checks STEP_HANDLER_REGISTRY and FlowRunExecutor._build_step_handler stay aligned for FlowOutputMode."
+        - "backend/tests/unittests/flows/test_flow_runtime_output_formats.py checks OUTPUT_FORMAT_SPECS keys exactly match FlowOutputType."
+        - "backend/tests/unittests/flows/test_flow_runtime_output_renderers.py keeps docx/docxtpl/weasyprint/markdown_it imports and dynamic imports in document rendering leaves only."
+      commands:
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_runtime_output_formats.py tests/unittests/flows/test_flow_runtime_output_renderers.py -q"
+          status: "pass"
+          output: "39 passed in 2.55s."
+        - command: "cd backend && uv run ruff check tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_runtime_output_formats.py tests/unittests/flows/test_flow_runtime_output_renderers.py"
+          status: "pass"
+          output: "All checks passed."
+        - command: "cd backend && uv run ruff format --check tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_runtime_output_formats.py tests/unittests/flows/test_flow_runtime_output_renderers.py"
+          status: "pass"
+          output: "4 files already formatted."
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_runtime_output_formats.py tests/unittests/flows/test_flow_runtime_output_renderers.py"
+          status: "pass"
+          output: "0 errors, 0 warnings, 0 informations."
+        - command: "git diff --check"
+          status: "pass"
+      peer_review:
+        claude_plan_initial:
+          status: "fail_then_revised"
+          artifact: ".codex/artifacts/claude-peer-loop-t021-flow-runtime-architecture-guards-20260526T023809Z.md"
+          verdict: "GREEN_LIGHT no; valid concerns about scope, messages, negative tests, and temporary handler exhaustiveness guard."
+        claude_plan_revised:
+          status: "pass"
+          artifact: ".codex/artifacts/claude-peer-loop-t021-flow-runtime-architecture-guards-revised-plan-20260526T024141Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+        claude_implementation_initial:
+          status: "pass"
+          artifact: ".codex/artifacts/claude-peer-loop-t021-flow-runtime-architecture-guards-implementation-review-20260526T025108Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+        antigravity:
+          status: "pass_with_valid_concern_addressed"
+          artifact: ".codex/artifacts/antigravity-peer-loop-t021-flow-runtime-architecture-guards-antigravity-final-gate-20260526T025258Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8. Valid output_formats blanket-exclusion concern was addressed by scanning output_mode there while still excluding output_type."
+        claude_implementation_final:
+          status: "pass"
+          artifact: ".codex/artifacts/claude-peer-loop-t021-flow-runtime-architecture-guards-final-implementation-review-20260526T025901Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+      notes:
+        - "trigger: next task that includes executor.py in allowed_files should replace the _build_step_handler AST guard with source-level assert_never and delete the temporary test guard."
+        - "trigger: next HTTP-post delivery or provenance task should move the output-mode-specific _build_attempt_provenance http_post exception closer to the HTTP-post handler."
+        - "Known limitation: the output-axis scanner is syntactic, not data-flow-aware; a local alias such as mode = step.output_mode is not detected. Closing that requires a heavier lint/data-flow task and was not needed for this guard slice."
+        - "Staged-file subset check remains required immediately before commit."
+      next_task: T900
 
   - id: T009
     type: judge
@@ -2196,7 +2257,7 @@ tasks:
   - id: T900
     type: judge
     assignee: Judge
-    status: queued
+    status: active
     reasoning_hint: xhigh
     objective: "Re-score Flows after each completed tranche and choose the next highest-ROI tranche by strict score-floor impact."
     inputs:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ast
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -29,6 +31,10 @@ from intric.flows.runtime.step_handlers.pass_through import PassThroughStepHandl
 from intric.flows.runtime.step_handlers.template_fill import TemplateFillStepHandler
 from intric.flows.runtime.step_handlers.transcribe_only import TranscribeOnlyStepHandler
 from intric.flows.variable_resolver import FlowVariableResolver
+
+FLOW_RUNTIME_ROOT = (
+    Path(__file__).resolve().parents[3] / "src" / "intric" / "flows" / "runtime"
+)
 
 
 def _run() -> FlowRun:
@@ -151,7 +157,44 @@ class _OutputOnlyHandler:
 
 
 def test_registry_covers_all_flow_output_modes() -> None:
-    assert set(STEP_HANDLER_REGISTRY) == set(FlowOutputMode)
+    assert set(STEP_HANDLER_REGISTRY) == set(FlowOutputMode), (
+        "runtime/step_handlers.STEP_HANDLER_REGISTRY is the canonical output_mode "
+        "owner. Add one handler entry for every FlowOutputMode instead of branching "
+        "in generic runtime code."
+    )
+
+
+def _build_step_handler_match_modes() -> frozenset[FlowOutputMode]:
+    tree = ast.parse((FLOW_RUNTIME_ROOT / "executor.py").read_text())
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef) or node.name != "_build_step_handler":
+            continue
+        modes: set[FlowOutputMode] = set()
+        for child in ast.walk(node):
+            if not isinstance(child, ast.Match):
+                continue
+            for case in child.cases:
+                pattern = case.pattern
+                if not (
+                    isinstance(pattern, ast.MatchValue)
+                    and isinstance(pattern.value, ast.Attribute)
+                    and isinstance(pattern.value.value, ast.Name)
+                    and pattern.value.value.id == "FlowOutputMode"
+                ):
+                    continue
+                modes.add(FlowOutputMode[pattern.value.attr])
+        return frozenset(modes)
+    raise AssertionError("FlowRunExecutor._build_step_handler was not found")
+
+
+def test_executor_handler_match_cases_cover_registry_modes() -> None:
+    match_modes = _build_step_handler_match_modes()
+
+    assert match_modes == set(STEP_HANDLER_REGISTRY), (
+        "FlowRunExecutor._build_step_handler is the temporary construction guard "
+        "for runtime/step_handlers. Keep its FlowOutputMode match cases in sync "
+        "with STEP_HANDLER_REGISTRY until executor.py can use assert_never."
+    )
 
 
 @pytest.mark.asyncio
