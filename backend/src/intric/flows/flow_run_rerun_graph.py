@@ -7,6 +7,7 @@ from typing import cast
 from uuid import UUID
 
 from intric.flows.enums import FlowInputSource, RerunDependencyKind
+from intric.flows.http_transport import is_authored_config
 from intric.flows.runtime.models import RuntimeStep
 from intric.flows.step_lineage import build_step_ref_mapping
 from intric.flows.template_reference_analyzer import (
@@ -233,6 +234,31 @@ def _http_config_templates(
         body_template_kind = RerunDependencyKind.OUTPUT_CONFIG_BODY_TEMPLATE
         body_json_kind = RerunDependencyKind.OUTPUT_CONFIG_BODY_JSON
 
+    if is_authored_config(dict(config_mapping)):
+        return _authored_http_config_templates(
+            config_mapping=config_mapping,
+            url_kind=url_kind,
+            headers_kind=headers_kind,
+            body_template_kind=body_template_kind,
+        )
+
+    return _legacy_http_config_templates(
+        config_mapping=config_mapping,
+        url_kind=url_kind,
+        headers_kind=headers_kind,
+        body_template_kind=body_template_kind,
+        body_json_kind=body_json_kind,
+    )
+
+
+def _legacy_http_config_templates(
+    *,
+    config_mapping: Mapping[str, object],
+    url_kind: RerunDependencyKind,
+    headers_kind: RerunDependencyKind,
+    body_template_kind: RerunDependencyKind,
+    body_json_kind: RerunDependencyKind,
+) -> list[tuple[str, RerunDependencyKind]]:
     templates: list[tuple[str, RerunDependencyKind]] = []
     url = config_mapping.get("url")
     if isinstance(url, str):
@@ -255,6 +281,100 @@ def _http_config_templates(
         (template, body_json_kind) for template in _iter_nested_strings(body_json)
     )
     return templates
+
+
+def _authored_http_config_templates(
+    *,
+    config_mapping: Mapping[str, object],
+    url_kind: RerunDependencyKind,
+    headers_kind: RerunDependencyKind,
+    body_template_kind: RerunDependencyKind,
+) -> list[tuple[str, RerunDependencyKind]]:
+    templates: list[tuple[str, RerunDependencyKind]] = []
+    _append_string_template(
+        templates=templates,
+        value=config_mapping.get("url"),
+        dependency_kind=url_kind,
+    )
+    _extend_authored_auth_templates(
+        templates=templates,
+        auth=config_mapping.get("auth"),
+        dependency_kind=headers_kind,
+    )
+    custom_headers = config_mapping.get("custom_headers")
+    if isinstance(custom_headers, Sequence) and not isinstance(
+        custom_headers, (str, bytes, bytearray)
+    ):
+        for header in cast(Sequence[object], custom_headers):
+            header_mapping = _mapping(header)
+            if header_mapping is None:
+                continue
+            _append_string_template(
+                templates=templates,
+                value=header_mapping.get("value"),
+                dependency_kind=headers_kind,
+            )
+
+    body = _mapping(config_mapping.get("body"))
+    if body is not None and body.get("mode") in {"json_template", "text_template"}:
+        _append_string_template(
+            templates=templates,
+            value=body.get("template"),
+            dependency_kind=body_template_kind,
+        )
+    return templates
+
+
+def _extend_authored_auth_templates(
+    *,
+    templates: list[tuple[str, RerunDependencyKind]],
+    auth: object,
+    dependency_kind: RerunDependencyKind,
+) -> None:
+    auth_mapping = _mapping(auth)
+    if auth_mapping is None:
+        return
+    match auth_mapping.get("mode"):
+        case "bearer_token":
+            _append_string_template(
+                templates=templates,
+                value=auth_mapping.get("token"),
+                dependency_kind=dependency_kind,
+            )
+        case "api_key":
+            _append_string_template(
+                templates=templates,
+                value=auth_mapping.get("header_name"),
+                dependency_kind=dependency_kind,
+            )
+            _append_string_template(
+                templates=templates,
+                value=auth_mapping.get("key"),
+                dependency_kind=dependency_kind,
+            )
+        case "basic_auth":
+            _append_string_template(
+                templates=templates,
+                value=auth_mapping.get("username"),
+                dependency_kind=dependency_kind,
+            )
+            _append_string_template(
+                templates=templates,
+                value=auth_mapping.get("password"),
+                dependency_kind=dependency_kind,
+            )
+        case _:
+            pass
+
+
+def _append_string_template(
+    *,
+    templates: list[tuple[str, RerunDependencyKind]],
+    value: object,
+    dependency_kind: RerunDependencyKind,
+) -> None:
+    if isinstance(value, str):
+        templates.append((value, dependency_kind))
 
 
 def _template_reference_dependency_orders(

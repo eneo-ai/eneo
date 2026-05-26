@@ -51,7 +51,7 @@ def compile_http_config(
     ctx = variables or {}
 
     def _interpolate(template: str) -> str:
-        if interpolate is not None and ctx:
+        if interpolate is not None:
             return interpolate(template, ctx)
         return template
 

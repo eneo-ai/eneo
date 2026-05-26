@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 
-
 from intric.flows.http_transport.authored_config import (
     CustomHeader,
     HttpAuthApiKey,
@@ -93,7 +92,9 @@ def test_auto_body_returns_none() -> None:
 
 
 def test_json_template_body_parses_json() -> None:
-    cfg = _config(body=HttpBody(mode=HttpBodyMode.JSON_TEMPLATE, template='{"key": "val"}'))
+    cfg = _config(
+        body=HttpBody(mode=HttpBodyMode.JSON_TEMPLATE, template='{"key": "val"}')
+    )
     result = compile_http_config(cfg, direction="output", method="POST")
 
     assert result.json_body == {"key": "val"}
@@ -101,7 +102,9 @@ def test_json_template_body_parses_json() -> None:
 
 
 def test_text_template_body_returns_bytes() -> None:
-    cfg = _config(body=HttpBody(mode=HttpBodyMode.TEXT_TEMPLATE, template="hello world"))
+    cfg = _config(
+        body=HttpBody(mode=HttpBodyMode.TEXT_TEMPLATE, template="hello world")
+    )
     result = compile_http_config(cfg, direction="output", method="POST")
 
     assert result.body == b"hello world"
@@ -150,6 +153,26 @@ def test_url_interpolation_with_interpolate_fn() -> None:
     )
 
     assert result.url == "https://example.org/items"
+
+
+def test_interpolation_runs_with_empty_variables_context() -> None:
+    cfg = _config(url="https://example.org/{{path}}")
+    calls: list[object] = []
+
+    def interpolate(template: str, ctx: object) -> str:
+        calls.append(ctx)
+        return template.replace("{{path}}", "items")
+
+    result = compile_http_config(
+        cfg,
+        direction="output",
+        method="POST",
+        variables={},
+        interpolate=interpolate,
+    )
+
+    assert result.url == "https://example.org/items"
+    assert calls == [{}]
 
 
 def test_url_unchanged_without_interpolate_fn() -> None:

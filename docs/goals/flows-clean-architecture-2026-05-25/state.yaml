@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T068
+active_task: T071
 
 tasks:
   - id: T001
@@ -6840,7 +6840,7 @@ tasks:
   - id: T068
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "judge(flows): choose the next safe tranche after HTTP transition owner consolidation."
     inputs:
@@ -6868,6 +6868,322 @@ tasks:
       - "The next highest-ROI task requires unavailable Docker/DB verification and cannot be narrowed to read-only preflight."
       - "The next task would require retention or service-key product/data decisions that remain blocked."
       - "The next task would combine final architecture docs with unresolved implementation work."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T20:25:18+02:00"
+      summary: "Chose a read-only backend HTTP authored-config runtime ownership preflight as the next safe tranche. Frontend HTTP authored config reuse is now consolidated, but backend authored/test/persistence paths use HttpAuthoredConfig while runtime HTTP execution still consumes legacy flat headers/body config. Because this crosses runtime execution, draft persistence, API test behavior, and persisted JSONB/published snapshots, T069 must map ownership before any Worker implementation."
+      decision_artifact: "docs/goals/flows-clean-architecture-2026-05-25/notes/t068-next-safe-after-http-transition-judge.md"
+      decision: "activate_t069_read_only_scout"
+      evidence:
+        - "frontend/apps/web/src/lib/features/flows/components/http/httpConfigDefaults.ts"
+        - "frontend/apps/web/src/lib/features/flows/components/http/httpConfigTypes.ts"
+        - "backend/src/intric/flows/http_transport/authored_config.py:65"
+        - "backend/src/intric/flows/application/flow_service.py:681"
+        - "backend/src/intric/flows/application/flow_service.py:685"
+        - "backend/src/intric/flows/step_config_secrets.py:16"
+        - "backend/src/intric/flows/http_transport/test_action.py:60"
+        - "backend/src/intric/flows/http_transport/compiler.py:30"
+        - "backend/src/intric/flows/runtime/http_orchestration.py:121"
+        - "backend/src/intric/flows/runtime/http_orchestration.py:141"
+        - "backend/src/intric/flows/runtime/http_orchestration.py:149"
+        - "backend/src/intric/flows/runtime/http_orchestration.py:300"
+        - "backend/src/intric/flows/runtime/http_orchestration.py:317"
+        - "backend/src/intric/flows/runtime/http_orchestration.py:323"
+        - "backend/tests/unittests/flows/test_typed_io_executor.py:962"
+        - "backend/tests/unittests/flows/test_typed_io_executor.py:1934"
+      dispositions:
+        T014: "queued; schema/migration invariants still require Docker/Postgres-backed verification, and Docker is unavailable from this host."
+        T015: "queued; public API/OpenAPI/generated-client work remains broad and should be split by source-backed Judge evidence before implementation."
+        T016: "queued broad placeholder; recent frontend state sub-slices are complete enough to prioritize backend HTTP ownership preflight."
+        T901: "queued final docs Worker; do not start while implementation architecture is still changing."
+        T009_T010_T011: "blocked; retention, service-key identity, and review/rerun product/data decisions remain absent."
+      review_tier: "local validation only for this read-only Judge; later backend HTTP Worker likely needs Claude and possibly Antigravity depending on runtime/API/data blast radius."
+      commands:
+        - command: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1, status=ok, blockers=[]"
+        - command: "git status --short && git branch --show-current"
+          status: pass
+          output: "feature/refactor-flows-flowai; unrelated dirty/untracked baseline preserved."
+        - command: "sed -n '6840,6910p' docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+          status: pass
+        - command: "sed -n '1,240p' docs/goals/flows-clean-architecture-2026-05-25/notes/t067-http-transition-config-owner.md"
+          status: pass
+        - command: "rg -n 'headers|body_template|body_json|custom_headers|response_format|auth|is_authored_config|decrypt_step_headers|encrypt_step_headers|http_post|http_get|input_config|output_config' backend/src/intric/flows/http_transport backend/src/intric/flows/step_config_secrets.py backend/src/intric/flows/runtime backend/src/intric/flows/application/flow_service.py backend/tests/unittests/flows backend/tests/integration/flows -g '*.py'"
+          status: pass
+        - command: "nl -ba backend/src/intric/flows/http_transport/authored_config.py && nl -ba backend/src/intric/flows/http_transport/compiler.py && nl -ba backend/src/intric/flows/http_transport/secret_codec.py && nl -ba backend/src/intric/flows/runtime/http_orchestration.py"
+          status: pass
+        - command: "docker ps --format '{{.Names}}'"
+          status: blocked
+          output: "Docker API unavailable at /Users/ccimen/.orbstack/run/docker.sock."
+      next_task: T069
+
+  - id: T069
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "scout(flows): preflight backend HTTP authored-config runtime ownership."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t068-next-safe-after-http-transition-judge.md"
+      - "backend/src/intric/flows/http_transport"
+      - "backend/src/intric/flows/application/flow_service.py"
+      - "backend/src/intric/flows/api/flow_http_test_router.py"
+      - "backend/src/intric/flows/api/flow_assembler.py"
+      - "backend/src/intric/flows/runtime/http_orchestration.py"
+      - "backend/src/intric/flows/runtime/http_runtime.py"
+      - "backend/src/intric/flows/runtime/executor.py"
+      - "backend/src/intric/flows/runtime/step_handlers/http_post.py"
+      - "backend/tests/unittests/flows/http_transport"
+      - "backend/tests/unittests/flows/test_http_orchestration.py"
+      - "backend/tests/unittests/flows/test_typed_io_executor.py"
+      - "backend/tests/unittests/flows/test_flow_service.py"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t069-http-authored-runtime-ownership-preflight.md"
+    constraints:
+      - "Read-only Scout: no source edits, test edits, migrations, generated-client edits, frontend edits, deletion, or docs/flows/architecture.md edits."
+      - "Before starting, check the watchdog blocker file and verify any halt-worthy blocker against source/state/git evidence."
+      - "Do not implement runtime behavior, API/OpenAPI behavior, schema changes, or generated-client updates."
+      - "Do not broaden into Flow AI Builder except where a Flow proper file directly depends on the same contract."
+      - "Do not start retention, service-key identity/review/rerun, schema migration, materialized webhook request snapshots, or other blocked product/data work without recorded decisions."
+      - "Inventory duplicate/scattered reusable HTTP config logic, not only dead code."
+      - "Include published-snapshot and draft JSONB preflight requirements before recommending deletion or migration of flat legacy paths."
+      - "If proposing a Worker, include consolidation effect, naming-gate answer, maintainer-doc readiness, allowed_files, verify commands, and stop_if."
+    expected_output:
+      - "Concept inventory table: Concept, Current locations, Behavior differences, Canonical owner, Merge/delete path."
+      - "Classification of backend HTTP config paths as delete_now, merge_or_consolidate, needs_preflight, or keep_temporarily."
+      - "Persisted-data and published-snapshot preflight requirements for any legacy flat config deletion or migration."
+      - "Exact next Worker/Judge/Scout or block recommendation with allowed_files, verification commands, stop_if, consolidation effect, naming gate, and architecture-doc readiness."
+      - "Review-tier recommendation for the proposed next task under the updated tiered review rule."
+    stop_if:
+      - "A correct recommendation requires live DB/published snapshot evidence but Docker/Postgres remains unavailable and source-only evidence is insufficient."
+      - "The next implementation would require product/data decisions for retention, service-key identity, review/rerun, or materialized webhook request storage."
+      - "The next implementation would require combining public API/OpenAPI/generated-client changes with runtime behavior changes in one oversized slice."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T20:29:40+02:00"
+      summary: "Mapped the backend HTTP authored-config ownership split. Authoring, persistence, redaction, validation, and HTTP-test paths already use HttpAuthoredConfig and compile_http_config, but runtime HTTP execution and rerun dependency extraction still consume only flat legacy headers/body_template/body_json. Recommended T070 to reuse the existing authored compiler in runtime orchestration and update the existing rerun graph owner while preserving legacy flat compatibility until persisted draft and published snapshot preflight proves it can be deleted or migrated."
+      note: "docs/goals/flows-clean-architecture-2026-05-25/notes/t069-http-authored-runtime-ownership-preflight.md"
+      concept_inventory:
+        - concept: "Authored HTTP config shape"
+          current_locations: "http_transport/authored_config.py, frontend components/http/*, API examples/models"
+          behavior_differences: "Accepted and persisted as auth/body/custom_headers, but runtime currently ignores auth/custom_headers/body.template."
+          canonical_owner: "HttpAuthoredConfig"
+          merge_delete_path: "Runtime should parse authored config through the existing owner; no new shape."
+        - concept: "Authored config to effective HTTP request"
+          current_locations: "http_transport/compiler.py and http_transport/test_action.py"
+          behavior_differences: "HTTP test compiles authored config; runtime uses flat helpers."
+          canonical_owner: "compile_http_config"
+          merge_delete_path: "Runtime authored branch should call compiler instead of duplicating auth/body/header compilation."
+        - concept: "Legacy flat HTTP runtime config"
+          current_locations: "runtime/http_orchestration.py, runtime/http_runtime.py, step_config_secrets.py, flow_validators_http.py"
+          behavior_differences: "Uses headers/body_template/body_json and has live tests."
+          canonical_owner: "temporary compatibility inside runtime HTTP orchestration and flow_validators_http"
+          merge_delete_path: "Keep temporarily; delete or migrate only after draft and published snapshot preflight."
+        - concept: "Rerun dependency extraction for HTTP config templates"
+          current_locations: "flow_run_rerun_graph.py and RerunDependencyKind"
+          behavior_differences: "Scans flat url/headers/body_template/body_json; misses authored custom_headers/body.template/auth templates."
+          canonical_owner: "flow_run_rerun_graph.py"
+          merge_delete_path: "T070 must update this existing owner when authored templates become executable."
+      classifications:
+        delete_now: []
+        merge_or_consolidate:
+          - "Runtime authored-config execution through compile_http_config."
+          - "Rerun graph authored-template scanning in flow_run_rerun_graph.py."
+        needs_preflight:
+          - "Deleting or migrating legacy flat HTTP config support."
+          - "Typing public API input_config/output_config away from dict[str, Any]."
+        keep_temporarily:
+          - "Legacy flat headers/body_template/body_json runtime support."
+          - "step_config_secrets.py flat-header encryption."
+      commands:
+        - command: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1, status=ok, blockers=[]"
+        - command: "git diff --check -- docs/goals/flows-clean-architecture-2026-05-25/state.yaml docs/goals/flows-clean-architecture-2026-05-25/notes/t068-next-safe-after-http-transition-judge.md"
+          status: pass
+        - command: "nl -ba backend/src/intric/flows/runtime/http_runtime.py && nl -ba backend/src/intric/flows/runtime/http_orchestration.py && nl -ba backend/src/intric/flows/runtime/flow_webhook_delivery.py"
+          status: pass
+        - command: "nl -ba backend/src/intric/flows/http_transport/authored_config.py && nl -ba backend/src/intric/flows/http_transport/compiler.py && nl -ba backend/src/intric/flows/http_transport/secret_codec.py && nl -ba backend/src/intric/flows/http_transport/validator.py"
+          status: pass
+        - command: "nl -ba backend/src/intric/flows/flow_validators_http.py && nl -ba backend/src/intric/flows/flow_run_rerun_graph.py"
+          status: pass
+        - command: "rg -n 'http-test|HttpTest|custom_headers|body_json|body_template|response_format|find_stored_http_config|is_authored_config' backend/tests -g '*.py'"
+          status: pass
+        - command: "PYTHONDONTWRITEBYTECODE=1 backend/.venv/bin/python - <<'PY' ... authored runtime probe ... PY"
+          status: blocked
+          output: "Host Python settings validation failed before Flow code due missing backend env."
+        - command: "cd backend && uv run pytest tests/unittests/flows/http_transport tests/unittests/flows/test_http_orchestration.py tests/unittests/flows/test_flow_validators.py::test_validate_steps_rejects_http_body_template_and_body_json_together tests/unittests/flows/test_flow_validators.py::test_validate_steps_rejects_invalid_http_response_format tests/unittests/flows/test_typed_io_executor.py::test_resolve_step_input_http_post_uses_body_json_and_interpolated_headers tests/unittests/flows/test_typed_io_executor.py::test_resolve_http_input_decrypts_encrypted_headers -q"
+          status: pass
+          output: "80 passed, 1 warning."
+      proposed_next_task: T070
+
+  - id: T070
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "refactor(flows-runtime): execute authored HTTP config through existing compiler."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t069-http-authored-runtime-ownership-preflight.md"
+      - "backend/src/intric/flows/http_transport/authored_config.py"
+      - "backend/src/intric/flows/http_transport/compiler.py"
+      - "backend/src/intric/flows/http_transport/secret_codec.py"
+      - "backend/src/intric/flows/http_transport/normalizer.py"
+      - "backend/src/intric/flows/runtime/http_orchestration.py"
+      - "backend/src/intric/flows/runtime/http_runtime.py"
+      - "backend/src/intric/flows/flow_run_rerun_graph.py"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t070-http-authored-runtime-worker.md"
+      - "backend/src/intric/flows/runtime/http_orchestration.py"
+      - "backend/src/intric/flows/flow_run_rerun_graph.py"
+      - "backend/src/intric/flows/http_transport/compiler.py"
+      - "backend/tests/unittests/flows/test_http_orchestration.py"
+      - "backend/tests/unittests/flows/test_flow_rerun_graph.py"
+      - "backend/tests/unittests/flows/test_typed_io_executor.py"
+      - "backend/tests/unittests/flows/http_transport/test_compiler.py"
+    constraints:
+      - "Before starting implementation and before committing, check the watchdog blocker file and verify any halt-worthy blocker against source/state/git evidence."
+      - "Run a Claude plan gate before implementation because this changes runtime behavior and rerun dependency ownership."
+      - "Run a Claude commit gate after the diff is stable."
+      - "Use Antigravity only if Claude and Codex disagree or the slice must widen into public API/data migration."
+      - "Reuse HttpAuthoredConfig, decrypt_authored_config, is_authored_config, and compile_http_config; do not duplicate authored auth/custom-header/body compilation in runtime."
+      - "Do not add new RerunDependencyKind values in this slice; authored HTTP templates must reuse existing URL, HEADERS, and BODY_TEMPLATE dependency kinds or stop."
+      - "Apply runtime timeout validation to authored configs through the same runtime cap as legacy configs."
+      - "Fix compiler interpolation at the existing owner if the runtime slice exposes a source-verified compiler bug."
+      - "Preserve legacy flat headers/body_template/body_json runtime compatibility."
+      - "Do not edit API routers, Pydantic API schemas, OpenAPI/generated frontend files, migrations, schema files, service-key identity, retention, review/rerun product policy, materialized webhook request storage, or Flow AI Builder."
+      - "Do not delete flat legacy HTTP config support or tests in this slice."
+      - "Update the existing rerun graph owner if authored templates become runtime-significant."
+      - "Authored runtime tests must capture send_http_request kwargs and assert exact URL, auth/custom headers, body, timeout, and webhook idempotency-key values."
+      - "Record the FlowHttpOrchestrationDeps collapse follow-up in the T070 worker note and receipt with location and trigger."
+      - "Stage only T070 allowed files; preserve unrelated modified/untracked files."
+      - "New private names must reveal the HTTP runtime/authored-config axis and be clear enough for the future where-to-change-X table."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_http_orchestration.py tests/unittests/flows/test_flow_rerun_graph.py tests/unittests/flows/test_typed_io_executor.py::test_resolve_step_input_http_post_uses_body_json_and_interpolated_headers tests/unittests/flows/test_typed_io_executor.py::test_resolve_http_input_decrypts_encrypted_headers -q"
+      - "cd backend && uv run pytest tests/unittests/flows/http_transport/test_compiler.py tests/unittests/flows/http_transport/test_secret_codec.py tests/unittests/flows/http_transport/test_validator.py tests/unittests/flows/http_transport/test_normalizer.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/runtime/http_orchestration.py src/intric/flows/flow_run_rerun_graph.py src/intric/flows/http_transport/compiler.py tests/unittests/flows/test_http_orchestration.py tests/unittests/flows/test_flow_rerun_graph.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/http_transport/test_compiler.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/runtime/http_orchestration.py src/intric/flows/flow_run_rerun_graph.py src/intric/flows/http_transport/compiler.py tests/unittests/flows/test_http_orchestration.py tests/unittests/flows/test_flow_rerun_graph.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/http_transport/test_compiler.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/http_orchestration.py src/intric/flows/flow_run_rerun_graph.py src/intric/flows/http_transport/compiler.py tests/unittests/flows/test_http_orchestration.py tests/unittests/flows/test_flow_rerun_graph.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/http_transport/test_compiler.py"
+      - "git diff --check"
+      - "git diff -- backend/src/intric/flows/runtime/http_orchestration.py backend/src/intric/flows/flow_run_rerun_graph.py backend/src/intric/flows/http_transport/compiler.py backend/tests/unittests/flows/test_http_orchestration.py backend/tests/unittests/flows/test_flow_rerun_graph.py backend/tests/unittests/flows/test_typed_io_executor.py backend/tests/unittests/flows/http_transport/test_compiler.py | rg -n '^\\+.*(pyright: ignore|type: ignore|cast\\(Any|dict\\[str, Any\\]|helper|manager|processor|INPUT_CONFIG_AUTH|OUTPUT_CONFIG_AUTH|RerunDependencyKind\\.[A-Z_]+ =|T0[0-9][0-9]|Phase [0-9A-G]\\b)'"
+    stop_if:
+      - "The watchdog has a halt-worthy blocker that cannot be resolved or source-evidence-disagreed."
+      - "The fix requires API router/model/OpenAPI/generated-client changes."
+      - "The fix requires schema migration, deleting flat configs, or live DB/published snapshot evidence."
+      - "The fix requires changing service-key identity, retention, review/rerun product policy, materialized webhook request snapshots, or Flow AI Builder."
+      - "Runtime authored support cannot be implemented by reusing HttpAuthoredConfig, decrypt_authored_config, and compile_http_config."
+      - "Rerun dependency extraction cannot be updated without reusing existing RerunDependencyKind URL, HEADERS, and BODY_TEMPLATE values."
+      - "Required files exceed allowed_files."
+      - "Focused verification fails twice for reasons unrelated to this task."
+    consolidation_effect:
+      reused_existing_owner: "HttpAuthoredConfig, decrypt_authored_config, compile_http_config, and flow_run_rerun_graph.py."
+      logic_moved_from: "Runtime authored request resolution moves from not using the authored owner to delegating to http_transport.compiler."
+      logic_deleted: "None expected; legacy flat compatibility stays until data preflight."
+      duplicate_path_removed: "Avoid adding a second runtime auth/custom-header/body compiler."
+      new_code_added: "One runtime authored-vs-legacy dispatch path and authored-template extraction inside the existing rerun graph owner."
+      why_existing_owners_were_insufficient: "http_transport owns authored request compilation but not runtime send/audit; http_orchestration owns send/audit but lacks authored dispatch."
+      guard_preventing_duplicate_logic_from_returning: "Authored runtime tests, authored rerun dependency tests, existing legacy tests, and anti-leak diff guard."
+      net_flow_logic_surface_area: "preserved"
+      if_increased_why: "Temporary authored/legacy branch is necessary until persisted draft and published snapshot preflight permits deleting flat config."
+    receipt:
+      result: done
+      summary: "Authored HTTP input/webhook runtime execution now reuses the existing authored HTTP owners: HttpAuthoredConfig, decrypt_authored_config, and compile_http_config. Runtime preserves legacy flat config compatibility while dispatching authored configs before decryption, applying the runtime timeout cap, and sending the authored EffectiveHttpRequest. Rerun dependency extraction now scans authored URL/auth/custom-header value/body-template fields through the existing rerun graph owner with existing RerunDependencyKind values. compile_http_config now interpolates when variables is an empty dict."
+      evidence:
+        - "backend/src/intric/flows/runtime/http_orchestration.py:115"
+        - "backend/src/intric/flows/runtime/http_orchestration.py:177"
+        - "backend/src/intric/flows/runtime/http_orchestration.py:371"
+        - "backend/src/intric/flows/http_transport/compiler.py:54"
+        - "backend/src/intric/flows/flow_run_rerun_graph.py:237"
+        - "backend/src/intric/flows/flow_run_rerun_graph.py:284"
+        - "backend/tests/unittests/flows/test_http_orchestration.py:117"
+        - "backend/tests/unittests/flows/test_http_orchestration.py:417"
+        - "backend/tests/unittests/flows/test_flow_rerun_graph.py:171"
+        - "backend/tests/unittests/flows/http_transport/test_compiler.py:153"
+        - ".codex/artifacts/claude-peer-loop-t070-authored-http-runtime-final-plan-20260526T184747Z.md"
+        - ".codex/artifacts/claude-peer-loop-t070-authored-http-runtime-implementation-review-20260526T190318Z.md"
+      commands:
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_http_orchestration.py::test_resolve_http_input_source_text_authored_config_compiles_request tests/unittests/flows/test_http_orchestration.py::test_deliver_webhook_authored_config_compiles_request tests/unittests/flows/http_transport/test_compiler.py::test_interpolation_runs_with_empty_variables_context tests/unittests/flows/test_flow_rerun_graph.py::test_authored_http_config_templates_create_rerun_dependencies -q"
+          status: pass
+          output: "Pre-implementation red check failed with 5 expected failures; after implementation 5 passed."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_http_orchestration.py tests/unittests/flows/test_flow_rerun_graph.py tests/unittests/flows/test_typed_io_executor.py::test_resolve_step_input_http_post_uses_body_json_and_interpolated_headers tests/unittests/flows/test_typed_io_executor.py::test_resolve_http_input_decrypts_encrypted_headers -q"
+          status: pass
+          output: "35 passed, 1 unrelated Pydantic warning."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/http_transport/test_compiler.py tests/unittests/flows/http_transport/test_secret_codec.py tests/unittests/flows/http_transport/test_validator.py tests/unittests/flows/http_transport/test_normalizer.py -q"
+          status: pass
+          output: "68 passed."
+        - cmd: "cd backend && uv run ruff check src/intric/flows/runtime/http_orchestration.py src/intric/flows/flow_run_rerun_graph.py src/intric/flows/http_transport/compiler.py tests/unittests/flows/test_http_orchestration.py tests/unittests/flows/test_flow_rerun_graph.py tests/unittests/flows/http_transport/test_compiler.py"
+          status: pass
+          output: "All checks passed."
+        - cmd: "cd backend && uv run ruff format --check src/intric/flows/runtime/http_orchestration.py src/intric/flows/flow_run_rerun_graph.py src/intric/flows/http_transport/compiler.py tests/unittests/flows/test_http_orchestration.py tests/unittests/flows/test_flow_rerun_graph.py tests/unittests/flows/http_transport/test_compiler.py"
+          status: pass
+          output: "6 files already formatted."
+        - cmd: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/http_orchestration.py src/intric/flows/flow_run_rerun_graph.py src/intric/flows/http_transport/compiler.py tests/unittests/flows/test_http_orchestration.py tests/unittests/flows/test_flow_rerun_graph.py tests/unittests/flows/http_transport/test_compiler.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations."
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "! git diff -- backend/src/intric/flows/runtime/http_orchestration.py backend/src/intric/flows/flow_run_rerun_graph.py backend/src/intric/flows/http_transport/compiler.py backend/tests/unittests/flows/test_http_orchestration.py backend/tests/unittests/flows/test_flow_rerun_graph.py backend/tests/unittests/flows/http_transport/test_compiler.py | rg -n '^\\+.*(pyright: ignore|type: ignore|cast\\(Any|dict\\[str, Any\\]|\\bAny\\b|helper|manager|processor|INPUT_CONFIG_AUTH|OUTPUT_CONFIG_AUTH|RerunDependencyKind\\.[A-Z_]+ =|T0[0-9][0-9]|Phase [0-9A-G]\\b)'"
+          status: pass
+          output: "No added-line matches."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t070-http-authored-runtime --phase verification --iteration 3 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT: yes; MIN_SCORE: 8."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t070-http-authored-runtime --phase commit-gate --iteration 4 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT: yes; MIN_SCORE: 8."
+      reviewer_notes:
+        claude: "Plan gate and commit gate green. Antigravity skipped under tiered review because Claude and local source evidence agreed and this slice did not change public API, schema, generated client, or persistence."
+        verified_claims:
+          - "compile_http_config only changed empty-context interpolation by dropping the ctx truthiness guard."
+          - "Custom header names are not scanned in rerun extraction because compile_http_config does not interpolate custom header names."
+          - "FlowRunWebhookDeliveryService catches deliver_webhook exceptions through its generic retry/dead-letter path, so authored validation failures do not escape the delivery loop."
+      follow_ups:
+        - "After persisted draft/published snapshot preflight, collapse FlowHttpOrchestrationDeps toward a single EffectiveHttpRequest boundary or make legacy flat config an explicit typed compatibility path."
+        - "When http_transport.normalizer is in scope, widen is_authored_config to accept a read-only Mapping so rerun graph does not copy the mapping before calling the owner."
+        - "When the authored rerun extractor is next touched, compare against HttpAuthMode and HttpBodyMode enum values instead of bare wire strings if that does not widen imports awkwardly."
+        - "Review compile_http_config non-string CustomHeader.value behavior after secret-sentinel preflight."
+      consolidation_effect:
+        reused_existing_owner: "HttpAuthoredConfig, decrypt_authored_config, compile_http_config, flow_run_rerun_graph.py, and existing RerunDependencyKind values."
+        logic_moved_from: "Authored request construction moved out of implicit absence in runtime; runtime now delegates authored auth/custom-header/body/url compilation to http_transport.compiler."
+        logic_deleted: "None; legacy flat compatibility remains until data preflight."
+        duplicate_path_removed: "No duplicate authored runtime compiler was added; http_orchestration only dispatches and sends."
+        new_code_added: "A private authored request dispatch in http_orchestration.py and authored extraction functions in flow_run_rerun_graph.py."
+        why_existing_owners_were_insufficient: "http_transport.compiler owns authored request compilation but not runtime audit/send; flow_run_rerun_graph.py already owns dependency extraction and needed a typed authored branch."
+        guard_preventing_duplicate_logic_from_returning: "Request-fingerprint runtime tests, exact RerunDependencyKind tests, compiler empty-context test, legacy regression tests, and added-line anti-leak grep."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "A temporary authored/legacy branch remains because deleting flat config requires persisted-data and published-snapshot preflight."
+
+  - id: T071
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe Flow clean-architecture task after T070, respecting reuse-before-inventing, product/data gates, and current source evidence."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
+      - "T070 receipt"
+    constraints:
+      - "Read-only."
+      - "Check the watchdog before starting and before any task transition."
+      - "Do not activate retention, service-key identity, schema migration, webhook outbox, or other product/data-gated work unless state.yaml records the required decision."
+      - "Do not write docs/flows/architecture.md before the final docs Worker."
+      - "Prefer consolidation through existing owners over creating new modules."
+      - "Apply tiered review: full Claude plus optional Antigravity only for high-risk/cross-boundary work; Claude-only for medium-risk; local validation for low-risk."
+    expected_output:
+      - "Next task decision or stop rule."
+      - "If a Worker is chosen: objective, allowed_files, verification commands, consolidation effect, and peer-review tier."
+      - "If a Scout is chosen: exact evidence questions and source files."
+      - "Blocked tasks with the specific missing product/data decision."
     receipt: null
 
   - id: T901

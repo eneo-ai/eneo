@@ -156,6 +156,99 @@ def test_runtime_interpolated_fields_create_rerun_dependencies(
     assert graph.invalidated_steps[1].dependency_kinds == (dependency_kind,)
 
 
+@pytest.mark.parametrize(
+    ("step_kwargs", "dependency_kinds"),
+    [
+        (
+            {
+                "input_config": {
+                    "url": "https://api.example.test/{{ step_1.output.id }}",
+                    "auth": {
+                        "mode": "bearer_token",
+                        "token": "{{ step_1.output.token }}",
+                    },
+                    "body": {
+                        "mode": "json_template",
+                        "template": '{"id": "{{ step_1.output.id }}"}',
+                    },
+                    "custom_headers": [
+                        {
+                            "name": "X-Trace",
+                            "value": "{{ step_1.output.trace_id }}",
+                            "secret": False,
+                        }
+                    ],
+                }
+            },
+            (
+                RerunDependencyKind.INPUT_CONFIG_BODY_TEMPLATE,
+                RerunDependencyKind.INPUT_CONFIG_HEADERS,
+                RerunDependencyKind.INPUT_CONFIG_URL,
+            ),
+        ),
+        (
+            {
+                "output_config": {
+                    "url": "https://hook.example.test/{{ step_1.output.id }}",
+                    "auth": {
+                        "mode": "api_key",
+                        "header_name": "X-{{ step_1.output.header }}",
+                        "key": "{{ step_1.output.token }}",
+                    },
+                    "body": {
+                        "mode": "text_template",
+                        "template": "{{ step_1.output.text }}",
+                    },
+                    "custom_headers": [],
+                }
+            },
+            (
+                RerunDependencyKind.OUTPUT_CONFIG_BODY_TEMPLATE,
+                RerunDependencyKind.OUTPUT_CONFIG_HEADERS,
+                RerunDependencyKind.OUTPUT_CONFIG_URL,
+            ),
+        ),
+    ],
+)
+def test_authored_http_config_templates_create_rerun_dependencies(
+    step_kwargs,
+    dependency_kinds,
+):
+    graph = build_rerun_invalidation_graph(
+        steps=[
+            _step(1),
+            _step(2, **step_kwargs),
+        ],
+        root_step_id=_uuid(1),
+    )
+
+    assert graph.invalidated_step_ids == (_uuid(1), _uuid(2))
+    assert graph.invalidated_steps[1].dependency_kinds == dependency_kinds
+
+
+def test_authored_http_body_none_does_not_create_body_dependency():
+    graph = build_rerun_invalidation_graph(
+        steps=[
+            _step(1),
+            _step(
+                2,
+                output_config={
+                    "url": "https://hook.example.test/static",
+                    "auth": {"mode": "none"},
+                    "body": {
+                        "mode": "none",
+                        "template": "{{ step_1.output.text }}",
+                    },
+                    "custom_headers": [],
+                },
+            ),
+        ],
+        root_step_id=_uuid(1),
+    )
+
+    assert graph.invalidated_step_ids == (_uuid(1),)
+
+
 def test_step_refs_and_user_labels_create_rerun_dependencies():
     graph = build_rerun_invalidation_graph(
         steps=[
