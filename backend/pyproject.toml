@@ -61,6 +61,12 @@ dependencies = [
     "python-calamine>=0.3.1,<1",  # Fast Excel reader engine for pandas
     "rich>=14.2.0",
     "typing-extensions>=4.12.0,<5",
+    "opentelemetry-sdk>=1.20.0,<2",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.41b0",
+    "opentelemetry-instrumentation-redis>=0.41b0",
+    "opentelemetry-instrumentation-httpx>=0.41b0",
+    "opentelemetry-instrumentation-aiohttp-client>=0.41b0",
 ]
 
 [project.scripts]

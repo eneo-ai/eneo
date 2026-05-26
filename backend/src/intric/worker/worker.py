@@ -230,6 +230,13 @@ class Worker:
         return kwargs
 
     async def startup(self, ctx: ARQContext) -> None:
+        # OTEL must be initialised before lifespan.startup() so that
+        # SQLAlchemy, Redis, and aiohttp auto-instrumentation patches are
+        # active before those engines/pools are created.
+        from intric.main.observability import init_observability
+
+        init_observability()
+
         await lifespan.startup()
         crochet.setup()
 
