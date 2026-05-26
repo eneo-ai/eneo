@@ -33,6 +33,15 @@ export default ts.config(
     ignores: ["build/", ".svelte-kit/", "dist/", "src/lib/paraglide/"]
   },
   {
+    // Block hardcoded human-facing text — every string must go through
+    // paraglide (m.*). Scoped to the personal-assistant governance admin for
+    // now; widen the glob once a given area has been fully translated.
+    files: ["src/routes/(app)/admin/personal-assistant/**/*.svelte"],
+    rules: {
+      "intric/no-hardcoded-text": "error"
+    }
+  },
+  {
     rules: {
       "no-undef": "off",
       "@typescript-eslint/no-unused-vars": [
