@@ -4,6 +4,7 @@ from typing import Any
 import aiohttp
 from aiohttp.typedefs import Query
 
+from intric.libs.clients.throttle_retry import retry_on_throttle
 from intric.main.exceptions import InternalHTTPException
 from intric.main.logging import get_logger
 
@@ -43,8 +44,11 @@ class WrappedAiohttpClient:
     ) -> Any:
         url = self._create_url(endpoint=endpoint)
 
-        async with self.client.get(url, params=params, headers=headers) as response:
-            return await self._handle_response(response)
+        async def _do() -> Any:
+            async with self.client.get(url, params=params, headers=headers) as response:
+                return await self._handle_response(response)
+
+        return await retry_on_throttle(_do)
 
     async def post(
         self,
@@ -54,8 +58,11 @@ class WrappedAiohttpClient:
     ) -> Any:
         url = self._create_url(endpoint=endpoint)
 
-        async with self.client.post(url, json=data, headers=headers) as response:
-            return await self._handle_response(response)
+        async def _do() -> Any:
+            async with self.client.post(url, json=data, headers=headers) as response:
+                return await self._handle_response(response)
+
+        return await retry_on_throttle(_do)
 
     async def request(
         self,
@@ -67,10 +74,13 @@ class WrappedAiohttpClient:
     ) -> Any:
         url = self._create_url(endpoint=endpoint)
 
-        async with self.client.request(
-            method, url, json=data, params=params, headers=headers
-        ) as response:
-            return await self._handle_response(response)
+        async def _do() -> Any:
+            async with self.client.request(
+                method, url, json=data, params=params, headers=headers
+            ) as response:
+                return await self._handle_response(response)
+
+        return await retry_on_throttle(_do)
 
     async def download(
         self,
@@ -86,19 +96,23 @@ class WrappedAiohttpClient:
         Returns:
             Binary content from the response body
         """
-        try:
-            async with self.client.get(url, headers=headers) as response:
-                response.raise_for_status()
-                return await response.read()
-        except aiohttp.ClientResponseError as http_err:
-            logger.exception(f"HTTP error while downloading from {url}:")
-            raise http_err
-        except aiohttp.ClientConnectionError as conn_err:
-            logger.exception(f"Connection error while downloading from {url}:")
-            raise InternalHTTPException from conn_err
-        except Exception as err:
-            logger.exception(f"Unknown error while downloading from {url}:")
-            raise InternalHTTPException from err
+
+        async def _do() -> bytes:
+            try:
+                async with self.client.get(url, headers=headers) as response:
+                    response.raise_for_status()
+                    return await response.read()
+            except aiohttp.ClientResponseError as http_err:
+                logger.exception(f"HTTP error while downloading from {url}:")
+                raise http_err
+            except aiohttp.ClientConnectionError as conn_err:
+                logger.exception(f"Connection error while downloading from {url}:")
+                raise InternalHTTPException from conn_err
+            except Exception as err:
+                logger.exception(f"Unknown error while downloading from {url}:")
+                raise InternalHTTPException from err
+
+        return await retry_on_throttle(_do)
 
     async def close(self) -> None:
         if self.client and not self.client.closed:
