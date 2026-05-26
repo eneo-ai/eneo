@@ -110,7 +110,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T017
+active_task: T018
 
 tasks:
   - id: T001
@@ -1514,7 +1514,7 @@ tasks:
   - id: T017
     type: scout
     assignee: Scout
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Map current runtime step behavior and every output_type concern before adding a handler/output-format seam: prompt instructions, native JSON-mode decisions, artifact rendering, handler dependencies, and existing DOCX/PDF leaf responsibilities."
     inputs:
@@ -1536,12 +1536,98 @@ tasks:
       - "Minimal StepHandlerDeps candidates with source evidence."
       - "Which branches can move behind OutputFormatSpec first without behavior changes."
       - "Focused tests and guard tests needed."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Read-only Scout completed. Mapped current runtime output_mode behavior, output_type policy, duplicate/scattered owners, and guard needs before any handler/output-format implementation."
+      evidence:
+        output_mode_dispatch:
+          - "template_fill: executor branches to execute_template_fill_step at backend/src/intric/flows/runtime/executor.py:1031; template behavior lives in backend/src/intric/flows/runtime/template_fill_runtime.py:49."
+          - "transcribe_only: complete_step_execution skips LLM/RAG at backend/src/intric/flows/runtime/step_execution_runtime.py:991; invariant helper is backend/src/intric/flows/output_modes.py:6."
+          - "http_post output delivery: success plan discovers delivery at backend/src/intric/flows/runtime/step_attempt_runtime.py:191; executor directly delivers and marks status at backend/src/intric/flows/runtime/executor.py:852."
+          - "pass_through/default LLM path: executor builds StepExecutionRuntimeDeps at backend/src/intric/flows/runtime/executor.py:1056 and calls complete_step_execution at backend/src/intric/flows/runtime/executor.py:1128."
+          - "HTTP input-source provenance is a separate axis, not StepHandler scope: backend/src/intric/flows/runtime/executor.py:349 and backend/src/intric/flows/runtime/step_input_resolution.py:86."
+        output_type_policy:
+          - "Prompt instructions branch on json/pdf/docx in backend/src/intric/flows/runtime/step_execution_runtime.py:732 and are called at backend/src/intric/flows/runtime/step_execution_runtime.py:902."
+          - "Native JSON object-mode preference branches on json/pdf/docx in backend/src/intric/flows/runtime/step_execution_runtime.py:1273; model-capability cache and retry remain LLM runtime mechanics at backend/src/intric/flows/runtime/step_execution_runtime.py:1058 and 1123."
+          - "JSON parse/validate/prune policy lives in backend/src/intric/flows/runtime/output_runtime.py:108 and reuses backend/src/intric/flows/output_processing.py:53."
+          - "Generated PDF/DOCX artifact policy and file persistence live in backend/src/intric/flows/runtime/output_runtime.py:126; byte rendering is delegated through backend/src/intric/flows/runtime/document_rendering/service.py:45."
+          - "Raw PDF passthrough is current behavior at backend/src/intric/flows/runtime/output_runtime.py:48 and 147; deletion requires separate approval because tests protect it."
+          - "Template-fill DOCX byte mechanics remain in backend/src/intric/flows/runtime/docx_template_runtime.py:78 and 124, distinct from generated DOCX rendering."
+        existing_owners_to_reuse:
+          - "FlowOutputType/FlowOutputMode enums: backend/src/intric/flows/enums.py:59."
+          - "Step IO legality and no-LLM/document-generation/citation engine truth: backend/src/intric/flows/flow_capability_manifest.py:514, 561, 570, 603."
+          - "Transcribe-only string-boundary validation: backend/src/intric/flows/output_modes.py:6."
+          - "Rich StepExecutionOutput contract: backend/src/intric/flows/runtime/models.py:62."
+          - "Generated document rendering owner: backend/src/intric/flows/runtime/document_rendering/service.py:31."
+          - "Template DOCX byte owner: backend/src/intric/flows/runtime/docx_template_runtime.py:78."
+      duplicate_or_scattered_logic:
+        - concept: "Output format prompt and native JSON-mode policy"
+          current_locations: "backend/src/intric/flows/runtime/step_execution_runtime.py:732 and 1273"
+          behavior_differences: "Prompt text and native JSON-mode preference both depend on output_type, but are currently generic runtime branches."
+          canonical_owner: "OutputFormatSpec, while LLM runtime keeps provider capability cache/retry mechanics until a later handler move."
+          merge_delete_path: "Move branches into specs and delete original branch functions after callers migrate; do not copy and keep."
+        - concept: "Output parsing/rendering/file artifact policy"
+          current_locations: "backend/src/intric/flows/runtime/output_runtime.py:108, 126, 147"
+          behavior_differences: "json validates structured output; pdf/docx render artifacts; pdf has raw-byte passthrough."
+          canonical_owner: "OutputFormatSpec plus leaf output renderers over existing DocumentRenderService/document renderers."
+          merge_delete_path: "T019 must either add output_runtime.py to allowed_files for the full move or narrow to prompt/native JSON-mode only."
+        - concept: "Citation capability"
+          current_locations: "backend/src/intric/flows/runtime/step_execution_runtime.py:621 and backend/src/intric/flows/flow_capability_manifest.py:603"
+          behavior_differences: "Runtime duplicates an enum-strict engine-truth helper with string comparisons."
+          canonical_owner: "flow_capability_manifest.is_citation_capable_step"
+          merge_delete_path: "T018 should require citation_mode_for_step to delegate to the engine-truth helper before handler/spec code creates a third copy."
+        - concept: "Step behavior dispatch"
+          current_locations: "backend/src/intric/flows/runtime/executor.py:1031, backend/src/intric/flows/runtime/step_execution_runtime.py:991, backend/src/intric/flows/runtime/step_attempt_runtime.py:191"
+          behavior_differences: "template_fill, transcribe_only, http_post delivery, and default LLM behavior are discovered in different runtime files."
+          canonical_owner: "StepHandler registry keyed by FlowOutputMode, with cross-axis rules remaining in flow_capability_manifest."
+          merge_delete_path: "T020 should move existing behavior behind handlers without copying internals; webhook delivery remains a documented temporary FlowRunExecutor path until T013 outbox."
+      step_handler_deps_strategy:
+        - "Use per-handler typed dependency dataclasses. Do not introduce one shared services/context bag."
+        - "Reuse/deepen StepExecutionRuntimeDeps for default LLM and transcribe-only paths."
+        - "Reuse/deepen TemplateFillRuntimeDeps for template_fill and type template_asset_service when that boundary is touched."
+        - "HTTP-post delivery currently depends on FlowRunExecutor methods/deps; T020 must not implement webhook outbox early."
+      first_safe_output_format_moves:
+        - "Move prompt instruction branching first."
+        - "Move native JSON-mode preference decision second; keep provider cache/retry in LLM runtime until handler work."
+        - "Move output_runtime validation/rendering only if T019 allowed_files include output_runtime.py; otherwise narrow T019."
+      guard_tests_needed:
+        - "Enum-iterated registry totality: FlowOutputType for format specs and FlowOutputMode for handlers."
+        - "AST Compare-node guards for output_type/output_mode branching outside approved specs/handlers."
+        - "Import guards keeping python-docx/docxtpl/WeasyPrint and runtime.document_rendering imports in renderer/template leaves."
+        - "Regression tests preserving raw-PDF passthrough if it moves."
+        - "Guard or focused test preventing citation eligibility from reappearing outside flow_capability_manifest."
+      peer_review:
+        claude_iteration_1:
+          artifact: ".codex/artifacts/claude-peer-loop-t017-runtime-output-behavior-scout-20260526T002620Z.md"
+          verdict: "GREEN_LIGHT no; MIN_SCORE 7. Valid blockers: missing HTTP input-source axis, unresolved citation owner, webhook temporary-path scope, StepHandlerDeps strategy, and missing engine-truth owners."
+        claude_iteration_2:
+          artifact: ".codex/artifacts/claude-peer-loop-t017-runtime-output-behavior-scout-revised-20260526T003040Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8. Remaining concerns are T018 design decisions."
+        antigravity_synthesis:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t017-runtime-output-behavior-antigravity-synthesis-20260526T003239Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8. Emphasized cross-axis rules must stay in flow_capability_manifest and deps Any debt must not be copied."
+      commands:
+        - cmd: "rg -n \"output_mode|output_type|template_fill|http_post|transcribe_only|docx|pdf|json|native|artifact|render|prompt\" backend/src/intric/flows/runtime/executor.py backend/src/intric/flows/runtime/step_execution_runtime.py backend/src/intric/flows/runtime/template_fill_runtime.py backend/src/intric/flows/runtime/docx_template_runtime.py backend/src/intric/flows/runtime/step_result_builder.py"
+          status: pass
+          output: "Mapped runtime branches and leaf ownership."
+        - cmd: "rg -n \"step\\.output_mode|step\\.output_type\" backend/src/intric/flows/runtime -g '*.py' -g '!**/__pycache__/**'"
+          status: pass
+          output: "Confirmed current runtime step.output_mode/output_type references for the inventory."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t017 --phase review --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: fail_then_revised
+          output: "GREEN_LIGHT no; MIN_SCORE 7."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t017 --phase review --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t017-synthesis --phase synthesis --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8."
+      next_task: T018
 
   - id: T018
     type: judge
     assignee: Judge
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Approve the minimal StepExecutionResult, OutputFormatSpec, OutputRenderer, and StepHandler design from T017 evidence before implementation."
     inputs:
