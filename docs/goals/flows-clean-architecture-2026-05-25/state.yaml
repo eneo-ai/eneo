@@ -110,7 +110,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T018
+active_task: T019
 
 tasks:
   - id: T001
@@ -1627,7 +1627,7 @@ tasks:
   - id: T018
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Approve the minimal StepExecutionResult, OutputFormatSpec, OutputRenderer, and StepHandler design from T017 evidence before implementation."
     inputs:
@@ -1650,45 +1650,93 @@ tasks:
       - "allowed_files"
       - "verify"
       - "stop_if"
-    receipt: null
+    receipt:
+      result: done
+      decision: "Activate T019 as the first behavior-preserving output-format Worker."
+      summary: "Approved a minimal output-format policy slice after Claude rejected the first brief for leaving parallel owners. T019 must move and delete the existing prompt-instruction and native JSON-mode helpers from step_execution_runtime.py, introduce a total FlowOutputType-backed OutputFormatSpec registry, preserve text prompts byte-for-byte when specs return no instructions, and make citation_mode_for_step delegate inline citation eligibility to flow_capability_manifest while preserving non-inline and invalid-enum fail-soft behavior."
+      design_decisions:
+        step_execution_result: "Do not introduce StepExecutionResult in T019; defer a wrapper around StepExecutionOutput until delivery-intent/handler work needs it."
+        output_format_spec: "Introduce OutputFormatSpec for prompt instructions and native JSON-mode preference only; do not move output_runtime validation/rendering/persistence in this slice."
+        output_renderer: "Defer OutputRenderer and document-rendering migration to a later rendering slice with output_runtime.py allowed."
+        step_handler_deps: "Use per-handler typed dependency dataclasses later; do not add a shared service locator or generic StepHandlerDeps bag now."
+        cross_axis_rules: "Keep citation/completion/generated-document cross-axis truth in flow_capability_manifest.py."
+      evidence:
+        - "backend/src/intric/flows/runtime/step_execution_runtime.py:732-781 owns current prompt augmentation branches."
+        - "backend/src/intric/flows/runtime/step_execution_runtime.py:902-906 is the prompt augmentation call site."
+        - "backend/src/intric/flows/runtime/step_execution_runtime.py:1059 is the native JSON-mode call site."
+        - "backend/src/intric/flows/runtime/step_execution_runtime.py:1273-1296 owns current native JSON-mode and schema object-preference branches."
+        - "backend/src/intric/flows/runtime/step_execution_runtime.py:621-629 duplicates inline citation capability."
+        - "backend/src/intric/flows/flow_capability_manifest.py:639-646 is the canonical cross-axis citation capability owner."
+        - "backend/src/intric/flows/citation_sidecar.py:25-32 returns arbitrary normalized citation-mode strings, so non-inline modes must pass through unchanged."
+      commands:
+        - command: "if [ -f /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json ]; then sed -n '1,220p' /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json; else printf 'NO_WATCHDOG\\n'; fi"
+          status: pass
+          output: "Watchdog status ok; blockers empty. Stale active_task T008 was advisory because status was ok."
+        - command: "rg -n 'def augment_prompt_for_typed_output|_should_request_native_json_object_mode|_schema_prefers_object_value|augment_prompt_for_typed_output\\(|citation_mode_for_step\\(|resolve_citation_mode\\(' backend/src/intric/flows backend/tests -g '*.py'"
+          status: pass
+          output: "Confirmed current owner/call sites and tests that must migrate in T019."
+        - command: "nl -ba backend/src/intric/flows/citation_sidecar.py | sed -n '1,120p'; nl -ba backend/src/intric/flows/runtime/step_execution_runtime.py | sed -n '720,790p;895,910p;1048,1090p;1265,1300p'"
+          status: pass
+          output: "Verified prompt, JSON-mode, and citation behavior before approving the Worker."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t018 --new-session --phase plan --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: fail_expected
+          output: "GREEN_LIGHT no; MIN_SCORE 6. Valid blockers: delete old helpers explicitly, move schema object-preference helper, preserve citation passthrough, enumerate parity tests."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t018 --phase verification --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8 after revised brief."
+      peer_review:
+        claude:
+          first_artifact: ".codex/artifacts/claude-peer-loop-t018-minimal-output-architecture-judge-20260526T004140Z.md"
+          final_artifact: ".codex/artifacts/claude-peer-loop-t018-minimal-output-architecture-judge-revision-20260526T005003Z.md"
+          verdict: "Approved T019 as scoped. Non-blocking corrections were applied to the brief: JsonObject premise, empty-instruction parity, typed exception message, invalid enum citation fail-soft, and preserving existing golden assertions."
+      notes:
+        - "No source or test files were edited in T018."
+        - "Antigravity was not used for T018 because Claude's final green had no disputed high-risk decision; T019 implementation remains subject to the required Claude gate and Antigravity can be used if the implementation review becomes disputed."
+      next_task: T019
 
   - id: T019
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: high
-    objective: "Introduce typed StepExecutionResult or extend StepExecutionOutput, then add OutputFormatSpec registry for current text/json/docx/pdf output_type policy without changing runtime behavior."
+    objective: "Move current output_type prompt instructions and native JSON-mode preference behind a total OutputFormatSpec registry without changing runtime behavior."
     allowed_files:
-      - "backend/src/intric/flows/runtime/models.py"
-      - "backend/src/intric/flows/runtime/step_execution_result.py"
       - "backend/src/intric/flows/runtime/output_formats/base.py"
       - "backend/src/intric/flows/runtime/output_formats/__init__.py"
       - "backend/src/intric/flows/runtime/output_formats/text.py"
       - "backend/src/intric/flows/runtime/output_formats/json.py"
       - "backend/src/intric/flows/runtime/output_formats/docx.py"
       - "backend/src/intric/flows/runtime/output_formats/pdf.py"
-      - "backend/src/intric/flows/runtime/output_renderers/base.py"
-      - "backend/src/intric/flows/runtime/output_renderers/__init__.py"
-      - "backend/src/intric/flows/runtime/output_renderers/docx.py"
-      - "backend/src/intric/flows/runtime/output_renderers/pdf.py"
-      - "backend/src/intric/flows/runtime/docx_template_runtime.py"
       - "backend/src/intric/flows/runtime/step_execution_runtime.py"
-      - "backend/tests/unittests/flows/test_docx_template_runtime.py"
       - "backend/tests/unittests/flows/test_flow_runtime_output_formats.py"
-      - "backend/tests/unittests/flows/test_flow_runtime_output_renderers.py"
+      - "backend/tests/unittests/flows/test_step_execution_runtime.py"
+      - "backend/tests/unittests/flows/test_typed_io_executor.py"
     verify:
-      - "cd backend && uv run pytest tests/unittests/flows/test_docx_template_runtime.py tests/unittests/flows/test_flow_runtime_output_formats.py tests/unittests/flows/test_flow_runtime_output_renderers.py -q"
-      - "cd backend && uv run ruff check src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/output_formats src/intric/flows/runtime/output_renderers src/intric/flows/runtime/step_execution_runtime.py"
-      - "cd backend && uv run ruff format --check src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/output_formats src/intric/flows/runtime/output_renderers src/intric/flows/runtime/step_execution_runtime.py"
-      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/output_formats src/intric/flows/runtime/output_renderers src/intric/flows/runtime/step_execution_runtime.py"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_runtime_output_formats.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_typed_io_executor.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/runtime/output_formats src/intric/flows/runtime/step_execution_runtime.py tests/unittests/flows/test_flow_runtime_output_formats.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_typed_io_executor.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/runtime/output_formats src/intric/flows/runtime/step_execution_runtime.py tests/unittests/flows/test_flow_runtime_output_formats.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_typed_io_executor.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/output_formats src/intric/flows/runtime/step_execution_runtime.py"
+      - "! rg -n 'augment_prompt_for_typed_output|_should_request_native_json_object_mode|_schema_prefers_object_value' backend"
       - "git diff --check"
     stop_if:
       - "T018 has no approved minimal design."
-      - "A behavior-preserving output format move requires executor or schema changes."
-      - "The design leaves output_type prompt instructions or native JSON-mode decisions in generic runtime code."
-      - "The design replaces StepExecutionOutput with a smaller object that loses provenance, diagnostics, token usage, artifacts, structured output, or retention-relevant metadata."
-      - "The design duplicates existing renderer/prompt/JSON-mode logic instead of moving or reusing it behind OutputFormatSpec."
+      - "The change needs output_runtime.py, document rendering files, StepHandler files, OutputRenderer files, StepExecutionResult, executor.py, or schema/migration changes."
+      - "Prompt or native JSON-mode logic is copied into specs while the original branches remain as parallel owners."
+      - "Tests still import or call augment_prompt_for_typed_output, _should_request_native_json_object_mode, or _schema_prefers_object_value after migration."
+      - "Cross-axis capability logic is moved into OutputFormatSpec or StepHandler instead of delegating to flow_capability_manifest.py."
+      - "Citation delegation cannot be proven behavior-preserving with focused tests."
+      - "Strict typing requires new Any, new dict[str, Any] boundaries instead of existing JsonObject, pyright ignores, or a service locator."
       - "Need files outside allowed_files."
+    consolidation_effect:
+      reused_existing_owner: "FlowOutputType and flow_capability_manifest.is_citation_capable_step; JsonObject for the existing runtime contract-shaped schema alias."
+      logic_moved_from: "Prompt augmentation and native JSON-mode branches in step_execution_runtime.py."
+      logic_deleted: "augment_prompt_for_typed_output, _should_request_native_json_object_mode, and _schema_prefers_object_value from step_execution_runtime.py."
+      duplicate_path_removed: "Runtime inline citation eligibility duplicate in citation_mode_for_step."
+      new_code_added: "A small output_formats package with one Protocol, one total resolver, and four output-type specs."
+      why_existing_owners_were_insufficient: "document_rendering owns byte rendering, output_processing owns JSON parsing/validation, and flow_capability_manifest owns cross-axis rules; no existing owner owns output_type prompt/native JSON-mode policy."
+      guard_preventing_duplicate_logic_from_returning: "Spec parity tests, citation delegation tests, registry totality/unknown-type tests, and a backend-wide rg guard for deleted helper names."
+      net_flow_logic_surface_area: "reduced"
+      if_increased_why: ""
     receipt: null
 
   - id: T020
