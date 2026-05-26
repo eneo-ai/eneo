@@ -10,10 +10,10 @@ Tests cover:
 - refresh_tools uses stored encrypted credentials
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import pytest
 from pydantic import ValidationError
 
 from intric.mcp_servers.presentation.models import (
@@ -22,7 +22,6 @@ from intric.mcp_servers.presentation.models import (
     MCPServerUpdate,
 )
 from intric.settings.encryption_service import EncryptionService
-
 
 # =============================================================================
 # Helpers
@@ -150,7 +149,7 @@ class TestMCPServerPublicHasCredentials:
             icon_url=None,
             documentation_url=None,
         )
-        assert "http_auth_config_schema" not in dto.model_fields
+        assert "http_auth_config_schema" not in type(dto).model_fields
 
 
 # =============================================================================

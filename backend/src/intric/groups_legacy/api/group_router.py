@@ -11,6 +11,7 @@ from intric.ai_models.embedding_models.datastore.datastore_models import (
 from intric.authentication.auth_dependencies import (
     get_current_active_user,
     get_scope_filter,
+    require_user_for_creation,
 )
 from intric.collections.presentation.collection_models import (
     CollectionPublic,
@@ -89,6 +90,7 @@ async def get_group_by_id(
 async def create_group(
     group: CreateGroupRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     """
     Valid values for `embedding_model` are the provided by `GET /api/v1/settings/models/`.
@@ -135,7 +137,7 @@ async def update_group(
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.COLLECTION_UPDATED,
         entity_type=EntityType.COLLECTION,
         entity_id=collection_updated.id,
@@ -195,7 +197,7 @@ async def delete_group_by_id(
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.COLLECTION_DELETED,
         entity_type=EntityType.COLLECTION,
         entity_id=id,
@@ -230,6 +232,7 @@ async def add_info_blobs(
     info_blobs: InfoBlobUpsertRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
     current_user: Annotated[UserInDB, Depends(get_current_active_user)],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     """Maximum allowed simultaneous upload is 128.
 
@@ -285,7 +288,7 @@ async def add_info_blobs(
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.FILE_UPLOADED,
         entity_type=EntityType.FILE,
         entity_id=id,  # Group ID
@@ -343,6 +346,7 @@ async def upload_file(
     id: UUID,
     file: UploadFile,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     """Starts a job, use the job operations to keep track of this job"""
     from intric.audit.domain.action_types import ActionType
@@ -376,7 +380,7 @@ async def upload_file(
 
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.FILE_UPLOADED,
         entity_type=EntityType.FILE,
         entity_id=id,  # Use group ID as entity

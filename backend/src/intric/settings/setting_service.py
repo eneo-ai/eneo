@@ -176,7 +176,7 @@ class SettingService:
 
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
-            actor_id=self.user.id,
+            user=self.user,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=self.user.tenant_id,
@@ -225,7 +225,7 @@ class SettingService:
 
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
-            actor_id=self.user.id,
+            user=self.user,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=self.user.tenant_id,
@@ -264,7 +264,7 @@ class SettingService:
 
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
-            actor_id=self.user.id,
+            user=self.user,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=self.user.tenant_id,
@@ -306,7 +306,7 @@ class SettingService:
 
         await self.audit_service.log_async(
             tenant_id=self.user.tenant_id,
-            actor_id=self.user.id,
+            user=self.user,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=self.user.tenant_id,

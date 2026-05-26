@@ -27,6 +27,8 @@ from intric.authentication.api_key_router_helpers import (
 from intric.authentication.auth_dependencies import (
     get_scope_filter,
     require_resource_permission_for_method,
+    require_user_for_creation,
+    require_user_identity,
 )
 from intric.authentication.auth_models import (
     ApiKey,
@@ -76,6 +78,7 @@ async def create_assistant(
     request: Request,
     assistant: AssistantCreatePublic,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     # Scope validation: scoped keys cannot create assistants outside their scope
     scope_filter = get_scope_filter(request)
@@ -137,7 +140,7 @@ async def create_assistant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.ASSISTANT_CREATED,
         entity_type=EntityType.ASSISTANT,
         entity_id=created_assistant_id,
@@ -638,7 +641,7 @@ async def update_assistant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.ASSISTANT_UPDATED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,
@@ -717,7 +720,7 @@ async def delete_assistant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.ASSISTANT_DELETED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,
@@ -1007,6 +1010,7 @@ async def leave_feedback(
 async def generate_read_only_assistant_key(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_identity_guard: None = Depends(require_user_identity),
 ):
     """Generates a read-only api key for this assistant.
 
@@ -1048,7 +1052,7 @@ async def generate_read_only_assistant_key(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.API_KEY_GENERATED,
         entity_type=EntityType.API_KEY,
         entity_id=id,  # Use assistant ID as entity ID for assistant API keys
@@ -1116,7 +1120,7 @@ async def transfer_assistant_to_space(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.ASSISTANT_TRANSFERRED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,
@@ -1184,7 +1188,7 @@ async def publish_assistant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.ASSISTANT_PUBLISHED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,
@@ -1267,7 +1271,7 @@ async def add_mcp_to_assistant(
     mcp_server = await mcp_server_service.get_mcp_server(mcp_server_id)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.ASSISTANT_UPDATED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,
@@ -1314,7 +1318,7 @@ async def remove_mcp_from_assistant(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.ASSISTANT_UPDATED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,

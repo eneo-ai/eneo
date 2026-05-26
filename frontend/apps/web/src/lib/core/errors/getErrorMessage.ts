@@ -44,7 +44,10 @@ const ERROR_CODE_MESSAGES: Record<number, () => string> = {
 
   // --- Internal errors ---
   9024: () => m.eneo_error_9024(), // INTERNAL_SERVER_ERROR
-  9038: () => m.eneo_error_9038() // RESOURCE_NOT_READY
+  9038: () => m.eneo_error_9038(), // RESOURCE_NOT_READY
+
+  // --- Model lifecycle ---
+  9039: () => m.eneo_error_9039() // MODEL_IN_USE
 };
 
 /**

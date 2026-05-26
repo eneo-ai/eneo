@@ -22,6 +22,7 @@
   }>();
 
   let showViewDialog = $state(false);
+  let showEditDialog = $state(false);
 </script>
 
 <ApiKeyActionMenu
@@ -33,9 +34,13 @@
   {isFollowedViaScope}
   {onFollowChanged}
   {currentUserId}
+  onEditRequested={() => {
+    showEditDialog = true;
+  }}
   onViewRequested={() => {
     showViewDialog = true;
   }}
 />
 
+<ApiKeyDialog mode="edit" {apiKey} bind:open={showEditDialog} {onChanged} />
 <ApiKeyDialog mode="view" {apiKey} bind:open={showViewDialog} />

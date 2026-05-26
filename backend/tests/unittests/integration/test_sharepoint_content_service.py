@@ -4,6 +4,7 @@ Tests the content pulling, delta change processing, and token handling
 for SharePoint integrations.
 """
 
+import unicodedata
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -617,6 +618,142 @@ class TestIsItemInFolderScope:
         )
 
         assert result is False
+
+    def test_matches_path_with_encoded_spaces(self, service):
+        """Percent-encoded spaces in the Graph path match a decoded scope path."""
+        item = {
+            "id": "child-1",
+            "parentReference": {
+                "id": "subfolder-x",
+                "path": "/drives/d/root:/Documents/My%20Files",
+            },
+        }
+
+        result = service._is_item_in_folder_scope(
+            item,
+            scope_folder_id="folder-123",
+            scope_folder_path="/Documents/My Files",
+            selected_item_type="folder",
+        )
+
+        assert result is True
+
+    def test_matches_path_with_encoded_non_ascii(self, service):
+        """Percent-encoded å/ä/ö in the Graph path match a decoded scope path."""
+        item = {
+            "id": "child-1",
+            "parentReference": {
+                "id": "subfolder-x",
+                # UTF-8 percent-encoding of "Åäö"
+                "path": "/drives/d/root:/Dokument/%C3%85%C3%A4%C3%B6",
+            },
+        }
+
+        result = service._is_item_in_folder_scope(
+            item,
+            scope_folder_id="folder-123",
+            scope_folder_path="/Dokument/Åäö",
+            selected_item_type="folder",
+        )
+
+        assert result is True
+
+    def test_matches_path_with_nfd_unicode(self, service):
+        """NFD-form Unicode in the Graph path matches an NFC-form scope path."""
+        nfd_path = unicodedata.normalize("NFD", "/Dokument/Åäö")
+        item = {
+            "id": "child-1",
+            "parentReference": {
+                "id": "subfolder-x",
+                "path": f"/drives/d/root:{nfd_path}",
+            },
+        }
+
+        result = service._is_item_in_folder_scope(
+            item,
+            scope_folder_id="folder-123",
+            # scope stored in NFC form
+            scope_folder_path=unicodedata.normalize("NFC", "/Dokument/Åäö"),
+            selected_item_type="folder",
+        )
+
+        assert result is True
+
+    def test_matches_path_case_insensitively(self, service):
+        """Mixed-case Graph path matches a differently-cased scope path."""
+        item = {
+            "id": "child-1",
+            "parentReference": {
+                "id": "subfolder-x",
+                "path": "/drives/d/root:/documents/REPORTS",
+            },
+        }
+
+        result = service._is_item_in_folder_scope(
+            item,
+            scope_folder_id="folder-123",
+            scope_folder_path="/Documents/Reports",
+            selected_item_type="folder",
+        )
+
+        assert result is True
+
+    def test_matches_nested_descendant_path(self, service):
+        """An item nested below the scope folder is in scope."""
+        item = {
+            "id": "child-1",
+            "parentReference": {
+                "id": "subfolder-x",
+                "path": "/drives/d/root:/Documents/Reports/2024/Q1",
+            },
+        }
+
+        result = service._is_item_in_folder_scope(
+            item,
+            scope_folder_id="folder-123",
+            scope_folder_path="/Documents/Reports",
+            selected_item_type="folder",
+        )
+
+        assert result is True
+
+    def test_does_not_match_sibling_prefix_path(self, service):
+        """A sibling whose name merely starts with the scope name is out of scope."""
+        item = {
+            "id": "child-1",
+            "parentReference": {
+                "id": "subfolder-x",
+                "path": "/drives/d/root:/Documents/ReportsArchive",
+            },
+        }
+
+        result = service._is_item_in_folder_scope(
+            item,
+            scope_folder_id="folder-123",
+            scope_folder_path="/Documents/Reports",
+            selected_item_type="folder",
+        )
+
+        assert result is False
+
+    def test_matches_path_with_trailing_slash_in_scope(self, service):
+        """A trailing slash on the scope path does not break matching."""
+        item = {
+            "id": "child-1",
+            "parentReference": {
+                "id": "subfolder-x",
+                "path": "/drives/d/root:/Documents/Reports",
+            },
+        }
+
+        result = service._is_item_in_folder_scope(
+            item,
+            scope_folder_id="folder-123",
+            scope_folder_path="/Documents/Reports/",
+            selected_item_type="folder",
+        )
+
+        assert result is True
 
 
 class TestGetItemType:

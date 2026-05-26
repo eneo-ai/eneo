@@ -142,7 +142,7 @@ class TestSettingToggleAuditLogging:
         assert call_kwargs["metadata"]["changes"]["provisioning"]["old"] is False
 
     @pytest.mark.asyncio
-    async def test_audit_log_includes_actor_id(self):
+    async def test_audit_log_includes_actor(self):
         """Audit entry must include who made the change."""
         user = _make_user()
         service, audit_mock = _make_service(user=user)
@@ -153,7 +153,7 @@ class TestSettingToggleAuditLogging:
         await service.update_template_setting(enabled=True)
 
         call_kwargs = audit_mock.log_async.call_args[1]
-        assert call_kwargs["actor_id"] == user.id
+        assert call_kwargs["user"] is user
         assert call_kwargs["tenant_id"] == user.tenant_id
 
     @pytest.mark.asyncio

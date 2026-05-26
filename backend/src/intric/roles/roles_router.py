@@ -8,7 +8,10 @@ from fastapi import APIRouter, Depends
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
-from intric.authentication.auth_dependencies import require_permission
+from intric.authentication.auth_dependencies import (
+    require_permission,
+    require_user_for_creation,
+)
 from intric.main.container.container import Container
 from intric.roles.permissions import Permission
 from intric.roles.role import (
@@ -82,6 +85,7 @@ async def get_role_by_id(
 async def create_role(
     role: RoleCreateRequest,
     container: _ContainerDep,
+    _user_for_creation: None = Depends(require_user_for_creation),
 ) -> RoleInDB:
     service = container.role_service()
     user = container.user()
@@ -93,7 +97,7 @@ async def create_role(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.ROLE_CREATED,
         entity_type=EntityType.ROLE,
         entity_id=created_role.id,
@@ -142,7 +146,7 @@ async def update_role(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.ROLE_MODIFIED,
         entity_type=EntityType.ROLE,
         entity_id=role_id,
@@ -180,7 +184,7 @@ async def delete_role_by_id(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.ROLE_DELETED,
         entity_type=EntityType.ROLE,
         entity_id=role_id,
@@ -217,7 +221,7 @@ async def reset_role_to_default(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.ROLE_MODIFIED,
         entity_type=EntityType.ROLE,
         entity_id=role_id,
@@ -264,7 +268,7 @@ async def set_default_role(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.TENANT_SETTINGS_UPDATED,
         entity_type=EntityType.TENANT_SETTINGS,
         entity_id=user.tenant_id,

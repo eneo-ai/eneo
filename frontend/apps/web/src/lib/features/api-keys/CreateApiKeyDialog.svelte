@@ -60,6 +60,7 @@
 
   let {
     mode = "create",
+    scope = "user",
     apiKey,
     open = $bindable(false),
     onCreated,
@@ -70,6 +71,7 @@
     triggerVariant = "primary"
   }: {
     mode?: DialogMode;
+    scope?: "user" | "admin";
     apiKey?: ApiKeyV2;
     open?: boolean;
     onCreated?: () => void;
@@ -753,8 +755,15 @@
     }
     if (apiKey.key_type === "pk_") {
       const origins = allowedOrigins.filter(Boolean);
+      // Block the round-trip when the admin emptied the origin list: backend
+      // requires at least one origin for pk_, and the fail-closed origin check
+      // would otherwise lock the key out the moment this PATCH lands.
+      if (origins.length === 0) {
+        errorMessage = m.api_keys_origin_required();
+        return;
+      }
       if (JSON.stringify(origins) !== JSON.stringify(apiKey.allowed_origins ?? [])) {
-        updates.allowed_origins = origins.length > 0 ? origins : null;
+        updates.allowed_origins = origins;
       }
     }
     if (apiKey.key_type === "sk_") {
@@ -772,7 +781,11 @@
     isSubmitting = true;
 
     try {
-      await intric.apiKeys.admin.update({ id: apiKey.id, update: updates });
+      if (scope === "admin") {
+        await intric.apiKeys.admin.update({ id: apiKey.id, update: updates });
+      } else {
+        await intric.apiKeys.update({ id: apiKey.id, update: updates });
+      }
       onChanged?.();
       showDialog = false;
     } catch (error: unknown) {
@@ -1451,6 +1464,16 @@
                         </p>
                       {/if}
                     </div>
+                    {#if ownership === "service"}
+                      <div
+                        class="border-accent-default/30 bg-accent-dimmer/30 text-default rounded-lg border p-3 text-xs"
+                      >
+                        <span class="flex items-start gap-1.5">
+                          <Info class="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          <span>{m.api_keys_ownership_service_explainer()}</span>
+                        </span>
+                      </div>
+                    {/if}
                     {#if ownership === "service" && scopeType === "tenant" && (effectivePermission === "write" || effectivePermission === "admin")}
                       <div
                         class="border-warning-default/40 bg-warning-dimmer/40 text-warning-stronger dark:bg-warning-dimmer/20 rounded-lg border p-3 text-xs"

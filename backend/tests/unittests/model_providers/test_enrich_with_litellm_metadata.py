@@ -23,6 +23,8 @@ def test_enriches_known_completion_model() -> None:
             "supports_vision": True,
             "supports_function_calling": True,
             "supports_reasoning": True,
+            "input_cost_per_token": 0.000015,
+            "output_cost_per_token": 0.000075,
         }
     }
     with _patch_cost_map(fake):
@@ -37,6 +39,8 @@ def test_enriches_known_completion_model() -> None:
         "supports_vision": True,
         "supports_function_calling": True,
         "supports_reasoning": True,
+        "input_cost_per_token": 0.000015,
+        "output_cost_per_token": 0.000075,
     }
 
 
@@ -69,6 +73,8 @@ def test_enriches_embedding_model() -> None:
             "mode": "embedding",
             "max_input_tokens": 8191,
             "output_vector_size": 3072,
+            "input_cost_per_token": 0.00000013,
+            "output_cost_per_token": None,
         }
     }
     with _patch_cost_map(fake):
@@ -80,6 +86,8 @@ def test_enriches_embedding_model() -> None:
         "mode": "embedding",
         "max_input_tokens": 8191,
         "output_vector_size": 3072,
+        "input_cost_per_token": 0.00000013,
+        "output_cost_per_token": None,
     }
 
 

@@ -150,6 +150,30 @@ async def test_update_request_rejects_empty_allowed_origins_for_pk():
 
 
 @pytest.mark.asyncio
+async def test_update_request_rejects_null_allowed_origins_for_pk():
+    """An explicit `allowed_origins: None` PATCH for a pk_ key would land a row
+    that the fail-closed _validate_origin check then rejects on every request.
+    Block it at the update boundary so the key never gets into that state."""
+    service = _service()
+    key = SimpleNamespace(
+        key_type=ApiKeyType.PK.value,
+        tenant_id=uuid4(),
+        permission=ApiKeyPermission.READ.value,
+        resource_permissions=None,
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_update_request(
+            key=key,
+            updates={"allowed_origins": None},
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.code == "invalid_request"
+    assert "at least one allowed origin" in exc.value.message
+
+
+@pytest.mark.asyncio
 async def test_update_request_rejects_non_read_permission_for_pk():
     service = _service()
     key = SimpleNamespace(
@@ -692,16 +716,17 @@ async def test_pk_empty_allowed_origins_blocks_all():
 
 
 @pytest.mark.asyncio
-async def test_pk_none_allowed_origins_permits_legacy_keys():
-    """Legacy pk_ rows whose allowed_origins is NULL are permitted (no constraint).
-
-    New pk_ keys minted after the allowlist requirement always carry a non-empty
-    list; this branch only exists for pre-existing data.
-    """
+async def test_pk_null_allowed_origins_blocks_all():
+    """A pk_ key without an allowed_origins list (NULL) is misconfigured —
+    earlier behaviour was to silently permit every origin, which let any
+    legacy row missing the column bypass CORS-style origin enforcement.
+    Fail closed: NULL and empty list both return origin_not_allowed."""
     service = _service()
     key = _make_pk_key(allowed_origins=None)
 
-    await service._validate_origin(key=key, origin="https://anything.example")
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service._validate_origin(key=key, origin="https://anything.example")
+    assert exc.value.code == "origin_not_allowed"
 
 
 # ---------------------------------------------------------------------------
@@ -890,3 +915,51 @@ def test_reverse_proxy_ip_resolution_falls_back_to_client_host():
         trusted_proxy_headers=[],
     )
     assert ip == "192.168.1.1"
+
+
+def test_resolve_client_ip_returns_none_for_non_ip_client_host():
+    """A non-IP request.client.host (e.g. Starlette TestClient's "testclient")
+    must not propagate downstream — audit INET column would crash and IP
+    allow-list parsing would silently fail."""
+    request = SimpleNamespace(
+        headers={},
+        client=SimpleNamespace(host="testclient"),
+    )
+
+    ip = resolve_client_ip(
+        request,
+        trusted_proxy_count=0,
+        trusted_proxy_headers=[],
+    )
+    assert ip is None
+
+
+def test_resolve_client_ip_returns_none_for_non_ip_in_forwarded_for():
+    """A proxy that injects garbage in X-Forwarded-For must not bypass
+    validation — extracted hop is validated before being returned."""
+    request = SimpleNamespace(
+        headers={"x-forwarded-for": "not-an-ip, 10.0.0.1"},
+        client=SimpleNamespace(host="10.0.0.1"),
+    )
+
+    ip = resolve_client_ip(
+        request,
+        trusted_proxy_count=1,
+        trusted_proxy_headers=[],
+    )
+    assert ip is None
+
+
+def test_resolve_client_ip_accepts_ipv6():
+    """IPv6 addresses pass validation."""
+    request = SimpleNamespace(
+        headers={},
+        client=SimpleNamespace(host="2001:db8::1"),
+    )
+
+    ip = resolve_client_ip(
+        request,
+        trusted_proxy_count=0,
+        trusted_proxy_headers=[],
+    )
+    assert ip == "2001:db8::1"

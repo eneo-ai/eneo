@@ -2,7 +2,7 @@ import random
 from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Optional, cast
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import UUID
 
 import jwt
 import sqlalchemy as sa
@@ -86,6 +86,52 @@ def _permission_allows(key: ApiKeyV2InDB, required: ApiKeyPermission) -> bool:
     granted = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
     needed = PERMISSION_LEVEL_ORDER.get(required.value, 3)
     return granted >= needed
+
+
+# Resource permissions granted to all service keys regardless of scope.
+# Tenant-level role gates (validate_permissions) only need to pass — the
+# real authorization happens at the route-level scope/permission guards
+# and at SpaceActor for per-resource actions. Excludes:
+#   - Permission.ADMIN: only TENANT+ADMIN service keys get this
+#   - Permission.API_KEYS: lifecycle mutations are session-only (gated
+#     via require_session_auth in api_key_router)
+_SERVICE_KEY_BASE_PERMISSIONS: frozenset[Permission] = frozenset(
+    {
+        Permission.ASSISTANTS,
+        Permission.GROUP_CHATS,
+        Permission.APPS,
+        Permission.SERVICES,
+        Permission.COLLECTIONS,
+        Permission.AI,
+        Permission.EDITOR,
+        Permission.WEBSITES,
+        Permission.INTEGRATIONS,
+        Permission.SHARED_SPACES,
+        Permission.INSIGHTS,
+    }
+)
+
+
+def _synthesize_service_key_permissions(key: ApiKeyV2InDB) -> set[Permission]:
+    """Derive a tenant-level permission set for a service-key synthetic user.
+
+    A TENANT+ADMIN key gets ADMIN on top of the resource set; all other
+    scope/permission combinations get the resource set only. The route-level
+    scope and permission guards still narrow what the key can actually call.
+    """
+    permissions = set(_SERVICE_KEY_BASE_PERMISSIONS)
+    scope_type = key.scope_type
+    if hasattr(scope_type, "value"):
+        scope_type = scope_type.value
+    permission = key.permission
+    if hasattr(permission, "value"):
+        permission = permission.value
+    if (
+        scope_type == ApiKeyScopeType.TENANT.value
+        and permission == ApiKeyPermission.ADMIN.value
+    ):
+        permissions.add(Permission.ADMIN)
+    return permissions
 
 
 def _check_basic_method_permission(
@@ -683,10 +729,6 @@ class UserService:
         settings_upsert = SettingsUpsert(user_id=user_in_db.id)
         await self.settings_repo.add(settings_upsert)
 
-        api_key = await self.auth_service.create_user_api_key_v2(
-            user_id=user_in_db.id, tenant_id=user_in_db.tenant_id
-        )
-
         access_token = AccessToken(
             access_token=self.auth_service.create_access_token_for_user(
                 user=user_in_db
@@ -694,7 +736,7 @@ class UserService:
             token_type="bearer",
         )
 
-        return user_in_db, access_token, api_key
+        return user_in_db, access_token
 
     async def _get_user_from_token(self, token: str):
         username = self.auth_service.get_username_from_token(
@@ -738,9 +780,15 @@ class UserService:
     async def _build_service_user(self, key: ApiKeyV2InDB) -> "UserInDB":
         """Build a synthetic UserInDB for service keys — no DB user lookup.
 
-        Stores the API key on `service_api_key` so that SpaceActor can derive
-        the correct role without a real membership row.
+        Stores the API key on `active_api_key` so that SpaceActor can derive
+        the correct role without a real membership row. Also synthesizes a
+        role with permissions derived from the key's scope+permission so that
+        tenant-level ``validate_permissions`` gates pass without requiring
+        per-call-site ``is_service_api_key()`` checks. Per-resource access is
+        still enforced by SpaceActor and the route-level scope/permission
+        guards — this only unblocks the role-based permission gates.
         """
+        from intric.roles.role import RoleInDB
         from intric.users.user import UserInDB as UserInDBModel
 
         tenant = await self.tenant_repo.get(key.tenant_id)
@@ -748,18 +796,31 @@ class UserService:
             raise BadRequestException(
                 f"Tenant {key.tenant_id} does not exist for service key {key.id}"
             )
-        synthetic_id = uuid5(NAMESPACE_URL, f"service-key:{key.id}")
+
+        # Use the key id directly as the synthetic user id. No row in `users`
+        # carries this id, so it remains "obviously not a real user" — but it
+        # now correlates with the actual key in logs, audit metadata, and
+        # caches without an extra uuid5 derivation step.
+        synthetic_role = RoleInDB(
+            id=key.id,
+            tenant_id=key.tenant_id,
+            name=f"Service Key Role ({key.name})",
+            permissions=sorted(
+                _synthesize_service_key_permissions(key),
+                key=lambda p: p.value,
+            ),
+        )
 
         key_suffix = key.key_suffix or key.id.hex[:8]
         return UserInDBModel(
-            id=synthetic_id,
+            id=key.id,
             email=f"sk-{key_suffix}@service.key",
             username=f"Service Key ({key.name})",
             state=UserState.ACTIVE,
             tenant_id=key.tenant_id,
             tenant=tenant,
             active_api_key=key,
-            roles=[],
+            roles=[synthetic_role],
             used_tokens=0,
             email_verified=True,
             is_active=True,

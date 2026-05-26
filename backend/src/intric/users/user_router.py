@@ -25,6 +25,7 @@ from intric.authentication.auth_dependencies import (
     require_api_key_permission,
     require_api_key_scope_check,
     require_permission,
+    require_user_identity,
 )
 from intric.authentication.auth_models import (
     AccessToken,
@@ -750,6 +751,7 @@ async def get_currently_authenticated_user(
         UserInDB, Depends(auth_dependencies.get_current_active_user_with_quota)
     ],
     container: Annotated[Container, Depends(get_container())],
+    _user_identity_guard: None = Depends(require_user_identity),
 ):
     api_key_repo = container.api_key_v2_repo()
     latest_key = await api_key_repo.get_latest_active_by_owner(
@@ -802,6 +804,7 @@ async def generate_api_key(
         UserInDB, Depends(auth_dependencies.get_current_active_user)
     ],
     container: Annotated[Container, Depends(get_container())],
+    _user_identity_guard: None = Depends(require_user_identity),
 ):
     """Generating a new api key will delete the old key.
     Make sure to copy the key since it will only be showed once,
@@ -835,7 +838,7 @@ async def generate_api_key(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.API_KEY_GENERATED,
         entity_type=EntityType.API_KEY,
         entity_id=current_user.id,  # Use user ID as entity ID for user API keys
@@ -866,6 +869,7 @@ async def revoke_legacy_api_key(
         UserInDB, Depends(auth_dependencies.get_current_active_user)
     ],
     container: Annotated[Container, Depends(get_container())],
+    _user_identity_guard: None = Depends(require_user_identity),
 ):
     if current_user.api_key is None:
         raise HTTPException(status_code=404, detail="No legacy API key found.")
@@ -876,7 +880,7 @@ async def revoke_legacy_api_key(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.API_KEY_REVOKED,
         entity_type=EntityType.API_KEY,
         entity_id=current_user.id,
@@ -968,7 +972,7 @@ async def invite_user(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.USER_CREATED,
         entity_type=EntityType.USER,
         entity_id=new_user.id,
@@ -1086,7 +1090,7 @@ async def update_user(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.USER_UPDATED,
         entity_type=EntityType.USER,
         entity_id=id,
@@ -1159,7 +1163,7 @@ async def delete_user(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.USER_DELETED,
         entity_type=EntityType.USER,
         entity_id=id,

@@ -27,6 +27,7 @@ from intric.main.request_context import get_request_context
 
 if TYPE_CHECKING:
     from intric.feature_flag.feature_flag_service import FeatureFlagService
+    from intric.users.user import UserInDB
 
 logger = logging.getLogger(__name__)
 
@@ -110,15 +111,21 @@ class AuditService:
 
     async def log(
         self,
+        *,
         tenant_id: UUID,
-        actor_id: Optional[UUID],
         action: ActionType,
         entity_type: EntityType,
         entity_id: UUID,
         description: str,
         metadata: dict[str, Any],
-        outcome: Outcome = Outcome.SUCCESS,
+        # Pass `user` to derive actor_id/actor_type via audit_actor_for so
+        # service-key callers don't FK-violate audit_log.actor_id (their
+        # synthetic UUID has no users row). Sysadmin paths that act without
+        # a user keep using the explicit form with actor_type=SYSTEM.
+        user: Optional["UserInDB"] = None,
+        actor_id: Optional[UUID] = None,
         actor_type: ActorType = ActorType.USER,
+        outcome: Outcome = Outcome.SUCCESS,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
         request_id: Optional[UUID] = None,
@@ -152,6 +159,11 @@ class AuditService:
         should_log = await self._should_log_action(tenant_id, action)
         if not should_log:
             return None
+
+        if user is not None:
+            from intric.authentication.auth_models import audit_actor_for
+
+            actor_id, actor_type = audit_actor_for(user)
 
         if actor_type != ActorType.SYSTEM and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
@@ -255,15 +267,19 @@ class AuditService:
 
     async def log_async(
         self,
+        *,
         tenant_id: UUID,
-        actor_id: Optional[UUID],
         action: ActionType,
         entity_type: EntityType,
         entity_id: UUID,
         description: str,
         metadata: dict[str, Any],
-        outcome: Outcome = Outcome.SUCCESS,
+        # See `log()` for `user` semantics — derives actor_id/actor_type via
+        # audit_actor_for so service-key callers don't FK-violate.
+        user: Optional["UserInDB"] = None,
+        actor_id: Optional[UUID] = None,
         actor_type: ActorType = ActorType.USER,
+        outcome: Outcome = Outcome.SUCCESS,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
         request_id: Optional[UUID] = None,
@@ -305,6 +321,11 @@ class AuditService:
         if not should_log:
             return None
 
+        if user is not None:
+            from intric.authentication.auth_models import audit_actor_for
+
+            actor_id, actor_type = audit_actor_for(user)
+
         if actor_type != ActorType.SYSTEM and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
 
@@ -337,9 +358,34 @@ class AuditService:
             "error_message": error_message,
         }
 
-        # Enqueue to ARQ
-        await job_manager.enqueue(
-            cast(Task, "log_audit_event"), job_id, cast(TaskParams, params)
-        )
+        # Enqueue to ARQ. Audit is best-effort: if Redis/ARQ is unreachable we
+        # log a warning but do NOT propagate the failure — a 500 on a
+        # successful mutation just because audit couldn't be enqueued would
+        # turn a partial degradation into a full outage.
+        #
+        # Programming errors (TypeError from non-serialisable params,
+        # ValueError from invalid input, AttributeError, AssertionError)
+        # are NOT swallowed — they indicate a bug we want to see in dev/CI
+        # rather than have vanish into a warning log.
+        try:
+            await job_manager.enqueue(
+                cast(Task, "log_audit_event"), job_id, cast(TaskParams, params)
+            )
+        except (TypeError, ValueError, AttributeError, AssertionError):
+            raise
+        except Exception as enqueue_exc:  # noqa: BLE001 — infrastructure failure
+            logger.warning(
+                "Failed to enqueue audit event; mutation succeeded but audit "
+                "trail is missing this entry",
+                extra={
+                    "job_id": str(job_id),
+                    "action": action.value,
+                    "entity_type": entity_type.value,
+                    "entity_id": str(entity_id),
+                    "error_type": type(enqueue_exc).__name__,
+                    "error": str(enqueue_exc),
+                },
+            )
+            return None
 
         return job_id

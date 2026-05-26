@@ -25,6 +25,8 @@ from intric.questions.question import Question, QuestionAdd
 
 if TYPE_CHECKING:
     from intric.completion_models.infrastructure.web_search import WebSearchResult
+    from intric.logging.logging import LoggingDetails
+    from intric.questions.question import ToolCallInfo
 
 
 class QuestionRepository:
@@ -128,6 +130,77 @@ class QuestionRepository:
 
     async def get(self, id: UUID):
         return await self.delegate.get(id)
+
+    async def update_with_answer(
+        self,
+        *,
+        question_id: UUID,
+        tenant_id: UUID,
+        answer: str,
+        num_tokens_question: int | None = None,
+        num_tokens_answer: int | None = None,
+        completion_model_id: UUID | None = None,
+        tool_calls: list["ToolCallInfo"] | None = None,
+        info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
+        generated_files: list[File] | None = None,
+        web_search_results: list["WebSearchResult"] | None = None,
+        logging_details: "LoggingDetails | None" = None,
+    ) -> None:
+        """Update an existing placeholder Question row with the final or partial answer.
+
+        Used both for normal stream completion (full answer + token counts + late-bound rows)
+        and for partial persistence on abort (just the answer text + estimated token counts).
+
+        tenant_id is required in the WHERE clause to defend against cross-tenant writes if a
+        caller ever supplies a stale question_id.
+        """
+        logging_details_id: object = None
+        if logging_details is not None:
+            log_stmt = (  # pyright: ignore[reportUnknownVariableType]  # logging_table is imperatively mapped
+                sa.insert(logging_table)
+                .values(**logging_details.model_dump())
+                .returning(logging_table)
+            )
+            log_result = await self.session.execute(log_stmt)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+            logging_row = log_result.scalar_one()  # pyright: ignore[reportUnknownVariableType]
+            logging_details_id = logging_row.id  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+        update_values: dict[str, Any] = {"answer": answer}
+        if num_tokens_question is not None:
+            update_values["num_tokens_question"] = num_tokens_question
+        if num_tokens_answer is not None:
+            update_values["num_tokens_answer"] = num_tokens_answer
+        if completion_model_id is not None:
+            update_values["completion_model_id"] = completion_model_id
+        if tool_calls is not None:
+            update_values["tool_calls"] = [tc.model_dump() for tc in tool_calls]
+        if logging_details_id is not None:
+            update_values["logging_details_id"] = logging_details_id
+
+        update_stmt = (
+            sa.update(Questions)
+            .where(Questions.id == question_id)
+            .where(Questions.tenant_id == tenant_id)
+            .values(**update_values)
+        )
+        await self.session.execute(update_stmt)
+
+        if info_blob_chunks:
+            await self._add_references(
+                question_id=question_id,  # type: ignore[arg-type]  # helper annotated as int but ID is UUID
+                chunks=info_blob_chunks,
+            )
+        if generated_files:
+            await self._add_files(
+                question_id=question_id,  # type: ignore[arg-type]  # helper annotated as int but ID is UUID
+                files=list(generated_files),
+                file_type="assistant",
+            )
+        if web_search_results:
+            await self._add_web_search_results(
+                web_search_results=list(web_search_results),
+                question_id=question_id,
+            )
 
     async def add(
         self,

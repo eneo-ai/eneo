@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Any, Optional
 from uuid import UUID
 
@@ -21,6 +22,10 @@ class EmbeddingModelBase(BaseModel):
     description: Optional[str] = None
     org: Optional[str] = None
     litellm_model_name: Optional[str] = None
+    # Indicative USD ratecard. Output is almost always 0 for embeddings but
+    # kept for symmetry with completion-model pricing.
+    input_cost_per_token: Optional[Decimal] = None
+    output_cost_per_token: Optional[Decimal] = None
 
     @classmethod
     def _validate_batch_size(cls, value: Optional[int]) -> Optional[int]:

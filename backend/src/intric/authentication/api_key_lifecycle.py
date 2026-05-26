@@ -144,7 +144,7 @@ class ApiKeyLifecycleService:
         if self.audit_service is not None:
             await self.audit_service.log_async(
                 tenant_id=user.tenant_id,
-                actor_id=user.id,
+                user=user,
                 action=ActionType.API_KEY_CREATED,
                 entity_type=EntityType.API_KEY,
                 entity_id=record.id,
@@ -274,7 +274,7 @@ class ApiKeyLifecycleService:
         if self.audit_service is not None:
             await self.audit_service.log_async(
                 tenant_id=user.tenant_id,
-                actor_id=user.id,
+                user=user,
                 action=ActionType.API_KEY_ROTATED,
                 entity_type=EntityType.API_KEY,
                 entity_id=record.id,
@@ -448,7 +448,7 @@ class ApiKeyLifecycleService:
 
             await self.audit_service.log_async(
                 tenant_id=user.tenant_id,
-                actor_id=user.id,
+                user=user,
                 action=ActionType.API_KEY_UPDATED,
                 entity_type=EntityType.API_KEY,
                 entity_id=updated_key.id,
@@ -620,7 +620,7 @@ class ApiKeyLifecycleService:
         if self.audit_service is not None:
             await self.audit_service.log_async(
                 tenant_id=user.tenant_id,
-                actor_id=user.id,
+                user=user,
                 action=ActionType.API_KEY_SUSPENDED,
                 entity_type=EntityType.API_KEY,
                 entity_id=updated_key.id,
@@ -730,7 +730,7 @@ class ApiKeyLifecycleService:
         if self.audit_service is not None:
             await self.audit_service.log_async(
                 tenant_id=user.tenant_id,
-                actor_id=user.id,
+                user=user,
                 action=ActionType.API_KEY_REACTIVATED,
                 entity_type=EntityType.API_KEY,
                 entity_id=updated_key.id,
@@ -809,7 +809,7 @@ class ApiKeyLifecycleService:
         if self.audit_service is not None:
             await self.audit_service.log_async(
                 tenant_id=user.tenant_id,
-                actor_id=user.id,
+                user=user,
                 action=ActionType.API_KEY_REVOKED,
                 entity_type=EntityType.API_KEY,
                 entity_id=updated_key.id,
@@ -890,7 +890,7 @@ class ApiKeyLifecycleService:
         if self.audit_service is not None:
             await self.audit_service.log_async(
                 tenant_id=user.tenant_id,
-                actor_id=user.id,
+                user=user,
                 action=ActionType.API_KEY_PURGED,
                 entity_type=EntityType.API_KEY,
                 entity_id=key.id,
@@ -1118,7 +1118,7 @@ class ApiKeyLifecycleService:
 
         await self.audit_service.log_async(
             tenant_id=user.tenant_id,
-            actor_id=user.id,
+            user=user,
             action=ActionType.API_KEY_EXPIRATION_EXTENDED,
             entity_type=EntityType.API_KEY,
             entity_id=key.id,
@@ -1191,7 +1191,7 @@ class ApiKeyLifecycleService:
         }
         await self.audit_service.log_async(
             tenant_id=user.tenant_id,
-            actor_id=user.id,
+            user=user,
             action=action,
             entity_type=EntityType.API_KEY,
             entity_id=key.id if key is not None else key_id,

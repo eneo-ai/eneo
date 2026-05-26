@@ -31,6 +31,7 @@ from intric.authentication.auth_dependencies import (
     require_api_key_permission,
     require_permission,
     require_session_auth,
+    require_user_for_creation,
 )
 from intric.authentication.auth_models import (
     ApiKeyCreatedResponse,
@@ -505,6 +506,7 @@ async def update_notification_preferences(
         Body(examples=[{"enabled": True, "days_before_expiry": [30, 14, 7, 3, 1]}]),
     ],
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
 ) -> ApiKeyNotificationPreferencesResponse:
     user: UserInDB = container.user()
@@ -586,6 +588,7 @@ async def upsert_notification_subscription(
     target_type: ApiKeyNotificationTargetType,
     target_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
 ) -> ApiKeyNotificationSubscriptionListResponse:
     user: UserInDB = container.user()
@@ -650,6 +653,7 @@ async def delete_notification_subscription(
     target_type: ApiKeyNotificationTargetType,
     target_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
 ) -> ApiKeyNotificationSubscriptionListResponse:
     user: UserInDB = container.user()
@@ -905,10 +909,11 @@ async def create_api_key(
     _session_guard: None = Depends(require_session_auth),
     _perm_guard: None = Depends(require_permission(Permission.API_KEYS)),
     # Defense-in-depth: require_session_auth rejects API-key callers first, so
-    # this never fires for legitimate traffic. Kept so the route-coverage gate
+    # these never fire for legitimate traffic. Kept so the route-coverage gate
     # (tests/unit/test_api_key_route_coverage.py) stays green and so a future
     # regression of the session guard cannot silently re-open the path.
     _api_key_guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    _user_for_creation: None = Depends(require_user_for_creation),
 ) -> ApiKeyCreatedResponse:
     lifecycle = container.api_key_lifecycle_service()
     try:
@@ -1095,6 +1100,7 @@ async def update_api_key(
         ),
     ],
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
@@ -1123,6 +1129,7 @@ async def update_api_key(
 async def revoke_api_key_deprecated(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
@@ -1154,6 +1161,7 @@ async def revoke_api_key_deprecated(
 async def revoke_api_key(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
         ApiKeyStateChangeRequest | None,
@@ -1187,6 +1195,7 @@ async def revoke_api_key(
 async def rotate_api_key(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[ApiKeyRotateRequest | None, Body()] = None,
 ) -> ApiKeyCreatedResponse:
@@ -1224,6 +1233,7 @@ async def extend_api_key_expiration(
         Body(examples=[{"expires_at": "2030-01-01T00:00:00Z"}]),
     ],
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
@@ -1254,6 +1264,7 @@ async def extend_api_key_expiration(
 async def purge_api_key(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
@@ -1287,6 +1298,7 @@ async def purge_api_key(
 async def suspend_api_key(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
         ApiKeyStateChangeRequest | None,
@@ -1320,6 +1332,7 @@ async def suspend_api_key(
 async def reactivate_api_key(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
     lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()

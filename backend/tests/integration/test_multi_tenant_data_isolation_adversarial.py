@@ -185,6 +185,24 @@ async def test_user_cannot_access_other_tenant_space_via_id_manipulation(
         )
 
 
+@pytest.fixture
+def _tenant_credentials_enabled(test_settings):
+    """Swap in a test_settings copy with tenant_credentials_enabled=True.
+
+    Uses set_settings() instead of monkeypatch so the FastAPI dependency
+    Depends(get_settings) resolves to the override even if another module
+    has reassigned the singleton earlier in the same xdist worker.
+    """
+    from intric.main.config import set_settings
+
+    enabled_settings = test_settings.model_copy(
+        update={"tenant_credentials_enabled": True}
+    )
+    set_settings(enabled_settings)
+    yield
+    set_settings(test_settings)
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_credentials_endpoint_never_leaks_other_tenant_keys(
@@ -194,7 +212,7 @@ async def test_credentials_endpoint_never_leaks_other_tenant_keys(
     encryption_service,
     test_settings,
     mock_transcription_models,
-    monkeypatch,
+    _tenant_credentials_enabled,
 ):
     """Verify GET /tenants/{id}/credentials is strictly tenant-scoped.
 
@@ -209,8 +227,6 @@ async def test_credentials_endpoint_never_leaks_other_tenant_keys(
     - Credential enumeration attacks
     - Response filtering bugs
     """
-    # Enable tenant credentials for this test
-    monkeypatch.setattr(test_settings, "tenant_credentials_enabled", True)
     # Create two tenants with credentials
     tenant_a = await _create_tenant(
         client, super_admin_token, f"tenant-cred-a-{uuid4().hex[:6]}"

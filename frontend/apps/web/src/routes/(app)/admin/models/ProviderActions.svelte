@@ -1,31 +1,73 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
+<!--
+  Per-provider action menu (edit / delete) shown in the table group header.
+  The delete flow is blocked when the provider still has tenant-attached
+  models — we surface the blocking list inside the confirmation so the
+  admin sees exactly what to clean up first. Models are pre-loaded when
+  the dropdown opens so the dialog never flickers through an empty/loading
+  state.
+-->
+
 <script lang="ts">
-  import type { ModelProviderPublic } from "@intric/intric-js";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { Button, Dropdown, Dialog } from "@intric/ui";
+  import type {
+    CompletionModel,
+    EmbeddingModel,
+    ModelProviderPublic,
+    TranscriptionModel
+  } from "@intric/intric-js";
   import { getIntric } from "$lib/core/Intric";
   import { invalidate } from "$app/navigation";
-  import { writable } from "svelte/store";
-  import { Pencil, Trash2, AlertTriangle, Loader2, Box, Sparkles, AudioLines } from "lucide-svelte";
+  import {
+    Pencil,
+    Trash2,
+    AlertTriangle,
+    Loader2,
+    Box,
+    Sparkles,
+    AudioLines,
+    MoreHorizontal,
+    Check
+  } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
 
-  export let provider: ModelProviderPublic;
-  export let onEditProvider: ((provider: ModelProviderPublic) => void) | undefined = undefined;
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+
+  type ModelKind = "completion" | "embedding" | "transcription";
+  type ProviderModel = CompletionModel | EmbeddingModel | TranscriptionModel;
+
+  type BlockingModel = {
+    id: string;
+    name: string;
+    type: string;
+    kind: ModelKind;
+    icon: typeof Sparkles;
+  };
+
+  let {
+    provider,
+    onEditProvider
+  }: {
+    provider: ModelProviderPublic;
+    onEditProvider?: (provider: ModelProviderPublic) => void;
+  } = $props();
 
   const intric = getIntric();
 
-  const showDeleteConfirm = writable(false);
-  let isDeleting = false;
-  let deleteError: string | null = null;
-  let isLoadingModels = false;
-  let modelsLoadError: string | null = null;
-  let providerModels: Array<{
-    name: string;
-    type: string;
-    typeRaw: string;
-    icon: typeof Sparkles;
-  }> = [];
+  let deleteOpen = $state(false);
+  let isDeleting = $state(false);
+  let deleteError = $state<string | null>(null);
+
+  // Pre-loaded list of models attached to this provider. Dropdown open can
+  // warm it, while delete open forces a fresh read before enabling deletion.
+  let modelsLoaded = $state(false);
+  let isLoadingModels = $state(false);
+  let modelsLoadError = $state<string | null>(null);
+  let providerModels = $state<BlockingModel[]>([]);
+
+  const canDelete = $derived(modelsLoaded && providerModels.length === 0 && !isLoadingModels);
 
   async function handleDelete() {
     deleteError = null;
@@ -33,7 +75,7 @@
     try {
       await intric.modelProviders.delete({ id: provider.id });
       await invalidate("admin:model-providers:load");
-      $showDeleteConfirm = false;
+      deleteOpen = false;
     } catch (e: unknown) {
       deleteError = e instanceof Error ? e.message : m.failed_to_delete_provider();
     } finally {
@@ -41,42 +83,34 @@
     }
   }
 
-  type AnyModel = Record<string, unknown>;
-
-  function getModelName(model: AnyModel): string {
-    if ("nickname" in model && model.nickname) {
-      return String(model.nickname);
-    }
-    if ("model_name" in model && model.model_name) {
-      return String(model.model_name);
-    }
-    return String(model.name);
+  function getModelName(model: ProviderModel): string {
+    return model.nickname || model.name;
   }
 
   function tagModels(
-    models: AnyModel[],
-    type: "completion" | "embedding" | "transcription",
+    models: ProviderModel[],
+    kind: ModelKind,
     label: string,
     icon: typeof Sparkles
-  ) {
+  ): BlockingModel[] {
     return models
       .filter((model) => model.provider_id === provider.id)
-      .map((model) => ({
-        name: getModelName(model),
-        type: label,
-        typeRaw: type,
-        icon
-      }));
+      .map((model) => ({ id: model.id, name: getModelName(model), type: label, kind, icon }));
   }
 
-  async function loadProviderModels() {
+  async function loadProviderModels({ force = false }: { force?: boolean } = {}) {
+    if (isLoadingModels || (modelsLoaded && !force)) return;
+
+    if (force) {
+      modelsLoaded = false;
+      providerModels = [];
+    }
+
     isLoadingModels = true;
     modelsLoadError = null;
-    providerModels = [];
 
     try {
       const models = await intric.models.list();
-
       providerModels = [
         ...tagModels(models.completionModels, "completion", m.completion_model(), Sparkles),
         ...tagModels(models.embeddingModels, "embedding", m.embedding_model(), Box),
@@ -87,184 +121,164 @@
           AudioLines
         )
       ].sort((a, b) => a.name.localeCompare(b.name));
+      modelsLoaded = true;
     } catch (e: unknown) {
       modelsLoadError = e instanceof Error ? e.message : m.failed_to_load_models();
     } finally {
       isLoadingModels = false;
     }
   }
+
+  function handleDropdownOpenChange(open: boolean) {
+    if (open) void loadProviderModels();
+  }
+
+  function openDeleteDialog() {
+    deleteError = null;
+    deleteOpen = true;
+    void loadProviderModels({ force: true });
+  }
 </script>
 
-<Dropdown.Root>
-  <Dropdown.Trigger let:trigger asFragment>
-    <Button
-      variant="on-fill"
-      is={trigger}
-      padding="icon"
-      class="hover:bg-hover-dimmer rounded-md transition-colors duration-150"
-    >
-      <IconEllipsis />
-    </Button>
-  </Dropdown.Trigger>
-  <Dropdown.Menu let:item>
-    <Button
-      is={item}
-      padding="icon-leading"
-      on:click={() => {
-        onEditProvider?.(provider);
-      }}
-    >
-      <Pencil class="h-4 w-4" />
-      {m.edit_provider()}
-    </Button>
-    <Button
-      is={item}
-      padding="icon-leading"
-      variant="destructive"
-      on:click={() => {
-        deleteError = null;
-        $showDeleteConfirm = true;
-        loadProviderModels();
-      }}
-    >
-      <Trash2 class="h-4 w-4" />
-      {m.delete_provider()}
-    </Button>
-  </Dropdown.Menu>
-</Dropdown.Root>
-
-<!-- Delete Confirmation Dialog -->
-<Dialog.Root openController={showDeleteConfirm}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.delete_provider()}</Dialog.Title>
-    <Dialog.Section>
-      <div class="flex flex-col gap-5 p-4">
-        <!-- Error Alert -->
-        {#if deleteError}
-          <div
-            class="border-negative-default/30 bg-negative-dimmer/50 relative overflow-hidden rounded-lg border"
-          >
-            <div class="bg-negative-default absolute inset-y-0 left-0 w-1"></div>
-            <div class="flex items-start gap-3 p-4 pl-5">
-              <div class="bg-negative-default/10 flex-shrink-0 rounded-full p-1.5">
-                <AlertTriangle class="text-negative-default h-4 w-4" />
-              </div>
-              <div class="min-w-0 flex-1">
-                <p class="text-negative-stronger text-sm font-medium">
-                  {m.failed_to_delete_provider()}
-                </p>
-                <p class="text-negative-default/90 mt-1 text-sm">{deleteError}</p>
-              </div>
-            </div>
-          </div>
-        {/if}
-
-        <!-- Models List Section -->
-        {#if isLoadingModels}
-          <div class="flex items-center justify-center gap-3 py-6">
-            <Loader2 class="text-muted h-5 w-5 animate-spin" />
-            <span class="text-muted text-sm">{m.loading()}</span>
-          </div>
-        {:else if modelsLoadError}
-          <div
-            class="border-negative-default/30 bg-negative-dimmer/50 relative overflow-hidden rounded-lg border"
-          >
-            <div class="bg-negative-default absolute inset-y-0 left-0 w-1"></div>
-            <div class="flex items-start gap-3 p-4 pl-5">
-              <div class="bg-negative-default/10 flex-shrink-0 rounded-full p-1.5">
-                <AlertTriangle class="text-negative-default h-4 w-4" />
-              </div>
-              <p class="text-negative-default/90 text-sm">{modelsLoadError}</p>
-            </div>
-          </div>
-        {:else if providerModels.length > 0}
-          <div class="border-negative-default/30 bg-negative-dimmer/30 rounded-lg border">
-            <div class="border-negative-default/20 flex items-center gap-2 border-b px-4 py-3">
-              <AlertTriangle class="text-negative-default h-4 w-4" />
-              <p class="text-negative-stronger text-sm font-medium">
-                {providerModels.length === 1
-                  ? m.provider_model_count_one({ count: providerModels.length })
-                  : m.provider_model_count_other({ count: providerModels.length })}
-              </p>
-            </div>
-            <ul class="divide-negative-default/10 divide-y">
-              {#each providerModels as model (model.name)}
-                <li class="flex items-center gap-3 px-4 py-2.5">
-                  <div
-                    class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md"
-                    class:bg-accent-dimmer={model.typeRaw === "completion"}
-                    class:text-accent-default={model.typeRaw === "completion"}
-                    class:bg-positive-dimmer={model.typeRaw === "embedding"}
-                    class:text-positive-default={model.typeRaw === "embedding"}
-                    class:bg-dynamic-dimmer={model.typeRaw === "transcription"}
-                    class:text-dynamic-default={model.typeRaw === "transcription"}
-                  >
-                    <svelte:component this={model.icon} class="h-3.5 w-3.5" />
-                  </div>
-                  <div class="min-w-0 flex-1">
-                    <p class="text-primary truncate text-sm font-medium">{model.name}</p>
-                    <p class="text-muted text-xs">{model.type}</p>
-                  </div>
-                </li>
-              {/each}
-            </ul>
-            <!-- Blocking message -->
-            <div class="border-negative-default/20 bg-negative-dimmer/50 border-t px-4 py-3">
-              <p class="text-negative-stronger text-sm font-medium">
-                {m.delete_provider_blocked()}
-              </p>
-            </div>
-          </div>
-        {:else}
-          <div
-            class="border-positive-default/30 bg-positive-dimmer/30 flex items-center gap-3 rounded-lg border px-4 py-3"
-          >
-            <div
-              class="bg-positive-default/10 flex h-6 w-6 items-center justify-center rounded-full"
-            >
-              <svg
-                class="text-positive-default h-3.5 w-3.5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
-            <p class="text-positive-stronger text-sm">{m.no_models_in_provider()}</p>
-          </div>
-        {/if}
-
-        <!-- Confirmation Text -->
-        <div class="space-y-2">
-          <p class="text-primary text-sm">
-            {m.delete_provider_confirm({ name: provider.name })}
-          </p>
-          {#if providerModels.length === 0 && !isLoadingModels}
-            <p class="text-muted text-sm">
-              {m.delete_provider_warning()}
-            </p>
-          {/if}
-        </div>
-      </div>
-    </Dialog.Section>
-    <Dialog.Controls>
-      <Button variant="outlined" on:click={() => ($showDeleteConfirm = false)}>
-        {m.cancel()}
+<DropdownMenu.Root onOpenChange={handleDropdownOpenChange}>
+  <DropdownMenu.Trigger>
+    {#snippet child({ props })}
+      <Button {...props} variant="ghost" size="icon-sm" aria-label={m.actions()}>
+        <MoreHorizontal />
       </Button>
-      <Button
+    {/snippet}
+  </DropdownMenu.Trigger>
+
+  <DropdownMenu.Content align="end">
+    <DropdownMenu.Item onclick={() => onEditProvider?.(provider)}>
+      <Pencil />
+      {m.edit_provider()}
+    </DropdownMenu.Item>
+    <DropdownMenu.Separator />
+    <DropdownMenu.Item variant="destructive" onclick={openDeleteDialog}>
+      <Trash2 />
+      {m.delete_provider()}
+    </DropdownMenu.Item>
+  </DropdownMenu.Content>
+</DropdownMenu.Root>
+
+<AlertDialog.Root bind:open={deleteOpen}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.delete_provider()}</AlertDialog.Title>
+      <AlertDialog.Description>
+        {m.delete_provider_confirm({ name: provider.name })}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+
+    <div class="flex flex-col gap-4">
+      {#if deleteError}
+        <div
+          class="border-negative-default/30 bg-negative-dimmer/40 relative overflow-hidden rounded-lg border"
+          role="alert"
+        >
+          <div class="bg-negative-default absolute inset-y-0 left-0 w-1" aria-hidden="true"></div>
+          <div class="flex items-start gap-3 p-4 pl-5">
+            <div class="bg-negative-default/10 flex-shrink-0 rounded-full p-1.5">
+              <AlertTriangle class="text-negative-default size-4" aria-hidden="true" />
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="text-negative-stronger text-sm font-medium">
+                {m.failed_to_delete_provider()}
+              </p>
+              <p class="text-negative-default/90 mt-1 text-sm">{deleteError}</p>
+            </div>
+          </div>
+        </div>
+      {/if}
+
+      {#if isLoadingModels}
+        <div class="text-muted flex items-center justify-center gap-3 py-6">
+          <Loader2 class="size-5 animate-spin" aria-hidden="true" />
+          <span class="text-sm">{m.loading()}</span>
+        </div>
+      {:else if modelsLoadError}
+        <div
+          class="border-negative-default/30 bg-negative-dimmer/40 relative overflow-hidden rounded-lg border"
+          role="alert"
+        >
+          <div class="bg-negative-default absolute inset-y-0 left-0 w-1" aria-hidden="true"></div>
+          <div class="flex items-start gap-3 p-4 pl-5">
+            <div class="bg-negative-default/10 flex-shrink-0 rounded-full p-1.5">
+              <AlertTriangle class="text-negative-default size-4" aria-hidden="true" />
+            </div>
+            <p class="text-negative-default/90 text-sm">{modelsLoadError}</p>
+          </div>
+        </div>
+      {:else if providerModels.length > 0}
+        <div class="border-negative-default/30 bg-negative-dimmer/30 rounded-lg border">
+          <div class="border-negative-default/20 flex items-center gap-2 border-b px-4 py-3">
+            <AlertTriangle class="text-negative-default size-4" aria-hidden="true" />
+            <p class="text-negative-stronger text-sm font-medium">
+              {providerModels.length === 1
+                ? m.provider_model_count_one({ count: providerModels.length })
+                : m.provider_model_count_other({ count: providerModels.length })}
+            </p>
+          </div>
+
+          <ul class="divide-negative-default/10 divide-y">
+            {#each providerModels as model (`${model.kind}:${model.id}`)}
+              <li class="flex items-center gap-3 px-4 py-2.5">
+                <div
+                  class="flex size-7 flex-shrink-0 items-center justify-center rounded-md"
+                  class:bg-accent-dimmer={model.kind === "completion"}
+                  class:text-accent-default={model.kind === "completion"}
+                  class:bg-positive-dimmer={model.kind === "embedding"}
+                  class:text-positive-default={model.kind === "embedding"}
+                  class:bg-dynamic-dimmer={model.kind === "transcription"}
+                  class:text-dynamic-default={model.kind === "transcription"}
+                >
+                  <model.icon class="size-3.5" aria-hidden="true" />
+                </div>
+                <div class="min-w-0 flex-1">
+                  <p class="text-primary truncate text-sm font-medium">{model.name}</p>
+                  <p class="text-muted text-xs">{model.type}</p>
+                </div>
+              </li>
+            {/each}
+          </ul>
+
+          <div class="border-negative-default/20 bg-negative-dimmer/50 border-t px-4 py-3">
+            <p class="text-negative-stronger text-sm font-medium">
+              {m.delete_provider_blocked()}
+            </p>
+          </div>
+        </div>
+      {:else if modelsLoaded}
+        <div
+          class="border-positive-default/30 bg-positive-dimmer/30 flex items-center gap-3 rounded-lg border px-4 py-3"
+        >
+          <div class="bg-positive-default/10 flex size-6 items-center justify-center rounded-full">
+            <Check class="text-positive-default size-3.5" aria-hidden="true" />
+          </div>
+          <p class="text-positive-stronger text-sm">{m.no_models_in_provider()}</p>
+        </div>
+      {/if}
+
+      {#if canDelete}
+        <p class="text-muted text-sm">{m.delete_provider_warning()}</p>
+      {/if}
+    </div>
+
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action
         variant="destructive"
-        on:click={handleDelete}
-        disabled={isDeleting || providerModels.length > 0}
+        onclick={handleDelete}
+        disabled={isDeleting || !canDelete}
       >
         {#if isDeleting}
-          <Loader2 class="mr-2 h-4 w-4 animate-spin" />
+          <Loader2 class="size-4 animate-spin" aria-hidden="true" />
           {m.deleting()}
         {:else}
           {m.delete_provider()}
         {/if}
-      </Button>
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

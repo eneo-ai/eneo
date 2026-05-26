@@ -20,7 +20,10 @@ def protocol():
 
 @pytest.fixture
 def repo():
-    return AsyncMock()
+    mock = AsyncMock()
+    # session.in_transaction() is sync — keep it a MagicMock so it doesn't return a coroutine
+    mock.session = MagicMock()
+    return mock
 
 
 @pytest.fixture

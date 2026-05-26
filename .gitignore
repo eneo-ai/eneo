@@ -28,6 +28,13 @@ backend/exports/
 # test results
 backend/test-results/
 
+# Local review notes and ad-hoc UI screenshots (not part of the codebase)
+REVIEW_*.md
+REVIEW_PLAN.md
+REVIEW_REPORT.md
+chat-*.png
+notes/
+
 # claude
 .claude/*.local.json
 backend/openapi.json
