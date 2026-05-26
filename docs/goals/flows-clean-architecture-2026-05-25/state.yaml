@@ -63,7 +63,7 @@ agents:
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
 scorecard:
-  current_floor: 6
+  current_floor: 7
   target_floor: 9
   source: "ChatGPT Pro review plus local schema and architecture maps."
   scoring_ladder:
@@ -72,18 +72,18 @@ scorecard:
     floor_8: "Webhook delivery durable; step identity stable; runtime file lifecycle explicit; service-key permission matrix coherent."
     floor_9: "Long-term polish complete: typed public/lifecycle JSONB ownership, mature health/readiness, clean frontend state ownership, and unneeded compatibility paths deleted."
   dimensions:
-    maintainability: 7
-    code_quality: 7
-    clean_architecture: 7
-    separation_of_concerns: 7
-    single_source_of_truth: 6
-    human_readability: 7
-    human_reviewability: 7
-    data_integrity: 6
-    api_consumer_dx: 7
-    api_maintainer_dx: 7
-    runtime_reliability: 6
-    testability: 7
+    maintainability: 8
+    code_quality: 8
+    clean_architecture: 8
+    separation_of_concerns: 8
+    single_source_of_truth: 7
+    human_readability: 8
+    human_reviewability: 8
+    data_integrity: 7
+    api_consumer_dx: 8
+    api_maintainer_dx: 8
+    runtime_reliability: 7
+    testability: 8
   notes:
     - "Overall score is the minimum dimension score."
     - "Do not chase 9/10 before the 7/8 foundations are complete."
@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T999
+active_task: T041
 
 tasks:
   - id: T001
@@ -3681,7 +3681,7 @@ tasks:
   - id: T999
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: xhigh
     objective: "Final audit: decide whether Flows has reached a defensible 9/10 strict score floor."
     inputs:
@@ -3699,6 +3699,102 @@ tasks:
       - "dimension scores"
       - "missing evidence"
       - "next required task if not complete"
+    receipt:
+      result: done
+      verdict: "not_complete"
+      summary: "Rejected goal completion after T040. Flows has improved to a strict floor of 7/10, but not 9/10: outbound webhook delivery is still inline and not durable, runtime file retention remains product/data-decision blocked, service-key identity/review/rerun policy remains blocked, draft id-owned persistence/schema/frontend polish remain queued, and required Workers remain incomplete."
+      strict_score_floor: 7
+      dimensions:
+        maintainability: 8
+        code_quality: 8
+        clean_architecture: 8
+        separation_of_concerns: 8
+        single_source_of_truth: 7
+        human_readability: 8
+        human_reviewability: 8
+        data_integrity: 7
+        api_consumer_dx: 8
+        api_maintainer_dx: 8
+        runtime_reliability: 7
+        testability: 8
+      missing_evidence:
+        - "Webhook delivery is not durable: FlowRunExecutor still performs inline HTTP delivery after step-result persistence."
+        - "The planned Flow outbound delivery outbox owner does not exist yet; single-source-of-truth remains limited while inline executor delivery owns the path."
+        - "Runtime input retention/file lifecycle remains blocked by T009/T010 product/data decision."
+        - "Service-key identity and review/rerun/resume matrix remains blocked by T009/T011 decision, despite the narrower T026-T031 API consumer DX fixes."
+        - "T012, T013, T014, T015, and T016 remain queued with empty allowed_files and require Scout/Judge preflight before implementation."
+      evidence:
+        - "backend/src/intric/flows/runtime/step_handlers/http_post.py:39 emits WebhookDeliveryIntent."
+        - "backend/src/intric/flows/runtime/step_attempt_runtime.py:193 turns delivery intents into should_deliver_webhook."
+        - "backend/src/intric/flows/runtime/executor.py:862 calls _deliver_step_webhook inline after successful step persistence."
+        - "backend/src/intric/flows/runtime/executor.py:1579 builds webhook context and calls _deliver_webhook."
+        - "backend/src/intric/flows/runtime/executor.py:1611 handles inline delivery failure by marking webhook_delivered false and terminalizing the run failed."
+        - "backend/src/intric/flows/runtime/executor.py:1641 handles inline delivery success by writing webhook_delivered true."
+        - "backend/src/intric/database/tables/flow_tables.py:1431 defines flow_run_audit_outbox, which is audit/lifecycle-shaped rather than a webhook delivery outbox."
+        - "docs/goals/flows-clean-architecture-2026-05-25/goal.md:111 names Webhook delivery as a distinct Flow outbound delivery outbox service."
+        - ".codex/artifacts/claude-peer-loop-t999-final-audit-and-next-task-20260526T085956Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t999-webhook-next-task-antigravity-synthesis-20260526T090212Z.md"
+      commands:
+        - command: "ruby -e 'require \"yaml\"; data=YAML.load_file(\"docs/goals/flows-clean-architecture-2026-05-25/state.yaml\"); data[\"tasks\"].each{|t| puts \"#{t[\"id\"]} #{t[\"status\"]} #{t[\"type\"]}: #{t[\"objective\"]}\" }'"
+          status: "pass"
+          output: "Confirmed T009-T011 blocked, T012-T016 queued, T040 done, and T999 active before audit."
+        - command: "rg -n \"WebhookDeliveryIntent|should_deliver_webhook|_deliver_step_webhook|_handle_webhook_delivery_failure|_mark_webhook_delivery_success|flow_run_audit_outbox\" backend/src/intric/flows backend/src/intric/database/tables/flow_tables.py -g '*.py'"
+          status: "pass"
+          output: "Confirmed typed intent exists but inline executor delivery remains the only outbound webhook delivery path."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t999-final-audit --phase review --iteration 1 --require-green --required-min-score 6 --timeout-seconds 1200 ..."
+          status: "pass"
+          output: "GREEN_LIGHT yes; MIN_SCORE 7. Recommended not_complete and T041 Scout; pushed single_source_of_truth to 7."
+        - command: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t999-webhook-next-task-synthesis --phase synthesis --iteration 1 --spend-mode auto --timeout-seconds 1200 ..."
+          status: "pass"
+          output: "GREEN_LIGHT yes; MIN_SCORE 7. Confirmed T041 Scout and added run-terminalization/idempotency refinements."
+      next_required_task: T041
+
+  - id: T041
+    type: scout
+    assignee: Scout
+    status: active
+    reasoning_hint: high
+    objective: "Preflight durable outbound webhook delivery before T013 implementation: map current inline delivery, existing audit outbox reuse/non-reuse, WebhookDeliveryIntent ownership, schema/migration requirements, idempotency and retry/dead-letter semantics, tests, and smallest safe Worker slices."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+      - "backend/src/intric/flows/runtime/executor.py"
+      - "backend/src/intric/flows/runtime/step_execution_result.py"
+      - "backend/src/intric/flows/runtime/step_handlers/http_post.py"
+      - "backend/src/intric/flows/runtime/step_attempt_runtime.py"
+      - "backend/src/intric/flows/runtime/http_orchestration.py"
+      - "backend/src/intric/flows/application/flow_run_audit_outbox_delivery.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_audit_outbox_repo.py"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/tests/unittests/flows/test_flow_executor_runtime.py"
+      - "backend/tests/integration/flows/test_flow_runtime_worker_contract.py"
+    constraints:
+      - "Read-only: no source edits, no test edits, no migrations, no deletion."
+      - "Do not implement T013."
+      - "Do not start retention, service-key identity, draft id-owned persistence, schema-hardening outside webhook delivery, frontend state cleanup, or Flow AI Builder cleanup."
+      - "Do not propose reusing the flow_run_audit_outbox table for webhook delivery if doing so weakens its audit/lifecycle constraints."
+      - "Do not propose a generic outbox base class, event bus, plugin system, or one-implementation delivery port."
+      - "Use WebhookDeliveryIntent as the canonical ingress unless source evidence proves it is insufficient."
+      - "Treat run terminalization on delivery failure/dead-letter as a product-architecture tradeoff to be decided by Judge, not a Scout assumption."
+      - "Map retention coupling: payload references must remain deliverable if runtime input/output retention later purges files or result content."
+    expected_output:
+      - "Current inline webhook delivery evidence with file:line citations."
+      - "Concept table: outbound delivery intent, payload reference, inline delivery, audit outbox pattern, delivery status, retry/dead-letter, idempotency, runtime health/readiness."
+      - "Decision on whether audit outbox infrastructure can be reused as a pattern only, and why the audit table itself should or should not be reused."
+      - "Run terminalization options for delivery failure/dead-letter, with API/runtime reliability tradeoffs and required product decision if needed."
+      - "Idempotency model: producer-side uniqueness, consumer Idempotency-Key header, retry vs rerun attempt semantics, and database constraints."
+      - "Retention coupling and payload materialization options."
+      - "Crash-window analysis for step result save, intent enqueue, transaction commit, worker delivery, retry, and dead-letter."
+      - "Exact red tests, integration tests, migration tests, health/readiness tests, and verification commands for the first safe Worker."
+      - "Proposed allowed_files and stop_if for the smallest safe Worker, or a stop recommendation if product/data decisions are required first."
+      - "Consolidation effect: reused existing owner, logic moved from, logic deleted, duplicate path removed, new code added, why existing owners were insufficient, guard/test preventing duplicate logic from returning, net Flow logic surface area."
+    stop_if:
+      - "Current source already has a durable outbound webhook delivery outbox that consumes WebhookDeliveryIntent."
+      - "The first safe Worker requires unresolved retention or run-terminalization product decisions."
+      - "The first safe Worker cannot be scoped to reviewable allowed_files and behavior-focused tests."
+      - "A proposed design keeps inline executor delivery and adds an outbox in parallel without a same-slice deletion trigger."
+      - "A proposed design bypasses WebhookDeliveryIntent or weakens typed boundaries with dict-shaped payloads."
     receipt: null
 
 checks:
