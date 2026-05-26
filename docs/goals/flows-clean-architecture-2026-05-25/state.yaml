@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T078
+active_task: T080
 
 tasks:
   - id: T001
@@ -7753,7 +7753,7 @@ tasks:
   - id: T078
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe Flow clean-architecture task after T077 output-format policy consolidation."
     inputs:
@@ -7774,6 +7774,181 @@ tasks:
       - "If approving a Worker: allowed_files, verification commands, stop_if, review tier, and consolidation effect."
       - "If choosing Scout: exact read-only evidence questions and stop conditions."
       - "Explicitly reject blocked product/data-gated work if still blocked."
+    stop_if:
+      - "The next safe task requires product/data decisions not recorded in state.yaml."
+      - "The next task cannot be scoped to a small reviewable allowed_files set."
+      - "The next task would widen into API/OpenAPI/generated, migrations, retention, service-key identity, webhook outbox, or Flow AI Builder without an explicit board gate."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T21:49:00+02:00"
+      decision: "approve_worker"
+      summary: "Chose a narrow post-T077 cleanup Worker that finishes the output-format typed-boundary consolidation surfaced by Claude's commit-gate follow-ups. This is safe now because it stays inside the existing output_runtime/output_formats owners, changes no behavior, and avoids product/data-gated work."
+      evidence:
+        - "backend/src/intric/flows/runtime/output_runtime.py:42 still spells structured output as dict[str, Any] | list[Any] instead of the existing JsonStructuredValue alias."
+        - "backend/src/intric/flows/runtime/output_runtime.py:53 still types parse_json_output as Callable[[str], dict[str, Any] | list[Any]]."
+        - "backend/src/intric/flows/runtime/output_formats/base.py:188 and :220 expose shared document pipeline functions that are intended as output_formats-internal implementation details."
+        - "backend/src/intric/flows/runtime/output_formats/docx.py:10 imports the shared document pipeline."
+        - "backend/src/intric/flows/runtime/output_formats/pdf.py:11 imports the shared document pipeline."
+        - ".codex/artifacts/claude-peer-loop-t077-output-format-policy-implementation-review-20260526T194123Z.md"
+      rejected_or_deferred:
+        - "Retention, service-key identity/review/rerun, schema migrations, and webhook outbox remain blocked/gated unless state.yaml records decisions."
+        - "T901 final architecture docs remain final-docs-only, not active during runtime cleanup."
+        - "compile_validators validator-instance efficiency is deferred because changing that gate could alter behavior and deserves separate source preflight."
+      commands:
+        - command: "jq '{schema_version,status,active_task,blockers}' /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1 status=ok blockers=[]; stale active_task T039 advisory."
+        - command: "rg -n \"JsonStructuredValue|process_structured_document_output|render_document_output|OutputRuntimeDeps|Callable\\[\\[str\\]|compile_validators\\(\\[step\\]\\)|OutputFormatProcessingResult|TypedOutputProcessingResult\" backend/src/intric/flows/runtime/output_runtime.py backend/src/intric/flows/runtime/output_formats backend/tests/unittests/flows/test_output_formats.py backend/tests/unittests/flows/test_output_runtime.py -g '*.py'"
+          status: pass
+      next_task: T079
+      review_tier: "Claude commit gate only unless the implementation widens; no Antigravity unless Claude/Codex disagree."
+      consolidation_effect:
+        reused_existing_owner: "output_runtime, output_formats/base.py, and existing output format specs."
+        logic_moved_from: "No behavior moves; only typed boundary naming and internal helper visibility are tightened."
+        logic_deleted: "Duplicate JSON structured-output spelling in output_runtime should be deleted in favor of JsonStructuredValue."
+        duplicate_path_removed: "Two names for the same structured JSON value boundary."
+        new_code_added: "No new module or concept expected."
+        why_existing_owners_were_insufficient: "They are sufficient; T079 must reuse/deepen them without creating new owners."
+        guard_preventing_duplicate_logic_from_returning: "pyright, output_runtime/output_formats behavior tests, and added-line anti-leak grep."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+
+  - id: T079
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "refactor(flows-runtime): tighten output-format typed boundary names after policy consolidation."
+    inputs:
+      - "T077 receipt"
+      - "T078 receipt"
+      - "backend/src/intric/flows/runtime/output_runtime.py"
+      - "backend/src/intric/flows/runtime/output_formats/base.py"
+      - "backend/src/intric/flows/runtime/output_formats/docx.py"
+      - "backend/src/intric/flows/runtime/output_formats/pdf.py"
+      - "backend/tests/unittests/flows/test_output_runtime.py"
+      - "backend/tests/unittests/flows/test_output_formats.py"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "backend/src/intric/flows/runtime/output_runtime.py"
+      - "backend/src/intric/flows/runtime/output_formats/base.py"
+      - "backend/src/intric/flows/runtime/output_formats/docx.py"
+      - "backend/src/intric/flows/runtime/output_formats/pdf.py"
+      - "backend/tests/unittests/flows/test_output_runtime.py"
+      - "backend/tests/unittests/flows/test_output_formats.py"
+    constraints:
+      - "Before starting implementation and before committing, check the watchdog blocker file."
+      - "No behavior changes."
+      - "No API/OpenAPI/generated client, schema/migration, retention, service-key, webhook outbox, Flow AI Builder, frontend, or docs/flows/architecture.md edits."
+      - "Do not add a new module, plugin SDK, service, manager, processor, helper bag, or new JSON alias."
+      - "Reuse JsonStructuredValue from output_processing; do not invent another structured JSON type."
+      - "Private-prefix shared output_formats/base.py functions only if imports/tests stay clear and behavior unchanged."
+      - "Do not touch compile_validators semantics or validator construction in this slice."
+      - "Run Claude commit gate after the diff is stable; skip plan gate unless the implementation widens."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_output_formats.py tests/unittests/flows/test_output_runtime.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/output_formats/base.py src/intric/flows/runtime/output_formats/docx.py src/intric/flows/runtime/output_formats/pdf.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_output_formats.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/output_formats/base.py src/intric/flows/runtime/output_formats/docx.py src/intric/flows/runtime/output_formats/pdf.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_output_formats.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/output_formats/base.py src/intric/flows/runtime/output_formats/docx.py src/intric/flows/runtime/output_formats/pdf.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_output_formats.py"
+      - "git diff --check"
+      - "! git diff -- backend/src/intric/flows/runtime/output_runtime.py backend/src/intric/flows/runtime/output_formats/base.py backend/src/intric/flows/runtime/output_formats/docx.py backend/src/intric/flows/runtime/output_formats/pdf.py backend/tests/unittests/flows/test_output_runtime.py backend/tests/unittests/flows/test_output_formats.py | rg -n '^\\+.*(pyright: ignore|type: ignore|cast\\(Any|dict\\[str, Any\\]|\\bAny\\b|helper|manager|processor|T0[0-9][0-9]|Phase [0-9A-G]\\b)'"
+    stop_if:
+      - "The watchdog has a halt-worthy blocker that cannot be resolved or source-evidence-disagreed."
+      - "The change needs files outside allowed_files."
+      - "The change requires behavior changes or compile_validators semantic changes."
+      - "The diff creates a second JSON value alias or a new abstraction owner."
+      - "Focused verification fails twice for reasons unrelated to this task."
+    consolidation_effect:
+      reused_existing_owner: "output_runtime and output_formats/base.py."
+      logic_moved_from: "None expected."
+      logic_deleted: "Duplicate structured JSON type spelling and public-looking names for internal shared document pipelines."
+      duplicate_path_removed: "Duplicate JSON structured-output spelling."
+      new_code_added: "No new concept expected."
+      why_existing_owners_were_insufficient: "They are sufficient; this Worker should only deepen naming/type clarity inside them."
+      guard_preventing_duplicate_logic_from_returning: "pyright plus anti-leak grep; existing output_format/output_runtime tests."
+      net_flow_logic_surface_area: "reduced"
+      if_increased_why: "N/A"
+    receipt:
+      result: done
+      completed_at: "2026-05-26T21:54:00+02:00"
+      summary: "Unified output_runtime's structured-output annotations with the existing JsonStructuredValue alias. The initially considered private-prefix rename for shared sibling output-format functions was rejected because Pyright correctly treats cross-module underscore imports as private usage; no ignore or workaround was added."
+      changed_files:
+        - "backend/src/intric/flows/runtime/output_runtime.py"
+        - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      evidence:
+        - "backend/src/intric/flows/runtime/output_runtime.py:8 imports JsonStructuredValue from the existing output_processing owner."
+        - "backend/src/intric/flows/runtime/output_runtime.py:43 uses JsonStructuredValue for TypedOutputProcessingResult.structured_output."
+        - "backend/src/intric/flows/runtime/output_runtime.py:53 uses JsonStructuredValue for OutputRuntimeDeps.parse_json_output."
+      rejected_during_implementation:
+        - "Private-prefixing process_structured_document_output/render_document_output was reverted after Pyright reported reportPrivateUsage from docx.py/pdf.py sibling imports."
+        - "compile_validators semantics and validator construction were left untouched."
+      commands:
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_output_formats.py tests/unittests/flows/test_output_runtime.py -q"
+          status: pass
+          output: "19 passed."
+        - command: "cd backend && uv run ruff check src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/output_formats/base.py src/intric/flows/runtime/output_formats/docx.py src/intric/flows/runtime/output_formats/pdf.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_output_formats.py"
+          status: pass
+        - command: "cd backend && uv run ruff format --check src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/output_formats/base.py src/intric/flows/runtime/output_formats/docx.py src/intric/flows/runtime/output_formats/pdf.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_output_formats.py"
+          status: pass
+          output: "6 files already formatted."
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/output_formats/base.py src/intric/flows/runtime/output_formats/docx.py src/intric/flows/runtime/output_formats/pdf.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_output_formats.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations."
+        - command: "git diff --check"
+          status: pass
+        - command: "added-line anti-leak grep for ignores, broad Any, dict[str, Any], generic helper/manager/processor names, and task/phase comments"
+          status: pass
+      peer_review:
+        claude_commit:
+          artifact: ".codex/artifacts/claude-peer-loop-t079-output-boundary-cleanup-implementation-review-20260526T195046Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8. Commit-safe."
+        antigravity:
+          verdict: "Skipped per tiered review: narrow typed cleanup, Claude green, no high-risk boundary."
+      consolidation_effect:
+        reused_existing_owner: "JsonStructuredValue from output_processing and output_runtime."
+        logic_moved_from: "None."
+        logic_deleted: "Duplicate structured JSON spelling in output_runtime."
+        duplicate_path_removed: "Two names for the same structured JSON parser boundary inside output runtime."
+        new_code_added: "No new concept; one import and two annotation changes."
+        why_existing_owners_were_insufficient: "Existing owners were sufficient; the Worker reused them."
+        guard_preventing_duplicate_logic_from_returning: "pyright, output_runtime/output_formats tests, and anti-leak grep."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+      residual_risk:
+        - "Other runtime modules still spell JSON structures inline and may merit a separate source-preflighted cleanup."
+        - "RuntimeOutputStep.output_contract and OutputRuntimeDeps.compile_validators remain weakly typed and should not be changed without a scoped task."
+      unrelated_files_preserved:
+        - ".devcontainer/docker-compose.yml"
+        - ".gitignore"
+        - "AGENTS.md"
+        - "frontend/packages/ui/src/icons/types.d.ts"
+        - ".devcontainer/devcontainer-lock.json and other untracked root/doc artifacts"
+      next_task: T080
+
+  - id: T080
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe Flow clean-architecture task after T079 typed-boundary cleanup."
+    inputs:
+      - "T077 receipt"
+      - "T079 receipt"
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+    constraints:
+      - "Read-only except board receipt/task transition."
+      - "Check the watchdog before starting and before activating any Worker."
+      - "Do not start retention, service-key identity, schema migration, webhook outbox, review/rerun service-key policy, or other blocked decision-gated work unless state.yaml records the required decision."
+      - "Do not write docs/flows/architecture.md until final docs Worker T901."
+      - "Prefer reuse/move/merge/delete before new logic."
+      - "Respect tiered review."
+    expected_output:
+      - "Decision: approve_worker | scout_first | blocked | final_audit_not_ready"
+      - "Exact next task objective."
+      - "If approving a Worker: allowed_files, verification commands, stop_if, review tier, and consolidation effect."
+      - "Explicit disposition of blocked product/data-gated work and final docs."
     stop_if:
       - "The next safe task requires product/data decisions not recorded in state.yaml."
       - "The next task cannot be scoped to a small reviewable allowed_files set."
