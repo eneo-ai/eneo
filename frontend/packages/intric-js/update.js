@@ -102,12 +102,11 @@ export function openApiTypescriptArgs(snapshotPath) {
 
 /** @param {string} clientSource @param {string} version @returns {string} */
 export function replaceClientVersion(clientSource, version) {
-  const regex = /(?<=const version = ")(.*)(?=";)/;
-  const updatedClient = clientSource.replace(regex, version);
-  if (updatedClient === clientSource) {
+  const regex = /^(\s*const\s+version\s*=\s*")([^"]*)(";\s*(?:(?:\/\/.*))?)$/m;
+  if (!regex.test(clientSource)) {
     throw new Error("Could not find client version declaration.");
   }
-  return updatedClient;
+  return clientSource.replace(regex, `$1${version}$3`);
 }
 
 /** @param {unknown} openapi @returns {string} */

@@ -66,6 +66,26 @@ test("replaceClientVersion updates the existing client version literal", () => {
   );
 });
 
+test("replaceClientVersion preserves the updater marker comment", () => {
+  assert.equal(
+    replaceClientVersion(
+      '  const version = "DEV"; // # Client version auto-updates when running the updater, do not edit this line.\n',
+      "2.0.0"
+    ),
+    '  const version = "2.0.0"; // # Client version auto-updates when running the updater, do not edit this line.\n'
+  );
+});
+
+test("replaceClientVersion accepts a current client version", () => {
+  assert.equal(
+    replaceClientVersion(
+      '  const version = "DEV"; // # Client version auto-updates when running the updater, do not edit this line.\n',
+      "DEV"
+    ),
+    '  const version = "DEV"; // # Client version auto-updates when running the updater, do not edit this line.\n'
+  );
+});
+
 test("openApiTypescriptArgs uses argv array with fixed compatibility option", () => {
   assert.deepEqual(openApiTypescriptArgs("/tmp/openapi.json"), [
     "x",
