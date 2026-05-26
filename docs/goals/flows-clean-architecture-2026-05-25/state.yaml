@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T056
+active_task: T057
 
 tasks:
   - id: T001
@@ -5496,7 +5496,7 @@ tasks:
   - id: T056
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "judge(flows): choose the next safe Flow clean-architecture task after Flow API provider typing cleanup."
     inputs:
@@ -5522,6 +5522,99 @@ tasks:
       - "Choosing a Worker requires retention, service-key identity/review/rerun, schema migration, webhook outbox, or other blocked product/data decisions."
       - "Choosing a Worker requires files outside a reviewable Flow proper scope."
       - "Evidence is insufficient to choose between remaining safe runtime reliability, API DX, frontend DX, schema/preflight, output-format, or cleanup candidates."
+    receipt:
+      result: done
+      summary: "Chose T057 as the next safe Worker: clarify the existing Flow API provider wiring architecture guard without changing production source. The Worker will rename the stale pass-through-only test, make provider reportUnknownMemberType ignore detection whitespace-tolerant, add a focused detector test, and keep the shared detector owner rather than adding a parallel guard."
+      decision: "activate T057"
+      evidence:
+        - "docs/goals/flows-clean-architecture-2026-05-25/notes/t056-next-safe-judge.md"
+        - "backend/tests/unittests/flows/test_flow_architecture_guards.py:226"
+        - "backend/tests/unittests/flows/test_flow_architecture_guards.py:249"
+        - "backend/tests/unittests/flows/test_flow_architecture_guards.py:665"
+        - "backend/tests/unittests/flows/test_flow_architecture_guards.py:674"
+        - ".codex/artifacts/claude-peer-loop-t056-next-safe-flow-task-judge-20260526T152955Z.md"
+        - ".codex/artifacts/claude-peer-loop-t056-next-safe-flow-task-judge-revised-20260526T153250Z.md"
+      candidate_classification:
+        safe_now:
+          - "Clarify and deepen the existing Flow API provider wiring guard."
+        needs_preflight:
+          - "Runtime/Celery/library reportUnknownMemberType ignores in flows/runtime/*."
+          - "Flow AI Builder provider pass-through helpers, out of Flows proper scope unless a Flow proper file directly depends on the same contract."
+          - "Broader test-boundary rewrite or guard reorganization."
+        blocked_on_decision:
+          - "Retention behavior."
+          - "Service-key identity model."
+          - "Review/rerun service-key capability policy."
+          - "Schema migrations, webhook outbox changes, and other product/data decisions not recorded as unblocked."
+        final_docs_only:
+          - "T901 docs/flows/architecture.md maintainer map; do not start during active runtime/API/schema work."
+      consolidation_effect:
+        reused_existing_owner: "backend/tests/unittests/flows/test_flow_architecture_guards.py."
+        logic_moved_from: "None."
+        logic_deleted: "T057 will delete the stale narrow guard name and brittle substring detection."
+        duplicate_path_removed: "None; the existing guard and shared detector are deepened."
+        new_code_added: "One module-level whitespace-tolerant regex and one focused detector test in the existing guard file."
+        why_existing_owners_were_insufficient: "Existing owner is sufficient; no new owner or parallel guard is needed."
+        guard_preventing_duplicate_logic_from_returning: "Flow API provider wiring guard over all Flow API Python files."
+        net_flow_logic_surface_area: "preserved"
+      naming_gate:
+        new_production_names: "None."
+        architecture_doc_readiness: "The renamed guard should appear clearly in the final docs/flows/architecture.md guard-test map and where-to-change-X table."
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1 status=ok blockers=[]; stale active_task T039 advisory."
+        - cmd: "rg -n 'Human Maintainer|Naming Gate|architecture\\.md|where to change|reuse|move|merge|delete|canonical owner|final docs|docs/flows/architecture' docs/goals/flows-clean-architecture-2026-05-25/goal.md docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
+          status: pass
+          output: "Confirmed updated maintainer-map, naming-gate, final-docs, and reuse/move/merge/delete rules before transition."
+        - cmd: "git status --short --branch"
+          status: pass
+          output: "Only existing unrelated dirty/untracked baseline plus T056 note."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t056-next-safe-judge --phase plan --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: fail
+          output: "GREEN_LIGHT: no; MIN_SCORE: 6; valid blockers: guard name omitted manual-construction axis, detector whitespace variants needed a focused test, shared Celery detector effect needed acknowledgement, and rg quoting needed cleanup."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t056-next-safe-judge --phase verification --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT: yes; MIN_SCORE: 8"
+      next_task: T057
+
+  - id: T057
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: medium
+    objective: "test(flows): clarify Flow API provider wiring guard."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t056-next-safe-judge.md"
+      - ".codex/artifacts/claude-peer-loop-t056-next-safe-flow-task-judge-revised-20260526T153250Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t057-flow-api-provider-wiring-guard.md"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+    constraints:
+      - "Check watchdog before starting implementation and before committing."
+      - "Test-only architecture guard cleanup; no production source, API/OpenAPI, generated client, runtime, data, migration, frontend, Flow AI Builder, final architecture doc, retention, service-key identity/review/rerun, or webhook outbox edits."
+      - "Reuse and deepen the existing architecture guard owner; do not add a parallel guard."
+      - "Rename the stale pass-through-only test to a positive invariant name covering provider type erasure, private provider pass-through helpers, and direct service construction."
+      - "Make reportUnknownMemberType ignore detection whitespace-tolerant without weakening the provider-call proximity window."
+      - "Add a focused detector test proving whitespace variants and a negative no-nearby-provider case."
+      - "Acknowledge that the shared detector also tightens the Flow Celery task provider wiring guard and keep that guard green."
+      - "Preserve unrelated dirty/untracked files."
+    expected_output:
+      - "T057 task note with verification receipt, consolidation effect, naming-gate answer, and Claude implementation-gate result."
+      - "Renamed Flow API provider wiring guard with self-explaining assertion message."
+      - "Whitespace-tolerant reportUnknownMemberType ignore detection at module scope."
+      - "Focused detector test for spacing variants and proximity-window behavior."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "The guard cleanup requires production source edits."
+      - "The regex change creates false positives against current Flow API source."
+      - "The detector test cannot prove whitespace variants without weakening the provider-call proximity window."
+      - "The task expands into runtime/Celery/library typing cleanup, Flow AI Builder, product/data gates, or final architecture docs."
+      - "Staged files include anything outside allowed_files."
+      - "Claude implementation gate is not green and the disagreement cannot be resolved with source evidence."
     receipt: null
 
   - id: T901
