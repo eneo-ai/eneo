@@ -63,7 +63,7 @@ agents:
   antigravity_peer_loop: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py"
 
 scorecard:
-  current_floor: 5
+  current_floor: 6
   target_floor: 9
   source: "ChatGPT Pro review plus local schema and architecture maps."
   scoring_ladder:
@@ -72,24 +72,25 @@ scorecard:
     floor_8: "Webhook delivery durable; step identity stable; runtime file lifecycle explicit; service-key permission matrix coherent."
     floor_9: "Long-term polish complete: typed public/lifecycle JSONB ownership, mature health/readiness, clean frontend state ownership, and unneeded compatibility paths deleted."
   dimensions:
-    maintainability: 6
-    code_quality: 5
-    clean_architecture: 5
-    separation_of_concerns: 5
-    single_source_of_truth: 5
-    human_readability: 6
-    human_reviewability: 5
-    data_integrity: 5
-    api_consumer_dx: 6
-    api_maintainer_dx: 5
-    runtime_reliability: 5
-    testability: 5
+    maintainability: 7
+    code_quality: 7
+    clean_architecture: 7
+    separation_of_concerns: 7
+    single_source_of_truth: 6
+    human_readability: 7
+    human_reviewability: 7
+    data_integrity: 6
+    api_consumer_dx: 7
+    api_maintainer_dx: 7
+    runtime_reliability: 6
+    testability: 7
   notes:
     - "Overall score is the minimum dimension score."
     - "Do not chase 9/10 before the 7/8 foundations are complete."
     - "Do not mark complete until a Judge/PM audit verifies the strict score floor is at least 9/10."
     - "Published snapshot is the runtime boundary: strict typed JSON first, no flow_version_steps normalization without a real query need."
     - "Dead/legacy/compatibility cleanup is Flow-scoped and evidence-gated; do not delete legacy-looking live behavior without a deletion trigger."
+    - "T900 after T021: the 7/10 ladder items are structurally complete, but strict dimension floor is 6/10 because step identity, data integrity, and runtime reliability still need source/data preflight before implementation."
 
 source_material:
   primary_reports:
@@ -110,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T900
+active_task: T030
 
 tasks:
   - id: T001
@@ -2257,7 +2258,7 @@ tasks:
   - id: T900
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: xhigh
     objective: "Re-score Flows after each completed tranche and choose the next highest-ROI tranche by strict score-floor impact."
     inputs:
@@ -2273,6 +2274,108 @@ tasks:
       - "Current strict score floor"
       - "Next tranche recommendation"
       - "Risks and missing verification"
+    receipt:
+      result: done
+      completed_at: "2026-05-26T05:10:26+02:00"
+      summary: "Re-scored Flows after the published-contract and output/step-behavior isolation tranches. The 7/10 ladder items are structurally complete, but the strict dimension floor is 6/10 because step identity, data integrity, and runtime reliability remain below 7. Chose a read-only T030 Scout before any T012 step-identity Worker implementation."
+      strict_score_floor: 6
+      ladder_assessment:
+        floor_6: "satisfied: T003/T004/T005 fixed known normal-path bugs, public Flow API errors, and test reviewability."
+        floor_7: "satisfied structurally: T007/T008/T022 made published runtime contract canonical, removed frontend fallbacks, and contract-tested the API consumer journey."
+        floor_8: "not satisfied: webhook delivery is not durable, step identity is not stable, runtime file lifecycle/retention is undecided, and service-key identity/review/rerun policy is still product-gated."
+      dimensions:
+        maintainability: 7
+        code_quality: 7
+        clean_architecture: 7
+        separation_of_concerns: 7
+        single_source_of_truth: 6
+        human_readability: 7
+        human_reviewability: 7
+        data_integrity: 6
+        api_consumer_dx: 7
+        api_maintainer_dx: 7
+        runtime_reliability: 6
+        testability: 7
+      evidence:
+        - "backend/src/intric/flows/infrastructure/flow_repo.py:118-144 omits incoming FlowStep.id from _step_to_db_row."
+        - "backend/src/intric/flows/infrastructure/flow_repo.py:752-803 syncs draft steps by step_order and deletes stale rows by order."
+        - "backend/src/intric/flows/application/flow_service.py:673-682 merges stored HTTP secrets by step_order."
+        - "backend/src/intric/flows/application/flow_service.py:713-723 and 772-790 publish sorted draft steps with step_id, step_order, and assistant_id."
+        - "backend/src/intric/flows/application/flow_run_service.py:273-276 and 644-733 still pass mutable flow.steps as fallback when published snapshots lack step_id/assistant_id."
+        - "backend/src/intric/database/tables/flow_tables.py:700-707 and 894-898 keep runtime result/attempt step_id nullable with FlowSteps FK ON DELETE SET NULL."
+      commands:
+        - command: "ruby -ryaml -e 's=YAML.load_file(\"docs/goals/flows-clean-architecture-2026-05-25/state.yaml\"); puts \"score_floor=#{s[\"scorecard\"][\"current_floor\"]}\"; s[\"tasks\"].each{|t| puts [t[\"id\"],t[\"type\"],t[\"status\"],t[\"objective\"]].join(\" | \") }'"
+          status: "pass"
+          output: "Confirmed T021 done, T900 active before rescore, T009/T010/T011 blocked, and T012-T016 queued."
+        - command: "rg/nl source evidence commands for flow_repo.py, flow_service.py, flow_run_service.py, published_definition.py, flow_tables.py"
+          status: "pass"
+          output: "Verified current source evidence for step identity and runtime fallback risks."
+      peer_review:
+        claude_initial:
+          status: "pass_with_wrapper_threshold_note"
+          artifact: ".codex/artifacts/claude-peer-loop-t900-rescore-after-runtime-architecture-guards-20260526T030724Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 6. Wrapper exited nonzero because required-min-score 8 conflicted with the honest strict Flow floor."
+        claude_final:
+          status: "pass"
+          artifact: ".codex/artifacts/claude-peer-loop-t900-rescore-after-runtime-architecture-guards-wrapper-aligned-review-20260526T030847Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 6."
+        antigravity:
+          status: "pass"
+          artifact: ".codex/artifacts/antigravity-peer-loop-t900-rescore-and-next-tranche-antigravity-synthesis-20260526T031026Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 6. Added that T030 should evaluate removing runtime-to-draft SQL FKs rather than assuming a NOT NULL/RESTRICT migration."
+      notes:
+        - "Do not lift the strict score floor to 7 until data integrity, runtime reliability, and single-source-of-truth concerns around step identity are addressed or defensibly ruled out."
+        - "T009/T010/T011 remain blocked by human product/data decisions."
+        - "T012 implementation must not start before T030 source/data preflight and a Judge-approved allowed_files/test plan."
+        - "T013 webhook outbox should consume T020 WebhookDeliveryIntent but remains queued, not active."
+        - "T014 schema invariants require migration/data preflight and must not be started from review notes alone."
+      next_task: T030
+
+  - id: T030
+    type: scout
+    assignee: Scout
+    status: active
+    reasoning_hint: high
+    objective: "Preflight runtime step identity and draft step persistence before T012 implementation: map current step identity owners, order-based compatibility paths, published-snapshot data requirements, persistence/migration risks, tests, and exact allowed_files for the smallest safe Worker."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+      - "flows-clean-architecture-2026-05-25/01-data-schema-and-ownership.md"
+      - "flows-clean-architecture-2026-05-25/02-runtime-reliability.md"
+      - "backend/src/intric/flows/domain/flow.py"
+      - "backend/src/intric/flows/infrastructure/flow_repo.py"
+      - "backend/src/intric/flows/application/flow_service.py"
+      - "backend/src/intric/flows/application/flow_run_service.py"
+      - "backend/src/intric/flows/published_definition.py"
+      - "backend/src/intric/flows/runtime"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/tests/unittests/flows"
+      - "backend/tests/integration/flows"
+    constraints:
+      - "Read-only: no source edits, no test edits, no migrations, no deletion."
+      - "Stay in Flows proper; do not clean Flow AI Builder unless a Flow proper file directly depends on a shared Flow contract."
+      - "Do not implement T012."
+      - "Do not start retention, service-key identity, schema migration, or webhook outbox work."
+      - "Apply reuse-before-inventing: identify current owners and whether to reuse, deepen, move, merge, delete, or create."
+      - "Include persisted-data/source preflight for published snapshots missing step_id or assistant_id before deleting _build_preseed_steps(... fallback_steps=flow.steps)."
+      - "Do not propose flow_version_steps unless a real relational query need is proven."
+      - "Do not assume runtime rows should physically FK to mutable draft flow_steps; evaluate removing that FK versus enforcing NOT NULL/RESTRICT with source/data evidence."
+    expected_output:
+      - "Table: Concept | Current locations | Behavior differences | Canonical owner | Merge/delete path."
+      - "Source evidence for draft step persistence by id vs step_order, secret merge ownership, publish snapshot fields, run preseed fallback, result/attempt/checkpoint/rerun identity, and evidence/export identity."
+      - "Persisted-data preflight plan and runnable SQL for flow_versions.definition_json rows where any steps entry lacks step_id or assistant_id, including recommended stop threshold."
+      - "Decision tree for whether T012 can be a source-only Worker or must be preceded by a migration/schema task."
+      - "Exact red tests and verification commands for T012."
+      - "Proposed allowed_files for the smallest safe T012 Worker, or a stop recommendation if migration/product decisions are required."
+      - "Consolidation effect for the proposed Worker: reused existing owner, logic moved from, logic deleted, duplicate path removed, new code added, why existing owners were insufficient, guard/test preventing duplicate logic from returning, and net Flow logic surface area."
+      - "Explicit non-goals: no retention, no service-key identity, no webhook outbox, no schema migration, no Flow AI Builder cleanup except directly coupled Flow contract usage."
+    stop_if:
+      - "Persisted-data preflight cannot be run or specified safely."
+      - "Existing published snapshots missing step_id/assistant_id imply migration/schema work before source-only T012."
+      - "T012 would require changing runtime retention, service-key identity, webhook delivery, or Flow AI Builder behavior."
+      - "The first Worker cannot be scoped to reviewable allowed_files and behavior-focused tests."
+      - "The plan would create a parallel step identity implementation instead of reusing/deepening the published snapshot and FlowStep owners."
     receipt: null
 
   - id: T999
