@@ -23,7 +23,8 @@
     validationErrors = new Map(),
     onBuildWithAI,
     onSelectStep,
-    onStepsChanged
+    onMoveStep,
+    onRemoveStep
   }: {
     steps: FlowStep[];
     activeStepId: string | null;
@@ -31,7 +32,8 @@
     validationErrors?: Map<string, string[]>;
     onBuildWithAI?: () => void;
     onSelectStep?: (stepId: string | null) => void;
-    onStepsChanged?: (steps: FlowStep[]) => void;
+    onMoveStep?: (index: number, direction: -1 | 1) => void | Promise<void>;
+    onRemoveStep?: (index: number) => void | Promise<void>;
   } = $props();
 
   const mode = getFlowUserMode();
@@ -45,20 +47,6 @@
   let pendingRemoveIndex: number | null = $state(null);
   let pendingRemoveLabel = $state("");
   let pendingRemoveIsAssembly = $state(false);
-
-  function moveStep(index: number, direction: -1 | 1) {
-    const newIndex = index + direction;
-    if (newIndex < 0 || newIndex >= steps.length) return;
-
-    const updated = [...steps];
-    [updated[index], updated[newIndex]] = [updated[newIndex], updated[index]];
-
-    updated.forEach((step, i) => {
-      step.step_order = i + 1;
-    });
-
-    onStepsChanged?.(updated);
-  }
 
   function requestRemoveStep(index: number) {
     const targetStep = steps[index];
@@ -85,13 +73,9 @@
     return orders;
   });
 
-  function confirmRemove() {
+  async function confirmRemove() {
     if (pendingRemoveIndex === null) return;
-    const updated = steps.filter((_, i) => i !== pendingRemoveIndex);
-    updated.forEach((step, i) => {
-      step.step_order = i + 1;
-    });
-    onStepsChanged?.(updated);
+    await onRemoveStep?.(pendingRemoveIndex);
     showRemoveConfirm = false;
     pendingRemoveIndex = null;
     pendingRemoveIsAssembly = false;
@@ -196,8 +180,8 @@
           canMoveDown={index < steps.length - 1}
           hasValidationError={stepOrdersWithErrors.has(step.step_order)}
           onClick={() => onSelectStep?.(step.id ?? null)}
-          onMoveUp={() => moveStep(index, -1)}
-          onMoveDown={() => moveStep(index, 1)}
+          onMoveUp={() => void onMoveStep?.(index, -1)}
+          onMoveDown={() => void onMoveStep?.(index, 1)}
           onRemove={() => requestRemoveStep(index)}
         />
       {/each}

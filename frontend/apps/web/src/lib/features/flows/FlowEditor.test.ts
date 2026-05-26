@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { get } from "svelte/store";
 import { describe, expect, it, vi } from "vitest";
 
@@ -526,6 +527,78 @@ describe("FlowEditor step mutation commands", () => {
     } finally {
       editor.destroy();
     }
+  });
+
+  it("moves steps through the editor owner and remaps step-order references", async () => {
+    const secondStep = makeStep(2, {
+      input_bindings: { question: "Use {{step_1.output.text}}" }
+    });
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1), secondStep, makeStep(3)] }),
+      intric: makeIntric()
+    });
+    try {
+      await editor.moveStepAtIndex(0, 1);
+
+      const update = get(editor.state.update);
+      expect(update.steps.map((step) => step.id)).toEqual(["step-2", "step-1", "step-3"]);
+      expect(update.steps.map((step) => step.step_order)).toEqual([1, 2, 3]);
+      expect((update.steps[0].input_bindings as Record<string, unknown>).question).toBe(
+        "Use {{step_2.output.text}}"
+      );
+      expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(true);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("preserves active step identity across moves", async () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1), makeStep(2), makeStep(3)] }),
+      intric: makeIntric()
+    });
+    try {
+      editor.selectStep("step-1");
+
+      await editor.moveStepAtIndex(0, 1);
+
+      expect(get(editor.state.update).steps[1]?.id).toBe("step-1");
+      expect(get(editor.state.activeStepId)).toBe("step-1");
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("ignores invalid move indexes without changing the step array", async () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
+      intric: makeIntric()
+    });
+    try {
+      const originalSteps = get(editor.state.update).steps;
+
+      await editor.moveStepAtIndex(0, -1);
+      await editor.moveStepAtIndex(1, 1);
+      await editor.moveStepAtIndex(-1, 1);
+
+      expect(get(editor.state.update).steps).toBe(originalSteps);
+      expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(false);
+    } finally {
+      editor.destroy();
+    }
+  });
+});
+
+describe("FlowStepList ownership guard", () => {
+  it("does not own step order mutation", () => {
+    const source = readFileSync(
+      new URL("./components/FlowStepList.svelte", import.meta.url),
+      "utf8"
+    );
+
+    expect(source).not.toContain("onStepsChanged");
+    expect(source).not.toMatch(/\bstep\.step_order\s*=/);
+    expect(source).not.toMatch(/\bstep_order\s*:\s*(?:i|index|stepIndex)\s*\+\s*1/);
   });
 });
 

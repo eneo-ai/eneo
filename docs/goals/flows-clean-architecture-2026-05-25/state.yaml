@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T086
+active_task: T088
 
 tasks:
   - id: T001
@@ -8415,7 +8415,7 @@ tasks:
   - id: T086
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe frontend-state ownership slice from T016 after T014 is environment-blocked and T015 has no immediate API Worker."
     inputs:
@@ -8442,6 +8442,198 @@ tasks:
       - "Backend contract shape needed by the frontend slice is unstable."
       - "UX conflict behavior for form schema edits is undecided."
       - "The next task cannot be narrowed below a broad frontend sweep."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T22:10:01+02:00"
+      decision: approve_worker
+      summary: "Chose a narrow T016 frontend state ownership slice: route Flow step-list move/remove mutations through the existing FlowEditor owner instead of letting FlowStepList renumber and mutate FlowStep objects locally."
+      evidence:
+        - "frontend/apps/web/src/lib/features/flows/components/FlowStepList.svelte:49"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowStepList.svelte:56"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowStepList.svelte:60"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowStepList.svelte:88"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowStepList.svelte:91"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowStepList.svelte:94"
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts:479"
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts:766"
+        - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte:965"
+        - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte:1004"
+      commands:
+        - cmd: "python3 watchdog check"
+          status: pass
+          output: "schema_version=1 status=ok halt_blockers=[]"
+        - cmd: "sed/rg/nl reads for T016/T086, frontend-state standard, FlowStepList, FlowEditor, FlowEditor tests, route wiring, FlowRun dialog state owners"
+          status: pass
+      next_task: T087
+      review_tier: "Claude-only implementation gate: medium-risk frontend state ownership; no Antigravity unless Claude and Codex disagree or the slice crosses API/runtime/data/schema/final-audit boundaries."
+      disposition:
+        T014: "queued/environment-blocked until Docker/Postgres or another database preflight path is available."
+        T015: "queued; T085 found no immediate source-backed API Worker and service-key review/rerun wording remains product-gated."
+        T016: "queued broad placeholder; T087 is activated as the next narrow frontend state ownership sub-slice."
+        T901: "queued final docs Worker; do not start while runtime/API/schema/frontend architecture is still changing."
+        product_data_gated_tasks: "T009/T010/T011 and retention/service-key/review/rerun decisions remain blocked until state.yaml records owner decisions."
+      consolidation_effect:
+        reused_existing_owner: "FlowEditor as the existing draft step identity/order mutation owner."
+        logic_moved_from: "FlowStepList local move/remove renumbering."
+        logic_deleted: "Planned for T087: local FlowStepList mutation/renumbering branches."
+        duplicate_path_removed: "Planned for T087: component-side step ordering path parallel to FlowEditor.applyStepsWithSafeOrderRemap/removeStepAtIndex."
+        new_code_added: "Planned for T087: a narrow FlowEditor command for moving a step by index if existing commands cannot express that without leaking mutation to the route/component."
+        why_existing_owners_were_insufficient: "FlowEditor has safe order remapping and removal commands, but no dedicated move-by-index command; FlowStepList filled the gap by mutating FlowStep objects."
+        guard_preventing_duplicate_logic_from_returning: "FlowEditor behavior tests plus a focused source guard that FlowStepList does not assign step_order or expose onStepsChanged."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+
+  - id: T087
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Route Flow step-list move/remove mutations through FlowEditor so draft step identity/order has one frontend owner."
+    inputs:
+      - "T086 receipt"
+      - "docs/engineering/frontend-state-standard.md"
+      - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowStepList.svelte"
+      - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte"
+      - "frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts"
+      - "frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowStepList.svelte"
+      - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte"
+    constraints:
+      - "Before implementation and before commit, check the watchdog blocker file."
+      - "Do not touch backend API/OpenAPI/generated-client, schema/migrations, retention, service-key identity/review/rerun, webhook outbox, Flow AI Builder, or docs/flows/architecture.md."
+      - "Reuse/deepen FlowEditor as the canonical frontend owner for draft step identity/order mutations."
+      - "Do not create a new helper/manager/module for step ordering unless FlowEditor cannot absorb the command."
+      - "Keep FlowStepList a UI component: selection, confirmation UI, and event forwarding only."
+      - "Preserve safe token/order remapping behavior through FlowEditor.applyStepsWithSafeOrderRemap."
+      - "Do not change form-schema conflict behavior, run-dialog upload/recording semantics, or backend contract shape."
+    verify:
+      - "cd frontend/apps/web && bun test src/lib/features/flows/FlowEditor.test.ts"
+      - "cd frontend/apps/web && bun run check"
+      - "git diff --check"
+      - "git diff -- frontend/apps/web/src/lib/features/flows/FlowEditor.ts frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts frontend/apps/web/src/lib/features/flows/components/FlowStepList.svelte 'frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte' | rg -n '^\\+.*(as any|@ts-ignore|TODO|helper|manager|processor|common|misc|dict\\[str, Any\\]|Any\\b)'"
+      - "rg -n 'onStepsChanged|step\\.step_order\\s*=|\\.forEach\\(\\(step, i\\).*step_order' frontend/apps/web/src/lib/features/flows/components/FlowStepList.svelte"
+    review:
+      tier: "Claude-only commit gate after diff is stable."
+      antigravity: "Skip unless Claude and Codex disagree or the slice expands across API/runtime/data/schema/final-audit boundaries."
+    stop_if:
+      - "The change requires backend API/OpenAPI/generated-client updates."
+      - "The component cannot stop mutating step order without a broad page-state rewrite."
+      - "Safe prompt/input binding remapping would be bypassed or weakened."
+      - "Verification reveals unrelated frontend check failures that cannot be isolated with focused tests."
+    consolidation_effect:
+      reused_existing_owner: "FlowEditor draft step mutation owner."
+      logic_moved_from: "FlowStepList local move/remove renumbering."
+      logic_deleted: "FlowStepList step_order mutation and generic onStepsChanged payload path."
+      duplicate_path_removed: "Component-side step ordering path parallel to FlowEditor.applyStepsWithSafeOrderRemap/removeStepAtIndex."
+      new_code_added: "Only a FlowEditor move-by-index command if required by the UI; no new module/class."
+      why_existing_owners_were_insufficient: "FlowEditor owns removal and safe remapping but lacks a direct move command, so the component currently constructs reordered steps itself."
+      guard_preventing_duplicate_logic_from_returning: "FlowEditor tests for move behavior and a source guard that FlowStepList no longer assigns step_order or exposes onStepsChanged."
+      net_flow_logic_surface_area: "reduced"
+      if_increased_why: "N/A"
+    receipt:
+      result: done
+      completed_at: "2026-05-26T22:18:45+02:00"
+      summary: "Centralized draft step-list move/remove ownership in FlowEditor. FlowStepList now forwards move/remove intent instead of constructing reordered step arrays or mutating step_order. The route delegates to FlowEditor.moveStepAtIndex/removeStepAtIndex, so safe token/order remapping remains the one path for list reorders."
+      files_changed:
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts"
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowStepList.svelte"
+        - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte"
+        - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      evidence:
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts:489"
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts:1016"
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts:532"
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts:554"
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts:597"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowStepList.svelte:51"
+        - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte:965"
+        - "frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte:976"
+      commands:
+        - cmd: "python3 watchdog check"
+          status: pass
+          output: "schema_version=1 status=ok halt_blockers=[]"
+        - cmd: "cd frontend/apps/web && bun test src/lib/features/flows/FlowEditor.test.ts"
+          status: pass
+          output: "40 pass, 0 fail"
+        - cmd: "cd frontend/apps/web && bunx prettier --check src/lib/features/flows/FlowEditor.ts src/lib/features/flows/FlowEditor.test.ts src/lib/features/flows/components/FlowStepList.svelte 'src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte'"
+          status: pass
+          output: "All matched files use Prettier code style."
+        - cmd: "cd frontend/apps/web && bunx eslint src/lib/features/flows/FlowEditor.ts src/lib/features/flows/FlowEditor.test.ts src/lib/features/flows/components/FlowStepList.svelte 'src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte'"
+          status: pass
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "rg -n 'onStepsChanged' frontend/apps/web/src -g '!**/*.test.ts'"
+          status: pass
+          output: "No matches."
+        - cmd: "rg -n 'step\\.step_order\\s*=|\\.forEach\\(\\(step, i\\).*step_order' frontend/apps/web/src/lib/features/flows/components/FlowStepList.svelte"
+          status: pass
+          output: "No matches."
+        - cmd: "git diff -- frontend/apps/web/src/lib/features/flows/FlowEditor.ts frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts frontend/apps/web/src/lib/features/flows/components/FlowStepList.svelte 'frontend/apps/web/src/routes/(app)/spaces/[spaceId]/flows/[flowId]/+page.svelte' | rg -n '^\\+.*(as any|@ts-ignore|TODO|helper|manager|processor|common|misc|dict\\[str, Any\\]|Any\\b)'"
+          status: pass
+          output: "No matches."
+        - cmd: "cd frontend/apps/web && bun run check"
+          status: fail
+          output: "Existing unrelated diagnostics in packages/intric-js/src/client/stream.js and frontend flowRunProgress.test.ts; no T087 changed-file diagnostics."
+      review:
+        claude:
+          status: green
+          min_score: 8
+          artifact: ".codex/artifacts/claude-peer-loop-t087-step-list-ownership-implementation-review-20260526T201710Z.md"
+          valid_concerns_addressed:
+            - "Removed the redundant FlowStepList moveStep wrapper."
+            - "Added active-step preservation coverage."
+            - "Added a source guard test preventing FlowStepList from regrowing onStepsChanged or local step_order mutation."
+          disagreements: []
+        antigravity:
+          status: skipped
+          reason: "Tiered review rule: medium-risk frontend state ownership, Claude was green, and no API/runtime/data/schema/final-audit boundary was crossed."
+      consolidation_effect:
+        reused_existing_owner: "FlowEditor."
+        logic_moved_from: "FlowStepList and route-side generic reordered-step payload handling."
+        logic_deleted: "FlowStepList local step_order assignment/renumbering and the onStepsChanged prop path."
+        duplicate_path_removed: "Component-side step reorder/remove mutation parallel to FlowEditor.applyStepsWithSafeOrderRemap/removeStepAtIndex."
+        new_code_added: "FlowEditor.moveStepAtIndex plus behavior/source-guard tests inside existing FlowEditor test ownership."
+        why_existing_owners_were_insufficient: "FlowEditor already owned removal and safe remapping but lacked a move-by-index command for the list UI, which forced the component to build reordered step arrays."
+        guard_preventing_duplicate_logic_from_returning: "FlowEditor behavior tests assert move remapping, active-step preservation, invalid no-op behavior, and FlowStepList source does not own onStepsChanged or step_order mutation."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+      naming_gate:
+        new_names_clear_for_architecture_doc: true
+        notes: "moveStepAtIndex is domain-specific to FlowEditor draft step order mutation and fits the final where-to-change-X table under changing draft step order."
+
+  - id: T088
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: medium
+    objective: "Choose the next safe task after T087 step-list ownership consolidation."
+    inputs:
+      - "T087 receipt"
+      - "T016 broad frontend state brief"
+      - "T014/T015 receipts"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only except this board receipt/task transition."
+      - "Before activating any Worker, check the watchdog blocker file."
+      - "Respect tiered review: local validation for low-risk docs/routing, Claude-only for medium-risk frontend/API cleanup, Claude plus optional Antigravity only for high-risk/cross-boundary work."
+      - "Do not start retention, service-key identity/review/rerun, schema migration, webhook outbox, Flow AI Builder cleanup, or docs/flows/architecture.md unless the board explicitly unblocks it."
+      - "Prefer reuse/move/merge/delete through canonical owners over creating new frontend logic."
+    expected_output:
+      - "Decision: approve_worker | scout_first | blocked."
+      - "Exact next task objective, allowed_files, verification commands, review tier, stop_if, and consolidation effect."
+      - "Disposition of T014/T015/T016/T901 and blocked product/data tasks."
+    stop_if:
+      - "The next task requires Docker/Postgres, product/data owner decisions, or public API/OpenAPI/generated-client work that lacks a current source-backed brief."
+      - "The next frontend slice cannot be narrowed below a broad sweep."
     receipt: null
 
   - id: T901

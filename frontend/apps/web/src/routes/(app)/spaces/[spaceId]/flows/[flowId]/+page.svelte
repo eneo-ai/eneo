@@ -962,14 +962,25 @@
                     flowEditor.selectStep(stepId);
                   }
                 }}
-                onStepsChanged={async (updatedSteps) => {
+                onMoveStep={async (index, direction) => {
                   try {
-                    await flowEditor.applyStepsWithSafeOrderRemap(updatedSteps);
+                    await flowEditor.moveStepAtIndex(index, direction);
                   } catch (error) {
                     const message =
                       error instanceof IntricError
                         ? error.getReadableMessage()
                         : "Kunde inte uppdatera stegordning.";
+                    toast.error(message);
+                  }
+                }}
+                onRemoveStep={async (index) => {
+                  try {
+                    await flowEditor.removeStepAtIndex(index);
+                  } catch (error) {
+                    const message =
+                      error instanceof IntricError
+                        ? error.getReadableMessage()
+                        : "Kunde inte ta bort steget.";
                     toast.error(message);
                   }
                 }}
