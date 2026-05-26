@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T082
+active_task: T086
 
 tasks:
   - id: T001
@@ -8084,7 +8084,7 @@ tasks:
   - id: T082
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe Flow clean-architecture task after output-format typed-boundary cleanup."
     inputs:
@@ -8112,6 +8112,336 @@ tasks:
       - "The next safe task requires product/data decisions not recorded in state.yaml."
       - "The next task cannot be scoped to a small reviewable allowed_files set."
       - "The next task would widen into API/OpenAPI/generated, migrations, retention, service-key identity/review/rerun, webhook outbox, or Flow AI Builder without a source-backed board gate."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T22:12:00+02:00"
+      decision: "scout_first"
+      summary: "Selected a read-only schema preflight before any T014 migration implementation. T014 is the next highest-ROI queued tranche after step identity, webhook outbox, and output-format isolation, but its current brief has empty allowed_files/verify and crosses schema, indexes, constraints, data preflight, and lock risk. The next task must map current source/DB evidence and split the smallest safe Worker."
+      evidence:
+        - "state.yaml has T014 queued with empty allowed_files and verify."
+        - "state.yaml has T015 and T016 queued, but T015 crosses public API/OpenAPI/generated-client/service-key journey and T016 is broad frontend ownership; both still need narrower source-backed splits."
+        - "state.yaml keeps T009/T010/T011 blocked by product/data decisions."
+        - "T901 remains queued final docs and must not start while implementation architecture is still changing."
+      commands:
+        - command: "python3 watchdog blocker check"
+          status: pass
+          output: "schema_version=1 status=ok halt_blockers=[]"
+        - command: "cd backend && uv run python - <<'PY' ... print active/queued/blocked tasks ... PY"
+          status: pass
+          output: "Confirmed active T082; queued T014/T015/T016/T901; blocked T009/T010/T011."
+        - command: "sed/rg reads for T014/T015/T016, roadmap phases, and final-docs constraints"
+          status: pass
+      rejected_or_deferred:
+        - "No T014 Worker until DB/source preflight produces allowed_files, tests, lock/index posture, and rollback/downgrade guidance."
+        - "No T015 API/OpenAPI/generated-client work in this transition."
+        - "No T016 frontend state work before a narrower Judge split."
+        - "No retention, service-key identity/review/rerun, materialized webhook snapshot, or final docs work."
+      next_task: T083
+      review_tier: "Local validation for the read-only Scout; any migration Worker approved from it requires full Claude plan/commit gates and optional Antigravity because schema/data decisions are high-risk."
+      consolidation_effect:
+        reused_existing_owner: "T014 schema/data-integrity tranche and existing DB/source owners."
+        logic_moved_from: "None."
+        logic_deleted: "None."
+        duplicate_path_removed: "None."
+        new_code_added: "No source code; one read-only Scout task."
+        why_existing_owners_were_insufficient: "Existing source owners may be sufficient, but T014 lacks preflight evidence to safely choose migration/constraint/index edits."
+        guard_preventing_duplicate_logic_from_returning: "T083 must define source-backed tests/guards before implementation."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+
+  - id: T083
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Preflight T014 schema invariants before migration work: published pointer FK, files.user_id FK drift, measured queued/stale indexes, and tenant FKs that clarify normal correctness."
+    inputs:
+      - "T014 queued brief"
+      - "T082 receipt"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/alembic/versions"
+      - "backend/src/intric/flows"
+      - "backend/tests"
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only except this board receipt/task transition."
+      - "Use SQLAlchemy/Alembic, Supabase Postgres, and complexity guidance for migration/index/query-shape analysis."
+      - "No source edits, test edits, migrations, OpenAPI/generated-client changes, frontend edits, product/data decisions, or docs/flows/architecture.md edits."
+      - "Do not start T014 implementation; produce evidence, allowed_files, verification commands, stop_if rules, and review tier for the smallest safe Worker."
+      - "Do not propose indexes without source query shape plus catalog/EXPLAIN evidence."
+      - "Do not propose constraints without data preflight and downgrade/lock posture."
+      - "Do not broaden into retention, service-key identity/review/rerun, materialized webhook snapshots, or Flow AI Builder cleanup."
+    expected_output:
+      - "Current schema/constraint/index inventory with file:line and catalog evidence."
+      - "Data-preflight SQL and local results for published pointer FK candidates, files.user_id FK drift, queued/stale run query/index shape, and tenant FK candidates."
+      - "Classification of each T014 sub-scope as approve_worker, needs_preflight, blocked_environment, or reject."
+      - "Smallest safe Worker with allowed_files, tests, verification commands, rollback/downgrade notes, and lock/index posture."
+      - "Consolidation effect using the reuse-before-inventing protocol."
+    stop_if:
+      - "Docker/Postgres is unavailable and the Scout cannot get required catalog/data evidence."
+      - "Preflight finds violating data that requires human/product/data decision before migration."
+      - "The safe Worker cannot be narrowed below multiple unrelated schema changes."
+      - "The next step would require product/data decisions still blocked in state.yaml."
+    receipt:
+      result: blocked_environment
+      completed_at: "2026-05-26T22:18:00+02:00"
+      summary: "Stopped T014 schema preflight before implementation because required DB/catalog evidence is unavailable in this Codex host: Docker contexts point at missing sockets and local psql/pg_isready are not installed. Source evidence confirms T014 crosses constraints, files ownership, and partial-index/query-shape decisions that should not be inferred without catalog/data checks."
+      skills_used:
+        - "complexity-optimizer: confirmed index/query-shape changes need real data shape and measured evidence."
+        - "supabase-postgres-best-practices: confirmed missing/partial index guidance requires WHERE/JOIN shape plus catalog/EXPLAIN evidence."
+        - "sqlalchemy-alembic-expert-best-practices-code-review: confirmed concurrent-index and NOT VALID/validate-split posture for future migration work."
+      source_evidence:
+        - "backend/src/intric/database/tables/flow_tables.py:141-181 defines flows.published_version as nullable integer without a published-version FK."
+        - "backend/src/intric/database/tables/flow_tables.py:326-348 defines flow_versions keyed by (flow_id, version) and tenant-linked through fk_flow_versions_flow_tenant."
+        - "backend/src/intric/database/tables/files_table.py:24-38 still keeps legacy files.user_id nullable with ON DELETE SET NULL alongside owner_type/owner_user_id/owner_api_key_id."
+        - "backend/alembic/versions/20260411_flow_run_identity_and_idempotency.py:126-185 added typed file owner identity while preserving files.user_id."
+        - "backend/src/intric/database/tables/flow_tables.py:687-692 has a partial running-run updated_at index but no source-backed queued stale index decision in this Scout."
+        - "backend/src/intric/flows/infrastructure/flow_run_repo.py:1617-1682 queries stale queued/running runs and claim paths; these require EXPLAIN/catalog checks before new index work."
+        - "backend/src/intric/flows/infrastructure/flow_run_webhook_delivery_repo.py:90-115 and backend/src/intric/database/tables/flow_tables.py:1734-1743 already show pending-delivery partial-index patterns for comparison."
+      commands:
+        - command: "docker ps --format '{{.Names}}'"
+          status: blocked_environment
+          output: "Docker API unavailable at /Users/ccimen/.orbstack/run/docker.sock."
+        - command: "docker context ls"
+          status: pass
+          output: "default, desktop-linux, and orbstack contexts exist, but sockets are missing."
+        - command: "ls -l /var/run/docker.sock /Users/ccimen/.orbstack/run/docker.sock /Users/ccimen/.docker/run/docker.sock"
+          status: blocked_environment
+          output: "/var/run/docker.sock points to missing OrbStack socket; Docker Desktop socket also missing."
+        - command: "pg_isready -h localhost -p 5432 -U postgres"
+          status: blocked_environment
+          output: "pg_isready not installed."
+        - command: "PGPASSWORD=postgres psql -h localhost -p 5432 -U postgres -d postgres -c 'select current_database(), count(*) from pg_class;'"
+          status: blocked_environment
+          output: "psql not installed."
+        - command: "rg/nl source reads for flow_tables.py, files_table.py, flow_run_repo.py, flow_run_webhook_delivery_repo.py, flow_run_audit_outbox_repo.py, and relevant Alembic migrations"
+          status: pass
+      classification:
+        published_pointer_fk: "needs_preflight: requires data check for flows.published_version values without matching flow_versions row and FK lock/downgrade design."
+        files_user_id_fk_drift: "needs_preflight: requires data check for files.user_id vs owner_user_id/owner_api_key_id and caller/persisted-data preflight before dropping or tightening legacy user_id behavior."
+        queued_stale_indexes: "needs_preflight: requires catalog/EXPLAIN evidence for stale queued/running queries before any partial index proposal."
+        tenant_fks: "needs_preflight: requires catalog/data evidence to avoid redundant or broad tenant-hardening."
+      stop_reason: "Required DB catalog/data evidence is unavailable; implementing T014 from source-only evidence would violate the T083 stop_if and the Postgres/Alembic skills."
+      next_task: T084
+      consolidation_effect:
+        reused_existing_owner: "Existing SQLAlchemy models, Alembic migrations, and repository query owners as evidence."
+        logic_moved_from: "None."
+        logic_deleted: "None."
+        duplicate_path_removed: "None."
+        new_code_added: "No source code; board receipt only."
+        why_existing_owners_were_insufficient: "They expose candidates, but DB/catalog evidence is required before changing schema owners."
+        guard_preventing_duplicate_logic_from_returning: "Future T014 Worker must include data preflight, catalog/EXPLAIN evidence, and migration tests."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+
+  - id: T084
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the next safe non-DB Flow clean-architecture task while T014 schema preflight is environment-blocked."
+    inputs:
+      - "T083 receipt"
+      - "T015 queued brief"
+      - "T016 queued brief"
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only except this board receipt/task transition."
+      - "Before task transition or activating a Worker, check the watchdog blocker file."
+      - "Do not start T014 until Docker/Postgres catalog/data preflight is available."
+      - "Do not start retention, service-key identity/review/rerun, materialized webhook snapshots, schema migrations, or final docs."
+      - "If choosing T015 or T016, split to the smallest source-backed Scout/Worker and preserve reuse-before-inventing evidence."
+      - "Respect tiered review."
+    expected_output:
+      - "Decision: approve_worker | scout_first | blocked | final_audit_not_ready"
+      - "Next task objective, allowed_files, verification commands, review tier, stop_if, and consolidation effect."
+      - "Explicit disposition of T014/T015/T016/T901 and blocked product/data tasks."
+    stop_if:
+      - "All remaining safe non-DB tasks require decisions or unavailable tooling."
+      - "The next task cannot be narrowed below a broad API/frontend sweep."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T22:24:00+02:00"
+      decision: "scout_first"
+      summary: "With T014 schema preflight blocked by unavailable DB tooling, chose a read-only T015 API consumer DX Scout. T015 is public API/OpenAPI/generated-client sensitive and broad, so implementation must not start before mapping current runtime paths, error codes, examples, generated-client impact, and the service-key journey boundaries that remain product-gated."
+      evidence:
+        - "T014 remains queued but DB/catalog evidence is unavailable from T083."
+        - "T015 is queued with empty allowed_files/verify and crosses public API/OpenAPI/generated client and service-key journey tests."
+        - "T016 is queued and broad frontend state ownership; it should follow a source-backed split and should not compensate for unknown API contract gaps."
+        - "T009/T010/T011 remain blocked by product/data decisions; T901 remains final-docs-only."
+      commands:
+        - command: "python3 watchdog blocker check"
+          status: pass
+          output: "schema_version=1 status=ok halt_blockers=[]"
+        - command: "sed/rg reads for T014/T015/T016/T901 and roadmap API/frontend phases"
+          status: pass
+        - command: "sed -n '1,220p' /Users/ccimen/.agents/skills/fastapi/SKILL.md"
+          status: pass
+          output: "Loaded FastAPI router/schema/OpenAPI guidance for the upcoming API Scout."
+      rejected_or_deferred:
+        - "No T014 schema/migration work until DB preflight is available."
+        - "No direct T015 implementation before source/API/generated-client mapping."
+        - "No T016 frontend cleanup before a narrowed source-backed split."
+        - "No service-key identity/review/rerun product decision work."
+      next_task: T085
+      review_tier: "Local validation for read-only Scout. Any T015 Worker that touches API/OpenAPI/generated-client requires full Claude gates and optional Antigravity only if the decision is disputed or expensive to undo."
+      consolidation_effect:
+        reused_existing_owner: "T015 API consumer DX tranche, Flow API routers/models/tests, generated-client pipeline, and service-key published runtime owner."
+        logic_moved_from: "None."
+        logic_deleted: "None."
+        duplicate_path_removed: "None."
+        new_code_added: "No source code; one read-only Scout task."
+        why_existing_owners_were_insufficient: "The current T015 brief is too broad and has no allowed_files/verify; source mapping is needed before choosing changes."
+        guard_preventing_duplicate_logic_from_returning: "T085 must define exact contract/API tests and generated-client checks before implementation."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+
+  - id: T085
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Preflight T015 API consumer DX before public API/OpenAPI/generated-client work: runtime paths, stable error codes, examples, generated-client alignment, and service-key journey contract tests."
+    inputs:
+      - "T015 queued brief"
+      - "T084 receipt"
+      - "backend/src/intric/flows/api"
+      - "backend/src/intric/flows/application"
+      - "backend/tests/unittests/flows"
+      - "backend/tests/integration/flows"
+      - "backend/tests/integration/test_api_key_service_keys.py"
+      - "backend/tests/unit/test_flow_openapi_contract.py"
+      - "frontend/packages/intric-js"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only except this board receipt/task transition."
+      - "Use FastAPI guidance for router/schema/OpenAPI/error-contract analysis."
+      - "No source edits, test edits, OpenAPI regeneration, generated-client changes, frontend edits, schema migrations, or docs/flows/architecture.md edits."
+      - "Do not reopen service-key identity/review/rerun product decisions blocked in T009/T010/T011."
+      - "Do not change /published/ ownership; verify whether it remains the service-key-safe runtime projection."
+      - "Prefer reuse/deepen existing Flow API error adapters, route owners, generated client updater, and contract tests before proposing new code."
+    expected_output:
+      - "Inventory: runtime consumer journey step, current endpoint/test/client owner, DX gap, product-decision dependency, canonical owner, proposed merge/delete/add path."
+      - "Classification of findings as approve_worker, needs_preflight, blocked_product_decision, or keep_temporarily."
+      - "Exact smallest safe Worker with allowed_files, tests, generated-client/OpenAPI commands, review tier, stop_if, and consolidation effect."
+      - "Explicit non-goals for service-key identity/review/rerun, retention, schema migration, webhook outbox, frontend state ownership, and final docs."
+    stop_if:
+      - "The next API change requires product/service-key decisions still blocked in state.yaml."
+      - "Generated-client pipeline is unavailable in a way that prevents safe API Worker verification."
+      - "The safe Worker cannot be narrowed below a broad API sweep."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T22:34:00+02:00"
+      decision: "no_api_worker_now"
+      summary: "Mapped the T015 API consumer surface and did not approve an immediate API/OpenAPI/generated-client Worker. The published runtime projection, run contract, canonical flow-run paths, GeneralError/OpenAPI guards, SDK endpoint helpers, and service-key runtime projection tests are already covered by local non-DB verification. Remaining service-key review/rerun wording and policy questions overlap T009/T011 blocked product decisions and should not be changed speculatively."
+      inventory:
+        - consumer_step: "Discover published flow"
+          current_owner: "flow_authoring_router.get_published_flow_runtime + FlowAssembler.to_runtime_public + FlowRuntimePublic"
+          evidence: "backend/src/intric/flows/api/flow_authoring_router.py:444; backend/src/intric/flows/api/flow_assembler.py:77; backend/src/intric/flows/api/flow_models.py:759"
+          status: "keep_temporarily"
+          reason: "Current owner is canonical and tested."
+        - consumer_step: "Understand inputs and version pin"
+          current_owner: "FlowRunContractService and /run-contract/"
+          evidence: "backend/tests/unit/test_flow_openapi_contract.py:1041; backend/tests/unittests/flows/test_flow_upload_router.py:59"
+          status: "keep_temporarily"
+          reason: "Contract owner is already canonical; no duplicate input-policy surface remains."
+        - consumer_step: "Service-key published runtime journey"
+          current_owner: "published runtime projection and service-key integration tests"
+          evidence: "backend/tests/integration/test_api_key_service_keys.py:760; backend/tests/integration/test_api_key_service_keys.py:784-842"
+          status: "keep_temporarily"
+          reason: "Current behavior is covered; broader service-key identity/review/rerun alignment remains blocked."
+        - consumer_step: "OpenAPI/GeneralError/API examples"
+          current_owner: "test_flow_openapi_contract.py"
+          evidence: "backend/tests/unit/test_flow_openapi_contract.py:640-780; backend/tests/unit/test_flow_openapi_contract.py:961; backend/tests/unit/test_flow_openapi_contract.py:2112-2172"
+          status: "keep_temporarily"
+          reason: "Local OpenAPI contract tests pass."
+        - consumer_step: "Generated SDK helper paths"
+          current_owner: "frontend/packages/intric-js/src/endpoints/flows.js and update.js"
+          evidence: "frontend/packages/intric-js/src/endpoints/flows.js:375-394; frontend/packages/intric-js/src/endpoints/flows.js:605-854; frontend/packages/intric-js/update.js:103-181"
+          status: "keep_temporarily"
+          reason: "SDK endpoint/update tests and type-smoke pass."
+        - consumer_step: "Service-key review/resume/rerun policy"
+          current_owner: "T009/T011 product decision gate"
+          evidence: "state.yaml T009/T011 blocked_reason=needs_human_product_decision; backend/src/intric/flows/api/flow_run_execution_router.py:75-81 and :176-189"
+          status: "blocked_product_decision"
+          reason: "Do not change public behavior or promises until product decision is recorded."
+      commands:
+        - command: "python3 watchdog blocker check"
+          status: pass
+          output: "schema_version=1 status=ok halt_blockers=[]"
+        - command: "sed -n '1,220p' /Users/ccimen/.agents/skills/fastapi/SKILL.md"
+          status: pass
+          output: "Loaded FastAPI guidance for router/schema/OpenAPI analysis."
+        - command: "rg/nl source reads for Flow API routers, flow_models.py, flow_assembler.py, OpenAPI tests, service-key tests, and intric-js endpoint/update files"
+          status: pass
+        - command: "cd backend && uv run pytest tests/unit/test_flow_openapi_contract.py -q"
+          status: pass
+          output: "60 passed, 15 unrelated deprecation warnings."
+        - command: "cd frontend/packages/intric-js && bun test update.test.js src/endpoints/flows.test.js"
+          status: pass
+          output: "35 pass."
+        - command: "cd frontend/packages/intric-js && bun run check"
+          status: pass
+      rejected_or_deferred:
+        - "No public API/OpenAPI/generated-client changes without a concrete current gap."
+        - "No service-key review/resume/rerun policy changes while T009/T011 remain blocked."
+        - "No frontend state work folded into the API Scout."
+        - "No T014 schema work while DB preflight remains unavailable."
+      next_task: T086
+      review_tier: "Local validation only for the Scout. Future API/OpenAPI/generated-client Worker still requires full Claude gates and optional Antigravity only for disputed or expensive-to-undo decisions."
+      consolidation_effect:
+        reused_existing_owner: "Flow API routers/models/OpenAPI tests, FlowAssembler runtime paths, generated SDK updater/helpers, and T009/T011 decision gate."
+        logic_moved_from: "None."
+        logic_deleted: "None."
+        duplicate_path_removed: "None."
+        new_code_added: "No source code; board receipt only."
+        why_existing_owners_were_insufficient: "They appear sufficient for current T015 non-DB evidence; product-gated policy remains outside implementation scope."
+        guard_preventing_duplicate_logic_from_returning: "Existing OpenAPI/SDK/service-key tests; future T015 Worker must name a concrete failing gap first."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+
+  - id: T086
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe frontend-state ownership slice from T016 after T014 is environment-blocked and T015 has no immediate API Worker."
+    inputs:
+      - "T016 queued brief"
+      - "T085 receipt"
+      - "frontend/apps/web/src/lib/features/flows"
+      - "frontend/packages/intric-js"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only except this board receipt/task transition."
+      - "Before activating a Worker, check the watchdog blocker file."
+      - "Do not touch backend API/OpenAPI/generated-client, schema/migrations, retention, service-key identity/review/rerun, webhook outbox, Flow AI Builder, or docs/flows/architecture.md."
+      - "Split T016 to the smallest source-backed frontend state ownership Worker."
+      - "Prefer reusing existing frontend state/config owners before adding modules."
+    expected_output:
+      - "Decision: approve_worker | scout_first | blocked"
+      - "Exact next frontend task objective, allowed_files, verification commands, review tier, stop_if, and consolidation effect."
+      - "Explicit disposition of T014/T015/T016/T901 and blocked product/data tasks."
+    stop_if:
+      - "Backend contract shape needed by the frontend slice is unstable."
+      - "UX conflict behavior for form schema edits is undecided."
+      - "The next task cannot be narrowed below a broad frontend sweep."
     receipt: null
 
   - id: T901
