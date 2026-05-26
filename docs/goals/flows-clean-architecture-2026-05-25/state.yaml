@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T059
+active_task: T060
 
 tasks:
   - id: T001
@@ -5836,7 +5836,7 @@ tasks:
   - id: T059
     type: scout
     assignee: Scout
-    status: active
+    status: done
     reasoning_hint: high
     objective: "scout(flows): preflight remaining draft step id-owned persistence."
     inputs:
@@ -5873,6 +5873,100 @@ tasks:
       - "Persisted data or frontend caller evidence is insufficient to choose id semantics."
       - "The clean path requires schema migration or OpenAPI/generated-client changes before a Judge approves exact scope."
       - "The plan would add a parallel step identity path instead of deepening canonical Flow authoring/API/repository owners."
+    receipt:
+      result: done
+      summary: "Preflighted the remaining draft step id-owned authoring update work. Confirmed FlowStep.id already exists and is published to clients, but FlowUpdateRequest reuses FlowStepCreateRequest without id, FlowAssembler drops id, FlowService._merge_step_secrets selects stored configs by step_order, FlowRepository._sync_flow_steps syncs rows by step_order, and FlowEditor omits id from its PATCH diff despite storing ids and stripping temp ids. The first Worker should not be backend-only; it should include backend API/service/repository, generated client, and FlowEditor payload changes after a Judge approves exact id-less update semantics."
+      evidence:
+        - "docs/goals/flows-clean-architecture-2026-05-25/notes/t059-draft-step-id-preflight.md"
+        - "backend/src/intric/flows/domain/flow.py:39"
+        - "backend/src/intric/flows/api/flow_models.py:447"
+        - "backend/src/intric/flows/api/flow_models.py:530"
+        - "backend/src/intric/flows/api/flow_assembler.py:39"
+        - "backend/src/intric/flows/application/flow_service.py:673"
+        - "backend/src/intric/flows/infrastructure/flow_repo.py:745"
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts:74"
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts:109"
+        - "frontend/apps/web/src/lib/core/editing/getDiff.ts:201"
+      decision: "activate T060"
+      spawned_tasks:
+        - id: T060
+          type: judge
+          title: "judge(flows): choose draft step id-owned authoring update worker"
+          rationale: "The safe implementation crosses public API schema, repository/service behavior, generated client, and FlowEditor payload ownership, so Judge must pin exact semantics and allowed_files before a Worker edits source."
+      consolidation_effect:
+        reused_existing_owner: "FlowStep.id, Flow authoring API schemas, FlowAssembler, FlowService._merge_step_secrets, FlowRepository._sync_flow_steps, and FlowEditor."
+        logic_moved_from: "None in T059; proposed Worker should move update identity from step_order-owned matching to id-owned matching inside existing owners."
+        logic_deleted: "None in T059; proposed Worker should remove order-as-identity behavior where persisted ids are available."
+        duplicate_path_removed: "None in T059; proposed Worker should remove the hidden split where clients receive step ids but generated update contracts and FlowEditor payloads drop them."
+        new_code_added: "T059 note only."
+        why_existing_owners_were_insufficient: "Existing owners are sufficient for implementation; T060 must decide whether an update-specific draft step request schema is needed because create-step and update-step contracts are currently conflated."
+        guard_preventing_duplicate_logic_from_returning: "Recommended service reorder-secret test, repository id-preservation integration test, API model/assembler tests, and FlowEditor payload test."
+        net_flow_logic_surface_area: "preserved"
+      naming_gate:
+        result: "pass"
+        notes:
+          - "Recommended domain field remains FlowStep.id."
+          - "If a new schema is needed, prefer a draft authoring/update-axis name such as FlowDraftStepUpdateRequest."
+          - "Avoid vague identity names such as step_key, step_ref, or step_handle."
+      architecture_doc_readiness: "Captured enough ownership evidence for the final docs/flows/architecture.md Draft Flow authoring and where-to-change-X sections without writing that doc during active refactors."
+      commands:
+        - cmd: "python3 -m json.tool /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          result: pass
+          output: "watchdog status ok; no blockers"
+        - cmd: "rg updated maintainer-map/naming/reuse/final-docs sections in goal.md, roadmap-and-taskfiles.md, new-codex-session-prompt.md, state.yaml"
+          result: pass
+          output: "Confirmed Human Maintainer Map and Naming Gate, T901 final docs task, and reuse/move/merge/delete rules."
+        - cmd: "sed exact updated goal/session sections and active T059/T901 state block"
+          result: pass
+          output: "Re-read updated durable instructions before continuing."
+        - cmd: "nl/rg source evidence for FlowStep.id, Flow update schema, assembler, service secret merge, repository sync, database step ids, generated schema, FlowEditor diff owner, ResourceEditor getDiff, and materialization order refs"
+          result: pass
+          output: "Confirmed id exists but authoring update path remains order-owned and frontend PATCH currently drops ids."
+        - cmd: "git status --short --branch"
+          result: pass
+          output: "Only known unrelated dirty/untracked baseline before T059 note/state edits."
+      next_task: T060
+
+  - id: T060
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "judge(flows): choose draft step id-owned authoring update worker."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t059-draft-step-id-preflight.md"
+      - "backend/src/intric/flows/domain/flow.py"
+      - "backend/src/intric/flows/api/flow_models.py"
+      - "backend/src/intric/flows/api/flow_assembler.py"
+      - "backend/src/intric/flows/application/flow_service.py"
+      - "backend/src/intric/flows/infrastructure/flow_repo.py"
+      - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts"
+      - "frontend/apps/web/src/lib/core/editing/getDiff.ts"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t060-draft-step-id-worker-judge.md"
+    constraints:
+      - "Read-only Judge task; no source edits, tests, migrations, API/OpenAPI/frontend edits, generated-client edits, deletion, or docs/flows/architecture.md edits."
+      - "Check watchdog before task transition and before activating any Worker."
+      - "Use the T059 evidence and Claude plan gate to choose the smallest safe implementation slice."
+      - "Decide exact semantics for id-less update steps, unknown incoming step ids, retained existing steps, and new draft steps before Worker activation."
+      - "If API schema changes are approved for the Worker, require the FastAPI skill and generated-client update in that Worker."
+      - "Do not activate retention, service-key identity/review/rerun, schema migration, final architecture docs, Flow AI Builder, or unrelated cleanup."
+      - "Reject any plan that adds a parallel step identity owner instead of deepening FlowStep.id and existing API/service/repository/frontend owners."
+    expected_output:
+      - "Decision: activate one exact Worker or block with the missing evidence/product decision."
+      - "Exact Worker objective, allowed_files, red tests, verification commands, stop_if, consolidation effect, naming-gate answer, and maintainer-doc readiness evidence."
+      - "Claude plan-gate verdict with concrete concerns accepted or source-evidence-backed disagreements."
+      - "Explicit answer to whether the Worker is backend-only, backend+generated-client, or backend+generated-client+frontend."
+    stop_if:
+      - "Need product decision on backwards compatibility for id-less existing-step updates."
+      - "Need schema migration or persisted-data repair."
+      - "Cannot define behavior-focused tests proving secret preservation by FlowStep.id."
+      - "Worker would need files outside a small reviewable source/test/generated-client/frontend slice."
+      - "Claude raises a valid blocker that cannot be resolved in a small first Worker."
     receipt: null
 
   - id: T901
