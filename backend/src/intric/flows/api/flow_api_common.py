@@ -236,8 +236,8 @@ async def resolve_flow_access_context(
             scope_filter=resolved_scope_filter,
         )
 
-    space_service = container.space_service()  # pyright: ignore[reportUnknownMemberType]
-    actor_manager = container.actor_manager()  # pyright: ignore[reportUnknownMemberType]
+    space_service = container.space_service()
+    actor_manager = container.actor_manager()
     space = await space_service.get_space(flow.space_id)
     actor = actor_manager.get_space_actor_from_space(space)
     return FlowAccessContext(
@@ -277,8 +277,8 @@ async def resolve_space_access_context(
         required_access=required_access,
         allow_service_key_principals=allow_service_key_principals,
     )
-    space_service = container.space_service()  # pyright: ignore[reportUnknownMemberType]
-    actor_manager = container.actor_manager()  # pyright: ignore[reportUnknownMemberType]
+    space_service = container.space_service()
+    actor_manager = container.actor_manager()
     space = await space_service.get_space(space_id)
     actor = actor_manager.get_space_actor_from_space(space)
     return FlowSpaceAccessContext(

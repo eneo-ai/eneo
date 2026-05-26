@@ -25,10 +25,6 @@ FLOW_SOURCE_ROOT = BACKEND_ROOT / "src" / "intric" / "flows"
 FLOW_RUNTIME_ROOT = FLOW_SOURCE_ROOT / "runtime"
 FLOW_API_ROOT = FLOW_SOURCE_ROOT / "api"
 FLOW_TASKS_PATH = FLOW_RUNTIME_ROOT / "tasks.py"
-FLOW_API_PROVIDER_ANY_ERASURE_FILES = (
-    FLOW_API_ROOT / "flow_router_common.py",
-    FLOW_API_ROOT / "flow_upload_router.py",
-)
 FLOW_API_PACKAGES = {"api", "ai_builder"}
 OUTPUT_FORMATS_ROOT = FLOW_RUNTIME_ROOT / "output_formats"
 DATA_RETENTION_ROOT = BACKEND_ROOT / "src" / "intric" / "data_retention"
@@ -155,7 +151,6 @@ OUTBOX_DELIVERY_STATUS_OWNER_NAMES = frozenset(
         "FlowRunWebhookDeliveries",
     }
 )
-FLOW_API_PROVIDER_TYPING_BLOCKER_FUNCTION_NAMES = frozenset({"_get_flow_version_repo"})
 FORBIDDEN_API_MANUAL_CONSTRUCTION_CLASS_NAMES = frozenset(
     {
         "FlowFileUploadService",
@@ -276,8 +271,6 @@ def _is_docstring_expression(node: ast.AST) -> bool:
 def _container_provider_passthrough_name(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> str | None:
-    if node.name in FLOW_API_PROVIDER_TYPING_BLOCKER_FUNCTION_NAMES:
-        return None
     if not node.name.startswith("_"):
         return None
     if not any(arg.arg == "container" for arg in node.args.args):
@@ -681,15 +674,13 @@ def test_flow_celery_task_provider_wiring_is_not_erased_to_any():
 def test_flow_api_provider_passthrough_helpers_are_not_reintroduced():
     offenders: list[str] = []
 
-    for path in FLOW_API_PROVIDER_ANY_ERASURE_FILES:
+    for path in _flow_api_python_files():
         relative_path = path.relative_to(BACKEND_ROOT)
         offenders.extend(
             f"{relative_path}:{offender}"
             for offender in _container_provider_any_erasure_offenders(path)
         )
 
-    for path in _flow_api_python_files():
-        relative_path = path.relative_to(BACKEND_ROOT)
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):

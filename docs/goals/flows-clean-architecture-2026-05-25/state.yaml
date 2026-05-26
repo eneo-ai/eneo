@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T055
+active_task: T056
 
 tasks:
   - id: T001
@@ -5309,7 +5309,7 @@ tasks:
   - id: T054
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "judge(flows): choose the next safe Flow clean-architecture task after API provider pass-through cleanup."
     inputs:
@@ -5434,6 +5434,94 @@ tasks:
       - "The fix requires changing endpoint decorators, signatures, response models, OpenAPI, generated clients, auth policy, behavior, tests outside allowed files, or non-Flow API files."
       - "Staged files include anything outside allowed_files."
       - "Claude implementation gate is not green and the disagreement cannot be resolved with source evidence."
+    receipt:
+      result: done
+      summary: "Removed the remaining Flow API provider typing exceptions. flow_api_common.py no longer carries provider reportUnknownMemberType ignores, flow_run_steps_router.py no longer has _get_flow_version_repo or its annotation-only import, and the architecture guard now scans all Flow API Python files for provider pass-through helpers and provider Any/pyright-ignore erasure."
+      files_changed:
+        - "backend/src/intric/flows/api/flow_api_common.py"
+        - "backend/src/intric/flows/api/flow_run_steps_router.py"
+        - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+        - "docs/goals/flows-clean-architecture-2026-05-25/notes/t055-flow-api-provider-typing-exceptions.md"
+      evidence:
+        - "docs/goals/flows-clean-architecture-2026-05-25/notes/t055-flow-api-provider-typing-exceptions.md"
+        - ".codex/artifacts/claude-peer-loop-t055-flow-api-provider-typing-exception-cleanup-implementation-review-20260526T152416Z.md"
+      consolidation_effect:
+        reused_existing_owner: "Container.flow_version_repo, Container.space_service, and Container.actor_manager."
+        logic_moved_from: "_get_flow_version_repo helper to direct provider call."
+        logic_deleted: "_get_flow_version_repo, its annotation-only import, five provider pyright-ignore records, provider-typing exception mechanism, and bounded provider-erasure file tuple."
+        duplicate_path_removed: "No Flow API provider pass-through or provider-erasure exception remains."
+        new_code_added: "No production code; guard scan scope now uses Flow API file discovery."
+        why_existing_owners_were_insufficient: "Existing owners are sufficient; direct provider calls pass strict in-place pyright."
+        guard_preventing_duplicate_logic_from_returning: "Structural provider pass-through and provider-erasure guard over all Flow API Python files."
+        net_flow_logic_surface_area: "reduced"
+      naming_gate:
+        new_production_names: "None."
+        architecture_doc_readiness: "Final docs can state Flow API provider wiring has no private pass-through helpers and no provider Any/pyright-ignore erasure."
+      commands:
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py::test_flow_api_provider_passthrough_helpers_are_not_reintroduced -q"
+          status: fail
+          output: "Red before source edits: six offender records."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py::test_flow_api_provider_passthrough_helpers_are_not_reintroduced -q"
+          status: pass
+          output: "1 passed"
+        - cmd: "cd backend && uv run pyright src/intric/flows/api/flow_api_common.py src/intric/flows/api/flow_run_steps_router.py tests/unittests/flows/test_flow_architecture_guards.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "cd backend && uv run pyright src/intric/flows/api"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_scope_errors.py tests/unittests/flows/test_flow_run_execution_router.py tests/unittests/flows/test_flow_evidence_router.py -q"
+          status: pass
+          output: "83 passed, 9 warnings"
+        - cmd: "cd backend && uv run ruff check src/intric/flows/api/flow_api_common.py src/intric/flows/api/flow_run_steps_router.py tests/unittests/flows/test_flow_architecture_guards.py"
+          status: pass
+          output: "All checks passed!"
+        - cmd: "cd backend && uv run ruff format --check src/intric/flows/api/flow_api_common.py src/intric/flows/api/flow_run_steps_router.py tests/unittests/flows/test_flow_architecture_guards.py"
+          status: pass
+          output: "3 files already formatted"
+        - cmd: "rg -n 'pyright: ignore\\[reportUnknownMemberType\\]|cast\\(\\s*Any\\s*,\\s*container\\.|def _get_.*\\(|return container\\.' backend/src/intric/flows/api backend/tests/unittests/flows/test_flow_architecture_guards.py -g '*.py'"
+          status: pass
+          output: "No matches."
+        - cmd: "git diff --unified=0 -- backend/src/intric/flows/api | rg '^[+-].*(@router|operation_id|response_model|status_code|summary=|description=)'"
+          status: pass
+          output: "No endpoint decorator/OpenAPI metadata diff."
+        - cmd: "git diff -- backend/src/intric/flows/api backend/tests/unittests/flows/test_flow_architecture_guards.py | rg -n 'A\\.[0-9]|T05[0-9]|Worker|Judge|state\\.yaml|plan §|Phase [0A-G]\\b'"
+          status: pass
+          output: "No source/test planning vocabulary."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t055-flow-api-provider-typing-exceptions --phase commit-gate --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT: yes; MIN_SCORE: 8"
+      next_task: T056
+
+  - id: T056
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "judge(flows): choose the next safe Flow clean-architecture task after Flow API provider typing cleanup."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t055-flow-api-provider-typing-exceptions.md"
+      - ".codex/artifacts/claude-peer-loop-t055-flow-api-provider-typing-exception-cleanup-implementation-review-20260526T152416Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t056-next-safe-judge.md"
+    constraints:
+      - "Read-only Judge task; no source edits, tests, migrations, API/OpenAPI/frontend edits, deletion, or docs/flows/architecture.md edits."
+      - "Check watchdog before task transition and before activating any Worker."
+      - "Respect product/data decision gates: do not activate retention, service-key identity/review/rerun, schema migration, webhook outbox, or other blocked tasks unless state.yaml records the required decision."
+      - "Apply reuse-before-inventing, canonical-owner, consolidation-effect, and naming-gate requirements to every candidate Worker."
+      - "Do not broaden into Flow AI Builder provider helpers; they remain out of Flows proper scope unless directly coupled."
+      - "Do not start the final maintainer architecture doc Worker during active runtime/API/schema work."
+    expected_output:
+      - "Classify remaining candidate tasks as safe_now, needs_preflight, blocked_on_decision, or final_docs_only."
+      - "Choose the next smallest safe task or record a stop rule."
+      - "Ensure any proposed Worker includes Consolidation effect and naming-gate answers."
+    stop_if:
+      - "Choosing a Worker requires retention, service-key identity/review/rerun, schema migration, webhook outbox, or other blocked product/data decisions."
+      - "Choosing a Worker requires files outside a reviewable Flow proper scope."
+      - "Evidence is insufficient to choose between remaining safe runtime reliability, API DX, frontend DX, schema/preflight, output-format, or cleanup candidates."
     receipt: null
 
   - id: T901

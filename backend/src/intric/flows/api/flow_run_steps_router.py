@@ -20,7 +20,6 @@ from intric.flows.api.flow_graph import (
 )
 from intric.flows.api.flow_models import FlowRunStepPublic, GraphResponse
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
-from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.principal import FlowPrincipal
 from intric.flows.published_definition import parse_published_definition
 from intric.main.container.container import Container
@@ -61,10 +60,6 @@ The file_id must reference an artifact that was actually produced by a step in t
 
 Service-key principals are supported for their own runtime artifacts in v1.
     """
-
-
-def _get_flow_version_repo(container: Container) -> FlowVersionRepository:
-    return container.flow_version_repo()  # pyright: ignore[reportUnknownMemberType]
 
 
 def _result_files_by_step_result_id(
@@ -208,7 +203,7 @@ async def get_flow_graph(
     )
     flow_service = container.flow_service()
     flow_run_service = container.flow_run_service()
-    flow_version_repo = _get_flow_version_repo(container)
+    flow_version_repo = container.flow_version_repo()
 
     if run_id is not None:
         run = await flow_run_service.get_run(
