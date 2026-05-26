@@ -19,9 +19,6 @@ from intric.flows.api.flow_graph import (
     enrich_nodes_with_run_results,
 )
 from intric.flows.api.flow_models import FlowRunStepPublic, GraphResponse
-from intric.flows.application.flow_run_evidence_service import FlowRunEvidenceService
-from intric.flows.application.flow_run_service import FlowRunService
-from intric.flows.application.flow_service import FlowService
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.principal import FlowPrincipal
@@ -64,18 +61,6 @@ The file_id must reference an artifact that was actually produced by a step in t
 
 Service-key principals are supported for their own runtime artifacts in v1.
     """
-
-
-def _get_flow_run_service(container: Container) -> FlowRunService:
-    return container.flow_run_service()
-
-
-def _get_flow_run_evidence_service(container: Container) -> FlowRunEvidenceService:
-    return container.flow_run_evidence_service()
-
-
-def _get_flow_service(container: Container) -> FlowService:
-    return container.flow_service()
 
 
 def _get_flow_version_repo(container: Container) -> FlowVersionRepository:
@@ -132,11 +117,11 @@ async def list_flow_run_steps(
         required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
-    step_results_with_files = await _get_flow_run_service(
-        container
-    ).list_step_results_with_files(
-        run_id=run_id,
-        flow_id=id,
+    step_results_with_files = (
+        await container.flow_run_service().list_step_results_with_files(
+            run_id=run_id,
+            flow_id=id,
+        )
     )
     result_files_by_step_result_id = _result_files_by_step_result_id(
         list(step_results_with_files.result_files)
@@ -221,8 +206,8 @@ async def get_flow_graph(
         required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
-    flow_service = _get_flow_service(container)
-    flow_run_service = _get_flow_run_service(container)
+    flow_service = container.flow_service()
+    flow_run_service = container.flow_run_service()
     flow_version_repo = _get_flow_version_repo(container)
 
     if run_id is not None:
@@ -312,7 +297,7 @@ async def generate_flow_run_artifact_signed_url(
         required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
-    evidence_service = _get_flow_run_evidence_service(container)
+    evidence_service = container.flow_run_evidence_service()
     user = container.user()
     actor_kwargs = audit_actor_kwargs(user)
 

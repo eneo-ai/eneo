@@ -25,7 +25,6 @@ from intric.flows.api.flow_models import (
     FlowSparsePublic,
     FlowUpdateRequest,
 )
-from intric.flows.application.flow_service import FlowService
 from intric.flows.flow_access_policy import (
     PUBLISHED_FLOW_RUNTIME_ALTERNATIVE,
     ServiceKeyRuntimeAlternativeKey,
@@ -114,10 +113,6 @@ def _ensure_service_key_can_read_current_definition(
     if actor.get_current_role() in _SERVICE_KEY_CURRENT_DEFINITION_ROLES:
         return
     _raise_service_key_admin_required()
-
-
-def _get_flow_service(container: Container) -> FlowService:
-    return container.flow_service()
 
 
 def _path_for_operation_id(request: Request, operation_id: str) -> str | None:
@@ -221,7 +216,7 @@ async def create_flow(
         )
 
     assembler = FlowAssembler()
-    flow_service = _get_flow_service(container)
+    flow_service = container.flow_service()
     user = container.user()
 
     created = await flow_service.create_flow(
@@ -327,7 +322,7 @@ async def list_flows(
 
     service_key_principal = FlowPrincipal.from_user(container.user()).is_service_key
     assembler = FlowAssembler()
-    flows = await _get_flow_service(container).list_flows(
+    flows = await container.flow_service().list_flows(
         space_id=space_id,
         sparse=True,
         published_only=service_key_principal
@@ -559,7 +554,7 @@ async def update_flow(
     if "steps" in payload:
         steps = [assembler.to_domain_step(step) for step in flow_in.steps]
 
-    updated = await _get_flow_service(container).update_flow(
+    updated = await container.flow_service().update_flow(
         flow_id=id,
         name=payload.get("name", NOT_PROVIDED),
         description=payload.get("description", NOT_PROVIDED),
@@ -644,7 +639,7 @@ async def delete_flow(
         )
     ensure_can_mutate_flow_draft(container, access_context)
 
-    await _get_flow_service(container).delete_flow(id)
+    await container.flow_service().delete_flow(id)
     user = container.user()
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
@@ -710,7 +705,7 @@ async def publish_flow(
         )
     ensure_can_mutate_flow_draft(container, access_context)
 
-    published = await _get_flow_service(container).publish_flow(flow_id=id)
+    published = await container.flow_service().publish_flow(flow_id=id)
     user = container.user()
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
@@ -778,7 +773,7 @@ async def unpublish_flow(
         )
     ensure_can_mutate_flow_draft(container, access_context)
 
-    unpublished = await _get_flow_service(container).unpublish_flow(flow_id=id)
+    unpublished = await container.flow_service().unpublish_flow(flow_id=id)
     user = container.user()
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,

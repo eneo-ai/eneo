@@ -18,16 +18,11 @@ from intric.flows.api.flow_models import (
     FlowTemplateAssetPublic,
     FlowTemplateInspectionPublic,
 )
-from intric.flows.flow_template_asset_service import FlowTemplateAssetService
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
 from intric.server.dependencies.container import get_container
 
 router = APIRouter()
-
-
-def _get_flow_template_asset_service(container: Container) -> FlowTemplateAssetService:
-    return container.flow_template_asset_service()
 
 
 @router.get(
@@ -69,7 +64,7 @@ async def list_flow_template_files(
     container: Container = Depends(get_container(with_user=True)),
 ):
     await require_flow_edit_access(request, container, flow_id=id)
-    assets = await _get_flow_template_asset_service(container).list_assets(
+    assets = await container.flow_template_asset_service().list_assets(
         flow_id=id,
         can_edit=True,
         can_download=True,
@@ -124,7 +119,7 @@ async def inspect_flow_template(
     container: Container = Depends(get_container(with_user=True)),
 ):
     await require_flow_edit_access(request, container, flow_id=id)
-    inspection = await _get_flow_template_asset_service(container).inspect_asset(
+    inspection = await container.flow_template_asset_service().inspect_asset(
         flow_id=id,
         asset_id=file_id,
     )
@@ -195,7 +190,7 @@ async def upload_flow_template_file(
         require_flow_lookup_without_scope=True,
     )
 
-    asset = await _get_flow_template_asset_service(container).upload_asset(
+    asset = await container.flow_template_asset_service().upload_asset(
         flow_id=id,
         upload_file=upload_file,
     )
@@ -265,7 +260,7 @@ async def generate_flow_template_signed_url(
     container: Container = Depends(get_container(with_user=True)),
 ):
     await require_flow_edit_access(request, container, flow_id=id)
-    asset, file = await _get_flow_template_asset_service(container).get_asset_with_file(
+    asset, file = await container.flow_template_asset_service().get_asset_with_file(
         flow_id=id,
         asset_id=file_id,
     )

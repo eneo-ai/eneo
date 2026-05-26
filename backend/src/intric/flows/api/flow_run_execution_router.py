@@ -43,11 +43,6 @@ from intric.flows.api.flow_models import (
     FlowRunStepRerunResponse,
     flow_run_status_capabilities_public,
 )
-from intric.flows.application.flow_run_rerun_service import FlowRunRerunService
-from intric.flows.application.flow_run_review_checkpoint_service import (
-    FlowRunReviewCheckpointService,
-)
-from intric.flows.application.flow_run_service import FlowRunService
 from intric.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.main.container.container import Container
@@ -390,20 +385,6 @@ Service-key principals may resume approved checkpoints only for runs they own (k
 )
 
 
-def _get_flow_run_service(container: Container) -> FlowRunService:
-    return container.flow_run_service()
-
-
-def _get_flow_run_review_checkpoint_service(
-    container: Container,
-) -> FlowRunReviewCheckpointService:
-    return container.flow_run_review_checkpoint_service()
-
-
-def _get_flow_run_rerun_service(container: Container) -> FlowRunRerunService:
-    return container.flow_run_rerun_service()
-
-
 @asynccontextmanager
 async def _commit_flow_runtime_write_before_response(
     container: Container,
@@ -503,7 +484,7 @@ async def create_flow_run(
             allow_service_key_principals=True,
             require_published_for_service_key=True,
         )
-        run_service = _get_flow_run_service(container)
+        run_service = container.flow_run_service()
         user = container.user()
         actor_kwargs = audit_actor_kwargs(user)
         run = await run_service.create_run(
@@ -597,7 +578,7 @@ async def list_flow_runs_alias(
         require_flow_lookup_without_scope=True,
         allow_service_key_principals=True,
     )
-    run_service = _get_flow_run_service(container)
+    run_service = container.flow_run_service()
     runs = await run_service.list_runs(
         flow_id=id,
         limit=limit + 1,
@@ -661,7 +642,7 @@ async def get_flow_run_alias(
         required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
-    run_service = _get_flow_run_service(container)
+    run_service = container.flow_run_service()
     run = await run_service.get_run(run_id=run_id, flow_id=id)
     result_files = await run_service.list_result_files_for_runs(runs=[run])
     token_usage_by_run_id = await run_service.list_token_usage_for_runs(runs=[run])
@@ -710,9 +691,7 @@ async def get_active_flow_run_review_checkpoint(
         required_access=common.FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
-    checkpoint = await _get_flow_run_review_checkpoint_service(
-        container
-    ).get_active_review_checkpoint(
+    checkpoint = await container.flow_run_review_checkpoint_service().get_active_review_checkpoint(
         flow_id=id,
         run_id=run_id,
     )
@@ -805,14 +784,14 @@ async def edit_flow_run_review_checkpoint(
             required_access=common.FlowApiAction.REVIEW,
             allow_service_key_principals=True,
         )
-        checkpoint = await _get_flow_run_review_checkpoint_service(
-            container
-        ).edit_review_checkpoint(
-            flow_id=id,
-            run_id=run_id,
-            checkpoint_id=checkpoint_id,
-            expected_checkpoint_revision=review_in.expected_checkpoint_revision,
-            current_payload_json=review_in.current_payload_json,
+        checkpoint = (
+            await container.flow_run_review_checkpoint_service().edit_review_checkpoint(
+                flow_id=id,
+                run_id=run_id,
+                checkpoint_id=checkpoint_id,
+                expected_checkpoint_revision=review_in.expected_checkpoint_revision,
+                current_payload_json=review_in.current_payload_json,
+            )
         )
     return FlowAssembler().to_review_checkpoint_public(checkpoint)
 
@@ -881,9 +860,7 @@ async def approve_flow_run_review_checkpoint(
             required_access=common.FlowApiAction.REVIEW,
             allow_service_key_principals=True,
         )
-        checkpoint = await _get_flow_run_review_checkpoint_service(
-            container
-        ).approve_review_checkpoint(
+        checkpoint = await container.flow_run_review_checkpoint_service().approve_review_checkpoint(
             flow_id=id,
             run_id=run_id,
             checkpoint_id=checkpoint_id,
@@ -956,9 +933,7 @@ async def reject_flow_run_review_checkpoint(
             required_access=common.FlowApiAction.REVIEW,
             allow_service_key_principals=True,
         )
-        checkpoint = await _get_flow_run_review_checkpoint_service(
-            container
-        ).reject_review_checkpoint(
+        checkpoint = await container.flow_run_review_checkpoint_service().reject_review_checkpoint(
             flow_id=id,
             run_id=run_id,
             checkpoint_id=checkpoint_id,
@@ -1041,7 +1016,7 @@ async def resume_flow_run_review_checkpoint(
             required_access=common.FlowApiAction.RESUME,
             allow_service_key_principals=True,
         )
-        review_service = _get_flow_run_review_checkpoint_service(container)
+        review_service = container.flow_run_review_checkpoint_service()
         result = await review_service.resume_review_checkpoint(
             flow_id=id,
             run_id=run_id,
@@ -1050,7 +1025,7 @@ async def resume_flow_run_review_checkpoint(
             idempotency_key=idempotency_key,
         )
         if result.accepted:
-            run_service = _get_flow_run_service(container)
+            run_service = container.flow_run_service()
             dispatch_request = run_service.build_dispatch_request(result.run)
     if dispatch_request is not None:
         background_tasks.add_task(
@@ -1104,7 +1079,7 @@ async def cancel_flow_run_alias(
             required_access=common.FlowApiAction.RUN,
             allow_service_key_principals=True,
         )
-        run_service = _get_flow_run_service(container)
+        run_service = container.flow_run_service()
         await run_service.get_run(run_id=run_id, flow_id=id)
         run = await run_service.cancel_run(run_id=run_id)
     return FlowAssembler().to_run_public(run)
@@ -1164,8 +1139,8 @@ async def rerun_flow_run_step(
             flow_id=id,
             required_access=common.FlowApiAction.RERUN,
         )
-        run_service = _get_flow_run_service(container)
-        rerun_service = _get_flow_run_rerun_service(container)
+        run_service = container.flow_run_service()
+        rerun_service = container.flow_run_rerun_service()
         result = await rerun_service.rerun_step(
             flow_id=id,
             run_id=run_id,
@@ -1248,7 +1223,7 @@ async def redispatch_flow_run_alias(
     )
     user = container.user()
     actor_kwargs = audit_actor_kwargs(user)
-    run_service = _get_flow_run_service(container)
+    run_service = container.flow_run_service()
     run = await run_service.get_run(run_id=run_id, flow_id=id)
 
     redispatched = await run_service.redispatch_stale_queued_runs(

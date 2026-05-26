@@ -5,7 +5,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Request, status
 
-from intric.assistants.api.assistant_assembler import AssistantAssembler
 from intric.assistants.api.assistant_models import (
     AssistantPublic,
     AssistantUpdatePublic,
@@ -16,7 +15,6 @@ from intric.audit.domain.entity_types import EntityType
 from intric.flows.api import flow_router_common as common
 from intric.flows.api.flow_api_common import error_response
 from intric.flows.api.flow_models import FlowAssistantCreateRequest
-from intric.flows.application.flow_service import FlowService
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes, UnauthorizedException
 from intric.server.dependencies.container import get_container
@@ -51,14 +49,6 @@ _FLOW_ASSISTANT_PUBLIC_EXAMPLE: dict[str, object] = {
     "insight_enabled": False,
     "metadata_json": {"origin": "flow_managed"},
 }
-
-
-def _get_flow_service(container: Container) -> FlowService:
-    return container.flow_service()
-
-
-def _get_assistant_assembler(container: Container) -> AssistantAssembler:
-    return container.assistant_assembler()
 
 
 async def _require_flow_assistant_access(
@@ -131,8 +121,8 @@ async def create_flow_assistant(
     container: Container = Depends(get_container(with_user=True)),
 ):
     await _require_flow_assistant_access(request, container, flow_id=id)
-    flow_service = _get_flow_service(container)
-    assistant_assembler = _get_assistant_assembler(container)
+    flow_service = container.flow_service()
+    assistant_assembler = container.assistant_assembler()
     user = container.user()
 
     created_assistant, permissions = await flow_service.create_flow_assistant(
@@ -205,8 +195,8 @@ async def get_flow_assistant(
     container: Container = Depends(get_container(with_user=True)),
 ):
     await _require_flow_assistant_access(request, container, flow_id=id)
-    flow_service = _get_flow_service(container)
-    assistant_assembler = _get_assistant_assembler(container)
+    flow_service = container.flow_service()
+    assistant_assembler = container.assistant_assembler()
     assistant, permissions = await flow_service.get_flow_assistant(
         flow_id=id,
         assistant_id=assistant_id,
@@ -265,8 +255,8 @@ async def update_flow_assistant(
     container: Container = Depends(get_container(with_user=True)),
 ):
     await _require_flow_assistant_access(request, container, flow_id=id)
-    flow_service = _get_flow_service(container)
-    assistant_assembler = _get_assistant_assembler(container)
+    flow_service = container.flow_service()
+    assistant_assembler = container.assistant_assembler()
     user = container.user()
     update = common.extract_assistant_update_payload(assistant_in)
 
@@ -332,7 +322,7 @@ async def delete_flow_assistant(
     container: Container = Depends(get_container(with_user=True)),
 ):
     await _require_flow_assistant_access(request, container, flow_id=id)
-    flow_service = _get_flow_service(container)
+    flow_service = container.flow_service()
     user = container.user()
     assistant, _ = await flow_service.get_flow_assistant(
         flow_id=id, assistant_id=assistant_id

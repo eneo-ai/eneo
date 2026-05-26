@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T053
+active_task: T054
 
 tasks:
   - id: T001
@@ -5104,7 +5104,7 @@ tasks:
   - id: T052
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "judge(flows): choose the next safe Flow clean-architecture task after run-contract provider consolidation."
     inputs:
@@ -5215,11 +5215,12 @@ tasks:
       - "backend/src/intric/flows/api/flow_run_evidence_router.py"
       - "backend/src/intric/flows/api/flow_run_steps_router.py"
       - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+      - "backend/tests/unittests/flows/test_flow_evidence_router.py"
     constraints:
       - "Check watchdog before starting implementation and before committing."
       - "FastAPI adapter-only refactor: do not change endpoint signatures, decorators, request/response models, OpenAPI shape, generated clients, auth policy, or endpoint behavior."
       - "Do not edit _get_flow_version_repo or attempt to solve flow_version_repo provider typing in this task."
-      - "Do not edit verification test modules other than test_flow_architecture_guards.py; if another test requires edits, stop and return to Judge."
+      - "Do not edit verification test modules other than test_flow_architecture_guards.py except fixture-only FlowRunStepPublic schema-shape repair in test_flow_evidence_router.py if the broad verification bundle proves the fixture is stale. No assertions or behavior expectations may change."
       - "Deepen the existing architecture guard; do not add a parallel guard."
       - "Structural guard must scan Flow API Python files and fail red with exactly 11 offenders before source edits."
       - "Retain exactly one documented temporary provider-typing exception: _get_flow_version_repo."
@@ -5231,14 +5232,110 @@ tasks:
       - "Structural Flow API provider pass-through guard over FLOW_API_ROOT Python files."
       - "Typed one-line Flow API provider helpers deleted and call sites inlined to Container provider calls."
       - "Unused service/assembler imports removed."
-      - "Verification test modules pass unmodified."
+      - "Verification test modules pass with only fixture-shape repair in test_flow_evidence_router.py if required by current FlowRunStepPublic fields."
     stop_if:
       - "Watchdog reports a halt-worthy blocker."
       - "Red guard reports anything other than 11 offenders before source edits."
       - "Direct Container provider calls introduce pyright errors, Any/cast erasure, or new pyright ignores."
-      - "A non-guard test must be edited to keep behavior green."
+      - "A non-guard test must be edited for anything other than adding required FlowRunStepPublic fixture fields."
       - "Staged files include anything outside allowed_files."
       - "Claude implementation gate is not green and the disagreement cannot be resolved with source evidence."
+    receipt:
+      result: done
+      summary: "Deleted 11 typed one-line Flow API provider pass-through helpers across six routers and made endpoint handlers call the canonical Container providers directly. Deepened the provider guard into a structural AST check over Flow API Python files, retained only _get_flow_version_repo as a documented provider-typing blocker, and repaired stale FlowRunStepPublic fixtures by adding required schema fields without changing assertions."
+      files_changed:
+        - "backend/src/intric/flows/api/flow_template_router.py"
+        - "backend/src/intric/flows/api/flow_assistant_router.py"
+        - "backend/src/intric/flows/api/flow_authoring_router.py"
+        - "backend/src/intric/flows/api/flow_run_execution_router.py"
+        - "backend/src/intric/flows/api/flow_run_evidence_router.py"
+        - "backend/src/intric/flows/api/flow_run_steps_router.py"
+        - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+        - "backend/tests/unittests/flows/test_flow_evidence_router.py"
+        - "docs/goals/flows-clean-architecture-2026-05-25/notes/t053-api-provider-pass-throughs.md"
+      evidence:
+        - "docs/goals/flows-clean-architecture-2026-05-25/notes/t053-api-provider-pass-throughs.md"
+        - ".codex/artifacts/claude-peer-loop-t053-api-provider-pass-through-cleanup-implementation-review-20260526T143427Z.md"
+      retained_temporary_paths:
+        - path: "backend/src/intric/flows/api/flow_run_steps_router.py:_get_flow_version_repo"
+          owner: "flow_run_steps_router provider-typing blocker until Container/provider typing preflight."
+          reason: "Direct container.flow_version_repo() currently needs reportUnknownMemberType."
+          deletion_trigger: "Provider-typing or Container typed-accessor preflight proves strict-pyright clean without Any, casts, or ignores."
+      consolidation_effect:
+        reused_existing_owner: "Container providers and the corresponding application services/assembler."
+        logic_moved_from: "Private one-line Flow API _get_* provider helpers to direct endpoint-handler provider calls."
+        logic_deleted: "11 typed provider pass-through helper functions and their annotation-only imports."
+        duplicate_path_removed: "Flow API service wiring no longer has a parallel typed helper family."
+        new_code_added: "Structural architecture guard predicate and one explicit provider-typing exception for _get_flow_version_repo."
+        why_existing_owners_were_insufficient: "Existing owners were sufficient; the deleted helpers only forwarded to them."
+        guard_preventing_duplicate_logic_from_returning: "test_flow_api_provider_passthrough_helpers_are_not_reintroduced scans Flow API Python files structurally."
+        net_flow_logic_surface_area: "reduced"
+      naming_gate:
+        new_production_names: "None."
+        architecture_doc_readiness: "Provider wiring can be documented as: Flow API handlers call canonical Container providers directly; private provider pass-through helpers are blocked except documented provider-typing blockers."
+      commands:
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py::test_flow_api_provider_passthrough_helpers_are_not_reintroduced -q"
+          status: fail
+          output: "Red before source edits: exactly 11 offenders; _get_flow_version_repo not reported."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py::test_flow_api_provider_passthrough_helpers_are_not_reintroduced -q"
+          status: pass
+          output: "1 passed"
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_evidence_router.py::test_flow_run_steps_alias_surfaces_diagnostics_dicts_only tests/unittests/flows/test_flow_evidence_router.py::test_flow_run_steps_alias_handles_non_list_diagnostics -q"
+          status: pass
+          output: "2 passed, 9 warnings"
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_template_router.py tests/unittests/flows/test_flow_run_execution_router.py tests/unittests/flows/test_flow_evidence_router.py tests/unittests/flows/test_flow_scope_errors.py -q"
+          status: pass
+          output: "85 passed, 9 warnings"
+        - cmd: "cd backend && uv run pyright src/intric/flows/api/flow_template_router.py src/intric/flows/api/flow_assistant_router.py src/intric/flows/api/flow_authoring_router.py src/intric/flows/api/flow_run_execution_router.py src/intric/flows/api/flow_run_evidence_router.py src/intric/flows/api/flow_run_steps_router.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_evidence_router.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "cd backend && uv run ruff check src/intric/flows/api/flow_template_router.py src/intric/flows/api/flow_assistant_router.py src/intric/flows/api/flow_authoring_router.py src/intric/flows/api/flow_run_execution_router.py src/intric/flows/api/flow_run_evidence_router.py src/intric/flows/api/flow_run_steps_router.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_evidence_router.py"
+          status: pass
+          output: "All checks passed!"
+        - cmd: "cd backend && uv run ruff format --check src/intric/flows/api/flow_template_router.py src/intric/flows/api/flow_assistant_router.py src/intric/flows/api/flow_authoring_router.py src/intric/flows/api/flow_run_execution_router.py src/intric/flows/api/flow_run_evidence_router.py src/intric/flows/api/flow_run_steps_router.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_evidence_router.py"
+          status: pass
+          output: "8 files already formatted"
+        - cmd: "rg -n '^def _get_.*\\(|return container\\.' backend/src/intric/flows/api -g '*.py'"
+          status: pass
+          output: "Only _get_flow_version_repo and its retained return line remain."
+        - cmd: "git diff --unified=0 -- backend/src/intric/flows/api | rg '^[+-].*(@router|operation_id|response_model|status_code|summary=|description=)'"
+          status: pass
+          output: "No endpoint decorator/OpenAPI metadata diff."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t053-api-provider-pass-throughs --phase commit-gate --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT: yes; MIN_SCORE: 8"
+      next_task: T054
+
+  - id: T054
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "judge(flows): choose the next safe Flow clean-architecture task after API provider pass-through cleanup."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t053-api-provider-pass-throughs.md"
+      - ".codex/artifacts/claude-peer-loop-t053-api-provider-pass-through-cleanup-implementation-review-20260526T143427Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t054-next-safe-judge.md"
+    constraints:
+      - "Read-only Judge task; no source edits, tests, migrations, API/OpenAPI/frontend edits, deletion, or docs/flows/architecture.md edits."
+      - "Check watchdog before task transition and before activating any Worker."
+      - "Respect product/data decision gates: do not activate retention, service-key identity/review/rerun, schema migration, webhook outbox, or other blocked tasks unless state.yaml records the required decision."
+      - "Apply reuse-before-inventing, canonical-owner, consolidation-effect, and naming-gate requirements to every candidate Worker."
+      - "Carry forward the _get_flow_version_repo and flow_api_common provider-typing blockers without assuming the implementation path."
+      - "Do not start the final maintainer architecture doc Worker during active runtime/API/schema work."
+    expected_output:
+      - "Classify remaining candidate tasks as safe_now, needs_preflight, blocked_on_decision, or final_docs_only."
+      - "Choose the next smallest safe task or record a stop rule."
+      - "If provider-typing cleanup is chosen, require source preflight proving direct provider access is pyright-clean without Any/casts/ignores or approve a typed-accessor design."
+      - "Ensure any proposed Worker includes Consolidation effect and naming-gate answers."
+    stop_if:
+      - "Choosing a Worker requires retention, service-key identity/review/rerun, schema migration, webhook outbox, or other blocked product/data decisions."
+      - "Choosing a Worker requires files outside a reviewable Flow proper scope."
+      - "Evidence is insufficient to choose between remaining safe runtime reliability, API DX, frontend DX, schema/preflight, output-format, or provider-typing candidates."
     receipt: null
 
   - id: T901

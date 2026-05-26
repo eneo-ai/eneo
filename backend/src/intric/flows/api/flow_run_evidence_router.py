@@ -17,7 +17,6 @@ from intric.flows.api.flow_trace_audit import (
     build_flow_trace_error_payload,
     log_flow_trace_audit_or_deny,
 )
-from intric.flows.application.flow_run_evidence_service import FlowRunEvidenceService
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes
 from intric.server.dependencies.container import get_container
@@ -62,10 +61,6 @@ _RAW_REASON_REQUIRED_CODE: Final[str] = "flow_evidence_export_reason_required"
 _RAW_REASON_REQUIRED_MESSAGE: Final[str] = (
     "Raw evidence export requires an explicit non-default reason."
 )
-
-
-def _get_flow_run_evidence_service(container: Container) -> FlowRunEvidenceService:
-    return container.flow_run_evidence_service()
 
 
 @router.get(
@@ -120,7 +115,7 @@ async def get_flow_run_evidence_alias(
         allow_service_key_principals=True,
     )
     user = container.user()
-    evidence_service = _get_flow_run_evidence_service(container)
+    evidence_service = container.flow_run_evidence_service()
     run = await evidence_service.get_run(
         run_id=run_id,
         flow_id=id,
@@ -254,7 +249,7 @@ async def export_flow_run_evidence_alias(
             ),
         )
     user = container.user()
-    evidence_service = _get_flow_run_evidence_service(container)
+    evidence_service = container.flow_run_evidence_service()
     run = await evidence_service.get_run(
         run_id=run_id,
         flow_id=id,

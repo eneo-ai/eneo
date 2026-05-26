@@ -25,7 +25,7 @@ FLOW_SOURCE_ROOT = BACKEND_ROOT / "src" / "intric" / "flows"
 FLOW_RUNTIME_ROOT = FLOW_SOURCE_ROOT / "runtime"
 FLOW_API_ROOT = FLOW_SOURCE_ROOT / "api"
 FLOW_TASKS_PATH = FLOW_RUNTIME_ROOT / "tasks.py"
-FLOW_API_PROVIDER_PASSTHROUGH_FILES = (
+FLOW_API_PROVIDER_ANY_ERASURE_FILES = (
     FLOW_API_ROOT / "flow_router_common.py",
     FLOW_API_ROOT / "flow_upload_router.py",
 )
@@ -155,12 +155,7 @@ OUTBOX_DELIVERY_STATUS_OWNER_NAMES = frozenset(
         "FlowRunWebhookDeliveries",
     }
 )
-FORBIDDEN_API_PASSTHROUGH_HELPER_NAMES = frozenset(
-    {
-        "flow_run_contract_service",
-        "flow_upload_service",
-    }
-)
+FLOW_API_PROVIDER_TYPING_BLOCKER_FUNCTION_NAMES = frozenset({"_get_flow_version_repo"})
 FORBIDDEN_API_MANUAL_CONSTRUCTION_CLASS_NAMES = frozenset(
     {
         "FlowFileUploadService",
@@ -183,6 +178,12 @@ def _flow_runtime_python_files() -> list[Path]:
         path
         for path in FLOW_RUNTIME_ROOT.rglob("*.py")
         if "__pycache__" not in path.parts
+    ]
+
+
+def _flow_api_python_files() -> list[Path]:
+    return [
+        path for path in FLOW_API_ROOT.rglob("*.py") if "__pycache__" not in path.parts
     ]
 
 
@@ -262,6 +263,46 @@ def _container_provider_any_erasure_offenders(path: Path) -> list[str]:
             offenders.append(f"pyright-ignore:{line_number}")
 
     return offenders
+
+
+def _is_docstring_expression(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    )
+
+
+def _container_provider_passthrough_name(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> str | None:
+    if node.name in FLOW_API_PROVIDER_TYPING_BLOCKER_FUNCTION_NAMES:
+        return None
+    if not node.name.startswith("_"):
+        return None
+    if not any(arg.arg == "container" for arg in node.args.args):
+        return None
+
+    body = [
+        statement for statement in node.body if not _is_docstring_expression(statement)
+    ]
+    if len(body) != 1:
+        return None
+    statement = body[0]
+    if not isinstance(statement, ast.Return):
+        return None
+
+    value = statement.value
+    if (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Attribute)
+        and isinstance(value.func.value, ast.Name)
+        and value.func.value.id == "container"
+        and not value.args
+        and not value.keywords
+    ):
+        return value.func.attr
+    return None
 
 
 def _should_scan_path_for_axis(path: Path, *, axis: str) -> bool:
@@ -640,20 +681,24 @@ def test_flow_celery_task_provider_wiring_is_not_erased_to_any():
 def test_flow_api_provider_passthrough_helpers_are_not_reintroduced():
     offenders: list[str] = []
 
-    for path in FLOW_API_PROVIDER_PASSTHROUGH_FILES:
+    for path in FLOW_API_PROVIDER_ANY_ERASURE_FILES:
         relative_path = path.relative_to(BACKEND_ROOT)
         offenders.extend(
             f"{relative_path}:{offender}"
             for offender in _container_provider_any_erasure_offenders(path)
         )
 
+    for path in _flow_api_python_files():
+        relative_path = path.relative_to(BACKEND_ROOT)
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-                and node.name in FORBIDDEN_API_PASSTHROUGH_HELPER_NAMES
-            ):
-                offenders.append(f"{relative_path}:helper:{node.name}:{node.lineno}")
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                provider_name = _container_provider_passthrough_name(node)
+                if provider_name is not None:
+                    offenders.append(
+                        f"{relative_path}:helper:{node.name}:{provider_name}:{node.lineno}"
+                    )
+                continue
             if not isinstance(node, ast.Call):
                 continue
             if (

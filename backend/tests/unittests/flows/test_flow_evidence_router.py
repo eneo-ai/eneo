@@ -527,11 +527,15 @@ async def test_flow_run_steps_alias_surfaces_diagnostics_dicts_only(monkeypatch)
     container = MagicMock()
     flow_id = uuid4()
     run_id = uuid4()
+    tenant_id = uuid4()
     run_service = AsyncMock()
     run_service.list_step_results_with_files.return_value = SimpleNamespace(
         step_results=[
             SimpleNamespace(
                 id=uuid4(),
+                flow_run_id=run_id,
+                flow_id=flow_id,
+                tenant_id=tenant_id,
                 step_id=uuid4(),
                 step_order=1,
                 assistant_id=uuid4(),
@@ -589,6 +593,9 @@ async def test_flow_run_steps_alias_handles_non_list_diagnostics(monkeypatch):
         step_results=[
             SimpleNamespace(
                 id=step_result_id,
+                flow_run_id=run.id,
+                flow_id=run.flow_id,
+                tenant_id=run.tenant_id,
                 step_id=uuid4(),
                 step_order=1,
                 assistant_id=uuid4(),
@@ -602,6 +609,9 @@ async def test_flow_run_steps_alias_handles_non_list_diagnostics(monkeypatch):
             ),
             SimpleNamespace(
                 id=uuid4(),
+                flow_run_id=run.id,
+                flow_id=run.flow_id,
+                tenant_id=run.tenant_id,
                 step_id=uuid4(),
                 step_order=2,
                 assistant_id=uuid4(),
