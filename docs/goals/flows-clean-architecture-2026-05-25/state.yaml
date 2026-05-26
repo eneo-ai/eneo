@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T048
+active_task: T049
 
 tasks:
   - id: T001
@@ -4593,7 +4593,7 @@ tasks:
   - id: T048
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "judge(flows): choose the next safe Flow clean-architecture task after typed Flow task wiring."
     inputs:
@@ -4619,6 +4619,156 @@ tasks:
       - "Choosing a Worker requires retention, service-key identity/review/rerun, schema migration, Flow AI Builder cleanup, or other blocked product/data decisions."
       - "Choosing a Worker requires files outside a reviewable Flow proper scope."
       - "Evidence is insufficient to choose between remaining safe runtime reliability, API DX, frontend DX, schema/preflight, or provider-wiring candidates."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T15:11:10+02:00"
+      summary: "Chose T049 as the next smallest safe Flow clean-architecture Worker: delete the duplicate Flow upload-service construction path in the API adapter and call the existing Container.flow_file_upload_service provider directly from the upload router. Revised the plan twice after Claude blockers so all three affected upload-router tests must be migrated without losing signal."
+      artifact: "docs/goals/flows-clean-architecture-2026-05-25/notes/t048-next-safe-judge.md"
+      decision:
+        next_task: T049
+        objective: "refactor(flows-api): use the Flow upload service provider directly."
+        classification:
+          safe_now:
+            - "Delete flow_router_common.flow_upload_service, inline container.flow_file_upload_service() at the two upload-router call sites, remove cast(Any)/pyright-ignore provider erasure, and add a narrow architecture guard."
+          follow_up:
+            - "Broader Flow API provider-erasure cleanup, including flow_api_common.py and flow_run_steps_router.py."
+            - "flow_router_common.flow_run_contract_service remains a one-line provider pass-through and should be judged separately if consistent API helper cleanup is desired."
+            - "A future Container typing task may remove repeated dependency-injector provider erasure pressure at the source."
+          needs_preflight:
+            - "Draft step id-owned persistence and runtime step identity schema follow-ups."
+            - "Schema migrations, JSONB ownership, and index/lock changes."
+            - "Runtime output-mode/output-type movement when the active task reaches the output-format tranche."
+            - "Frontend state ownership or generated client cleanup outside a dedicated frontend Worker."
+          blocked_on_decision:
+            - "Retention behavior."
+            - "Service-key identity model."
+            - "Review/rerun service-key capability."
+          final_docs_only:
+            - "T901 docs/flows/architecture.md maintainer map; do not start during active runtime/API/schema work."
+      evidence:
+        - "backend/src/intric/flows/api/flow_router_common.py:115-121 manually constructs FlowFileUploadService and erases three container providers through cast(Any) plus pyright ignores."
+        - "backend/src/intric/main/container/container.py:1256-1262 already defines the canonical flow_file_upload_service provider."
+        - "backend/src/intric/flows/flow_file_upload_service.py:159-167 owns the typed FlowFileUploadService constructor boundary."
+        - "backend/src/intric/flows/api/flow_upload_router.py:197-200 and :297-300 are the two production callers."
+        - "backend/tests/unittests/flows/test_flow_upload_router.py:107-156, :187-212, and :259-293 are the three affected router tests that require fixture migration."
+      peer_review:
+        claude:
+          iterations:
+            - artifact: ".codex/artifacts/claude-peer-loop-t048-next-safe-flow-task-judge-20260526T130119Z.md"
+              verdict: "GREEN_LIGHT no; MIN_SCORE 6"
+              valid_blocker: "Plan missed upload-router fixture degradation for two real-service tests."
+            - artifact: ".codex/artifacts/claude-peer-loop-t048-next-safe-flow-task-judge-iteration-2-20260526T130823Z.md"
+              verdict: "GREEN_LIGHT no; MIN_SCORE 7"
+              valid_blocker: "Plan missed the third upload-router test monkeypatching the helper that T049 will delete."
+            - artifact: ".codex/artifacts/claude-peer-loop-t048-next-safe-flow-task-judge-iteration-3-20260526T131049Z.md"
+              verdict: "GREEN_LIGHT yes; MIN_SCORE 8"
+          valid_concerns_addressed:
+            - "All three affected upload-router tests must be migrated explicitly."
+            - "The guard must fail red against the current bad pattern before source edits."
+            - "Delete the pass-through helper instead of preserving a one-line wrapper."
+            - "Guard scope and expected zero-reference grep result must be explicit."
+        antigravity:
+          verdict: "Skipped by rule; Claude and Codex agreed after revision, and this is not a high-risk/disputed public contract, schema, data, runtime reliability, or architecture synthesis decision."
+      commands:
+        - command: "python3 -m json.tool /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          result: pass
+          notes: "schema_version 1; status ok; blockers empty. Stale watchdog active_task T039 is advisory because status is ok."
+        - command: "sed -n relevant sections of goal.md, roadmap-and-taskfiles.md, and new-codex-session-prompt.md"
+          result: pass
+          notes: "Re-read Human Maintainer Map, final docs requirement, naming gate, and reuse/move/merge/delete rules."
+        - command: "sed -n /Users/ccimen/.agents/skills/fastapi/SKILL.md"
+          result: pass
+          notes: "Applied FastAPI adapter guidance; T049 must not change endpoint signatures, schemas, dependency declarations, OpenAPI, or generated clients."
+        - command: "rg source evidence for flow_upload_service, FlowFileUploadService, container.flow_file_upload_service, and affected upload-router tests"
+          result: pass
+          notes: "Confirmed canonical provider owner, duplicate construction path, two production callers, and three affected tests."
+        - command: "cd backend && uv run pyright src/intric/flows/api/flow_router_common.py"
+          result: pass
+          notes: "Baseline passes only with the current cast(Any)/pyright-ignore erasure."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t048-next-safe-judge --phase plan --iteration 1 --timeout-seconds 1200 --require-green --required-min-score 8 ..."
+          result: fail_then_revised
+          notes: "GREEN_LIGHT no; MIN_SCORE 6; accepted fixture-migration blocker."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t048-next-safe-judge --phase verification --iteration 2 --timeout-seconds 1200 --require-green --required-min-score 8 ..."
+          result: fail_then_revised
+          notes: "GREEN_LIGHT no; MIN_SCORE 7; accepted third-test migration blocker."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t048-next-safe-judge --phase verification --iteration 3 --timeout-seconds 1200 --require-green --required-min-score 8 ..."
+          result: pass
+          notes: "GREEN_LIGHT yes; MIN_SCORE 8."
+      consolidation_effect:
+        reused_existing_owner: "Container.flow_file_upload_service and FlowFileUploadService."
+        logic_moved_from: "Manual API adapter construction in flow_router_common.flow_upload_service to direct provider ownership at the upload-router call sites."
+        logic_deleted: "T049 will delete duplicate constructor wiring, cast(Any)/pyright-ignore provider erasure, and the pass-through flow_upload_service helper."
+        duplicate_path_removed: "The API adapter will stop rebuilding the upload service from lower-level providers."
+        new_code_added: "T049 should add one focused architecture guard and minimal test-fixture rewiring; no production helper or abstraction."
+        why_existing_owners_were_insufficient: "Existing owners are sufficient; the current adapter bypasses them and erases types."
+        guard_preventing_duplicate_logic_from_returning: "test_flow_api_upload_service_uses_container_provider_without_any_erasure."
+        net_flow_logic_surface_area: "reduced"
+      naming_gate:
+        new_names_expected: "No new Flow module/class/type/status/file names."
+        guard_name: "test_flow_api_upload_service_uses_container_provider_without_any_erasure clearly names the Flow API upload-service provider ownership contract."
+        would_appear_in_architecture_doc: true
+        would_appear_in_where_to_change_table: true
+      next_task: T049
+
+  - id: T049
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: medium
+    objective: "refactor(flows-api): use the Flow upload service provider directly."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t048-next-safe-judge.md"
+      - ".codex/artifacts/claude-peer-loop-t048-next-safe-flow-task-judge-iteration-3-20260526T131049Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t049-flow-upload-service-provider.md"
+      - "backend/src/intric/flows/api/flow_router_common.py"
+      - "backend/src/intric/flows/api/flow_upload_router.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+      - "backend/tests/unittests/flows/test_flow_upload_router.py"
+    constraints:
+      - "Check watchdog before starting implementation and before committing."
+      - "Treat the T048 Claude iteration-3 artifact as the plan gate; rerun Claude plan gate if implementation scope deviates."
+      - "Use FastAPI/API adapter guidance; do not change endpoint signatures, request/response models, dependency declarations, OpenAPI, generated clients, or public API behavior."
+      - "No source edits outside allowed_files; no migrations, schema changes, frontend edits, retention, service-key identity/review/rerun, webhook outbox, output-format architecture, final architecture docs, or Flow AI Builder changes."
+      - "Do not change Container provider definitions or FlowFileUploadService constructor semantics."
+      - "Do not introduce Any, cast(Any), dict[str, Any], pyright ignores, generic helpers, managers, processors, service locators, fake interfaces, or one-implementation protocols."
+      - "Do not write docs/flows/architecture.md in this task."
+    expected_output:
+      - "Confirm Container.flow_file_upload_service is still the existing provider owner."
+      - "Add the architecture guard first and prove it fails red against the current flow_router_common.py bad pattern before production edits."
+      - "Delete flow_router_common.flow_upload_service(container)."
+      - "Call container.flow_file_upload_service() directly from upload_flow_file and upload_flow_runtime_file."
+      - "Migrate test_upload_flow_runtime_file_calls_step_upload_service by replacing the helper monkeypatch with container.flow_file_upload_service.return_value = upload_service and preserving upload_runtime_file_for_step.assert_awaited_once()."
+      - "Migrate test_upload_flow_file_rejects_when_flow_input_type_not_file_upload and test_upload_flow_file_uses_flow_limit_override so they still build and exercise a real FlowFileUploadService from existing lower-level test doubles."
+      - "Keep BadRequestException, file_service.save_file.assert_not_awaited(), and max_size == 31_000_000 assertions."
+      - "Worker receipt with consolidation effect, naming-gate answer, commands, Claude commit gate, and next-task recommendation."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py::test_flow_api_upload_service_uses_container_provider_without_any_erasure -q"
+      - "cd backend && uv run pyright src/intric/flows/api/flow_router_common.py src/intric/flows/api/flow_upload_router.py"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py::test_flow_api_upload_service_uses_container_provider_without_any_erasure tests/unittests/flows/test_flow_upload_router.py -q"
+      - "cd backend && uv run pyright src/intric/flows/api/flow_router_common.py src/intric/flows/api/flow_upload_router.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_upload_router.py"
+      - "cd backend && uv run ruff check src/intric/flows/api/flow_router_common.py src/intric/flows/api/flow_upload_router.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_upload_router.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/api/flow_router_common.py src/intric/flows/api/flow_upload_router.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_upload_router.py"
+      - "rg -n 'cast\\(\\s*Any|pyright: ignore\\[reportUnknownMemberType\\]|FlowFileUploadService\\(|def flow_upload_service' backend/src/intric/flows/api/flow_router_common.py backend/src/intric/flows/api/flow_upload_router.py"
+      - "rg -n 'common\\.flow_upload_service|flow_upload_service\\(' backend/src/intric/flows backend/tests/unittests/flows -g '*.py'"
+      - "git diff --check"
+      - "git diff --name-only"
+      - "git diff --staged --name-only"
+    stop_if:
+      - "Direct container.flow_file_upload_service() calls fail strict pyright."
+      - "The new guard does not fail red against the current pre-edit bad pattern."
+      - "Migrated upload-router tests no longer exercise the intended seams."
+      - "The runtime-file router test stops asserting upload_service.upload_runtime_file_for_step.assert_awaited_once()."
+      - "The rejection-path test stops asserting BadRequestException and file_service.save_file.assert_not_awaited()."
+      - "The limit-override test stops asserting file_service.save_file.await_args.kwargs['max_size'] == 31_000_000."
+      - "The fix requires changing endpoint signatures, response models, dependencies, OpenAPI, generated clients, or Flow upload behavior."
+      - "The fix requires changing Container provider definitions or FlowFileUploadService constructor semantics."
+      - "The fix requires Any, cast(Any), dict[str, Any], a pyright ignore, a generic helper, manager, processor, service locator, fake interface, or one-implementation protocol."
+      - "The task expands into retention, service-key identity/review/rerun, schema migrations, webhook outbox, output-format architecture, final architecture docs, or Flow AI Builder."
+      - "Staged files include anything outside the T049 allowed files."
     receipt: null
 
   - id: T901
