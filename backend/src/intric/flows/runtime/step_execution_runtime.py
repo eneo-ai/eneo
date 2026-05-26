@@ -17,11 +17,14 @@ from intric.completion_models.infrastructure.tenant_model_capabilities import (
 from intric.files.file_models import File
 from intric.flows.citation_sidecar import (
     CITATION_MODE_INLINE_INREF_SIDECAR,
+    CITATION_MODE_OFF,
     build_citation_sidecar,
     resolve_citation_mode,
     strip_inline_reference_tags,
 )
 from intric.flows.domain.flow import FlowRun, FlowStepResult, FlowStepResultStatus
+from intric.flows.enums import FlowOutputMode, FlowOutputType
+from intric.flows.flow_capability_manifest import is_citation_capable_step
 from intric.flows.output_modes import transcribe_only_violation
 from intric.flows.runtime.inherited_citations import (
     build_inherited_citation_prompt_appendix,
@@ -34,6 +37,8 @@ from intric.flows.runtime.models import (
     StepExecutionOutput,
     StepInputValue,
 )
+from intric.flows.runtime.output_formats import resolve_format_spec
+from intric.flows.runtime.output_formats.base import append_output_format_instructions
 from intric.flows.runtime.output_runtime import TypedOutputProcessingResult
 from intric.flows.runtime.protocols import RuntimeAssistantProtocol
 from intric.flows.runtime.step_input_validation import (
@@ -622,11 +627,23 @@ def citation_mode_for_step(step: RuntimeStep) -> str:
     citation_mode = resolve_citation_mode(step.output_config)
     if citation_mode != CITATION_MODE_INLINE_INREF_SIDECAR:
         return citation_mode
-    if step.output_type != "text":
-        return "off"
-    if step.output_mode in {"template_fill", "transcribe_only"}:
-        return "off"
-    return citation_mode
+    try:
+        output_type = FlowOutputType(step.output_type)
+    except ValueError:
+        return CITATION_MODE_OFF
+    if output_type is not FlowOutputType.TEXT:
+        return CITATION_MODE_OFF
+    try:
+        output_mode = FlowOutputMode(step.output_mode)
+    except ValueError:
+        return citation_mode
+    if is_citation_capable_step(
+        output_type=output_type,
+        output_mode=output_mode,
+        output_config=step.output_config,
+    ):
+        return citation_mode
+    return CITATION_MODE_OFF
 
 
 def build_runtime_citation_sidecar(
@@ -727,58 +744,6 @@ def infer_finish_reason(
         if tool_calls:
             return "tool_calls"
     return None
-
-
-def augment_prompt_for_typed_output(
-    *,
-    output_type: str,
-    output_contract: dict[str, Any] | None,
-    prompt: str,
-) -> str:
-    if output_type == "json":
-        instructions = [
-            "Return ONLY valid JSON.",
-            "Do not include markdown code fences, commentary, or any surrounding text.",
-            "The top-level JSON value must be an object or array.",
-        ]
-        if output_contract is not None:
-            schema_json = json.dumps(
-                output_contract, ensure_ascii=False, sort_keys=True
-            )
-            instructions.extend(
-                [
-                    "Follow this JSON Schema exactly:",
-                    schema_json,
-                ]
-            )
-    elif output_type in {"pdf", "docx"}:
-        if output_contract is not None:
-            artifact_name = "PDF" if output_type == "pdf" else "DOCX"
-            schema_json = json.dumps(
-                output_contract, ensure_ascii=False, sort_keys=True
-            )
-            instructions = [
-                f"The system will validate your JSON and render it into a {artifact_name} file after you respond.",
-                "Return ONLY valid JSON.",
-                "Do not include markdown code fences, commentary, or any surrounding text.",
-                "The top-level JSON value must be an object or array.",
-                "Use plain text for JSON string values; do not include Markdown formatting markers inside strings.",
-                "Follow this JSON Schema exactly:",
-                schema_json,
-            ]
-        else:
-            artifact_name = "PDF" if output_type == "pdf" else "DOCX"
-            instructions = [
-                f"The system will render your answer into a {artifact_name} file after you respond.",
-                "Return only the document body as Markdown/plain text content.",
-                "Do not output binary file contents, base64, XML/ZIP internals, or PDF object syntax.",
-                "For PDF output specifically, do not start the response with %PDF-.",
-            ]
-    else:
-        return prompt
-
-    suffix = "\n".join(instructions)
-    return f"{prompt}\n\n{suffix}" if prompt.strip() else suffix
 
 
 def execution_hash(
@@ -899,10 +864,10 @@ async def prepare_step_execution(
         if prompt_text
         else ""
     )
-    effective_prompt = augment_prompt_for_typed_output(
-        output_type=step.output_type,
-        output_contract=step.output_contract,
-        prompt=effective_prompt,
+    output_format_spec = resolve_format_spec(step.output_type)
+    effective_prompt = append_output_format_instructions(
+        effective_prompt,
+        output_format_spec.prompt_instructions(step.output_contract),
     )
     diagnostics = list(step_input.diagnostics)
 
@@ -1056,7 +1021,9 @@ async def complete_step_execution(
     model_kwargs = prepared.assistant.completion_model_kwargs
     original_kwargs = model_kwargs
     cache_key = deps.json_mode_cache_key(prepared.assistant)
-    native_json_object_requested = _should_request_native_json_object_mode(step)
+    native_json_object_requested = resolve_format_spec(
+        step.output_type
+    ).should_request_native_json_object_mode(step.output_contract)
     if native_json_object_requested:
         cached_json_mode_support = state.json_mode_supported.get(cache_key)
         if cached_json_mode_support is None:
@@ -1268,29 +1235,3 @@ async def complete_step_execution(
             else None
         ),
     )
-
-
-def _should_request_native_json_object_mode(step: RuntimeStep) -> bool:
-    if step.output_type == "json":
-        if step.output_contract is None:
-            return True
-        return _schema_prefers_object_value(step.output_contract)
-    if step.output_type in {"pdf", "docx"} and step.output_contract is not None:
-        return _schema_prefers_object_value(step.output_contract)
-    return False
-
-
-def _schema_prefers_object_value(schema: dict[str, Any]) -> bool:
-    raw_type = schema.get("type")
-    if isinstance(raw_type, str):
-        return raw_type == "object"
-    if isinstance(raw_type, list):
-        declared = {
-            item for item in cast(list[object], raw_type) if isinstance(item, str)
-        }
-        return "object" in declared and "array" not in declared
-    if isinstance(schema.get("properties"), dict):
-        return True
-    if "items" in schema:
-        return False
-    return False

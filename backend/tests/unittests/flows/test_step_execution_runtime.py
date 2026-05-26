@@ -10,6 +10,10 @@ from uuid import uuid4
 import pytest
 
 from intric.ai_models.completion_models.completion_model import Completion, TokenUsage
+from intric.flows.citation_sidecar import (
+    CITATION_MODE_INLINE_INREF_SIDECAR,
+    CITATION_MODE_OFF,
+)
 from intric.flows.flow import (
     FlowRun,
     FlowRunStatus,
@@ -24,6 +28,8 @@ from intric.flows.runtime.models import (
     StepExecutionOutput,
     StepInputValue,
 )
+from intric.flows.runtime.output_formats import resolve_format_spec
+from intric.flows.runtime.output_formats.base import append_output_format_instructions
 from intric.flows.runtime.output_runtime import TypedOutputProcessingResult
 from intric.flows.runtime.step_execution_runtime import (
     FlowStepCancelledError,
@@ -31,8 +37,8 @@ from intric.flows.runtime.step_execution_runtime import (
     StepExecutionRuntimeDeps,
     apply_prompt_context_trace,
     attach_typed_failure_context,
-    augment_prompt_for_typed_output,
     build_output_payload,
+    citation_mode_for_step,
     complete_step_execution,
     detect_native_json_output_support,
     effective_model_parameters,
@@ -112,6 +118,18 @@ def _step(
         output_contract=output_contract,
         input_type=input_type,
         input_contract=input_contract,
+    )
+
+
+def _prompt_for_output_format(
+    *,
+    output_type: str,
+    output_contract: dict[str, object] | None,
+    prompt: str,
+) -> str:
+    spec = resolve_format_spec(output_type)
+    return append_output_format_instructions(
+        prompt, spec.prompt_instructions(output_contract)
     )
 
 
@@ -290,8 +308,8 @@ async def test_prepare_step_execution_validates_json_binding_when_binding_is_jso
     )
 
 
-def test_augment_prompt_for_json_output_appends_schema_instructions():
-    prompt = augment_prompt_for_typed_output(
+def test_json_output_format_appends_schema_prompt_instructions():
+    prompt = _prompt_for_output_format(
         output_type="json",
         output_contract={"type": "object", "properties": {"ok": {"type": "boolean"}}},
         prompt="Analyze the text",
@@ -302,6 +320,45 @@ def test_augment_prompt_for_json_output_appends_schema_instructions():
     assert "Do not include markdown code fences" in prompt
     assert '"type": "object"' in prompt
     assert '"ok"' in prompt
+
+
+@pytest.mark.parametrize(
+    ("output_config", "expected"),
+    [
+        ({}, CITATION_MODE_OFF),
+        ({"citation_mode": "custom_sidecar"}, "custom_sidecar"),
+    ],
+)
+def test_citation_mode_for_step_preserves_non_inline_modes(
+    output_config: dict[str, object], expected: str
+) -> None:
+    assert citation_mode_for_step(_step(output_config=output_config)) == expected
+
+
+@pytest.mark.parametrize(
+    ("output_type", "output_mode", "expected"),
+    [
+        ("text", "pass_through", CITATION_MODE_INLINE_INREF_SIDECAR),
+        ("json", "pass_through", CITATION_MODE_OFF),
+        ("pdf", "pass_through", CITATION_MODE_OFF),
+        ("docx", "pass_through", CITATION_MODE_OFF),
+        ("text", "template_fill", CITATION_MODE_OFF),
+        ("text", "transcribe_only", CITATION_MODE_OFF),
+        ("garbage", "pass_through", CITATION_MODE_OFF),
+        ("text", "garbage", CITATION_MODE_INLINE_INREF_SIDECAR),
+        ("json", "garbage", CITATION_MODE_OFF),
+    ],
+)
+def test_citation_mode_for_step_delegates_inline_eligibility(
+    output_type: str, output_mode: str, expected: str
+) -> None:
+    step = _step(
+        output_type=output_type,
+        output_mode=output_mode,
+        output_config={"citation_mode": CITATION_MODE_INLINE_INREF_SIDECAR},
+    )
+
+    assert citation_mode_for_step(step) == expected
 
 
 def test_detect_native_json_output_support_uses_litellm_model_name(

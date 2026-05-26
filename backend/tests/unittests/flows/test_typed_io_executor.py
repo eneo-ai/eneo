@@ -31,7 +31,8 @@ from intric.flows.runtime.executor import (
     RuntimeStep,
     StepInputValue,
 )
-from intric.flows.runtime.step_execution_runtime import augment_prompt_for_typed_output
+from intric.flows.runtime.output_formats import resolve_format_spec
+from intric.flows.runtime.output_formats.base import append_output_format_instructions
 from intric.main.exceptions import TypedIOValidationException
 
 
@@ -126,6 +127,18 @@ def _runtime_step(
         output_contract=output_contract,
         input_type=input_type,
         input_contract=input_contract,
+    )
+
+
+def _prompt_for_output_format(
+    *,
+    output_type: str,
+    output_contract: dict[str, object] | None,
+    prompt: str,
+) -> str:
+    spec = resolve_format_spec(output_type)
+    return append_output_format_instructions(
+        prompt, spec.prompt_instructions(output_contract)
     )
 
 
@@ -1956,7 +1969,7 @@ async def test_resolve_http_input_decrypts_encrypted_headers(user):
 
 
 def test_document_output_prompt_instructs_model_to_return_markdown_not_binary() -> None:
-    prompt = augment_prompt_for_typed_output(
+    prompt = _prompt_for_output_format(
         output_type="pdf",
         output_contract=None,
         prompt="Generera en PDF-rapport",
@@ -1968,7 +1981,7 @@ def test_document_output_prompt_instructs_model_to_return_markdown_not_binary() 
 
 
 def test_document_output_prompt_with_contract_requests_validated_json() -> None:
-    prompt = augment_prompt_for_typed_output(
+    prompt = _prompt_for_output_format(
         output_type="pdf",
         output_contract={"type": "object"},
         prompt="Return report data",

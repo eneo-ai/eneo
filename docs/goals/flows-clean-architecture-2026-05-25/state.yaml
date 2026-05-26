@@ -110,7 +110,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T019
+active_task: T020
 
 tasks:
   - id: T001
@@ -1697,7 +1697,7 @@ tasks:
   - id: T019
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Move current output_type prompt instructions and native JSON-mode preference behind a total OutputFormatSpec registry without changing runtime behavior."
     allowed_files:
@@ -1737,12 +1737,86 @@ tasks:
       guard_preventing_duplicate_logic_from_returning: "Spec parity tests, citation delegation tests, registry totality/unknown-type tests, and a backend-wide rg guard for deleted helper names."
       net_flow_logic_surface_area: "reduced"
       if_increased_why: ""
-    receipt: null
+    receipt:
+      result: done
+      summary: "Moved output_type prompt instructions and native JSON-mode preference out of step_execution_runtime.py into a total FlowOutputType-backed output_formats registry. Deleted augment_prompt_for_typed_output, _should_request_native_json_object_mode, and _schema_prefers_object_value. Runtime prompt preparation and JSON-mode selection now resolve the output format spec by enum boundary, while citation_mode_for_step delegates valid inline capability to flow_capability_manifest.is_citation_capable_step and preserves the documented fail-soft persisted-data behavior for invalid output modes."
+      files_changed:
+        - "backend/src/intric/flows/runtime/output_formats/base.py"
+        - "backend/src/intric/flows/runtime/output_formats/__init__.py"
+        - "backend/src/intric/flows/runtime/output_formats/text.py"
+        - "backend/src/intric/flows/runtime/output_formats/json.py"
+        - "backend/src/intric/flows/runtime/output_formats/docx.py"
+        - "backend/src/intric/flows/runtime/output_formats/pdf.py"
+        - "backend/src/intric/flows/runtime/step_execution_runtime.py"
+        - "backend/tests/unittests/flows/test_flow_runtime_output_formats.py"
+        - "backend/tests/unittests/flows/test_step_execution_runtime.py"
+        - "backend/tests/unittests/flows/test_typed_io_executor.py"
+      evidence:
+        - "backend/src/intric/flows/runtime/output_formats/__init__.py:19-38 defines the enum-keyed total registry and typed resolver boundary."
+        - "backend/src/intric/flows/runtime/output_formats/base.py:10-24 defines the spec protocol and prompt append invariant."
+        - "backend/src/intric/flows/runtime/output_formats/base.py:27-40 preserves the old schema object-preference behavior in one owner."
+        - "backend/src/intric/flows/runtime/step_execution_runtime.py:626-646 delegates inline citation eligibility to flow_capability_manifest for valid enum values."
+        - "backend/src/intric/flows/runtime/step_execution_runtime.py:867-871 resolves prompt instructions through OutputFormatSpec."
+        - "backend/src/intric/flows/runtime/step_execution_runtime.py:1024-1026 resolves native JSON object-mode through OutputFormatSpec."
+        - "backend/tests/unittests/flows/test_flow_runtime_output_formats.py:25-193 covers registry totality, unknown output type, prompt byte parity, and native JSON-mode matrix."
+      commands:
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_runtime_output_formats.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_typed_io_executor.py -q"
+          status: fail_expected_environment
+          output: "1 failed, 126 passed; only failure is test_document_outputs_generate_downloadable_artifacts[pdf-application/pdf-.pdf] because WeasyPrint cannot load local libgobject-2.0-0."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_runtime_output_formats.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_typed_io_executor.py -q -k 'not test_document_outputs_generate_downloadable_artifacts'"
+          status: pass
+          output: "125 passed, 2 deselected, 1 warning."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_runtime_output_formats.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_typed_io_executor.py::test_document_output_prompt_instructs_model_to_return_markdown_not_binary tests/unittests/flows/test_typed_io_executor.py::test_document_output_prompt_with_contract_requests_validated_json -q"
+          status: pass
+          output: "72 passed, 1 warning."
+        - command: "cd backend && uv run ruff check src/intric/flows/runtime/output_formats src/intric/flows/runtime/step_execution_runtime.py tests/unittests/flows/test_flow_runtime_output_formats.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_typed_io_executor.py"
+          status: pass
+          output: "All checks passed."
+        - command: "cd backend && uv run ruff format --check src/intric/flows/runtime/output_formats src/intric/flows/runtime/step_execution_runtime.py tests/unittests/flows/test_flow_runtime_output_formats.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_typed_io_executor.py"
+          status: pass
+          output: "10 files already formatted."
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/output_formats src/intric/flows/runtime/step_execution_runtime.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations."
+        - command: "rg -n \"augment_prompt_for_typed_output|_should_request_native_json_object_mode|_schema_prefers_object_value\" backend; test $? -eq 1"
+          status: pass
+          output: "No backend references to the deleted helper names remain."
+        - command: "git diff --check -- backend/src/intric/flows/runtime/output_formats backend/src/intric/flows/runtime/step_execution_runtime.py backend/tests/unittests/flows/test_flow_runtime_output_formats.py backend/tests/unittests/flows/test_step_execution_runtime.py backend/tests/unittests/flows/test_typed_io_executor.py"
+          status: pass
+        - command: "git diff -- backend/src/intric/flows/runtime/output_formats backend/src/intric/flows/runtime/step_execution_runtime.py backend/tests/unittests/flows/test_flow_runtime_output_formats.py backend/tests/unittests/flows/test_step_execution_runtime.py backend/tests/unittests/flows/test_typed_io_executor.py | rg -n '^\\+.*(pyright: ignore|type: ignore|cast\\(Any|dict\\[str, Any\\]|T0[0-9][0-9]|Phase [0-9A-G]\\b)'; test $? -eq 1"
+          status: pass
+          output: "No added forbidden suppressions, broad Any boundaries, task markers, or phase markers."
+      peer_review:
+        claude:
+          plan_first_artifact: ".codex/artifacts/claude-peer-loop-t019-output-format-policy-implementation-plan-20260526T005813Z.md"
+          plan_final_artifact: ".codex/artifacts/claude-peer-loop-t019-output-format-policy-implementation-plan-revision-20260526T010126Z.md"
+          implementation_artifact: ".codex/artifacts/claude-peer-loop-t019-output-format-policy-implementation-review-20260526T011146Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 9. Recommended committing; only P3 polish on root re-export/private helper surface."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t019-output-format-policy-antigravity-final-gate-20260526T011331Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 9. Noted that invalid output_mode fail-soft may deserve future hardening, but recommended committing current behavior-preserving T019."
+      codex_disagreements:
+        - "Antigravity suggested returning off for invalid output_mode. That would intentionally change the behavior Claude required T019 to preserve: current code returns inline for output_type=text and an unknown output_mode because only known template_fill/transcribe_only suppress inline. Kept behavior-preserving tests and recorded future hardening as a separate corrupted-runtime-definition concern."
+        - "Antigravity called None vs empty schema inconsistency. T019 intentionally preserves current behavior: JSON None enables native JSON-mode while an empty schema object disables it; the matrix test pins this for later product/runtime policy review."
+      consolidation_effect:
+        reused_existing_owner: "FlowOutputType, JsonObject, and flow_capability_manifest.is_citation_capable_step."
+        logic_moved_from: "Prompt augmentation and native JSON-mode branches in step_execution_runtime.py."
+        logic_deleted: "augment_prompt_for_typed_output, _should_request_native_json_object_mode, and _schema_prefers_object_value from step_execution_runtime.py."
+        duplicate_path_removed: "Runtime-local inline citation eligibility branching now delegates to flow_capability_manifest for valid enum values."
+        new_code_added: "output_formats package with OutputFormatSpec, enum-keyed resolver, prompt append invariant, and one spec per current output type."
+        why_existing_owners_were_insufficient: "Existing rendering, parsing, and cross-axis capability owners did not own output_type prompt/native JSON-mode policy."
+        guard_preventing_duplicate_logic_from_returning: "Registry totality tests, prompt/schema parity tests, citation delegation tests, and backend-wide deleted-helper rg guard."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: ""
+      notes:
+        - "Did not edit output_runtime.py, document rendering files, StepHandler files, OutputRenderer files, StepExecutionResult, executor.py, routers, schema/migration files, retention, service-key identity, webhook outbox, or Flow AI Builder."
+        - "P3 follow-up candidates: re-export append_output_format_instructions from output_formats root, underscore package-private helpers, and narrow __all__ to discourage direct singleton imports."
+      next_task: T020
 
   - id: T020
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: high
     objective: "Introduce the StepHandler registry and move current output_mode behavior dispatch behind handlers without changing runtime behavior."
     allowed_files:
