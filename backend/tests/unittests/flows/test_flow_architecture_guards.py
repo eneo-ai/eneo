@@ -23,6 +23,7 @@ from intric.database.tables.flow_tables import (
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 FLOW_SOURCE_ROOT = BACKEND_ROOT / "src" / "intric" / "flows"
 FLOW_RUNTIME_ROOT = FLOW_SOURCE_ROOT / "runtime"
+FLOW_TASKS_PATH = FLOW_RUNTIME_ROOT / "tasks.py"
 FLOW_API_PACKAGES = {"api", "ai_builder"}
 OUTPUT_FORMATS_ROOT = FLOW_RUNTIME_ROOT / "output_formats"
 DATA_RETENTION_ROOT = BACKEND_ROOT / "src" / "intric" / "data_retention"
@@ -194,6 +195,19 @@ def _outbox_delivery_status_source_files() -> list[Path]:
             ):
                 files.append(path)
     return sorted(files)
+
+
+def _is_container_provider_call(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "container"
+    )
+
+
+def _contains_container_provider_call(node: ast.AST) -> bool:
+    return any(_is_container_provider_call(child) for child in ast.walk(node))
 
 
 def _should_scan_path_for_axis(path: Path, *, axis: str) -> bool:
@@ -557,4 +571,44 @@ def test_flow_outbox_delivery_status_literals_use_canonical_vocabulary():
     assert offenders == [], (
         "Outbox delivery status comparisons must use FlowOutboxDeliveryStatus "
         "from flow_tables.py, not raw string literals: " + ", ".join(offenders)
+    )
+
+
+def test_flow_celery_task_provider_wiring_is_not_erased_to_any():
+    source = FLOW_TASKS_PATH.read_text()
+    tree = ast.parse(source, filename=str(FLOW_TASKS_PATH))
+    offenders: list[str] = []
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Name) or node.func.id != "cast":
+            continue
+        if len(node.args) < 2:
+            continue
+        type_arg = node.args[0]
+        if (
+            isinstance(type_arg, ast.Name)
+            and type_arg.id == "Any"
+            and _contains_container_provider_call(node.args[1])
+        ):
+            offenders.append(f"cast(Any):{node.lineno}")
+
+    container_provider_lines = {
+        node.lineno for node in ast.walk(tree) if _is_container_provider_call(node)
+    }
+    for line_number, line in enumerate(source.splitlines(), start=1):
+        if (
+            "pyright: ignore" in line
+            and "reportUnknownMemberType" in line
+            and any(
+                provider_line <= line_number <= provider_line + 2
+                for provider_line in container_provider_lines
+            )
+        ):
+            offenders.append(f"pyright-ignore:{line_number}")
+
+    assert offenders == [], (
+        "Flow Celery task wiring must preserve typed Container provider "
+        "contracts instead of erasing them to Any: " + ", ".join(offenders)
     )

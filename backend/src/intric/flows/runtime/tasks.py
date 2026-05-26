@@ -4,7 +4,7 @@ import asyncio
 import concurrent.futures
 import threading
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast
+from typing import Any
 from uuid import UUID
 
 from dependency_injector import providers
@@ -140,10 +140,7 @@ async def _execute_flow_run_async(
             space_repo=container.space_repo(),
             completion_service=container.completion_service(),
             file_repo=container.file_repo(),
-            template_asset_service=cast(
-                Any,
-                container.flow_template_asset_service(),
-            ),  # pyright: ignore[reportUnknownMemberType]
+            template_asset_service=container.flow_template_asset_service(),
             encryption_service=container.encryption_service(),
             audit_service=container.audit_service(),
             references_service=container.references_service(),
