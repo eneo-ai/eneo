@@ -22,7 +22,6 @@ from intric.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
     FlowRunTokenUsage,
-    FlowStep,
     FlowStepResult,
     JsonObject,
 )
@@ -271,8 +270,7 @@ class FlowRunService:
         reject_reserved_input_payload_keys(normalized_inline_payload)
         normalized_step_inputs = normalize_step_inputs_payload(step_inputs)
         preseed_steps = self._build_preseed_steps(
-            definition_json=definition.definition_json,
-            fallback_steps=flow.steps,
+            definition_json=definition.definition_json
         )
         step_input_file_projections: list[StepInputFileProjection] = []
         if step_inputs is not None or definition.has_required_runtime_input():
@@ -645,7 +643,6 @@ class FlowRunService:
         self,
         *,
         definition_json: JsonObject,
-        fallback_steps: list[FlowStep],
     ) -> list[PreseedStep]:
         raw_steps = parse_published_definition(definition_json).steps
         if not raw_steps:
@@ -653,12 +650,6 @@ class FlowRunService:
                 "Published flow version does not contain executable steps.",
                 code="flow_version_no_executable_steps",
             )
-
-        by_step_order: dict[int, FlowStep] = {}
-        for step in fallback_steps:
-            if getattr(step, "id", None) is None:
-                continue
-            by_step_order[int(step.step_order)] = step
 
         preseed: list[PreseedStep] = []
         for step_snapshot in raw_steps:
@@ -687,15 +678,11 @@ class FlowRunService:
             step_id_raw = step_snapshot.get("step_id")
             assistant_id_raw = step_snapshot.get("assistant_id")
             if step_id_raw is None or assistant_id_raw is None:
-                fallback = by_step_order.get(step_order)
-                if fallback is None:
-                    raise BadRequestException(
-                        f"Flow version step {step_order} is missing stable step identifiers.",
-                        code="flow_version_missing_step_identifiers",
-                        context={"step_order": step_order},
-                    )
-                step_id_raw = fallback.id
-                assistant_id_raw = fallback.assistant_id
+                raise BadRequestException(
+                    f"Flow version step {step_order} is missing stable step identifiers.",
+                    code="flow_version_missing_step_identifiers",
+                    context={"step_order": step_order},
+                )
 
             try:
                 step_id = UUID(str(step_id_raw))

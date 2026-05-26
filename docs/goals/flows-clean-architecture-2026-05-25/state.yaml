@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T034
+active_task: T036
 
 tasks:
   - id: T001
@@ -2835,7 +2835,7 @@ tasks:
   - id: T034
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Approve the next source/API/frontend id-owned draft persistence Worker after T033: refresh source evidence for remaining step-order/draft-step paths, decide exact allowed_files, verification, stop conditions, and whether public API runtime step_id nullability is a separate follow-up."
     inputs:
@@ -2863,6 +2863,238 @@ tasks:
       - "Source evidence for remaining duplicate/scattered step identity logic."
       - "Consolidation effect section."
       - "Public API/nullability/generated-client disposition."
+    receipt:
+      summary: "Approved a split follow-up instead of the broad T012 draft/source/API/frontend Worker. T035 is the next safe Worker: delete the runtime run-preseed fallback that repairs broken published snapshots from mutable draft flow.steps by step_order. Full draft id-owned persistence, API response nullability, generated-client changes, and Flow draft materialization remain separate judged follow-ups."
+      decision: split_followup
+      evidence:
+        - "backend/src/intric/flows/application/flow_run_service.py:273 still passes fallback_steps=flow.steps into _build_preseed_steps."
+        - "backend/src/intric/flows/application/flow_run_service.py:644-733 still repairs missing published step_id/assistant_id from mutable draft steps by step_order."
+        - "backend/tests/unittests/flows/test_flow_run_service.py:3012-3058 still protects successful fallback repair behavior."
+        - "backend/src/intric/flows/api/flow_models.py:444-555 and frontend/packages/intric-js/src/types/schema.d.ts:16893-16939 show draft update requests still cannot carry persisted step ids."
+        - "backend/src/intric/flows/application/flow_draft_materialization.py:155-177 and backend/src/intric/flows/application/flow_draft_materialization_executor.py:241-270 show materialization still depends on order-derived existing steps, so draft id-owned persistence must be split."
+        - "backend/src/intric/flows/api/flow_models.py:1166 and backend/src/intric/flows/api/flow_models.py:1751 still expose optional runtime step_id response fields; this is a separate API/generated-client follow-up."
+      local_preflight:
+        command: "docker exec -i eneo-41ae93-db-1 psql ... T030 published snapshot threshold query on postgres and flows_migration_smoke"
+        output: "postgres: flow_versions=254, published_steps=1684, bad_step_identity_rows=0, bad_definition_envelopes=0; flows_migration_smoke: all zero."
+      commands:
+        - command: "if [ -f /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json ]; then ruby -rjson -e '...' ...; fi"
+          result: pass
+          output: "schema_version=1, status=ok, blockers=[]; no halt-worthy watchdog blocker."
+        - command: "docker exec -i eneo-41ae93-db-1 psql ... T030 published snapshot threshold query"
+          result: pass
+          output: "Local target databases have zero bad published snapshot step identity rows and zero bad definition envelopes."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t034-step-identity-next-worker --phase plan --iteration 1 --timeout-seconds 1200 --require-green --required-min-score 8 ..."
+          result: fail
+          output: "GREEN_LIGHT no; MIN_SCORE 7. Valid blockers: path-scope grep guard, make published-snapshot preflight mandatory, and pin the replacement red test's matching-step_order invariant."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t034-step-identity-next-worker --phase plan --iteration 2 --timeout-seconds 1200 --require-green --required-min-score 8 ..."
+          result: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 9. T035 is safe to activate for local feature-branch work; deploy remains gated by per-target preflight."
+        - command: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t034-step-identity-next-worker-synthesis --timeout-seconds 1200 --spend-mode auto ..."
+          result: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8. No blocker for T035; follow-ups: automate preflight, audit sparse runtime flow loading, move structural published-step validation toward the parser."
+      peer_reviews:
+        claude_initial:
+          artifact: ".codex/artifacts/claude-peer-loop-t034-step-identity-next-worker-judge-20260526T053802Z.md"
+          verdict: "GREEN_LIGHT no; MIN_SCORE 7."
+          valid_concerns_addressed:
+            - "Scoped the fallback grep guard to flow_run_service.py and test_flow_run_service.py."
+            - "Made published-snapshot preflight mandatory for target databases and recorded current local results."
+            - "Specified that the red test must include a draft step matching the broken published snapshot step_order and assert the typed error/context."
+        claude_final:
+          artifact: ".codex/artifacts/claude-peer-loop-t034-step-identity-next-worker-judge-revised-20260526T054504Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 9."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t034-step-identity-next-worker-antigravity-synthesis-20260526T054658Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+          follow_ups:
+            - "Extract the published-snapshot step identity preflight into a checked-in script before treating this as a deploy/runbook-quality gate."
+            - "Audit whether create_run still needs the full draft Flow aggregate after fallback deletion."
+            - "Move structural published-step validation out of FlowRunService and into the published definition parser in a later judged slice."
+      consolidation_effect:
+        reused_existing_owner: "Published definition/runtime parser remains the runtime identity owner."
+        logic_moved_from: "None in T034; T035 will delete the duplicate runtime fallback."
+        logic_deleted: "None; T034 was read-only."
+        duplicate_path_removed: "None yet; T035 is approved to remove draft flow.steps repair from run preseed."
+        new_code_added: "No source/test code; only board receipt and local review artifact."
+        why_existing_owners_were_insufficient: "Existing runtime owner is sufficient; the next task deletes the bypass instead of inventing a new owner."
+        guard_preventing_duplicate_return: "T035 must include a behavior test where broken published identity fails even when draft steps could repair it, plus a path-scoped fallback_steps grep guard."
+        net_flow_logic_surface_area: "preserved in T034; T035 must reduce it."
+      next_task: T035
+
+  - id: T035
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Delete the runtime run-preseed fallback that repairs missing published snapshot step identity from mutable draft flow.steps by step_order, making the published definition snapshot the only runtime preseed identity owner."
+    inputs:
+      - "T030 receipt and preflight SQL"
+      - "T033 receipt"
+      - "T034 receipt"
+      - "backend/src/intric/flows/application/flow_run_service.py"
+      - "backend/tests/unittests/flows/test_flow_run_service.py"
+    allowed_files:
+      - "backend/src/intric/flows/application/flow_run_service.py"
+      - "backend/tests/unittests/flows/test_flow_run_service.py"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Before starting implementation, re-check the watchdog file and verify any halt-worthy blocker against source/state/git evidence."
+      - "Do not edit API routers, Pydantic API schemas, OpenAPI/generated frontend types, frontend files, migrations, Flow draft materialization, FlowService draft updates, FlowRepository draft sync, retention, service-key identity, webhook outbox, runtime input retention, schema hardening, or flow_version_steps."
+      - "Do not add explanatory comments for the deleted fallback; the task receipt and commit message carry the why."
+      - "Preserve unrelated dirty/untracked files and stage only allowed files."
+      - "If implementation needs files outside allowed_files, stop and return to Judge."
+    implementation:
+      - "Remove the fallback_steps parameter from _build_preseed_steps."
+      - "Remove by_step_order draft-step repair logic."
+      - "Change create_run preseed construction to pass only the published definition JSON."
+      - "Replace test_create_run_resolves_missing_snapshot_identifiers_from_fallback_steps with a red/green test proving missing published identifiers fail even when current mutable draft steps have the matching step_order that old fallback would have used."
+      - "Assert BadRequestException.code == flow_version_missing_step_identifiers and context == {step_order: <broken_order>}."
+      - "Add a partial-null edge case where step_id is present but assistant_id is missing and run creation fails before flow_run_repo.create is called."
+      - "Keep test_create_run_rejects_missing_snapshot_identifiers_without_fallback as the distinct no-possible-repair path."
+    verify:
+      - "Rerun the T030 published-snapshot threshold query for each local target database; bad_step_identity_rows and bad_definition_envelopes must both be zero."
+      - "grep -n \"_build_preseed_steps\\|fallback_steps\" backend/src/intric/"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py -q -k 'preseed or snapshot_identifier or create_run_creates_preseeded_run'"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_published_definition_contract.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_flow_run_service.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_flow_run_service.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_flow_run_service.py"
+      - "rg -n \"fallback_steps|resolves_missing_snapshot_identifiers_from_fallback_steps\" backend/src/intric/flows/application/flow_run_service.py backend/tests/unittests/flows/test_flow_run_service.py; test $? -eq 1"
+      - "git diff --check"
+    stop_if:
+      - "Published snapshot preflight is not run for a target database."
+      - "Published snapshot preflight finds any missing/invalid step_id or assistant_id."
+      - "Any caller currently depends on repairing published versions from mutable draft flow.steps."
+      - "The change needs files outside allowed_files."
+      - "The change needs API/router/schema/OpenAPI/generated-client/frontend files."
+      - "The change needs source/API/frontend draft persistence, Flow draft materialization, retention, service-key identity, webhook outbox, schema migration, runtime input retention, or flow_version_steps."
+    expected_output:
+      - "Small behavior-preserving/deletion diff in allowed files only."
+      - "Runtime preseed identity is published-snapshot-only."
+      - "A regression test proves broken published identity fails even when draft rows could repair by order."
+      - "Commands and pass/fail recorded in receipt."
+      - "Next safe task activated unless a stop rule applies."
+    consolidation_effect:
+      reused_existing_owner: "Published definition/runtime parser remains the runtime identity owner."
+      logic_moved_from: "None."
+      logic_deleted: "Mutable draft flow.steps fallback repair inside run preseed."
+      duplicate_path_removed: "Published snapshot identity is no longer repaired from mutable draft rows by step_order."
+      new_code_added: "One behavior test replacement and partial-null assertion only."
+      why_existing_owners_were_insufficient: "Existing runtime owner is sufficient; the implementation deletes a legacy bypass instead of adding a new owner."
+      guard_preventing_duplicate_return: "A matching-draft-step failure test and path-scoped fallback_steps grep guard."
+      net_flow_logic_surface_area: "reduced"
+    receipt:
+      summary: "Deleted the runtime run-preseed draft-step fallback. Run preseed now uses only the published definition snapshot; missing published step_id or assistant_id fails with flow_version_missing_step_identifiers before a run is created. The old fallback-success test was replaced with a regression test proving broken published identity fails even when current draft steps could have repaired it by step_order."
+      evidence:
+        - "backend/src/intric/flows/application/flow_run_service.py no longer imports FlowStep."
+        - "backend/src/intric/flows/application/flow_run_service.py:270 builds preseed from definition.definition_json only."
+        - "backend/src/intric/flows/application/flow_run_service.py:643 _build_preseed_steps no longer accepts fallback_steps."
+        - "backend/src/intric/flows/application/flow_run_service.py:678 raises flow_version_missing_step_identifiers whenever step_id or assistant_id is absent from the published snapshot."
+        - "backend/tests/unittests/flows/test_flow_run_service.py:3012 parametrizes broken_order/include_step_id so both fully missing and partial-null snapshot identity fail even when the draft has a matching step_order."
+      commands:
+        - command: "if [ -f /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json ]; then ruby -rjson -e '...' ...; fi"
+          result: pass
+          output: "schema_version=1, status=ok, blockers=[] before Worker implementation."
+        - command: "docker exec -i eneo-41ae93-db-1 psql ... T030 published snapshot threshold query"
+          result: pass
+          output: "postgres: flow_versions=254, published_steps=1684, bad_step_identity_rows=0, bad_definition_envelopes=0; flows_migration_smoke: all zero."
+        - command: "grep -n \"_build_preseed_steps\\|fallback_steps\" backend/src/intric/flows/..."
+          result: pass
+          output: "Before implementation, fallback_steps only appeared in flow_run_service.py; after implementation no fallback_steps matches remain in the scoped guard."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py::test_create_run_rejects_missing_snapshot_identifiers_even_when_draft_could_repair -q"
+          result: fail
+          output: "Red before source change: 2 failed with DID NOT RAISE BadRequestException, proving old code repaired from draft rows."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py::test_create_run_rejects_missing_snapshot_identifiers_even_when_draft_could_repair -q"
+          result: pass
+          output: "After implementation and test polish: 2 passed, 8 warnings."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py -q -k 'preseed or snapshot_identifier or create_run_creates_preseeded_run'"
+          result: pass
+          output: "4 passed, 96 deselected, 8 warnings."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_published_definition_contract.py -q"
+          result: pass
+          output: "124 passed, 10 warnings."
+        - command: "cd backend && uv run ruff check src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_flow_run_service.py"
+          result: pass
+          output: "All checks passed."
+        - command: "cd backend && uv run ruff format --check src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_flow_run_service.py"
+          result: pass
+          output: "2 files already formatted."
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_flow_run_service.py"
+          result: pass
+          output: "0 errors, 0 warnings, 0 informations."
+        - command: "rg -n \"fallback_steps|resolves_missing_snapshot_identifiers_from_fallback_steps\" backend/src/intric/flows/application/flow_run_service.py backend/tests/unittests/flows/test_flow_run_service.py; test $? -eq 1"
+          result: pass
+          output: "No matches."
+        - command: "git diff --check"
+          result: pass
+          output: "No whitespace errors."
+      peer_reviews:
+        claude_initial_commit_gate:
+          artifact: ".codex/artifacts/claude-peer-loop-t035-run-preseed-fallback-implementation-review-20260526T055417Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 9."
+          valid_concerns_addressed:
+            - "Varied broken_order across parametrized cases so context propagation is proven."
+            - "Removed sentinel-string test setup."
+            - "Removed unused flow_run_repo.create.return_value from the failure test."
+        claude_final_commit_gate:
+          artifact: ".codex/artifacts/claude-peer-loop-t035-run-preseed-fallback-implementation-review-final-20260526T055720Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 9."
+        antigravity_commit_gate:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t035-run-preseed-fallback-implementation-antigravity-synthesis-20260526T055814Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 9."
+          follow_ups:
+            - "Add a checked-in published-snapshot step identity preflight script before treating the manual SQL as a deploy-quality gate."
+            - "Audit and remove eager draft step loading from create_run if a sparse Flow metadata query is approved."
+            - "Move structural published-step validation from FlowRunService toward the published definition parser in a separate judged slice."
+      consolidation_effect:
+        reused_existing_owner: "Published definition/runtime parser remains the runtime identity owner."
+        logic_moved_from: "None."
+        logic_deleted: "Mutable draft flow.steps fallback repair inside run preseed."
+        duplicate_path_removed: "Published snapshot identity is no longer repaired from mutable draft rows by step_order."
+        new_code_added: "One behavior test replacement with two parametrized cases for fully missing and partially missing snapshot identity."
+        why_existing_owners_were_insufficient: "The existing runtime owner was sufficient; this task deleted the legacy bypass."
+        guard_preventing_duplicate_return: "A matching-draft-step failure test and path-scoped fallback_steps grep guard."
+        net_flow_logic_surface_area: "reduced"
+      unrelated_dirty_preserved:
+        - ".devcontainer/docker-compose.yml"
+        - ".gitignore"
+        - "AGENTS.md"
+        - "frontend/packages/ui/src/icons/types.d.ts"
+        - ".devcontainer/devcontainer-lock.json and other unrelated untracked root/goal note files"
+      next_task: T036
+
+  - id: T036
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next smallest post-fallback Flow step-identity/runtime-contract consolidation slice after T035, using source evidence to decide between preflight automation, parser-owned published-step validation, sparse runtime flow loading, public runtime step_id nullability, or the first draft id-owned persistence sub-worker."
+    inputs:
+      - "T030 receipt"
+      - "T034 receipt"
+      - "T035 receipt"
+      - ".codex/artifacts/claude-peer-loop-t035-run-preseed-fallback-implementation-review-final-20260526T055720Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t035-run-preseed-fallback-implementation-antigravity-synthesis-20260526T055814Z.md"
+      - "backend/src/intric/flows/application/flow_run_service.py"
+      - "backend/src/intric/flows/published_definition.py"
+      - "backend/src/intric/flows/runtime/step_definition_parser.py"
+      - "backend/src/intric/flows/infrastructure/flow_repo.py"
+      - "backend/src/intric/flows/api/flow_models.py"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+    constraints:
+      - "Read-only."
+      - "Do not edit source, tests, migrations, generated frontend files, or docs other than the board receipt."
+      - "Before transitioning from this Judge task into any Worker, re-check the watchdog file and verify any halt-worthy blocker against source/state/git evidence."
+      - "Do not start retention, service-key identity, webhook outbox, Flow AI Builder cleanup, runtime input retention, schema hardening, schema migrations, or flow_version_steps."
+      - "Approve a Worker only with exact allowed_files, verification commands, stop_if, and consolidation_effect."
+      - "Apply reuse-before-inventing: prefer deepening existing owners or deleting duplicate paths over adding new modules."
+      - "Split API/generated-client work from runtime internals unless source evidence proves they must move together."
+    expected_output:
+      - "Decision: approve_preflight_script | approve_parser_validation | approve_sparse_runtime_loading | approve_public_step_id_nullability | approve_draft_identity_subworker | blocked."
+      - "Exact Worker objective, allowed_files, verify, stop_if."
+      - "Source evidence for ownership and duplicate/scattered logic."
+      - "Consolidation effect section."
+      - "Public API/generated-client disposition."
     receipt: null
 
   - id: T999

@@ -3009,13 +3009,35 @@ async def test_cancel_run_is_noop_for_terminal_status(user, status):
 
 
 @pytest.mark.asyncio
-async def test_create_run_resolves_missing_snapshot_identifiers_from_fallback_steps(
+@pytest.mark.parametrize(
+    ("broken_order", "include_step_id"),
+    (
+        (1, False),
+        (2, True),
+    ),
+)
+async def test_create_run_rejects_missing_snapshot_identifiers_even_when_draft_could_repair(
+    broken_order,
+    include_step_id,
     user,
 ):
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
+    draft_step = flow.steps[broken_order - 1]
+    broken_step: dict[str, object] = {"step_order": broken_order}
+    if include_step_id:
+        broken_step["step_id"] = str(draft_step.id)
+    published_steps: list[dict[str, object]] = [
+        {
+            "step_order": step.step_order,
+            "step_id": str(step.id),
+            "assistant_id": str(step.assistant_id),
+        }
+        for step in flow.steps
+    ]
+    published_steps[broken_order - 1] = broken_step
     service = FlowRunService(
         user=user,
         flow_repo=flow_repo,
@@ -3032,30 +3054,20 @@ async def test_create_run_resolves_missing_snapshot_identifiers_from_fallback_st
         definition_checksum="checksum",
         definition_json=_published_definition_json(
             flow,
-            [
-                {"step_order": 1},
-                {
-                    "step_order": 2,
-                    "step_id": str(flow.steps[1].id),
-                    "assistant_id": str(flow.steps[1].assistant_id),
-                },
-            ],
+            published_steps,
         ),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
-    created_run = _run(user=user, flow_id=flow.id)
-    flow_run_repo.create.return_value = created_run
 
-    await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
+    with pytest.raises(
+        BadRequestException, match="missing stable step identifiers"
+    ) as exc_info:
+        await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
 
-    preseed_steps = flow_run_repo.create.await_args.kwargs["preseed_steps"]
-    assert preseed_steps[0]["step_order"] == 1
-    assert preseed_steps[0]["step_id"] == flow.steps[0].id
-    assert preseed_steps[0]["assistant_id"] == flow.steps[0].assistant_id
-    assert preseed_steps[1]["step_order"] == 2
-    assert preseed_steps[1]["step_id"] == flow.steps[1].id
-    assert preseed_steps[1]["assistant_id"] == flow.steps[1].assistant_id
+    assert exc_info.value.code == "flow_version_missing_step_identifiers"
+    assert exc_info.value.context == {"step_order": broken_order}
+    flow_run_repo.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio
