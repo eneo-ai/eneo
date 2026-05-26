@@ -5,7 +5,7 @@ goal:
   slug: "flows-clean-architecture-2026-05-25"
   kind: open_ended
   tranche: "Reconfirm current source evidence, implement the first safe verified Flow architecture slice, verify it, and audit before continuing toward canonical runtime ownership."
-  status: active
+  status: blocked
 
 rules:
   pm_owns_state: true
@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T090
+active_task: null
 
 tasks:
   - id: T001
@@ -8767,7 +8767,7 @@ tasks:
   - id: T090
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Choose the next safe Flow clean-architecture task after T089."
     inputs:
@@ -8793,7 +8793,320 @@ tasks:
     stop_if:
       - "The only remaining actionable work is outside Flows proper or requires owner/product/data decisions."
       - "The next safe Flow task cannot be narrowed below a broad sweep."
-    receipt: null
+    receipt:
+      result: done
+      completed_at: "2026-05-26T22:24:09+02:00"
+      decision: scout_first
+      summary: "Did not approve another broad frontend Worker. The remaining full-check errors are outside Flows proper, and remaining T016 areas such as form-schema local edit conflict behavior and run-dialog recording/upload state need a source-backed inventory before implementation."
+      evidence:
+        - "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte:56"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte:58"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte:68"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte:107"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:100"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:101"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.svelte.ts:19"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunLaunchInputState.svelte.ts:5"
+      commands:
+        - cmd: "python3 watchdog check"
+          status: pass
+          output: "schema_version=1 status=ok halt_blockers=[]"
+        - cmd: "sed/rg/nl reads for T090, T016, FlowFormSchemaEditor, FlowRunDialog, FlowRunLaunchInputState, FlowRunFileInputState, and remaining full-check diagnostics"
+          status: pass
+      next_task: T091
+      review_tier: "Local validation only: read-only Scout inventory."
+      disposition:
+        T014: "queued/environment-blocked pending database preflight."
+        T015: "queued/product-gated for service-key review/rerun policy unless a new exact API gap appears."
+        T016: "queued broad placeholder; T091 will inventory remaining source-backed frontend state candidates."
+        T901: "queued final docs Worker; do not start during active implementation architecture changes."
+        non_flow_check_failures: "Do not activate SDK stream.js or API-key UI cleanup merely to make frontend check green under this Flow goal."
+      consolidation_effect:
+        reused_existing_owner: "N/A, read-only Judge."
+        logic_moved_from: "N/A."
+        logic_deleted: "N/A."
+        duplicate_path_removed: "N/A."
+        new_code_added: "No source code."
+        why_existing_owners_were_insufficient: "Remaining frontend state candidates need Scout evidence before a Worker can safely change owners."
+        guard_preventing_duplicate_logic_from_returning: "T091 must name the owner and guard/test for any future Worker."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+
+  - id: T091
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: medium
+    objective: "Inventory remaining T016 frontend state ownership candidates after T087/T089 and identify the next source-narrowed Worker or a block."
+    inputs:
+      - "T087 receipt"
+      - "T089 receipt"
+      - "T090 receipt"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte"
+      - "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowRunLaunchInputState.svelte.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.svelte.ts"
+      - "frontend/apps/web/src/lib/features/flows/flowRunContract.ts"
+      - "frontend/apps/web/src/lib/features/flows/flowRunWizard.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/flowRunProgress.ts"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only except this board receipt/task transition."
+      - "No source edits, test edits, generated-client edits, backend edits, docs/flows/architecture.md, or Flow AI Builder cleanup."
+      - "Do not propose a Worker unless the existing owner, duplicate/scattered logic, allowed files, and verification are exact."
+      - "Respect T016 stop_if: do not propose form-schema conflict behavior changes if the UX decision is still unclear."
+    expected_output:
+      - "Inventory table: Concept | Current locations | Behavior differences | Canonical owner | Merge/delete path."
+      - "Classify each candidate as approve_worker, needs_preflight, keep_temporarily, or blocked."
+      - "If a Worker is safe, specify objective, allowed_files, verify, review tier, stop_if, and consolidation effect."
+    stop_if:
+      - "The next candidate crosses product/data decisions, backend contract shape, or broad frontend sweep."
+      - "Only non-Flow check failures remain."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T22:25:55+02:00"
+      summary: "Mapped remaining T016 frontend-state areas after T087/T089. No immediate Worker is safe: form-schema edit conflict behavior needs UX/product preflight, run-dialog recording/upload side effects are intentionally split across existing owners and are too runtime-sensitive for a small frontend-only move, wizard/progress helpers already have owners, and remaining full-check errors are outside Flows proper."
+      inventory:
+        - concept: "Form schema draft edit state"
+          current_locations:
+            - "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte:58"
+            - "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte:68"
+            - "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts:73"
+            - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts:499"
+          behavior_differences: "Component owns local edit ids/localDirty/autogenerated-name state and commit timing; flowFormSchema owns normalization/persisted shape; FlowEditor owns metadata write. T016 explicitly stops if form-schema edit conflict behavior is undecided."
+          canonical_owner: "flowFormSchema for schema shape; FlowEditor for persisted metadata write; FlowFormSchemaEditor for transient UI edit state until conflict UX is decided."
+          merge_delete_path: "needs_preflight: decide conflict/reset semantics before moving localDirty/localFields into a deeper owner or deleting component-local buffering."
+          classification: needs_preflight
+        - concept: "Run launch form/freeform input state"
+          current_locations:
+            - "frontend/apps/web/src/lib/features/flows/components/FlowRunLaunchInputState.svelte.ts:5"
+            - "frontend/apps/web/src/lib/features/flows/flowRunContract.ts:171"
+            - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:123"
+            - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:1053"
+          behavior_differences: "FlowRunLaunchInputState owns mutable form/freeform values; flowRunContract owns payload construction/reuse/readers; FlowRunDialog composes state into run creation."
+          canonical_owner: "FlowRunLaunchInputState for mutable launch input; flowRunContract for generated-contract payload shape."
+          merge_delete_path: "keep_temporarily: no duplicate path found that is small enough to delete."
+          classification: keep_temporarily
+        - concept: "Runtime file upload and recording state"
+          current_locations:
+            - "frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.svelte.ts:19"
+            - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:548"
+            - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:628"
+            - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:683"
+            - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:948"
+          behavior_differences: "FlowRunFileInputState owns in-memory file/recording/resume flags; FlowRunDialog owns browser/file/audio side effects, upload calls, RecordingSession refs, and recovery orchestration."
+          canonical_owner: "FlowRunFileInputState for state; FlowRunDialog remains UI/side-effect coordinator until a dedicated runtime-upload design is approved."
+          merge_delete_path: "needs_preflight: moving side effects requires audio/file recovery behavior tests and likely a dedicated design gate."
+          classification: needs_preflight
+        - concept: "Run wizard page/blocker derivation"
+          current_locations:
+            - "frontend/apps/web/src/lib/features/flows/flowRunWizard.ts:78"
+            - "frontend/apps/web/src/lib/features/flows/flowRunWizard.ts:145"
+            - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:142"
+            - "frontend/apps/web/src/lib/features/flows/flowRunWizard.test.ts:10"
+          behavior_differences: "Pure owner already computes pages/blockers; dialog only derives and renders."
+          canonical_owner: "flowRunWizard."
+          merge_delete_path: "keep_temporarily: no duplicate path found."
+          classification: keep_temporarily
+        - concept: "Run progress snapshot projection"
+          current_locations:
+            - "frontend/apps/web/src/lib/features/flows/components/flowRunProgress.ts:42"
+            - "frontend/apps/web/src/lib/features/flows/components/FlowRunProgressPanel.svelte:53"
+            - "frontend/apps/web/src/lib/features/flows/components/flowRunProgress.test.ts:5"
+          behavior_differences: "Pure owner already builds snapshot; T089 aligned stale generated-contract fixtures."
+          canonical_owner: "flowRunProgress."
+          merge_delete_path: "keep_temporarily: no duplicate path found."
+          classification: keep_temporarily
+        - concept: "Remaining frontend full-check diagnostics"
+          current_locations:
+            - "frontend/packages/intric-js/src/client/stream.js:16"
+            - "frontend/packages/intric-js/src/client/stream.js:39"
+            - "frontend/apps/web/src/lib/features/api-keys/ExtendExpirationDialog.svelte:28"
+          behavior_differences: "Non-Flow SDK/API-key diagnostics after T089 removed the Flow progress fixture errors."
+          canonical_owner: "Outside this Flow goal."
+          merge_delete_path: "blocked: do not activate under Flows proper merely to make broad check green."
+          classification: blocked
+      commands:
+        - cmd: "python3 watchdog check"
+          status: pass
+          output: "schema_version=1 status=ok halt_blockers=[]"
+        - cmd: "rg/nl reads over FlowFormSchemaEditor, flowFormSchema, FlowRunDialog, FlowRunLaunchInputState, FlowRunFileInputState, flowRunContract, flowRunWizard, flowRunProgress and tests"
+          status: pass
+      recommended_next: T092
+      consolidation_effect:
+        reused_existing_owner: "Read-only inventory of existing frontend owners."
+        logic_moved_from: "N/A."
+        logic_deleted: "N/A."
+        duplicate_path_removed: "N/A."
+        new_code_added: "No source code."
+        why_existing_owners_were_insufficient: "No source-narrowed frontend Worker was proven safe; remaining candidates need product/UX/runtime preflight."
+        guard_preventing_duplicate_logic_from_returning: "Future Worker must name a guard/test before activation."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+
+  - id: T092
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: medium
+    objective: "Audit remaining queued/blocked board work and choose the next safe unblock path after T091 found no immediate frontend Worker."
+    inputs:
+      - "T014 queued schema task and T083 environment-blocked receipt"
+      - "T015 queued API task and T085 receipt"
+      - "T016 queued frontend task and T091 receipt"
+      - "T901 final docs task"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only except this board receipt/task transition."
+      - "Before activating any Worker or Scout, check the watchdog blocker file."
+      - "Do not start retention, service-key identity/review/rerun, schema migration, webhook outbox, Flow AI Builder cleanup, or final docs unless the board gate is satisfied."
+      - "If rechecking T014 database preflight, keep it Scout/read-only and use DB/Postgres/Alembic skills before any schema work."
+      - "Do not use non-Flow frontend check failures as a reason to broaden this goal."
+    expected_output:
+      - "Decision: approve_worker | scout_first | blocked."
+      - "If scout_first, exact read-only Scout objective and allowed files."
+      - "If blocked, exact external unblockers and no source edits."
+    stop_if:
+      - "All remaining work is blocked by missing Docker/Postgres, product/data owner decisions, or final-doc timing."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T22:31:44+02:00"
+      decision: scout_first
+      summary: "No Worker is safe immediately after T091. T015 has no current source-backed API Worker, T016 has no narrow frontend Worker, T901 is final-docs-only, and service-key/retention/review-rerun remain product-gated. The only remaining path that may unblock implementation is T014, so activate a read-only database/schema preflight Scout to recheck whether the devcontainer can provide catalog/data/query evidence."
+      evidence:
+        - "T083 receipt: Docker/Postgres unavailable blocked T014 schema preflight."
+        - "T085 receipt: no immediate T015 API Worker; service-key review/rerun wording overlaps product-gated decisions."
+        - "T091 receipt: no immediate T016 frontend Worker; remaining candidates need UX/runtime preflight or are outside Flows proper."
+        - "T901: final maintainer docs Worker remains queued until active runtime/API/schema/frontend architecture work settles."
+      commands:
+        - cmd: "watchdog check"
+          status: pass
+          output: "schema_version=1 status=ok halt_blockers=[]"
+        - cmd: "state.yaml/goal/roadmap/session-prompt reads plus T014/T083/T015/T085/T016/T901 receipt review"
+          status: pass
+      next_task: T093
+      review_tier: "Local validation only for read-only Scout; if T093 leads to schema/migration Worker, that next Worker is high-risk and requires DB/Postgres/Alembic/complexity skills plus full Claude and optional Antigravity."
+      disposition:
+        T014: "queued; may become actionable only after read-only catalog/data/query-shape evidence."
+        T015: "queued; no immediate API Worker after T085 and product-gated service-key review/rerun questions remain blocked."
+        T016: "queued; no immediate frontend Worker after T091."
+        T901: "queued final docs Worker; do not start during active implementation architecture changes."
+        product_data_gated_tasks: "T009/T010/T011 and retention/service-key/review-rerun decisions remain blocked until owner decisions are recorded."
+      consolidation_effect:
+        reused_existing_owner: "T014 schema/data preflight task and existing database schema/query owners."
+        logic_moved_from: "N/A, read-only Judge."
+        logic_deleted: "N/A."
+        duplicate_path_removed: "N/A."
+        new_code_added: "No source code."
+        why_existing_owners_were_insufficient: "No implementation owner can be safely changed without database/catalog evidence for T014; other queued areas are either product-gated or not currently source-narrowed."
+        guard_preventing_duplicate_logic_from_returning: "T093 must collect evidence before any schema/index/migration Worker can be approved."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+
+  - id: T093
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: medium
+    objective: "Recheck T014 database preflight environment and collect read-only catalog/data/query-shape evidence for the schema invariant task."
+    inputs:
+      - "T014 queued schema task"
+      - "T083 environment-blocked receipt"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/src/intric/database/tables/files_table.py"
+      - "backend/src/intric/flows/repositories/flow_run_repo.py"
+      - "backend/src/intric/flows/repositories/flow_run_webhook_delivery_repo.py"
+      - "backend/alembic/versions"
+      - "Docker/devcontainer if available, including docker exec eneo-41ae93-eneo-1"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only except this board receipt/task transition."
+      - "Before starting, check the watchdog blocker file."
+      - "Use complexity-optimizer, Supabase Postgres best practices, and SQLAlchemy/Alembic expert guidance before DB/schema preflight."
+      - "No source edits, test edits, migrations, generated-client edits, docs/flows/architecture.md, or Flow AI Builder cleanup."
+      - "Do not run schema migrations or write to the database."
+      - "If DB access is available, use read-only catalog/data queries and EXPLAIN for relevant query shapes only."
+      - "Do not approve a schema/index Worker without catalog/data evidence and exact allowed_files/verify."
+    expected_output:
+      - "Whether Docker/devcontainer/Postgres access is available now."
+      - "If available, read-only evidence for T014 invariants: published-version pointer, legacy files.user_id drift, queued/running recovery index need, webhook delivery query coverage."
+      - "If unavailable, exact blocker evidence and no source edits."
+      - "Next recommendation: approve_worker | scout_first | blocked."
+    stop_if:
+      - "Docker/devcontainer/Postgres credentials remain unavailable."
+      - "The only possible next step would require source edits or migrations without DB/catalog evidence."
+      - "The preflight would require writes, migrations, or product/data decisions."
+    receipt:
+      result: blocked_environment
+      completed_at: "2026-05-26T22:39:12+02:00"
+      summary: "Rechecked the T014 database/schema preflight path, including the owner's explicit devcontainer name, and the environment is still blocked. Docker cannot reach the active OrbStack socket or alternate Docker sockets, local psql/pg_isready are absent, and a direct async SQLAlchemy connection to the backend .env database target fails on localhost:5432. T014 remains unsafe to implement because published-pointer FKs, files.user_id drift, queued/stale indexes, and tenant FK decisions need catalog/data/EXPLAIN evidence."
+      skills_used:
+        - "complexity-optimizer: applied the rule that query/index work needs current behavior, data shape, and measured evidence before optimization."
+        - "supabase-postgres-best-practices: applied missing/partial-index guidance requiring matching WHERE/JOIN query patterns plus catalog/EXPLAIN evidence."
+        - "sqlalchemy-alembic-expert-best-practices-code-review: applied concurrent-index and NOT VALID/validation-split guidance for any future schema Worker."
+      source_evidence:
+        - "backend/src/intric/database/tables/flow_tables.py:141-181 keeps flows.published_version as a nullable integer without a direct published-version FK."
+        - "backend/src/intric/database/tables/flow_tables.py:326-348 defines flow_versions keyed by flow_id/version and tenant-linked through fk_flow_versions_flow_tenant."
+        - "backend/src/intric/database/tables/files_table.py:24-38 keeps legacy files.user_id with ON DELETE SET NULL alongside typed owner_user_id/owner_api_key_id."
+        - "backend/alembic/versions/20260411_flow_run_identity_and_idempotency.py:126-185 added typed file owner identity while preserving files.user_id."
+        - "backend/src/intric/database/tables/flow_tables.py:687-692 has a partial running-run updated_at index but no source-only proof for queued/stale index additions."
+        - "backend/src/intric/flows/infrastructure/flow_run_repo.py:1617-1693 queries and claims stale queued/running runs; new index work needs catalog/EXPLAIN evidence."
+        - "backend/src/intric/flows/infrastructure/flow_run_webhook_delivery_repo.py:90-115 and backend/src/intric/database/tables/flow_tables.py:1734-1743 show pending-delivery query/index patterns for comparison, but not enough to infer new indexes without DB evidence."
+      commands:
+        - cmd: "watchdog check"
+          status: pass
+          output: "schema_version=1 status=ok halt_blockers=[]"
+        - cmd: "docker ps --format '{{.Names}}'"
+          status: blocked_environment
+          output: "Docker API unavailable at unix:///Users/ccimen/.orbstack/run/docker.sock."
+        - cmd: "docker exec eneo-41ae93-eneo-1 bash -lc 'echo ok'"
+          status: blocked_environment
+          output: "Docker API unavailable at unix:///Users/ccimen/.orbstack/run/docker.sock."
+        - cmd: "docker context ls"
+          status: pass
+          output: "default, desktop-linux, and orbstack contexts exist; active orbstack endpoint points at a missing socket."
+        - cmd: "ls -l /var/run/docker.sock /Users/ccimen/.orbstack/run/docker.sock /Users/ccimen/.docker/run/docker.sock"
+          status: blocked_environment
+          output: "/var/run/docker.sock points to missing OrbStack socket; OrbStack and Docker Desktop user sockets are missing."
+        - cmd: "DOCKER_HOST=unix:///var/run/docker.sock docker ps --format '{{.Names}}'"
+          status: blocked_environment
+          output: "Socket missing."
+        - cmd: "DOCKER_HOST=unix:///Users/ccimen/.docker/run/docker.sock docker ps --format '{{.Names}}'"
+          status: blocked_environment
+          output: "Socket missing."
+        - cmd: "command -v psql || true && command -v pg_isready || true"
+          status: blocked_environment
+          output: "No psql or pg_isready on PATH."
+        - cmd: "cd backend && uv run python - <<'PY' ... get_settings database target ... PY"
+          status: pass
+          output: "db_target localhost 5432 postgres postgres"
+        - cmd: "cd backend && uv run python - <<'PY' ... async SQLAlchemy select current_database/current_user ... PY"
+          status: blocked_environment
+          output: "connect_failed OSError: connect call failed for ::1/127.0.0.1:5432"
+        - cmd: "nl/rg source reads for flow_tables.py, files_table.py, flow_run_repo.py, flow_run_webhook_delivery_repo.py, config.py, and relevant Alembic migrations"
+          status: pass
+      classification:
+        published_pointer_fk: "needs_preflight: requires data check for flows.published_version values without matching flow_versions rows plus lock/downgrade design."
+        files_user_id_fk_drift: "needs_preflight: requires data/caller evidence for legacy files.user_id before tightening/dropping or changing FK behavior."
+        queued_stale_indexes: "needs_preflight: requires catalog/index inventory and EXPLAIN for stale queued/running query shapes before any index proposal."
+        tenant_fks: "needs_preflight: requires catalog/data evidence to avoid redundant or broad tenant-hardening."
+      recommendation: blocked
+      stop_reason: "All remaining safe implementation paths are currently blocked: T014 needs DB/catalog evidence, T015 has no source-backed API Worker and service-key review/rerun is product-gated, T016 has no narrow frontend Worker after T091, and T901 is final-docs-only."
+      consolidation_effect:
+        reused_existing_owner: "Existing SQLAlchemy model, Alembic migration, repository query, and outbox delivery owners as read-only evidence."
+        logic_moved_from: "N/A."
+        logic_deleted: "N/A."
+        duplicate_path_removed: "N/A."
+        new_code_added: "No source code."
+        why_existing_owners_were_insufficient: "They cannot be changed safely without DB/catalog evidence for schema/index decisions."
+        guard_preventing_duplicate_logic_from_returning: "No Worker is approved; future T014 Worker must include catalog/data/EXPLAIN receipt plus exact allowed_files and verification."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
 
   - id: T901
     type: worker
