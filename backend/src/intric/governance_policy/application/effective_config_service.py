@@ -5,7 +5,8 @@
 
 from typing import TYPE_CHECKING
 
-from intric.personal_assistant_policy.domain.policy_resolver import (
+from intric.governance_policy.domain.governance_policy import PolicyScope
+from intric.governance_policy.domain.policy_resolver import (
     EffectiveConfig,
     resolve,
 )
@@ -15,11 +16,11 @@ if TYPE_CHECKING:
     from intric.completion_models.application.completion_model_crud_service import (
         CompletionModelCRUDService,
     )
+    from intric.governance_policy.domain.governance_policy_repo import (
+        GovernancePolicyRepo,
+    )
     from intric.mcp_servers.application.mcp_server_settings_service import (
         MCPServerSettingsService,
-    )
-    from intric.personal_assistant_policy.domain.personal_assistant_policy_repo import (
-        PersonalAssistantPolicyRepo,
     )
     from intric.prompt_library.domain.prompt_library_repo import PromptLibraryRepo
     from intric.users.user import UserInDB
@@ -36,7 +37,7 @@ class EffectiveConfigService:
     def __init__(
         self,
         user: "UserInDB",
-        policy_repo: "PersonalAssistantPolicyRepo",
+        policy_repo: "GovernancePolicyRepo",
         prompt_library_repo: "PromptLibraryRepo",
         completion_model_crud_service: "CompletionModelCRUDService",
         mcp_server_settings_service: "MCPServerSettingsService",
@@ -47,25 +48,34 @@ class EffectiveConfigService:
         self.completion_model_crud_service = completion_model_crud_service
         self.mcp_server_settings_service = mcp_server_settings_service
 
-    async def resolve_for(self, assistant: "Assistant") -> EffectiveConfig:
+    async def resolve_for(
+        self, assistant: "Assistant", *, space_is_personal: bool
+    ) -> EffectiveConfig:
         """Compute the effective config for an assistant.
 
-        Returns the empty config for non-default assistants and when no
-        policy exists — both via the resolver's own short-circuits.
+        Returns the empty config for non-default assistants, non-personal
+        spaces, and when no policy exists — all via the resolver's own
+        short-circuits.
         """
-        if not assistant.is_default:
+        if not assistant.is_default or not space_is_personal:
             return resolve(
                 assistant=assistant,
+                space_is_personal=space_is_personal,
                 policy=None,
                 tenant_completion_models=[],
                 tenant_mcp_servers=[],
                 library_prompt_text=None,
             )
 
-        policy = await self.policy_repo.get_by_tenant(self.user.tenant_id)
+        # A personal default assistant maps to exactly one scope today. When
+        # finer scopes are added, derive it from (assistant, space) here.
+        policy = await self.policy_repo.get_by_tenant(
+            self.user.tenant_id, scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT
+        )
         if policy is None:
             return resolve(
                 assistant=assistant,
+                space_is_personal=space_is_personal,
                 policy=None,
                 tenant_completion_models=[],
                 tenant_mcp_servers=[],
@@ -95,6 +105,7 @@ class EffectiveConfigService:
 
         return resolve(
             assistant=assistant,
+            space_is_personal=space_is_personal,
             policy=policy,
             tenant_completion_models=tenant_models,
             tenant_mcp_servers=tenant_mcp_servers,

@@ -1,4 +1,4 @@
-"""Integration tests for the personal-assistant policy admin endpoints."""
+"""Integration tests for the personal-assistant governance admin endpoints."""
 
 from __future__ import annotations
 
@@ -39,13 +39,17 @@ async def regular_user_token(db_container, patch_auth_service_jwt):
 @pytest.mark.asyncio
 async def test_admin_get_auto_creates_empty_policy(client, admin_token):
     resp = await client.get(
-        "/api/v1/admin/personal-assistant-policy/",
+        "/api/v1/admin/governance-policy/",
         headers={"Authorization": f"Bearer {admin_token}"},
     )
 
     assert resp.status_code == 200, resp.text
     payload = resp.json()
-    assert payload["models_restriction"] == {"enabled": False, "models": []}
+    assert payload["models_restriction"] == {
+        "enabled": False,
+        "models": [],
+        "provider_ids": [],
+    }
     assert payload["mcp_restriction"] == {"enabled": False, "server_ids": []}
     assert payload["prompt_enforcement"] == {
         "enabled": False,
@@ -57,7 +61,7 @@ async def test_admin_get_auto_creates_empty_policy(client, admin_token):
 @pytest.mark.asyncio
 async def test_non_admin_gets_403(client, regular_user_token):
     resp = await client.get(
-        "/api/v1/admin/personal-assistant-policy/",
+        "/api/v1/admin/governance-policy/",
         headers={"Authorization": f"Bearer {regular_user_token}"},
     )
 
@@ -68,7 +72,7 @@ async def test_non_admin_gets_403(client, regular_user_token):
 @pytest.mark.asyncio
 async def test_model_restriction_requires_at_least_one_model(client, admin_token):
     resp = await client.put(
-        "/api/v1/admin/personal-assistant-policy/",
+        "/api/v1/admin/governance-policy/",
         json={"models_restriction": {"enabled": True, "models": []}},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
@@ -80,7 +84,7 @@ async def test_model_restriction_requires_at_least_one_model(client, admin_token
 @pytest.mark.asyncio
 async def test_mcp_restriction_allows_empty_deny_all(client, admin_token):
     resp = await client.put(
-        "/api/v1/admin/personal-assistant-policy/",
+        "/api/v1/admin/governance-policy/",
         json={"mcp_restriction": {"enabled": True, "server_ids": []}},
         headers={"Authorization": f"Bearer {admin_token}"},
     )

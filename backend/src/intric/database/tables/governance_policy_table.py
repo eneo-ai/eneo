@@ -13,10 +13,21 @@ from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
 
 
-class PersonalAssistantPolicies(BasePublic):
-    # __tablename__ auto-generated as "personal_assistant_policies".
+class GovernancePolicies(BasePublic):
+    # __tablename__ auto-generated as "governance_policies".
 
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
+
+    # Which set of assistants this policy governs. Stored as the PolicyScope
+    # enum value; set explicitly by the app on create (no DB default). Part of
+    # the composite unique below so future scopes don't need a schema change.
+    #
+    # Validation contract: PolicyScope is the single authority — writes go
+    # through `PolicyScope(...).value` and reads through `PolicyScope(row.scope)`
+    # (which raises on an unknown value). Deliberately NOT a DB CHECK/enum:
+    # that would force a constraint migration for every new scope and defeat
+    # the "new scopes are data, not schema" goal the composite unique enables.
+    scope: Mapped[str] = mapped_column()
 
     # Per-dimension enforcement flags. Distinguish "no restriction" from
     # "deny-all" (empty whitelist).
@@ -36,7 +47,9 @@ class PersonalAssistantPolicies(BasePublic):
     )
 
     __table_args__ = (
-        UniqueConstraint("tenant_id", name="uq_personal_assistant_policies_tenant_id"),
+        UniqueConstraint(
+            "tenant_id", "scope", name="uq_governance_policies_tenant_id_scope"
+        ),
         CheckConstraint(
             "NOT prompt_enforcement_enabled OR default_prompt_library_id IS NOT NULL",
             name="prompt_enforcement_requires_prompt",
@@ -44,11 +57,11 @@ class PersonalAssistantPolicies(BasePublic):
     )
 
 
-class PersonalAssistantPolicyCompletionModels(BaseCrossReference):
-    # __tablename__ auto-generated as "personal_assistant_policy_completion_models".
+class GovernancePolicyCompletionModels(BaseCrossReference):
+    # __tablename__ auto-generated as "governance_policy_completion_models".
 
     policy_id: Mapped[UUID] = mapped_column(
-        ForeignKey(PersonalAssistantPolicies.id, ondelete="CASCADE"), primary_key=True
+        ForeignKey(GovernancePolicies.id, ondelete="CASCADE"), primary_key=True
     )
     completion_model_id: Mapped[UUID] = mapped_column(
         ForeignKey(CompletionModels.id, ondelete="CASCADE"), primary_key=True
@@ -65,25 +78,25 @@ class PersonalAssistantPolicyCompletionModels(BaseCrossReference):
     )
 
 
-class PersonalAssistantPolicyMcpServers(BaseCrossReference):
-    # __tablename__ auto-generated as "personal_assistant_policy_mcp_servers".
+class GovernancePolicyMcpServers(BaseCrossReference):
+    # __tablename__ auto-generated as "governance_policy_mcp_servers".
 
     policy_id: Mapped[UUID] = mapped_column(
-        ForeignKey(PersonalAssistantPolicies.id, ondelete="CASCADE"), primary_key=True
+        ForeignKey(GovernancePolicies.id, ondelete="CASCADE"), primary_key=True
     )
     mcp_server_id: Mapped[UUID] = mapped_column(
         ForeignKey(MCPServers.id, ondelete="CASCADE"), primary_key=True
     )
 
 
-class PersonalAssistantPolicyProviders(BaseCrossReference):
-    # __tablename__ auto-generated as "personal_assistant_policy_providers".
+class GovernancePolicyProviders(BaseCrossReference):
+    # __tablename__ auto-generated as "governance_policy_providers".
     # Whitelisting a provider means "all org-enabled models from this
     # provider, including future additions" — admins lean on this to avoid
     # re-curating after every model upgrade.
 
     policy_id: Mapped[UUID] = mapped_column(
-        ForeignKey(PersonalAssistantPolicies.id, ondelete="CASCADE"), primary_key=True
+        ForeignKey(GovernancePolicies.id, ondelete="CASCADE"), primary_key=True
     )
     model_provider_id: Mapped[UUID] = mapped_column(
         ForeignKey(ModelProviders.id, ondelete="CASCADE"), primary_key=True

@@ -2,15 +2,18 @@ from uuid import uuid4
 
 import pytest
 
-from intric.main.exceptions import BadRequestException
-from intric.personal_assistant_policy.domain.personal_assistant_policy import (
-    PersonalAssistantPolicy,
+from intric.governance_policy.domain.governance_policy import (
+    GovernancePolicy,
     PolicyCompletionModel,
+    PolicyScope,
 )
+from intric.main.exceptions import BadRequestException
 
 
-def _empty_policy() -> PersonalAssistantPolicy:
-    return PersonalAssistantPolicy(id=uuid4(), tenant_id=uuid4())
+def _empty_policy() -> GovernancePolicy:
+    return GovernancePolicy(
+        id=uuid4(), tenant_id=uuid4(), scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT
+    )
 
 
 def test_default_policy_has_all_restrictions_disabled():

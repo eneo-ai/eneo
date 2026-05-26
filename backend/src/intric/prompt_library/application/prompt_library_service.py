@@ -18,8 +18,8 @@ from intric.roles.permissions import Permission, validate_permission
 from intric.users.user import UserInDB
 
 if TYPE_CHECKING:
-    from intric.personal_assistant_policy.domain.personal_assistant_policy_repo import (
-        PersonalAssistantPolicyRepo,
+    from intric.governance_policy.domain.governance_policy_repo import (
+        GovernancePolicyRepo,
     )
 
 
@@ -28,13 +28,13 @@ class PromptLibraryService:
         self,
         user: UserInDB,
         repo: PromptLibraryRepo,
-        personal_assistant_policy_repo: Optional["PersonalAssistantPolicyRepo"] = None,
+        governance_policy_repo: Optional["GovernancePolicyRepo"] = None,
     ) -> None:
         self.user = user
         self.repo = repo
         # Optional dependency: when Phase 2 is in place, deletes consult the
         # policy repo so we can give a friendly 409 instead of a raw FK violation.
-        self.personal_assistant_policy_repo = personal_assistant_policy_repo
+        self.governance_policy_repo = governance_policy_repo
 
     async def list_entries(self) -> list[PromptLibraryEntry]:
         validate_permission(self.user, Permission.ADMIN)
@@ -101,14 +101,14 @@ class PromptLibraryService:
         # Belt-and-suspenders: the FK has ON DELETE RESTRICT so the DB will
         # refuse the delete anyway, but consulting the policy repo first lets
         # us give a friendly error with context instead of a 500.
-        if self.personal_assistant_policy_repo is not None:
-            policy = await self.personal_assistant_policy_repo.get_by_prompt_library_id(
+        if self.governance_policy_repo is not None:
+            policy = await self.governance_policy_repo.get_by_prompt_library_id(
                 tenant_id=self.user.tenant_id, prompt_library_id=id
             )
             if policy is not None:
                 raise NameCollisionException(
                     f"Prompt '{entry.name}' is referenced by the personal "
-                    f"chat policy. Unset it on the policy before deleting."
+                    f"assistant governance policy. Unset it on the policy before deleting."
                 )
 
         await self.repo.delete(id=id, tenant_id=self.user.tenant_id)

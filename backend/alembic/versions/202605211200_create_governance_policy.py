@@ -1,9 +1,9 @@
-"""create personal_assistant_policies + m2m tables
+"""create governance_policies + m2m tables
 
-Tenant-level policy for personal assistant (default assistants in user-owned
-spaces). Stores allowed completion models, MCP servers, and the default
-prompt to enforce. Per-dimension *_enforced flags distinguish "no
-restriction" from "deny-all" (empty whitelist).
+Tenant-level policy for personal default assistants. Stores allowed completion
+models, MCP servers, and the default prompt to enforce. Per-dimension
+*_enforced flags distinguish "no restriction" from "deny-all" (empty
+whitelist).
 
 ON DELETE RESTRICT on default_prompt_library_id prevents admins from
 silently breaking 1000 chats by deleting a referenced prompt — the service
@@ -26,7 +26,7 @@ depends_on = None
 
 def upgrade() -> None:
     op.create_table(
-        "personal_assistant_policies",
+        "governance_policies",
         sa.Column(
             "id",
             sa.UUID(),
@@ -34,6 +34,8 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("tenant_id", sa.UUID(), nullable=False),
+        # PolicyScope enum value, set explicitly by the app (no DB default).
+        sa.Column("scope", sa.String(), nullable=False),
         sa.Column(
             "models_restriction_enabled",
             sa.Boolean(),
@@ -75,7 +77,7 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
-            "tenant_id", name="uq_personal_assistant_policies_tenant_id"
+            "tenant_id", "scope", name="uq_governance_policies_tenant_id_scope"
         ),
         sa.CheckConstraint(
             "NOT prompt_enforcement_enabled OR default_prompt_library_id IS NOT NULL",
@@ -84,12 +86,10 @@ def upgrade() -> None:
     )
 
     op.create_table(
-        "personal_assistant_policy_completion_models",
+        "governance_policy_completion_models",
         sa.Column("policy_id", sa.UUID(), nullable=False),
         sa.Column("completion_model_id", sa.UUID(), nullable=False),
-        sa.Column(
-            "is_default", sa.Boolean(), server_default="False", nullable=False
-        ),
+        sa.Column("is_default", sa.Boolean(), server_default="False", nullable=False),
         sa.Column(
             "created_at",
             sa.TIMESTAMP(timezone=True),
@@ -103,7 +103,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
-            ["policy_id"], ["personal_assistant_policies.id"], ondelete="CASCADE"
+            ["policy_id"], ["governance_policies.id"], ondelete="CASCADE"
         ),
         sa.ForeignKeyConstraint(
             ["completion_model_id"], ["completion_models.id"], ondelete="CASCADE"
@@ -112,14 +112,14 @@ def upgrade() -> None:
     )
     op.create_index(
         "uniq_policy_default_model",
-        "personal_assistant_policy_completion_models",
+        "governance_policy_completion_models",
         ["policy_id"],
         unique=True,
         postgresql_where=sa.text("is_default"),
     )
 
     op.create_table(
-        "personal_assistant_policy_mcp_servers",
+        "governance_policy_mcp_servers",
         sa.Column("policy_id", sa.UUID(), nullable=False),
         sa.Column("mcp_server_id", sa.UUID(), nullable=False),
         sa.Column(
@@ -135,7 +135,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
-            ["policy_id"], ["personal_assistant_policies.id"], ondelete="CASCADE"
+            ["policy_id"], ["governance_policies.id"], ondelete="CASCADE"
         ),
         sa.ForeignKeyConstraint(
             ["mcp_server_id"], ["mcp_servers.id"], ondelete="CASCADE"
@@ -145,10 +145,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("personal_assistant_policy_mcp_servers")
+    op.drop_table("governance_policy_mcp_servers")
     op.drop_index(
         "uniq_policy_default_model",
-        table_name="personal_assistant_policy_completion_models",
+        table_name="governance_policy_completion_models",
     )
-    op.drop_table("personal_assistant_policy_completion_models")
-    op.drop_table("personal_assistant_policies")
+    op.drop_table("governance_policy_completion_models")
+    op.drop_table("governance_policies")

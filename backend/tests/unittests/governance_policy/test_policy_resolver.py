@@ -1,11 +1,12 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
-from intric.personal_assistant_policy.domain.personal_assistant_policy import (
-    PersonalAssistantPolicy,
+from intric.governance_policy.domain.governance_policy import (
+    GovernancePolicy,
     PolicyCompletionModel,
+    PolicyScope,
 )
-from intric.personal_assistant_policy.domain.policy_resolver import resolve
+from intric.governance_policy.domain.policy_resolver import resolve
 
 
 def _mk_assistant(is_default: bool = True):
@@ -20,13 +21,16 @@ def _mk_mcp(id=None, name="s"):
     return SimpleNamespace(id=id or uuid4(), name=name)
 
 
-def _empty_policy() -> PersonalAssistantPolicy:
-    return PersonalAssistantPolicy(id=uuid4(), tenant_id=uuid4())
+def _empty_policy() -> GovernancePolicy:
+    return GovernancePolicy(
+        id=uuid4(), tenant_id=uuid4(), scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT
+    )
 
 
 def test_non_default_assistant_returns_all_disabled():
     cfg = resolve(
         assistant=_mk_assistant(is_default=False),
+        space_is_personal=True,
         policy=_empty_policy(),
         tenant_completion_models=[],
         tenant_mcp_servers=[],
@@ -38,9 +42,28 @@ def test_non_default_assistant_returns_all_disabled():
     assert cfg.enforced_prompt_text is None
 
 
+def test_non_personal_space_returns_all_disabled():
+    policy = _empty_policy()
+    policy.set_models_restriction(
+        enabled=True, models=[PolicyCompletionModel(completion_model_id=uuid4())]
+    )
+    cfg = resolve(
+        assistant=_mk_assistant(is_default=True),
+        space_is_personal=False,
+        policy=policy,
+        tenant_completion_models=[_mk_model()],
+        tenant_mcp_servers=[],
+        library_prompt_text="x",
+    )
+    assert cfg.models_enforced is False
+    assert cfg.mcp_enforced is False
+    assert cfg.prompt_enforced is False
+
+
 def test_no_policy_returns_all_disabled():
     cfg = resolve(
         assistant=_mk_assistant(),
+        space_is_personal=True,
         policy=None,
         tenant_completion_models=[_mk_model()],
         tenant_mcp_servers=[_mk_mcp()],
@@ -59,6 +82,7 @@ def test_models_disabled_means_no_filtering_even_with_m2m_rows():
     p.models_restriction_enabled = False
     cfg = resolve(
         assistant=_mk_assistant(),
+        space_is_personal=True,
         policy=p,
         tenant_completion_models=[_mk_model()],
         tenant_mcp_servers=[],
@@ -78,6 +102,7 @@ def test_models_enforced_with_single_model_locks():
     )
     cfg = resolve(
         assistant=_mk_assistant(),
+        space_is_personal=True,
         policy=p,
         tenant_completion_models=[m, _mk_model()],
         tenant_mcp_servers=[],
@@ -100,6 +125,7 @@ def test_models_enforced_with_multiple_models_no_lock():
     )
     cfg = resolve(
         assistant=_mk_assistant(),
+        space_is_personal=True,
         policy=p,
         tenant_completion_models=[m1, m2, _mk_model()],
         tenant_mcp_servers=[],
@@ -122,6 +148,7 @@ def test_stale_model_in_policy_not_in_tenant_list_is_filtered_out():
     )
     cfg = resolve(
         assistant=_mk_assistant(),
+        space_is_personal=True,
         policy=p,
         tenant_completion_models=[m1],
         tenant_mcp_servers=[],
@@ -144,6 +171,7 @@ def test_policy_default_model_is_set_when_one_flagged():
     )
     cfg = resolve(
         assistant=_mk_assistant(),
+        space_is_personal=True,
         policy=p,
         tenant_completion_models=[m1, m2],
         tenant_mcp_servers=[],
@@ -161,6 +189,7 @@ def test_policy_default_model_none_when_no_default_flagged():
     )
     cfg = resolve(
         assistant=_mk_assistant(),
+        space_is_personal=True,
         policy=p,
         tenant_completion_models=[m1],
         tenant_mcp_servers=[],
@@ -174,6 +203,7 @@ def test_mcp_disabled_no_filtering():
     p = _empty_policy()
     cfg = resolve(
         assistant=_mk_assistant(),
+        space_is_personal=True,
         policy=p,
         tenant_completion_models=[],
         tenant_mcp_servers=[s],
@@ -189,6 +219,7 @@ def test_mcp_enabled_with_empty_whitelist_is_deny_all():
     p.set_mcp_restriction(enabled=True, ids=[])
     cfg = resolve(
         assistant=_mk_assistant(),
+        space_is_personal=True,
         policy=p,
         tenant_completion_models=[],
         tenant_mcp_servers=[s],
@@ -205,6 +236,7 @@ def test_mcp_enforced_filters_to_whitelist_intersection_with_tenant():
     p.set_mcp_restriction(enabled=True, ids=[s1.id, stale_id])
     cfg = resolve(
         assistant=_mk_assistant(),
+        space_is_personal=True,
         policy=p,
         tenant_completion_models=[],
         tenant_mcp_servers=[s1, s2],
@@ -217,6 +249,7 @@ def test_prompt_disabled_returns_none():
     p = _empty_policy()
     cfg = resolve(
         assistant=_mk_assistant(),
+        space_is_personal=True,
         policy=p,
         tenant_completion_models=[],
         tenant_mcp_servers=[],
@@ -232,6 +265,7 @@ def test_prompt_enforced_with_text_returns_text():
     p.set_prompt_enforcement(enabled=True, prompt_library_id=pid)
     cfg = resolve(
         assistant=_mk_assistant(),
+        space_is_personal=True,
         policy=p,
         tenant_completion_models=[],
         tenant_mcp_servers=[],
@@ -248,6 +282,7 @@ def test_prompt_enforced_without_text_fails_safe():
     p.set_prompt_enforcement(enabled=True, prompt_library_id=uuid4())
     cfg = resolve(
         assistant=_mk_assistant(),
+        space_is_personal=True,
         policy=p,
         tenant_completion_models=[],
         tenant_mcp_servers=[],

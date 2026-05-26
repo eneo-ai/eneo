@@ -2,7 +2,7 @@
 #
 # Licensed under the MIT License.
 
-"""Pure resolver: maps (assistant, policy, tenant context) -> EffectiveConfig.
+"""Pure resolver: maps (assistant, scope, policy, tenant context) -> EffectiveConfig.
 
 This module is intentionally side-effect-free: no DB calls, no awaits.
 It is the single source of truth for what is allowed in a personal assistant,
@@ -17,10 +17,10 @@ from uuid import UUID
 if TYPE_CHECKING:
     from intric.assistants.assistant import Assistant
     from intric.completion_models.domain.completion_model import CompletionModel
-    from intric.mcp_servers.domain.entities.mcp_server import MCPServer
-    from intric.personal_assistant_policy.domain.personal_assistant_policy import (
-        PersonalAssistantPolicy,
+    from intric.governance_policy.domain.governance_policy import (
+        GovernancePolicy,
     )
+    from intric.mcp_servers.domain.entities.mcp_server import MCPServer
 
 
 @dataclass(frozen=True)
@@ -52,18 +52,19 @@ _EMPTY = EffectiveConfig(
 def resolve(
     *,
     assistant: "Assistant",
-    policy: "PersonalAssistantPolicy | None",
+    space_is_personal: bool,
+    policy: "GovernancePolicy | None",
     tenant_completion_models: list["CompletionModel"],
     tenant_mcp_servers: list["MCPServer"],
     library_prompt_text: str | None,
 ) -> EffectiveConfig:
     """Compute the effective config for a personal assistant.
 
-    Safe to call for non-default assistants or when no policy exists — in
-    those cases all `*_enforced` flags are False, which means "behave as
-    before."
+    Safe to call for non-default assistants, non-personal spaces, or when no
+    policy exists — in those cases all `*_enforced` flags are False, which
+    means "behave as before."
     """
-    if not assistant.is_default or policy is None:
+    if not assistant.is_default or not space_is_personal or policy is None:
         return _EMPTY
 
     # ---- MODELS -----------------------------------------------------------

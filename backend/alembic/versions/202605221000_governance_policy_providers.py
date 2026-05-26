@@ -1,4 +1,4 @@
-"""add personal_assistant_policy_providers join table
+"""add governance_policy_providers join table
 
 Allows admins to whitelist a whole provider (e.g. all Anthropic models)
 in addition to individual completion models. The effective allowed-model
@@ -23,7 +23,7 @@ depends_on = None
 
 def upgrade() -> None:
     op.create_table(
-        "personal_assistant_policy_providers",
+        "governance_policy_providers",
         sa.Column("policy_id", sa.UUID(), nullable=False),
         sa.Column("model_provider_id", sa.UUID(), nullable=False),
         sa.Column(
@@ -39,7 +39,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
-            ["policy_id"], ["personal_assistant_policies.id"], ondelete="CASCADE"
+            ["policy_id"], ["governance_policies.id"], ondelete="CASCADE"
         ),
         sa.ForeignKeyConstraint(
             ["model_provider_id"], ["model_providers.id"], ondelete="CASCADE"
@@ -49,4 +49,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("personal_assistant_policy_providers")
+    op.drop_table("governance_policy_providers")

@@ -343,10 +343,9 @@ class Assistant(Entity):
         mcp_servers_override: Optional[list["MCPServer"]] = None,
         prompt_override: str | None = None,
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
-        # Overrides come from the orchestrating service (personal-assistant policy
-        # resolver). When set, they take precedence over the values stored on
-        # the entity. When None, fall back to the entity's own values — so
-        # non-default assistants are entirely unaffected.
+        # Overrides come from the orchestrating service (personal assistant
+        # governance). When set, they take precedence over the values stored on
+        # the entity. When None, fall back to the entity's own values.
         effective_model = (
             completion_model_override
             if completion_model_override is not None

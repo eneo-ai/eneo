@@ -34,7 +34,7 @@ class PromptEnforcementInput(BaseModel):
     prompt_library_id: UUID | None = None
 
 
-class PersonalAssistantPolicyUpdate(BaseModel):
+class GovernancePolicyUpdate(BaseModel):
     models_restriction: ModelsRestrictionInput | None = None
     mcp_restriction: McpRestrictionInput | None = None
     prompt_enforcement: PromptEnforcementInput | None = None
@@ -66,7 +66,7 @@ class PromptEnforcementPublic(BaseModel):
     prompt_library_id: UUID | None
 
 
-class PersonalAssistantPolicyPublic(BaseModel):
+class GovernancePolicyPublic(BaseModel):
     models_restriction: ModelsRestrictionPublic
     mcp_restriction: McpRestrictionPublic
     prompt_enforcement: PromptEnforcementPublic

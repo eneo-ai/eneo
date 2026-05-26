@@ -94,6 +94,18 @@ from intric.files.file_size_service import FileSizeService
 from intric.files.image import ImageExtractor
 from intric.files.text import TextExtractor
 from intric.files.transcriber import Transcriber
+from intric.governance_policy.application.effective_config_service import (
+    EffectiveConfigService,
+)
+from intric.governance_policy.application.governance_policy_service import (
+    GovernancePolicyService,
+)
+from intric.governance_policy.infrastructure.governance_policy_repo_impl import (
+    GovernancePolicyRepoImpl,
+)
+from intric.governance_policy.presentation.governance_policy_assembler import (
+    GovernancePolicyAssembler,
+)
 from intric.group_chat.application.group_chat_service import GroupChatService
 from intric.group_chat.presentation.assemblers.group_chat_assembler import (
     GroupChatAssembler,
@@ -256,18 +268,6 @@ from intric.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
 from intric.modules.module_repo import ModuleRepository
-from intric.personal_assistant_policy.application.effective_config_service import (
-    EffectiveConfigService,
-)
-from intric.personal_assistant_policy.application.personal_assistant_policy_service import (
-    PersonalAssistantPolicyService,
-)
-from intric.personal_assistant_policy.infrastructure.personal_assistant_policy_repo_impl import (
-    PersonalAssistantPolicyRepoImpl,
-)
-from intric.personal_assistant_policy.presentation.personal_assistant_policy_assembler import (
-    PersonalAssistantPolicyAssembler,
-)
 from intric.prompt_library.application.prompt_library_service import (
     PromptLibraryService,
 )
@@ -602,12 +602,10 @@ class Container(containers.DeclarativeContainer):
     )
     prompt_library_repo = providers.Factory(PromptLibraryRepoImpl, session=session)
     prompt_library_assembler = providers.Factory(PromptLibraryAssembler)
-    personal_assistant_policy_repo = providers.Factory(
-        PersonalAssistantPolicyRepoImpl, session=session
+    governance_policy_repo = providers.Factory(
+        GovernancePolicyRepoImpl, session=session
     )
-    personal_assistant_policy_assembler = providers.Factory(
-        PersonalAssistantPolicyAssembler
-    )
+    governance_policy_assembler = providers.Factory(GovernancePolicyAssembler)
     model_provider_repository = providers.Factory(
         ModelProviderRepository, session=session, tenant_id=user.provided.tenant_id
     )
@@ -1047,7 +1045,7 @@ class Container(containers.DeclarativeContainer):
         PromptLibraryService,
         user=user,
         repo=prompt_library_repo,
-        personal_assistant_policy_repo=personal_assistant_policy_repo,
+        governance_policy_repo=governance_policy_repo,
     )
     file_protocol = providers.Factory(
         FileProtocol,
@@ -1082,7 +1080,7 @@ class Container(containers.DeclarativeContainer):
         actor_manager=actor_manager,
         group_service=group_service,
     )
-    # Personal-chat policy services are declared before assistant_service
+    # Personal assistant governance services are declared before assistant_service
     # because runtime enforcement injects effective_config_service into
     # AssistantService — the DI chain has to be top-to-bottom resolvable.
     mcp_server_settings_service = providers.Factory(
@@ -1091,10 +1089,10 @@ class Container(containers.DeclarativeContainer):
         user=user,
         encryption_service=encryption_service,
     )
-    personal_assistant_policy_service = providers.Factory(
-        PersonalAssistantPolicyService,
+    governance_policy_service = providers.Factory(
+        GovernancePolicyService,
         user=user,
-        repo=personal_assistant_policy_repo,
+        repo=governance_policy_repo,
         completion_model_crud_service=completion_model_crud_service,
         mcp_server_settings_service=mcp_server_settings_service,
         prompt_library_service=prompt_library_service,
@@ -1103,7 +1101,7 @@ class Container(containers.DeclarativeContainer):
     effective_config_service = providers.Factory(
         EffectiveConfigService,
         user=user,
-        policy_repo=personal_assistant_policy_repo,
+        policy_repo=governance_policy_repo,
         prompt_library_repo=prompt_library_repo,
         completion_model_crud_service=completion_model_crud_service,
         mcp_server_settings_service=mcp_server_settings_service,

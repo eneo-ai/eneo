@@ -41,6 +41,9 @@ from intric.embedding_models.presentation.tenant_embedding_models_router import 
     router as tenant_embedding_models_router,
 )
 from intric.files.file_router import router as files_router
+from intric.governance_policy.presentation.governance_policy_router import (
+    router as governance_policy_router,
+)
 from intric.group_chat.presentation.group_chat_router import router as group_chat_router
 from intric.groups_legacy.api.group_router import router as groups_router
 from intric.icons.api.icon_router import router as icons_router
@@ -68,9 +71,6 @@ from intric.model_providers.presentation.model_provider_router import (
     router as model_providers_router,
 )
 from intric.modules.module_router import router as module_router
-from intric.personal_assistant_policy.presentation.personal_assistant_policy_router import (
-    router as personal_assistant_policy_router,
-)
 from intric.prompt_library.presentation.prompt_library_router import (
     router as prompt_library_router,
 )
@@ -492,9 +492,9 @@ router.include_router(
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
-    personal_assistant_policy_router,
-    prefix="/admin/personal-assistant-policy",
-    tags=["admin", "personal-assistant-policy"],
+    governance_policy_router,
+    prefix="/admin/governance-policy",
+    tags=["admin", "governance-policy"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(

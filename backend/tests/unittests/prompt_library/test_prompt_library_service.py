@@ -139,7 +139,7 @@ async def test_delete_blocked_when_policy_uses_prompt():
     service = PromptLibraryService(
         user=_admin_user(tenant_id),
         repo=repo,
-        personal_assistant_policy_repo=policy_repo,
+        governance_policy_repo=policy_repo,
     )
 
     with pytest.raises(NameCollisionException):

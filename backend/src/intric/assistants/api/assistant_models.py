@@ -106,8 +106,9 @@ def _empty_mcp_tool_setting_list() -> list[MCPToolSetting]:
 class EffectiveConfigPublic(BaseModel):
     """Frontend hint surface for personal-assistant governance.
 
-    Only meaningful on default assistants. `prompt_locked` is exposed as a
-    boolean — we never leak the admin-prompt text to the user-facing API.
+    Only meaningful on default assistants in personal spaces. `prompt_locked`
+    is exposed as a boolean — we never leak the admin-prompt text to the
+    user-facing API.
     """
 
     models_enforced: bool
@@ -345,8 +346,8 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     effective_config: Optional[EffectiveConfigPublic] = Field(
         default=None,
         description=(
-            "Personal-chat governance hints. Only populated when "
-            "is_default=True and a tenant policy applies."
+            "Personal-assistant governance hints. Only populated for personal "
+            "default assistants when a tenant policy applies."
         ),
     )
 

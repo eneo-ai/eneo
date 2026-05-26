@@ -6,14 +6,15 @@
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from intric.main.exceptions import BadRequestException
-from intric.personal_assistant_policy.domain.personal_assistant_policy import (
-    PersonalAssistantPolicy,
+from intric.governance_policy.domain.governance_policy import (
+    GovernancePolicy,
     PolicyCompletionModel,
+    PolicyScope,
 )
-from intric.personal_assistant_policy.domain.personal_assistant_policy_repo import (
-    PersonalAssistantPolicyRepo,
+from intric.governance_policy.domain.governance_policy_repo import (
+    GovernancePolicyRepo,
 )
+from intric.main.exceptions import BadRequestException, NotFoundException
 from intric.roles.permissions import Permission, validate_permission
 from intric.users.user import UserInDB
 
@@ -32,11 +33,11 @@ if TYPE_CHECKING:
     )
 
 
-class PersonalAssistantPolicyService:
+class GovernancePolicyService:
     def __init__(
         self,
         user: UserInDB,
-        repo: PersonalAssistantPolicyRepo,
+        repo: GovernancePolicyRepo,
         completion_model_crud_service: "CompletionModelCRUDService",
         mcp_server_settings_service: "MCPServerSettingsService",
         prompt_library_service: "PromptLibraryService",
@@ -49,17 +50,20 @@ class PersonalAssistantPolicyService:
         self.prompt_library_service = prompt_library_service
         self.model_provider_repository = model_provider_repository
 
-    async def get_policy(self) -> PersonalAssistantPolicy:
+    async def get_policy(self) -> GovernancePolicy:
         """Get the tenant's policy, auto-creating an empty one if none exists.
 
         An auto-created empty policy has all `*_restriction_enabled=False`
         which means no user-facing change — safe to do lazily on first read.
         """
         validate_permission(self.user, Permission.ADMIN)
-        existing = await self.repo.get_by_tenant(self.user.tenant_id)
+        # Today the admin surface manages a single scope. A second scope would
+        # turn this into a per-scope lookup driven by the request.
+        scope = PolicyScope.PERSONAL_DEFAULT_ASSISTANT
+        existing = await self.repo.get_by_tenant(self.user.tenant_id, scope=scope)
         if existing is not None:
             return existing
-        return await self.repo.create_empty(self.user.tenant_id)
+        return await self.repo.create_empty(self.user.tenant_id, scope=scope)
 
     async def update_policy(
         self,
@@ -69,7 +73,7 @@ class PersonalAssistantPolicyService:
         ) = None,
         mcp_restriction: tuple[bool, list[UUID]] | None = None,
         prompt_enforcement: tuple[bool, UUID | None] | None = None,
-    ) -> PersonalAssistantPolicy:
+    ) -> GovernancePolicy:
         validate_permission(self.user, Permission.ADMIN)
         policy = await self.get_policy()
 
@@ -141,7 +145,7 @@ class PersonalAssistantPolicyService:
         # an unknown resource.
         try:
             await self.prompt_library_service.get_entry(prompt_id)
-        except Exception:
+        except NotFoundException:
             raise BadRequestException(
                 f"Prompt library entry {prompt_id} not found in this tenant"
             )

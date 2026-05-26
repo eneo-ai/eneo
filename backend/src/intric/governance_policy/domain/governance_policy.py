@@ -5,9 +5,21 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from uuid import UUID
 
 from intric.main.exceptions import BadRequestException
+
+
+class PolicyScope(str, Enum):
+    """What a governance policy governs.
+
+    Only PERSONAL_DEFAULT_ASSISTANT exists today. The column + composite unique
+    exist so finer scopes can be added later as data, not a schema migration.
+    Always set explicitly on create.
+    """
+
+    PERSONAL_DEFAULT_ASSISTANT = "personal_default_assistant"
 
 
 @dataclass
@@ -17,8 +29,8 @@ class PolicyCompletionModel:
 
 
 @dataclass
-class PersonalAssistantPolicy:
-    """Tenant-level governance config for the personal assistant.
+class GovernancePolicy:
+    """Tenant-level governance config for personal default assistants.
 
     All `*_restriction_enabled` flags default to False — an auto-created
     empty policy yields no user-facing change.
@@ -26,6 +38,7 @@ class PersonalAssistantPolicy:
 
     id: UUID | None
     tenant_id: UUID
+    scope: PolicyScope
 
     models_restriction_enabled: bool = False
     mcp_restriction_enabled: bool = False

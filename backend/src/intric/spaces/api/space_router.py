@@ -135,10 +135,14 @@ async def get_space(
     space = await service.get_space(id)
 
     effective_config = None
-    if space.default_assistant is not None and space.default_assistant.is_default:
+    if (
+        space.default_assistant is not None
+        and space.default_assistant.is_default
+        and space.is_personal()
+    ):
         effective_config_service = container.effective_config_service()
         effective_config = await effective_config_service.resolve_for(
-            space.default_assistant
+            space.default_assistant, space_is_personal=space.is_personal()
         )
 
     return assembler.from_space_to_model(
@@ -1483,10 +1487,14 @@ async def get_personal_space(
     space = await service.get_personal_space()
 
     effective_config = None
-    if space.default_assistant is not None and space.default_assistant.is_default:
+    if (
+        space.default_assistant is not None
+        and space.default_assistant.is_default
+        and space.is_personal()
+    ):
         effective_config_service = container.effective_config_service()
         effective_config = await effective_config_service.resolve_for(
-            space.default_assistant
+            space.default_assistant, space_is_personal=space.is_personal()
         )
 
     return assembler.from_space_to_model(
@@ -1508,10 +1516,14 @@ async def get_organization_space(
     space = await service.get_or_create_tenant_space()
 
     effective_config = None
-    if space.default_assistant is not None and space.default_assistant.is_default:
+    if (
+        space.default_assistant is not None
+        and space.default_assistant.is_default
+        and space.is_personal()
+    ):
         effective_config_service = container.effective_config_service()
         effective_config = await effective_config_service.resolve_for(
-            space.default_assistant
+            space.default_assistant, space_is_personal=space.is_personal()
         )
 
     return assembler.from_space_to_model(

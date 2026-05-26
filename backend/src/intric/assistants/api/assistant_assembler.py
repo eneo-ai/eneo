@@ -37,8 +37,8 @@ if TYPE_CHECKING:
         CompletionModelSparse,
     )
     from intric.completion_models.domain.completion_model import CompletionModel
+    from intric.governance_policy.domain.policy_resolver import EffectiveConfig
     from intric.main.models import ResourcePermission
-    from intric.personal_assistant_policy.domain.policy_resolver import EffectiveConfig
 
 
 class AssistantAssembler:

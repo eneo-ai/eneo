@@ -2,11 +2,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-from intric.personal_assistant_policy.application.effective_config_service import (
+from intric.governance_policy.application.effective_config_service import (
     EffectiveConfigService,
 )
-from intric.personal_assistant_policy.domain.personal_assistant_policy import (
-    PersonalAssistantPolicy,
+from intric.governance_policy.domain.governance_policy import (
+    GovernancePolicy,
+    PolicyScope,
 )
 
 
@@ -15,7 +16,9 @@ async def test_resolve_for_filters_disabled_mcp_servers_before_resolver():
     enabled_server_id = uuid4()
     disabled_server_id = uuid4()
 
-    policy = PersonalAssistantPolicy(id=uuid4(), tenant_id=tenant_id)
+    policy = GovernancePolicy(
+        id=uuid4(), tenant_id=tenant_id, scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT
+    )
     policy.set_mcp_restriction(
         enabled=True, ids=[enabled_server_id, disabled_server_id]
     )
@@ -43,7 +46,28 @@ async def test_resolve_for_filters_disabled_mcp_servers_before_resolver():
         ),
     )
 
-    cfg = await service.resolve_for(SimpleNamespace(is_default=True))
+    cfg = await service.resolve_for(
+        SimpleNamespace(is_default=True), space_is_personal=True
+    )
 
     assert cfg.mcp_enforced is True
     assert [server.id for server in cfg.available_mcp_servers] == [enabled_server_id]
+
+
+async def test_resolve_for_non_personal_space_short_circuits_before_repos():
+    policy_repo = AsyncMock()
+    service = EffectiveConfigService(
+        user=SimpleNamespace(tenant_id=uuid4()),
+        policy_repo=policy_repo,
+        prompt_library_repo=AsyncMock(),
+        completion_model_crud_service=AsyncMock(),
+        mcp_server_settings_service=AsyncMock(),
+    )
+
+    cfg = await service.resolve_for(
+        SimpleNamespace(is_default=True), space_is_personal=False
+    )
+
+    assert cfg.models_enforced is False
+    assert cfg.mcp_enforced is False
+    policy_repo.get_by_tenant.assert_not_called()

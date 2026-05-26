@@ -65,13 +65,14 @@ if TYPE_CHECKING:
         WebSearchResult,
     )
     from intric.files.file_models import File
+    from intric.governance_policy.application.effective_config_service import (
+        EffectiveConfigService,
+    )
+    from intric.governance_policy.domain.policy_resolver import EffectiveConfig
     from intric.integration.domain.repositories.integration_knowledge_repo import (
         IntegrationKnowledgeRepository,
     )
     from intric.mcp_servers.domain.entities.mcp_server import MCPServer
-    from intric.personal_assistant_policy.application.effective_config_service import (
-        EffectiveConfigService,
-    )
     from intric.sessions.session import SessionInDB
     from intric.sessions.session_service import SessionService
     from intric.spaces.api.space_models import TemplateCreate
@@ -197,6 +198,76 @@ class AssistantService:
                 integration_knowledge_id=integration_knowledge.id
             ):
                 raise BadRequestException("Invalid integration knowledge")
+
+    async def _resolve_effective_config(
+        self, *, space: "Space", assistant: Assistant
+    ) -> "EffectiveConfig | None":
+        if (
+            self.effective_config_service is None
+            or not assistant.is_default
+            or not space.is_personal()
+        ):
+            return None
+        return await self.effective_config_service.resolve_for(
+            assistant, space_is_personal=space.is_personal()
+        )
+
+    async def _ensure_governance_policy_allows_update(
+        self,
+        *,
+        space: "Space",
+        assistant: Assistant,
+        completion_model_id: UUID | None,
+        mcp_server_ids: list[UUID] | None,
+    ) -> None:
+        # Nothing to validate → skip resolving the policy (and its DB round-trip).
+        if completion_model_id is None and mcp_server_ids is None:
+            return
+
+        # _resolve_effective_config owns the is_default / personal-space / no-service
+        # short-circuits and returns None when the policy does not apply.
+        effective_config = await self._resolve_effective_config(
+            space=space, assistant=assistant
+        )
+        if effective_config is None:
+            return
+
+        if completion_model_id is not None and effective_config.models_enforced:
+            current_model_id = (
+                assistant.completion_model.id
+                if assistant.completion_model is not None
+                else None
+            )
+            if completion_model_id != current_model_id:
+                allowed_ids = {m.id for m in effective_config.available_models}
+                if completion_model_id not in allowed_ids:
+                    raise BadRequestException(
+                        "Model not allowed by personal assistant governance policy",
+                    )
+
+        if mcp_server_ids is not None and effective_config.mcp_enforced:
+            allowed_ids = {s.id for s in effective_config.available_mcp_servers}
+            # Grandfather servers already attached: only newly-added servers
+            # must satisfy the policy, mirroring the completion-model rule
+            # above. This lets an admin tighten the whitelist without blocking
+            # re-saves of assistants that still reference a now-disallowed
+            # server.
+            current_ids = {s.id for s in assistant.mcp_servers}
+            disallowed = (set(mcp_server_ids) - current_ids) - allowed_ids
+            if disallowed:
+                raise BadRequestException(
+                    "MCP servers not allowed by personal assistant governance policy",
+                )
+
+    async def _ensure_governance_policy_allows_mcp_server(
+        self, *, space: "Space", assistant: Assistant, mcp_server_id: UUID
+    ) -> None:
+        await self._ensure_governance_policy_allows_update(
+            space=space,
+            assistant=assistant,
+            completion_model_id=None,
+            mcp_server_ids=[mcp_server_id],
+        )
 
     async def create_assistant(
         self,
@@ -475,6 +546,13 @@ class AssistantService:
                     + ", ".join(missing_space_ids)
                 )
 
+        await self._ensure_governance_policy_allows_update(
+            space=space,
+            assistant=assistant,
+            completion_model_id=completion_model_id,
+            mcp_server_ids=mcp_server_ids,
+        )
+
         # Store MCP server IDs and tool settings for repository to handle.
         setattr(assistant, "_mcp_server_ids", mcp_server_ids)
         setattr(assistant, "_mcp_tool_settings", mcp_tools)
@@ -557,6 +635,33 @@ class AssistantService:
         )
 
         return assistant, permissions  # type: ignore[return-value]
+
+    async def get_assistant_with_effective_config(
+        self, assistant_id: UUID
+    ) -> tuple[Assistant, list[ResourcePermission], "EffectiveConfig | None"]:
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+
+        if not actor.can_read_assistants():
+            raise UnauthorizedException(
+                "You do not have permission to read assistants in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
+
+        permissions: list[ResourcePermission] = actor.get_assistant_permissions(
+            assistant=assistant
+        )
+        effective_config = await self._resolve_effective_config(
+            space=space, assistant=assistant
+        )
+
+        return assistant, permissions, effective_config
 
     async def get_assistants(
         self,
@@ -1093,19 +1198,18 @@ class AssistantService:
         else:
             web_search_results = []
 
-        # Personal-chat policy runtime enforcement.
-        # If the assistant is a default (personal-assistant) one and the tenant
-        # has policy enforcement active, override model / MCP / prompt at
-        # ask-time. UI filtering alone is not enough — stale entity state
-        # or direct API callers could otherwise bypass the policy.
+        # Personal assistant governance runtime enforcement.
+        # If the assistant is the default assistant in a personal space and
+        # tenant policy enforcement is active, override model / MCP / prompt at
+        # ask-time. UI filtering alone is not enough — stale entity state or
+        # direct API callers could otherwise bypass the policy.
         completion_model_override: "CompletionModel | None" = None
         mcp_servers_override: "list[MCPServer] | None" = None
         prompt_override: str | None = None
-        if assistant_to_ask.is_default and self.effective_config_service is not None:
-            effective_config = await self.effective_config_service.resolve_for(
-                assistant_to_ask
-            )
-
+        effective_config = await self._resolve_effective_config(
+            space=space, assistant=assistant_to_ask
+        )
+        if effective_config is not None:
             if effective_config.models_enforced:
                 current_model = assistant_to_ask.completion_model
                 allowed_ids = {m.id for m in effective_config.available_models}
@@ -1120,7 +1224,7 @@ class AssistantService:
                     )
                     if fallback is None:
                         raise BadRequestException(
-                            "Personal assistant policy has no allowed models — "
+                            "Personal assistant governance policy has no allowed models — "
                             "contact admin",
                         )
                     completion_model_override = fallback  # type: ignore[assignment]
@@ -1301,6 +1405,10 @@ class AssistantService:
             raise BadRequestException(
                 "MCP server is not assigned to this assistant's space"
             )
+
+        await self._ensure_governance_policy_allows_mcp_server(
+            space=space, assistant=assistant, mcp_server_id=mcp_server_id
+        )
 
         stmt = sa.select(AssistantMCPServers).where(
             AssistantMCPServers.assistant_id == assistant_id

@@ -7,14 +7,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from intric.main.container.container import Container
-from intric.personal_assistant_policy.domain.personal_assistant_policy import (
+from intric.governance_policy.domain.governance_policy import (
     PolicyCompletionModel,
 )
-from intric.personal_assistant_policy.presentation.personal_assistant_policy_models import (
-    PersonalAssistantPolicyPublic,
-    PersonalAssistantPolicyUpdate,
+from intric.governance_policy.presentation.governance_policy_models import (
+    GovernancePolicyPublic,
+    GovernancePolicyUpdate,
 )
+from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 
@@ -25,27 +25,27 @@ _ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))
 
 @router.get(
     "/",
-    response_model=PersonalAssistantPolicyPublic,
+    response_model=GovernancePolicyPublic,
     responses=responses.get_responses([403]),
 )
-async def get_personal_assistant_policy(container: _ContainerWithUser):
-    service = container.personal_assistant_policy_service()
-    assembler = container.personal_assistant_policy_assembler()
+async def get_governance_policy(container: _ContainerWithUser):
+    service = container.governance_policy_service()
+    assembler = container.governance_policy_assembler()
     policy = await service.get_policy()
     return assembler.to_public(policy)
 
 
 @router.put(
     "/",
-    response_model=PersonalAssistantPolicyPublic,
+    response_model=GovernancePolicyPublic,
     responses=responses.get_responses([400, 403]),
 )
-async def update_personal_assistant_policy(
-    payload: PersonalAssistantPolicyUpdate,
+async def update_governance_policy(
+    payload: GovernancePolicyUpdate,
     container: _ContainerWithUser,
 ):
-    service = container.personal_assistant_policy_service()
-    assembler = container.personal_assistant_policy_assembler()
+    service = container.governance_policy_service()
+    assembler = container.governance_policy_assembler()
 
     models_restriction = None
     if payload.models_restriction is not None:

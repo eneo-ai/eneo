@@ -3,22 +3,22 @@
 # Licensed under the MIT License.
 
 
-from intric.personal_assistant_policy.domain.personal_assistant_policy import (
-    PersonalAssistantPolicy,
+from intric.governance_policy.domain.governance_policy import (
+    GovernancePolicy,
 )
-from intric.personal_assistant_policy.presentation.personal_assistant_policy_models import (
+from intric.governance_policy.presentation.governance_policy_models import (
+    GovernancePolicyPublic,
     McpRestrictionPublic,
     ModelsRestrictionPublic,
-    PersonalAssistantPolicyPublic,
     PolicyCompletionModelPublic,
     PromptEnforcementPublic,
 )
 
 
-class PersonalAssistantPolicyAssembler:
+class GovernancePolicyAssembler:
     @staticmethod
-    def to_public(policy: PersonalAssistantPolicy) -> PersonalAssistantPolicyPublic:
-        return PersonalAssistantPolicyPublic(
+    def to_public(policy: GovernancePolicy) -> GovernancePolicyPublic:
+        return GovernancePolicyPublic(
             models_restriction=ModelsRestrictionPublic(
                 enabled=policy.models_restriction_enabled,
                 models=[

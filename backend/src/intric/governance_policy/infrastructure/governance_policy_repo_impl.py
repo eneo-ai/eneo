@@ -9,44 +9,44 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
 from intric.database.database import AsyncSession
-from intric.database.tables.personal_assistant_policy_table import (
-    PersonalAssistantPolicies,
-    PersonalAssistantPolicyCompletionModels,
-    PersonalAssistantPolicyMcpServers,
-    PersonalAssistantPolicyProviders,
+from intric.database.tables.governance_policy_table import (
+    GovernancePolicies,
+    GovernancePolicyCompletionModels,
+    GovernancePolicyMcpServers,
+    GovernancePolicyProviders,
 )
-from intric.personal_assistant_policy.domain.personal_assistant_policy import (
-    PersonalAssistantPolicy,
+from intric.governance_policy.domain.governance_policy import (
+    GovernancePolicy,
     PolicyCompletionModel,
+    PolicyScope,
 )
 
 
-class PersonalAssistantPolicyRepoImpl:
+class GovernancePolicyRepoImpl:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def _load_policy(
-        self, row: PersonalAssistantPolicies
-    ) -> PersonalAssistantPolicy:
+    async def _load_policy(self, row: GovernancePolicies) -> GovernancePolicy:
         models_stmt = sa.select(
-            PersonalAssistantPolicyCompletionModels.completion_model_id,
-            PersonalAssistantPolicyCompletionModels.is_default,
-        ).where(PersonalAssistantPolicyCompletionModels.policy_id == row.id)
+            GovernancePolicyCompletionModels.completion_model_id,
+            GovernancePolicyCompletionModels.is_default,
+        ).where(GovernancePolicyCompletionModels.policy_id == row.id)
         model_rows = (await self.session.execute(models_stmt)).all()
 
-        mcp_stmt = sa.select(PersonalAssistantPolicyMcpServers.mcp_server_id).where(
-            PersonalAssistantPolicyMcpServers.policy_id == row.id
+        mcp_stmt = sa.select(GovernancePolicyMcpServers.mcp_server_id).where(
+            GovernancePolicyMcpServers.policy_id == row.id
         )
         mcp_ids = [r[0] for r in (await self.session.execute(mcp_stmt)).all()]
 
-        provider_stmt = sa.select(
-            PersonalAssistantPolicyProviders.model_provider_id
-        ).where(PersonalAssistantPolicyProviders.policy_id == row.id)
+        provider_stmt = sa.select(GovernancePolicyProviders.model_provider_id).where(
+            GovernancePolicyProviders.policy_id == row.id
+        )
         provider_ids = [r[0] for r in (await self.session.execute(provider_stmt)).all()]
 
-        return PersonalAssistantPolicy(
+        return GovernancePolicy(
             id=row.id,
             tenant_id=row.tenant_id,
+            scope=PolicyScope(row.scope),
             models_restriction_enabled=row.models_restriction_enabled,
             mcp_restriction_enabled=row.mcp_restriction_enabled,
             prompt_enforcement_enabled=row.prompt_enforcement_enabled,
@@ -61,42 +61,45 @@ class PersonalAssistantPolicyRepoImpl:
             updated_by_user_id=row.updated_by_user_id,
         )
 
-    async def get_by_tenant(self, tenant_id: UUID) -> PersonalAssistantPolicy | None:
-        stmt = sa.select(PersonalAssistantPolicies).where(
-            PersonalAssistantPolicies.tenant_id == tenant_id
+    async def get_by_tenant(
+        self, tenant_id: UUID, *, scope: PolicyScope
+    ) -> GovernancePolicy | None:
+        stmt = sa.select(GovernancePolicies).where(
+            GovernancePolicies.tenant_id == tenant_id,
+            GovernancePolicies.scope == scope.value,
         )
         row = await self.session.scalar(stmt)
         if row is None:
             return None
         return await self._load_policy(row)
 
-    async def create_empty(self, tenant_id: UUID) -> PersonalAssistantPolicy:
+    async def create_empty(
+        self, tenant_id: UUID, *, scope: PolicyScope
+    ) -> GovernancePolicy:
         stmt = (
-            insert(PersonalAssistantPolicies)
-            .values(tenant_id=tenant_id)
-            .on_conflict_do_nothing(
-                constraint="uq_personal_assistant_policies_tenant_id"
-            )
-            .returning(PersonalAssistantPolicies)
+            insert(GovernancePolicies)
+            .values(tenant_id=tenant_id, scope=scope.value)
+            .on_conflict_do_nothing(constraint="uq_governance_policies_tenant_id_scope")
+            .returning(GovernancePolicies)
         )
         row = await self.session.scalar(stmt)
         if row is None:
-            existing = await self.get_by_tenant(tenant_id)
+            existing = await self.get_by_tenant(tenant_id, scope=scope)
             assert existing is not None
             return existing
         return await self._load_policy(row)
 
     async def save(
         self,
-        policy: PersonalAssistantPolicy,
+        policy: GovernancePolicy,
         *,
         updated_by_user_id: UUID,
-    ) -> PersonalAssistantPolicy:
+    ) -> GovernancePolicy:
         assert policy.id is not None
 
         update = (
-            sa.update(PersonalAssistantPolicies)
-            .where(PersonalAssistantPolicies.id == policy.id)
+            sa.update(GovernancePolicies)
+            .where(GovernancePolicies.id == policy.id)
             .values(
                 models_restriction_enabled=policy.models_restriction_enabled,
                 mcp_restriction_enabled=policy.mcp_restriction_enabled,
@@ -109,13 +112,13 @@ class PersonalAssistantPolicyRepoImpl:
 
         # Replace m2m rows (simple + correct; small N per policy).
         await self.session.execute(
-            sa.delete(PersonalAssistantPolicyCompletionModels).where(
-                PersonalAssistantPolicyCompletionModels.policy_id == policy.id
+            sa.delete(GovernancePolicyCompletionModels).where(
+                GovernancePolicyCompletionModels.policy_id == policy.id
             )
         )
         if policy.completion_models:
             await self.session.execute(
-                sa.insert(PersonalAssistantPolicyCompletionModels).values(
+                sa.insert(GovernancePolicyCompletionModels).values(
                     [
                         {
                             "policy_id": policy.id,
@@ -128,13 +131,13 @@ class PersonalAssistantPolicyRepoImpl:
             )
 
         await self.session.execute(
-            sa.delete(PersonalAssistantPolicyMcpServers).where(
-                PersonalAssistantPolicyMcpServers.policy_id == policy.id
+            sa.delete(GovernancePolicyMcpServers).where(
+                GovernancePolicyMcpServers.policy_id == policy.id
             )
         )
         if policy.mcp_server_ids:
             await self.session.execute(
-                sa.insert(PersonalAssistantPolicyMcpServers).values(
+                sa.insert(GovernancePolicyMcpServers).values(
                     [
                         {"policy_id": policy.id, "mcp_server_id": mid}
                         for mid in policy.mcp_server_ids
@@ -143,13 +146,13 @@ class PersonalAssistantPolicyRepoImpl:
             )
 
         await self.session.execute(
-            sa.delete(PersonalAssistantPolicyProviders).where(
-                PersonalAssistantPolicyProviders.policy_id == policy.id
+            sa.delete(GovernancePolicyProviders).where(
+                GovernancePolicyProviders.policy_id == policy.id
             )
         )
         if policy.model_provider_ids:
             await self.session.execute(
-                sa.insert(PersonalAssistantPolicyProviders).values(
+                sa.insert(GovernancePolicyProviders).values(
                     [
                         {"policy_id": policy.id, "model_provider_id": pid}
                         for pid in policy.model_provider_ids
@@ -158,19 +161,17 @@ class PersonalAssistantPolicyRepoImpl:
             )
 
         reloaded = await self.session.scalar(
-            sa.select(PersonalAssistantPolicies).where(
-                PersonalAssistantPolicies.id == policy.id
-            )
+            sa.select(GovernancePolicies).where(GovernancePolicies.id == policy.id)
         )
         assert reloaded is not None
         return await self._load_policy(reloaded)
 
     async def get_by_prompt_library_id(
         self, *, tenant_id: UUID, prompt_library_id: UUID
-    ) -> PersonalAssistantPolicy | None:
-        stmt = sa.select(PersonalAssistantPolicies).where(
-            PersonalAssistantPolicies.tenant_id == tenant_id,
-            PersonalAssistantPolicies.default_prompt_library_id == prompt_library_id,
+    ) -> GovernancePolicy | None:
+        stmt = sa.select(GovernancePolicies).where(
+            GovernancePolicies.tenant_id == tenant_id,
+            GovernancePolicies.default_prompt_library_id == prompt_library_id,
         )
         row = await self.session.scalar(stmt)
         if row is None:
