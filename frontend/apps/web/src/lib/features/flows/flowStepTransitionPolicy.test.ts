@@ -63,8 +63,78 @@ describe("flow step transition policy", () => {
     expect(result.step.input_type).toBe("audio");
     expect(result.inputTypeAdjusted).toBe(false);
     expect(result.step.input_config).toMatchObject({
+      auth: { mode: "none" },
+      body: { mode: "none" },
+      custom_headers: [],
+      response_format: "text",
       timeout_seconds: 30,
       url: ""
+    });
+  });
+
+  it("normalizes HTTP config fields while preserving unrelated input config", () => {
+    const result = applyInputSourceChange({
+      step: makeStep({
+        input_source: "flow_input",
+        input_type: "text",
+        input_config: {
+          url: "https://api.example.com/input",
+          auth: { mode: "oauth", token: "ignored" },
+          timeout_seconds: "fast",
+          body: { mode: "xml", template: 5 },
+          custom_headers: "not-an-array",
+          response_format: "xml",
+          runtime_input: { enabled: true },
+          headers: { "X-Legacy": "kept" }
+        }
+      }),
+      nextSource: "http_post",
+      previousOutputType: undefined,
+      runtimeInputConfig: makeRuntimeInputConfig(),
+      isAdvancedMode: false
+    });
+
+    expect(result.step.input_config).toEqual({
+      url: "https://api.example.com/input",
+      auth: { mode: "none" },
+      timeout_seconds: 30,
+      body: { mode: "none" },
+      custom_headers: [],
+      response_format: "text",
+      runtime_input: { enabled: true },
+      headers: { "X-Legacy": "kept" }
+    });
+  });
+
+  it("preserves valid HTTP config fields during input-source transitions", () => {
+    const result = applyInputSourceChange({
+      step: makeStep({
+        input_source: "flow_input",
+        input_type: "text",
+        input_config: {
+          url: "https://api.example.com/input",
+          auth: { mode: "bearer_token", token: "token-1" },
+          timeout_seconds: 45,
+          body: { mode: "json_template", template: '{"case":"{{flow_input.case_id}}"}' },
+          custom_headers: [{ name: "X-Trace", value: "abc", secret: false }],
+          response_format: "json",
+          runtime_input: { enabled: true }
+        }
+      }),
+      nextSource: "http_post",
+      previousOutputType: undefined,
+      runtimeInputConfig: makeRuntimeInputConfig(),
+      isAdvancedMode: false
+    });
+
+    expect(result.step.input_config).toEqual({
+      url: "https://api.example.com/input",
+      auth: { mode: "bearer_token", token: "token-1" },
+      timeout_seconds: 45,
+      body: { mode: "json_template", template: '{"case":"{{flow_input.case_id}}"}' },
+      custom_headers: [{ name: "X-Trace", value: "abc", secret: false }],
+      response_format: "json",
+      runtime_input: { enabled: true }
     });
   });
 

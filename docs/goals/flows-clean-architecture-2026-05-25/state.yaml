@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T066
+active_task: T068
 
 tasks:
   - id: T001
@@ -6647,7 +6647,7 @@ tasks:
   - id: T066
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "judge(flows): choose the next safe tranche after template-fill config typing."
     inputs:
@@ -6670,6 +6670,199 @@ tasks:
       - "Decision: activate the next exact Worker/Judge/Scout or block with reason."
       - "Disposition of T014/T015/T016/T901 and blocked T009/T010/T011."
       - "Whether the next task should address HTTP runtime/backend JSONB ownership preflight, another frontend state ownership slice, API DX, schema verification, or wait for Docker/Postgres."
+      - "Allowed files, verification commands, stop_if, consolidation effect, naming-gate answer, and maintainer-doc readiness for the chosen next task."
+    stop_if:
+      - "The next highest-ROI task requires unavailable Docker/DB verification and cannot be narrowed to read-only preflight."
+      - "The next task would require retention or service-key product/data decisions that remain blocked."
+      - "The next task would combine final architecture docs with unresolved implementation work."
+    receipt:
+      result: done
+      decision: "activate T067"
+      summary: "Chose another narrow T016 frontend state ownership/consolidation sub-slice: make step input-source transitions reuse the canonical HTTP authored-config default/parser owner instead of hand-seeding HTTP config fields in flowStepTransitionPolicy.ts. Backend runtime/API/schema/service-key/retention/webhook/final-docs work remains gated or queued."
+      decision_artifact: "docs/goals/flows-clean-architecture-2026-05-25/notes/t066-next-safe-after-template-fill-config-judge.md"
+      evidence:
+        - "frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.ts:62"
+        - "frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.ts:249"
+        - "frontend/apps/web/src/lib/features/flows/components/http/httpConfigDefaults.ts:4"
+        - "frontend/apps/web/src/lib/features/flows/components/http/httpConfigTypes.ts:55"
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts:218"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowStepInputSection.svelte:82"
+      candidate_disposition:
+        T014: "queued; schema/migration invariants still require Docker/Postgres-backed verification or a separate read-only preflight."
+        T015: "queued; public API/OpenAPI/generated-client work should be split by exact Judge evidence before implementation."
+        T016: "queued broad placeholder; T067 is activated as the next narrow frontend state ownership sub-slice."
+        T901: "queued final docs Worker; do not start while implementation architecture is still changing."
+        T009_T010_T011: "blocked by product/data decisions."
+      review_tier:
+        selected_tier: "medium"
+        plan_gate: "skipped; ownership is clear because HTTP defaults/parsing already have canonical owners and T067 is constrained to reuse them from the transition owner."
+        implementation_gate: "Claude-only after the diff is stable."
+        antigravity: "skip unless Claude and Codex disagree or the slice expands into API/runtime/data/schema/final-audit work."
+      consolidation_effect:
+        reused_existing_owner: "components/http/httpConfigDefaults.ts and components/http/httpConfigTypes.ts"
+        logic_moved_from: "manual known-field HTTP default seeding in flowStepTransitionPolicy.ts"
+        logic_deleted: "local auth/body/custom_headers/response_format/timeout default object construction for HTTP input-source transitions"
+        duplicate_path_removed: "flowStepTransitionPolicy.ts should no longer be a second HTTP authored-default owner"
+        new_code_added: "at most a small transition-local wrapper preserving unrelated input_config keys while delegating known HTTP fields"
+        why_existing_owners_were_insufficient: "Existing HTTP owners are sufficient for known fields; transition policy still owns preserving unrelated step-transition input_config keys."
+        guard_preventing_duplicate_logic_from_returning: "Focused transition-policy tests and grep guard against manual HTTP default literals in flowStepTransitionPolicy.ts."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "Only wrapper code at the transition boundary, if needed."
+      naming_gate:
+        new_names: "No new public names; private helper names must reveal HTTP input-source transition config if added."
+        architecture_doc_readiness: "Final docs can map HTTP authored config defaults/parsing to components/http/* and step source transitions to flowStepTransitionPolicy.ts."
+      commands:
+        - command: "jq '{schema_version,status,active_task,blockers}' /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1 status=ok blockers=[]; stale active_task T039 advisory."
+        - command: "ruby -ryaml -e '<print active task>'"
+          status: pass
+          output: "active=T066"
+        - command: "rg -n 'withHttpDefaults|createDefaultHttpConfig|parseHttpAuthoredConfig|auth: \\{ mode: \"none\" \\}|custom_headers|response_format|body: \\{ mode: \"none\" \\}' frontend/apps/web/src/lib/features/flows -g '*.{ts,svelte}'"
+          status: pass
+          output: "Duplicate transition-policy path found; other HTTP consumers route through canonical owner."
+        - command: "nl -ba frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.ts"
+          status: pass
+        - command: "nl -ba frontend/apps/web/src/lib/features/flows/components/http/httpConfigDefaults.ts && nl -ba frontend/apps/web/src/lib/features/flows/components/http/httpConfigTypes.ts"
+          status: pass
+      next_task: T067
+
+  - id: T067
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "refactor(flows-ui): reuse HTTP authored-config owner in step transitions."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t066-next-safe-after-template-fill-config-judge.md"
+      - "frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.ts"
+      - "frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/http/httpConfigDefaults.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/http/httpConfigTypes.ts"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t067-http-transition-config-owner.md"
+      - "frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.ts"
+      - "frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.test.ts"
+    constraints:
+      - "Before implementation and before commit, check the watchdog blocker file and verify halt-worthy blockers against source/state/git evidence."
+      - "Reuse createDefaultHttpConfig and parseHttpAuthoredConfig as the canonical owner for known HTTP authored config fields."
+      - "Keep flowStepTransitionPolicy.ts as the owner for input-source transition behavior."
+      - "Preserve unrelated input_config keys such as runtime-input metadata; do not silently delete step-transition state."
+      - "Frontend Flow-proper only: no backend, API/OpenAPI/generated-client, migration, retention, service-key identity/review/rerun, webhook outbox, Flow AI Builder, docs/flows/architecture.md, or unrelated cleanup edits."
+      - "No generic helpers, managers, processors, pass-through layers, fake interfaces, or speculative compatibility paths."
+      - "Claude-only implementation gate for this medium-risk frontend state ownership Worker; do not run Antigravity unless Claude and Codex disagree or the slice crosses API/runtime/data/schema/final-audit boundaries."
+    expected_output:
+      - "flowStepTransitionPolicy.ts no longer hand-seeds known HTTP authored config defaults."
+      - "HTTP input-source transitions use createDefaultHttpConfig and parseHttpAuthoredConfig for known fields."
+      - "Tests prove defaults are seeded, malformed known fields are normalized, and unrelated input_config keys are preserved."
+      - "T067 receipt with consolidation effect, naming-gate answer, maintainer-doc readiness, commands run, pass/fail, and Claude implementation-gate verdict."
+    verify:
+      - "cd frontend/apps/web && ../../node_modules/.bin/vitest run src/lib/features/flows/flowStepTransitionPolicy.test.ts src/lib/features/flows/components/http/httpConfigDefaults.test.ts src/lib/features/flows/FlowEditor.test.ts"
+      - "cd frontend/apps/web && ../../node_modules/.bin/eslint src/lib/features/flows/flowStepTransitionPolicy.ts src/lib/features/flows/flowStepTransitionPolicy.test.ts"
+      - "cd frontend/apps/web && ../../node_modules/.bin/prettier --check src/lib/features/flows/flowStepTransitionPolicy.ts src/lib/features/flows/flowStepTransitionPolicy.test.ts"
+      - "cd frontend/apps/web && tmp_config=.t067-http-transition-tsconfig.json && printf '%s\\n' '{' '  \"extends\": \"./tsconfig.json\",' '  \"compilerOptions\": {' '    \"allowJs\": false,' '    \"checkJs\": false' '  },' '  \"include\": [' '    \"src/lib/features/flows/flowStepTransitionPolicy.ts\",' '    \"src/lib/features/flows/flowStepTransitionPolicy.test.ts\",' '    \"src/lib/features/flows/components/http/httpConfigDefaults.ts\",' '    \"src/lib/features/flows/components/http/httpConfigTypes.ts\"' '  ],' '  \"exclude\": []' '}' > \"$tmp_config\" && ../../node_modules/.bin/tsc --project \"$tmp_config\" --noEmit; rc=$?; rm -f \"$tmp_config\"; exit $rc"
+      - "! rg -n 'function withHttpDefaults|auth: \\{ mode: \"none\" \\}|body: \\{ mode: \"none\" \\}|custom_headers: \\[\\]|response_format: \"text\"' frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.ts"
+      - "git diff --check"
+      - "scripts/gate-local/anti_slippage.sh"
+    stop_if:
+      - "Correct reuse requires changing HTTP owner modules outside allowed_files."
+      - "Preserving unrelated input_config keys cannot be done without retaining duplicate known-field HTTP default logic."
+      - "Existing tests or source evidence prove unknown HTTP input_config keys are an invalid-state path that must be deleted rather than preserved."
+      - "The implementation needs backend/API/generated-client/schema/runtime/product-decision work."
+      - "Claude finds a concrete implementation blocker that cannot be resolved inside allowed_files."
+      - "Verification fails twice for reasons caused by this task."
+    receipt:
+      result: done
+      summary: "Removed the remaining duplicate frontend HTTP authored-default seeding from step input-source transitions. flowStepTransitionPolicy.ts now reuses createDefaultHttpConfig and parseHttpAuthoredConfig for known HTTP fields while preserving unrelated input_config siblings such as runtime_input. Added transition-policy tests for default seeding, malformed known-field normalization with unrelated-key preservation, and valid authored-config preservation."
+      note: "docs/goals/flows-clean-architecture-2026-05-25/notes/t067-http-transition-config-owner.md"
+      evidence:
+        - "frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.ts:18"
+        - "frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.ts:64"
+        - "frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.ts:251"
+        - "frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.test.ts:65"
+        - "frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.test.ts:75"
+        - "frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.test.ts:109"
+      commands:
+        - command: "cd frontend/apps/web && ../../node_modules/.bin/vitest run src/lib/features/flows/flowStepTransitionPolicy.test.ts"
+          status: pass
+          output: "8 tests passed after adding valid-config preservation coverage."
+        - command: "cd frontend/apps/web && ../../node_modules/.bin/vitest run src/lib/features/flows/flowStepTransitionPolicy.test.ts src/lib/features/flows/components/http/httpConfigDefaults.test.ts src/lib/features/flows/FlowEditor.test.ts"
+          status: pass
+          output: "3 files, 71 tests passed."
+        - command: "cd frontend/apps/web && ../../node_modules/.bin/eslint src/lib/features/flows/flowStepTransitionPolicy.ts src/lib/features/flows/flowStepTransitionPolicy.test.ts"
+          status: pass
+        - command: "cd frontend/apps/web && ../../node_modules/.bin/prettier --check src/lib/features/flows/flowStepTransitionPolicy.ts src/lib/features/flows/flowStepTransitionPolicy.test.ts"
+          status: pass
+          output: "All matched files use Prettier code style."
+        - command: "cd frontend/apps/web && tmp_config=.t067-http-transition-tsconfig.json && printf ... include flowStepTransitionPolicy.ts, flowStepTransitionPolicy.test.ts, httpConfigDefaults.ts, httpConfigTypes.ts ... && ../../node_modules/.bin/tsc --project \"$tmp_config\" --noEmit; rc=$?; rm -f \"$tmp_config\"; exit $rc"
+          status: pass
+        - command: "! rg -n 'withHttpDefaults' frontend/apps/web/src"
+          status: pass
+        - command: "! rg -n 'function withHttpDefaults|auth: \\{ mode: \"none\" \\}|body: \\{ mode: \"none\" \\}|custom_headers: \\[\\]|response_format: \"text\"' frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.ts"
+          status: pass
+        - command: "git diff --check -- docs/goals/flows-clean-architecture-2026-05-25/state.yaml docs/goals/flows-clean-architecture-2026-05-25/notes/t066-next-safe-after-template-fill-config-judge.md frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.ts frontend/apps/web/src/lib/features/flows/flowStepTransitionPolicy.test.ts"
+          status: pass
+        - command: "scripts/gate-local/anti_slippage.sh"
+          status: pass
+          output: "anti-slippage: nothing staged (code files)."
+      peer_review:
+        claude:
+          artifact: ".codex/artifacts/claude-peer-loop-t067-http-transition-config-owner-implementation-review-20260526T181856Z.md"
+          verdict: "green"
+          green_light: true
+          min_score: 8
+          valid_concerns_addressed:
+            - "Added valid existing HTTP authored-config transition preservation coverage."
+            - "Stage exact allowed files only before commit."
+          deferred_non_blocking:
+            - "Dead _method parameter in createDefaultHttpConfig predates T067 and belongs to a future HTTP owner cleanup slice."
+        antigravity:
+          status: skipped
+          reason: "Tiered review rule: medium-risk frontend state ownership; Claude was green; no disputed API/runtime/data/schema/final-audit boundary."
+      consolidation_effect:
+        reused_existing_owner: "components/http/httpConfigDefaults.ts and components/http/httpConfigTypes.ts"
+        logic_moved_from: "duplicate known-field HTTP defaulting in flowStepTransitionPolicy.ts"
+        logic_deleted: "old withHttpDefaults known-field default literals and comments"
+        duplicate_path_removed: "step transitions no longer own HTTP authored defaults for known fields"
+        new_code_added: "transition-local wrapper preserving unrelated input_config siblings while delegating known HTTP fields"
+        why_existing_owners_were_insufficient: "HTTP owner handles known authored fields; transition policy still owns preserving wider step state."
+        guard_preventing_duplicate_logic_from_returning: "Transition-policy tests plus grep guards for withHttpDefaults and manual default literals."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "Wrapper is the boundary between loose FlowStep.input_config and typed HTTP authored config."
+      naming_gate:
+        new_names: "No new public names; private withHttpInputSourceDefaults identifies the HTTP input-source transition axis."
+        architecture_doc_readiness: "Final docs can map HTTP authored defaults/parsing to components/http/* and step input-source transitions to flowStepTransitionPolicy.ts."
+      next_task: T068
+
+  - id: T068
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: medium
+    objective: "judge(flows): choose the next safe tranche after HTTP transition owner consolidation."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t067-http-transition-config-owner.md"
+      - ".codex/artifacts/claude-peer-loop-t067-http-transition-config-owner-implementation-review-20260526T181856Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t068-next-safe-after-http-transition-judge.md"
+    constraints:
+      - "Read-only Judge task; no source edits, test edits, migrations, generated-client edits, frontend edits, deletion, or docs/flows/architecture.md edits."
+      - "Before starting, check the watchdog blocker file and verify any halt-worthy blocker against source/state/git evidence."
+      - "Apply tiered review: Claude-only for medium-risk frontend/API/refactor/guard tasks; Antigravity only for high-risk/disputed/runtime/API/data/final-audit work."
+      - "Do not start T014 schema/migration work unless Docker/Postgres verification is available or the task can be safely preflighted read-only."
+      - "Do not start retention, service-key identity/review/rerun, schema migration, materialized webhook request snapshots, or other blocked product/data work without recorded decisions."
+      - "Do not activate T901 final architecture docs while runtime/API/schema/frontend architecture is still changing."
+      - "If choosing a Worker, include consolidation effect, naming-gate answer, maintainer-doc readiness, allowed_files, verify commands, and stop_if."
+    expected_output:
+      - "Decision: activate the next exact Worker/Judge/Scout or block with reason."
+      - "Disposition of T014/T015/T016/T901 and blocked T009/T010/T011."
+      - "Whether the next task should address HTTP owner cleanup, HTTP runtime/backend JSONB ownership preflight, another frontend state ownership slice, API DX, schema verification, or wait for Docker/Postgres."
       - "Allowed files, verification commands, stop_if, consolidation effect, naming-gate answer, and maintainer-doc readiness for the chosen next task."
     stop_if:
       - "The next highest-ROI task requires unavailable Docker/DB verification and cannot be narrowed to read-only preflight."

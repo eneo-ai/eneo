@@ -15,6 +15,8 @@ import {
   type getTemplateFillOutputConfig
 } from "./templateFillConfig";
 import { sanitizeFlowStepReviewPolicy } from "./flowStepReviewPolicy";
+import { createDefaultHttpConfig } from "./components/http/httpConfigDefaults";
+import { parseHttpAuthoredConfig, type HttpMethod } from "./components/http/httpConfigTypes";
 
 type StepInputSource = FlowStep["input_source"];
 type StepInputType = FlowStep["input_type"];
@@ -60,7 +62,7 @@ export function applyInputSourceChange({
     isAdvancedMode
   });
   const nextInputConfig = httpSourceSelected
-    ? withHttpDefaults(step.input_config)
+    ? withHttpInputSourceDefaults(step.input_config, nextSource === "http_get" ? "GET" : "POST")
     : (step.input_config ?? null);
   const nextInputType = keepOrRecommendInputType({
     currentInputType: step.input_type,
@@ -246,31 +248,19 @@ export function applyOutputTypeChange({
   );
 }
 
-function withHttpDefaults(inputConfig: FlowStep["input_config"]): Record<string, unknown> {
-  const currentConfig =
-    inputConfig && typeof inputConfig === "object" ? (inputConfig as Record<string, unknown>) : {};
-
-  // If already in authored format (has auth key), preserve as-is with defaults
-  if (currentConfig.auth) {
-    return {
-      ...currentConfig,
-      url: typeof currentConfig.url === "string" ? currentConfig.url : "",
-      timeout_seconds:
-        typeof currentConfig.timeout_seconds === "number" ? currentConfig.timeout_seconds : 30
-    };
-  }
-
-  // Seed full authored config structure for new HTTP sources
+function withHttpInputSourceDefaults(
+  inputConfig: FlowStep["input_config"],
+  method: HttpMethod
+): Record<string, unknown> {
+  const currentConfig = isInputConfigRecord(inputConfig) ? inputConfig : {};
   return {
     ...currentConfig,
-    url: typeof currentConfig.url === "string" ? currentConfig.url : "",
-    auth: { mode: "none" },
-    timeout_seconds:
-      typeof currentConfig.timeout_seconds === "number" ? currentConfig.timeout_seconds : 30,
-    body: { mode: "none" },
-    custom_headers: [],
-    response_format: "text"
+    ...parseHttpAuthoredConfig(currentConfig, createDefaultHttpConfig("input", method))
   };
+}
+
+function isInputConfigRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function keepOrRecommendInputType({
