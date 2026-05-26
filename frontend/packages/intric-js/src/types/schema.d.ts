@@ -3740,7 +3740,7 @@ export interface paths {
     };
     /**
      * Get Flow
-     * @description Return the full draft representation of a flow, including all configured steps and metadata. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin. This endpoint is user-principal-oriented and returns the current draft definition. Service-key runtime clients should call `/api/v1/flows/{id}/published/` instead.
+     * @description Return the full current draft representation of a flow, including all configured steps and metadata. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin. Admin service-key principals may read the current draft definition when their scope covers the flow. Read and write service-key clients should call `/api/v1/flows/{id}/published/` for runtime-safe published projections and runtime paths.
      */
     get: operations["get_flow"];
     put?: never;
@@ -4007,11 +4007,12 @@ export interface paths {
     put?: never;
     /**
      * Upload flow input file
-     * @description Upload a file using flow-specific policy checks.
+     * @description Upload a file using published runtime input checks.
      *
-     *     This endpoint is flow-first and intended for external API consumers that should not call
-     *     generic file routes directly. Validation is based on the first `flow_input` step:
-     *     - accepted input types: audio/document/image/file
+     *     This endpoint is a compatibility shortcut for external API consumers. Validation is based
+     *     on the first `flow_input` runtime step in the published run contract; draft edits take
+     *     effect only after republish.
+     *     - accepted input types: audio/document/file
      *     - allowed mimetypes
      *     - effective tenant flow size limits
      *     - multipart form field name: `upload_file`
@@ -14574,6 +14575,8 @@ export interface components {
      *               }
      *             ],
      *             "finished_at": "2026-03-17T10:05:30Z",
+     *             "flow_id": "00000000-0000-0000-0000-000000000001",
+     *             "flow_run_id": "00000000-0000-0000-0000-000000000301",
      *             "id": "00000000-0000-0000-0000-000000000501",
      *             "input_payload_json": {
      *               "diagnostics": [
@@ -14593,6 +14596,7 @@ export interface components {
      *             "status": "completed",
      *             "step_id": "00000000-0000-0000-0000-000000000101",
      *             "step_order": 1,
+     *             "tenant_id": "00000000-0000-0000-0000-000000000010",
      *             "updated_at": "2026-03-17T10:05:30Z"
      *           }
      *         ]
@@ -15227,6 +15231,8 @@ export interface components {
      *             }
      *           ],
      *           "finished_at": "2026-03-17T10:05:30Z",
+     *           "flow_id": "00000000-0000-0000-0000-000000000001",
+     *           "flow_run_id": "00000000-0000-0000-0000-000000000301",
      *           "id": "00000000-0000-0000-0000-000000000501",
      *           "input_payload_json": {
      *             "diagnostics": [
@@ -15246,6 +15252,7 @@ export interface components {
      *           "status": "completed",
      *           "step_id": "00000000-0000-0000-0000-000000000101",
      *           "step_order": 1,
+     *           "tenant_id": "00000000-0000-0000-0000-000000000010",
      *           "updated_at": "2026-03-17T10:05:30Z"
      *         }
      *       ]
@@ -16133,6 +16140,8 @@ export interface components {
      *         }
      *       ],
      *       "finished_at": "2026-03-17T10:05:30Z",
+     *       "flow_id": "00000000-0000-0000-0000-000000000001",
+     *       "flow_run_id": "00000000-0000-0000-0000-000000000301",
      *       "id": "00000000-0000-0000-0000-000000000501",
      *       "input_payload_json": {
      *         "diagnostics": [
@@ -16152,20 +16161,33 @@ export interface components {
      *       "status": "completed",
      *       "step_id": "00000000-0000-0000-0000-000000000101",
      *       "step_order": 1,
+     *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "updated_at": "2026-03-17T10:05:30Z"
      *     }
      */
     FlowRunStepPublic: {
       /** Id */
       id?: string | null;
-      /** Flow Run Id */
-      flow_run_id?: string | null;
-      /** Flow Id */
-      flow_id?: string | null;
-      /** Tenant Id */
-      tenant_id?: string | null;
-      /** Step Id */
-      step_id?: string | null;
+      /**
+       * Flow Run Id
+       * Format: uuid
+       */
+      flow_run_id: string;
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
       /** Step Order */
       step_order: number;
       /** Assistant Id */
@@ -16817,8 +16839,11 @@ export interface components {
        * Format: uuid
        */
       tenant_id: string;
-      /** Step Id */
-      step_id?: string | null;
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
       /** Step Order */
       step_order: number;
       /** Attempt No */
@@ -20197,8 +20222,7 @@ export interface components {
      *                 "instructions": "Transcribe the uploaded audio into Swedish text.",
      *                 "knowledge_refs": [],
      *                 "mcp_server_refs": [],
-     *                 "mcp_tool_refs": [],
-     *                 "model_ref": "model.gpt-5-4"
+     *                 "mcp_tool_refs": []
      *               },
      *               "input_source": "flow_input",
      *               "input_type": "audio",
@@ -21178,8 +21202,7 @@ export interface components {
      *                     "instructions": "Transcribe the uploaded audio into Swedish text.",
      *                     "knowledge_refs": [],
      *                     "mcp_server_refs": [],
-     *                     "mcp_tool_refs": [],
-     *                     "model_ref": "model.gpt-5-4"
+     *                     "mcp_tool_refs": []
      *                   },
      *                   "input_source": "flow_input",
      *                   "input_type": "audio",
@@ -37053,22 +37076,12 @@ export interface operations {
           "application/json": components["schemas"]["FlowPublic"];
         };
       };
-      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_space_permission` when the caller lacks the required shared-space role, `flow_owner_required` when the caller is not allowed to override another member's draft, and the current fail-closed `flow_service_key_principal_not_supported` when a service-key principal calls flow authoring endpoints before first-class support lands. */
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `service_key_admin_required` when a non-admin service-key principal calls the current draft definition endpoint, and `insufficient_space_permission` when the caller cannot read the flow. */
       403: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          /**
-           * @example {
-           *       "message": "API key space scope does not match requested flow.",
-           *       "intric_error_code": 9001,
-           *       "code": "insufficient_scope",
-           *       "context": {
-           *         "auth_layer": "api_key_scope"
-           *       }
-           *     }
-           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
@@ -38383,7 +38396,7 @@ export interface operations {
           "application/json": components["schemas"]["FilePublic"];
         };
       };
-      /** @description Upload request is invalid for the published flow runtime input contract. Representative machine-readable codes include: flow_input_upload_not_supported, flow_input_file_empty. */
+      /** @description Upload request is invalid for the published runtime input contract. Representative machine-readable codes include: flow_input_upload_not_supported and flow_input_file_empty. */
       400: {
         headers: {
           [name: string]: unknown;

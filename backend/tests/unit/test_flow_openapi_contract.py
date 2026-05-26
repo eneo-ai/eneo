@@ -89,6 +89,21 @@ def _get_operation(openapi_spec: dict, path: str, method: str) -> dict:
     return openapi_spec.get("paths", {}).get(path, {}).get(method, {})
 
 
+def _schema_allows_null(schema: dict) -> bool:
+    options = schema.get("anyOf") or schema.get("oneOf") or []
+    return any(
+        isinstance(option, dict) and option.get("type") == "null" for option in options
+    )
+
+
+def _assert_required_uuid_property(schema: dict, field_name: str) -> None:
+    assert field_name in schema.get("required", [])
+    property_schema = schema.get("properties", {}).get(field_name, {})
+    assert property_schema.get("type") == "string"
+    assert property_schema.get("format") == "uuid"
+    assert not _schema_allows_null(property_schema)
+
+
 def _path_for_operation_id(openapi_spec: dict, operation_id: str) -> str:
     for path, methods in openapi_spec.get("paths", {}).items():
         for operation in methods.values():
@@ -1801,6 +1816,41 @@ def test_openapi_flow_consumer_request_response_schemas(openapi_spec: dict) -> N
         assert upload_file_schema.get("type") == "string"
         assert upload_file_schema.get("format") == "binary"
         assert "contentMediaType" not in upload_file_schema
+
+
+def test_openapi_flow_runtime_step_identity_fields_are_required(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    step_result = schemas.get("FlowRunStepPublic", {})
+    step_attempt = schemas.get("FlowStepAttemptPublic", {})
+
+    for field_name in ("flow_run_id", "flow_id", "tenant_id", "step_id"):
+        _assert_required_uuid_property(step_result, field_name)
+    _assert_required_uuid_property(step_attempt, "step_id")
+
+
+def test_openapi_flow_run_step_public_database_id_stays_nullable(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    step_result = schemas.get("FlowRunStepPublic", {})
+    id_property = step_result.get("properties", {}).get("id", {})
+
+    assert "id" not in step_result.get("required", [])
+    assert _schema_allows_null(id_property)
+
+
+def test_openapi_non_result_step_identity_exceptions_stay_nullable(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+
+    for component_name in ("FlowRunError", "FlowRunDebugStep"):
+        component = schemas.get(component_name, {})
+        step_id_property = component.get("properties", {}).get("step_id", {})
+        assert "step_id" not in component.get("required", [])
+        assert _schema_allows_null(step_id_property)
 
 
 def test_openapi_flow_evidence_export_documents_json_attachment(

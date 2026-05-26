@@ -17,6 +17,7 @@ from intric.flows.api.flow_models import (
     FlowRunPublic,
     FlowRunRerunInvalidatedStepPublic,
     FlowRunRerunOperationPublic,
+    FlowRunStepPublic,
     FlowStepAttemptPublic,
     FlowStepCreateRequest,
     FormFieldPublic,
@@ -39,6 +40,8 @@ from intric.flows.enums import (
 from intric.flows.flow_review_policy import FlowStepReviewMode
 from intric.flows.flow_run_error import FlowRunError
 from intric.main.exceptions import BadRequestException
+
+_MISSING = object()
 
 
 def _payload(**overrides: object) -> dict[str, object]:
@@ -578,6 +581,66 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
     assert response.debug_export.steps[
         0
     ].rag.prompt_context.included_source_display_names == ["Beslut till underlag"]
+
+
+def _flow_run_step_public_payload() -> dict[str, object]:
+    return {
+        "id": str(uuid4()),
+        "flow_run_id": str(uuid4()),
+        "flow_id": str(uuid4()),
+        "tenant_id": str(uuid4()),
+        "step_id": str(uuid4()),
+        "step_order": 1,
+        "status": "completed",
+        "created_at": "2026-03-20T12:00:01Z",
+        "updated_at": "2026-03-20T12:00:05Z",
+    }
+
+
+def _flow_step_attempt_public_payload() -> dict[str, object]:
+    return {
+        "id": str(uuid4()),
+        "flow_run_id": str(uuid4()),
+        "flow_id": str(uuid4()),
+        "tenant_id": str(uuid4()),
+        "step_id": str(uuid4()),
+        "step_order": 1,
+        "attempt_no": 1,
+        "status": "completed",
+        "started_at": "2026-03-20T12:00:00Z",
+        "created_at": "2026-03-20T12:00:00Z",
+        "updated_at": "2026-03-20T12:00:05Z",
+    }
+
+
+@pytest.mark.parametrize("bad_value", (_MISSING, None), ids=("missing", "none"))
+@pytest.mark.parametrize(
+    "field_name", ("flow_run_id", "flow_id", "tenant_id", "step_id")
+)
+def test_flow_run_step_public_requires_runtime_identity_fields(
+    field_name: str,
+    bad_value: object,
+) -> None:
+    payload = _flow_run_step_public_payload()
+    if bad_value is _MISSING:
+        payload.pop(field_name)
+    else:
+        payload[field_name] = bad_value
+
+    with pytest.raises(ValidationError):
+        FlowRunStepPublic.model_validate(payload)
+
+
+@pytest.mark.parametrize("bad_value", (_MISSING, None), ids=("missing", "none"))
+def test_flow_step_attempt_public_requires_step_id(bad_value: object) -> None:
+    payload = _flow_step_attempt_public_payload()
+    if bad_value is _MISSING:
+        payload.pop("step_id")
+    else:
+        payload["step_id"] = bad_value
+
+    with pytest.raises(ValidationError):
+        FlowStepAttemptPublic.model_validate(payload)
 
 
 def test_http_test_request_accepts_current_payload_shape() -> None:

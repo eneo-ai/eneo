@@ -191,6 +191,9 @@ FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
 
 FLOW_RUN_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
     "id": "00000000-0000-0000-0000-000000000501",
+    "flow_run_id": "00000000-0000-0000-0000-000000000301",
+    "flow_id": "00000000-0000-0000-0000-000000000001",
+    "tenant_id": "00000000-0000-0000-0000-000000000010",
     "step_id": "00000000-0000-0000-0000-000000000101",
     "step_order": 1,
     "assistant_id": "00000000-0000-0000-0000-000000000201",
@@ -1160,10 +1163,10 @@ class FlowRunStepPublic(BaseModel):
     )
 
     id: UUID | None = None
-    flow_run_id: UUID | None = None
-    flow_id: UUID | None = None
-    tenant_id: UUID | None = None
-    step_id: UUID | None = None
+    flow_run_id: UUID
+    flow_id: UUID
+    tenant_id: UUID
+    step_id: UUID
     step_order: int
     assistant_id: UUID | None = None
     status: FlowStepResultStatus
@@ -1748,7 +1751,7 @@ class FlowStepAttemptPublic(BaseModel):
     flow_run_id: UUID
     flow_id: UUID
     tenant_id: UUID
-    step_id: UUID | None = None
+    step_id: UUID
     step_order: int
     attempt_no: int
     rerun_operation_id: UUID | None = None

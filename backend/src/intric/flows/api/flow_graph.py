@@ -9,7 +9,9 @@ from intric.flows.step_lineage import (
 from intric.flows.template_reference_analyzer import analyze_template
 
 
-def build_graph_from_steps(steps: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def build_graph_from_steps(
+    steps: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     nodes: list[dict[str, Any]] = [
         {"id": "input", "label": "Input", "type": "input"},
     ]
@@ -31,7 +33,9 @@ def build_graph_from_steps(steps: list[dict[str, Any]]) -> tuple[list[dict[str, 
                 "output_type": step.get("output_type"),
                 "output_mode": output_mode,
                 "mcp_policy": step.get("mcp_policy"),
-                "output_classification_override": step.get("output_classification_override"),
+                "output_classification_override": step.get(
+                    "output_classification_override"
+                ),
             }
         )
 
@@ -57,7 +61,11 @@ def build_graph_from_steps(steps: list[dict[str, Any]]) -> tuple[list[dict[str, 
 
         if input_source == "previous_step" and step_order > 1:
             prev = next(
-                (item for item in sorted_steps if int(item["step_order"]) == step_order - 1),
+                (
+                    item
+                    for item in sorted_steps
+                    if int(item["step_order"]) == step_order - 1
+                ),
                 None,
             )
             if prev is not None:
@@ -83,7 +91,7 @@ def build_graph_from_steps(steps: list[dict[str, Any]]) -> tuple[list[dict[str, 
                             "style": "dashed",
                             "label": "aggregated",
                         }
-                )
+                    )
             edges.append(
                 {
                     "source": "input",
@@ -109,7 +117,11 @@ def build_graph_from_steps(steps: list[dict[str, Any]]) -> tuple[list[dict[str, 
             if upstream_order in existing_upstream_orders:
                 continue
             upstream = next(
-                (item for item in sorted_steps if int(item["step_order"]) == upstream_order),
+                (
+                    item
+                    for item in sorted_steps
+                    if int(item["step_order"]) == upstream_order
+                ),
                 None,
             )
             if upstream is None:
@@ -134,7 +146,9 @@ def build_graph_from_steps(steps: list[dict[str, Any]]) -> tuple[list[dict[str, 
             if str(edge["source"]) in step_ids and str(edge["target"]) in step_ids
         }
         terminal_steps = [
-            step for step in sorted_steps if str(step.get("step_id") or step.get("id")) not in source_step_ids
+            step
+            for step in sorted_steps
+            if str(step.get("step_id") or step.get("id")) not in source_step_ids
         ]
         for step in terminal_steps:
             edges.append(
@@ -191,19 +205,14 @@ def enrich_nodes_with_run_results(
     nodes: list[dict[str, Any]],
     step_results: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    by_step_id = {
-        str(item["step_id"]): item
-        for item in step_results
-        if item.get("step_id") is not None
-    }
-    by_step_order = {int(item["step_order"]): item for item in step_results}
+    by_step_id = {str(item["step_id"]): item for item in step_results}
 
     enriched: list[dict[str, Any]] = []
     for node in nodes:
         if node["type"] not in {"llm", "assembly"}:
             enriched.append(node)
             continue
-        result = by_step_id.get(node["id"]) or by_step_order.get(int(node["step_order"]))
+        result = by_step_id.get(node["id"])
         if result is None:
             enriched.append(node)
             continue

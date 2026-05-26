@@ -80,12 +80,13 @@ async def test_get_flow_graph_uses_run_version_snapshot_when_run_id_supplied():
     flow_id = uuid4()
     live_flow = _flow(flow_id)
     run = _run(flow_id=flow_id, tenant_id=live_flow.tenant_id)
+    snapshot_step_id = uuid4()
     flow_service.get_flow.return_value = live_flow
     flow_run_service.get_run.return_value = run
     flow_run_service.list_step_results.return_value = [
         SimpleNamespace(
             model_dump=lambda mode="json": {
-                "step_id": None,
+                "step_id": str(snapshot_step_id),
                 "step_order": 1,
                 "status": "completed",
                 "num_tokens_input": 5,
@@ -94,7 +95,6 @@ async def test_get_flow_graph_uses_run_version_snapshot_when_run_id_supplied():
             }
         )
     ]
-    snapshot_step_id = uuid4()
     flow_version_repo.get.return_value = FlowVersion(
         flow_id=flow_id,
         version=1,
