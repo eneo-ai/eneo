@@ -206,9 +206,19 @@ def _enrich_with_litellm_metadata(
             "supports_function_calling", False
         )
         enriched["supports_reasoning"] = info.get("supports_reasoning", False)
+        enriched["input_cost_per_token"] = info.get("input_cost_per_token")
+        enriched["output_cost_per_token"] = info.get("output_cost_per_token")
     elif mode == "embedding":
         enriched["max_input_tokens"] = info.get("max_input_tokens")
         enriched["output_vector_size"] = info.get("output_vector_size")
+        enriched["input_cost_per_token"] = info.get("input_cost_per_token")
+        enriched["output_cost_per_token"] = info.get("output_cost_per_token")
+    elif mode == "transcription":
+        # LiteLLM stores transcription rates per second on most entries
+        # (Whisper et al.); surface a per-minute view for the form.
+        input_per_second = info.get("input_cost_per_second")
+        if isinstance(input_per_second, (int, float)):
+            enriched["cost_per_minute"] = input_per_second * 60
     return enriched
 
 

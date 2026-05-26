@@ -291,6 +291,15 @@ API key secrets are **never stored in plaintext**. They are hashed with HMAC-SHA
 - `pk_` keys **cannot** have admin permission and **must** specify allowed origins
 - Each origin must include a scheme (`https://example.com`) or be a localhost address
 
+### Origin Trust Model
+
+Allowed origins for `pk_` keys are validated **per key** — there is no central tenant-wide allowlist that overrides or constrains what individual keys may list. This is a deliberate design choice:
+
+- **Authority**: the user who creates the key chooses which origins it accepts. Any space editor with permission to create `pk_` keys can list arbitrary external origins (e.g. `https://my-integration.example.com`).
+- **Tenant admins do not gate per-key origin lists**. Tenant-level policy controls *whether* a user may mint `pk_` keys (via roles and quotas) and may enforce rate limits, but does not vet the origins on each key.
+- **Implication**: a leaked `pk_` key is only as constrained as the origin list its creator chose. Treat key creation as a security-relevant action and review key listings in audit logs.
+- **Fail-closed**: a `pk_` key with `allowed_origins` unset (NULL) or empty cannot authenticate at all — the origin check rejects every request rather than silently passing them through.
+
 ### Audit Trail
 
 Every key lifecycle event is logged to the audit system:

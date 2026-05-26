@@ -1330,6 +1330,7 @@ class Container(containers.DeclarativeContainer):
         session_service=session_service,
         completion_service=completion_service,
         space_service=space_service,
+        file_service=file_service,
     )
 
     # Token Usage

@@ -1,4 +1,7 @@
 from intric.apps.app_runs.api.app_run_worker import worker as app_worker
+from intric.completion_models.infrastructure.model_cleanup_worker import (
+    worker as model_cleanup_worker,
+)
 from intric.data_retention.infrastructure.data_retention_worker import (
     worker as data_retention_worker,
 )
@@ -15,6 +18,7 @@ worker.include_subworker(app_worker)
 worker.include_subworker(integration_worker)
 worker.include_subworker(data_retention_worker)
 worker.include_subworker(sharepoint_subscription_worker)
+worker.include_subworker(model_cleanup_worker)
 
 
 class WorkerSettings:

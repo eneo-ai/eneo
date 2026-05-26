@@ -755,8 +755,15 @@
     }
     if (apiKey.key_type === "pk_") {
       const origins = allowedOrigins.filter(Boolean);
+      // Block the round-trip when the admin emptied the origin list: backend
+      // requires at least one origin for pk_, and the fail-closed origin check
+      // would otherwise lock the key out the moment this PATCH lands.
+      if (origins.length === 0) {
+        errorMessage = m.api_keys_origin_required();
+        return;
+      }
       if (JSON.stringify(origins) !== JSON.stringify(apiKey.allowed_origins ?? [])) {
-        updates.allowed_origins = origins.length > 0 ? origins : null;
+        updates.allowed_origins = origins;
       }
     }
     if (apiKey.key_type === "sk_") {

@@ -250,7 +250,7 @@ class AssistantService:
         if (
             template.completion_model
             and template.completion_model.id
-            and space.is_completion_model_in_space(template.completion_model.id)
+            and space.is_completion_model_available(template.completion_model.id)
         ):
             completion_model = space.get_completion_model(template.completion_model.id)
 
@@ -390,6 +390,10 @@ class AssistantService:
 
         completion_model = None
         if completion_model_id is not None:
+            if not space.is_completion_model_available(completion_model_id):
+                raise BadRequestException(
+                    "The completion model is not enabled in the space."
+                )
             completion_model = space.get_completion_model(completion_model_id)
 
         attachments = None
