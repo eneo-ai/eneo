@@ -187,4 +187,15 @@ jobs:
           set -euo pipefail
 
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
-          gh release upload "$RELEASE_TAG" release-sbom/* --repo "$GITHUB_REPOSITORY"
+          release_assets=(
+            "release-sbom/eneo-backend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.cyclonedx.json#Backend SBOM - CycloneDX JSON"
+            "release-sbom/eneo-backend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.spdx.json#Backend SBOM - SPDX JSON"
+            "release-sbom/eneo-backend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.table.txt#Backend packages - readable table"
+            "release-sbom/eneo-frontend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.cyclonedx.json#Frontend SBOM - CycloneDX JSON"
+            "release-sbom/eneo-frontend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.spdx.json#Frontend SBOM - SPDX JSON"
+            "release-sbom/eneo-frontend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.table.txt#Frontend packages - readable table"
+            "release-sbom/IMAGE-DIGESTS.txt#Image digests scanned"
+            "release-sbom/SBOM-SHA256SUMS.txt#SBOM file checksums"
+          )
+
+          gh release upload "$RELEASE_TAG" "${release_assets[@]}" --repo "$GITHUB_REPOSITORY"
