@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T095
+active_task: T096
 
 tasks:
   - id: T001
@@ -9269,7 +9269,7 @@ tasks:
   - id: T095
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the smallest safe T014 schema Worker from T094 evidence, or block if the published-pointer FK candidate is not migration-safe."
     inputs:
@@ -9298,6 +9298,160 @@ tasks:
       - "Published-pointer FK semantics are not safe without a broader schema design."
       - "The only safe Worker would require DB writes before a reviewed migration plan."
       - "The next implementation would require product/data decisions or broad tenant-hardening."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T23:14:30+02:00"
+      decision: approve_worker
+      summary: "Approved a single narrow T014 Worker for the published Flow pointer invariant only. The Worker must add fk_flows_published_version from flows(id, published_version) to flow_versions(flow_id, version), with ON DELETE NO ACTION, ON UPDATE NO ACTION, not deferrable, a fail-loud orphan preflight, NOT VALID plus same-migration VALIDATE, and a behavior-focused integration test. files.user_id drift, stale indexes, tenant hardening, service-key/retention/review-rerun decisions, API/frontend, webhook table work, and final docs remain out of scope."
+      evidence:
+        - "T094 receipt: flows_total=439, flows_with_published_version=196, orphaned_published_version_pointers=0."
+        - "backend/src/intric/database/tables/flow_tables.py:141-181 has flows.published_version without FK."
+        - "backend/src/intric/database/tables/flow_tables.py:326-348 has flow_versions keyed by flow_id/version."
+        - ".codex/artifacts/claude-peer-loop-t095-published-pointer-fk-judge-20260526T205809Z.md"
+        - ".codex/artifacts/claude-peer-loop-t095-published-pointer-fk-judge-revision-20260526T210244Z.md"
+      claude_review:
+        session: "flows-clean-architecture-t095-published-pointer-fk"
+        first_pass:
+          artifact: ".codex/artifacts/claude-peer-loop-t095-published-pointer-fk-judge-20260526T205809Z.md"
+          verdict: "changes_required"
+          green_light: false
+          min_score: 6
+          valid_blockers:
+            - "Bind FK semantics instead of leaving ON DELETE/deferrability/validation to the Worker."
+            - "Add behavior-focused integration tests to allowed_files."
+            - "Pin migration after current source head and enforce clean staged allowlist."
+        second_pass:
+          artifact: ".codex/artifacts/claude-peer-loop-t095-published-pointer-fk-judge-revision-20260526T210244Z.md"
+          verdict: green
+          green_light: true
+          min_score: 8
+          notes:
+            - "Accepted Codex's NOT VALID plus same-migration VALIDATE choice as nonblocking."
+            - "Corrected that same-transaction NOT VALID plus VALIDATE does not materially reduce lock duration; Worker receipt must not claim it does."
+        disagreements:
+          - "Codex kept NOT VALID plus same-migration validation despite Claude's first-pass preference for immediate validation, because the DB/Alembic skill prefers explicit FK validation posture and the pattern remains small. Claude accepted this in pass 2."
+      worker_contract:
+        next_task: T096
+        fk_name: "fk_flows_published_version"
+        fk_columns: "flows(id, published_version) -> flow_versions(flow_id, version)"
+        on_delete: "NO ACTION"
+        on_update: "NO ACTION"
+        deferrable: false
+        migration_down_revision: "20260526_flow_webhook_deliveries"
+        validation_posture: "Use postgresql_not_valid=True followed by ALTER TABLE flows VALIDATE CONSTRAINT fk_flows_published_version in the same migration; do not claim this lowers lock duration in the same transaction."
+        preflight: "Migration must raise an exception if any non-null flows.published_version lacks a matching flow_versions row."
+        downgrade: "Drop only fk_flows_published_version."
+        allowed_files:
+          - "backend/src/intric/database/tables/flow_tables.py"
+          - "backend/alembic/versions/20260526_flow_published_version_fk.py"
+          - "backend/tests/integration/flows/test_flow_published_version_fk.py"
+          - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+        verify:
+          - "cd backend && uv run alembic current"
+          - "cd backend && uv run alembic upgrade head"
+          - "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -At -c \"select count(*) from flows f left join flow_versions v on v.flow_id = f.id and v.version = f.published_version where f.published_version is not null and v.flow_id is null;\""
+          - "cd backend && uv run pytest tests/integration/flows/test_flow_published_version_fk.py -q"
+          - "cd backend && uv run pyright src/intric/database/tables/flow_tables.py"
+          - "cd backend && uv run ruff check src/intric/database/tables/flow_tables.py alembic/versions/20260526_flow_published_version_fk.py tests/integration/flows/test_flow_published_version_fk.py"
+          - "cd backend && uv run ruff format --check src/intric/database/tables/flow_tables.py alembic/versions/20260526_flow_published_version_fk.py tests/integration/flows/test_flow_published_version_fk.py"
+          - "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -At -c \"select confdeltype, confupdtype, condeferrable, convalidated from pg_constraint where conname = 'fk_flows_published_version';\""
+          - "cd backend && uv run alembic downgrade 20260526_flow_webhook_deliveries && cd backend && uv run alembic upgrade head"
+          - "git diff --check"
+          - "git diff --cached --name-only"
+        stop_if:
+          - "Orphan preflight returns non-zero."
+          - "FK semantics require CASCADE, SET NULL, DEFERRABLE, trigger logic, or application-service behavior changes."
+          - "Migration cannot chain from 20260526_flow_webhook_deliveries."
+          - "A correct test requires broad fixture rewrites outside the allowed integration test file."
+          - "Verification needs files outside allowed_files."
+          - "Unrelated dirty/untracked files would be staged or modified."
+      deferred:
+        files_user_id: "Separate Judge only; live DB delete rule differs from source and legacy callers/tests remain."
+        queued_stale_indexes: "Rejected for now; no queued/running data and stale queued plan is fast; running plan blocked until DB reaches webhook migration."
+        tenant_fks: "No broad hardening; existing runtime composite constraints are present where current DB has the tables."
+        T015: "Queued; no immediate API Worker after T085."
+        T016: "Queued; no immediate frontend Worker after T091."
+        T901: "Queued final docs; not active."
+        T009_T010_T011: "Remain product/data-decision blocked."
+      consolidation_effect:
+        reused_existing_owner: "Database schema as the canonical owner for published-version referential integrity."
+        logic_moved_from: "Application convention / unenforced integer pointer."
+        logic_deleted: "No source behavior deleted in Judge."
+        duplicate_path_removed: "Planned Worker removes the need for duplicate service-layer orphan guards for this invariant."
+        new_code_added: "Planned one FK in flow_tables.py, one Alembic migration, and one integration test."
+        why_existing_owners_were_insufficient: "Existing SQLAlchemy model and live DB do not enforce flows.published_version -> flow_versions."
+        guard_preventing_duplicate_logic_from_returning: "Behavior-focused FK integration test plus post-migration pg_constraint probe."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+      naming_gate:
+        new_names_clear_for_architecture_doc: true
+        notes: "fk_flows_published_version and test_flow_published_version_fk name the domain invariant directly and fit the final where-to-change-X table under published Flow version integrity."
+
+  - id: T096
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Add the published Flow pointer FK invariant from flows.published_version to flow_versions."
+    inputs:
+      - "T094 receipt"
+      - "T095 receipt"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/alembic/versions"
+      - "backend/tests/integration/flows"
+    allowed_files:
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/alembic/versions/20260526_flow_published_version_fk.py"
+      - "backend/tests/integration/flows/test_flow_published_version_fk.py"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Before implementation and before commit, check the watchdog blocker file."
+      - "Modify only the allowed files. Preserve unrelated dirty/untracked files."
+      - "Use explicit git add allowlist only; never git add . or interactive staging."
+      - "Add fk_flows_published_version with ON DELETE NO ACTION, ON UPDATE NO ACTION, not deferrable."
+      - "Migration revision must be 20260526_flow_published_version_fk and down_revision must be 20260526_flow_webhook_deliveries."
+      - "Migration must fail loudly if orphaned published_version pointers exist."
+      - "Use postgresql_not_valid=True plus same-migration VALIDATE, and do not claim this lowers lock duration inside the same transaction."
+      - "Downgrade must drop only fk_flows_published_version."
+      - "Add behavior-focused integration tests for valid pointer, invalid pointer, protected version delete, and null-then-delete."
+      - "No files.user_id cleanup, queued/stale indexes, tenant FK hardening, API/OpenAPI/generated-client changes, frontend edits, retention/service-key/review-rerun decisions, webhook-table work, Flow AI Builder cleanup, or docs/flows/architecture.md."
+      - "State.yaml edits are limited to this task receipt and next task transition."
+      - "No comments restating SQL behavior; comments only for non-obvious WHY."
+    verify:
+      - "cd backend && uv run alembic current"
+      - "cd backend && uv run alembic upgrade head"
+      - "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -At -c \"select count(*) from flows f left join flow_versions v on v.flow_id = f.id and v.version = f.published_version where f.published_version is not null and v.flow_id is null;\""
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_published_version_fk.py -q"
+      - "cd backend && uv run pyright src/intric/database/tables/flow_tables.py"
+      - "cd backend && uv run ruff check src/intric/database/tables/flow_tables.py alembic/versions/20260526_flow_published_version_fk.py tests/integration/flows/test_flow_published_version_fk.py"
+      - "cd backend && uv run ruff format --check src/intric/database/tables/flow_tables.py alembic/versions/20260526_flow_published_version_fk.py tests/integration/flows/test_flow_published_version_fk.py"
+      - "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -At -c \"select confdeltype, confupdtype, condeferrable, convalidated from pg_constraint where conname = 'fk_flows_published_version';\""
+      - "cd backend && uv run alembic downgrade 20260526_flow_webhook_deliveries && cd backend && uv run alembic upgrade head"
+      - "git diff --check"
+      - "git diff --cached --name-only"
+    review:
+      tier: "Full Claude plan gate already passed in T095; run Claude commit gate after implementation before commit. Antigravity optional only if Claude and Codex disagree or implementation reveals broader schema risk."
+      claude_plan_gate:
+        artifact: ".codex/artifacts/claude-peer-loop-t095-published-pointer-fk-judge-revision-20260526T210244Z.md"
+        green_light: true
+        min_score: 8
+    stop_if:
+      - "Orphan preflight returns non-zero."
+      - "FK semantics require CASCADE, SET NULL, DEFERRABLE, trigger logic, or application-service behavior changes."
+      - "Migration cannot chain from 20260526_flow_webhook_deliveries."
+      - "A correct test requires broad fixture rewrites outside the allowed integration test file."
+      - "Verification needs files outside allowed_files."
+      - "Unrelated dirty/untracked files would be staged or modified."
+    consolidation_effect:
+      reused_existing_owner: "Database schema / Flow table definitions."
+      logic_moved_from: "Unenforced application convention for published_version pointer integrity."
+      logic_deleted: "None expected."
+      duplicate_path_removed: "Prevents future service-layer orphan checks from becoming the invariant owner."
+      new_code_added: "One FK model declaration, one Alembic migration, and one behavior integration test."
+      why_existing_owners_were_insufficient: "flows.published_version is currently a nullable integer with no DB-enforced relationship to flow_versions."
+      guard_preventing_duplicate_logic_from_returning: "FK integration test plus pg_constraint verification."
+      net_flow_logic_surface_area: "reduced"
+      if_increased_why: "N/A"
     receipt: null
 
   - id: T901
