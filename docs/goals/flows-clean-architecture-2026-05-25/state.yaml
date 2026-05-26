@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T041
+active_task: T042
 
 tasks:
   - id: T001
@@ -3752,7 +3752,7 @@ tasks:
   - id: T041
     type: scout
     assignee: Scout
-    status: active
+    status: complete
     reasoning_hint: high
     objective: "Preflight durable outbound webhook delivery before T013 implementation: map current inline delivery, existing audit outbox reuse/non-reuse, WebhookDeliveryIntent ownership, schema/migration requirements, idempotency and retry/dead-letter semantics, tests, and smallest safe Worker slices."
     inputs:
@@ -3795,11 +3795,130 @@ tasks:
       - "The first safe Worker cannot be scoped to reviewable allowed_files and behavior-focused tests."
       - "A proposed design keeps inline executor delivery and adds an outbox in parallel without a same-slice deletion trigger."
       - "A proposed design bypasses WebhookDeliveryIntent or weakens typed boundaries with dict-shaped payloads."
+    receipt:
+      completed_at: "2026-05-26T09:38:00Z"
+      summary: "Completed read-only durable outbound webhook delivery preflight. Confirmed no durable webhook outbox exists; `WebhookDeliveryIntent` exists but is flattened to a boolean and consumed by inline executor delivery. Documented why `flow_run_audit_outbox` can only be reused as a pattern, not as the webhook table. Mapped idempotency mismatch, retention coupling, run terminalization options, claim/lease requirements, no-HTTP-under-lock requirement, tests, and Worker candidates. Activated T042 Judge because Claude and Antigravity disagree on ref-only versus materialized encrypted request storage, and that must be adjudicated before Worker implementation."
+      note: "docs/goals/flows-clean-architecture-2026-05-25/notes/t041-webhook-outbox-preflight.md"
+      source_evidence:
+        - "backend/src/intric/flows/runtime/step_execution_result.py:14 defines WebhookDeliveryIntent."
+        - "backend/src/intric/flows/runtime/step_handlers/http_post.py:39 emits WebhookDeliveryIntent with run/step/attempt idempotency."
+        - "backend/src/intric/flows/runtime/step_attempt_runtime.py:193 reduces delivery intents to should_deliver_webhook."
+        - "backend/src/intric/flows/runtime/executor.py:862 calls _deliver_step_webhook inline."
+        - "backend/src/intric/flows/runtime/executor.py:1579 builds webhook context before direct send."
+        - "backend/src/intric/flows/runtime/executor.py:1603 handles inline webhook failure by marking step result and terminalizing failed."
+        - "backend/src/intric/flows/runtime/http_orchestration.py:331 computes an attempt-blind Idempotency-Key."
+        - "backend/src/intric/database/tables/flow_tables.py:1431 defines audit-only flow_run_audit_outbox."
+        - "backend/src/intric/flows/infrastructure/flow_run_audit_outbox_repo.py:138 uses SKIP LOCKED for in-DB audit delivery rows."
+        - "backend/src/intric/data_retention/infrastructure/data_retention_service.py:485 targets terminal flow runs for runtime retention cleanup."
+      commands:
+        - command: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: "pass"
+          output: "schema_version=1; status=ok; blockers=[]"
+        - command: "git status --short --branch"
+          status: "pass"
+          output: "Confirmed branch feature/refactor-flows-flowai and only known unrelated dirty/untracked files plus current T041 docs edits."
+        - command: "sed -n '1,220p' /Users/ccimen/.codex/skills/complexity-optimizer/SKILL.md && sed -n '1,240p' /Users/ccimen/.agents/skills/supabase-postgres-best-practices/SKILL.md && sed -n '1,260p' /Users/ccimen/.agents/skills/sqlalchemy-alembic-expert-best-practices-code-review/SKILL.md"
+          status: "pass"
+          output: "Loaded performance/Postgres/Alembic guidance for outbox query, locking, index, and migration review."
+        - command: "rg -n \"webhook.*outbox|outbox.*webhook|WebhookOutbox|FlowWebhook|webhook_delivery|delivery_intent|WebhookDelivery\" backend/src/intric backend/tests -g '*.py'"
+          status: "pass"
+          output: "Found typed intent, inline executor delivery, HTTP orchestration, and tests; no durable webhook outbox owner."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t041-webhook-outbox-preflight --phase plan --iteration 1 --timeout-seconds 1200 ..."
+          status: "pass"
+          output: "GREEN_LIGHT yes; MIN_SCORE 8. Valid concerns incorporated into the note."
+        - command: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t041-webhook-outbox-synthesis --phase synthesis --iteration 1 --timeout-seconds 1200 ..."
+          status: "inconclusive"
+          output: "Artifact created but model response was empty; no verdict accepted."
+        - command: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t041-webhook-outbox-synthesis-retry --phase synthesis --iteration 1 --timeout-seconds 1200 ..."
+          status: "non_green"
+          output: "Antigravity rejected ref-only as a target and recommended materialized encrypted request snapshots. Recorded as advisory disagreement for T042 Judge, not accepted as implementation approval."
+      peer_review:
+        claude:
+          artifact: ".codex/artifacts/claude-peer-loop-t041-webhook-outbox-preflight-20260526T091900Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+          valid_concerns_addressed:
+            - "Add reconstruction proof requirement."
+            - "Add rerun-vs-pending-delivery policy requirement."
+            - "Make typed intent handoff explicit instead of boolean projection."
+            - "Avoid standalone Candidate A unless Judge proves it safer."
+            - "Require no transaction/lock held during HTTP send."
+        antigravity:
+          first_artifact: ".codex/artifacts/antigravity-peer-loop-t041-webhook-outbox-antigravity-synthesis-20260526T092430Z.md"
+          retry_artifact: ".codex/artifacts/antigravity-peer-loop-t041-webhook-outbox-antigravity-retry-20260526T093235Z.md"
+          verdict: "First pass inconclusive/empty; retry non-green/conditional."
+          valid_concerns_addressed:
+            - "Ref-only reconstruction may duplicate executor concepts if not tightly bounded."
+            - "Materialized encrypted snapshots may reduce retention coupling but require security/data decision."
+            - "Worker must claim with lease and send HTTP outside DB transactions."
+          disagreement:
+            - "Antigravity treated materialized encrypted storage as approved. Codex does not; resolved URL/header/body storage is a new sensitive data surface and must go through T042 Judge/security/data approval."
+            - "Antigravity's draft-edit temporal-fragility claim is not fully proven because runtime should use the immutable published version snapshot loaded by run.flow_version."
+      consolidation_effect:
+        reused_existing_owner: "WebhookDeliveryIntent as producer ingress; http_orchestration/FlowHttpRuntimeHelper for HTTP behavior; audit outbox only as a pattern."
+        logic_moved_from: "No source logic moved in T041; proposed future move is executor inline delivery into a webhook outbox service."
+        logic_deleted: "None in T041."
+        duplicate_path_removed: "None in T041; future Worker must delete inline executor delivery in the same behavior-switch tranche."
+        new_code_added: "Only the T041 goal note."
+        why_existing_owners_were_insufficient: "Current source has typed intent but no durable webhook outbox owner; audit outbox is lifecycle-audit-specific."
+        guard_preventing_duplicate_logic_from_returning: "Proposed source guard plus repository/worker tests after T042 chooses Worker."
+        net_flow_logic_surface_area: "preserved"
+      next_required_task: T042
+
+  - id: T042
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the first T013 durable outbound webhook Worker slice from T041 evidence. Adjudicate ref-only reconstruction versus materialized encrypted request storage, run terminalization semantics, rerun-with-pending-delivery policy, idempotency header shape, and whether the first Worker must include enqueue + worker delivery + inline deletion rather than standalone groundwork."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t041-webhook-outbox-preflight.md"
+      - ".codex/artifacts/claude-peer-loop-t041-webhook-outbox-preflight-20260526T091900Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t041-webhook-outbox-antigravity-retry-20260526T093235Z.md"
+      - "backend/src/intric/flows/runtime/executor.py"
+      - "backend/src/intric/flows/runtime/http_orchestration.py"
+      - "backend/src/intric/flows/runtime/execution_state_builder.py"
+      - "backend/src/intric/flows/runtime/step_execution_result.py"
+      - "backend/src/intric/flows/runtime/step_attempt_runtime.py"
+      - "backend/src/intric/flows/runtime/step_handlers/http_post.py"
+      - "backend/src/intric/flows/application/flow_run_audit_outbox_delivery.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_audit_outbox_repo.py"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/src/intric/data_retention/infrastructure/data_retention_service.py"
+    constraints:
+      - "Read-only: no source edits, no test edits, no migrations, no deletion."
+      - "Do not implement T013 from Judge."
+      - "Do not start retention, service-key identity, draft id-owned persistence, schema hardening outside webhook delivery, frontend state cleanup, or Flow AI Builder cleanup."
+      - "Do not approve reusing flow_run_audit_outbox table for webhook delivery."
+      - "Do not approve a generic outbox base class, event bus, plugin system, manager, processor, or one-implementation delivery port."
+      - "Do not approve standalone storage groundwork if it creates unused parallel logic without a near-term deletion/switch trigger."
+      - "If materialized request snapshots are chosen, require explicit security/data approval for encrypted storage of resolved URL, headers, body, and retention lifetime before Worker implementation."
+      - "If ref-only delivery is chosen, require source-backed reconstruction proof and a run-state/retention rule that keeps pending delivery data available."
+    expected_output:
+      - "Decision: ref-only pending-run reconstruction, materialized encrypted snapshot, or blocked for security/data/product decision."
+      - "Decision: coupled run terminalization semantics versus completed-with-pending-delivery semantics."
+      - "Decision: rerun/resume behavior while webhook delivery is pending or in progress."
+      - "Decision: outgoing Idempotency-Key header shape and database idempotency/uniqueness invariant."
+      - "Decision: first Worker scope, allowed_files, verify commands, and stop_if."
+      - "Explicit Worker consolidation effect section using the reuse/consolidation protocol."
+      - "Peer-review disagreement disposition with file:line evidence."
+    stop_if:
+      - "The first Worker requires storing resolved webhook request data and no security/data owner has approved encrypted storage and retention."
+      - "The first Worker requires changing user-visible run terminalization semantics without a Judge/product decision."
+      - "The first Worker cannot remove or hard-disable inline executor delivery in a reviewable tranche."
+      - "The Worker would keep both direct executor delivery and outbox delivery live without a same-slice deletion trigger."
+      - "The Worker would bypass WebhookDeliveryIntent or keep only the should_deliver_webhook boolean handoff."
+      - "The Worker would hold a DB transaction/row lock while sending external HTTP."
+      - "The Worker requires retention, service-key identity, Flow AI Builder, broad schema hardening, or frontend state cleanup."
     receipt: null
 
 checks:
   dirty_fingerprint: unknown
   last_verification:
-    result: unknown
-    task: null
-    commands: []
+    result: pass
+    task: T041
+    commands:
+      - "rg -n \"webhook.*outbox|outbox.*webhook|WebhookOutbox|FlowWebhook|webhook_delivery|delivery_intent|WebhookDelivery\" backend/src/intric backend/tests -g '*.py'"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t041-webhook-outbox-preflight --phase plan --iteration 1 --timeout-seconds 1200 ..."
+      - "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t041-webhook-outbox-synthesis-retry --phase synthesis --iteration 1 --timeout-seconds 1200 ..."
