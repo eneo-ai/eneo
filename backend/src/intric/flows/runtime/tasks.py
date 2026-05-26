@@ -20,6 +20,10 @@ from intric.flows.application.flow_run_recovery_policy import (
     FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
     flow_stale_running_reconcile_after_seconds,
 )
+from intric.flows.application.flow_webhook_delivery_policy import (
+    FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
+    FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS,
+)
 from intric.flows.domain.flow import FlowRunStatus
 from intric.flows.enums import FlowRunLifecycleSource
 from intric.flows.flow_document_limits import resolve_flow_document_render_limits
@@ -491,6 +495,20 @@ async def _deliver_flow_audit_outbox(
             return result.to_task_payload()
 
 
+async def _deliver_flow_webhook_outbox(
+    *, limit: int = FLOW_WEBHOOK_DELIVERY_BATCH_SIZE
+) -> dict[str, int | str]:
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(session=providers.Object(session))
+        service = container.flow_run_webhook_delivery_service()
+        result = await service.deliver_due(
+            now=datetime.now(timezone.utc),
+            limit=limit,
+        )
+        return result.to_task_payload()
+
+
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
     name="flows.reconcile_running",
 )
@@ -537,3 +555,15 @@ def deliver_flow_audit_outbox() -> dict[str, int | str]:
         loop,
     )
     return future.result(timeout=30)
+
+
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="flows.deliver_webhook_outbox",
+)
+def deliver_flow_webhook_outbox() -> dict[str, int | str]:
+    loop = _get_flow_task_loop()
+    future = asyncio.run_coroutine_threadsafe(
+        _deliver_flow_webhook_outbox(),
+        loop,
+    )
+    return future.result(timeout=FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS + 30)

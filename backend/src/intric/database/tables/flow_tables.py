@@ -97,6 +97,11 @@ FLOW_RUN_AUDIT_OUTBOX_DELIVERY_STATUS_VALUES = (
     "delivered",
     "dead_lettered",
 )
+FLOW_RUN_WEBHOOK_DELIVERY_STATUS_VALUES = (
+    "pending",
+    "delivered",
+    "dead_lettered",
+)
 FLOW_STEP_RESULT_STATUS_VALUES = tuple(item.value for item in FlowStepResultStatus)
 FLOW_STEP_ATTEMPT_STATUS_VALUES = tuple(item.value for item in FlowStepAttemptStatus)
 FLOW_RUN_STEP_RESULT_FILE_SOURCE_VALUES = ("generated_output", "declared_artifact")
@@ -1585,6 +1590,153 @@ class FlowRunAuditOutbox(BasePublic):
         ),
         Index(
             "ix_flow_run_audit_outbox_dead_lettered",
+            "dead_lettered_at",
+            postgresql_where=sa.text("delivery_status = 'dead_lettered'"),
+        ),
+    )
+
+
+class FlowRunWebhookDeliveries(BasePublic):
+    __tablename__ = "flow_run_webhook_deliveries"  # type: ignore[assignment]
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    flow_run_id: Mapped[UUID] = mapped_column(
+        nullable=False,
+        index=True,
+    )
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    step_order: Mapped[int] = mapped_column(nullable=False)
+    attempt_no: Mapped[int] = mapped_column(nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    payload_ref: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    delivery_status: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default="pending",
+    )
+    delivery_attempts: Mapped[int] = mapped_column(
+        nullable=False,
+        server_default="0",
+    )
+    next_delivery_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+        server_default=sa.func.now(),
+    )
+    claim_token: Mapped[Optional[UUID]] = mapped_column(nullable=True)
+    claimed_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    claim_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    delivered_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    dead_lettered_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    delivery_last_error: Mapped[Optional[str]] = mapped_column(sa.Text(), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+            name="uq_flow_run_webhook_deliveries_attempt",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="RESTRICT",
+            name="fk_flow_run_webhook_deliveries_run_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "flow_id"],
+            ["flow_runs.id", "flow_runs.flow_id"],
+            ondelete="RESTRICT",
+            name="fk_flow_run_webhook_deliveries_run_flow",
+        ),
+        CheckConstraint(
+            "attempt_no >= 1",
+            name="ck_flow_run_webhook_deliveries_attempt_no",
+        ),
+        CheckConstraint(
+            "delivery_attempts >= 0",
+            name="ck_flow_run_webhook_deliveries_delivery_attempts",
+        ),
+        CheckConstraint(
+            "idempotency_key <> ''",
+            name="ck_flow_run_webhook_deliveries_idempotency_key",
+        ),
+        CheckConstraint(
+            "payload_ref <> ''",
+            name="ck_flow_run_webhook_deliveries_payload_ref",
+        ),
+        CheckConstraint(
+            "delivery_status IN "
+            f"({_check_values(FLOW_RUN_WEBHOOK_DELIVERY_STATUS_VALUES)})",
+            name="ck_flow_run_webhook_deliveries_status",
+        ),
+        CheckConstraint(
+            "("
+            "(delivery_status = 'pending' "
+            "AND delivered_at IS NULL "
+            "AND dead_lettered_at IS NULL) "
+            "OR "
+            "(delivery_status = 'delivered' "
+            "AND delivered_at IS NOT NULL "
+            "AND dead_lettered_at IS NULL) "
+            "OR "
+            "(delivery_status = 'dead_lettered' "
+            "AND delivered_at IS NULL "
+            "AND dead_lettered_at IS NOT NULL)"
+            ")",
+            name="ck_flow_run_webhook_deliveries_delivery_timestamps",
+        ),
+        CheckConstraint(
+            "("
+            "(claim_token IS NULL AND claimed_at IS NULL AND claim_expires_at IS NULL) "
+            "OR "
+            "(delivery_status = 'pending' "
+            "AND claim_token IS NOT NULL "
+            "AND claimed_at IS NOT NULL "
+            "AND claim_expires_at IS NOT NULL)"
+            ")",
+            name="ck_flow_run_webhook_deliveries_claim_shape",
+        ),
+        Index(
+            "ix_flow_run_webhook_deliveries_tenant_created",
+            "tenant_id",
+            "created_at",
+        ),
+        Index(
+            "ix_flow_run_webhook_deliveries_pending_delivery",
+            "next_delivery_at",
+            "created_at",
+            postgresql_where=sa.text("delivery_status = 'pending'"),
+        ),
+        Index(
+            "ix_flow_run_webhook_deliveries_pending_run_tenant",
+            "flow_run_id",
+            "tenant_id",
+            postgresql_where=sa.text("delivery_status = 'pending'"),
+        ),
+        Index(
+            "ix_flow_run_webhook_deliveries_dead_lettered",
             "dead_lettered_at",
             postgresql_where=sa.text("delivery_status = 'dead_lettered'"),
         ),

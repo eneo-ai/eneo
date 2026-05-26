@@ -68,6 +68,9 @@ from intric.flows.infrastructure.flow_run_repo import (
     FlowRunActiveRerunOperation,
     FlowRunRepository,
 )
+from intric.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryRepository,
+)
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.principal import FlowPrincipal
 from intric.flows.published_definition import parse_published_runtime_steps
@@ -91,9 +94,6 @@ from intric.flows.runtime.http_orchestration import (
     FlowHttpOrchestrationDeps,
 )
 from intric.flows.runtime.http_orchestration import (
-    deliver_webhook as deliver_webhook_orchestrated,
-)
-from intric.flows.runtime.http_orchestration import (
     resolve_http_input_source_text as resolve_http_input_source_text_orchestrated,
 )
 from intric.flows.runtime.http_runtime import FlowHttpRuntimeHelper, IPAddress
@@ -113,7 +113,7 @@ from intric.flows.runtime.output_runtime import (
 )
 from intric.flows.runtime.protocols import RuntimeAssistantProtocol
 from intric.flows.runtime.rag_retrieval import RagRetrievalDeps, retrieve_rag_chunks
-from intric.flows.runtime.run_outcome import determine_run_outcome
+from intric.flows.runtime.run_outcome import finalize_run_from_current_results
 from intric.flows.runtime.step_attempt_runtime import (
     build_generic_failure_plan,
     build_step_gate_decision,
@@ -150,7 +150,6 @@ from intric.flows.runtime.step_input_resolution import (
 )
 from intric.flows.runtime.step_result_builder import (
     build_default_failed_input_payload,
-    with_webhook_delivery_status,
 )
 from intric.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,
@@ -389,6 +388,7 @@ class FlowRunExecutor:
         max_inline_text_bytes: int | None = None,
         audit_service: AuditService | None = None,
         flow_run_terminalizer: FlowRunTerminalizer | None = None,
+        webhook_delivery_repo: FlowRunWebhookDeliveryRepository | None = None,
         references_service: ReferencesService | None = None,
         transcriber: Transcriber | None = None,
         max_audio_files: int = 10,
@@ -415,6 +415,11 @@ class FlowRunExecutor:
         self.flow_run_terminalizer = flow_run_terminalizer or FlowRunTerminalizer(
             flow_run_repo,
             flow_run_repo.audit_outbox_repo,
+        )
+        self.webhook_delivery_repo = (
+            webhook_delivery_repo
+            if webhook_delivery_repo is not None
+            else FlowRunWebhookDeliveryRepository(session=session)
         )
         self.flow_version_repo = flow_version_repo
         self.space_repo = space_repo
@@ -838,6 +843,7 @@ class FlowRunExecutor:
                 step_result=step_result,
                 attempt_no=attempt_no,
                 attempt_start=_attempt_start_for_step(state=state, step=step),
+                commit=not success_plan.delivery_intents,
             )
             if persisted_step_result is None:
                 return await self._return_after_terminalized_step_write(
@@ -859,69 +865,28 @@ class FlowRunExecutor:
                     attempt_no=attempt_no,
                 )
 
-            if success_plan.should_deliver_webhook:
-                try:
-                    await self._deliver_step_webhook(
-                        step=step,
-                        output=output,
-                        run=latest_run,
-                        state=state,
-                    )
-                except Exception as exc:
-                    return await self._handle_webhook_delivery_failure(
-                        run_id=run_id,
-                        tenant_id=tenant_id,
-                        step=step,
-                        step_result=step_result,
-                        error=exc,
-                    )
-
-                delivered_step_result = await self._mark_webhook_delivery_success(
-                    run_id=run_id,
-                    tenant_id=tenant_id,
-                    step_result=step_result,
-                )
-                if delivered_step_result is None:
-                    return await self._return_after_terminalized_step_write(
-                        run_id=run_id,
+            if success_plan.delivery_intents:
+                for delivery_intent in success_plan.delivery_intents:
+                    await self.webhook_delivery_repo.insert_pending_delivery(
                         flow_id=flow_id,
                         tenant_id=tenant_id,
+                        intent=delivery_intent,
                     )
-                step_result = delivered_step_result
-                state.completed_by_order[step.step_order] = step_result
+                await self._commit()
+                return {"status": FlowRunStatus.RUNNING.value}
 
         results = await self.flow_run_repo.list_step_results(
             run_id=run_id, tenant_id=tenant_id
         )
-        outcome = determine_run_outcome(results=results)
-        if outcome.result_status == "skipped":
-            return {"status": "skipped", "reason": outcome.reason}
-
-        run_error = (
-            FlowRunError.from_source(
-                FlowRunLifecycleSource.EXECUTOR_FAILED,
-                code=outcome.reason or FlowRunLifecycleSource.EXECUTOR_FAILED.value,
-                message=outcome.error_message
-                or outcome.reason
-                or "One or more flow steps failed.",
-            )
-            if outcome.flow_status != FlowRunStatus.COMPLETED.value
-            else None
-        )
-        terminalization = await self._terminalize_run(
+        finalization = await finalize_run_from_current_results(
             run_id=run_id,
             tenant_id=tenant_id,
-            target_status=FlowRunStatus(outcome.flow_status),
-            source=(
-                FlowRunLifecycleSource.EXECUTOR_COMPLETED
-                if outcome.flow_status == FlowRunStatus.COMPLETED.value
-                else FlowRunLifecycleSource.EXECUTOR_FAILED
-            ),
-            error=run_error,
-            output_payload_json=outcome.output_payload_json,
+            results=results,
+            terminalizer=self.flow_run_terminalizer,
+            principal=self.principal,
         )
         await self._commit()
-        return {"status": terminalization.run.status.value}
+        return finalization.payload
 
     @staticmethod
     def _active_rerun_steps_by_id(
@@ -1466,6 +1431,7 @@ class FlowRunExecutor:
         step_result: FlowStepResult,
         attempt_no: int,
         attempt_start: AttemptStartProvenance | None,
+        commit: bool = True,
     ) -> FlowStepResult | None:
         saved_result = await self.flow_repo.save_step_result(
             run_id,
@@ -1505,7 +1471,8 @@ class FlowRunExecutor:
                 attempt_start=attempt_start,
             ),
         )
-        await self._commit()
+        if commit:
+            await self._commit()
         return step_result
 
     async def _open_review_checkpoint_for_completed_step(
@@ -1575,88 +1542,6 @@ class FlowRunExecutor:
             for step in sorted(steps, key=lambda item: item.step_order)
             if step.step_order > reviewed_step.step_order
         )
-
-    async def _deliver_step_webhook(
-        self,
-        *,
-        step: RuntimeStep,
-        output: StepExecutionOutput,
-        run: FlowRun,
-        state: RunExecutionState,
-    ) -> None:
-        webhook_context = self.variable_resolver.build_context(
-            run.input_payload_json,
-            state.prior_results,
-            current_step_order=step.step_order + 1,
-            step_names_by_order=state.step_names_by_order,
-        )
-        webhook_context["text"] = output.full_text
-        if output.structured_output is not None:
-            webhook_context["structured"] = output.structured_output
-        await self._deliver_webhook(
-            step=step,
-            text_payload=output.full_text,
-            run=run,
-            context=webhook_context,
-        )
-
-    async def _handle_webhook_delivery_failure(
-        self,
-        *,
-        run_id: UUID,
-        tenant_id: UUID,
-        step: RuntimeStep,
-        step_result: FlowStepResult,
-        error: Exception,
-    ) -> dict[str, Any]:
-        logger.exception(
-            "flow_executor.webhook_delivery_failed run_id=%s step_order=%d step_id=%s error=%s",
-            run_id,
-            step.step_order,
-            step.step_id,
-            str(error),
-        )
-        failed_result = with_webhook_delivery_status(
-            step_result=step_result,
-            delivered=False,
-            error=str(error),
-        )
-        await self.flow_repo.save_step_result(
-            run_id, failed_result, tenant_id=tenant_id
-        )
-        await self._terminalize_run(
-            run_id=run_id,
-            tenant_id=tenant_id,
-            target_status=FlowRunStatus.FAILED,
-            source=FlowRunLifecycleSource.EXECUTOR_FAILED,
-            error=FlowRunError.from_source(
-                FlowRunLifecycleSource.EXECUTOR_FAILED,
-                code="webhook_delivery_failed",
-                message=f"Webhook delivery failed: {error}",
-                step_order=step.step_order,
-            ),
-        )
-        await self._commit()
-        return {"status": "failed", "error": str(error)}
-
-    async def _mark_webhook_delivery_success(
-        self,
-        *,
-        run_id: UUID,
-        tenant_id: UUID,
-        step_result: FlowStepResult,
-    ) -> FlowStepResult | None:
-        delivered_result = with_webhook_delivery_status(
-            step_result=step_result,
-            delivered=True,
-        )
-        saved_result = await self.flow_repo.save_step_result(
-            run_id, delivered_result, tenant_id=tenant_id
-        )
-        await self._commit()
-        if saved_result is None:
-            return None
-        return delivered_result
 
     async def _resolve_step_input(
         self,
@@ -1868,32 +1753,6 @@ class FlowRunExecutor:
             error_message=error_message,
             status_code=status_code,
             duration_ms=duration_ms,
-            deps=deps,
-        )
-
-    async def _deliver_webhook(
-        self,
-        *,
-        step: RuntimeStep,
-        text_payload: str,
-        run: FlowRun,
-        context: dict[str, Any],
-    ) -> None:
-        deps = FlowHttpOrchestrationDeps(
-            encryption_service=self.encryption_service,
-            variable_resolver=self.variable_resolver,
-            resolve_timeout_seconds=self.http_runtime.resolve_timeout_seconds,
-            build_headers=self.http_runtime.build_headers,
-            resolve_request_body=self.http_runtime.resolve_request_body,
-            read_response_text=self.http_runtime.read_response_text,
-            send_http_request=self._send_http_request,
-            audit_http_outbound=self._audit_http_outbound,
-        )
-        await deliver_webhook_orchestrated(
-            step=step,
-            text_payload=text_payload,
-            run=run,
-            context=context,
             deps=deps,
         )
 

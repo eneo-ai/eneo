@@ -293,6 +293,7 @@ async def deliver_webhook(
     run: RuntimeHttpRun,
     context: dict[str, Any],
     deps: FlowHttpOrchestrationDeps,
+    idempotency_key: str,
 ) -> None:
     if step.output_config is None:
         return
@@ -328,8 +329,9 @@ async def deliver_webhook(
     )
     if body_bytes is None and json_body is None:
         body_bytes = text_payload.encode("utf-8")
-    idempotency = hashlib.sha256(f"{run.id}:{step.step_id}".encode("utf-8")).hexdigest()
-    headers["Idempotency-Key"] = idempotency
+    headers["Idempotency-Key"] = hashlib.sha256(
+        idempotency_key.encode("utf-8")
+    ).hexdigest()
 
     start_time = time.monotonic()
     try:

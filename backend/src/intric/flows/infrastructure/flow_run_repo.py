@@ -20,6 +20,7 @@ from intric.database.tables.flow_tables import (
     FlowRuns,
     FlowRunStepInputFiles,
     FlowRunStepResultFiles,
+    FlowRunWebhookDeliveries,
     FlowStepAttempts,
     FlowStepResults,
 )
@@ -1649,6 +1650,13 @@ class FlowRunRepository:
             .where(FlowRuns.tenant_id == tenant_id)
             .where(FlowRuns.status == FlowRunStatus.RUNNING.value)
             .where(FlowRuns.updated_at <= stale_before)
+            .where(
+                ~sa.select(FlowRunWebhookDeliveries.id)
+                .where(FlowRunWebhookDeliveries.flow_run_id == FlowRuns.id)
+                .where(FlowRunWebhookDeliveries.tenant_id == FlowRuns.tenant_id)
+                .where(FlowRunWebhookDeliveries.delivery_status == "pending")
+                .exists()
+            )
             .order_by(FlowRuns.updated_at.asc())
             .limit(limit)
         )

@@ -119,6 +119,14 @@ _REMOVED_TYPED_OUTPUT_HELPERS = frozenset(
         "_schema_prefers_object_value",
     }
 )
+_REMOVED_INLINE_WEBHOOK_EXECUTOR_FUNCTIONS = frozenset(
+    {
+        "_deliver_step_webhook",
+        "_handle_webhook_delivery_failure",
+        "_mark_webhook_delivery_success",
+        "_deliver_webhook",
+    }
+)
 
 
 def _flow_non_api_python_files() -> list[Path]:
@@ -428,4 +436,29 @@ def test_removed_typed_output_helpers_do_not_reappear():
         "Typed output prompt/native JSON-mode policy belongs in "
         "runtime/output_formats. Do not reintroduce removed helper owners: "
         + ", ".join(offenders)
+    )
+
+
+def test_executor_does_not_own_webhook_delivery_side_effects():
+    executor_path = FLOW_RUNTIME_ROOT / "executor.py"
+    tree = ast.parse(executor_path.read_text(), filename=str(executor_path))
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.name in _REMOVED_INLINE_WEBHOOK_EXECUTOR_FUNCTIONS
+        ):
+            offenders.append(f"function:{node.name}:{node.lineno}")
+        if isinstance(node, ast.Call) and isinstance(
+            node.func, ast.Attribute | ast.Name
+        ):
+            name = (
+                node.func.attr if isinstance(node.func, ast.Attribute) else node.func.id
+            )
+            if name in _REMOVED_INLINE_WEBHOOK_EXECUTOR_FUNCTIONS:
+                offenders.append(f"call:{name}:{node.lineno}")
+
+    assert offenders == [], (
+        "Webhook HTTP side effects belong to the durable outbox worker, not "
+        "FlowRunExecutor inline delivery: " + ", ".join(offenders)
     )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
@@ -77,7 +78,9 @@ async def test_resolve_http_input_source_text_json_success_audits_success() -> N
     send_http_request = AsyncMock(
         return_value=httpx.Response(200, request=request, json={"a": 1}),
     )
-    deps = _make_deps(send_http_request=send_http_request, read_response_text=lambda **_: '{"a":1}')
+    deps = _make_deps(
+        send_http_request=send_http_request, read_response_text=lambda **_: '{"a":1}'
+    )
 
     text, structured = await resolve_http_input_source_text(
         step=step,
@@ -123,7 +126,9 @@ async def test_resolve_http_input_source_text_non_success_maps_to_typed_code() -
     )
     run = _Run(id="run-3", flow_id="flow-1", tenant_id="tenant-1")
     request = httpx.Request("GET", "https://example.org/data")
-    send_http_request = AsyncMock(return_value=httpx.Response(503, request=request, text="unavailable"))
+    send_http_request = AsyncMock(
+        return_value=httpx.Response(503, request=request, text="unavailable")
+    )
     deps = _make_deps(send_http_request=send_http_request)
 
     with pytest.raises(TypedIOValidationException) as exc:
@@ -133,7 +138,9 @@ async def test_resolve_http_input_source_text_non_success_maps_to_typed_code() -
 
 
 @pytest.mark.asyncio
-async def test_resolve_http_input_source_text_malformed_json_maps_to_typed_code() -> None:
+async def test_resolve_http_input_source_text_malformed_json_maps_to_typed_code() -> (
+    None
+):
     step = _Step(
         step_order=31,
         step_id="s31",
@@ -143,8 +150,12 @@ async def test_resolve_http_input_source_text_malformed_json_maps_to_typed_code(
     )
     run = _Run(id="run-31", flow_id="flow-1", tenant_id="tenant-1")
     request = httpx.Request("GET", "https://example.org/data")
-    send_http_request = AsyncMock(return_value=httpx.Response(200, request=request, text="not-json"))
-    deps = _make_deps(send_http_request=send_http_request, read_response_text=lambda **_: "not-json")
+    send_http_request = AsyncMock(
+        return_value=httpx.Response(200, request=request, text="not-json")
+    )
+    deps = _make_deps(
+        send_http_request=send_http_request, read_response_text=lambda **_: "not-json"
+    )
 
     with pytest.raises(TypedIOValidationException) as exc:
         await resolve_http_input_source_text(step=step, run=run, context={}, deps=deps)
@@ -176,6 +187,7 @@ async def test_deliver_webhook_timeout_maps_to_bad_request_and_audits() -> None:
             run=run,
             context={},
             deps=deps,
+            idempotency_key="run-4:step-4:1:webhook",
         )
 
     assert "timed out" in str(exc.value)
@@ -202,6 +214,7 @@ async def test_deliver_webhook_requires_url_in_output_config() -> None:
             run=run,
             context={},
             deps=deps,
+            idempotency_key="run-41:step-41:1:webhook",
         )
 
     deps.audit_http_outbound.assert_not_awaited()
@@ -232,6 +245,7 @@ async def test_deliver_webhook_maps_typed_transport_error_to_bad_request() -> No
             run=run,
             context={},
             deps=deps,
+            idempotency_key="run-42:step-42:1:webhook",
         )
 
     deps.audit_http_outbound.assert_awaited_once()
@@ -260,15 +274,20 @@ async def test_deliver_webhook_sets_idempotency_key() -> None:
         run=run,
         context={},
         deps=deps,
+        idempotency_key="run-5:step-5:3:webhook",
     )
 
     kwargs = send_http_request.await_args.kwargs
-    assert kwargs["headers"]["Idempotency-Key"]
-    assert len(kwargs["headers"]["Idempotency-Key"]) == 64
+    assert (
+        kwargs["headers"]["Idempotency-Key"]
+        == hashlib.sha256(b"run-5:step-5:3:webhook").hexdigest()
+    )
 
 
 @pytest.mark.asyncio
-async def test_deliver_webhook_retry_keeps_same_idempotency_key_after_partial_failure() -> None:
+async def test_deliver_webhook_retry_keeps_same_idempotency_key_after_partial_failure() -> (
+    None
+):
     step = _Step(
         step_order=6,
         step_id="step-6",
@@ -295,6 +314,7 @@ async def test_deliver_webhook_retry_keeps_same_idempotency_key_after_partial_fa
             run=run,
             context={},
             deps=deps,
+            idempotency_key="run-6:step-6:4:webhook",
         )
 
     await deliver_webhook(
@@ -303,6 +323,7 @@ async def test_deliver_webhook_retry_keeps_same_idempotency_key_after_partial_fa
         run=run,
         context={},
         deps=deps,
+        idempotency_key="run-6:step-6:4:webhook",
     )
 
     assert len(keys) == 2

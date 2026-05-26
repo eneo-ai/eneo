@@ -17,6 +17,9 @@ from intric.flows.application.flow_run_recovery_policy import (
     FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
     FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS,
 )
+from intric.flows.application.flow_webhook_delivery_policy import (
+    FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS,
+)
 from intric.flows.flow_review_expiry_policy import (
     FLOW_REVIEW_EXPIRY_RECONCILE_INTERVAL_SECONDS,
 )
@@ -40,6 +43,7 @@ def create_flow_celery_app() -> Celery:
             "flows.reconcile_review_expiry": {"queue": settings.flow_celery_queue},
             "flows.redispatch_stale_queued": {"queue": settings.flow_celery_queue},
             "flows.deliver_audit_outbox": {"queue": settings.flow_celery_queue},
+            "flows.deliver_webhook_outbox": {"queue": settings.flow_celery_queue},
         },
     )
     app.conf.update(  # pyright: ignore[reportUnknownMemberType]
@@ -62,6 +66,10 @@ def create_flow_celery_app() -> Celery:
             "deliver-flow-audit-outbox": {
                 "task": "flows.deliver_audit_outbox",
                 "schedule": float(FLOW_AUDIT_OUTBOX_DELIVERY_INTERVAL_SECONDS),
+            },
+            "deliver-flow-webhook-outbox": {
+                "task": "flows.deliver_webhook_outbox",
+                "schedule": float(FLOW_WEBHOOK_DELIVERY_INTERVAL_SECONDS),
             },
         },
     )

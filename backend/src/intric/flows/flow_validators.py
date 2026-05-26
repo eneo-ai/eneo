@@ -105,6 +105,7 @@ def validate_steps(
     if chain_violation is not None:
         raise BadRequestException(chain_violation.message)
 
+    terminal_step_order = sorted_steps[-1].step_order
     seen: set[int] = set()
     for step in sorted_steps:
         seen.add(step.step_order)
@@ -115,6 +116,11 @@ def validate_steps(
         if step.input_source in ("http_get", "http_post"):
             validate_http_input_config(step=step)
         if step.output_mode == "http_post":
+            if step.step_order != terminal_step_order:
+                raise BadRequestException(
+                    f"Step {step.step_order}: output_mode 'http_post' is only supported on the last step.",
+                    code="flow_http_post_output_must_be_terminal",
+                )
             validate_http_output_config(step=step)
         transcribe_only_error = transcribe_only_violation(
             step_order=step.step_order,

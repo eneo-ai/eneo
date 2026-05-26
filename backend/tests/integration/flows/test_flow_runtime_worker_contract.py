@@ -15,6 +15,7 @@ from intric.database.tables.flow_tables import (
     FlowRunRerunInvalidatedSteps,
     FlowRunRerunOperations,
     FlowRuns,
+    FlowRunWebhookDeliveries,
     FlowStepAttempts,
     FlowStepResults,
 )
@@ -390,7 +391,6 @@ async def test_late_output_after_terminalization_does_not_complete_attempt_or_we
         completion_service.get_response.side_effect = (
             _terminalize_before_provider_success
         )
-        context.executor._deliver_webhook = AsyncMock()
 
         worker_result = await context.executor.execute(
             run_id=context.run_id,
@@ -422,7 +422,6 @@ async def test_late_output_after_terminalization_does_not_complete_attempt_or_we
         if target_status == FlowRunStatus.CANCELLED
         else FlowStepAttemptStatus.FAILED.value
     )
-    context.executor._deliver_webhook.assert_not_awaited()
     assert FlowRunLifecycleSource.EXECUTOR_COMPLETED.value not in {
         row.source for row in outbox_rows
     }
@@ -962,7 +961,7 @@ async def test_attempt_start_failure_persists_failed_state_for_fresh_sessions(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_webhook_delivery_success_uses_handler_intent_for_fresh_sessions(
+async def test_webhook_output_enqueues_delivery_for_fresh_sessions(
     setup_database,
     admin_user,
     test_tenant,
@@ -990,7 +989,6 @@ async def test_webhook_delivery_success_uses_handler_intent_for_fresh_sessions(
             completion_service=completion_service,
             output_mode="http_post",
         )
-        context.executor._deliver_webhook = AsyncMock()
         result = await context.executor.execute(
             run_id=context.run_id,
             flow_id=context.flow_id,
@@ -998,9 +996,22 @@ async def test_webhook_delivery_success_uses_handler_intent_for_fresh_sessions(
             celery_task_id=f"runtime-webhook-success-{uuid4()}",
             retry_count=0,
         )
+        delivery_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunWebhookDeliveries).where(
+                        FlowRunWebhookDeliveries.flow_run_id == context.run_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
 
-    assert result == {"status": "completed"}
-    context.executor._deliver_webhook.assert_awaited_once()
+    assert result == {"status": "running"}
+    assert len(delivery_rows) == 1
+    assert delivery_rows[0].delivery_status == "pending"
+    assert delivery_rows[0].idempotency_key.endswith(":1:webhook")
     (
         run_row,
         step_result_row,
@@ -1012,84 +1023,13 @@ async def test_webhook_delivery_success_uses_handler_intent_for_fresh_sessions(
     )
 
     assert run_row is not None
-    assert run_row.status == FlowRunStatus.COMPLETED.value
+    assert run_row.status == FlowRunStatus.RUNNING.value
     assert step_result_row is not None
     assert step_result_row.status == FlowStepResultStatus.COMPLETED.value
     assert step_result_row.output_payload_json == {
         "text": "Webhook payload text.",
-        "webhook_delivered": True,
+        "webhook_delivered": False,
     }
     assert len(attempt_rows) == 1
     assert attempt_rows[0].status == FlowStepAttemptStatus.COMPLETED.value
-    assert [row.target_status for row in outbox_rows] == [FlowRunStatus.COMPLETED.value]
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_webhook_delivery_failure_persists_failed_state_for_fresh_sessions(
-    setup_database,
-    admin_user,
-    test_tenant,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-):
-    completion_service = SimpleNamespace(
-        get_response=AsyncMock(
-            return_value=SimpleNamespace(
-                completion="Webhook payload text.",
-                total_token_count=1,
-            )
-        )
-    )
-
-    async with sessionmanager.session() as session:
-        context = await _create_runtime_worker_context(
-            session=session,
-            admin_user=admin_user,
-            test_tenant=test_tenant,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-            completion_service=completion_service,
-            output_mode="http_post",
-        )
-        context.executor._deliver_webhook = AsyncMock(
-            side_effect=RuntimeError("webhook unavailable")
-        )
-        result = await context.executor.execute(
-            run_id=context.run_id,
-            flow_id=context.flow_id,
-            tenant_id=context.tenant_id,
-            celery_task_id=f"runtime-webhook-failure-{uuid4()}",
-            retry_count=0,
-        )
-
-    assert result == {"status": "failed", "error": "webhook unavailable"}
-    (
-        run_row,
-        step_result_row,
-        attempt_rows,
-        outbox_rows,
-    ) = await _failure_state_from_fresh_session(
-        run_id=context.run_id,
-        tenant_id=context.tenant_id,
-    )
-
-    assert run_row is not None
-    assert run_row.status == FlowRunStatus.FAILED.value
-    assert (
-        FlowRunError.model_validate(run_row.error_json).message
-        == "Webhook delivery failed: webhook unavailable"
-    )
-    assert step_result_row is not None
-    assert step_result_row.status == FlowStepResultStatus.COMPLETED.value
-    assert step_result_row.output_payload_json["webhook_delivered"] is False
-    assert step_result_row.output_payload_json["webhook_error"] == "webhook unavailable"
-    assert len(attempt_rows) == 1
-    assert attempt_rows[0].status == FlowStepAttemptStatus.COMPLETED.value
-    assert attempt_rows[0].finished_at is not None
-    assert [row.target_status for row in outbox_rows] == [FlowRunStatus.FAILED.value]
-    assert [row.source for row in outbox_rows] == [
-        FlowRunLifecycleSource.EXECUTOR_FAILED.value
-    ]
+    assert outbox_rows == []

@@ -212,7 +212,7 @@ def test_build_step_success_plan_follows_delivery_intents_not_output_mode():
         execution_hash="exec-hash",
     )
 
-    assert plan.should_deliver_webhook is False
+    assert plan.delivery_intents == ()
     assert plan.step_result.status == FlowStepResultStatus.COMPLETED
     assert plan.step_result.output_payload_json == {
         "text": "done",
@@ -221,6 +221,21 @@ def test_build_step_success_plan_follows_delivery_intents_not_output_mode():
 
     claimed_without_http_mode = _claimed_result()
     step = _runtime_step(output_mode="pass_through")
+    intent = WebhookDeliveryIntent(
+        flow_run_id=claimed_without_http_mode.flow_run_id,
+        step_id=step.step_id,
+        step_order=step.step_order,
+        attempt_no=2,
+        idempotency_key=(
+            f"{claimed_without_http_mode.flow_run_id}:{step.step_id}:2:webhook"
+        ),
+        payload=WebhookPayloadRef(
+            value=(
+                f"flow_run:{claimed_without_http_mode.flow_run_id}:"
+                f"step:{step.step_id}:attempt:2"
+            )
+        ),
+    )
 
     plan = build_step_success_plan(
         claimed=claimed_without_http_mode,
@@ -230,24 +245,7 @@ def test_build_step_success_plan_follows_delivery_intents_not_output_mode():
         step=step,
         result=StepExecutionResult(
             output=_step_output(),
-            delivery_intents=(
-                WebhookDeliveryIntent(
-                    flow_run_id=claimed_without_http_mode.flow_run_id,
-                    step_id=step.step_id,
-                    step_order=step.step_order,
-                    attempt_no=2,
-                    idempotency_key=(
-                        f"{claimed_without_http_mode.flow_run_id}:"
-                        f"{step.step_id}:2:webhook"
-                    ),
-                    payload=WebhookPayloadRef(
-                        value=(
-                            f"flow_run:{claimed_without_http_mode.flow_run_id}:"
-                            f"step:{step.step_id}:attempt:2"
-                        )
-                    ),
-                ),
-            ),
+            delivery_intents=(intent,),
         ),
         output_payload_json={
             "text": "done",
@@ -256,7 +254,7 @@ def test_build_step_success_plan_follows_delivery_intents_not_output_mode():
         execution_hash="exec-hash",
     )
 
-    assert plan.should_deliver_webhook is True
+    assert plan.delivery_intents == (intent,)
 
 
 def test_build_attempt_provenance_round_trips_all_runtime_sections() -> None:

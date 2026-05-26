@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T043
+active_task: T044
 
 tasks:
   - id: T001
@@ -3979,7 +3979,7 @@ tasks:
   - id: T043
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "fix(flows-runtime): deliver webhooks through durable ref-only outbox."
     inputs:
@@ -3998,6 +3998,7 @@ tasks:
       - "backend/src/intric/flows/runtime/tasks.py"
       - "backend/src/intric/flows/runtime/executor.py"
       - "backend/src/intric/flows/runtime/http_orchestration.py"
+      - "backend/src/intric/flows/runtime/run_outcome.py"
       - "backend/src/intric/flows/runtime/step_attempt_runtime.py"
       - "backend/src/intric/flows/runtime/step_execution_result.py"
       - "backend/src/intric/flows/runtime/step_result_builder.py"
@@ -4067,15 +4068,129 @@ tasks:
       - "flow_webhook_delivery_policy.py would become a pass-through wrapper instead of pure retry/dead-letter policy."
       - "Requires router/API/OpenAPI/frontend changes."
       - "Requires retention, service-key identity, Flow AI Builder, frontend state cleanup, or broad schema hardening."
+    receipt:
+      result: done
+      summary: "Implemented durable ref-only webhook delivery outbox for terminal http_post Flow steps. Executor now persists completed step evidence and pending webhook delivery rows atomically, then leaves the run running. A Celery worker claims one pending row at a time, reconstructs the request from the published snapshot and persisted step result, delivers through existing HTTP orchestration/runtime owners, records delivered/retry/dead_lettered state with claim-token CAS, audits outbound HTTP using the persisted run principal, and completes/fails/no-ops run terminalization through existing terminalizer/finalizer owners."
+      implementation:
+        storage_shape: "Ref-only `flow_run_webhook_deliveries`; no resolved URL, headers, body, decrypted secret values, or request snapshots persisted."
+        executor_boundary: "Deleted inline executor webhook helpers and replaced boolean handoff with typed `WebhookDeliveryIntent` delivery_intents."
+        runtime_boundary: "FlowRunWebhookDeliveryService owns webhook delivery lifecycle; FlowRunWebhookDeliveryRepository owns delivery-row CAS/claim state; FlowHttpRuntimeHelper/http_orchestration keep URL/header/body/SSRF behavior."
+        terminal_only: "Validator rejects non-terminal http_post output modes; no webhook continuation dispatch added."
+        idempotency: "Persisted idempotency key is required; outgoing `Idempotency-Key` is sha256(stored key).hexdigest()."
+        stale_running: "Stale-running reconciliation skips runs with pending webhook rows; worker cleans up terminalized-run pending rows as dead_lettered without sending HTTP."
+        timeout_safety: "Worker claims one row at a time, stops claiming new rows after the beat interval, and Celery wrapper timeout is claim TTL + 30 seconds."
+      peer_review:
+        claude_plan_gate:
+          artifact: ".codex/artifacts/claude-peer-loop-t043-durable-webhook-outbox-worker-plan-verification-3-20260526T101059Z.md"
+          verdict: "GREEN_LIGHT yes, MIN_SCORE 8"
+        claude_commit_gate_initial:
+          artifact: ".codex/artifacts/claude-peer-loop-t043-durable-webhook-outbox-implementation-review-20260526T105734Z.md"
+          verdict: "changes_required"
+          valid_concerns_addressed:
+            - "Production audit no-op from static audit_user=None."
+            - "Missing encrypted-header worker-path coverage."
+            - "Success CAS failure could leak webhook_delivered=True before rollback."
+        claude_commit_gate_after_fixes:
+          artifact: ".codex/artifacts/claude-peer-loop-t043-durable-webhook-outbox-implementation-review-after-fixes-20260526T110818Z.md"
+          verdict: "GREEN_LIGHT yes, MIN_SCORE 8"
+        antigravity_synthesis:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t043-durable-webhook-outbox-antigravity-synthesis-20260526T111044Z.md"
+          verdict: "changes_required"
+          valid_concerns_addressed:
+            - "Outbox row transitions were coupled to run status and could leave terminalized-run rows stuck pending."
+            - "Failure-path stale claim could commit failed step result/run terminalization."
+        claude_after_antigravity_fixes:
+          artifact: ".codex/artifacts/claude-peer-loop-t043-durable-webhook-outbox-implementation-review-after-antigravity-fixes-20260526T111915Z.md"
+          verdict: "GREEN_LIGHT yes, MIN_SCORE 8"
+        antigravity_after_fixes:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t043-durable-webhook-outbox-antigravity-synthesis-after-fixes-20260526T112011Z.md"
+          verdict: "GREEN_LIGHT yes, MIN_SCORE 8"
+          valid_non_blocking_concern_addressed: "Sequential batch leases could expire for late rows; changed worker to claim one row at a time."
+        claude_final_exact_diff:
+          artifact: ".codex/artifacts/claude-peer-loop-t043-durable-webhook-outbox-final-exact-diff-review-20260526T113042Z.md"
+          verdict: "GREEN_LIGHT yes, MIN_SCORE 8"
+      commands:
+        - command: "python3 watchdog check /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          result: pass
+          notes: "schema_version 1; status ok; halt_blockers 0."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py::test_webhook_enqueue_keeps_completed_step_evidence tests/unittests/flows/test_flow_executor_runtime.py::test_webhook_step_enqueues_delivery_and_leaves_run_running tests/unittests/flows/test_celery_runtime.py::test_create_flow_celery_app_applies_redis_and_queue_settings tests/unittests/flows/test_http_orchestration.py tests/unittests/flows/test_step_attempt_runtime.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_architecture_guards.py -q"
+          result: pass
+          notes: "75 passed, 1 warning."
+        - command: "cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py::test_webhook_output_enqueues_delivery_for_fresh_sessions 'tests/integration/flows/test_flow_runtime_worker_contract.py::test_late_output_after_terminalization_does_not_complete_attempt_or_webhook[cancelled-expected_worker_result0-cancelled]' 'tests/integration/flows/test_flow_runtime_worker_contract.py::test_late_output_after_terminalization_does_not_complete_attempt_or_webhook[failed-expected_worker_result1-failed]' tests/integration/flows/test_flow_webhook_outbox_delivery.py -q"
+          result: pass
+          notes: "10 passed, 16 warnings."
+        - command: "cd backend && uv run pytest tests/integration/flows/test_flow_webhook_outbox_delivery.py tests/unittests/flows/test_celery_runtime.py::test_create_flow_celery_app_applies_redis_and_queue_settings -q"
+          result: pass
+          notes: "8 passed after final deadline/wrapper-timeout adjustment."
+        - command: "cd backend && uv run pyright src/intric/flows/runtime/flow_webhook_delivery.py src/intric/flows/infrastructure/flow_run_webhook_delivery_repo.py src/intric/flows/runtime/executor.py src/intric/flows/runtime/run_outcome.py src/intric/flows/runtime/http_orchestration.py src/intric/flows/runtime/step_attempt_runtime.py src/intric/flows/flow_validators.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/runtime/tasks.py src/intric/flows/runtime/celery_app.py src/intric/main/container/container.py src/intric/database/tables/flow_tables.py"
+          result: pass
+          notes: "0 errors, 0 warnings, 0 informations."
+        - command: "uv run ruff check <T043 touched files>"
+          result: pass
+          notes: "All checks passed."
+        - command: "git diff --check"
+          result: pass
+        - command: "cd backend && uv run alembic heads"
+          result: pass
+          notes: "20260526_flow_webhook_deliveries (head)."
+        - command: "rg -n '_run_is_still_running|FlowRuns.status == FlowRunStatus.RUNNING|join\\(FlowRuns' backend/src/intric/flows/infrastructure/flow_run_webhook_delivery_repo.py backend/src/intric/flows/runtime/flow_webhook_delivery.py"
+          result: pass
+          notes: "No matches."
+        - command: "rg -n 'should_deliver_webhook|_deliver_step_webhook|_deliver_webhook|_handle_webhook_delivery_failure|_mark_webhook_delivery_success' backend/src/intric/flows backend/tests/integration/flows backend/tests/unittests/flows"
+          result: pass
+          notes: "Only architecture guard forbidden-name list and http_orchestration test names remain."
+      consolidation_effect:
+        reused_existing_owner: "FlowHttpRuntimeHelper/http_orchestration, FlowRunTerminalizer, FlowVariableResolver, published-definition parser, FlowRunExecutor step execution, and FlowRunRepository stale-running reconciliation."
+        logic_moved_from: "Inline FlowRunExecutor webhook delivery/context/failure/success helpers moved behind FlowRunWebhookDeliveryService/Repository."
+        logic_deleted: "Executor private webhook delivery helpers and inline-delivery tests."
+        duplicate_path_removed: "No direct executor webhook delivery path remains; durable outbox is the single webhook side-effect owner."
+        new_code_added: "Webhook-specific delivery table, repo, worker service, retry policy, Celery task/beat wiring, and behavior tests because audit outbox is audit-log-specific and executor is not a durable external side-effect owner."
+        why_existing_owners_were_insufficient: "Audit outbox owns internal audit delivery, not external HTTP side effects; executor owns step execution, not retryable side effects."
+        guard_preventing_duplicate_logic_from_returning: "AST architecture guard forbids executor webhook side-effect helpers; integration tests pin durable outbox claim, audit, encrypted headers, CAS rollback, cancelled-run cleanup, and no-HTTP-under-lock behavior."
+        net_flow_logic_surface_area: "reduced"
+      follow_up_candidates:
+        - "T044 Judge should decide whether to add webhook-specific lifecycle source values, make audit actor lookup best-effort, pin retry-constant rationale, type delivery_status as Literal, remove executor fallback DI, and add deployment smoke/check instructions."
+
+  - id: T044
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "judge(flows): choose the next safe Flow clean-architecture task after durable webhook outbox."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - ".codex/artifacts/claude-peer-loop-t043-durable-webhook-outbox-final-exact-diff-review-20260526T113042Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t043-durable-webhook-outbox-antigravity-synthesis-after-fixes-20260526T112011Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t044-next-safe-judge.md"
+    constraints:
+      - "Read-only Judge task; no source edits, tests, migrations, OpenAPI generation, frontend edits, or deletion."
+      - "Check watchdog before task transition and before activating any Worker."
+      - "Respect product/data decision gates: do not activate retention, service-key identity, schema migration, or other blocked tasks unless state.yaml records the required decision."
+      - "Use reuse-before-inventing and canonical-owner protocol; prefer consolidation/deletion/move over new code."
+      - "If choosing a Worker, include Consolidation effect and exact allowed_files."
+    expected_output:
+      - "Classify remaining candidate tasks as safe_now, needs_preflight, blocked_on_decision, or follow_up."
+      - "Choose the next smallest safe task or record a stop rule."
+      - "Carry forward T043 follow-ups without broadening into runtime retention or service-key identity."
+    stop_if:
+      - "Choosing a Worker requires retention, service-key identity, schema migration, Flow AI Builder cleanup, or other blocked product/data decisions."
+      - "Choosing a Worker requires files outside a reviewable Flow proper scope."
+      - "Evidence is insufficient to choose between published-contract cleanup, webhook follow-ups, and step behavior/output-format isolation."
     receipt: null
 
 checks:
   dirty_fingerprint: unknown
   last_verification:
     result: pass
-    task: T042
+    task: T043
     commands:
-      - "rg -n \"_deliver_step_webhook|_handle_webhook_delivery_failure|_mark_webhook_delivery_success\" backend/src/intric backend/tests -g '*.py'"
-      - "rg -n \"Idempotency-Key|idempotency_key|run.id.*step.step_id|step_id.*idempotency|webhook.*idempotency|sha256\" backend/src/intric backend/tests docs flows-clean-architecture-2026-05-25 -g '*.*'"
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t042-webhook-outbox-judge --phase plan --iteration 1 --timeout-seconds 1200 ..."
-      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t042-webhook-outbox-judge --phase verification --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py::test_webhook_enqueue_keeps_completed_step_evidence tests/unittests/flows/test_flow_executor_runtime.py::test_webhook_step_enqueues_delivery_and_leaves_run_running tests/unittests/flows/test_celery_runtime.py::test_create_flow_celery_app_applies_redis_and_queue_settings tests/unittests/flows/test_http_orchestration.py tests/unittests/flows/test_step_attempt_runtime.py tests/unittests/flows/test_flow_validators.py tests/unittests/flows/test_flow_architecture_guards.py -q"
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_runtime_worker_contract.py::test_webhook_output_enqueues_delivery_for_fresh_sessions 'tests/integration/flows/test_flow_runtime_worker_contract.py::test_late_output_after_terminalization_does_not_complete_attempt_or_webhook[cancelled-expected_worker_result0-cancelled]' 'tests/integration/flows/test_flow_runtime_worker_contract.py::test_late_output_after_terminalization_does_not_complete_attempt_or_webhook[failed-expected_worker_result1-failed]' tests/integration/flows/test_flow_webhook_outbox_delivery.py -q"
+      - "cd backend && uv run pyright src/intric/flows/runtime/flow_webhook_delivery.py src/intric/flows/infrastructure/flow_run_webhook_delivery_repo.py src/intric/flows/runtime/executor.py src/intric/flows/runtime/run_outcome.py src/intric/flows/runtime/http_orchestration.py src/intric/flows/runtime/step_attempt_runtime.py src/intric/flows/flow_validators.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/runtime/tasks.py src/intric/flows/runtime/celery_app.py src/intric/main/container/container.py src/intric/database/tables/flow_tables.py"
+      - "uv run ruff check <T043 touched files>"
+      - "git diff --check"
+      - "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t043-webhook-outbox-worker --phase commit-gate --iteration 8 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+      - "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t043-webhook-outbox-synthesis --phase synthesis --iteration 2 --spend-mode auto ..."

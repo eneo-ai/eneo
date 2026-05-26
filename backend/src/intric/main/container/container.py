@@ -124,8 +124,14 @@ from intric.flows.flow_template_asset_service import FlowTemplateAssetService
 from intric.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
+from intric.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryRepository,
+)
 from intric.flows.runtime.celery_app import celery_app as flow_celery_app
 from intric.flows.runtime.celery_execution_backend import CeleryFlowExecutionBackend
+from intric.flows.runtime.flow_webhook_delivery import FlowRunWebhookDeliveryService
+from intric.flows.runtime.http_runtime import FlowHttpRuntimeHelper
+from intric.flows.variable_resolver import FlowVariableResolver
 from intric.group_chat.application.group_chat_service import GroupChatService
 from intric.group_chat.presentation.assemblers.group_chat_assembler import (
     GroupChatAssembler,
@@ -414,6 +420,18 @@ def _build_encryption_service() -> EncryptionService:
 
 def _flow_celery_queue_name() -> str:
     return get_settings().flow_celery_queue
+
+
+def _flow_http_request_timeout_seconds() -> float:
+    return float(get_settings().flow_http_request_timeout_seconds)
+
+
+def _flow_http_max_timeout_seconds() -> float:
+    return float(get_settings().flow_http_max_timeout_seconds)
+
+
+def _flow_http_allow_private_networks() -> bool:
+    return bool(get_settings().flow_http_allow_private_networks)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -717,6 +735,10 @@ class Container(containers.DeclarativeContainer):
         FlowRunAuditOutboxRepository,
         session=session,
     )
+    flow_run_webhook_delivery_repo = providers.Factory(
+        FlowRunWebhookDeliveryRepository,
+        session=session,
+    )
     flow_run_repo = providers.Factory(
         FlowRunRepository,
         session=session,
@@ -906,6 +928,27 @@ class Container(containers.DeclarativeContainer):
         FlowRunAuditOutboxDeliveryService,
         audit_outbox_repo=flow_run_audit_outbox_repo,
         audit_log_repo=audit_log_repo,
+    )
+    flow_http_runtime = providers.Factory(
+        FlowHttpRuntimeHelper,
+        variable_resolver=providers.Factory(FlowVariableResolver),
+        request_timeout_seconds=providers.Callable(_flow_http_request_timeout_seconds),
+        max_timeout_seconds=providers.Callable(_flow_http_max_timeout_seconds),
+        allow_private_networks=providers.Callable(_flow_http_allow_private_networks),
+    )
+    flow_run_webhook_delivery_service = providers.Factory(
+        FlowRunWebhookDeliveryService,
+        webhook_delivery_repo=flow_run_webhook_delivery_repo,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        flow_run_terminalizer=flow_run_terminalizer,
+        encryption_service=encryption_service,
+        audit_service=audit_service,
+        user_repo=user_repo,
+        api_key_repo=api_key_v2_repo,
+        tenant_repo=tenant_repo,
+        http_runtime=flow_http_runtime,
     )
     tenant_service = providers.Factory(
         TenantService,

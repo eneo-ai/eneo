@@ -178,15 +178,23 @@ def test_create_flow_celery_app_applies_redis_and_queue_settings(monkeypatch):
     assert (
         app.conf.task_routes["flows.deliver_audit_outbox"]["queue"] == "flows.execute"
     )
+    assert (
+        app.conf.task_routes["flows.deliver_webhook_outbox"]["queue"] == "flows.execute"
+    )
     assert app.conf.worker_prefetch_multiplier == 1
     assert app.conf.task_acks_late is True
     assert app.conf.task_soft_time_limit == 540
     assert app.conf.task_time_limit == 600
     assert "reconcile-stale-running" in app.conf.beat_schedule
     assert "deliver-flow-audit-outbox" in app.conf.beat_schedule
+    assert "deliver-flow-webhook-outbox" in app.conf.beat_schedule
     assert (
         app.conf.beat_schedule["deliver-flow-audit-outbox"]["task"]
         == "flows.deliver_audit_outbox"
+    )
+    assert (
+        app.conf.beat_schedule["deliver-flow-webhook-outbox"]["task"]
+        == "flows.deliver_webhook_outbox"
     )
 
 

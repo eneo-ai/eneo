@@ -531,6 +531,44 @@ def test_validate_steps_rejects_review_policy_for_http_post_output() -> None:
     assert exc_info.value.code == FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED
 
 
+def test_validate_steps_rejects_http_post_output_before_last_step() -> None:
+    with pytest.raises(BadRequestException, match="last step"):
+        validate_steps(
+            [
+                _step(
+                    1,
+                    output_mode=FlowOutputMode.HTTP_POST,
+                    output_config={"url": "https://example.test/hook"},
+                ),
+                _step(2),
+            ]
+        )
+
+
+def test_validate_steps_allows_http_post_output_on_last_step() -> None:
+    validate_steps(
+        [
+            _step(1, output_type=FlowOutputType.TEXT),
+            _step(
+                2,
+                output_mode=FlowOutputMode.HTTP_POST,
+                output_config={"url": "https://example.test/hook"},
+            ),
+        ]
+    )
+
+
+def test_validate_steps_allows_single_step_http_post_output() -> None:
+    validate_steps(
+        [
+            _step(
+                output_mode=FlowOutputMode.HTTP_POST,
+                output_config={"url": "https://example.test/hook"},
+            )
+        ]
+    )
+
+
 def test_normalize_flow_metadata_for_write_maps_legacy_string_type_to_text():
     metadata_json = {
         "form_schema": {

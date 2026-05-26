@@ -13,7 +13,10 @@ from intric.flows.domain.flow import (
 from intric.flows.enums import is_terminal_flow_run_status
 from intric.flows.runtime.claim_resolution import StepClaimResolution
 from intric.flows.runtime.models import RuntimeStep
-from intric.flows.runtime.step_execution_result import StepExecutionResult
+from intric.flows.runtime.step_execution_result import (
+    StepExecutionResult,
+    WebhookDeliveryIntent,
+)
 from intric.flows.runtime.step_result_builder import (
     build_completed_step_result,
     build_failed_step_result,
@@ -50,7 +53,7 @@ class StepFailurePlan:
 @dataclass(frozen=True)
 class StepSuccessPlan:
     step_result: FlowStepResult
-    should_deliver_webhook: bool
+    delivery_intents: tuple[WebhookDeliveryIntent, ...]
 
 
 def build_step_gate_decision(
@@ -190,5 +193,5 @@ def build_step_success_plan(
             output_payload_json=output_payload_json,
             execution_hash=execution_hash,
         ),
-        should_deliver_webhook=bool(result.delivery_intents),
+        delivery_intents=result.delivery_intents,
     )
