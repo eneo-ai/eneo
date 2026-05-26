@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T052
+active_task: T053
 
 tasks:
   - id: T001
@@ -5130,6 +5130,115 @@ tasks:
       - "Choosing a Worker requires retention, service-key identity/review/rerun, schema migration, Flow AI Builder cleanup, or other blocked product/data decisions."
       - "Choosing a Worker requires files outside a reviewable Flow proper scope."
       - "Evidence is insufficient to choose between remaining safe runtime reliability, API DX, frontend DX, schema/preflight, output-format, or provider-wiring candidates."
+    receipt:
+      result: done
+      summary: "Chose T053 as the next safe Worker after broadening the first draft from one router to the full typed Flow API provider-pass-through pattern. T053 must delete typed one-line container-provider helpers across Flow API routers, replace them with direct Container provider calls, deepen the existing architecture guard into a structural AST guard over Flow API files, and retain only _get_flow_version_repo as a documented provider-typing blocker."
+      decision: "activate T053"
+      evidence:
+        - "docs/goals/flows-clean-architecture-2026-05-25/notes/t052-next-safe-judge.md"
+        - "backend/src/intric/flows/api/flow_template_router.py:29"
+        - "backend/src/intric/flows/api/flow_assistant_router.py:56"
+        - "backend/src/intric/flows/api/flow_assistant_router.py:60"
+        - "backend/src/intric/flows/api/flow_authoring_router.py:119"
+        - "backend/src/intric/flows/api/flow_run_execution_router.py:393"
+        - "backend/src/intric/flows/api/flow_run_execution_router.py:397"
+        - "backend/src/intric/flows/api/flow_run_execution_router.py:403"
+        - "backend/src/intric/flows/api/flow_run_evidence_router.py:67"
+        - "backend/src/intric/flows/api/flow_run_steps_router.py:69"
+        - "backend/src/intric/flows/api/flow_run_steps_router.py:73"
+        - "backend/src/intric/flows/api/flow_run_steps_router.py:77"
+        - "backend/src/intric/flows/api/flow_run_steps_router.py:81"
+        - ".codex/artifacts/claude-peer-loop-t052-next-safe-flow-task-judge-20260526T141129Z.md"
+        - ".codex/artifacts/claude-peer-loop-t052-next-safe-flow-task-judge-revised-20260526T141818Z.md"
+      candidate_classification:
+        safe_now:
+          - "Delete typed one-line Flow API provider pass-through helpers and call Container providers directly."
+        needs_preflight:
+          - "_get_flow_version_repo direct inlining because current provider typing requires reportUnknownMemberType ignore."
+          - "flow_api_common.py space_service/actor_manager provider-ignore cleanup."
+          - "Container typed-accessor/dependency-injector provider typing."
+          - "Schema migrations, JSONB ownership, runtime step identity data follow-ups, output-format movement, and frontend state/generated-client cleanup outside dedicated Workers."
+        blocked_on_decision:
+          - "Retention behavior."
+          - "Service-key identity model."
+          - "Review/rerun service-key capability policy."
+        final_docs_only:
+          - "T901 docs/flows/architecture.md maintainer map; do not start during active runtime/API/schema work."
+      consolidation_effect:
+        reused_existing_owner: "Container providers and the corresponding application services/assembler."
+        logic_moved_from: "Private one-line Flow API _get_* provider helpers to direct endpoint-handler provider calls."
+        logic_deleted: "T053 will delete all typed one-line provider helpers listed in the T052 note."
+        duplicate_path_removed: "Flow API adapter service wiring will no longer have a parallel helper family for typed providers."
+        new_code_added: "Structural architecture guard predicate and one temporary provider-typing exception for _get_flow_version_repo."
+        why_existing_owners_were_insufficient: "Existing owners are sufficient; the helpers only forwarded to them."
+        guard_preventing_duplicate_logic_from_returning: "Structural Flow API provider pass-through guard over FLOW_API_ROOT Python files."
+        net_flow_logic_surface_area: "reduced"
+      naming_gate:
+        new_production_names: "None."
+        architecture_doc_readiness: "The provider-wiring rule can appear clearly in docs/flows/architecture.md guard-test map and where-to-change-X table."
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1 status=ok blockers=[]"
+        - cmd: "rg -n '^def _get_.*\\(|return container\\.' backend/src/intric/flows/api -g '*.py'"
+          status: pass
+          output: "Found 11 typed helper candidates plus retained _get_flow_version_repo provider-typing blocker."
+        - cmd: "cd backend && uv run pyright src/intric/flows/api/flow_template_router.py src/intric/flows/api/flow_assistant_router.py src/intric/flows/api/flow_authoring_router.py src/intric/flows/api/flow_run_execution_router.py src/intric/flows/api/flow_run_evidence_router.py src/intric/flows/api/flow_run_steps_router.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t052-next-safe-judge --phase plan --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: fail
+          output: "GREEN_LIGHT: no; MIN_SCORE: 5; valid blocker: first T052 draft missed sibling router provider-pass-through helpers."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t052-next-safe-judge --phase verification --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT: yes; MIN_SCORE: 8"
+      next_task: T053
+
+  - id: T053
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "refactor(flows-api): delete typed API provider pass-through helpers."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t052-next-safe-judge.md"
+      - ".codex/artifacts/claude-peer-loop-t052-next-safe-flow-task-judge-revised-20260526T141818Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t053-api-provider-pass-throughs.md"
+      - "backend/src/intric/flows/api/flow_template_router.py"
+      - "backend/src/intric/flows/api/flow_assistant_router.py"
+      - "backend/src/intric/flows/api/flow_authoring_router.py"
+      - "backend/src/intric/flows/api/flow_run_execution_router.py"
+      - "backend/src/intric/flows/api/flow_run_evidence_router.py"
+      - "backend/src/intric/flows/api/flow_run_steps_router.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+    constraints:
+      - "Check watchdog before starting implementation and before committing."
+      - "FastAPI adapter-only refactor: do not change endpoint signatures, decorators, request/response models, OpenAPI shape, generated clients, auth policy, or endpoint behavior."
+      - "Do not edit _get_flow_version_repo or attempt to solve flow_version_repo provider typing in this task."
+      - "Do not edit verification test modules other than test_flow_architecture_guards.py; if another test requires edits, stop and return to Judge."
+      - "Deepen the existing architecture guard; do not add a parallel guard."
+      - "Structural guard must scan Flow API Python files and fail red with exactly 11 offenders before source edits."
+      - "Retain exactly one documented temporary provider-typing exception: _get_flow_version_repo."
+      - "Delete redundant file/name-scoped provider-pass-through guard constants; keep direct manual-construction guard."
+      - "Do not expand into retention, service-key identity/review/rerun capability policy, schema migrations, webhook outbox, output-format architecture, final architecture docs, or Flow AI Builder."
+      - "Preserve unrelated dirty/untracked files."
+    expected_output:
+      - "T053 task note with source evidence, red/green verification, Claude implementation-gate receipt, consolidation effect, naming-gate answer, and retained _get_flow_version_repo exception."
+      - "Structural Flow API provider pass-through guard over FLOW_API_ROOT Python files."
+      - "Typed one-line Flow API provider helpers deleted and call sites inlined to Container provider calls."
+      - "Unused service/assembler imports removed."
+      - "Verification test modules pass unmodified."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "Red guard reports anything other than 11 offenders before source edits."
+      - "Direct Container provider calls introduce pyright errors, Any/cast erasure, or new pyright ignores."
+      - "A non-guard test must be edited to keep behavior green."
+      - "Staged files include anything outside allowed_files."
+      - "Claude implementation gate is not green and the disagreement cannot be resolved with source evidence."
     receipt: null
 
   - id: T901
