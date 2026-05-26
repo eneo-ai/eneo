@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T039
+active_task: T040
 
 tasks:
   - id: T001
@@ -3433,7 +3433,7 @@ tasks:
   - id: T039
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe post-step-identity Flow architecture task after T038: decide whether to prioritize public runtime step_id nullability, a checked-in published-snapshot preflight script, the 34 full-runtime-parser failures, sparse runtime loading, or draft id-owned persistence."
     inputs:
@@ -3460,6 +3460,125 @@ tasks:
       - "The next task requires a product/data decision not encoded in the board."
       - "The next task requires retention, service-key identity, webhook outbox, Flow AI Builder, runtime input retention, schema migrations, or flow_version_steps."
       - "The next task cannot be scoped to reviewable allowed_files and behavior-focused tests."
+    receipt:
+      result: done
+      decision: "approve_worker"
+      summary: "Approved T040 as the next post-step-identity Worker: make public runtime result/attempt identity fields non-null in Flow API schemas and generated client types, and delete the graph run-result fallback that still matched missing result step_id by step_order. Claude first blocked the narrower step_id-only brief for generated-client fallback risk, weak negative tests, and the graph fallback; Codex revised the brief. Antigravity then blocked the revised brief for adjacent FlowRunStepPublic parent-id nullability; Codex accepted that concern and revised T040 to require FlowRunStepPublic flow_run_id, flow_id, tenant_id, and step_id, while leaving id nullable because the domain result id remains optional. Claude and Antigravity both returned green after revision."
+      evidence:
+        - "backend/src/intric/database/tables/flow_tables.py:700"
+        - "backend/src/intric/database/tables/flow_tables.py:891"
+        - "backend/src/intric/flows/domain/flow.py:211"
+        - "backend/src/intric/flows/domain/flow.py:212"
+        - "backend/src/intric/flows/domain/flow.py:215"
+        - "backend/src/intric/flows/domain/flow.py:237"
+        - "backend/src/intric/flows/domain/flow.py:241"
+        - "backend/src/intric/flows/api/flow_models.py:1162"
+        - "backend/src/intric/flows/api/flow_models.py:1163"
+        - "backend/src/intric/flows/api/flow_models.py:1166"
+        - "backend/src/intric/flows/api/flow_models.py:1748"
+        - "backend/src/intric/flows/api/flow_models.py:1751"
+        - "backend/src/intric/flows/api/flow_graph.py:194"
+        - "backend/src/intric/flows/api/flow_graph.py:206"
+        - "backend/src/intric/flows/api/flow_assembler.py:151"
+        - "frontend/packages/intric-js/src/types/schema.d.ts:16168"
+        - "frontend/packages/intric-js/src/types/schema.d.ts:16821"
+        - ".codex/artifacts/t039-next-safe-post-step-identity-judge-brief.md"
+        - ".codex/artifacts/claude-peer-loop-t039-choose-next-post-step-identity-worker-20260526T080339Z.md"
+        - ".codex/artifacts/claude-peer-loop-t039-choose-next-post-step-identity-worker-revised-20260526T080735Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t039-public-runtime-step-id-contract-antigravity-synthesis-20260526T081103Z.md"
+        - ".codex/artifacts/claude-peer-loop-t039-choose-next-post-step-identity-worker-with-antigravity-synthesis-20260526T081449Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t039-public-runtime-identity-contract-antigravity-re-review-20260526T081557Z.md"
+      commands:
+        - command: "python3 -m json.tool /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: "pass"
+          output: "schema_version=1; status=ok; active_task=T039; blockers=[]"
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run python - <<'PY' ... inspect OpenAPI FlowRunStepPublic and FlowStepAttemptPublic required/step_id schemas ... PY"
+          status: "pass"
+          output: "FlowRunStepPublic required lacks identity fields; FlowStepAttemptPublic required lacks step_id; both step_id properties are anyOf uuid|null."
+        - command: "rg -n \"FlowRunStepPublic\\(|FlowStepAttemptPublic\\(|FlowRunStepPublic\\.model_validate|FlowStepAttemptPublic\\.model_validate\" backend/src/intric backend/tests -g '*.py'"
+          status: "pass"
+          output: "Only class definitions and FlowAssembler.to_step_public model_validate producer found."
+        - command: "rg -n \"step_id\\s*=\\s*None|\\\"step_id\\\": None|step_id: UUID \\| None|step_id: str \\| None\" backend/src/intric/flows backend/tests/unittests/flows backend/tests/integration/flows -g '*.py'"
+          status: "pass_with_expected_hits"
+          output: "Expected remaining nullable/debug/error/rejection-fixture hits include FlowRunError, FlowRunDebugStep, and a missing-identifier rejection test."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t039-next-post-step-identity-worker --phase plan --iteration 1 --timeout-seconds 1200 ..."
+          status: "changes_required"
+          output: "Blocked on generated-client hand-edit fallback, weak red test, and graph step_id-null fallback."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t039-next-post-step-identity-worker --phase verification --iteration 2 --timeout-seconds 1200 --require-green --required-min-score 8 ..."
+          status: "pass"
+          output: "GREEN_LIGHT yes; MIN_SCORE 9 after step_id, graph fallback, regen-only, and negative-test revisions."
+        - command: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t039-public-step-id-contract-synthesis --phase synthesis --iteration 1 --timeout-seconds 1200 --spend-mode auto ..."
+          status: "changes_required"
+          output: "Valid blocker: FlowRunStepPublic flow_run_id, flow_id, tenant_id should be required with step_id."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t039-next-post-step-identity-worker --phase verification --iteration 3 --timeout-seconds 1200 --require-green --required-min-score 8 ..."
+          status: "pass"
+          output: "GREEN_LIGHT yes; MIN_SCORE 9 after accepting parent-id nullability concern."
+        - command: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t039-public-step-id-contract-synthesis --phase synthesis --iteration 2 --timeout-seconds 1200 --spend-mode auto ..."
+          status: "pass"
+          output: "GREEN_LIGHT yes; MIN_SCORE 9 in the final block after revised brief."
+      public_api_generated_client_disposition: "T040 must update backend OpenAPI contract tests and regenerate frontend/packages/intric-js/src/types/schema.d.ts from a canonical local OpenAPI snapshot. Hand-editing generated schema output is forbidden."
+      consolidation_effect:
+        reused_existing_owner: "FlowRunStepPublic and FlowStepAttemptPublic in backend/src/intric/flows/api/flow_models.py; generated schema.d.ts mirrors OpenAPI; flow_graph.py remains the graph enrichment owner."
+        logic_moved_from: "None."
+        logic_deleted: "T040 must delete nullable/omittable public runtime identity fields and the graph run-result step_order fallback for missing result step_id."
+        duplicate_path_removed: "Public API and graph enrichment will no longer contradict snapshot-owned non-null runtime result identity."
+        new_code_added: "Only behavior/contract tests; no new production abstraction."
+        why_existing_owners_were_insufficient: "Existing public API schemas and graph enrichment still preserved stale nullable identity compatibility after DB/domain/runtime owners became non-null."
+        guard_test_preventing_duplicate_logic_returning: "OpenAPI contract assertions, Pydantic negative tests, and graph route fixture update."
+        net_flow_logic_surface_area: "reduced"
+      next_task: T040
+
+  - id: T040
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Make Flow runtime step result and attempt identity fields non-null in backend API schemas, generated client types, and graph run-result enrichment, matching the snapshot-owned runtime DB/domain invariant."
+    allowed_files:
+      - "backend/src/intric/flows/api/flow_models.py"
+      - "backend/src/intric/flows/api/flow_graph.py"
+      - "backend/tests/unit/test_flow_openapi_contract.py"
+      - "backend/tests/unittests/flows/test_flow_models.py"
+      - "backend/tests/unittests/flows/test_flow_run_execution_router.py"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    verify:
+      - "cd backend && uv run pytest tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_run_execution_router.py -q"
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_evidence_api_contracts.py -q"
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_repository.py tests/integration/flows/test_flow_run_repository.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/api/flow_models.py src/intric/flows/api/flow_graph.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_run_execution_router.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/api/flow_models.py src/intric/flows/api/flow_graph.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_run_execution_router.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/api/flow_models.py src/intric/flows/api/flow_graph.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_run_execution_router.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run python -c 'from intric.server.main import get_application; import json; print(json.dumps(get_application().openapi(), sort_keys=True))' > /tmp/eneo-openapi.json"
+      - "cd frontend/packages/intric-js && node update.js --schema-file /tmp/eneo-openapi.json"
+      - "cd frontend/packages/intric-js && bun test update.test.js"
+      - "cd frontend/packages/intric-js && bun run check"
+      - "rg -n \"FlowRunStepPublic\\(|FlowStepAttemptPublic\\(|FlowRunStepPublic\\.model_validate|FlowStepAttemptPublic\\.model_validate\" backend/src/intric backend/tests -g '*.py'"
+      - "rg -n 'step_id\\s*=\\s*None|\"step_id\": None|step_id: UUID \\| None|step_id: str \\| None' backend/src/intric/flows backend/tests/unittests/flows backend/tests/integration/flows -g '*.py'"
+      - "rg -n 'flow_run_id\\s*=\\s*None|flow_id\\s*=\\s*None|tenant_id\\s*=\\s*None|\"flow_run_id\": None|\"flow_id\": None|\"tenant_id\": None|flow_run_id: UUID \\| None|flow_id: UUID \\| None|tenant_id: UUID \\| None' backend/src/intric/flows backend/tests/unittests/flows backend/tests/integration/flows -g '*.py'"
+      - "rg -n \"FlowRunStepPublic: \\{|FlowStepAttemptPublic: \\{|step_id\\?: string \\| null|flow_run_id\\?: string \\| null|flow_id\\?: string \\| null|tenant_id\\?: string \\| null|step_id: string;|flow_run_id: string;|flow_id: string;|tenant_id: string;\" frontend/packages/intric-js/src/types/schema.d.ts frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts"
+      - "git diff --check"
+      - "git diff -- backend/src/intric/flows/api/flow_models.py backend/src/intric/flows/api/flow_graph.py backend/tests/unit/test_flow_openapi_contract.py backend/tests/unittests/flows/test_flow_models.py backend/tests/unittests/flows/test_flow_run_execution_router.py frontend/packages/intric-js/src/types/schema.d.ts frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts docs/goals/flows-clean-architecture-2026-05-25/state.yaml | rg -n '^\\+.*(pyright: ignore|type: ignore|cast\\(Any|dict\\[str, Any\\]|T0[0-9][0-9]|Phase [0-9A-G]\\b)'"
+      - "git status --porcelain"
+    stop_if:
+      - "Before starting implementation, the watchdog file reports a halt-worthy blocker."
+      - "Any serializer or current-source path can still produce null FlowRunStepPublic.flow_run_id, flow_id, tenant_id, or step_id, or null FlowStepAttemptPublic.step_id."
+      - "OpenAPI snapshot diff touches public schemas outside FlowRunStepPublic and FlowStepAttemptPublic."
+      - "OpenAPI/client regeneration cannot be performed from /tmp/eneo-openapi.json or produces broad unrelated churn."
+      - "The generated client change requires frontend application behavior edits outside generated type fixtures."
+      - "The change requires FlowRunStepPublic.id, debug export nullability, run error nullability, sparse runtime loading, draft id-owned persistence, migrations, service-key identity, retention, webhook outbox, or Flow AI Builder."
+      - "git status --porcelain shows new or modified files outside allowed_files and the known unrelated dirty/untracked baseline."
+      - "Verification fails twice for reasons related to this task."
+    consolidation_effect:
+      reused_existing_owner: "FlowRunStepPublic and FlowStepAttemptPublic in backend/src/intric/flows/api/flow_models.py; generated schema.d.ts mirrors OpenAPI; flow_graph.py owns graph enrichment."
+      logic_moved_from: "None."
+      logic_deleted: "Nullable/omittable public runtime identity fields and graph run-result step_order fallback for missing result step_id."
+      duplicate_path_removed: "Public API and graph enrichment will align with non-null snapshot-owned runtime result identity."
+      new_code_added: "Behavior/contract tests only; no new production abstraction."
+      why_existing_owners_were_insufficient: "Existing public API schemas and graph enrichment preserved stale nullable compatibility after DB/domain/runtime owners became non-null."
+      guard_test_preventing_duplicate_logic_returning: "OpenAPI contract assertions, Pydantic negative tests, graph route fixture update, and generated-client type smoke check."
+      net_flow_logic_surface_area: "reduced"
     receipt: null
 
   - id: T999
