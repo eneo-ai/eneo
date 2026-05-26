@@ -25,7 +25,7 @@ FLOW_SOURCE_ROOT = BACKEND_ROOT / "src" / "intric" / "flows"
 FLOW_RUNTIME_ROOT = FLOW_SOURCE_ROOT / "runtime"
 FLOW_API_ROOT = FLOW_SOURCE_ROOT / "api"
 FLOW_TASKS_PATH = FLOW_RUNTIME_ROOT / "tasks.py"
-FLOW_API_UPLOAD_PROVIDER_FILES = (
+FLOW_API_PROVIDER_PASSTHROUGH_FILES = (
     FLOW_API_ROOT / "flow_router_common.py",
     FLOW_API_ROOT / "flow_upload_router.py",
 )
@@ -153,6 +153,18 @@ OUTBOX_DELIVERY_STATUS_OWNER_NAMES = frozenset(
         "FlowOutboxDeliveryStatus",
         "FlowRunAuditOutbox",
         "FlowRunWebhookDeliveries",
+    }
+)
+FORBIDDEN_API_PASSTHROUGH_HELPER_NAMES = frozenset(
+    {
+        "flow_run_contract_service",
+        "flow_upload_service",
+    }
+)
+FORBIDDEN_API_MANUAL_CONSTRUCTION_CLASS_NAMES = frozenset(
+    {
+        "FlowFileUploadService",
+        "FlowRunContractService",
     }
 )
 
@@ -625,10 +637,10 @@ def test_flow_celery_task_provider_wiring_is_not_erased_to_any():
     )
 
 
-def test_flow_api_upload_service_uses_container_provider_without_any_erasure():
+def test_flow_api_provider_passthrough_helpers_are_not_reintroduced():
     offenders: list[str] = []
 
-    for path in FLOW_API_UPLOAD_PROVIDER_FILES:
+    for path in FLOW_API_PROVIDER_PASSTHROUGH_FILES:
         relative_path = path.relative_to(BACKEND_ROOT)
         offenders.extend(
             f"{relative_path}:{offender}"
@@ -637,18 +649,22 @@ def test_flow_api_upload_service_uses_container_provider_without_any_erasure():
 
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == "flow_upload_service":
-                offenders.append(f"{relative_path}:helper:{node.lineno}")
+            if (
+                isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+                and node.name in FORBIDDEN_API_PASSTHROUGH_HELPER_NAMES
+            ):
+                offenders.append(f"{relative_path}:helper:{node.name}:{node.lineno}")
             if not isinstance(node, ast.Call):
                 continue
             if (
                 isinstance(node.func, ast.Name)
-                and node.func.id == "FlowFileUploadService"
+                and node.func.id in FORBIDDEN_API_MANUAL_CONSTRUCTION_CLASS_NAMES
             ):
-                offenders.append(f"{relative_path}:manual-construction:{node.lineno}")
+                offenders.append(
+                    f"{relative_path}:manual-construction:{node.func.id}:{node.lineno}"
+                )
 
     assert offenders == [], (
-        "Flow API upload wiring must use Container.flow_file_upload_service "
-        "instead of reconstructing FlowFileUploadService or erasing provider "
-        "types: " + ", ".join(offenders)
+        "Flow API provider pass-through helpers must not be reintroduced; "
+        "route through the Container provider directly instead: " + ", ".join(offenders)
     )

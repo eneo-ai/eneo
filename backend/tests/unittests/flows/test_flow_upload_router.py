@@ -61,11 +61,7 @@ async def test_get_flow_run_contract_enforces_scope_and_returns_contract(monkeyp
     container = MagicMock()
     run_contract_service = AsyncMock()
     container.flow_service.return_value = AsyncMock()
-    monkeypatch.setattr(
-        router_common_module,
-        "flow_run_contract_service",
-        lambda _container: run_contract_service,
-    )
+    container.flow_run_contract_service.return_value = run_contract_service
 
     async def fake_enforce(
         request,

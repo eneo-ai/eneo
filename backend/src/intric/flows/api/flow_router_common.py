@@ -22,7 +22,6 @@ from intric.flows.api.flow_models import (
 from intric.flows.application import flow_dispatch
 from intric.flows.application.flow_assistant_update import FlowAssistantUpdateCommand
 from intric.flows.flow_access_policy import FlowApiAction
-from intric.flows.flow_run_contract_service import FlowRunContractService
 from intric.main.container.container import Container
 
 dispatch_flow_run_after_commit = flow_dispatch.dispatch_flow_run_after_commit
@@ -108,10 +107,6 @@ def required_uuid(value: UUID | None, *, field: str) -> UUID:
             detail=f"Expected non-null UUID for {field}.",
         )
     return value
-
-
-def flow_run_contract_service(container: Container) -> FlowRunContractService:
-    return container.flow_run_contract_service()
 
 
 async def enforce_flow_scope_for_request(

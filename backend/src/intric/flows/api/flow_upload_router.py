@@ -114,9 +114,7 @@ async def get_flow_run_contract(
         allow_service_key_principals=True,
         require_published_for_service_key=True,
     )
-    return await common.flow_run_contract_service(container).get_run_contract(
-        flow_id=id
-    )
+    return await container.flow_run_contract_service().get_run_contract(flow_id=id)
 
 
 @router.post(

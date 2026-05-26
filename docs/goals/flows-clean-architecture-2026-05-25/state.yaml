@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T051
+active_task: T052
 
 tasks:
   - id: T001
@@ -4958,7 +4958,7 @@ tasks:
   - id: T051
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "refactor(flows-api): use the run-contract service provider directly."
     inputs:
@@ -5017,6 +5017,119 @@ tasks:
       - "The task expands into retention, service-key identity/review/rerun, schema migrations, webhook outbox, output-format architecture, final architecture docs, or Flow AI Builder."
       - "Staged files include anything outside the T051 allowed files."
       - "Any unrelated pre-existing dirty file is staged, stashed, reset, cleaned, or otherwise modified."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T15:59:59+02:00"
+      summary: "Deleted the run-contract service pass-through helper in the Flow API adapter. The run-contract endpoint now calls Container.flow_run_contract_service directly, and the existing Flow API provider guard was generalized so provider-owned service pass-through helpers and manual constructions cannot return in the bounded API files."
+      artifact: "docs/goals/flows-clean-architecture-2026-05-25/notes/t051-run-contract-service-provider.md"
+      implementation:
+        changed:
+          - "backend/src/intric/flows/api/flow_router_common.py: removed flow_run_contract_service(container) and FlowRunContractService import."
+          - "backend/src/intric/flows/api/flow_upload_router.py: get_flow_run_contract now calls container.flow_run_contract_service() directly."
+          - "backend/tests/unittests/flows/test_flow_architecture_guards.py: generalized the Flow API provider guard, renamed the bounded file constant, and added forbidden helper/class-name sets."
+          - "backend/tests/unittests/flows/test_flow_upload_router.py: migrated the run-contract test fixture to container.flow_run_contract_service.return_value."
+        not_changed:
+          - "No endpoint paths, methods, signatures, dependency declarations, response models, OpenAPI, generated clients, persistence, runtime contract, retention, service-key identity/review/rerun, webhook outbox, output-format architecture, final architecture docs, or Flow AI Builder behavior."
+          - "No Container provider definition or FlowRunContractService constructor change."
+      peer_review:
+        claude:
+          artifact: ".codex/artifacts/claude-peer-loop-t051-run-contract-service-provider-implementation-review-20260526T135150Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8"
+          valid_concern_addressed_after_gate:
+            - "Widened the generalized guard to catch ast.AsyncFunctionDef as well as ast.FunctionDef, then reran verification."
+        antigravity:
+          verdict: "Skipped by rule; Claude green and no high-risk/disputed public contract, schema, data, runtime reliability, or architecture synthesis issue remained."
+      commands:
+        - command: "python3 -m json.tool /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          result: pass
+          notes: "schema_version 1; status ok; blockers empty. Stale watchdog active_task T039 is advisory because status is ok."
+        - command: "git status --short"
+          result: pass
+          notes: "Reported only pre-existing unrelated dirty/untracked files before T051 source edits."
+        - command: "git diff --name-only -- backend/src/intric/flows/api/flow_router_common.py backend/src/intric/flows/api/flow_upload_router.py backend/tests/unittests/flows/test_flow_architecture_guards.py backend/tests/unittests/flows/test_flow_upload_router.py"
+          result: pass
+          notes: "No output before T051 source edits."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py::test_flow_api_provider_passthrough_helpers_are_not_reintroduced -q"
+          result: fail_then_pass
+          notes: "Failed red before production edit with offender src/intric/flows/api/flow_router_common.py:helper:flow_run_contract_service:113; passed after edit."
+        - command: "cd backend && uv run pyright src/intric/flows/api/flow_router_common.py src/intric/flows/api/flow_upload_router.py"
+          result: pass
+          notes: "0 errors, 0 warnings, 0 informations."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_upload_router.py -q"
+          result: pass
+          notes: "17 passed, 9 warnings in 4.91s after async-helper guard tightening."
+        - command: "cd backend && uv run pyright src/intric/flows/api/flow_router_common.py src/intric/flows/api/flow_upload_router.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_upload_router.py"
+          result: pass
+          notes: "0 errors, 0 warnings, 0 informations."
+        - command: "cd backend && uv run ruff check src/intric/flows/api/flow_router_common.py src/intric/flows/api/flow_upload_router.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_upload_router.py"
+          result: pass
+          notes: "All checks passed."
+        - command: "cd backend && uv run ruff format --check src/intric/flows/api/flow_router_common.py src/intric/flows/api/flow_upload_router.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_upload_router.py"
+          result: pass
+          notes: "4 files already formatted."
+        - command: "rg -n 'def flow_run_contract_service|common\\.flow_run_contract_service|FlowRunContractService\\(' backend/src/intric/flows/api/flow_router_common.py backend/src/intric/flows/api/flow_upload_router.py backend/tests/unittests/flows/test_flow_upload_router.py"
+          result: pass
+          notes: "No matches."
+        - command: "rg -n 'FLOW_API_UPLOAD_PROVIDER_FILES' backend/tests/unittests/flows/test_flow_architecture_guards.py"
+          result: pass
+          notes: "No matches."
+        - command: "git grep -nE 'def flow_run_contract_service|common\\.flow_run_contract_service|FlowRunContractService\\(' -- backend/src"
+          result: pass
+          notes: "No production matches."
+        - command: "git diff --check"
+          result: pass
+        - command: "git diff --staged --name-only"
+          result: pass
+          notes: "No staged files during implementation verification."
+      consolidation_effect:
+        reused_existing_owner: "Container.flow_run_contract_service and FlowRunContractService."
+        logic_moved_from: "flow_router_common.flow_run_contract_service pass-through to direct provider use in get_flow_run_contract."
+        logic_deleted: "flow_run_contract_service helper and FlowRunContractService import from flow_router_common.py."
+        duplicate_path_removed: "Flow API run-contract wiring no longer has a second helper surface."
+        new_code_added: "Generalized one existing architecture guard and migrated one test fixture; no production helper or abstraction."
+        why_existing_owners_were_insufficient: "Existing owners were sufficient; the API helper only forwarded to them."
+        guard_preventing_duplicate_logic_from_returning: "test_flow_api_provider_passthrough_helpers_are_not_reintroduced and the migrated run-contract router test."
+        net_flow_logic_surface_area: "reduced"
+      naming_gate:
+        new_names_expected: "No new Flow production module/class/type/status/file names."
+        guard_name: "test_flow_api_provider_passthrough_helpers_are_not_reintroduced names the provider-ownership invariant."
+        constant_name: "FLOW_API_PROVIDER_PASSTHROUGH_FILES matches the generalized guard axis."
+        would_appear_in_architecture_doc: true
+        would_appear_in_where_to_change_table: true
+      follow_up_candidates:
+        - "Judge may consider broader Flow API provider-erasure cleanup, including flow_api_common.py and flow_run_steps_router.py."
+        - "Judge may consider a Container typed-accessor task if dependency-injector provider typing keeps creating cast(Any, container.X()) pressure."
+      next_task: T052
+
+  - id: T052
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "judge(flows): choose the next safe Flow clean-architecture task after run-contract provider consolidation."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t051-run-contract-service-provider.md"
+      - ".codex/artifacts/claude-peer-loop-t051-run-contract-service-provider-implementation-review-20260526T135150Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t052-next-safe-judge.md"
+    constraints:
+      - "Read-only Judge task; no source edits, tests, migrations, API/OpenAPI/frontend edits, deletion, or docs/flows/architecture.md edits."
+      - "Check watchdog before task transition and before activating any Worker."
+      - "Respect product/data decision gates: do not activate retention, service-key identity/review/rerun, schema migration, or other blocked tasks unless state.yaml records the required decision."
+      - "Apply reuse-before-inventing, canonical-owner, consolidation-effect, and naming-gate requirements to every candidate Worker."
+      - "Do not start the final maintainer architecture doc Worker during active runtime/API/schema work."
+    expected_output:
+      - "Classify remaining candidate tasks as safe_now, needs_preflight, blocked_on_decision, or final_docs_only."
+      - "Choose the next smallest safe task or record a stop rule."
+      - "Carry forward T051 non-blocking follow-ups without broadening into blocked work."
+      - "Ensure any proposed Worker includes Consolidation effect and naming-gate answers."
+    stop_if:
+      - "Choosing a Worker requires retention, service-key identity/review/rerun, schema migration, Flow AI Builder cleanup, or other blocked product/data decisions."
+      - "Choosing a Worker requires files outside a reviewable Flow proper scope."
+      - "Evidence is insufficient to choose between remaining safe runtime reliability, API DX, frontend DX, schema/preflight, output-format, or provider-wiring candidates."
     receipt: null
 
   - id: T901
