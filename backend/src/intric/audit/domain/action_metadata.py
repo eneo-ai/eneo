@@ -257,17 +257,45 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "Integrationskälla synkad",
         "description_sv": "Loggar när en full synkning startas för en integrationskälla",
     },
+    ActionType.COMPLETION_MODEL_CREATED.value: {
+        "name_sv": "Kompletteringsmodell skapad",
+        "description_sv": "Loggar när en AI-kompletteringsmodell läggs till i tenanten",
+    },
     ActionType.COMPLETION_MODEL_UPDATED.value: {
         "name_sv": "Kompletteringsmodell uppdaterad",
         "description_sv": "Loggar ändringar av AI-kompletteringsmodell",
+    },
+    ActionType.COMPLETION_MODEL_DELETED.value: {
+        "name_sv": "Kompletteringsmodell raderad",
+        "description_sv": "Loggar när en AI-kompletteringsmodell tas bort från tenanten",
+    },
+    ActionType.COMPLETION_MODEL_MIGRATED.value: {
+        "name_sv": "Kompletteringsmodell migrerad",
+        "description_sv": "Loggar när användning flyttas mellan AI-kompletteringsmodeller",
+    },
+    ActionType.EMBEDDING_MODEL_CREATED.value: {
+        "name_sv": "Embedding-modell skapad",
+        "description_sv": "Loggar när en embedding-modell läggs till i tenanten",
     },
     ActionType.EMBEDDING_MODEL_UPDATED.value: {
         "name_sv": "Embedding-modell uppdaterad",
         "description_sv": "Loggar ändringar av embedding-modell",
     },
+    ActionType.EMBEDDING_MODEL_DELETED.value: {
+        "name_sv": "Embedding-modell raderad",
+        "description_sv": "Loggar när en embedding-modell tas bort från tenanten",
+    },
+    ActionType.TRANSCRIPTION_MODEL_CREATED.value: {
+        "name_sv": "Transkriptionsmodell skapad",
+        "description_sv": "Loggar när en transkriptionsmodell läggs till i tenanten",
+    },
     ActionType.TRANSCRIPTION_MODEL_UPDATED.value: {
         "name_sv": "Transkriptionsmodell uppdaterad",
         "description_sv": "Loggar ändringar av transkriptionsmodell",
+    },
+    ActionType.TRANSCRIPTION_MODEL_DELETED.value: {
+        "name_sv": "Transkriptionsmodell raderad",
+        "description_sv": "Loggar när en transkriptionsmodell tas bort från tenanten",
     },
     ActionType.TEMPLATE_CREATED.value: {
         "name_sv": "Mall skapad",

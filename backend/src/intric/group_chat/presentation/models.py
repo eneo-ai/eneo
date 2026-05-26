@@ -32,12 +32,12 @@ class GroupChatCreate(BaseModel):
 
 class GroupChatAssistantUpdateSchema(BaseModel):
     id: UUID
-    user_description: Optional[str] = Field(  # type: ignore[call-overload]
+    user_description: Optional[str] = Field(
         description=(
             "Custom description provided by the user. "
             "Cannot be null if 'description' of assistant is null."
         ),
-        example="My custom AI assistant description",
+        json_schema_extra={"example": "My custom AI assistant description"},
     )
 
 

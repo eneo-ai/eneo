@@ -214,16 +214,26 @@ async def update_security_classification_levels(
 @router.delete(
     "/{id}/",
     status_code=204,
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def delete_security_classification(
     id: UUID,
     container: ContainerDep,
+    force: bool = False,
 ) -> None:
     """Delete a security classification.
+
+    Refuses if any model, space or MCP server still references it — the
+    FK is `ON DELETE SET NULL`, so dropping a referenced classification
+    would silently downgrade every dependent row to "no classification".
+    Pass `?force=true` to override after reviewing the usage report.
+
     Args:
         id: The ID of the security classification to delete.
+        force: When true, delete even if rows still reference this
+            classification. Those rows will be downgraded to NULL.
     Raises:
+        400: If the classification is referenced and `force` is false.
         403: If the user doesn't have permission to delete the security classification.
         404: If the security classification doesn't exist.
     """
@@ -234,9 +244,10 @@ async def delete_security_classification(
     security_classification = await service.get_security_classification(id)
 
     # Delete security classification
-    await service.delete_security_classification(id)
+    await service.delete_security_classification(id, force=force)
 
-    # Audit logging
+    # Audit logging — flag forced deletes prominently so a reader can
+    # tell when an admin overrode the in-use guard.
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
@@ -248,7 +259,10 @@ async def delete_security_classification(
         metadata=AuditMetadata.standard(
             actor=user,
             target=security_classification,
-            extra={"security_level": security_classification.security_level},
+            extra={
+                "security_level": security_classification.security_level,
+                "forced": force,
+            },
         ),
     )
 

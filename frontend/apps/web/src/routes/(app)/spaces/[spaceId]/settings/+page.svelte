@@ -32,10 +32,16 @@
 
   let { data } = $props();
   let models = $state(untrack(() => data.models));
-  let completionModels = $derived(models.completionModels.filter((model) => model.is_org_enabled));
-  let embeddingModels = $derived(models.embeddingModels.filter((model) => model.is_org_enabled));
+  let completionModels = $derived(
+    models.completionModels.filter(
+      (model) => model.is_org_enabled && !model.is_deprecated && !model.migrated_to_model_id
+    )
+  );
+  let embeddingModels = $derived(
+    models.embeddingModels.filter((model) => model.is_org_enabled && !model.is_deprecated)
+  );
   let transcriptionModels = $derived(
-    models.transcriptionModels.filter((model) => model.is_org_enabled)
+    models.transcriptionModels.filter((model) => model.is_org_enabled && !model.is_deprecated)
   );
 
   const spaces = getSpacesManager();

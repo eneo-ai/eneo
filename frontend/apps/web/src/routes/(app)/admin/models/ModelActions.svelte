@@ -1,76 +1,74 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
-  import { IconEllipsis } from "@intric/icons/ellipsis";
-  import { Button, Dialog, Dropdown } from "@intric/ui";
+  import {
+    IntricError,
+    type CompletionModel,
+    type EmbeddingModel,
+    type TranscriptionModel
+  } from "@intric/intric-js";
   import { getIntric } from "$lib/core/Intric";
   import { invalidate } from "$app/navigation";
-  import EditModelDialog from "./EditModelDialog.svelte";
   import { writable } from "svelte/store";
-  import { Pencil, Trash2, AlertTriangle, Loader2, ArrowRight } from "lucide-svelte";
-  import { IconCancel } from "@intric/icons/cancel";
-  import { IconCheck } from "@intric/icons/check";
-  import { IconArrowUpToLine } from "@intric/icons/arrow-up-to-line";
-  import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
-  import ModelClassificationDialog from "$lib/features/security-classifications/components/ModelClassificationDialog.svelte";
-  import { IconLockClosed } from "@intric/icons/lock-closed";
+  import {
+    Pencil,
+    Trash2,
+    AlertTriangle,
+    Loader2,
+    ArrowRight,
+    MoreHorizontal
+  } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
-  import { toastError } from "$lib/core/errors";
+  import { getErrorMessage } from "$lib/core/errors";
+
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+
+  import EditModelDialog from "./EditModelDialog.svelte";
   import MigrateModelDialog from "./MigrateModelDialog.svelte";
 
-  export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
-  export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
+  /** Backend error code for "model is referenced and can't be soft-deleted".
+   *  Mirrors `ErrorCodes.MODEL_IN_USE` in `backend/src/intric/main/exceptions.py`. */
+  const MODEL_IN_USE_CODE = 9039;
+
+  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel;
+  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel";
+
+  // svelte-headless-table's `createRender` expects a class-based component,
+  // so we keep this file on the legacy `export let` API. Shadcn primitives
+  // below work just fine inside a non-runes parent.
+  export let model: AnyModel;
+  export let type: ModelTypeKey;
   export let completionModels: CompletionModel[] = [];
 
   const intric = getIntric();
 
-  async function togglePreferred() {
-    if (!("is_org_default" in model)) return;
-    try {
-      model = await intric.models.update(
-        //@ts-expect-error ts doesn't understand this
-        {
-          [type]: model,
-          update: {
-            is_org_default: !model.is_org_default
-          }
-        }
-      );
-      invalidate("admin:models:load");
-    } catch (e) {
-      toastError(e, m.error_changing_model_status());
-    }
-  }
-
-  async function toggleEnabled() {
-    try {
-      model = await intric.models.update(
-        //@ts-expect-error ts doesn't understand this
-        {
-          [type]: model,
-          update: {
-            is_org_enabled: !model.is_org_enabled
-          }
-        }
-      );
-      invalidate("admin:models:load");
-    } catch (e) {
-      toastError(e, m.error_changing_model_status());
-    }
-  }
-
   const showEditDialog = writable(false);
-  const showSecurityDialog = writable(false);
-  const showDeleteConfirm = writable(false);
   const showMigrateDialog = writable(false);
+
+  // Delete confirm dialog state. Two-way bridge between an internal boolean
+  // (driven by shadcn `bind:open`) and the legacy reactive flag pattern used
+  // for the rest of this file.
+  let deleteOpen = false;
   let isDeleting = false;
   let deleteError: string | null = null;
-  let deleteErrorStatus: number | null = null;
+  let showMigrateOption = false;
+
+  $: completionModelTargets = type === "completionModel" ? completionModels : [];
+  $: modelLabel = "nickname" in model && model.nickname ? model.nickname : model.name;
+  $: isMigratedCompletionModel =
+    type === "completionModel" && "migrated_to_model_id" in model && !!model.migrated_to_model_id;
+
+  function openDelete() {
+    deleteError = null;
+    showMigrateOption = false;
+    deleteOpen = true;
+  }
 
   async function handleDelete() {
     deleteError = null;
-    deleteErrorStatus = null;
+    showMigrateOption = false;
     isDeleting = true;
 
     try {
@@ -83,164 +81,122 @@
       }
 
       await invalidate("admin:model-providers:load");
-      $showDeleteConfirm = false;
+      deleteOpen = false;
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "";
-      deleteError = msg.includes("MODEL_IN_USE")
-        ? m.model_in_use_error()
-        : msg || m.failed_to_delete_model();
-      deleteErrorStatus =
-        typeof (e as Record<string, unknown>)?.status === "number"
-          ? ((e as Record<string, unknown>).status as number)
-          : null;
+      deleteError = getErrorMessage(e);
+      showMigrateOption =
+        type === "completionModel" &&
+        !isMigratedCompletionModel &&
+        e instanceof IntricError &&
+        e.code === MODEL_IN_USE_CODE;
     } finally {
       isDeleting = false;
     }
   }
-
-  $: showMigrationAction = type === "completionModel" && deleteErrorStatus === 400;
-  $: completionModelTargets = type === "completionModel" ? completionModels : [];
 </script>
 
-<Dropdown.Root>
-  <Dropdown.Trigger let:trigger asFragment>
-    <Button variant="on-fill" is={trigger} disabled={false} padding="icon">
-      <IconEllipsis />
-    </Button>
-  </Dropdown.Trigger>
-  <Dropdown.Menu let:item>
-    <Button
-      is={item}
-      padding="icon-leading"
-      on:click={() => {
-        $showEditDialog = true;
-      }}
-    >
-      <Pencil class="h-4 w-4" />{m.edit_model()}
-    </Button>
-    <Button
-      is={item}
-      padding="icon-leading"
-      on:click={() => {
-        $showSecurityDialog = true;
-      }}
-    >
-      <IconLockClosed></IconLockClosed>{m.edit_security_classification()}
-    </Button>
-    {#if "is_org_default" in model}
-      <Button is={item} on:click={togglePreferred} padding="icon-leading">
-        {#if model.is_org_default}
-          <IconArrowDownToLine></IconArrowDownToLine>{m.unset_default_status()}
-        {:else}
-          <IconArrowUpToLine></IconArrowUpToLine>{m.set_as_default_model()}
-        {/if}
+<DropdownMenu.Root>
+  <DropdownMenu.Trigger>
+    {#snippet child({ props })}
+      <Button {...props} variant="ghost" size="icon" aria-label={m.actions()}>
+        <MoreHorizontal />
       </Button>
+    {/snippet}
+  </DropdownMenu.Trigger>
+
+  <DropdownMenu.Content align="end">
+    <DropdownMenu.Item onclick={() => showEditDialog.set(true)}>
+      <Pencil />
+      {m.edit_model()}
+    </DropdownMenu.Item>
+
+    {#if type === "completionModel" && !isMigratedCompletionModel}
+      <DropdownMenu.Item onclick={() => showMigrateDialog.set(true)}>
+        <ArrowRight />
+        {m.migrate_model_usage()}
+      </DropdownMenu.Item>
     {/if}
-    <Button
-      is={item}
-      padding="icon-leading"
-      on:click={toggleEnabled}
-      variant={model.is_org_enabled ? "destructive" : "positive-outlined"}
-      disabled={model.is_locked && !model.is_org_enabled}
-    >
-      {#if model.is_org_enabled}
-        <IconCancel></IconCancel>
-        <span>{m.disable_model()}</span>
-      {:else}
-        <IconCheck></IconCheck>
-        {m.enable_model()}
-      {/if}
-    </Button>
-    <Button
-      is={item}
-      padding="icon-leading"
-      variant="destructive"
-      on:click={() => {
-        deleteError = null;
-        deleteErrorStatus = null;
-        $showDeleteConfirm = true;
-      }}
-    >
-      <Trash2 class="h-4 w-4" />
+
+    <DropdownMenu.Separator />
+
+    <DropdownMenu.Item variant="destructive" onclick={openDelete}>
+      <Trash2 />
       {m.delete_model()}
-    </Button>
-  </Dropdown.Menu>
-</Dropdown.Root>
+    </DropdownMenu.Item>
+  </DropdownMenu.Content>
+</DropdownMenu.Root>
 
 <EditModelDialog {model} {type} openController={showEditDialog} />
 
-<ModelClassificationDialog {model} {type} openController={showSecurityDialog}
-></ModelClassificationDialog>
+<!-- Delete confirm. We use Dialog (not AlertDialog) here because the dialog
+     surface needs to remain interactive when the delete-error appears with a
+     "migrate instead" call to action that opens another dialog. -->
+<Dialog.Root bind:open={deleteOpen}>
+  <Dialog.Content class="sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title>{m.delete_model()}</Dialog.Title>
+    </Dialog.Header>
 
-<Dialog.Root openController={showDeleteConfirm}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.delete_model()}</Dialog.Title>
-    <Dialog.Section>
-      <div class="flex flex-col gap-5 p-4">
-        <!-- Error Alert with Migration Option -->
-        {#if deleteError}
-          <div
-            class="border-negative-default/30 bg-negative-dimmer/50 relative overflow-hidden rounded-lg border"
-          >
-            <div class="bg-negative-default absolute inset-y-0 left-0 w-1"></div>
-            <div class="flex items-start gap-3 p-4 pl-5">
-              <div class="bg-negative-default/10 flex-shrink-0 rounded-full p-1.5">
-                <AlertTriangle class="text-negative-default h-4 w-4" />
-              </div>
-              <div class="min-w-0 flex-1">
-                <p class="text-negative-stronger text-sm font-medium">
-                  {m.failed_to_delete_model()}
-                </p>
-                <p class="text-negative-default/90 mt-1 text-sm">{deleteError}</p>
-              </div>
+    <div class="flex flex-col gap-5">
+      {#if deleteError}
+        <div
+          class="border-negative-default/30 bg-negative-dimmer/40 relative overflow-hidden rounded-lg border"
+          role="alert"
+        >
+          <div class="bg-negative-default absolute inset-y-0 left-0 w-1" aria-hidden="true"></div>
+          <div class="flex items-start gap-3 p-4 pl-5">
+            <div class="bg-negative-default/10 flex-shrink-0 rounded-full p-1.5">
+              <AlertTriangle class="text-negative-default size-4" aria-hidden="true" />
             </div>
-            {#if showMigrationAction}
-              <div class="border-negative-default/20 bg-negative-dimmer/30 border-t px-4 py-3">
-                <button
-                  class="group bg-primary/5 text-primary hover:bg-primary/10 flex w-full items-center justify-between rounded-md px-3 py-2.5 text-sm font-medium transition-all"
-                  on:click={() => {
-                    $showDeleteConfirm = false;
-                    $showMigrateDialog = true;
-                  }}
-                >
-                  <span>{m.migrate_model_usage()}</span>
-                  <ArrowRight class="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-                </button>
-              </div>
-            {/if}
+            <div class="min-w-0 flex-1">
+              <p class="text-negative-stronger text-sm font-medium">
+                {m.failed_to_delete_model()}
+              </p>
+              <p class="text-negative-default/90 mt-1 text-sm">{deleteError}</p>
+            </div>
           </div>
-        {/if}
-
-        <!-- Confirmation Text -->
-        <div class="space-y-2">
-          <p class="text-primary text-sm">
-            {m.delete_model_confirm({
-              name: "nickname" in model && model.nickname ? model.nickname : model.name
-            })}
-          </p>
-          <p class="text-muted text-sm">
-            {m.delete_model_warning()}
-          </p>
+          {#if showMigrateOption}
+            <div class="border-negative-default/20 bg-negative-dimmer/30 border-t px-4 py-3">
+              <button
+                type="button"
+                class="group bg-primary/5 text-primary hover:bg-primary/10 flex w-full items-center justify-between rounded-md px-3 py-2.5 text-sm font-medium transition-all"
+                on:click={() => {
+                  deleteOpen = false;
+                  $showMigrateDialog = true;
+                }}
+              >
+                <span>{m.migrate_model_usage()}</span>
+                <ArrowRight
+                  class="size-4 transition-transform group-hover:translate-x-0.5"
+                  aria-hidden="true"
+                />
+              </button>
+            </div>
+          {/if}
         </div>
+      {/if}
+
+      <div class="space-y-2">
+        <p class="text-foreground text-sm">{m.delete_model_confirm({ name: modelLabel })}</p>
+        <p class="text-muted-foreground text-sm">{m.delete_model_warning()}</p>
       </div>
-    </Dialog.Section>
-    <Dialog.Controls>
-      <Button variant="outlined" on:click={() => ($showDeleteConfirm = false)}>
-        {m.cancel()}
-      </Button>
-      <Button variant="destructive" on:click={handleDelete} disabled={isDeleting}>
+    </div>
+
+    <Dialog.Footer>
+      <Button variant="outline" onclick={() => (deleteOpen = false)}>{m.cancel()}</Button>
+      <Button variant="destructive" onclick={handleDelete} disabled={isDeleting}>
         {#if isDeleting}
-          <Loader2 class="mr-2 h-4 w-4 animate-spin" />
+          <Loader2 class="size-4 animate-spin" aria-hidden="true" />
           {m.deleting()}
         {:else}
           {m.delete_model()}
         {/if}
       </Button>
-    </Dialog.Controls>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
 
-{#if type === "completionModel"}
+{#if type === "completionModel" && !isMigratedCompletionModel}
   <MigrateModelDialog
     openController={showMigrateDialog}
     sourceModel={model as CompletionModel}

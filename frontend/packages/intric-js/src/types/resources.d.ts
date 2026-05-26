@@ -116,8 +116,16 @@ export type Conversation = components["schemas"]["SessionPublic"] & {
   messages: ConversationMessage[];
 };
 export type ConversationSparse = components["schemas"]["SessionMetadataPublic"];
-export type ConversationMessage = components["schemas"]["Message"];
+// num_tokens_* are populated by the backend on every persisted message and
+// streamed live via the SSE token_usage event. They're augmented here rather
+// than waiting on a full schema.d.ts regen, since the rest of the schema is
+// frozen against the openapi-typescript version used at generation time.
+export type ConversationMessage = components["schemas"]["Message"] & {
+  num_tokens_question?: number;
+  num_tokens_answer?: number;
+};
 export type ConversationTools = components["schemas"]["UseTools"];
+export type PreflightResponse = components["schemas"]["PreflightResponse"];
 export type GroupChat = components["schemas"]["GroupChatPublic"];
 export type GroupChatSparse = Omit<components["schemas"]["GroupChatSparse"], "user_id">;
 export type ChatPartner =

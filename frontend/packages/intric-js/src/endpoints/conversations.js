@@ -202,6 +202,52 @@ export function initConversations(client) {
     },
 
     /**
+     * Estimate exact token cost a request would add to context, without sending.
+     * Excludes RAG/web-search content (selected at request time).
+     * Caller should debounce; concurrent requests aren't aborted server-side.
+     * @param {Object} params
+     * @param {ChatPartner} [params.chatPartner] Target assistant or group chat (used when no conversation yet)
+     * @param {{id: string} | Conversation} [params.conversation] Existing conversation to continue
+     * @param {string} params.question The pending input
+     * @param {{id: string}[]} [params.files] Pending file attachments
+     * @param {import("../types/resources").ConversationTools} [params.tools] Pending assistant target
+     * @returns {Promise<import('../types/resources').PreflightResponse>}
+     * @throws {IntricError}
+     */
+    preflight: async ({ chatPartner, conversation, question, files, tools }) => {
+      /** @type {{session_id?: string, assistant_id?: string, group_chat_id?: string}} */
+      const target = { session_id: undefined, assistant_id: undefined, group_chat_id: undefined };
+
+      if (conversation?.id && conversation.id.trim() !== "") {
+        target.session_id = conversation.id;
+      } else if (chatPartner?.id) {
+        if (chatPartner.type === "assistant" || chatPartner.type === "default-assistant") {
+          target.assistant_id = chatPartner.id;
+        } else target.group_chat_id = chatPartner.id;
+      } else {
+        throw new IntricError(
+          "Preflight requires one of session, assistant, or groupChat",
+          "CONNECTION",
+          0,
+          0
+        );
+      }
+
+      const res = await client.fetch("/api/v1/conversations/preflight", {
+        method: "post",
+        requestBody: {
+          "application/json": {
+            ...target,
+            question,
+            file_ids: (files ?? []).map((f) => f.id),
+            tools
+          }
+        }
+      });
+      return res;
+    },
+
+    /**
      * Submit approval decisions for pending tool calls.
      * @param {Object} params Approval parameters
      * @param {string} params.approvalId The approval ID from the tool_approval_required event

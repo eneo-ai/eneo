@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, Union, cast
 from uuid import UUID
@@ -120,6 +121,9 @@ class CompletionModelBase(BaseModel):
     base_url: Optional[str] = None
     litellm_model_name: Optional[str] = None
     model_kwargs_capabilities: Optional[SupportedModelKwargs] = None
+    # Indicative USD ratecard. NULL = unknown / self-hosted.
+    input_cost_per_token: Optional[Decimal] = None
+    output_cost_per_token: Optional[Decimal] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -192,6 +196,7 @@ class CompletionModel(CompletionModelBase, InDB):
     tenant_id: Optional[UUID] = None
     provider_id: Optional[UUID] = None
     provider_type: Optional[str] = None
+    migrated_to_model_id: Optional[UUID] = None
 
     def _provider_type(self) -> str | None:
         return self.provider_type
@@ -204,6 +209,8 @@ class CompletionModelPublic(CompletionModel):
     credential_provider: Optional[str] = None
     security_classification: Optional[SecurityClassificationPublic] = None
     provider_name: Optional[str] = None
+    deprecation_date: Optional[str] = None
+    migrated_to_model_id: Optional[UUID] = None
 
     @classmethod
     def from_domain(cls, completion_model: CompletionModelDomain):
@@ -216,7 +223,7 @@ class CompletionModelPublic(CompletionModel):
             family=completion_model.family,
             max_input_tokens=completion_model.max_input_tokens,
             max_output_tokens=completion_model.max_output_tokens,
-            is_deprecated=completion_model.is_deprecated,
+            is_deprecated=completion_model.is_effectively_deprecated,
             nr_billion_parameters=completion_model.nr_billion_parameters,
             hf_link=completion_model.hf_link,
             stability=completion_model.stability,
@@ -231,6 +238,12 @@ class CompletionModelPublic(CompletionModel):
             base_url=completion_model.base_url,
             litellm_model_name=completion_model.litellm_model_name,
             model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
+            input_cost_per_token=getattr(
+                completion_model, "input_cost_per_token", None
+            ),
+            output_cost_per_token=getattr(
+                completion_model, "output_cost_per_token", None
+            ),
             is_org_enabled=completion_model.is_org_enabled,
             is_org_default=completion_model.is_org_default,
             can_access=completion_model.can_access,
@@ -245,6 +258,10 @@ class CompletionModelPublic(CompletionModel):
             provider_id=completion_model.provider_id,
             provider_name=completion_model.provider_name,
             provider_type=completion_model.provider_type,
+            deprecation_date=completion_model.litellm_deprecation_date,
+            migrated_to_model_id=getattr(
+                completion_model, "migrated_to_model_id", None
+            ),
         )
 
 
