@@ -70,7 +70,15 @@ def test_service_key_principals_fail_closed_with_typed_error(
         checker(_service_key_user())
 
     assert exc_info.value.code == "flow_service_key_principal_not_supported"
-    assert exc_info.value.context == {
-        "auth_layer": "service_key_principal",
-        "capability": capability,
-    }
+    context = exc_info.value.context
+    assert context is not None
+    assert context["auth_layer"] == "service_key_principal"
+    assert context["capability"] == capability
+
+    if capability == "view":
+        assert context["runtime_endpoint_hint"] == {
+            "key": "published_flow_runtime",
+            "description": "Use the published runtime projection for service-key Flow clients.",
+        }
+    else:
+        assert "runtime_endpoint_hint" not in context

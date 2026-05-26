@@ -1962,6 +1962,83 @@ tasks:
         - "T021 should turn the registry/match exhaustiveness concern into AST/import/enum guard coverage."
       next_task: T021
 
+  - id: T029
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "Align the legacy flow_permissions service-key unit test with the canonical T028 published-runtime hint behavior."
+    allowed_files:
+      - "backend/tests/unittests/flows/test_flow_permissions.py"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Do not edit router/API/error-envelope files in this slice."
+      - "Do not change service-key endpoint policy, identity, review/rerun/resume behavior, retention, schema migrations, webhook outbox, or Flow AI Builder behavior."
+      - "Do not echo or commit the owner-provided API keys."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_permissions.py::test_service_key_principals_fail_closed_with_typed_error tests/unittests/flows/test_flow_access_policy.py::test_service_key_principals_fail_closed_unless_route_explicitly_allows tests/unittests/flows/test_flow_router_crud.py::test_get_flow_keeps_service_key_principals_human_only tests/unittests/flows/test_flow_router_crud.py::test_get_published_flow_runtime_allows_service_key_principals tests/unit/test_flow_openapi_contract.py::test_openapi_get_flow_service_key_denial_points_to_published_runtime -q"
+      - "cd backend && uv run ruff check tests/unittests/flows/test_flow_permissions.py"
+      - "cd backend && uv run ruff format --check tests/unittests/flows/test_flow_permissions.py"
+      - "git diff --check"
+    stop_if:
+      - "The fix requires source behavior changes instead of aligning the stale test."
+      - "The owner decision requires changing service-key identity, review/rerun/resume policy, retention, schema migrations, webhook outbox, global auth, or Flow AI Builder behavior."
+    consolidation_effect:
+      reused_existing_owner: "FlowActionRequirement/raise_service_key_not_supported remains the canonical service-key denial context owner; flow_authoring_router remains the API-bound endpoint-template owner."
+      logic_moved_from: "None."
+      logic_deleted: "Stale no-hint assertion in the legacy flow_permissions wrapper test."
+      duplicate_path_removed: "The legacy wrapper test no longer protects an older service-key context shape that conflicts with T028."
+      new_code_added: "Only a focused assertion branch for the view capability runtime hint."
+      why_existing_owners_were_insufficient: "Existing owners are sufficient; the stale test was the only mismatch."
+      guard_preventing_duplicate_logic_from_returning: "The updated wrapper test now agrees with the policy, router, and OpenAPI guards for service-key view denials."
+      net_flow_logic_surface_area: "reduced"
+      if_increased_why: ""
+    receipt:
+      result: done
+      completed_at: "2026-05-26T04:29:39+02:00"
+      summary: "Aligned the legacy flow_permissions service-key wrapper test with the canonical T028 published-runtime hint behavior. The source policy already returns runtime_endpoint_hint for service-key VIEW denials, router/OpenAPI tests already require the API-bound /published/ endpoint template, and the running local OpenAPI on port 8123 exposes that hint. No service-key endpoint policy, identity, review/rerun/resume, retention, webhook, schema, router, or Flow AI Builder behavior changed."
+      evidence:
+        - "backend/src/intric/flows/flow_access_policy.py:83-89 gives VIEW denials the published-runtime alternative."
+        - "backend/src/intric/flows/flow_access_policy.py:249-265 adds runtime_endpoint_hint when a runtime alternative exists."
+        - "backend/src/intric/flows/api/flow_authoring_router.py:308-381 keeps GET /flows/{id}/ user-principal-oriented and resolves the published route hint at the FastAPI boundary."
+        - "backend/src/intric/flows/api/flow_authoring_router.py:394-455 keeps GET /flows/{id}/published/ as the service-key-safe single-flow runtime projection."
+        - "backend/tests/unittests/flows/test_flow_permissions.py:72-84 now asserts only the view capability carries runtime_endpoint_hint."
+      commands:
+        - command: "git fetch origin develop"
+          status: "pass"
+          output: "Fetched origin/develop."
+        - command: "git log --oneline --decorate HEAD..origin/develop -- backend/src/intric/flows backend/tests/unittests/flows backend/tests/integration/flows frontend/packages/intric-js/src/endpoints/flows.js | head -50"
+          status: "pass"
+          output: "No relevant Flow service-key commits found on origin/develop."
+        - command: "git grep -n 'allow_service_key_principals\\|flow_service_key_principal_not_supported\\|runtime_endpoint_hint\\|get_published_flow_runtime' origin/develop -- backend/src/intric/flows backend/tests/unittests/flows backend/tests/integration/flows frontend/packages/intric-js/src/endpoints/flows.js 2>/dev/null | head -100 || true"
+          status: "pass"
+          output: "No Flow proper service-key route/policy fix found on origin/develop."
+        - command: "python3 - <<'PY' ... fetch http://localhost:8123/openapi.json and inspect GET /api/v1/flows/{id}/ 403 service-key example ... PY"
+          status: "pass"
+          output: "Running local OpenAPI reports runtime_endpoint_hint endpoint_template=/api/v1/flows/{id}/published/."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_permissions.py::test_service_key_principals_fail_closed_with_typed_error -q"
+          status: "fail_expected_red"
+          output: "Failed before the test update because the view case still expected the pre-T028 no-hint context."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_permissions.py::test_service_key_principals_fail_closed_with_typed_error tests/unittests/flows/test_flow_access_policy.py::test_service_key_principals_fail_closed_unless_route_explicitly_allows tests/unittests/flows/test_flow_router_crud.py::test_get_flow_keeps_service_key_principals_human_only tests/unittests/flows/test_flow_router_crud.py::test_get_published_flow_runtime_allows_service_key_principals tests/unit/test_flow_openapi_contract.py::test_openapi_get_flow_service_key_denial_points_to_published_runtime -q"
+          status: "pass"
+          output: "9 passed, 15 warnings."
+        - command: "cd backend && uv run ruff check tests/unittests/flows/test_flow_permissions.py"
+          status: "pass"
+          output: "All checks passed."
+        - command: "cd backend && uv run ruff format --check tests/unittests/flows/test_flow_permissions.py"
+          status: "pass"
+          output: "1 file already formatted."
+        - command: "git diff --check"
+          status: "pass"
+      peer_review:
+        claude: "Skipped: test-only stale expectation alignment with no source/API policy change."
+        antigravity: "Skipped: not high-risk after source/router/OpenAPI guards and local OpenAPI verification agreed."
+      notes:
+        - "The owner-provided API keys were not used or echoed."
+        - "The reported response without runtime_endpoint_hint matches pre-T028 behavior; current branch and the running local OpenAPI both expose the published-runtime hint."
+        - "GET /flows/{id}/ remains user-principal/current-draft; service-key runtime clients should call GET /flows/{id}/published/."
+      next_task: T021
+
   - id: T021
     type: worker
     assignee: Worker
