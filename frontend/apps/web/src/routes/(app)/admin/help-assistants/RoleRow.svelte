@@ -8,6 +8,7 @@
   import { Button, Input } from "@intric/ui";
   import { writable } from "svelte/store";
   import { invalidate } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { toastError } from "$lib/core/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
@@ -38,7 +39,6 @@
   }
 
   const displayName = $derived(role.assistant_name ?? roleKindLabel(role.kind));
-  const editHref = $derived(`/spaces/${role.org_space_id}/assistants/${role.assistant_id}/edit`);
 
   const setEnabled = createAsyncState(async (next: boolean) => {
     enabledOverride = next;
@@ -89,7 +89,11 @@
   <div class="flex items-start justify-between gap-4">
     <div class="flex flex-col gap-0.5">
       <span class="text-secondary text-sm">{roleKindLabel(role.kind)}</span>
-      <a class="text-lg font-medium hover:underline" href={editHref}>{displayName}</a>
+      <a
+        class="text-lg font-medium hover:underline"
+        href={resolve(`/spaces/${role.org_space_id}/assistants/${role.assistant_id}/edit`)}
+        >{displayName}</a
+      >
     </div>
     <Button variant="outlined" onclick={() => ($reassignOpen = true)}>
       {m.admin_help_assistants_reassign_button()}
