@@ -12,7 +12,8 @@ from intric.flows.domain.flow import (
 )
 from intric.flows.enums import is_terminal_flow_run_status
 from intric.flows.runtime.claim_resolution import StepClaimResolution
-from intric.flows.runtime.models import RuntimeStep, StepExecutionOutput
+from intric.flows.runtime.models import RuntimeStep
+from intric.flows.runtime.step_execution_result import StepExecutionResult
 from intric.flows.runtime.step_result_builder import (
     build_completed_step_result,
     build_failed_step_result,
@@ -173,10 +174,11 @@ def build_step_success_plan(
     flow_id: UUID,
     tenant_id: UUID,
     step: RuntimeStep,
-    output: StepExecutionOutput,
+    result: StepExecutionResult,
     output_payload_json: dict[str, Any],
     execution_hash: str,
 ) -> StepSuccessPlan:
+    output = result.output
     return StepSuccessPlan(
         step_result=build_completed_step_result(
             claimed=claimed,
@@ -188,5 +190,5 @@ def build_step_success_plan(
             output_payload_json=output_payload_json,
             execution_hash=execution_hash,
         ),
-        should_deliver_webhook=step.output_mode == "http_post",
+        should_deliver_webhook=bool(result.delivery_intents),
     )

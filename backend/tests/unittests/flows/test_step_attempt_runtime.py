@@ -23,6 +23,11 @@ from intric.flows.runtime.step_attempt_runtime import (
     build_step_success_plan,
     build_typed_failure_plan,
 )
+from intric.flows.runtime.step_execution_result import (
+    StepExecutionResult,
+    WebhookDeliveryIntent,
+    WebhookPayloadRef,
+)
 from intric.flows.runtime.step_result_builder import build_completed_step_result
 
 
@@ -188,7 +193,7 @@ def test_build_generic_failure_plan_uses_public_error_contract():
     assert plan.return_result == {"status": "failed", "error": "step_execution_failed"}
 
 
-def test_build_step_success_plan_marks_webhook_delivery_requirement():
+def test_build_step_success_plan_follows_delivery_intents_not_output_mode():
     claimed = _claimed_result()
     step = _runtime_step(output_mode="http_post")
     output = _step_output()
@@ -199,33 +204,7 @@ def test_build_step_success_plan_marks_webhook_delivery_requirement():
         flow_id=claimed.flow_id,
         tenant_id=claimed.tenant_id,
         step=step,
-        output=output,
-        output_payload_json={
-            "text": "done",
-            "webhook_delivered": False,
-        },
-        execution_hash="exec-hash",
-    )
-
-    assert plan.should_deliver_webhook is True
-    assert plan.step_result.status == FlowStepResultStatus.COMPLETED
-    assert plan.step_result.output_payload_json == {
-        "text": "done",
-        "webhook_delivered": False,
-    }
-
-
-def test_build_step_success_plan_without_webhook_stays_false():
-    claimed = _claimed_result()
-    step = _runtime_step(output_mode="pass_through")
-
-    plan = build_step_success_plan(
-        claimed=claimed,
-        run_id=claimed.flow_run_id,
-        flow_id=claimed.flow_id,
-        tenant_id=claimed.tenant_id,
-        step=step,
-        output=_step_output(),
+        result=StepExecutionResult(output=output),
         output_payload_json={
             "text": "done",
             "webhook_delivered": False,
@@ -234,6 +213,50 @@ def test_build_step_success_plan_without_webhook_stays_false():
     )
 
     assert plan.should_deliver_webhook is False
+    assert plan.step_result.status == FlowStepResultStatus.COMPLETED
+    assert plan.step_result.output_payload_json == {
+        "text": "done",
+        "webhook_delivered": False,
+    }
+
+    claimed_without_http_mode = _claimed_result()
+    step = _runtime_step(output_mode="pass_through")
+
+    plan = build_step_success_plan(
+        claimed=claimed_without_http_mode,
+        run_id=claimed_without_http_mode.flow_run_id,
+        flow_id=claimed_without_http_mode.flow_id,
+        tenant_id=claimed_without_http_mode.tenant_id,
+        step=step,
+        result=StepExecutionResult(
+            output=_step_output(),
+            delivery_intents=(
+                WebhookDeliveryIntent(
+                    flow_run_id=claimed_without_http_mode.flow_run_id,
+                    step_id=step.step_id,
+                    step_order=step.step_order,
+                    attempt_no=2,
+                    idempotency_key=(
+                        f"{claimed_without_http_mode.flow_run_id}:"
+                        f"{step.step_id}:2:webhook"
+                    ),
+                    payload=WebhookPayloadRef(
+                        value=(
+                            f"flow_run:{claimed_without_http_mode.flow_run_id}:"
+                            f"step:{step.step_id}:attempt:2"
+                        )
+                    ),
+                ),
+            ),
+        ),
+        output_payload_json={
+            "text": "done",
+            "webhook_delivered": False,
+        },
+        execution_hash="exec-hash",
+    )
+
+    assert plan.should_deliver_webhook is True
 
 
 def test_build_attempt_provenance_round_trips_all_runtime_sections() -> None:

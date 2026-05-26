@@ -110,7 +110,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T020
+active_task: T021
 
 tasks:
   - id: T001
@@ -1816,7 +1816,7 @@ tasks:
   - id: T020
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Introduce the StepHandler registry and move current output_mode behavior dispatch behind handlers without changing runtime behavior."
     allowed_files:
@@ -1833,13 +1833,15 @@ tasks:
       - "backend/src/intric/flows/runtime/step_attempt_runtime.py"
       - "backend/src/intric/flows/runtime/template_fill_runtime.py"
       - "backend/tests/unittests/flows/test_flow_runtime_step_handlers.py"
+      - "backend/tests/unittests/flows/test_flow_executor_runtime.py"
+      - "backend/tests/unittests/flows/test_typed_io_executor.py"
       - "backend/tests/unittests/flows/test_step_execution_runtime.py"
       - "backend/tests/unittests/flows/test_step_attempt_runtime.py"
       - "backend/tests/integration/flows/test_flow_runtime_worker_contract.py"
     verify:
-      - "cd backend && uv run pytest tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py -q"
-      - "cd backend && uv run ruff check src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/step_handlers src/intric/flows/runtime/executor.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/runtime/step_attempt_runtime.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py"
-      - "cd backend && uv run ruff format --check src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/step_handlers src/intric/flows/runtime/executor.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/runtime/step_attempt_runtime.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/step_handlers src/intric/flows/runtime/executor.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/runtime/step_attempt_runtime.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/step_handlers src/intric/flows/runtime/executor.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/runtime/step_attempt_runtime.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py"
       - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/step_handlers src/intric/flows/runtime/executor.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/runtime/step_attempt_runtime.py"
       - "git diff --check"
     stop_if:
@@ -1873,12 +1875,97 @@ tasks:
       guard_preventing_duplicate_logic_from_returning: "Handler unit tests, step_attempt_runtime delivery-intent tests, integration worker contract, and T021 AST/import guards."
       net_flow_logic_surface_area: "reduced"
       if_increased_why: ""
-    receipt: null
+    implementation_review:
+      result: blocked
+      claude_artifact: ".codex/artifacts/claude-peer-loop-t020-step-handler-implementation-review-20260526T015906Z.md"
+      summary: "Claude verified the initial implementation but blocked commit because the main loop bypassed legacy executor test patches and broader executor tests were outside the verify set. T020 scope is widened only to the two executor test consumers so _execute_step can be the single result-returning runtime method instead of preserving a parallel output-only wrapper."
+    receipt:
+      result: done
+      summary: "Moved runtime output_mode behavior behind StepHandler ownership. FlowRunExecutor._execute_step is now the single result-returning runtime method, StepExecutionResult carries typed delivery intents, http_post delivery decisions come from handler-produced WebhookDeliveryIntent values, transcribe_only/template_fill behavior moved behind handlers, and step_attempt_runtime no longer reads output_mode for webhook delivery."
+      evidence:
+        - "backend/src/intric/flows/runtime/executor.py:720"
+        - "backend/src/intric/flows/runtime/executor.py:1011"
+        - "backend/src/intric/flows/runtime/executor.py:1051"
+        - "backend/src/intric/flows/runtime/step_execution_result.py:12"
+        - "backend/src/intric/flows/runtime/step_execution_result.py:23"
+        - "backend/src/intric/flows/runtime/step_handlers/__init__.py:21"
+        - "backend/src/intric/flows/runtime/step_handlers/http_post.py:18"
+        - "backend/src/intric/flows/runtime/step_handlers/transcribe_only.py:17"
+        - "backend/src/intric/flows/runtime/step_handlers/template_fill.py:15"
+        - "backend/src/intric/flows/runtime/step_handlers/pass_through.py:15"
+        - "backend/src/intric/flows/runtime/step_attempt_runtime.py:173"
+        - "backend/tests/unittests/flows/test_flow_runtime_step_handlers.py:153"
+        - "backend/tests/unittests/flows/test_step_attempt_runtime.py:219"
+        - "backend/tests/integration/flows/test_flow_runtime_worker_contract.py:794"
+      commands:
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_step_attempt_runtime.py::test_build_step_success_plan_follows_delivery_intents_not_output_mode -q"
+          status: fail_expected_red
+          output: "Failed before implementation with ModuleNotFoundError for intric.flows.runtime.step_execution_result."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py -q"
+          status: fail_then_triaged
+          output: "Initial post-implementation run failed with 22 executor-test regressions plus the known local PDF WeasyPrint dependency failure. The 22 regressions were fixed by collapsing _execute_step_result into _execute_step returning StepExecutionResult."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py -q -k 'not test_document_outputs_generate_downloadable_artifacts'"
+          status: pass
+          output: "197 passed, 2 deselected, 16 warnings."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_typed_io_executor.py::test_document_outputs_generate_downloadable_artifacts -q"
+          status: fail_environment
+          output: "PDF parameter fails locally because WeasyPrint cannot load libgobject-2.0-0; DOCX parameter passes."
+        - command: "cd backend && uv run ruff check src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/step_handlers src/intric/flows/runtime/executor.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/runtime/step_attempt_runtime.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py"
+          status: pass
+        - command: "cd backend && uv run ruff format --check src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/step_handlers src/intric/flows/runtime/executor.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/runtime/step_attempt_runtime.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py"
+          status: pass
+          output: "17 files already formatted."
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/step_handlers src/intric/flows/runtime/executor.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/runtime/step_attempt_runtime.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations."
+        - command: "git diff --check"
+          status: pass
+        - command: "rg -n \"_execute_step_result|output_handler\" backend/src/intric/flows/runtime backend/tests/unittests/flows/test_flow_runtime_step_handlers.py backend/tests/unittests/flows/test_flow_executor_runtime.py backend/tests/unittests/flows/test_typed_io_executor.py; test $? -eq 1"
+          status: pass
+        - command: "rg -n \"output_mode\" backend/src/intric/flows/runtime/step_attempt_runtime.py; test $? -eq 1"
+          status: pass
+        - command: "rg -n \"step\\.output_mode\\s*==|output_mode\\s*==\\s*\\\"(template_fill|transcribe_only|http_post|pass_through)\\\"\" backend/src/intric/flows/runtime/executor.py backend/src/intric/flows/runtime/step_execution_runtime.py backend/src/intric/flows/runtime/step_attempt_runtime.py backend/src/intric/flows/runtime/step_handlers"
+          status: pass_with_allowlist
+          output: "Only executor.py http_post attempt-start provenance remains; T020 preflight documented it as a T021 allowlist candidate."
+        - command: "git diff --unified=0 -- backend/src/intric/flows/runtime backend/tests/unittests/flows backend/tests/integration/flows | rg '^\\+.*(dict\\[str, Any\\]|\\bAny\\b|type: ignore|pyright: ignore)' ; test $? -eq 1"
+          status: pass
+        - command: "git diff --unified=0 -- backend/src/intric/flows/runtime backend/tests/unittests/flows backend/tests/integration/flows | rg '^\\+.*(T020|T013|T021|/tmp/|plan/phases|plan/progress)' ; test $? -eq 1"
+          status: pass
+        - command: "cd backend && uv run pytest tests/unittests/flows -q -k 'not test_document_outputs_generate_downloadable_artifacts'"
+          status: fail_out_of_scope
+          output: "4267 passed, 4 skipped, 2 deselected, 12 failed. Ten failures are PDF rendering tests blocked by missing local libgobject-2.0-0; remaining failures are stale service-key permission/repo snapshot expectations outside T020 allowed_files."
+      peer_review:
+        claude:
+          preflight_artifact: ".codex/artifacts/claude-peer-loop-t020-step-handler-worker-preflight-20260526T012222Z.md"
+          preflight_revision_artifact: ".codex/artifacts/claude-peer-loop-t020-step-handler-worker-preflight-revision-20260526T012803Z.md"
+          blocked_implementation_artifact: ".codex/artifacts/claude-peer-loop-t020-step-handler-implementation-review-20260526T015906Z.md"
+          final_implementation_artifact: ".codex/artifacts/claude-peer-loop-t020-step-handler-implementation-review-after-blocker-fix-20260526T021602Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8. Earlier blocker on broken executor tests was valid and addressed."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t020-step-handler-antigravity-final-gate-20260526T021858Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8. Flagged registry/match exhaustiveness and synthetic webhook payload ref as non-blocking follow-ups."
+      codex_disagreements:
+        - "Antigravity reported a clean complete test suite but its transcript omitted the local PDF dependency failure detail. Kept the receipt explicit: 197-test expanded non-PDF suite passes, isolated PDF parameter fails locally from missing libgobject-2.0-0, and DOCX passes."
+        - "Claude and Antigravity suggested assert_never/static exhaustiveness polish for _build_step_handler. Deferred to T021 guard task because both reviews greenlit the commit and changing source after the gates would require another review loop."
+      consolidation_effect:
+        reused_existing_owner: "complete_step_execution, execute_template_fill_step, transcribe_only validation/payload construction, direct webhook delivery executor code until T013, and step_attempt_runtime success-plan shape."
+        logic_moved_from: "executor.py template_fill branch, step_execution_runtime.py transcribe_only branch, and step_attempt_runtime.py http_post delivery-decision branch."
+        logic_deleted: "Direct output_mode behavior dispatch outside handler ownership and the parallel _execute_step_result wrapper."
+        duplicate_path_removed: "step_attempt_runtime.py no longer reads output_mode; FlowRunExecutor now has one result-returning _execute_step method."
+        new_code_added: "StepExecutionResult, WebhookDeliveryIntent, WebhookPayloadRef, StepHandler protocol, handler registry, and one handler per current output mode."
+        why_existing_owners_were_insufficient: "Current runtime behavior had no single owner for what output_mode means, and webhook delivery state needed typed data beyond StepExecutionOutput."
+        guard_preventing_duplicate_logic_from_returning: "Handler registry/per-handler tests, step_attempt_runtime intent projection test, expanded executor tests, integration webhook contract, source grep guards, and queued T021 AST/import guards."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: ""
+      notes:
+        - "Did not edit routers, FastAPI auth/error behavior, service-key policy, retention, schema migrations, durable webhook outbox, frontend code, or Flow AI Builder."
+        - "T021 should turn the registry/match exhaustiveness concern into AST/import/enum guard coverage."
+      next_task: T021
 
   - id: T021
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: medium
     objective: "Add AST/import/enum-based architecture guard tests that enforce one runtime owner, no scattered output_mode/output_type branching, registry totality, and no duplicate DOCX/PDF rendering path."
     allowed_files:

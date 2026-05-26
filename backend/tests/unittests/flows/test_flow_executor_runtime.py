@@ -49,6 +49,12 @@ from intric.flows.runtime.executor import (
     StepExecutionOutput,
     StepInputValue,
 )
+from intric.flows.runtime.output_runtime import TypedOutputProcessingResult
+from intric.flows.runtime.step_execution_result import (
+    StepExecutionResult,
+    WebhookDeliveryIntent,
+    WebhookPayloadRef,
+)
 from intric.main.exceptions import BadRequestException, TypedIOValidationException
 
 _DEFAULT_SNAPSHOT_MODEL_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -214,6 +220,43 @@ def _started_step_attempt(
         finished_at=None,
         created_at=now,
         updated_at=now,
+    )
+
+
+def _step_result(output: StepExecutionOutput) -> StepExecutionResult:
+    return StepExecutionResult(output=output)
+
+
+def _typed_output_result() -> TypedOutputProcessingResult:
+    return TypedOutputProcessingResult(
+        structured_output=None,
+        artifacts=None,
+        diagnostics=[],
+    )
+
+
+def _webhook_step_result(
+    output: StepExecutionOutput,
+    *,
+    run_id: UUID,
+    step_id: UUID,
+    step_order: int = 1,
+    attempt_no: int = 1,
+) -> StepExecutionResult:
+    return StepExecutionResult(
+        output=output,
+        delivery_intents=(
+            WebhookDeliveryIntent(
+                flow_run_id=run_id,
+                step_id=step_id,
+                step_order=step_order,
+                attempt_no=attempt_no,
+                idempotency_key=f"{run_id}:{step_id}:{attempt_no}:webhook",
+                payload=WebhookPayloadRef(
+                    value=f"flow_run:{run_id}:step:{step_id}:attempt:{attempt_no}"
+                ),
+            ),
+        ),
     )
 
 
@@ -467,32 +510,36 @@ async def test_webhook_failure_keeps_completed_step_evidence(user):
     )
     executor._flow_is_active = AsyncMock(return_value=True)
     executor._execute_step = AsyncMock(
-        return_value=StepExecutionOutput(
-            input_text="hello",
-            source_text="hello",
-            input_source="flow_input",
-            used_question_binding=False,
-            legacy_prompt_binding_used=False,
-            full_text="result",
-            persisted_text="result",
-            generated_file_ids=[],
-            tool_calls_metadata=None,
-            num_tokens_input=10,
-            num_tokens_output=11,
-            effective_prompt="prompt",
-            model_parameters_json={"temperature": 0.2},
-            contract_validation={
-                "schema_type_hint": "object",
-                "parse_attempted": True,
-                "parse_succeeded": True,
-                "candidate_type": "dict",
-            },
-            transcription_metadata={
-                "model": "kb-whisper-large",
-                "language": "sv",
-                "files_count": 1,
-                "elapsed_ms": 1200,
-            },
+        return_value=_webhook_step_result(
+            StepExecutionOutput(
+                input_text="hello",
+                source_text="hello",
+                input_source="flow_input",
+                used_question_binding=False,
+                legacy_prompt_binding_used=False,
+                full_text="result",
+                persisted_text="result",
+                generated_file_ids=[],
+                tool_calls_metadata=None,
+                num_tokens_input=10,
+                num_tokens_output=11,
+                effective_prompt="prompt",
+                model_parameters_json={"temperature": 0.2},
+                contract_validation={
+                    "schema_type_hint": "object",
+                    "parse_attempted": True,
+                    "parse_succeeded": True,
+                    "candidate_type": "dict",
+                },
+                transcription_metadata={
+                    "model": "kb-whisper-large",
+                    "language": "sv",
+                    "files_count": 1,
+                    "elapsed_ms": 1200,
+                },
+            ),
+            run_id=queued_run.id,
+            step_id=step_id,
         )
     )
     executor._deliver_webhook = AsyncMock(
@@ -583,20 +630,24 @@ async def test_webhook_failure_logs_exception_context(user, monkeypatch):
     )
     executor._flow_is_active = AsyncMock(return_value=True)
     executor._execute_step = AsyncMock(
-        return_value=StepExecutionOutput(
-            input_text="hello",
-            source_text="hello",
-            input_source="flow_input",
-            used_question_binding=False,
-            legacy_prompt_binding_used=False,
-            full_text="result",
-            persisted_text="result",
-            generated_file_ids=[],
-            tool_calls_metadata=None,
-            num_tokens_input=10,
-            num_tokens_output=11,
-            effective_prompt="prompt",
-            model_parameters_json={"temperature": 0.2},
+        return_value=_webhook_step_result(
+            StepExecutionOutput(
+                input_text="hello",
+                source_text="hello",
+                input_source="flow_input",
+                used_question_binding=False,
+                legacy_prompt_binding_used=False,
+                full_text="result",
+                persisted_text="result",
+                generated_file_ids=[],
+                tool_calls_metadata=None,
+                num_tokens_input=10,
+                num_tokens_output=11,
+                effective_prompt="prompt",
+                model_parameters_json={"temperature": 0.2},
+            ),
+            run_id=queued_run.id,
+            step_id=step_id,
         )
     )
     executor._deliver_webhook = AsyncMock(
@@ -662,20 +713,24 @@ async def test_webhook_success_persists_delivery_and_completes_run(user):
     )
     executor._flow_is_active = AsyncMock(return_value=True)
     executor._execute_step = AsyncMock(
-        return_value=StepExecutionOutput(
-            input_text="hello",
-            source_text="hello",
-            input_source="flow_input",
-            used_question_binding=False,
-            legacy_prompt_binding_used=False,
-            full_text="result",
-            persisted_text="result",
-            generated_file_ids=[],
-            tool_calls_metadata=None,
-            num_tokens_input=10,
-            num_tokens_output=11,
-            effective_prompt="prompt",
-            model_parameters_json={"temperature": 0.2},
+        return_value=_webhook_step_result(
+            StepExecutionOutput(
+                input_text="hello",
+                source_text="hello",
+                input_source="flow_input",
+                used_question_binding=False,
+                legacy_prompt_binding_used=False,
+                full_text="result",
+                persisted_text="result",
+                generated_file_ids=[],
+                tool_calls_metadata=None,
+                num_tokens_input=10,
+                num_tokens_output=11,
+                effective_prompt="prompt",
+                model_parameters_json={"temperature": 0.2},
+            ),
+            run_id=queued_run.id,
+            step_id=step_id,
         )
     )
     executor._deliver_webhook = AsyncMock()
@@ -779,43 +834,47 @@ async def test_execute_persists_distinct_model_parameters_for_each_step(user):
     executor._flow_is_active = AsyncMock(return_value=True)
     executor._execute_step = AsyncMock(
         side_effect=[
-            StepExecutionOutput(
-                input_text="hello",
-                source_text="hello",
-                input_source="flow_input",
-                used_question_binding=False,
-                legacy_prompt_binding_used=False,
-                full_text="step-one",
-                persisted_text="step-one",
-                generated_file_ids=[],
-                tool_calls_metadata=None,
-                num_tokens_input=10,
-                num_tokens_output=11,
-                effective_prompt="prompt-one",
-                model_parameters_json={
-                    "model_id": str(uuid4()),
-                    "model_name": "claude-haiku-4-5",
-                    "provider": "anthropic",
-                },
+            _step_result(
+                StepExecutionOutput(
+                    input_text="hello",
+                    source_text="hello",
+                    input_source="flow_input",
+                    used_question_binding=False,
+                    legacy_prompt_binding_used=False,
+                    full_text="step-one",
+                    persisted_text="step-one",
+                    generated_file_ids=[],
+                    tool_calls_metadata=None,
+                    num_tokens_input=10,
+                    num_tokens_output=11,
+                    effective_prompt="prompt-one",
+                    model_parameters_json={
+                        "model_id": str(uuid4()),
+                        "model_name": "claude-haiku-4-5",
+                        "provider": "anthropic",
+                    },
+                )
             ),
-            StepExecutionOutput(
-                input_text="step-one",
-                source_text="step-one",
-                input_source="previous_step",
-                used_question_binding=False,
-                legacy_prompt_binding_used=False,
-                full_text="step-two",
-                persisted_text="step-two",
-                generated_file_ids=[],
-                tool_calls_metadata=None,
-                num_tokens_input=12,
-                num_tokens_output=13,
-                effective_prompt="prompt-two",
-                model_parameters_json={
-                    "model_id": str(uuid4()),
-                    "model_name": "gpt-4o-mini",
-                    "provider": "openai",
-                },
+            _step_result(
+                StepExecutionOutput(
+                    input_text="step-one",
+                    source_text="step-one",
+                    input_source="previous_step",
+                    used_question_binding=False,
+                    legacy_prompt_binding_used=False,
+                    full_text="step-two",
+                    persisted_text="step-two",
+                    generated_file_ids=[],
+                    tool_calls_metadata=None,
+                    num_tokens_input=12,
+                    num_tokens_output=13,
+                    effective_prompt="prompt-two",
+                    model_parameters_json={
+                        "model_id": str(uuid4()),
+                        "model_name": "gpt-4o-mini",
+                        "provider": "openai",
+                    },
+                )
             ),
         ]
     )
@@ -1999,20 +2058,22 @@ async def test_execute_uses_persisted_next_attempt_no_for_attempt_lifecycle(user
     )
     executor._flow_is_active = AsyncMock(return_value=True)
     executor._execute_step = AsyncMock(
-        return_value=StepExecutionOutput(
-            input_text="hello",
-            source_text="hello",
-            input_source="flow_input",
-            used_question_binding=False,
-            legacy_prompt_binding_used=False,
-            full_text="done",
-            persisted_text="done",
-            generated_file_ids=[],
-            tool_calls_metadata=None,
-            num_tokens_input=10,
-            num_tokens_output=10,
-            effective_prompt="prompt",
-            model_parameters_json={},
+        return_value=_step_result(
+            StepExecutionOutput(
+                input_text="hello",
+                source_text="hello",
+                input_source="flow_input",
+                used_question_binding=False,
+                legacy_prompt_binding_used=False,
+                full_text="done",
+                persisted_text="done",
+                generated_file_ids=[],
+                tool_calls_metadata=None,
+                num_tokens_input=10,
+                num_tokens_output=10,
+                effective_prompt="prompt",
+                model_parameters_json={},
+            )
         )
     )
 
@@ -2084,20 +2145,22 @@ async def test_execute_stops_before_claiming_later_steps_when_run_becomes_cancel
     )
     executor._flow_is_active = AsyncMock(return_value=True)
     executor._execute_step = AsyncMock(
-        return_value=StepExecutionOutput(
-            input_text="hello",
-            source_text="hello",
-            input_source="flow_input",
-            used_question_binding=False,
-            legacy_prompt_binding_used=False,
-            full_text="step-one",
-            persisted_text="step-one",
-            generated_file_ids=[],
-            tool_calls_metadata=None,
-            num_tokens_input=10,
-            num_tokens_output=10,
-            effective_prompt="prompt",
-            model_parameters_json={},
+        return_value=_step_result(
+            StepExecutionOutput(
+                input_text="hello",
+                source_text="hello",
+                input_source="flow_input",
+                used_question_binding=False,
+                legacy_prompt_binding_used=False,
+                full_text="step-one",
+                persisted_text="step-one",
+                generated_file_ids=[],
+                tool_calls_metadata=None,
+                num_tokens_input=10,
+                num_tokens_output=10,
+                effective_prompt="prompt",
+                model_parameters_json={},
+            )
         )
     )
 
@@ -2160,20 +2223,22 @@ async def test_execute_does_not_persist_step_after_run_cancelled_during_executio
     )
     executor._flow_is_active = AsyncMock(return_value=True)
     executor._execute_step = AsyncMock(
-        return_value=StepExecutionOutput(
-            input_text="hello",
-            source_text="hello",
-            input_source="flow_input",
-            used_question_binding=False,
-            legacy_prompt_binding_used=False,
-            full_text="result",
-            persisted_text="result",
-            generated_file_ids=[],
-            tool_calls_metadata=None,
-            num_tokens_input=10,
-            num_tokens_output=10,
-            effective_prompt="prompt",
-            model_parameters_json={},
+        return_value=_step_result(
+            StepExecutionOutput(
+                input_text="hello",
+                source_text="hello",
+                input_source="flow_input",
+                used_question_binding=False,
+                legacy_prompt_binding_used=False,
+                full_text="result",
+                persisted_text="result",
+                generated_file_ids=[],
+                tool_calls_metadata=None,
+                num_tokens_input=10,
+                num_tokens_output=10,
+                effective_prompt="prompt",
+                model_parameters_json={},
+            )
         )
     )
 
@@ -2262,20 +2327,22 @@ async def test_execute_returns_terminal_outcome_when_review_open_loses_run_race(
     )
     executor._flow_is_active = AsyncMock(return_value=True)
     executor._execute_step = AsyncMock(
-        return_value=StepExecutionOutput(
-            input_text="hello",
-            source_text="hello",
-            input_source="flow_input",
-            used_question_binding=False,
-            legacy_prompt_binding_used=False,
-            full_text="done",
-            persisted_text="done",
-            generated_file_ids=[],
-            tool_calls_metadata=None,
-            num_tokens_input=10,
-            num_tokens_output=10,
-            effective_prompt="prompt",
-            model_parameters_json={},
+        return_value=_step_result(
+            StepExecutionOutput(
+                input_text="hello",
+                source_text="hello",
+                input_source="flow_input",
+                used_question_binding=False,
+                legacy_prompt_binding_used=False,
+                full_text="done",
+                persisted_text="done",
+                generated_file_ids=[],
+                tool_calls_metadata=None,
+                num_tokens_input=10,
+                num_tokens_output=10,
+                effective_prompt="prompt",
+                model_parameters_json={},
+            )
         )
     )
 
@@ -2352,20 +2419,22 @@ async def test_execute_propagates_non_terminal_review_open_errors(user):
     )
     executor._flow_is_active = AsyncMock(return_value=True)
     executor._execute_step = AsyncMock(
-        return_value=StepExecutionOutput(
-            input_text="hello",
-            source_text="hello",
-            input_source="flow_input",
-            used_question_binding=False,
-            legacy_prompt_binding_used=False,
-            full_text="done",
-            persisted_text="done",
-            generated_file_ids=[],
-            tool_calls_metadata=None,
-            num_tokens_input=10,
-            num_tokens_output=10,
-            effective_prompt="prompt",
-            model_parameters_json={},
+        return_value=_step_result(
+            StepExecutionOutput(
+                input_text="hello",
+                source_text="hello",
+                input_source="flow_input",
+                used_question_binding=False,
+                legacy_prompt_binding_used=False,
+                full_text="done",
+                persisted_text="done",
+                generated_file_ids=[],
+                tool_calls_metadata=None,
+                num_tokens_input=10,
+                num_tokens_output=10,
+                effective_prompt="prompt",
+                model_parameters_json={},
+            )
         )
     )
 
@@ -2455,20 +2524,22 @@ async def test_execute_appends_completed_handoff_and_continues_with_next_step(us
     )
     executor._flow_is_active = AsyncMock(return_value=True)
     executor._execute_step = AsyncMock(
-        return_value=StepExecutionOutput(
-            input_text="from-step-1",
-            source_text="from-step-1",
-            input_source="previous_step",
-            used_question_binding=False,
-            legacy_prompt_binding_used=False,
-            full_text="from-step-2",
-            persisted_text="from-step-2",
-            generated_file_ids=[],
-            tool_calls_metadata=None,
-            num_tokens_input=10,
-            num_tokens_output=10,
-            effective_prompt="prompt",
-            model_parameters_json={},
+        return_value=_step_result(
+            StepExecutionOutput(
+                input_text="from-step-1",
+                source_text="from-step-1",
+                input_source="previous_step",
+                used_question_binding=False,
+                legacy_prompt_binding_used=False,
+                full_text="from-step-2",
+                persisted_text="from-step-2",
+                generated_file_ids=[],
+                tool_calls_metadata=None,
+                num_tokens_input=10,
+                num_tokens_output=10,
+                effective_prompt="prompt",
+                model_parameters_json={},
+            )
         )
     )
 
@@ -2545,20 +2616,22 @@ async def test_execute_cancels_when_flow_deleted_after_first_step_and_keeps_comp
     )
     executor._flow_is_active = AsyncMock(side_effect=[True, True, False])
     executor._execute_step = AsyncMock(
-        return_value=StepExecutionOutput(
-            input_text="hello",
-            source_text="hello",
-            input_source="flow_input",
-            used_question_binding=False,
-            legacy_prompt_binding_used=False,
-            full_text="step-one",
-            persisted_text="step-one",
-            generated_file_ids=[],
-            tool_calls_metadata=None,
-            num_tokens_input=10,
-            num_tokens_output=10,
-            effective_prompt="prompt",
-            model_parameters_json={},
+        return_value=_step_result(
+            StepExecutionOutput(
+                input_text="hello",
+                source_text="hello",
+                input_source="flow_input",
+                used_question_binding=False,
+                legacy_prompt_binding_used=False,
+                full_text="step-one",
+                persisted_text="step-one",
+                generated_file_ids=[],
+                tool_calls_metadata=None,
+                num_tokens_input=10,
+                num_tokens_output=10,
+                effective_prompt="prompt",
+                model_parameters_json={},
+            )
         )
     )
 
@@ -3257,7 +3330,7 @@ async def test_execute_step_records_attempt_start_before_llm_dispatch(user):
             text="hello", source_text="hello", input_source="flow_input"
         )
     )
-    executor._process_typed_output = AsyncMock(return_value=(None, None))
+    executor._process_typed_output = AsyncMock(return_value=_typed_output_result())
     executor._apply_output_cap = AsyncMock(return_value=("answer", []))
     executor._commit = AsyncMock()
 
@@ -3292,7 +3365,7 @@ async def test_execute_step_uses_rag_chunks_when_knowledge_present(user):
             text="hello", source_text="hello", input_source="flow_input"
         )
     )
-    executor._process_typed_output = AsyncMock(return_value=(None, None))
+    executor._process_typed_output = AsyncMock(return_value=_typed_output_result())
     executor._apply_output_cap = AsyncMock(return_value=("answer", []))
     executor._commit = AsyncMock()
     source_id = uuid4()
@@ -3317,7 +3390,7 @@ async def test_execute_step_uses_rag_chunks_when_knowledge_present(user):
         return_value=SimpleNamespace(chunks=chunks, no_duplicate_chunks=[chunks[0]])
     )
 
-    output = await executor._execute_step(step=step, run=run, state=state)
+    output = (await executor._execute_step(step=step, run=run, state=state)).output
 
     executor.references_service.get_references.assert_awaited_once()
     rag_kwargs = executor.references_service.get_references.await_args.kwargs
@@ -3359,13 +3432,13 @@ async def test_execute_step_skips_rag_when_assistant_has_no_knowledge(user):
             text="hello", source_text="hello", input_source="flow_input"
         )
     )
-    executor._process_typed_output = AsyncMock(return_value=(None, None))
+    executor._process_typed_output = AsyncMock(return_value=_typed_output_result())
     executor._apply_output_cap = AsyncMock(return_value=("answer", []))
     executor._commit = AsyncMock()
     executor.references_service = AsyncMock()
     executor.references_service.get_references = AsyncMock()
 
-    output = await executor._execute_step(step=step, run=run, state=state)
+    output = (await executor._execute_step(step=step, run=run, state=state)).output
 
     executor.references_service.get_references.assert_not_awaited()
     assert assistant.get_response.await_args.kwargs["info_blob_chunks"] == []
@@ -3393,7 +3466,7 @@ async def test_execute_step_rag_timeout_appends_diagnostic_and_continues(user):
             text="hello", source_text="hello", input_source="flow_input"
         )
     )
-    executor._process_typed_output = AsyncMock(return_value=(None, None))
+    executor._process_typed_output = AsyncMock(return_value=_typed_output_result())
     executor._apply_output_cap = AsyncMock(return_value=("answer", []))
     executor._commit = AsyncMock()
     executor.references_service = AsyncMock()
@@ -3401,7 +3474,7 @@ async def test_execute_step_rag_timeout_appends_diagnostic_and_continues(user):
         side_effect=asyncio.TimeoutError()
     )
 
-    output = await executor._execute_step(step=step, run=run, state=state)
+    output = (await executor._execute_step(step=step, run=run, state=state)).output
 
     assert assistant.get_response.await_args.kwargs["info_blob_chunks"] == []
     assert output.rag_metadata is not None
@@ -3430,7 +3503,7 @@ async def test_execute_step_rag_failure_appends_diagnostic_and_continues(user):
             text="hello", source_text="hello", input_source="flow_input"
         )
     )
-    executor._process_typed_output = AsyncMock(return_value=(None, None))
+    executor._process_typed_output = AsyncMock(return_value=_typed_output_result())
     executor._apply_output_cap = AsyncMock(return_value=("answer", []))
     executor._commit = AsyncMock()
     executor.references_service = AsyncMock()
@@ -3438,7 +3511,7 @@ async def test_execute_step_rag_failure_appends_diagnostic_and_continues(user):
         side_effect=RuntimeError("boom")
     )
 
-    output = await executor._execute_step(step=step, run=run, state=state)
+    output = (await executor._execute_step(step=step, run=run, state=state)).output
 
     assert assistant.get_response.await_args.kwargs["info_blob_chunks"] == []
     assert output.rag_metadata is not None
@@ -3467,13 +3540,13 @@ async def test_execute_step_skips_rag_when_input_is_whitespace(user):
             text="   ", source_text="   ", input_source="flow_input"
         )
     )
-    executor._process_typed_output = AsyncMock(return_value=(None, None))
+    executor._process_typed_output = AsyncMock(return_value=_typed_output_result())
     executor._apply_output_cap = AsyncMock(return_value=("answer", []))
     executor._commit = AsyncMock()
     executor.references_service = AsyncMock()
     executor.references_service.get_references = AsyncMock()
 
-    output = await executor._execute_step(step=step, run=run, state=state)
+    output = (await executor._execute_step(step=step, run=run, state=state)).output
 
     executor.references_service.get_references.assert_not_awaited()
     assert output.rag_metadata is not None
@@ -3604,20 +3677,22 @@ async def test_prior_results_bootstrap_once(user):
     )
     executor._flow_is_active = AsyncMock(return_value=True)
     executor._execute_step = AsyncMock(
-        return_value=StepExecutionOutput(
-            input_text="hello",
-            source_text="hello",
-            input_source="flow_input",
-            used_question_binding=False,
-            legacy_prompt_binding_used=False,
-            full_text="result",
-            persisted_text="result",
-            generated_file_ids=[],
-            tool_calls_metadata=None,
-            num_tokens_input=10,
-            num_tokens_output=11,
-            effective_prompt="prompt",
-            model_parameters_json={"temperature": 0.2},
+        return_value=_step_result(
+            StepExecutionOutput(
+                input_text="hello",
+                source_text="hello",
+                input_source="flow_input",
+                used_question_binding=False,
+                legacy_prompt_binding_used=False,
+                full_text="result",
+                persisted_text="result",
+                generated_file_ids=[],
+                tool_calls_metadata=None,
+                num_tokens_input=10,
+                num_tokens_output=11,
+                effective_prompt="prompt",
+                model_parameters_json={"temperature": 0.2},
+            )
         )
     )
 
@@ -4039,20 +4114,22 @@ async def test_execute_audits_completed_run_terminal_state(user):
     )
     executor._flow_is_active = AsyncMock(return_value=True)
     executor._execute_step = AsyncMock(
-        return_value=StepExecutionOutput(
-            input_text="hello",
-            source_text="hello",
-            input_source="flow_input",
-            used_question_binding=False,
-            legacy_prompt_binding_used=False,
-            full_text="done",
-            persisted_text="done",
-            generated_file_ids=[],
-            tool_calls_metadata=None,
-            num_tokens_input=10,
-            num_tokens_output=10,
-            effective_prompt="prompt",
-            model_parameters_json={},
+        return_value=_step_result(
+            StepExecutionOutput(
+                input_text="hello",
+                source_text="hello",
+                input_source="flow_input",
+                used_question_binding=False,
+                legacy_prompt_binding_used=False,
+                full_text="done",
+                persisted_text="done",
+                generated_file_ids=[],
+                tool_calls_metadata=None,
+                num_tokens_input=10,
+                num_tokens_output=10,
+                effective_prompt="prompt",
+                model_parameters_json={},
+            )
         )
     )
 

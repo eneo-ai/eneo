@@ -609,7 +609,11 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert attempt_rows[0].status == FlowStepAttemptStatus.COMPLETED.value
         assert attempt_rows[0].finished_at is not None
 
-        evidence = await container.flow_run_service().get_evidence(run_id=run.id)
+        evidence = (
+            await container.flow_run_evidence_service().get_redacted_evidence_bundle(
+                run_id=run.id
+            )
+        ).to_dict()
         assert evidence["run"]["status"] == FlowRunStatus.COMPLETED.value
         assert evidence["step_results"][0]["output_payload_json"] == {
             "text": "The run completed.",
@@ -629,7 +633,7 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert outbox_row.entity_id == run.id
         assert outbox_row.description == "flow_run_completed:executor_completed"
 
-        rerun_result = await container.flow_run_service().rerun_step(
+        rerun_result = await container.flow_run_rerun_service().rerun_step(
             flow_id=flow.id,
             run_id=run.id,
             rerun_step_id=step.id,
@@ -730,7 +734,11 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert invalidated_row.new_attempt_no == 2
         assert invalidated_row.new_attempt_id == rerun_attempt_rows[1].id
 
-        rerun_evidence = await container.flow_run_service().get_evidence(run_id=run.id)
+        rerun_evidence = (
+            await container.flow_run_evidence_service().get_redacted_evidence_bundle(
+                run_id=run.id
+            )
+        ).to_dict()
         assert len(rerun_evidence["step_attempts"]) == 2
         assert [
             attempt["attempt_no"] for attempt in rerun_evidence["step_attempts"]
@@ -853,7 +861,9 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
         )
 
     assert result["status"] == "failed"
-    assert "not valid JSON" in result["error"]
+    assert result["error"] == (
+        "Step 1: typed input/output validation failed (typed_io_output_parse_failed)."
+    )
     (
         run_row,
         step_result_row,
@@ -866,7 +876,9 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
 
     assert run_row is not None
     assert run_row.status == FlowRunStatus.FAILED.value
-    assert "not valid JSON" in FlowRunError.model_validate(run_row.error_json).message
+    assert FlowRunError.model_validate(run_row.error_json).message == (
+        "Step 1: typed input/output validation failed (typed_io_output_parse_failed)."
+    )
     assert step_result_row is not None
     assert step_result_row.status == FlowStepResultStatus.FAILED.value
     assert step_result_row.error_message is not None
@@ -946,6 +958,70 @@ async def test_attempt_start_failure_persists_failed_state_for_fresh_sessions(
     assert [row.source for row in outbox_rows] == [
         FlowRunLifecycleSource.EXECUTOR_FAILED.value
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_webhook_delivery_success_uses_handler_intent_for_fresh_sessions(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            return_value=SimpleNamespace(
+                completion="Webhook payload text.",
+                total_token_count=1,
+            )
+        )
+    )
+
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+            output_mode="http_post",
+        )
+        context.executor._deliver_webhook = AsyncMock()
+        result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            celery_task_id=f"runtime-webhook-success-{uuid4()}",
+            retry_count=0,
+        )
+
+    assert result == {"status": "completed"}
+    context.executor._deliver_webhook.assert_awaited_once()
+    (
+        run_row,
+        step_result_row,
+        attempt_rows,
+        outbox_rows,
+    ) = await _failure_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    assert run_row is not None
+    assert run_row.status == FlowRunStatus.COMPLETED.value
+    assert step_result_row is not None
+    assert step_result_row.status == FlowStepResultStatus.COMPLETED.value
+    assert step_result_row.output_payload_json == {
+        "text": "Webhook payload text.",
+        "webhook_delivered": True,
+    }
+    assert len(attempt_rows) == 1
+    assert attempt_rows[0].status == FlowStepAttemptStatus.COMPLETED.value
+    assert [row.target_status for row in outbox_rows] == [FlowRunStatus.COMPLETED.value]
 
 
 @pytest.mark.asyncio

@@ -1525,7 +1525,7 @@ async def test_file_input_uses_extracted_file_text(user):
         return_value=_mock_assistant_for_execute_step()
     )
 
-    output = await executor._execute_step(step=step, run=run)
+    output = (await executor._execute_step(step=step, run=run)).output
 
     assert output.input_text == "Extracted file text"
     assert output.full_text == "ok"
@@ -1610,7 +1610,7 @@ async def test_audio_step_does_not_forward_audio_files_to_llm(user):
         )
     )
 
-    output = await executor._execute_step(step=step, run=run)
+    output = (await executor._execute_step(step=step, run=run)).output
 
     assert output.input_text == "Transcribed text"
     assert assistant.get_response.await_args.kwargs["files"] == []
@@ -1646,7 +1646,7 @@ async def test_audio_transcribe_only_skips_llm_and_rag(user):
         return_value=([], {"status": "should_not_run"}, [])
     )
 
-    output = await executor._execute_step(step=step, run=run)
+    output = (await executor._execute_step(step=step, run=run)).output
 
     assistant.get_response.assert_not_awaited()
     executor._retrieve_rag_chunks.assert_not_awaited()
@@ -1700,7 +1700,7 @@ async def test_text_input_contract_accepts_json_object_string(user):
         return_value=_mock_assistant_for_execute_step()
     )
 
-    output = await executor._execute_step(step=step, run=run)
+    output = (await executor._execute_step(step=step, run=run)).output
 
     assert output.input_text == '{"title":"Sakerhetsanalys"}'
     assert output.full_text == "ok"
@@ -1731,7 +1731,7 @@ async def test_text_input_contract_accepts_json_array_string(user):
         return_value=_mock_assistant_for_execute_step()
     )
 
-    output = await executor._execute_step(step=step, run=run)
+    output = (await executor._execute_step(step=step, run=run)).output
 
     assert output.input_text == '["a","b"]'
     assert output.full_text == "ok"
@@ -1816,7 +1816,7 @@ async def test_text_input_contract_string_schema_keeps_string_behavior(user):
         return_value=_mock_assistant_for_execute_step()
     )
 
-    output = await executor._execute_step(step=step, run=run)
+    output = (await executor._execute_step(step=step, run=run)).output
 
     assert output.input_text == '{"title":"still a string"}'
     assert output.full_text == "ok"
@@ -1854,7 +1854,7 @@ async def test_document_outputs_generate_downloadable_artifacts(
         return_value=_mock_assistant_for_execute_step(response_text="Rapport")
     )
 
-    output = await executor._execute_step(step=step, run=run)
+    output = (await executor._execute_step(step=step, run=run)).output
 
     assert output.artifacts is not None
     assert len(output.artifacts) == 1
@@ -1878,7 +1878,7 @@ async def test_docx_output_handles_empty_assistant_response(user):
         return_value=_mock_assistant_for_execute_step(response_text="")
     )
 
-    output = await executor._execute_step(step=step, run=run)
+    output = (await executor._execute_step(step=step, run=run)).output
 
     assert output.artifacts is not None
     assert output.artifacts[0]["file_id"] == str(stored_file.id)

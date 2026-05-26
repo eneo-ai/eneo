@@ -37,6 +37,7 @@ from intric.flows.domain.flow import (
     JsonObject,
 )
 from intric.flows.enums import (
+    FlowOutputMode,
     FlowOutputType,
     FlowRunLifecycleSource,
     FlowRunRerunInvalidationRole,
@@ -120,18 +121,27 @@ from intric.flows.runtime.step_attempt_runtime import (
     build_typed_failure_plan,
     build_typed_failure_run_error_message,
 )
+from intric.flows.runtime.step_execution_result import StepExecutionResult
 from intric.flows.runtime.step_execution_runtime import (
     FlowStepCancelledError,
     StepExecutionRuntimeDeps,
     attach_typed_failure_context,
     build_output_payload,
-    complete_step_execution,
     effective_model_parameters,
     execution_hash,
     is_json_mode_rejection,
     json_mode_cache_key,
     prepare_step_execution,
 )
+from intric.flows.runtime.step_handlers import (
+    STEP_HANDLER_REGISTRY,
+    resolve_handler_mode,
+)
+from intric.flows.runtime.step_handlers.base import PreparedAssistantStep, StepHandler
+from intric.flows.runtime.step_handlers.http_post import HttpPostStepHandler
+from intric.flows.runtime.step_handlers.pass_through import PassThroughStepHandler
+from intric.flows.runtime.step_handlers.template_fill import TemplateFillStepHandler
+from intric.flows.runtime.step_handlers.transcribe_only import TranscribeOnlyStepHandler
 from intric.flows.runtime.step_input_resolution import (
     StepInputResolutionDeps,
 )
@@ -144,7 +154,6 @@ from intric.flows.runtime.step_result_builder import (
 )
 from intric.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,
-    execute_template_fill_step,
 )
 from intric.flows.variable_resolver import FlowVariableResolver
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
@@ -710,13 +719,14 @@ class FlowRunExecutor:
                 step.output_type,
             )
             try:
-                output = await self._execute_step(
+                execution_result = await self._execute_step(
                     step=step,
                     run=latest_run,
                     state=state,
                     version_metadata=version_metadata,
                     attempt_no=attempt_no,
                 )
+                output = execution_result.output
             except FlowStepCancelledError:
                 return await self._handle_cancelled_step(
                     run_id=run_id,
@@ -810,7 +820,7 @@ class FlowRunExecutor:
                 flow_id=flow_id,
                 tenant_id=tenant_id,
                 step=step,
-                output=output,
+                result=execution_result,
                 output_payload_json=build_output_payload(output),
                 execution_hash=execution_hash(
                     run_id=run_id,
@@ -1006,7 +1016,7 @@ class FlowRunExecutor:
         state: RunExecutionState | None = None,
         version_metadata: dict[str, Any] | None = None,
         attempt_no: int | None = None,
-    ) -> StepExecutionOutput:
+    ) -> StepExecutionResult:
         if state is None:
             state = RunExecutionState(
                 completed_by_order={},
@@ -1028,22 +1038,58 @@ class FlowRunExecutor:
             run.id,
             step.step_order,
         )
-        if step.output_mode == "template_fill":
-            template_fill_deps = TemplateFillRuntimeDeps(
-                variable_resolver=self.variable_resolver,
-                file_repo=self.file_repo,
-                template_asset_service=self.template_asset_service,
-                apply_output_cap=self._apply_output_cap_positional,
-                user_id=self.user.id,
-                principal=self.principal,
-                logger=logger,
-            )
-            return await execute_template_fill_step(
-                step=step,
-                run=run,
-                state=state,
-                deps=template_fill_deps,
-            )
+
+        handler = self._build_step_handler(resolve_handler_mode(step.output_mode))
+        return await handler.execute(
+            step=step,
+            run=run,
+            state=state,
+            version_metadata=version_metadata,
+            attempt_no=attempt_no,
+        )
+
+    def _build_step_handler(self, mode: FlowOutputMode) -> StepHandler:
+        handler_class = STEP_HANDLER_REGISTRY[mode]
+        match mode:
+            case FlowOutputMode.PASS_THROUGH:
+                assert handler_class is PassThroughStepHandler
+                return PassThroughStepHandler(
+                    prepare_assistant_step=self._prepare_assistant_step
+                )
+            case FlowOutputMode.HTTP_POST:
+                assert handler_class is HttpPostStepHandler
+                return HttpPostStepHandler(
+                    completion_handler=PassThroughStepHandler(
+                        prepare_assistant_step=self._prepare_assistant_step
+                    )
+                )
+            case FlowOutputMode.TRANSCRIBE_ONLY:
+                assert handler_class is TranscribeOnlyStepHandler
+                return TranscribeOnlyStepHandler(
+                    prepare_assistant_step=self._prepare_assistant_step
+                )
+            case FlowOutputMode.TEMPLATE_FILL:
+                assert handler_class is TemplateFillStepHandler
+                return TemplateFillStepHandler(deps=self._template_fill_runtime_deps())
+        raise TypedIOValidationException(
+            f"Unsupported output mode '{mode.value}'.",
+            code="flow_unsupported_output_mode",
+        )
+
+    def _template_fill_runtime_deps(self) -> TemplateFillRuntimeDeps:
+        return TemplateFillRuntimeDeps(
+            variable_resolver=self.variable_resolver,
+            file_repo=self.file_repo,
+            template_asset_service=self.template_asset_service,
+            apply_output_cap=self._apply_output_cap_positional,
+            user_id=self.user.id,
+            principal=self.principal,
+            logger=logger,
+        )
+
+    def _build_step_execution_runtime_deps(
+        self, *, step: RuntimeStep
+    ) -> StepExecutionRuntimeDeps:
         try:
             llm_timeout_seconds = self._step_deadline_seconds(step)
         except BadRequestException as exc:
@@ -1053,7 +1099,7 @@ class FlowRunExecutor:
                 context=exc.context,
             ) from exc
 
-        execution_deps = StepExecutionRuntimeDeps(
+        return StepExecutionRuntimeDeps(
             variable_resolver=self.variable_resolver,
             completion_service=self.completion_service,
             load_assistant=self._load_assistant,
@@ -1071,6 +1117,17 @@ class FlowRunExecutor:
             rag_retrieval_timeout_seconds=self.rag_retrieval_timeout_seconds,
             run_cancelled=self._run_is_cancelled,
         )
+
+    async def _prepare_assistant_step(
+        self,
+        *,
+        step: RuntimeStep,
+        run: FlowRun,
+        state: RunExecutionState,
+        version_metadata: JsonObject | None,
+        attempt_no: int | None,
+    ) -> PreparedAssistantStep:
+        execution_deps = self._build_step_execution_runtime_deps(step=step)
         prepared = await prepare_step_execution(
             step=step,
             run=run,
@@ -1125,13 +1182,7 @@ class FlowRunExecutor:
                 attempt_start=attempt_start,
             )
         await self._commit()
-        return await complete_step_execution(
-            step=step,
-            run=run,
-            state=state,
-            prepared=prepared,
-            deps=execution_deps,
-        )
+        return PreparedAssistantStep(prepared=prepared, deps=execution_deps)
 
     async def _retrieve_rag_chunks(
         self,

@@ -25,7 +25,6 @@ from intric.flows.citation_sidecar import (
 from intric.flows.domain.flow import FlowRun, FlowStepResult, FlowStepResultStatus
 from intric.flows.enums import FlowOutputMode, FlowOutputType
 from intric.flows.flow_capability_manifest import is_citation_capable_step
-from intric.flows.output_modes import transcribe_only_violation
 from intric.flows.runtime.inherited_citations import (
     build_inherited_citation_prompt_appendix,
     collect_inherited_citation_context,
@@ -45,7 +44,6 @@ from intric.flows.runtime.step_input_validation import (
     validate_input_contract,
     validate_runtime_input_policy,
 )
-from intric.flows.runtime.step_result_builder import build_transcribe_only_rag_metadata
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.main.exceptions import TypedIOValidationException
 
@@ -953,62 +951,6 @@ async def complete_step_execution(
         if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR
         else None
     )
-    if step.output_mode == "transcribe_only":
-        mode_error = transcribe_only_violation(
-            step_order=step.step_order,
-            input_type=step.input_type,
-            output_type=step.output_type,
-            output_mode=step.output_mode,
-        )
-        if mode_error is not None:
-            raise deps.attach_typed_failure_context(
-                TypedIOValidationException(
-                    mode_error,
-                    code="typed_io_invalid_output_mode_combination",
-                ),
-                input_payload_for_result=prepared.input_payload_for_result,
-                effective_prompt=prepared.effective_prompt,
-            )
-        diagnostics.append(
-            StepDiagnostic(
-                code="audio_transcribe_only_used",
-                message=(
-                    f"Step {step.step_order}: transcribe_only mode used; "
-                    "completion LLM and RAG were skipped."
-                ),
-                severity="info",
-            )
-        )
-        rag_metadata = build_transcribe_only_rag_metadata(
-            timeout_seconds=deps.rag_retrieval_timeout_seconds
-        )
-        persisted_text, generated_file_ids = await deps.apply_output_cap(
-            text=prepared.step_input.text,
-            run=run,
-            step=step,
-        )
-        return StepExecutionOutput(
-            input_text=prepared.step_input.text,
-            source_text=prepared.step_input.source_text,
-            input_source=prepared.step_input.input_source,
-            used_question_binding=prepared.step_input.used_question_binding,
-            legacy_prompt_binding_used=prepared.step_input.legacy_prompt_binding_used,
-            full_text=prepared.step_input.text,
-            persisted_text=persisted_text,
-            generated_file_ids=generated_file_ids,
-            tool_calls_metadata=None,
-            num_tokens_input=0,
-            num_tokens_output=0,
-            effective_prompt="",
-            model_parameters_json={"mode": "transcribe_only"},
-            contract_validation=prepared.contract_validation,
-            structured_output=None,
-            artifacts=None,
-            diagnostics=diagnostics,
-            rag_metadata=rag_metadata,
-            transcription_metadata=prepared.step_input.transcription_metadata,
-            runtime_input_metadata=prepared.step_input.runtime_input_metadata,
-        )
 
     info_blob_chunks, rag_metadata, rag_diagnostics = await deps.retrieve_rag_chunks(
         assistant=prepared.assistant,
