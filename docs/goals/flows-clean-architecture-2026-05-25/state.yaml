@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T030
+active_task: T032
 
 tasks:
   - id: T001
@@ -2334,7 +2334,7 @@ tasks:
   - id: T030
     type: scout
     assignee: Scout
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Preflight runtime step identity and draft step persistence before T012 implementation: map current step identity owners, order-based compatibility paths, published-snapshot data requirements, persistence/migration risks, tests, and exact allowed_files for the smallest safe Worker."
     inputs:
@@ -2376,7 +2376,95 @@ tasks:
       - "T012 would require changing runtime retention, service-key identity, webhook delivery, or Flow AI Builder behavior."
       - "The first Worker cannot be scoped to reviewable allowed_files and behavior-focused tests."
       - "The plan would create a parallel step identity implementation instead of reusing/deepening the published snapshot and FlowStep owners."
-    receipt: null
+    receipt:
+      result: done
+      completed_at: "2026-05-26T06:28:00+02:00"
+      summary: "Mapped draft/runtime step identity owners and found T012 source-only is not the next safe Worker. Published snapshots are clean enough to delete the preseed fallback later, but runtime result/attempt rows already have null step_id values and still FK mutable draft flow_steps with ON DELETE SET NULL. Recommended migration-first: backfill null runtime identities from pinned published snapshots, drop runtime-to-draft step FKs, and make result/attempt step_id non-null before source/API/frontend id-owned draft persistence."
+      artifact: "docs/goals/flows-clean-architecture-2026-05-25/notes/t030-step-identity-preflight.md"
+      evidence:
+        - "backend/src/intric/flows/domain/flow.py:39 defines FlowStep.id as UUID | None."
+        - "backend/src/intric/flows/infrastructure/flow_repo.py:118-144 omits id from DB row payloads and backend/src/intric/flows/infrastructure/flow_repo.py:752-808 syncs draft steps by step_order."
+        - "backend/src/intric/flows/api/flow_models.py:444-555 and backend/src/intric/flows/api/flow_assembler.py:38-57 show authoring update cannot currently round-trip step id."
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts:74-125 and frontend/apps/web/src/lib/core/editing/getDiff.ts:201-215 show frontend PATCH diffs strip temp ids but omit persisted ids."
+        - "backend/src/intric/flows/application/flow_service.py:673-698 merges step config secrets by step_order; backend/src/intric/flows/application/flow_service.py:713-793 writes step_id/assistant_id into the published snapshot."
+        - "backend/src/intric/flows/application/flow_run_service.py:273-276 and 644-733 still allow run preseed to repair missing snapshot identifiers from mutable flow.steps."
+        - "backend/src/intric/database/tables/flow_tables.py:700-703 and 894-897 keep result/attempt step_id nullable and FK mutable flow_steps.id with ON DELETE SET NULL."
+        - "backend/src/intric/database/tables/flow_tables.py:1018, 1116, 1302, and 1377 show adjacent runtime/review/file rows store non-null step_id without direct FlowSteps FK."
+        - "backend/src/intric/flows/infrastructure/flow_run_repo.py:2453 and 2487 contain optional-step-id guards that will become dead once table metadata is tightened."
+      data_preflight:
+        published_snapshots:
+          database: "postgres"
+          flow_versions: 254
+          published_steps: 1684
+          bad_step_identity_rows: 0
+          bad_definition_envelopes: 0
+        migration_smoke_database:
+          database: "flows_migration_smoke"
+          flow_versions: 0
+          published_steps: 0
+          bad_step_identity_rows: 0
+          bad_definition_envelopes: 0
+        runtime_rows:
+          database: "postgres"
+          flow_step_results_total: 581
+          flow_step_results_null_step_id: 4
+          flow_step_attempts_total: 484
+          flow_step_attempts_null_step_id: 2
+          recoverable_from_pinned_snapshot: "6/6"
+        constraints:
+          - "flow_step_results_step_id_fkey: FOREIGN KEY (step_id) REFERENCES flow_steps(id) ON DELETE SET NULL"
+          - "flow_step_attempts_step_id_fkey: FOREIGN KEY (step_id) REFERENCES flow_steps(id) ON DELETE SET NULL"
+      commands:
+        - command: "python3 watchdog status parse for /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: "pass"
+          output: "schema_version 1; status ok; active_task T030; halt_blockers empty."
+        - command: "git status --short --branch"
+          status: "pass"
+          output: "Confirmed branch feature/refactor-flows-flowai ahead 22 and unrelated dirty/untracked files preserved."
+        - command: "nl/rg source reads for flow_repo.py, flow_service.py, flow_run_service.py, published_definition.py, runtime models/parser, flow_tables.py, FlowEditor.ts, getDiff.ts, flow_models.py, flow_assembler.py, and flow_run_repo.py"
+          status: "pass"
+          output: "Confirmed order-owned draft sync, order-owned secret merge, published snapshot identity, preseed fallback, frontend/API id omission, runtime nullable FK risk, and stale optional guards."
+        - command: "docker exec -i -e PGPASSWORD=postgres eneo-41ae93-db-1 psql -U postgres -d postgres <published snapshot identity preflight>"
+          status: "pass"
+          output: "flow_versions 254; published_steps 1684; bad_step_identity_rows 0; bad_definition_envelopes 0."
+        - command: "docker exec -i -e PGPASSWORD=postgres eneo-41ae93-db-1 psql -U postgres -d flows_migration_smoke <published snapshot identity preflight>"
+          status: "pass"
+          output: "flow_versions 0; published_steps 0; bad_step_identity_rows 0; bad_definition_envelopes 0."
+        - command: "docker exec -i -e PGPASSWORD=postgres eneo-41ae93-db-1 psql -U postgres -d postgres <runtime null step_id preflight>"
+          status: "pass"
+          output: "4 null result step_ids and 2 null attempt step_ids; 6/6 recoverable from pinned published snapshot."
+        - command: "docker exec -i -e PGPASSWORD=postgres eneo-41ae93-db-1 psql -U postgres -d postgres <result/attempt FK constraint query>"
+          status: "pass"
+          output: "Verified flow_step_results_step_id_fkey and flow_step_attempts_step_id_fkey both reference flow_steps(id) ON DELETE SET NULL."
+      peer_review:
+        claude:
+          first_pass:
+            status: "changes_required"
+            artifact: ".codex/artifacts/claude-peer-loop-t030-step-identity-preflight-20260526T041730Z.md"
+            verdict: "GREEN_LIGHT no; valid blocker that source-first T012 could increase SET NULL runtime history before schema decoupling."
+          revised_pass:
+            status: "pass"
+            artifact: ".codex/artifacts/claude-peer-loop-t030-step-identity-preflight-revised-20260526T042352Z.md"
+            verdict: "GREEN_LIGHT yes; MIN_SCORE 8. Asked T032 to require embedded migration preflight, downgrade posture, tenant-scoped tests, and wider verification."
+        antigravity:
+          status: "pass"
+          artifact: ".codex/artifacts/antigravity-peer-loop-t030-step-identity-migration-first-synthesis-20260526T042613Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8. Added verified requirement to include flow_run_repo.py for stale optional step_id guard cleanup if table metadata becomes non-null."
+      consolidation_effect:
+        reused_existing_owner: "Published definition/runtime parser remains runtime identity owner; FlowStep.id remains draft identity owner."
+        logic_moved_from: "No source logic moved in T030. Recommended migration moves runtime DB identity ownership away from mutable draft flow_steps toward stored snapshot UUIDs."
+        logic_deleted: "No source logic deleted in T030. Recommended Worker deletes runtime-to-draft FK dependency."
+        duplicate_path_removed: "None in T030. Later source Worker should remove _build_preseed_steps fallback to mutable flow.steps."
+        new_code_added: "One Scout note and board receipt only."
+        why_existing_owners_were_insufficient: "Runtime code already writes snapshot ids, but DB constraints still allow mutable draft step deletion to null historical runtime identity."
+        guard_preventing_duplicate_logic_from_returning: "T032 must require migration tests for embedded recovery preflight, no draft FK, non-null step_id, downgrade posture, and no stale optional guards."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: ""
+      notes:
+        - "T012 should remain queued but must not start before migration-first Judge/Worker resolves runtime result/attempt FK/nullability."
+        - "Do not add flow_version_steps; no relational query need was proven."
+        - "Do not start retention, service-key identity, webhook outbox, Flow AI Builder cleanup, or source/API/frontend id-owned draft persistence from this task."
+      next_task: T032
 
   - id: T031
     type: worker
@@ -2482,6 +2570,49 @@ tasks:
         - "Flow AI Builder source remains unchanged; its service-key session denial currently surfaces as insufficient_space_permission because AI Builder coerces unsupported raw Flow auth codes into its own public error enum."
         - "Follow-up candidate: a separate read-only Scout/Judge can decide whether AI Builder should expose a more specific service-key public denial code; not part of this Flow proper slice."
       next_task: T030
+
+  - id: T032
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Approve the migration-first runtime step identity Worker from T030 evidence: decide exact allowed_files, downgrade posture, embedded data preflight, migration tests, verification commands, and stop conditions before any source/API/frontend id-owned draft persistence work."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t030-step-identity-preflight.md"
+      - ".codex/artifacts/claude-peer-loop-t030-step-identity-preflight-revised-20260526T042352Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t030-step-identity-migration-first-synthesis-20260526T042613Z.md"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+      - "backend/alembic/versions"
+      - "backend/tests/integration/flows"
+      - "backend/tests/unittests/flows"
+    constraints:
+      - "Read-only: no source edits, no test edits, no migrations, no deletion."
+      - "Before deciding, re-check the watchdog state file and verify any halt-worthy blocker against source/state/git evidence."
+      - "Do not approve source/API/frontend id-owned draft persistence in this task; that remains after runtime result/attempt schema is decoupled."
+      - "Do not start retention, service-key identity, webhook outbox, Flow AI Builder cleanup, runtime input retention, or schema work beyond the candidate runtime step identity migration."
+      - "Do not approve flow_version_steps unless a real relational query need is proven; T030 did not prove one."
+      - "Preserve unrelated dirty/untracked files; do not include them in allowed_files."
+      - "Apply reuse-before-inventing and canonical-owner rules: runtime identity owner is the published snapshot; draft identity owner is FlowStep.id."
+    expected_output:
+      - "Decision: approve_migration_worker | revise | blocked."
+      - "Exact Worker objective and non-goals."
+      - "Allowed files with no conditionals."
+      - "Embedded migration preflight/backfill plan, including tenant-scoped recovery and abort behavior for unrecoverable null rows."
+      - "Downgrade posture: schema reversible while recovered UUID data remains forward-fixed, or a justified alternative."
+      - "Red tests, including backfill, no draft FK, non-null columns, unrecoverable-null abort, tenant scope, downgrade round-trip, and stale optional-guard cleanup."
+      - "Verification commands, including migration-isolation test, relevant unit tests, broader flows unit sweep, pyright on table/repository files, and git diff --check."
+      - "Stop conditions."
+      - "Consolidation effect: reused owner, logic moved/deleted, duplicate path removed, new code added, why existing owners were insufficient, guard/test preventing duplicate logic from returning, net Flow logic surface area."
+    stop_if:
+      - "Runtime null row recovery cannot be proven from pinned published snapshots in the target database."
+      - "The Worker would need retention, service-key identity, webhook delivery, Flow AI Builder, runtime input retention, source/API/frontend id-owned draft persistence, or flow_version_steps."
+      - "A downgrade or data safety posture cannot be made reviewable."
+      - "The allowed_files cannot be made small and exact."
+      - "The plan would preserve runtime-to-draft FlowSteps dependency for flexibility instead of decoupling ownership."
+    receipt: null
 
   - id: T999
     type: judge
