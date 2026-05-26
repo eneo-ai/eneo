@@ -4,7 +4,7 @@ Store model names directly in migration history so records survive
 model deletion. Change FK ondelete from CASCADE to SET NULL.
 
 Revision ID: fix_migration_history
-Revises: 202604291030
+Revises: 202605061100
 Create Date: 2026-04-01
 
 """
@@ -14,7 +14,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "fix_migration_history"
-down_revision = "202604291030"
+down_revision = "202605061100"
 branch_labels = None
 depends_on = None
 
