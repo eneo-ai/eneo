@@ -20,6 +20,7 @@ from intric.flows.api.flow_models import (
     FlowRunStepPublic,
     FlowStepAttemptPublic,
     FlowStepCreateRequest,
+    FlowStepUpdateRequest,
     FormFieldPublic,
     GraphEdge,
     GraphNode,
@@ -88,6 +89,18 @@ def test_flow_step_create_request_accepts_template_fill_output_mode() -> None:
     )
 
     assert request.output_mode.value == "template_fill"
+
+
+def test_flow_step_create_request_does_not_expose_persisted_id() -> None:
+    assert "id" not in FlowStepCreateRequest.model_json_schema()["properties"]
+
+
+def test_flow_step_update_request_accepts_persisted_step_id() -> None:
+    step_id = uuid4()
+
+    request = FlowStepUpdateRequest.model_validate(_payload(id=str(step_id)))
+
+    assert request.id == step_id
 
 
 def test_flow_run_create_request_parses_typed_step_inputs() -> None:

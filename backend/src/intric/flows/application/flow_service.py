@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, TypeAlias, cast
 from uuid import UUID
 
 from intric.assistants.assistant import Assistant, AssistantOrigin
@@ -37,6 +37,7 @@ from intric.flows.http_transport import (
     is_authored_config,
     merge_secrets_on_update,
 )
+from intric.flows.http_transport.secret_codec import SECRET_SENTINEL
 from intric.flows.infrastructure.flow_repo import FlowRepository
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.published_definition import (
@@ -54,6 +55,16 @@ from intric.mcp_servers.domain.entities.mcp_server import MCPServer
 from intric.settings.encryption_service import EncryptionService
 from intric.spaces.space_service import SpaceService
 from intric.users.user import UserInDB
+
+SecretSentinelJsonValue: TypeAlias = (
+    None
+    | bool
+    | int
+    | float
+    | str
+    | list["SecretSentinelJsonValue"]
+    | dict[str, "SecretSentinelJsonValue"]
+)
 
 
 class FlowService:
@@ -200,6 +211,11 @@ class FlowService:
                 "Cannot mutate a published flow. Unpublish first."
             )
 
+        if steps is not None:
+            self._validate_update_step_identity(
+                incoming_steps=steps,
+                stored_steps=existing.steps,
+            )
         next_steps = steps if steps is not None else existing.steps
         await self._validate_assistant_scope_for_steps(
             space_id=existing.space_id,
@@ -675,11 +691,11 @@ class FlowService:
         incoming_steps: list[FlowStep],
         stored_steps: list[FlowStep],
     ) -> list[FlowStep]:
-        """Merge sentinel secret values from incoming with stored encrypted values."""
-        stored_by_order = {s.step_order: s for s in stored_steps}
+        """Merge secret sentinels by persisted draft step id, not mutable order."""
+        stored_by_id = {step.id: step for step in stored_steps if step.id is not None}
         result: list[FlowStep] = []
         for step in incoming_steps:
-            stored = stored_by_order.get(step.step_order)
+            stored = stored_by_id.get(step.id) if step.id is not None else None
             input_config = self._merge_config_secrets(
                 step.input_config, stored.input_config if stored else None
             )
@@ -696,6 +712,63 @@ class FlowService:
                 )
             )
         return result
+
+    def _validate_update_step_identity(
+        self,
+        *,
+        incoming_steps: list[FlowStep],
+        stored_steps: list[FlowStep],
+    ) -> None:
+        stored_ids = {step.id for step in stored_steps if step.id is not None}
+        seen_ids: set[UUID] = set()
+        seen_orders: set[int] = set()
+        for step in incoming_steps:
+            if step.step_order in seen_orders:
+                raise BadRequestException(
+                    "A step order can only appear once in a flow update.",
+                    code="duplicate_step_order",
+                )
+            seen_orders.add(step.step_order)
+            if step.id is None:
+                if self._step_has_secret_sentinel(step):
+                    raise BadRequestException(
+                        "Secret sentinel values require an existing draft step id.",
+                        code="sentinel_secret_requires_step_id",
+                    )
+                continue
+            if step.id in seen_ids:
+                raise BadRequestException(
+                    "A draft step id can only appear once in a flow update.",
+                    code="duplicate_step_id",
+                )
+            seen_ids.add(step.id)
+            if step.id not in stored_ids:
+                raise BadRequestException(
+                    "Flow update references an unknown draft step id.",
+                    code="unknown_step_id",
+                )
+
+    @classmethod
+    def _step_has_secret_sentinel(cls, step: FlowStep) -> bool:
+        return cls._contains_secret_sentinel(
+            step.input_config
+        ) or cls._contains_secret_sentinel(step.output_config)
+
+    @classmethod
+    def _contains_secret_sentinel(cls, value: SecretSentinelJsonValue) -> bool:
+        if value == SECRET_SENTINEL:
+            return True
+        if isinstance(value, dict):
+            for nested_value in value.values():
+                if cls._contains_secret_sentinel(nested_value):
+                    return True
+            return False
+        if isinstance(value, list):
+            for nested_value in value:
+                if cls._contains_secret_sentinel(nested_value):
+                    return True
+            return False
+        return False
 
     @staticmethod
     def _merge_config_secrets(

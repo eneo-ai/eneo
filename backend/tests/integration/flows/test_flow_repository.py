@@ -41,7 +41,9 @@ def _build_flow(
     space_id: UUID,
     user_id: UUID,
     assistant_id: UUID,
+    additional_assistant_ids: list[UUID] | None = None,
 ) -> Flow:
+    assistant_ids = [assistant_id, *(additional_assistant_ids or [])]
     return Flow(
         id=None,
         tenant_id=tenant_id,
@@ -58,26 +60,40 @@ def _build_flow(
         created_at=None,
         updated_at=None,
         steps=[
-            FlowStep(
-                id=None,
-                flow_id=uuid4(),  # overwritten by repository insert payload
+            _build_step(
                 tenant_id=tenant_id,
-                assistant_id=assistant_id,
-                step_order=1,
-                user_description="Initial summarization step",
-                input_source="flow_input",
-                input_type="text",
-                input_contract=None,
-                output_mode="pass_through",
-                output_type="json",
-                output_contract={"type": "object"},
-                input_bindings={"question": "{{flow.input.question}}"},
-                output_classification_override=None,
-                mcp_policy="inherit",
-                input_config=None,
-                output_config=None,
+                assistant_id=step_assistant_id,
+                step_order=index + 1,
             )
+            for index, step_assistant_id in enumerate(assistant_ids)
         ],
+    )
+
+
+def _build_step(
+    *,
+    tenant_id: UUID,
+    assistant_id: UUID,
+    step_order: int,
+) -> FlowStep:
+    return FlowStep(
+        id=None,
+        flow_id=uuid4(),  # overwritten by repository insert payload
+        tenant_id=tenant_id,
+        assistant_id=assistant_id,
+        step_order=step_order,
+        user_description=f"Repository step {step_order}",
+        input_source="flow_input" if step_order == 1 else "previous_step",
+        input_type="text",
+        input_contract=None,
+        output_mode="pass_through",
+        output_type="json",
+        output_contract={"type": "object"},
+        input_bindings={"question": "{{flow.input.question}}"},
+        output_classification_override=None,
+        mcp_policy="inherit",
+        input_config=None,
+        output_config=None,
     )
 
 
@@ -639,6 +655,151 @@ async def test_flow_update_deletes_orphaned_flow_managed_assistant(
         )
         assert deleted_assistant is None
         assert remaining_assistant is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_repository_update_preserves_step_ids_during_adjacent_reorder(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flow reorder ids", [model.id])
+        assistant_one = await assistant_factory(
+            session,
+            "Flow Assistant One",
+            model.id,
+            space_id=space.id,
+        )
+        assistant_two = await assistant_factory(
+            session,
+            "Flow Assistant Two",
+            model.id,
+            space_id=space.id,
+        )
+
+        repo = FlowRepository(session=session, factory=FlowFactory())
+        created = await repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant_one.id,
+                additional_assistant_ids=[assistant_two.id],
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        first_step, second_step = created.steps
+
+        updated = created.model_copy(
+            update={
+                "steps": [
+                    second_step.model_copy(
+                        update={"step_order": 1, "input_source": "flow_input"},
+                        deep=True,
+                    ),
+                    first_step.model_copy(
+                        update={"step_order": 2, "input_source": "previous_step"},
+                        deep=True,
+                    ),
+                ]
+            },
+            deep=True,
+        )
+
+        persisted = await repo.update(updated, tenant_id=admin_user.tenant_id)
+
+        assert [step.id for step in persisted.steps] == [second_step.id, first_step.id]
+        assert [step.assistant_id for step in persisted.steps] == [
+            assistant_two.id,
+            assistant_one.id,
+        ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_repository_update_inserts_new_step_without_replacing_existing_ids(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Flow insert ids", [model.id])
+        assistant_one = await assistant_factory(
+            session,
+            "Flow Assistant One",
+            model.id,
+            space_id=space.id,
+        )
+        assistant_two = await assistant_factory(
+            session,
+            "Flow Assistant Two",
+            model.id,
+            space_id=space.id,
+        )
+        assistant_three = await assistant_factory(
+            session,
+            "Flow Assistant Three",
+            model.id,
+            space_id=space.id,
+        )
+
+        repo = FlowRepository(session=session, factory=FlowFactory())
+        created = await repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant_one.id,
+                additional_assistant_ids=[assistant_two.id],
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        first_step, second_step = created.steps
+        new_step = _build_step(
+            tenant_id=admin_user.tenant_id,
+            assistant_id=assistant_three.id,
+            step_order=1,
+        )
+
+        updated = created.model_copy(
+            update={
+                "steps": [
+                    new_step,
+                    first_step.model_copy(
+                        update={"step_order": 2, "input_source": "previous_step"},
+                        deep=True,
+                    ),
+                    second_step.model_copy(
+                        update={"step_order": 3, "input_source": "previous_step"},
+                        deep=True,
+                    ),
+                ]
+            },
+            deep=True,
+        )
+
+        persisted = await repo.update(updated, tenant_id=admin_user.tenant_id)
+
+        assert persisted.steps[0].id not in {first_step.id, second_step.id}
+        assert [step.id for step in persisted.steps[1:]] == [
+            first_step.id,
+            second_step.id,
+        ]
+        assert [step.assistant_id for step in persisted.steps] == [
+            assistant_three.id,
+            assistant_one.id,
+            assistant_two.id,
+        ]
 
 
 @pytest.mark.asyncio

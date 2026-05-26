@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T061
+active_task: T062
 
 tasks:
   - id: T001
@@ -2187,7 +2187,7 @@ tasks:
   - id: T012
     type: worker
     assignee: Worker
-    status: queued
+    status: done
     reasoning_hint: high
     objective: "Make draft step persistence id-owned and runtime step identity snapshot-owned: runtime rows preserve published step_id, step_order, and assistant_id without relying on mutable flow_steps."
     allowed_files: []
@@ -2197,7 +2197,25 @@ tasks:
       - "Frontend step update semantics are ambiguous."
       - "Run evidence/rerun/review cannot be covered by tests."
       - "Implementation attempts to add flow_version_steps without a real relational query need."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Closed the original draft/runtime step identity placeholder through focused subtasks. T036/T037 moved published step identity validation to the published-definition/runtime-parser boundary, T038 hardened the runtime step identity migration shape, and T059/T060/T061 made draft authoring updates id-owned across API, service, repository, generated schema, and FlowEditor."
+      completed_by_subtasks:
+        - id: T036
+          summary: "Chose published-definition construction as the runtime step identity owner."
+        - id: T037
+          summary: "Validated published step identity at construction and removed duplicate run-service parsing."
+        - id: T038
+          summary: "Improved runtime step identity migration query shape and safety."
+        - id: T059
+          summary: "Preflighted remaining draft id-owned persistence."
+        - id: T060
+          summary: "Chose the draft step id-owned authoring update Worker."
+        - id: T061
+          summary: "Preserved draft step identity through authoring updates."
+      residual_risk:
+        - "T061 repository integration tests are present but Docker/DB-blocked locally; they must run via restored Docker or CI before push/merge."
+        - "Do not reactivate T012 as a broad placeholder; any remaining identity follow-up needs a new Judge-approved task."
 
   - id: T013
     type: worker
@@ -6037,7 +6055,7 @@ tasks:
   - id: T061
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "fix(flows): preserve draft step identity through authoring updates."
     inputs:
@@ -6101,6 +6119,118 @@ tasks:
       - "Pyright requires Any, broad casts, type ignores, a union-overloaded assembler method, or new generic helpers."
       - "Implementation adds a parallel identity owner instead of deepening existing Flow authoring/API/service/repository/frontend owners."
       - "Frontend clone/copy source evidence proves id-less sentinel secrets are shipped behavior that needs product decision before rejection."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T19:15:00+02:00"
+      summary: "Preserved draft step identity through authoring updates. Update-only `FlowStepUpdateRequest` carries persisted draft ids through the API adapter and assembler; `FlowService` validates duplicate order/id, unknown id, and id-less secret sentinels before merging secrets by id; `FlowRepository._sync_flow_steps` now syncs retained rows by id with a flushed temporary reorder band; `FlowEditor` includes persisted ids in PATCH diffs and strips local `_temp_` ids before submit."
+      note: "docs/goals/flows-clean-architecture-2026-05-25/notes/t061-draft-step-id-worker.md"
+      commands:
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_service.py -k \"step_id or step_order or secret or sentinel\""
+          status: pass
+          output: "8 passed, 58 deselected, 1 warning"
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_review_policy.py tests/unit/test_flow_openapi_contract.py"
+          status: pass
+          output: "106 passed, 15 warnings"
+        - command: "cd backend && uv run pyright src/intric/flows/api/flow_models.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_authoring_router.py src/intric/flows/application/flow_service.py src/intric/flows/infrastructure/flow_repo.py tests/unittests/flows/test_flow_service.py tests/integration/flows/test_flow_repository.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_review_policy.py tests/unit/test_flow_openapi_contract.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations"
+        - command: "cd backend && uv run ruff check src/intric/flows/api/flow_models.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_authoring_router.py src/intric/flows/application/flow_service.py src/intric/flows/infrastructure/flow_repo.py tests/unittests/flows/test_flow_service.py tests/integration/flows/test_flow_repository.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_review_policy.py tests/unit/test_flow_openapi_contract.py"
+          status: pass
+          output: "All checks passed"
+        - command: "cd backend && uv run ruff format --check src/intric/flows/api/flow_models.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_authoring_router.py src/intric/flows/application/flow_service.py src/intric/flows/infrastructure/flow_repo.py tests/unittests/flows/test_flow_service.py tests/integration/flows/test_flow_repository.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_review_policy.py tests/unit/test_flow_openapi_contract.py"
+          status: pass
+          output: "10 files already formatted"
+        - command: "cd frontend/apps/web && bun test src/lib/features/flows/FlowEditor.test.ts"
+          status: pass
+          output: "34 pass"
+        - command: "cd backend && uv run python - <<'PY' > /tmp/eneo-openapi-t061.json ... app.openapi() ... PY"
+          status: pass
+          output: "OpenAPI snapshot generated from FastAPI app."
+        - command: "cd frontend/packages/intric-js && bun run update --schema-file /tmp/eneo-openapi-t061.json"
+          status: pass
+          output: "Update completed successfully; only frontend/packages/intric-js/src/types/schema.d.ts changed."
+        - command: "cd backend && uv run pytest tests/integration/flows/test_flow_repository.py -k \"step_id or reorder or insert\""
+          status: blocked_environment
+          output: "Testcontainers cannot connect to Docker socket; docker.errors.DockerException/FileNotFoundError."
+        - command: "docker exec eneo-41ae93-eneo-1 sh -lc 'cd /workspace/backend && uv run pytest tests/integration/flows/test_flow_repository.py -k \"step_id or reorder or insert\"'"
+          status: blocked_environment
+          output: "Docker CLI cannot connect to /Users/ccimen/.orbstack/run/docker.sock."
+        - command: "cd frontend/packages/intric-js && bun run update"
+          status: blocked_environment
+          output: "No server at localhost:8123; starting backend failed because Redis localhost:6379 is unavailable."
+        - command: "git diff --check"
+          status: pass
+      peer_review:
+        claude_initial:
+          artifact: ".codex/artifacts/claude-peer-loop-preserve-draft-step-identity-through-authoring-updates-implementation-review-20260526T170508Z.md"
+          verdict: "GREEN_LIGHT no; MIN_SCORE 6."
+          valid_concerns_addressed:
+            - "Added typed duplicate_step_order validation before repository persistence."
+            - "Added behavior test for duplicate step_order."
+            - "Documented repository unknown_step_id as defense-in-depth with FlowService as canonical validation owner."
+        claude_final:
+          artifact: ".codex/artifacts/claude-peer-loop-preserve-draft-step-identity-through-authoring-updates-implementation-review-iteration-2-20260526T171030Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+          stop_before_push: "Run the repository integration tests against PostgreSQL locally or via CI before push/merge."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-preserve-draft-step-identity-antigravity-implementation-synthesis-20260526T171256Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 9."
+          valid_concerns_addressed:
+            - "Confirmed frontend _temp_ ids should stay client-local and should not become backend protocol."
+            - "Accepted repository integration tests as stop-before-push rather than local-commit blocker because Docker/DB are unavailable."
+          non_blocking_follow_ups:
+            - "Consider iterative or depth-bounded secret-sentinel traversal if future evidence shows deeply nested authored configs are accepted on this path."
+      consolidation_effect:
+        reused_existing_owner: "FlowStep.id/FlowSteps.id, Flow authoring API models, FlowAssembler, FlowService.update_flow/_merge_step_secrets, FlowRepository._sync_flow_steps, generated OpenAPI types, and FlowEditor."
+        logic_moved_from: "Mutable step_order matching inside service/repository behavior to persisted id matching inside the same existing owners."
+        logic_deleted: "Order-as-identity behavior for retained draft steps in secret merge and repository sync."
+        duplicate_path_removed: "Clients received FlowStepPublic.id but update contracts and FlowEditor payloads dropped it; update now preserves the same identity."
+        new_code_added: "FlowStepUpdateRequest plus local validation/sync/frontend helper code inside existing owners; no new module or fake seam."
+        why_existing_owners_were_insufficient: "Create/update contracts were conflated, assembler dropped id, service/repository matched by order, and FlowEditor omitted id from editableFields."
+        guard_preventing_duplicate_logic_from_returning: "Service tests, repository integration tests, OpenAPI/model/assembler tests, generated schema diff, and FlowEditor tests."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: ""
+      naming_gate:
+        result: pass
+        notes:
+          - "`FlowStepUpdateRequest` names the Flow authoring update axis and belongs in the final maintainer where-to-change-X table."
+          - "No vague helper/manager/processor/common/misc/generic module or fake interface was added."
+      architecture_doc_readiness: "Captured final-doc evidence for Draft Flow step identity: create is id-less, update carries persisted id, FlowService validates identity/order invariants, FlowRepository syncs by id, FlowEditor owns _temp_ ids locally."
+      residual_risk:
+        - "Repository integration tests are present but could not run locally because Docker/DB are unavailable; run before push/merge via Docker or CI."
+      next_task: T062
+
+  - id: T062
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "judge(flows): choose the next safe post-step-identity tranche."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t061-draft-step-id-worker.md"
+      - ".codex/artifacts/claude-peer-loop-preserve-draft-step-identity-through-authoring-updates-implementation-review-iteration-2-20260526T171030Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-preserve-draft-step-identity-antigravity-implementation-synthesis-20260526T171256Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t062-next-safe-after-step-identity-judge.md"
+    constraints:
+      - "Read-only Judge task; no source edits, test edits, migrations, generated-client edits, frontend edits, deletion, or docs/flows/architecture.md edits."
+      - "Before starting, check the watchdog blocker file and verify any halt-worthy blocker against source/state/git evidence."
+      - "Choose among existing queued safe work or create one exact Worker; do not start retention, service-key identity/review/rerun, schema migration, materialized webhook request snapshots, or other blocked product/data work without recorded decisions."
+      - "Do not activate T901 final architecture docs while runtime/API/schema/frontend architecture is still changing."
+      - "Respect the T061 stop-before-push condition: repository integration tests must run against PostgreSQL via Docker/CI before push/merge."
+      - "Apply reuse-before-inventing and naming gate; every proposed Worker must include consolidation effect and maintainer-doc readiness."
+    expected_output:
+      - "Decision: activate the next exact Worker/Judge/Scout or block with reason."
+      - "Allowed files, verification commands, stop_if, consolidation effect, naming-gate answer, and maintainer-doc readiness for the chosen next task."
+      - "Disposition of queued T014/T015/T016/T901 and blocked T009/T010/T011."
+      - "Whether local Docker/DB unavailability blocks the chosen next task."
+    stop_if:
+      - "The next highest-ROI task requires Docker/DB verification that is unavailable and cannot be deferred to CI."
+      - "The next task would require retention or service-key product/data decisions that remain blocked."
+      - "The next task would combine final architecture docs with unresolved implementation work."
     receipt: null
 
   - id: T901

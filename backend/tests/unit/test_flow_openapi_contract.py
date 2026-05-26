@@ -1149,6 +1149,34 @@ def test_openapi_flow_step_review_policy_documents_authoring_contract(
     assert "14 days" in expiry_description
 
 
+def test_openapi_flow_step_update_uses_step_update_request_schema(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    create_schema = schemas.get("FlowStepCreateRequest", {})
+    update_schema = schemas.get("FlowStepUpdateRequest", {})
+    partial_update_schema = schemas.get("PartialFlowUpdateRequest", {})
+
+    assert "id" not in create_schema.get("properties", {})
+    update_id = update_schema.get("properties", {}).get("id", {})
+    assert any(
+        isinstance(option, dict) and option.get("format") == "uuid"
+        for option in update_id.get("anyOf", [])
+    )
+    assert _schema_allows_null(update_id)
+
+    steps_schema = partial_update_schema.get("properties", {}).get("steps", {})
+    step_items: dict | None = None
+    for option in steps_schema.get("anyOf", []):
+        if isinstance(option, dict) and option.get("type") == "array":
+            items = option.get("items", {})
+            if isinstance(items, dict):
+                step_items = items
+                break
+    assert step_items is not None
+    assert step_items.get("$ref") == "#/components/schemas/FlowStepUpdateRequest"
+
+
 def test_openapi_runtime_paths_expose_review_checkpoint_templates(
     openapi_spec: dict,
 ) -> None:

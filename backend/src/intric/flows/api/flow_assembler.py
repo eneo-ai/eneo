@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Sequence
+from uuid import UUID
 
 from intric.flows.api.flow_models import (
     FlowPublic,
@@ -15,6 +16,7 @@ from intric.flows.api.flow_models import (
     FlowRunTokenUsagePublic,
     FlowSparsePublic,
     FlowStepCreateRequest,
+    FlowStepUpdateRequest,
 )
 from intric.flows.domain.flow import (
     Flow,
@@ -37,7 +39,16 @@ from intric.flows.http_transport import (
 
 class FlowAssembler:
     def to_domain_step(self, step: FlowStepCreateRequest) -> FlowStep:
+        return self._to_domain_step_from_authoring_request(step, step_id=None)
+
+    def to_domain_step_for_update(self, step: FlowStepUpdateRequest) -> FlowStep:
+        return self._to_domain_step_from_authoring_request(step, step_id=step.id)
+
+    def _to_domain_step_from_authoring_request(
+        self, step: FlowStepCreateRequest, *, step_id: UUID | None
+    ) -> FlowStep:
         return FlowStep(
+            id=step_id,
             assistant_id=step.assistant_id,
             step_order=step.step_order,
             timeout_seconds=step.timeout_seconds,

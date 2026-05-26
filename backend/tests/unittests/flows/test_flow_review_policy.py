@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 
 from intric.flows.api.flow_assembler import FlowAssembler
-from intric.flows.api.flow_models import FlowStepCreateRequest
+from intric.flows.api.flow_models import FlowStepCreateRequest, FlowStepUpdateRequest
 from intric.flows.enums import FlowOutputMode, flow_output_mode_has_outbound_delivery
 from intric.flows.flow import FlowStep
 from intric.flows.flow_review_expiry_policy import (
@@ -200,4 +200,26 @@ def test_flow_step_create_request_preserves_review_policy_for_domain_step() -> N
 
     step = FlowAssembler().to_domain_step(request)
 
+    assert step.review_policy == FlowStepReviewPolicy(mode=FlowStepReviewMode.EDIT)
+
+
+def test_flow_step_update_request_preserves_id_and_review_policy_for_domain_step() -> (
+    None
+):
+    step_id = uuid4()
+    request = FlowStepUpdateRequest(
+        id=step_id,
+        assistant_id=uuid4(),
+        step_order=1,
+        input_source="flow_input",
+        input_type="text",
+        output_mode="pass_through",
+        output_type="text",
+        mcp_policy="inherit",
+        review_policy={"mode": "edit"},
+    )
+
+    step = FlowAssembler().to_domain_step_for_update(request)
+
+    assert step.id == step_id
     assert step.review_policy == FlowStepReviewPolicy(mode=FlowStepReviewMode.EDIT)

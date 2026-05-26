@@ -501,6 +501,32 @@ describe("FlowEditor step mutation commands", () => {
       editor.destroy();
     }
   });
+
+  it("uses temporary ids as stable keys when reordering unsaved steps", async () => {
+    const tempFirst = makeStep(1, { id: "_temp_alpha", assistant_id: "" });
+    const tempSecond = makeStep(2, {
+      id: "_temp_beta",
+      assistant_id: "",
+      input_bindings: { question: "{{step_1.output.text}}" }
+    });
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [tempFirst, tempSecond] }),
+      intric: makeIntric()
+    });
+    try {
+      await editor.applyStepsWithSafeOrderRemap([
+        { ...tempSecond, step_order: 1, input_source: "flow_input" },
+        { ...tempFirst, step_order: 2, input_source: "previous_step" }
+      ]);
+
+      const [firstStep] = get(editor.state.update).steps;
+      expect((firstStep.input_bindings as Record<string, unknown>).question).toBe(
+        "{{step_2.output.text}}"
+      );
+    } finally {
+      editor.destroy();
+    }
+  });
 });
 
 describe("FlowEditor active step selection commands", () => {
@@ -634,10 +660,66 @@ describe("FlowEditor save flushing", () => {
 
       expect(flowUpdate).toHaveBeenCalledTimes(1);
       const [{ update }] = flowUpdate.mock.calls[0] as [{ update: { steps?: FlowStep[] } }];
+      expect(update.steps?.map((step) => step.id)).toEqual(["step-1", "step-2"]);
       expect(update.steps?.[1]?.input_bindings).toEqual({
         question: "Granskade minnesanteckningar:\n{{step_1.output.text}}"
       });
       expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(false);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("does not include steps when saving a name-only change", async () => {
+    const flowUpdate = vi.fn(async ({ flow, update }) => ({
+      ...(flow as Flow),
+      ...(update as Partial<Flow>)
+    }));
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1), makeStep(2)] }),
+      intric: makeIntric({ flowUpdate })
+    });
+    try {
+      editor.setName("Renamed flow");
+
+      await editor.flushFlowSaves();
+
+      expect(flowUpdate).toHaveBeenCalledTimes(1);
+      const [{ update }] = flowUpdate.mock.calls[0] as [{ update: { steps?: FlowStep[] } }];
+      expect(update).toEqual({ name: "Renamed flow" });
+      expect(update.steps).toBeUndefined();
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("sends persisted step ids and strips temporary step ids before saving", async () => {
+    const flowUpdate = vi.fn(async ({ flow, update }) => ({
+      ...(flow as Flow),
+      ...(update as Partial<Flow>)
+    }));
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1)] }),
+      intric: makeIntric({ flowUpdate })
+    });
+    try {
+      const persistedStep = get(editor.state.update).steps[0];
+      const newStep = makeStep(2, {
+        id: "_temp_new",
+        assistant_id: "assistant-2",
+        input_source: "previous_step"
+      });
+      editor.state.update.update((resource) => ({
+        ...resource,
+        steps: [persistedStep, newStep]
+      }));
+
+      await editor.flushFlowSaves();
+
+      expect(flowUpdate).toHaveBeenCalledTimes(1);
+      const [{ update }] = flowUpdate.mock.calls[0] as [{ update: { steps?: FlowStep[] } }];
+      expect(update.steps?.[0]?.id).toBe("step-1");
+      expect(update.steps?.[1]).not.toHaveProperty("id");
     } finally {
       editor.destroy();
     }

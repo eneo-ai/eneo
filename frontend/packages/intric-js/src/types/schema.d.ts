@@ -17045,6 +17045,69 @@ export interface components {
       expires_after_seconds?: number | null;
     };
     /**
+     * FlowStepUpdateRequest
+     * @example {
+     *       "assistant_id": "00000000-0000-0000-0000-000000000001",
+     *       "input_source": "flow_input",
+     *       "input_type": "audio",
+     *       "mcp_policy": "inherit",
+     *       "output_mode": "transcribe_only",
+     *       "output_type": "text",
+     *       "step_order": 1,
+     *       "user_description": "Transcribe incoming audio"
+     *     }
+     */
+    FlowStepUpdateRequest: {
+      /**
+       * Assistant Id
+       * Format: uuid
+       */
+      assistant_id: string;
+      /** Step Order */
+      step_order: number;
+      /**
+       * Timeout Seconds
+       * @description Optional per-step LLM timeout override in seconds.
+       */
+      timeout_seconds?: number | null;
+      /** User Description */
+      user_description?: string | null;
+      input_source: components["schemas"]["FlowInputSource"];
+      input_type: components["schemas"]["FlowInputType"];
+      /** Input Contract */
+      input_contract?: {
+        [key: string]: unknown;
+      } | null;
+      output_mode: components["schemas"]["FlowOutputMode"];
+      output_type: components["schemas"]["FlowOutputType"];
+      /** Output Contract */
+      output_contract?: {
+        [key: string]: unknown;
+      } | null;
+      /** Input Bindings */
+      input_bindings?: {
+        [key: string]: unknown;
+      } | null;
+      /** Output Classification Override */
+      output_classification_override?: number | null;
+      mcp_policy: components["schemas"]["FlowMcpPolicy"];
+      /** Input Config */
+      input_config?: {
+        [key: string]: unknown;
+      } | null;
+      /** Output Config */
+      output_config?: {
+        [key: string]: unknown;
+      } | null;
+      /** @description Optional human-in-the-loop checkpoint for this step. Set mode to `view` to pause after the step until a reviewer approves it, or `edit` to let the reviewer edit the step output before downstream steps continue. Use `null` or omit the field for no pause. Review policy cannot be combined with outbound delivery output modes. */
+      review_policy?: components["schemas"]["FlowStepReviewPolicy"] | null;
+      /**
+       * Id
+       * @description Persisted draft step id. Omit for a new step; include it to update, reorder, or retain an existing draft step.
+       */
+      id?: string | null;
+    };
+    /**
      * FlowTemplateAssetPublic
      * @example {
      *       "can_download": true,
@@ -19983,6 +20046,7 @@ export interface components {
      *       "steps": [
      *         {
      *           "assistant_id": "00000000-0000-0000-0000-000000000002",
+     *           "id": "00000000-0000-0000-0000-000000000101",
      *           "input_source": "flow_input",
      *           "input_type": "audio",
      *           "mcp_policy": "inherit",
@@ -20000,7 +20064,7 @@ export interface components {
       /** Description */
       description?: string | null;
       /** Steps */
-      steps?: components["schemas"]["FlowStepCreateRequest"][] | null;
+      steps?: components["schemas"]["FlowStepUpdateRequest"][] | null;
       /** Metadata Json */
       metadata_json?: {
         [key: string]: unknown;

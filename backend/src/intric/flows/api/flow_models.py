@@ -496,6 +496,16 @@ class FlowStepCreateRequest(BaseModel):
         return value
 
 
+class FlowStepUpdateRequest(FlowStepCreateRequest):
+    id: UUID | None = Field(
+        default=None,
+        description=(
+            "Persisted draft step id. Omit for a new step; include it to update, "
+            "reorder, or retain an existing draft step."
+        ),
+    )
+
+
 class FlowCreateRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -535,6 +545,7 @@ class FlowUpdateRequest(BaseModel):
                 "description": "Transcribe, redact, and summarize citizen audio submissions.",
                 "steps": [
                     {
+                        "id": "00000000-0000-0000-0000-000000000101",
                         "assistant_id": "00000000-0000-0000-0000-000000000002",
                         "step_order": 1,
                         "user_description": "Transcribe incoming audio",
@@ -553,7 +564,7 @@ class FlowUpdateRequest(BaseModel):
 
     name: str
     description: str | None
-    steps: list[FlowStepCreateRequest]
+    steps: list[FlowStepUpdateRequest]
     metadata_json: dict[str, Any] | None | NotProvided = Field(default=NOT_PROVIDED)
     data_retention_days: int | None | NotProvided = Field(default=NOT_PROVIDED)
 

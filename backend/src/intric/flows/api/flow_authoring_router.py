@@ -552,7 +552,7 @@ async def update_flow(
     payload = flow_in.model_dump(exclude_unset=True)
     steps = None
     if "steps" in payload:
-        steps = [assembler.to_domain_step(step) for step in flow_in.steps]
+        steps = [assembler.to_domain_step_for_update(step) for step in flow_in.steps]
 
     updated = await container.flow_service().update_flow(
         flow_id=id,

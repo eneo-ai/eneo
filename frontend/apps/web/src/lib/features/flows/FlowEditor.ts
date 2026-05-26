@@ -62,6 +62,14 @@ function getUnifiedFlowSaveStatus(
   return "saved";
 }
 
+function stripTemporaryStepId(step: FlowStep): FlowStep {
+  if (!step.id?.startsWith("_temp_")) return step;
+
+  const stepWithoutTemporaryId: FlowStep = { ...step };
+  delete stepWithoutTemporaryId.id;
+  return stepWithoutTemporaryId;
+}
+
 const [getFlowEditor, setFlowEditor] = createContext<FlowEditor>("Edit a flow");
 
 function createFlowEditor(data: FlowEditorInitData) {
@@ -75,10 +83,7 @@ function createFlowEditor(data: FlowEditorInitData) {
       // Strip temp IDs before sending to API
       const cleanChanges = { ...changes } as Record<string, unknown>;
       if (cleanChanges.steps && Array.isArray(cleanChanges.steps)) {
-        cleanChanges.steps = (cleanChanges.steps as FlowStep[]).map((step) => ({
-          ...step,
-          id: step.id?.startsWith?.("_temp_") ? undefined : step.id
-        }));
+        cleanChanges.steps = (cleanChanges.steps as FlowStep[]).map(stripTemporaryStepId);
       }
       const updated = (await data.intric.flows.update({
         flow: resource,
@@ -107,6 +112,7 @@ function createFlowEditor(data: FlowEditorInitData) {
       name: true,
       description: true,
       steps: [
+        "id",
         "assistant_id",
         "step_order",
         "user_description",
@@ -749,7 +755,7 @@ function createFlowEditor(data: FlowEditorInitData) {
   }
 
   function getStableStepKey(step: FlowStep, index: number): string {
-    if (step.id && !step.id.startsWith("_temp_")) return `id:${step.id}`;
+    if (step.id) return `id:${step.id}`;
     if (step.assistant_id) return `assistant:${step.assistant_id}`;
     return `index:${index}`;
   }

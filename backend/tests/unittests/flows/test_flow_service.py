@@ -21,6 +21,7 @@ from intric.flows.flow_resource_bindings import (
     ResourceSlotRef,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
+from intric.flows.http_transport.secret_codec import SECRET_SENTINEL
 from intric.main.exceptions import BadRequestException, NotFoundException
 from intric.main.models import NOT_PROVIDED
 from intric.prompts.api.prompt_models import PromptCreate
@@ -52,6 +53,16 @@ def _step(step_order: int = 1) -> FlowStep:
         output_type="json",
         mcp_policy="inherit",
     )
+
+
+def _http_authored_config(secret_value: str | dict[str, str]):
+    return {
+        "url": "https://example.org/output",
+        "auth": {"mode": "none"},
+        "custom_headers": [
+            {"name": "X-Step-Secret", "value": secret_value, "secret": True}
+        ],
+    }
 
 
 def _build_assistant(*, flow_id, space_id, user) -> Assistant:
@@ -647,6 +658,224 @@ async def test_update_flow_passes_expected_revision_to_repo(user):
 
     flow_repo.update.assert_awaited_once()
     assert flow_repo.update.await_args.kwargs["expected_revision"] == 3
+
+
+@pytest.mark.asyncio
+async def test_update_flow_merges_http_secrets_by_step_id_after_reorder(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(
+        user=user,
+        flow_repo=flow_repo,
+        version_repo=version_repo,
+        encryption_service=_FakeEncryptionService(),
+    )
+
+    flow_id = uuid4()
+    first_step = _step(step_order=1).model_copy(
+        update={
+            "input_config": _http_authored_config("enc:first-secret"),
+        },
+        deep=True,
+    )
+    second_step = _step(step_order=2).model_copy(
+        update={
+            "input_source": "previous_step",
+            "input_config": _http_authored_config("enc:second-secret"),
+        },
+        deep=True,
+    )
+    existing = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[first_step, second_step],
+    )
+    flow_repo.get.return_value = existing
+    flow_repo.update.side_effect = lambda flow, tenant_id, expected_revision=None: flow
+
+    first_incoming = first_step.model_copy(
+        update={
+            "step_order": 2,
+            "input_source": "previous_step",
+            "input_config": _http_authored_config(SECRET_SENTINEL),
+        },
+        deep=True,
+    )
+    second_incoming = second_step.model_copy(
+        update={
+            "step_order": 1,
+            "input_source": "flow_input",
+            "input_config": _http_authored_config(SECRET_SENTINEL),
+        },
+        deep=True,
+    )
+
+    await service.update_flow(
+        flow_id=flow_id,
+        steps=[second_incoming, first_incoming],
+    )
+
+    persisted = flow_repo.update.await_args.kwargs["flow"]
+    persisted_by_id = {step.id: step for step in persisted.steps}
+    assert (
+        persisted_by_id[first_step.id].input_config["custom_headers"][0]["value"]
+        == "enc:first-secret"
+    )
+    assert (
+        persisted_by_id[second_step.id].input_config["custom_headers"][0]["value"]
+        == "enc:second-secret"
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_flow_rejects_unknown_step_id(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    flow_id = uuid4()
+    existing = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1)],
+    )
+    flow_repo.get.return_value = existing
+    incoming = _step(step_order=1).model_copy(update={"id": uuid4()}, deep=True)
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_flow(flow_id=flow_id, steps=[incoming])
+
+    assert exc_info.value.code == "unknown_step_id"
+
+
+@pytest.mark.asyncio
+async def test_update_flow_rejects_idless_step_secret_sentinel(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    flow_id = uuid4()
+    existing = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[_step(step_order=1)],
+    )
+    flow_repo.get.return_value = existing
+    new_step = _step(step_order=2).model_copy(
+        update={
+            "id": None,
+            "input_source": "previous_step",
+            "input_config": _http_authored_config(SECRET_SENTINEL),
+        },
+        deep=True,
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_flow(flow_id=flow_id, steps=[existing.steps[0], new_step])
+
+    assert exc_info.value.code == "sentinel_secret_requires_step_id"
+
+
+@pytest.mark.asyncio
+async def test_update_flow_rejects_duplicate_step_id(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    flow_id = uuid4()
+    first_step = _step(step_order=1)
+    existing = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[first_step],
+    )
+    flow_repo.get.return_value = existing
+    duplicate = first_step.model_copy(
+        update={"step_order": 2, "input_source": "previous_step"}, deep=True
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_flow(flow_id=flow_id, steps=[first_step, duplicate])
+
+    assert exc_info.value.code == "duplicate_step_id"
+
+
+@pytest.mark.asyncio
+async def test_update_flow_rejects_duplicate_step_order(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+
+    flow_id = uuid4()
+    first_step = _step(step_order=1)
+    second_step = _step(step_order=2)
+    existing = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[first_step, second_step],
+    )
+    flow_repo.get.return_value = existing
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_flow(
+            flow_id=flow_id,
+            steps=[
+                first_step,
+                second_step.model_copy(update={"step_order": 1}, deep=True),
+            ],
+        )
+
+    assert exc_info.value.code == "duplicate_step_order"
 
 
 @pytest.mark.asyncio

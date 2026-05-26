@@ -755,25 +755,68 @@ class FlowRepository:
                     sa.select(FlowSteps)
                     .where(FlowSteps.flow_id == flow_id)
                     .where(FlowSteps.tenant_id == tenant_id)
+                    .order_by(FlowSteps.id.asc())
+                    .with_for_update()
                 )
             )
             .scalars()
             .all()
         )
-        existing_by_order = {int(row.step_order): row for row in existing_rows}
+        existing_by_id = {row.id: row for row in existing_rows}
+        incoming_ids = {step.id for step in steps if step.id is not None}
 
-        incoming_orders = {int(step.step_order) for step in steps}
         cleanup_candidates: set[UUID] = set()
+        retained_steps: list[tuple[FlowStep, FlowSteps]] = []
+        new_steps: list[FlowStep] = []
         for step in steps:
+            if step.id is None:
+                new_steps.append(step)
+                continue
+            existing = existing_by_id.get(step.id)
+            if existing is None:
+                # FlowService owns update-id validation; this protects direct
+                # repository callers from treating stale ids as new rows.
+                raise BadRequestException(
+                    "Flow update references an unknown draft step id.",
+                    code="unknown_step_id",
+                )
+            if existing.assistant_id != step.assistant_id:
+                cleanup_candidates.add(existing.assistant_id)
+            retained_steps.append((step, existing))
+
+        changed_order_rows = [
+            existing
+            for step, existing in retained_steps
+            if int(existing.step_order) != int(step.step_order)
+        ]
+        if changed_order_rows:
+            for existing in changed_order_rows:
+                await self.session.execute(
+                    sa.update(FlowSteps)
+                    .where(FlowSteps.id == existing.id)
+                    .where(FlowSteps.tenant_id == tenant_id)
+                    .values(step_order=-int(existing.step_order))
+                )
+            # uq_flow_steps_flow_step_order is not deferrable, so final orders
+            # need a flushed temporary band.
+            await self.session.flush()
+
+        stale_id_set = {row.id for row in existing_rows if row.id not in incoming_ids}
+        if stale_id_set:
+            cleanup_candidates.update(
+                row.assistant_id for row in existing_rows if row.id in stale_id_set
+            )
+            await self.session.execute(
+                sa.delete(FlowSteps)
+                .where(FlowSteps.flow_id == flow_id)
+                .where(FlowSteps.tenant_id == tenant_id)
+                .where(FlowSteps.id.in_(stale_id_set))
+            )
+
+        for step, existing in retained_steps:
             payload = self._step_to_db_row(
                 flow_id=flow_id, tenant_id=tenant_id, step=step
             )
-            existing = existing_by_order.get(int(step.step_order))
-            if existing is None:
-                await self.session.execute(sa.insert(FlowSteps).values(payload))
-                continue
-            if existing.assistant_id != step.assistant_id:
-                cleanup_candidates.add(existing.assistant_id)
             await self.session.execute(
                 sa.update(FlowSteps)
                 .where(FlowSteps.id == existing.id)
@@ -781,19 +824,15 @@ class FlowRepository:
                 .values(**payload)
             )
 
-        stale_orders = [
-            order for order in existing_by_order if order not in incoming_orders
-        ]
-        if stale_orders:
-            cleanup_candidates.update(
-                existing_by_order[order].assistant_id for order in stale_orders
-            )
+        for step in new_steps:
             await self.session.execute(
-                sa.delete(FlowSteps)
-                .where(FlowSteps.flow_id == flow_id)
-                .where(FlowSteps.tenant_id == tenant_id)
-                .where(FlowSteps.step_order.in_(stale_orders))
+                sa.insert(FlowSteps).values(
+                    self._step_to_db_row(
+                        flow_id=flow_id, tenant_id=tenant_id, step=step
+                    )
+                )
             )
+
         await self._delete_orphan_flow_managed_assistants(
             flow_id=flow_id,
             tenant_id=tenant_id,
