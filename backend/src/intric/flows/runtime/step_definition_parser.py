@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping, TypeGuard, cast
+from typing import Mapping, Sequence, TypeGuard, cast
 from uuid import UUID
 
 from intric.database.tables.flow_tables import (
@@ -30,6 +30,17 @@ ALLOWED_INPUT_SOURCES = {
 }
 ALLOWED_INPUT_TYPES = set(FLOW_STEP_INPUT_TYPE_VALUES)
 ALLOWED_OUTPUT_TYPES = set(FLOW_STEP_OUTPUT_TYPE_VALUES)
+
+FLOW_VERSION_INVALID_STEP_ORDER = "flow_version_invalid_step_order"
+FLOW_VERSION_INVALID_STEP_IDENTIFIER = "flow_version_invalid_step_identifier"
+FLOW_VERSION_MISSING_STEP_IDENTIFIERS = "flow_version_missing_step_identifiers"
+
+
+@dataclass(frozen=True)
+class PublishedStepIdentity:
+    step_id: UUID
+    step_order: int
+    assistant_id: UUID
 
 
 @dataclass(frozen=True)
@@ -129,6 +140,40 @@ def _step_order_from_snapshot(item_dict: Mapping[str, object]) -> int:
     return int(str(step_order_value))
 
 
+def _published_step_order_from_snapshot(item: Mapping[str, object]) -> int:
+    step_order_raw = item.get("step_order", 0)
+    if isinstance(step_order_raw, bool):
+        raise BadRequestException(
+            "Invalid flow version step order.",
+            code=FLOW_VERSION_INVALID_STEP_ORDER,
+            context={"step_order": step_order_raw},
+        )
+    if isinstance(step_order_raw, int):
+        step_order = step_order_raw
+    elif isinstance(step_order_raw, str):
+        try:
+            step_order = int(step_order_raw)
+        except ValueError as exc:
+            raise BadRequestException(
+                "Invalid flow version step order.",
+                code=FLOW_VERSION_INVALID_STEP_ORDER,
+                context={"step_order": step_order_raw},
+            ) from exc
+    else:
+        raise BadRequestException(
+            "Invalid flow version step order.",
+            code=FLOW_VERSION_INVALID_STEP_ORDER,
+            context={"step_order": step_order_raw},
+        )
+    if step_order <= 0:
+        raise BadRequestException(
+            "Invalid flow version step order.",
+            code=FLOW_VERSION_INVALID_STEP_ORDER,
+            context={"step_order": step_order},
+        )
+    return step_order
+
+
 def _optional_step_description(value: object) -> str | None:
     if not isinstance(value, str):
         return None
@@ -144,6 +189,82 @@ def _field_string(value: object, default: str) -> str:
     return str(value)
 
 
+def _parse_published_step_identifier_fields(
+    item: Mapping[str, object],
+    *,
+    step_order: int,
+) -> tuple[UUID, UUID]:
+    step_id_raw = item.get("step_id")
+    assistant_id_raw = item.get("assistant_id")
+    if step_id_raw is None or assistant_id_raw is None:
+        raise BadRequestException(
+            f"Flow version step {step_order} is missing stable step identifiers.",
+            code=FLOW_VERSION_MISSING_STEP_IDENTIFIERS,
+            context={"step_order": step_order},
+        )
+
+    try:
+        step_id = UUID(str(step_id_raw))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise BadRequestException(
+            "Invalid flow version step identifier.",
+            code=FLOW_VERSION_INVALID_STEP_IDENTIFIER,
+            context={
+                "step_order": step_order,
+                "field": "step_id",
+                "value": step_id_raw,
+            },
+        ) from exc
+
+    try:
+        assistant_id = UUID(str(assistant_id_raw))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise BadRequestException(
+            "Invalid flow version step identifier.",
+            code=FLOW_VERSION_INVALID_STEP_IDENTIFIER,
+            context={
+                "step_order": step_order,
+                "field": "assistant_id",
+                "value": assistant_id_raw,
+            },
+        ) from exc
+
+    return step_id, assistant_id
+
+
+def _parse_published_step_identity(
+    item: Mapping[str, object],
+) -> PublishedStepIdentity:
+    step_order = _published_step_order_from_snapshot(item)
+    step_id, assistant_id = _parse_published_step_identifier_fields(
+        item,
+        step_order=step_order,
+    )
+    return PublishedStepIdentity(
+        step_id=step_id,
+        step_order=step_order,
+        assistant_id=assistant_id,
+    )
+
+
+def parse_published_step_identities(
+    steps: Sequence[Mapping[str, object]],
+) -> list[PublishedStepIdentity]:
+    return [_parse_published_step_identity(step) for step in steps]
+
+
+def _generic_runtime_identity_exception(
+    exc: BadRequestException,
+) -> BadRequestException:
+    if exc.code in {
+        FLOW_VERSION_INVALID_STEP_ORDER,
+        FLOW_VERSION_INVALID_STEP_IDENTIFIER,
+        FLOW_VERSION_MISSING_STEP_IDENTIFIERS,
+    }:
+        return BadRequestException("Invalid step identifiers in flow snapshot.")
+    return exc
+
+
 def _parse_step_identity(
     item: Mapping[str, object],
     *,
@@ -151,10 +272,12 @@ def _parse_step_identity(
     user_description: str | None,
 ) -> _StepIdentity:
     try:
-        step_id = UUID(str(item["step_id"]))
-        assistant_id = UUID(str(item["assistant_id"]))
-    except (KeyError, TypeError, ValueError) as exc:
-        raise BadRequestException("Invalid step identifiers in flow snapshot.") from exc
+        step_id, assistant_id = _parse_published_step_identifier_fields(
+            item,
+            step_order=step_order,
+        )
+    except BadRequestException as exc:
+        raise _generic_runtime_identity_exception(exc) from exc
     return _StepIdentity(
         step_id=step_id,
         step_order=step_order,

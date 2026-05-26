@@ -27,7 +27,7 @@ from intric.flows.published_definition import (
 from intric.main.exceptions import BadRequestException
 
 
-def _step(*, order: int = 1):
+def _step(*, order: object = 1):
     return {
         "step_id": str(uuid4()),
         "step_order": order,
@@ -62,12 +62,20 @@ def test_writer_owns_definition_envelope_and_orders_steps() -> None:
 
 def test_parser_round_trips_definition_and_runtime_steps() -> None:
     flow_id = uuid4()
+    step_id = uuid4()
+    assistant_id = uuid4()
     definition = build_published_definition_json(
         flow_id=flow_id,
         name="Flow",
         description=None,
         metadata_json=None,
-        steps=[_step(order=1)],
+        steps=[
+            {
+                **_step(order=1),
+                "step_id": str(step_id),
+                "assistant_id": str(assistant_id),
+            }
+        ],
     )
 
     parsed = parse_published_definition(definition)
@@ -77,8 +85,87 @@ def test_parser_round_trips_definition_and_runtime_steps() -> None:
     assert parsed.flow_id == flow_id
     assert parsed.name == "Flow"
     assert parsed.steps == definition["steps"]
+    assert len(parsed.step_identities) == 1
+    step_identity = parsed.step_identities[0]
+    assert step_identity.step_id == step_id
+    assert step_identity.step_order == 1
+    assert step_identity.assistant_id == assistant_id
     assert len(runtime_steps) == 1
     assert runtime_steps[0].step_order == 1
+
+
+@pytest.mark.parametrize(
+    ("step_snapshot", "error_code", "error_context"),
+    [
+        (
+            {"step_order": 1, "assistant_id": str(uuid4())},
+            "flow_version_missing_step_identifiers",
+            {"step_order": 1},
+        ),
+        (
+            {"step_order": 1, "step_id": str(uuid4()), "assistant_id": None},
+            "flow_version_missing_step_identifiers",
+            {"step_order": 1},
+        ),
+        (
+            {"step_order": 1, "step_id": "not-a-uuid", "assistant_id": str(uuid4())},
+            "flow_version_invalid_step_identifier",
+            {"step_order": 1, "field": "step_id", "value": "not-a-uuid"},
+        ),
+        (
+            {"step_order": 1, "step_id": str(uuid4()), "assistant_id": "bad-id"},
+            "flow_version_invalid_step_identifier",
+            {"step_order": 1, "field": "assistant_id", "value": "bad-id"},
+        ),
+        (
+            {"step_order": True, "step_id": str(uuid4()), "assistant_id": str(uuid4())},
+            "flow_version_invalid_step_order",
+            {"step_order": True},
+        ),
+        (
+            {
+                "step_order": "abc",
+                "step_id": str(uuid4()),
+                "assistant_id": str(uuid4()),
+            },
+            "flow_version_invalid_step_order",
+            {"step_order": "abc"},
+        ),
+        (
+            {"step_order": 1.5, "step_id": str(uuid4()), "assistant_id": str(uuid4())},
+            "flow_version_invalid_step_order",
+            {"step_order": 1.5},
+        ),
+        (
+            {"step_order": 0, "step_id": str(uuid4()), "assistant_id": str(uuid4())},
+            "flow_version_invalid_step_order",
+            {"step_order": 0},
+        ),
+        (
+            {"step_order": -1, "step_id": str(uuid4()), "assistant_id": str(uuid4())},
+            "flow_version_invalid_step_order",
+            {"step_order": -1},
+        ),
+    ],
+)
+def test_published_definition_validates_step_identity_at_construction(
+    step_snapshot: dict[str, object],
+    error_code: str,
+    error_context: dict[str, object],
+) -> None:
+    definition = build_published_definition_json(
+        flow_id=uuid4(),
+        name="Flow",
+        description=None,
+        metadata_json=None,
+        steps=[step_snapshot],
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        parse_published_definition(definition)
+
+    assert exc_info.value.code == error_code
+    assert exc_info.value.context == error_context
 
 
 def test_parser_exposes_typed_metadata_without_raw_metadata_field() -> None:

@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T036
+active_task: T038
 
 tasks:
   - id: T001
@@ -3066,7 +3066,7 @@ tasks:
   - id: T036
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next smallest post-fallback Flow step-identity/runtime-contract consolidation slice after T035, using source evidence to decide between preflight automation, parser-owned published-step validation, sparse runtime flow loading, public runtime step_id nullability, or the first draft id-owned persistence sub-worker."
     inputs:
@@ -3095,7 +3095,247 @@ tasks:
       - "Source evidence for ownership and duplicate/scattered logic."
       - "Consolidation effect section."
       - "Public API/generated-client disposition."
-    receipt: null
+    receipt:
+      result: done
+      decision: "approve_parser_validation"
+      summary: "Approved T037 as the next Worker after revising the design from a lazy step identity projection to construction-time `PublishedFlowDefinition` identity validation. Antigravity's initial blocker was valid: a successfully constructed published definition should not be able to carry invalid step identity. T037 must validate typed published step identities during `parse_published_definition(...)`, store them on `PublishedFlowDefinition`, and remove raw identity parsing from `FlowRunService` without changing broader runtime parser behavior."
+      source_evidence:
+        - "backend/src/intric/flows/application/flow_run_service.py:642-720 still parses step_order, step_id, assistant_id, UUIDs, and named identity error codes from raw published step dictionaries."
+        - "backend/src/intric/flows/published_definition.py:126-176 validates the published definition envelope and constructs `PublishedFlowDefinition`, but currently leaves step identity in raw `steps`."
+        - "backend/src/intric/flows/runtime/step_definition_parser.py:125-163 already parses step order and UUID identity for full runtime-step parsing."
+        - "backend/src/intric/flows/runtime/step_definition_parser.py:317-403 validates broader runtime semantics; full `runtime_steps()` cannot replace preseed identity because it also enforces input/output/review/chain rules."
+        - "backend/src/intric/flows/api/flow_run_steps_router.py:239 reads `parse_published_definition(...).steps`; T037 must preserve raw steps for this caller."
+        - "backend/src/intric/flows/published_definition.py:15 imports `parse_runtime_steps`; defining `PublishedStepIdentity` in `published_definition.py` and importing it from `step_definition_parser.py` would create a circular import."
+      data_preflight:
+        - command: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -At -F $'\\t' -c \"select flow_id, version, definition_json::text from flow_versions order by flow_id, version\" | PYTHONDONTWRITEBYTECODE=1 uv run python -c '<parse every row with parse_published_runtime_steps>'"
+          status: pass
+          output: "flow_versions=254; runtime_steps=1546; parse_failures=34; failure_codes={'flow_input_contract_inapplicable': 34}"
+        - command: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -P pager=off -c '<published step identity threshold query>'"
+          status: pass
+          output: "flow_versions=254; published_steps=1684; bad_step_identity_rows=0; bad_definition_envelopes=0"
+      commands:
+        - cmd: "rg -n \"parse_published_definition\\(|parse_published_runtime_steps\\(|PublishedFlowDefinition\" backend/src backend/tests -g '*.py'"
+          status: pass
+          output: "All current callers are Flow runtime/API/test callers; no hidden non-Flow source callers found."
+        - cmd: "if [ -f /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json ]; then cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json; else printf 'NO_WATCHDOG\\n'; fi"
+          status: pass
+          output: "schema_version 1; status ok; blockers empty. Stale active_task T035 is advisory because status is ok."
+      peer_review:
+        claude_initial:
+          artifact: ".codex/artifacts/claude-peer-loop-t036-next-step-identity-slice-judge-final-20260526T063251Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8 for the lazy projection plan."
+        antigravity_blocker:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t036-next-step-identity-slice-antigravity-synthesis-20260526T063456Z.md"
+          verdict: "GREEN_LIGHT no; MIN_SCORE 7; valid blocker that identity validation should happen during `parse_published_definition(...)` construction, not through a lazy `step_identities()` method."
+        claude_revised:
+          artifact: ".codex/artifacts/claude-peer-loop-t036-revised-published-step-identity-boundary-20260526T064216Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8 after construction-time invariant revision."
+        antigravity_revised:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t036-revised-step-identity-boundary-clean-antigravity-gate-20260526T064551Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8. Added circular-import pin: define `PublishedStepIdentity` in `step_definition_parser.py` and import it into `published_definition.py`."
+      public_api_disposition: "Public API/OpenAPI/generated-client `step_id` nullability remains a separate task; T037 must not edit API/router/OpenAPI/generated frontend files."
+      follow_ups:
+        - "Add a checked-in published-step identity preflight script before treating manual SQL as a deploy-quality gate."
+        - "Audit the 34 local published versions that fail full runtime-step parsing with `flow_input_contract_inapplicable`."
+        - "Consider a separate graph/API smoke after T037 if source evidence shows eager identity validation affected graph callers."
+      consolidation_effect:
+        reused_existing_owner: "Published-definition construction and runtime step definition parser."
+        logic_moved_from: "FlowRunService raw published step identity parsing."
+        logic_deleted: "Application-layer step order parsing, UUID conversion, and named identity error-code branches."
+        duplicate_path_removed: "Run creation no longer validates published step identity separately from the published definition/runtime parser owner."
+        new_code_added: "A typed `PublishedStepIdentity` projection on `PublishedFlowDefinition`, validated at construction."
+        why_existing_owners_were_insufficient: "`PublishedFlowDefinition` currently exposes only raw step dictionaries, while full `runtime_steps()` is too broad for preseed because it rejects 34 persisted versions for non-identity runtime-contract rules."
+        guard_preventing_duplicate_return: "Contract tests plus grep guard forbidding identity UUID parsing, named identity codes, and `_build_preseed_steps` in `FlowRunService`."
+        net_flow_logic_surface_area: "reduced"
+      next_task: T037
+
+  - id: T037
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Validate published step identity at the `PublishedFlowDefinition` construction boundary and remove duplicate raw identity parsing from run creation."
+    allowed_files:
+      - "backend/src/intric/flows/runtime/step_definition_parser.py"
+      - "backend/src/intric/flows/published_definition.py"
+      - "backend/src/intric/flows/application/flow_run_service.py"
+      - "backend/tests/unittests/flows/test_step_definition_parser.py"
+      - "backend/tests/unittests/flows/test_published_definition_contract.py"
+      - "backend/tests/unittests/flows/test_flow_run_service.py"
+      - "backend/tests/unittests/flows/test_flow_executor_runtime.py"
+      - "backend/tests/unittests/flows/test_flow_run_execution_router.py"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Before starting implementation, re-check the watchdog file and verify any halt-worthy blocker against source/state/git evidence."
+      - "Define the typed published step identity projection in `step_definition_parser.py`, not `published_definition.py`, to avoid a circular import."
+      - "`parse_published_definition(...)` must validate and store `step_identities: list[PublishedStepIdentity]` on `PublishedFlowDefinition` during construction."
+      - "`FlowRunService` must project `definition.step_identities` to `PreseedStep`; it must not parse raw step dictionaries, UUIDs, or named identity error codes."
+      - "Empty published steps remain an application run-readiness failure in `_prepare_run_creation`, raising `flow_version_no_executable_steps` before run creation."
+      - "Preserve current run-create identity error codes and contexts for missing identifiers, invalid UUIDs, and invalid step order."
+      - "`parse_runtime_steps(...)` must reuse the same identity parsing logic while preserving existing generic step-scoped diagnostics; translate named `flow_version_*` identity errors back to generic parser errors inside `parse_runtime_steps(...)` without a complex mapping layer."
+      - "Add a concise `parse_published_definition(...)` contract docstring or equivalent note that successful construction guarantees envelope validity and step identity structure."
+      - "Do not edit API/router/OpenAPI/generated frontend files, sparse repository loading, migrations, Flow AI Builder, retention, service-key identity, webhook outbox, runtime input retention, or `flow_version_steps`."
+      - "Do not add a new generic helper module, fake interface, plugin system, event bus, or one-implementation abstraction."
+      - "Do not put task IDs or planning vocabulary in committed source, tests, comments, docstrings, or commit message."
+      - "Antigravity implementation review found two directly coupled sparse published-step test fixtures outside the original allowed files. T037 may edit only those two additional test files to align fixtures with the stricter construction-time identity invariant; no production API/router/runtime edits are allowed outside the original source files."
+    verify:
+      - "Rerun the full-runtime-parser data preflight and record the 34 `flow_input_contract_inapplicable` failures."
+      - "Rerun the published-snapshot identity threshold query and record zero bad identity rows."
+      - "cd backend && uv run pytest tests/unittests/flows/test_step_definition_parser.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py -q"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py::test_execute_fails_run_when_definition_snapshot_is_invalid tests/unittests/flows/test_flow_run_execution_router.py::test_get_flow_graph_uses_run_version_snapshot_when_run_id_supplied -q"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_run_execution_router.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/runtime/step_definition_parser.py src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_step_definition_parser.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_run_execution_router.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/runtime/step_definition_parser.py src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_step_definition_parser.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_run_execution_router.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/step_definition_parser.py src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_step_definition_parser.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_run_execution_router.py"
+      - "rg -n \"UUID\\(str\\(step_id_raw\\)|UUID\\(str\\(assistant_id_raw\\)|flow_version_missing_step_identifiers|flow_version_invalid_step_identifier|flow_version_invalid_step_order\" backend/src/intric/flows -g '*.py' -g '!backend/src/intric/flows/runtime/step_definition_parser.py' -g '!backend/src/intric/flows/published_definition.py'; test $? -eq 1"
+      - "rg -n \"Flow version step .*missing stable step identifiers|Invalid flow version step identifier|Invalid flow version step order|def _build_preseed_steps\" backend/src/intric/flows/application/flow_run_service.py; test $? -eq 1"
+      - "git diff --check"
+    stop_if:
+      - "The watchdog has a halt-worthy blocker that cannot be resolved or source-evidence-disagreed."
+      - "Identity validation at `parse_published_definition(...)` construction breaks a current source caller for a non-identity reason."
+      - "The Worker needs API/router/OpenAPI/generated-client/frontend files."
+      - "The Worker needs to change full runtime parser behavior for the 34 known `flow_input_contract_inapplicable` published versions."
+      - "The Worker changes public run-create identity error codes/contexts without separate Judge approval."
+      - "The Worker keeps identity parsing in both `FlowRunService` and the parser/published-definition owner."
+      - "The Worker requires sparse FlowRepository loading, preflight script work, draft id-owned persistence, Flow draft materialization, retention, service-key identity, webhook outbox, runtime input retention, schema migrations, or `flow_version_steps`."
+      - "Allowed files are insufficient."
+    consolidation_effect:
+      reused_existing_owner: "Published-definition construction and runtime step definition parser."
+      logic_moved_from: "FlowRunService raw published step identity parsing."
+      logic_deleted: "Application-layer step order parsing, UUID conversion, and named identity error-code branches."
+      duplicate_path_removed: "Run creation no longer separately parses published step identity from raw snapshot dictionaries."
+      new_code_added: "Typed `PublishedStepIdentity` projection in the existing parser/definition boundary."
+      why_existing_owners_were_insufficient: "`PublishedFlowDefinition` lacked a typed identity projection and full `runtime_steps()` is intentionally broader than preseed identity."
+      guard_preventing_duplicate_return: "Published-definition/parser tests plus grep guards preventing identity parsing/error codes in `FlowRunService`."
+      net_flow_logic_surface_area: "reduced"
+    receipt:
+      result: done
+      completed_at: "2026-05-26T07:35:00+02:00"
+      summary: "Validated published step identity at `PublishedFlowDefinition` construction and removed duplicate raw identity parsing from `FlowRunService`. Run creation now projects typed `PublishedStepIdentity` values into preseed rows; broader runtime parsing still preserves its legacy generic diagnostics."
+      evidence:
+        - "backend/src/intric/flows/runtime/step_definition_parser.py:34 defines the published step identity error-code owner."
+        - "backend/src/intric/flows/runtime/step_definition_parser.py:40 defines the typed `PublishedStepIdentity` projection."
+        - "backend/src/intric/flows/runtime/step_definition_parser.py:229 parses published step identities from step snapshots."
+        - "backend/src/intric/flows/published_definition.py:131 documents the construction-time contract."
+        - "backend/src/intric/flows/published_definition.py:180 stores validated `step_identities` on `PublishedFlowDefinition`."
+        - "backend/src/intric/flows/application/flow_run_service.py:272 projects typed identities into preseed rows and no longer parses UUIDs or raw step dictionaries."
+        - "backend/tests/unittests/flows/test_published_definition_contract.py:90 covers construction-time identity validation error codes and contexts."
+        - "backend/tests/unittests/flows/test_flow_run_service.py:2946 asserts invalid published snapshots do not create run rows."
+        - "backend/tests/unittests/flows/test_flow_executor_runtime.py:2939 and backend/tests/unittests/flows/test_flow_run_execution_router.py:110 align sparse fixtures with the stricter identity invariant."
+      commands:
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_published_definition_contract.py::test_parser_round_trips_definition_and_runtime_steps tests/unittests/flows/test_published_definition_contract.py::test_published_definition_validates_step_identity_at_construction -q"
+          status: "fail_expected_red"
+          output: "8 failed before implementation because construction did not expose or validate step identities."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_published_definition_contract.py::test_parser_round_trips_definition_and_runtime_steps tests/unittests/flows/test_published_definition_contract.py::test_published_definition_validates_step_identity_at_construction tests/unittests/flows/test_step_definition_parser.py::test_parse_runtime_steps_scopes_invalid_step_identifier -q"
+          status: pass
+          output: "9 passed."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_step_definition_parser.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py -q"
+          status: pass
+          output: "151 passed, 10 warnings."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py::test_execute_fails_run_when_definition_snapshot_is_invalid tests/unittests/flows/test_flow_run_execution_router.py::test_get_flow_graph_uses_run_version_snapshot_when_run_id_supplied -q"
+          status: pass
+          output: "2 passed, 9 warnings."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_run_execution_router.py -q"
+          status: pass
+          output: "91 passed, 9 warnings."
+        - command: "cd backend && uv run ruff check src/intric/flows/runtime/step_definition_parser.py src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_step_definition_parser.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_run_execution_router.py"
+          status: pass
+        - command: "cd backend && uv run ruff format --check src/intric/flows/runtime/step_definition_parser.py src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_step_definition_parser.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_run_execution_router.py"
+          status: pass
+          output: "8 files already formatted."
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/step_definition_parser.py src/intric/flows/published_definition.py src/intric/flows/application/flow_run_service.py tests/unittests/flows/test_step_definition_parser.py tests/unittests/flows/test_published_definition_contract.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_run_execution_router.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations."
+        - command: "rg -n \"UUID\\(str\\(step_id_raw\\)|UUID\\(str\\(assistant_id_raw\\)|flow_version_missing_step_identifiers|flow_version_invalid_step_identifier|flow_version_invalid_step_order\" backend/src/intric/flows -g '*.py' -g '!backend/src/intric/flows/runtime/step_definition_parser.py' -g '!backend/src/intric/flows/published_definition.py'; test $? -eq 1"
+          status: pass
+          output: "No matches."
+        - command: "rg -n \"Flow version step .*missing stable step identifiers|Invalid flow version step identifier|Invalid flow version step order|def _build_preseed_steps\" backend/src/intric/flows/application/flow_run_service.py; test $? -eq 1"
+          status: pass
+          output: "No matches."
+        - command: "cd backend && uv run pytest tests/unittests/flows -q"
+          status: "fail_environment_and_pre_existing"
+          output: "12 failed, 4296 passed, 4 skipped, 26 warnings. 11 failures share missing local WeasyPrint/libgobject; one isolated `test_flow_repo.py::test_get_assistant_snapshots_scopes_collection_query_to_tenant` expectation mismatch is unrelated to T037."
+        - command: "git diff --check"
+          status: pass
+      data_preflight:
+        - command: "docker exec -i eneo-41ae93-db-1 psql ... parse every local flow_versions.definition_json through runtime parser"
+          status: pass
+          output: "flow_versions=254; runtime_steps=1546; parse_failures=34; failure_codes={'flow_input_contract_inapplicable': 34}"
+        - command: "docker exec -i eneo-41ae93-db-1 psql ... published step identity threshold query"
+          status: pass
+          output: "flow_versions=254; published_steps=1684; bad_step_identity_rows=0; bad_definition_envelopes=0"
+      peer_review:
+        claude:
+          artifact: ".codex/artifacts/claude-peer-loop-t037-published-step-identity-implementation-review-after-fixture-fixes-20260526T072228Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8. Approved commit after fixture fixes, docstring tightening, and negative step_order coverage."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t037-published-step-identity-implementation-antigravity-recheck-20260526T072606Z.md"
+          verdict: "Report body GREEN_LIGHT yes and MIN_SCORE 8, but runner footer said it did not return green; treated as advisory green with parser inconsistency recorded."
+      consolidation_effect:
+        reused_existing_owner: "Published-definition construction and runtime step definition parser."
+        logic_moved_from: "FlowRunService raw published step identity parsing."
+        logic_deleted: "Application-layer step order parsing, UUID conversion, and named identity error-code branches."
+        duplicate_path_removed: "Run creation no longer separately parses published step identity from raw snapshot dictionaries."
+        new_code_added: "Typed `PublishedStepIdentity` projection in the existing parser/definition boundary."
+        why_existing_owners_were_insufficient: "`PublishedFlowDefinition` lacked a typed identity projection and full `runtime_steps()` is intentionally broader than preseed identity."
+        guard_preventing_duplicate_logic_from_returning: "Published-definition/parser tests plus grep guards preventing identity parsing/error codes in `FlowRunService`."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: ""
+      residual_risk:
+        - "Full Flow unit suite still has unrelated local/environmental failures listed above."
+        - "Public API step_id nullability and checked-in preflight script remain separate follow-ups."
+      unrelated_files_preserved:
+        - ".devcontainer/docker-compose.yml"
+        - ".gitignore"
+        - "AGENTS.md"
+        - "frontend/packages/ui/src/icons/types.d.ts"
+        - ".devcontainer/devcontainer-lock.json and other untracked root/doc artifacts"
+      next_task: T038
+
+  - id: T038
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Improve the runtime step identity Alembic migration's production query shape and migration safety using DB/performance/Alembic guidance, without changing Flow runtime/API behavior."
+    allowed_files:
+      - "backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py"
+      - "backend/tests/integration/migrations/test_flow_runtime_step_identity_migration.py"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Before starting implementation and before committing, re-check the watchdog state file and verify any halt-worthy blocker against source/state/git evidence."
+      - "Use complexity-optimizer, supabase-postgres-best-practices, and sqlalchemy-alembic-expert-best-practices-code-review before editing."
+      - "Run Claude plan gate before implementation and Claude commit gate after implementation."
+      - "Use Antigravity after Claude because this touches an already-committed Alembic migration and production data movement."
+      - "Keep this to the existing runtime step identity migration and directly coupled migration tests."
+      - "Do not edit API/router/OpenAPI/generated frontend files, Flow runtime source, retention, service-key identity, webhook outbox, Flow AI Builder, runtime input retention, public schema nullability, or flow_version_steps."
+      - "Do not add generic helpers, a new migration framework, or a second runtime identity path."
+      - "Preserve Alembic transactional DDL unless peer review proves a separate concurrent-index migration is required."
+      - "Do not add a temporary/partial index inside the same transactional migration unless peer review explicitly approves the lock behavior."
+      - "If the best-practice fix requires a new migration revision or a staged deploy decision, stop and record the follow-up rather than silently widening this slice."
+    verify:
+      - "cd backend && uv run pytest -m migration_isolation tests/integration/migrations/test_flow_runtime_step_identity_migration.py -q"
+      - "cd backend && uv run ruff check alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py tests/integration/migrations/test_flow_runtime_step_identity_migration.py"
+      - "cd backend && uv run ruff format --check alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py tests/integration/migrations/test_flow_runtime_step_identity_migration.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py tests/integration/migrations/test_flow_runtime_step_identity_migration.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run python -m py_compile alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py"
+      - "git diff --check"
+    stop_if:
+      - "The watchdog has a halt-worthy blocker that cannot be resolved or source-evidence-disagreed."
+      - "Peer review says editing the committed migration in place is unsafe and requires a new revision or deploy decision."
+      - "The change needs files outside allowed_files."
+      - "The change needs runtime/API/source behavior changes or product/data decisions."
+      - "The migration-isolation tests cannot prove behavior preservation after the query-shape change."
+    consolidation_effect:
+      reused_existing_owner: "The existing T033 runtime step identity migration remains the owner of this data movement."
+      logic_moved_from: "No Flow runtime logic moves in this task."
+      logic_deleted: "Target any migration-only duplicated JSON expansion or unsafe FK recreation behavior approved by peer review."
+      duplicate_path_removed: "Do not create a second runtime identity migration path."
+      new_code_added: "Only migration SQL shape/test guard changes needed for DB safety."
+      why_existing_owners_were_insufficient: "The owner exists, but its recovery query can be made less dependent on null runtime row count and its FK downgrade posture needs best-practice review."
+      guard_preventing_duplicate_return: "Migration isolation tests plus SQL-shape/source guards if peer review approves them."
+      net_flow_logic_surface_area: "preserved"
+      if_increased_why: ""
 
   - id: T999
     type: judge

@@ -2943,6 +2943,7 @@ async def test_create_run_rejects_invalid_published_snapshot(
         await service.create_run(flow_id=flow.id, input_payload_json={"x": "y"})
     assert exc_info.value.code == error_code
     assert exc_info.value.context == error_context
+    flow_run_repo.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio

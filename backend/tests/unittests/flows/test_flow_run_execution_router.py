@@ -107,6 +107,7 @@ async def test_get_flow_graph_uses_run_version_snapshot_when_run_id_supplied():
                 {
                     "step_id": str(snapshot_step_id),
                     "step_order": 1,
+                    "assistant_id": str(uuid4()),
                     "user_description": "Snapshot step",
                     "input_source": "flow_input",
                     "input_type": "text",

@@ -2936,10 +2936,11 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
             definition_json={
                 "steps": [
                     {
+                        "step_id": str(uuid4()),
                         "step_order": 1,
                         "assistant_id": str(uuid4()),
                         "input_source": "flow_input",
-                        "output_mode": "pass_through",
+                        "output_mode": "invalid_mode",
                     }
                 ]
             },

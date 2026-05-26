@@ -269,9 +269,19 @@ class FlowRunService:
         )
         reject_reserved_input_payload_keys(normalized_inline_payload)
         normalized_step_inputs = normalize_step_inputs_payload(step_inputs)
-        preseed_steps = self._build_preseed_steps(
-            definition_json=definition.definition_json
-        )
+        if not definition.step_identities:
+            raise BadRequestException(
+                "Published flow version does not contain executable steps.",
+                code="flow_version_no_executable_steps",
+            )
+        preseed_steps: list[PreseedStep] = [
+            {
+                "step_id": identity.step_id,
+                "assistant_id": identity.assistant_id,
+                "step_order": identity.step_order,
+            }
+            for identity in definition.step_identities
+        ]
         step_input_file_projections: list[StepInputFileProjection] = []
         if step_inputs is not None or definition.has_required_runtime_input():
             runtime_steps = definition.runtime_steps()
@@ -638,83 +648,3 @@ class FlowRunService:
             principal=self._principal(),
         )
         return result.run
-
-    def _build_preseed_steps(
-        self,
-        *,
-        definition_json: JsonObject,
-    ) -> list[PreseedStep]:
-        raw_steps = parse_published_definition(definition_json).steps
-        if not raw_steps:
-            raise BadRequestException(
-                "Published flow version does not contain executable steps.",
-                code="flow_version_no_executable_steps",
-            )
-
-        preseed: list[PreseedStep] = []
-        for step_snapshot in raw_steps:
-            step_order_raw = step_snapshot.get("step_order", 0)
-            if isinstance(step_order_raw, bool):
-                raise BadRequestException(
-                    "Invalid flow version step order.",
-                    code="flow_version_invalid_step_order",
-                    context={"step_order": step_order_raw},
-                )
-            try:
-                step_order = int(step_order_raw)
-            except (TypeError, ValueError) as exc:
-                raise BadRequestException(
-                    "Invalid flow version step order.",
-                    code="flow_version_invalid_step_order",
-                    context={"step_order": step_order_raw},
-                ) from exc
-            if step_order <= 0:
-                raise BadRequestException(
-                    "Invalid flow version step order.",
-                    code="flow_version_invalid_step_order",
-                    context={"step_order": step_order},
-                )
-
-            step_id_raw = step_snapshot.get("step_id")
-            assistant_id_raw = step_snapshot.get("assistant_id")
-            if step_id_raw is None or assistant_id_raw is None:
-                raise BadRequestException(
-                    f"Flow version step {step_order} is missing stable step identifiers.",
-                    code="flow_version_missing_step_identifiers",
-                    context={"step_order": step_order},
-                )
-
-            try:
-                step_id = UUID(str(step_id_raw))
-            except (TypeError, ValueError, AttributeError) as exc:
-                raise BadRequestException(
-                    "Invalid flow version step identifier.",
-                    code="flow_version_invalid_step_identifier",
-                    context={
-                        "step_order": step_order,
-                        "field": "step_id",
-                        "value": step_id_raw,
-                    },
-                ) from exc
-
-            try:
-                assistant_id = UUID(str(assistant_id_raw))
-            except (TypeError, ValueError, AttributeError) as exc:
-                raise BadRequestException(
-                    "Invalid flow version step identifier.",
-                    code="flow_version_invalid_step_identifier",
-                    context={
-                        "step_order": step_order,
-                        "field": "assistant_id",
-                        "value": assistant_id_raw,
-                    },
-                ) from exc
-
-            preseed.append(
-                {
-                    "step_id": step_id,
-                    "assistant_id": assistant_id,
-                    "step_order": step_order,
-                }
-            )
-        return preseed

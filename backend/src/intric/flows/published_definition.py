@@ -12,7 +12,11 @@ from intric.flows.flow_metadata import (
     parse_flow_metadata,
 )
 from intric.flows.runtime.models import RuntimeStep
-from intric.flows.runtime.step_definition_parser import parse_runtime_steps
+from intric.flows.runtime.step_definition_parser import (
+    PublishedStepIdentity,
+    parse_published_step_identities,
+    parse_runtime_steps,
+)
 from intric.flows.runtime_input import build_runtime_input_config
 from intric.main.exceptions import BadRequestException
 
@@ -45,6 +49,7 @@ class PublishedFlowDefinition:
     name: str
     description: str | None
     steps: list[JsonObject]
+    step_identities: list[PublishedStepIdentity]
     definition_json: JsonObject
 
     def metadata(self) -> FlowMetadata:
@@ -126,6 +131,11 @@ def build_published_definition_json(
 def parse_published_definition(
     definition_json: Mapping[str, object],
 ) -> PublishedFlowDefinition:
+    """Parse and validate a published snapshot.
+
+    A successful return guarantees that the envelope is well-formed and all step
+    identities are valid.
+    """
     schema_version = definition_json.get("schema_version")
     if not isinstance(schema_version, int):
         raise BadRequestException(
@@ -166,12 +176,14 @@ def parse_published_definition(
 
     name = definition_json.get("name")
     description = definition_json.get("description")
+    steps = [cast(JsonObject, step) for step in step_items]
     return PublishedFlowDefinition(
         schema_version=schema_version,
         flow_id=flow_id,
         name=name if isinstance(name, str) else "",
         description=description if isinstance(description, str) else None,
-        steps=[cast(JsonObject, step) for step in step_items],
+        steps=steps,
+        step_identities=parse_published_step_identities(steps),
         definition_json=dict(definition_json),
     )
 
