@@ -68,6 +68,26 @@ export function initModels(client) {
     },
 
     /**
+     * Validate migration compatibility without executing.
+     * @param {Object} params
+     * @param {string} params.fromId Source model ID
+     * @param {string} params.toId Target model ID
+     * @returns {Promise<import("../types/schema").components["schemas"]["ValidationResult"]>}
+     * @throws {IntricError}
+     * */
+    validateMigration: async ({ fromId, toId }) => {
+      const res = await client.fetch("/api/v1/completion-models/{model_id}/migration-validate", {
+        method: "get",
+        params: {
+          path: { model_id: fromId },
+          query: { to_model_id: toId }
+        }
+      });
+
+      return res;
+    },
+
+    /**
      * Migrate completion model usage to another model.
      * @param {Object} params
      * @param {string} params.fromId Source model ID
@@ -88,6 +108,91 @@ export function initModels(client) {
             confirm_migration: confirmMigration
           }
         }
+      });
+
+      return res;
+    },
+
+    /**
+     * Get usage statistics for a completion model (aggregated counts).
+     * @param {Object} params
+     * @param {string} params.modelId Model ID
+     * @returns {Promise<import("../types/schema").components["schemas"]["ModelUsageStatistics"]>}
+     * @throws {IntricError}
+     * */
+    getUsageStats: async ({ modelId }) => {
+      const res = await client.fetch("/api/v1/completion-models/{model_id}/usage", {
+        method: "get",
+        params: { path: { model_id: modelId } }
+      });
+
+      return res;
+    },
+
+    /**
+     * Get detailed usage for a completion model (individual entities).
+     * @param {Object} params
+     * @param {string} params.modelId Model ID
+     * @param {string} [params.entityType] Filter by entity type
+     * @param {number} [params.limit=50] Number of results
+     * @returns {Promise<import("../types/schema").components["schemas"]["PaginatedResponse"]>}
+     * @throws {IntricError}
+     * */
+    getUsageDetails: async ({ modelId, entityType, limit = 50 }) => {
+      /** @type {Record<string, any>} */
+      const query = { limit };
+      if (entityType) query.entity_type = entityType;
+
+      const res = await client.fetch("/api/v1/completion-models/{model_id}/usage/details", {
+        method: "get",
+        params: {
+          path: { model_id: modelId },
+          // Query params are read via a custom Depends() on the backend, so
+          // they don't appear in the OpenAPI schema's params type.
+          // @ts-expect-error see comment above
+          query
+        }
+      });
+
+      return res;
+    },
+
+    /**
+     * Get migration history for a specific completion model.
+     * @param {Object} params
+     * @param {string} params.modelId Model ID
+     * @param {number} [params.limit=50] Number of results
+     * @param {number} [params.offset=0] Offset for pagination
+     * @returns {Promise<import("../types/schema").components["schemas"]["ModelMigrationHistory"][]>}
+     * @throws {IntricError}
+     * */
+    getMigrationHistory: async ({ modelId, limit = 50, offset = 0 }) => {
+      const res = await client.fetch("/api/v1/completion-models/{model_id}/migration-history", {
+        method: "get",
+        // Query params are read via a custom Depends() on the backend, so
+        // they don't appear in the OpenAPI schema's params type.
+        // @ts-expect-error see comment above
+        params: { path: { model_id: modelId }, query: { limit, offset } }
+      });
+
+      return res;
+    },
+
+    /**
+     * Get all migration history for the tenant.
+     * @param {Object} [params]
+     * @param {number} [params.limit=50] Number of results
+     * @param {number} [params.offset=0] Offset for pagination
+     * @returns {Promise<import("../types/schema").components["schemas"]["ModelMigrationHistory"][]>}
+     * @throws {IntricError}
+     * */
+    getAllMigrationHistory: async ({ limit = 50, offset = 0 } = {}) => {
+      const res = await client.fetch("/api/v1/completion-models/migration-history", {
+        method: "get",
+        // Query params are read via a custom Depends() on the backend, so
+        // they don't appear in the OpenAPI schema's params type.
+        // @ts-expect-error see comment above
+        params: { query: { limit, offset } }
       });
 
       return res;

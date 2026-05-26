@@ -1,6 +1,6 @@
 import { sveltekit } from "@sveltejs/kit/vite";
 import { defineConfig } from "vitest/config";
-import type { PluginOption } from "vite";
+import { searchForWorkspaceRoot, type PluginOption } from "vite";
 import tailwindcss from "@tailwindcss/vite";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
 
@@ -29,7 +29,17 @@ export default defineConfig({
   server: {
     host: "0.0.0.0", // Change to host 0.0.0.0 if you cant login on localhost (e.g. WSL)
     port: 3000,
-    strictPort: true
+    strictPort: true,
+    fs: {
+      // Allow the dev server to serve files from the monorepo root so workspace
+      // packages like @intric/ui (icons in packages/ui/src/icons/svg) load
+      // without "outside of Vite serving allow list" errors.
+      allow: [searchForWorkspaceRoot(process.cwd())]
+    },
+    watch: {
+      usePolling: true,
+      interval: 1000
+    }
   },
   define: {
     __FRONTEND_VERSION__: JSON.stringify(pkg.version),

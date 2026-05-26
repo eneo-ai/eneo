@@ -411,7 +411,11 @@
               <p class="text-muted text-xs">Låst av organisationens policy.</p>
             </div>
           {:else}
-            <SelectAIModelV2 bind:selectedModel={$update.completion_model} {availableModels} {aria}
+            <SelectAIModelV2
+              bind:selectedModel={$update.completion_model}
+              {availableModels}
+              showCost={false}
+              {aria}
             ></SelectAIModelV2>
             {#if modelsEnforced}
               <p class="text-muted mt-2 text-xs">

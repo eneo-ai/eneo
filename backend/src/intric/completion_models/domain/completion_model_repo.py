@@ -54,6 +54,9 @@ class CompletionModelRepository:
             )
         )
 
+        # Exclude soft-deleted models
+        stmt = stmt.where(CompletionModels.deleted_at.is_(None))
+
         if not with_deprecated:
             stmt = stmt.where(CompletionModels.is_deprecated == False)  # noqa
 
@@ -87,6 +90,7 @@ class CompletionModelRepository:
             )
             .where(
                 CompletionModels.id == model_id,
+                CompletionModels.deleted_at.is_(None),
                 # Allow both global models (tenant_id IS NULL) and tenant models (tenant_id = user.tenant_id)
                 sa.or_(
                     CompletionModels.tenant_id.is_(None),

@@ -18,7 +18,11 @@ from intric.audit.infrastructure.rate_limiting import (
 from intric.authentication.auth_dependencies import (
     require_resource_permission_for_method,
 )
-from intric.conversations.conversation_models import ConversationRequest
+from intric.conversations.conversation_models import (
+    ConversationRequest,
+    PreflightRequest,
+    PreflightResponse,
+)
 from intric.database.database import AsyncSession
 from intric.main.container.container import Container
 from intric.main.exceptions import NotFoundException
@@ -328,6 +332,81 @@ async def chat(
         )
 
     return await to_conversation_response(response=response, stream=request.stream)
+
+
+@router.post(
+    "/preflight",
+    response_model=PreflightResponse,
+    responses=responses.get_responses([400, 403, 404, 422, 429]),
+)
+async def preflight_tokens(
+    request: PreflightRequest,
+    http_request: Request,
+    container: Container = Depends(
+        get_container(with_user=True, with_transaction=False)  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
+    ),
+):
+    """Returns the exact token cost the next chat request will add.
+
+    Excludes knowledge/RAG and web-search content (selected at request time
+    and unknowable up-front). Designed to be called debounced from the input
+    field — the cost is dominated by tokenization (~5-20ms).
+
+    Rate-limited at 600 req/min/user; a 400ms-debounced typist tops out at
+    ~150 req/min, so the limit catches scripted abuse while leaving multiple
+    tabs and fast input untouched.
+    """
+    current_user = container.user()
+    redis_client = container.redis_client()
+    try:
+        await enforce_rate_limit(
+            redis_client=redis_client,
+            user_id=current_user.id,
+            tenant_id=current_user.tenant_id,
+            config=RateLimitConfig(
+                max_requests=600,
+                window_seconds=60,
+                key_prefix="rate_limit:preflight",
+            ),
+        )
+    except RateLimitExceededError as exc:
+        retry_after = exc.result.window_seconds
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "rate_limit_exceeded",
+                "message": "Too many preflight requests. Please retry shortly.",
+                "retry_after_seconds": retry_after,
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
+    except RateLimitServiceUnavailableError:
+        # Fail-open: preflight is best-effort UX, not a security-critical path.
+        logger.warning("Preflight rate limiter unavailable", exc_info=True)
+
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        await _validate_conversation_scope(
+            http_request=http_request,
+            container=container,
+            assistant_id=request.assistant_id,
+            group_chat_id=request.group_chat_id,
+            session_id=request.session_id,
+        )
+
+        conversation_service = container.conversation_service()
+        tool_assistant_id = None
+        if request.tools is not None and request.tools.assistants:
+            tool_assistant_id = request.tools.assistants[0].id
+
+        return await conversation_service.preflight_tokens(
+            question=request.question,
+            file_ids=request.file_ids,
+            session_id=request.session_id,
+            assistant_id=request.assistant_id,
+            group_chat_id=request.group_chat_id,
+            tool_assistant_id=tool_assistant_id,
+        )
 
 
 @router.get(

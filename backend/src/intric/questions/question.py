@@ -139,6 +139,14 @@ class Message(QuestionBase, InDB):
     generated_files: list[FilePublic]
     web_search_references: list[WebSearchResultPublic]
     tool_calls: list[ToolCallInfo] = []
+    # Default 0 keeps deserialization safe for rows persisted before token
+    # measurement was introduced. The DB columns are NOT NULL int, so every
+    # persisted row reads back as an integer. Clients that sum these values
+    # across history should treat 0 as "zero OR unmeasured" — historical
+    # conversations from before measurement was added will underreport actual
+    # context usage. Fix requires a backfill migration, out of scope here.
+    num_tokens_question: int = 0
+    num_tokens_answer: int = 0
 
     @field_validator("tool_calls", mode="before")
     @classmethod

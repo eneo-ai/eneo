@@ -2,14 +2,13 @@
 
 <script lang="ts">
   /**
-   * ProviderGlyph - Provider logos with chip styling
-   * Logos are auto-discovered from provider-logos/* via Vite glob import.
-   * To add a new provider: drop a {provider_type}.{svg,png,jpg,webp} in the folder. No code change needed.
+   * ProviderGlyph — provider logos with chip styling.
+   *
+   * Logos are auto-discovered from `$lib/assets/provider-logos/*` via a Vite
+   * glob import. To add a new provider: drop a
+   * `{provider_type}.{svg,png,jpg,webp}` in the folder. No code change needed.
    */
-
-  // Accept both prop names (some callers use `type`, some use `providerType`)
   export let providerType: string = "";
-  export let type: string = "";
   export let size: "sm" | "md" | "lg" = "md";
 
   const sizes = {
@@ -38,7 +37,7 @@
     return t;
   }
 
-  $: resolvedType = normalize(providerType || type);
+  $: resolvedType = normalize(providerType);
   $: logoUrl = logos[resolvedType];
   $: sizeConfig = sizes[size];
 </script>

@@ -263,7 +263,7 @@ def compute_effective_state(
     if rotation_grace_until is not None:
         if rotation_grace_until.tzinfo is None:
             rotation_grace_until = rotation_grace_until.replace(tzinfo=timezone.utc)
-        if rotation_grace_until < comparison_time:
+        if rotation_grace_until <= comparison_time:
             return ApiKeyState.REVOKED
     if suspended_at is not None:
         return ApiKeyState.SUSPENDED
