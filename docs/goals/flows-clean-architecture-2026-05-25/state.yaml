@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T058
+active_task: T059
 
 tasks:
   - id: T001
@@ -2202,7 +2202,7 @@ tasks:
   - id: T013
     type: worker
     assignee: Worker
-    status: queued
+    status: done
     reasoning_hint: high
     objective: "Add durable outbound webhook delivery outbox and remove direct post-commit webhook delivery from the executor, consuming WebhookDeliveryIntent if the step-handler tranche has landed."
     allowed_files: []
@@ -2212,7 +2212,28 @@ tasks:
       - "Idempotency key model is unclear."
       - "Need queue/worker setup that is unavailable locally."
       - "If T020 has landed, webhook design bypasses WebhookDeliveryIntent instead of consuming it."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Closed the original durable outbound webhook placeholder as completed by focused subtasks T041 through T045. T041 preflighted the durable delivery design, T042 chose the ref-only pending-run reconstruction semantics, T043 implemented durable ref-only webhook delivery outbox and removed direct post-commit executor delivery for terminal http_post steps, T044 chose the first follow-up, and T045 centralized the shared outbox delivery-status vocabulary."
+      completed_by_subtasks:
+        - id: T041
+          commit: "0063be86f"
+          summary: "Preflighted durable outbound webhook delivery."
+        - id: T042
+          commit: "3feb1ed50"
+          summary: "Chose the durable webhook outbox Worker slice and run terminalization semantics."
+        - id: T043
+          commit: "580d379dd"
+          summary: "Implemented durable ref-only webhook delivery outbox."
+        - id: T044
+          commit: "0a8bfff2f"
+          summary: "Chose the outbox delivery-status consolidation follow-up."
+        - id: T045
+          commit: "dd6ea39dd"
+          summary: "Centralized outbox delivery statuses."
+      notes:
+        - "T013 should not be reactivated as a broad duplicate placeholder; any remaining webhook follow-ups require their own Judge-approved task."
+        - "Materialized encrypted webhook request snapshots remain blocked by data/security decision and were not included in T013 completion."
 
   - id: T014
     type: worker
@@ -5396,7 +5417,7 @@ tasks:
   - id: T055
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "refactor(flows-api): remove remaining Flow API provider typing exceptions."
     inputs:
@@ -5699,7 +5720,7 @@ tasks:
   - id: T058
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "judge(flows): choose the next safe Flow clean-architecture task after provider wiring guard clarification."
     inputs:
@@ -5725,6 +5746,133 @@ tasks:
       - "Choosing a Worker requires retention, service-key identity/review/rerun, schema migration, webhook outbox, or other blocked product/data decisions."
       - "Choosing a Worker requires files outside a reviewable Flow proper scope."
       - "Evidence is insufficient to choose between remaining safe runtime reliability, API DX, frontend DX, schema/preflight, output-format, cleanup, or guard candidates."
+    receipt:
+      result: done
+      summary: "Chose T059 as the next safe read-only Scout: preflight the remaining draft step id-owned persistence work around the request-shape -> repository-sync -> secret-merge spine. The concrete correctness driver is the secret-merge reorder bug in FlowService._merge_step_secrets, not generic step identity cleanup. Normalized stale board state by marking T055 done and closing original T013 as completed by subtasks T041 through T045."
+      decision: "activate T059"
+      evidence:
+        - "docs/goals/flows-clean-architecture-2026-05-25/notes/t058-next-safe-judge.md"
+        - "backend/src/intric/flows/api/flow_models.py:447"
+        - "backend/src/intric/flows/api/flow_models.py:561"
+        - "backend/src/intric/flows/infrastructure/flow_repo.py:118"
+        - "backend/src/intric/flows/infrastructure/flow_repo.py:745"
+        - "backend/src/intric/flows/application/flow_service.py:673"
+        - "backend/src/intric/flows/application/flow_service.py:679"
+        - "backend/src/intric/flows/application/flow_service.py:682"
+        - "backend/src/intric/flows/application/flow_draft_materialization.py:145"
+        - "backend/src/intric/flows/application/flow_draft_materialization_executor.py:241"
+        - ".codex/artifacts/claude-peer-loop-t058-next-safe-flow-task-judge-20260526T155418Z.md"
+        - ".codex/artifacts/claude-peer-loop-t058-next-safe-flow-task-judge-revised-20260526T155702Z.md"
+        - ".codex/artifacts/claude-peer-loop-t058-next-safe-flow-task-judge-final-20260526T155838Z.md"
+      board_normalization:
+        t055: "status corrected from active to done; T055 already had a completed receipt and commits T056/T057 followed it."
+        t013: "status corrected from queued to done; completed_by_subtasks recorded on T013."
+      candidate_classification:
+        safe_now:
+          - "T059 read-only Scout for remaining draft step id-owned persistence."
+        needs_preflight:
+          - "Direct T012 implementation across request shape, repository sync, secret merge, materialization, frontend editor keys, generated client cleanup, or graph/editor behavior."
+          - "T014 schema invariant migrations."
+          - "T015 API consumer DX and generated-client/OpenAPI work."
+          - "T016 frontend state ownership."
+          - "Outbox payload-key literal cleanup."
+        blocked_on_decision:
+          - "Runtime input/file retention."
+          - "Service-key identity model."
+          - "Service-key review/resume/rerun capability policy."
+          - "Materialized encrypted webhook request snapshot storage."
+        final_docs_only:
+          - "T901 docs/flows/architecture.md maintainer map; do not start during active runtime/API/schema/frontend refactors."
+      consolidation_effect:
+        reused_existing_owner: "No source owner changed; T059 must identify the Flow authoring API, FlowRepository, and FlowService owners before implementation."
+        logic_moved_from: "None."
+        logic_deleted: "Stale board statuses for T055 and T013 were normalized."
+        duplicate_path_removed: "Original T013 durable-webhook placeholder no longer remains queued in parallel with completed webhook subtasks."
+        new_code_added: "None."
+        why_existing_owners_were_insufficient: "Existing owners may be sufficient; T059 must prove the first safe move along the request -> repository -> secret-merge spine."
+        guard_preventing_duplicate_logic_from_returning: "T059 must define the red test and any board invariant enforcement recommendation."
+        net_flow_logic_surface_area: "preserved"
+      naming_gate:
+        new_production_names: "None."
+        architecture_doc_readiness: "T059 must produce ownership evidence for the future Draft Flow / Published Flow Version / Run maintainer map and where-to-change-X table."
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1 status=ok blockers=[]; stale active_task T039 advisory."
+        - cmd: "git status --short --branch"
+          status: pass
+          output: "Only existing unrelated dirty/untracked baseline before T058 edits."
+        - cmd: "ruby -ryaml -e '<list active/queued/blocked tasks>'"
+          status: pass
+          output: "Found active_task T058 and stale T055 status active despite completed receipt."
+        - cmd: "git log --all --oneline --grep='T041\\|T042\\|T043\\|T044\\|T045\\|webhook\\|outbox delivery status\\|durable.*webhook' --regexp-ignore-case --max-count=30"
+          status: pass
+          output: "T041=0063be86f, T042=3feb1ed50, T043=580d379dd, T044=0a8bfff2f, T045=dd6ea39dd."
+        - cmd: "rg source evidence for draft step request shape, repository sync, secret merge, materialization, and frontend step-order fallbacks"
+          status: pass
+          output: "Confirmed remaining draft step order-owned surfaces and secret-merge reorder risk."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t058-next-safe-judge --phase plan --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT: yes; MIN_SCORE: 8; valid P2/P3 tightenings."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t058-next-safe-judge --phase verification --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT: yes; MIN_SCORE: 8."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t058-next-safe-judge --phase verification --iteration 3 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT: yes; MIN_SCORE: 9."
+      peer_review:
+        claude:
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 9 after final revision."
+          addressed_concerns:
+            - "Anchored T059 on the secret-merge reorder bug."
+            - "Narrowed T059 to the request-shape -> repository-sync -> secret-merge spine."
+            - "Pre-flagged API request naming/id-shape options."
+            - "Added concept-inventory row cap, vague-name examples, and state-board invariant enforcement recommendation."
+          disagreements: []
+        antigravity:
+          verdict: "Skipped by rule; Claude was green and no high-risk disputed architecture decision remained."
+      next_task: T059
+
+  - id: T059
+    type: scout
+    assignee: Scout
+    status: active
+    reasoning_hint: high
+    objective: "scout(flows): preflight remaining draft step id-owned persistence."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t058-next-safe-judge.md"
+      - ".codex/artifacts/claude-peer-loop-t058-next-safe-flow-task-judge-final-20260526T155838Z.md"
+      - "backend/src/intric/flows/api/flow_models.py"
+      - "backend/src/intric/flows/infrastructure/flow_repo.py"
+      - "backend/src/intric/flows/application/flow_service.py"
+      - "backend/src/intric/flows/application/flow_draft_materialization.py"
+      - "backend/src/intric/flows/application/flow_draft_materialization_executor.py"
+      - "Directly coupled Flow frontend/generated-client usage only as needed to decide first-Worker scope."
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t059-draft-step-id-preflight.md"
+    constraints:
+      - "Read-only Scout; no source edits, tests, migrations, API/OpenAPI/frontend edits, generated-client edits, deletion, or docs/flows/architecture.md edits."
+      - "Check watchdog before task transition and before activating any Worker."
+      - "Focus the first Worker spine on request shape, FlowRepository._sync_flow_steps, and FlowService._merge_step_secrets."
+      - "Anchor the first Worker red test on the stored-secret reorder bug: persisted secret values must stay attached to the same draft FlowStep.id, not the same step_order."
+      - "Keep the concept inventory capped to one row per file the first Worker will touch unless extra rows are needed to prove a stop rule."
+      - "Materialization, frontend editor state, generated-client cleanup, and graph/editor behavior are read-only/deferred unless evidence proves they are required to choose the first Worker scope."
+      - "Reject vague identity names such as step_handle, step_ref, or step_key; prefer FlowStep.id or a draft-update schema name that exposes the authoring axis."
+      - "Do not activate retention, service-key identity/review/rerun, schema migration, final architecture docs, Flow AI Builder, or unrelated cleanup."
+    expected_output:
+      - "T059 note with concept inventory, source evidence, persisted-data/caller preflight if needed, and first Worker recommendation."
+      - "Decision on whether the first Worker can be backend-only, backend plus generated client, or must include frontend state changes."
+      - "Exact first Worker allowed_files, red tests, verification commands, stop_if, consolidation effect, naming-gate answers, and maintainer-doc readiness evidence."
+      - "Recommendation for where to enforce the board invariant: no task with receipt.result == done may keep status != done."
+    stop_if:
+      - "Implementation is required to answer Scout questions."
+      - "The first Worker requires product decisions for retention or service-key identity."
+      - "Persisted data or frontend caller evidence is insufficient to choose id semantics."
+      - "The clean path requires schema migration or OpenAPI/generated-client changes before a Judge approves exact scope."
+      - "The plan would add a parallel step identity path instead of deepening canonical Flow authoring/API/repository owners."
     receipt: null
 
   - id: T901
