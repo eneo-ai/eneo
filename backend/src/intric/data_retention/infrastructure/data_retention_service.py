@@ -15,6 +15,7 @@ from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
 from intric.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 from intric.database.tables.files_table import Files
 from intric.database.tables.flow_tables import (
+    FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
     FlowRuns,
     FlowRunStepResultFiles,
@@ -50,6 +51,11 @@ logger = logging.getLogger(__name__)
 
 # Batch size for retention deletions to prevent transaction timeouts
 RETENTION_BATCH_SIZE = 5000
+
+
+def _sqlalchemy_affected_row_count(result: object) -> int:
+    rowcount = getattr(result, "rowcount", 0)
+    return rowcount if isinstance(rowcount, int) else 0
 
 
 class FlowRuntimeCleanupCounts(TypedDict):
@@ -183,7 +189,8 @@ class DataRetentionService:
         )
         base_subquery = sa.select(FlowRunAuditOutbox.id).where(
             sa.and_(
-                FlowRunAuditOutbox.delivery_status == "delivered",
+                FlowRunAuditOutbox.delivery_status
+                == FlowOutboxDeliveryStatus.DELIVERED.value,
                 sa.not_(audit_log_exists),
             )
         )
@@ -200,7 +207,7 @@ class DataRetentionService:
                     FlowRunAuditOutbox.id.in_(batch_subquery)
                 )
             )
-            batch_deleted = result.rowcount or 0
+            batch_deleted = _sqlalchemy_affected_row_count(result)
             if batch_deleted == 0:
                 break
             total_deleted += batch_deleted
@@ -318,7 +325,7 @@ class DataRetentionService:
             )
             query = sa.delete(record_table).where(record_table.id.in_(batch_subquery))  # type: ignore[attr-defined]
             result = await self.session.execute(query)
-            batch_deleted = result.rowcount
+            batch_deleted = _sqlalchemy_affected_row_count(result)
 
             if batch_deleted == 0:
                 break
@@ -413,7 +420,7 @@ class DataRetentionService:
             )
             query = sa.delete(Sessions).where(Sessions.id.in_(batch_subquery))
             result = await self.session.execute(query)
-            batch_deleted = result.rowcount
+            batch_deleted = _sqlalchemy_affected_row_count(result)
 
             if batch_deleted == 0:
                 break
@@ -572,7 +579,7 @@ class DataRetentionService:
                     model_parameters_json=None,
                 )
             )
-            debug_step_results += result.rowcount or 0
+            debug_step_results += _sqlalchemy_affected_row_count(result)
 
         attempt_stmt = sa.select(
             FlowStepAttempts.id,
@@ -600,7 +607,7 @@ class DataRetentionService:
                 .where(FlowStepAttempts.id == row.id)
                 .values(provenance_json=marker)
             )
-            debug_step_attempts += attempt_result.rowcount or 0
+            debug_step_attempts += _sqlalchemy_affected_row_count(attempt_result)
 
         return {
             "debug_step_results": debug_step_results,
@@ -691,7 +698,7 @@ class DataRetentionService:
                 .where(FlowStepResults.id == target.step_result_id)
                 .values(output_payload_json=output_payload)
             )
-            updated_rows += update_result.rowcount or 0
+            updated_rows += _sqlalchemy_affected_row_count(update_result)
             file_ids_by_tenant[target.tenant_id].update(target.file_ids)
 
         cleared_files = 0
@@ -712,7 +719,7 @@ class DataRetentionService:
                 .values(blob=None, text=None, transcription=None)
             )
             clear_result = await self.session.execute(clear_stmt)
-            cleared_files += clear_result.rowcount or 0
+            cleared_files += _sqlalchemy_affected_row_count(clear_result)
 
         return {
             "debug_step_results": 0,

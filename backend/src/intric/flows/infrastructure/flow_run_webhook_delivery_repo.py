@@ -8,7 +8,10 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.database.tables.flow_tables import FlowRunWebhookDeliveries
+from intric.database.tables.flow_tables import (
+    FlowOutboxDeliveryStatus,
+    FlowRunWebhookDeliveries,
+)
 from intric.flows.runtime.step_execution_result import WebhookDeliveryIntent
 
 
@@ -85,7 +88,10 @@ class FlowRunWebhookDeliveryRepository:
             (
                 await self.session.execute(
                     sa.select(FlowRunWebhookDeliveries.id)
-                    .where(FlowRunWebhookDeliveries.delivery_status == "pending")
+                    .where(
+                        FlowRunWebhookDeliveries.delivery_status
+                        == FlowOutboxDeliveryStatus.PENDING.value
+                    )
                     .where(
                         sa.or_(
                             FlowRunWebhookDeliveries.next_delivery_at.is_(None),
@@ -146,9 +152,12 @@ class FlowRunWebhookDeliveryRepository:
             sa.update(FlowRunWebhookDeliveries)
             .where(FlowRunWebhookDeliveries.id == delivery_id)
             .where(FlowRunWebhookDeliveries.claim_token == claim_token)
-            .where(FlowRunWebhookDeliveries.delivery_status == "pending")
+            .where(
+                FlowRunWebhookDeliveries.delivery_status
+                == FlowOutboxDeliveryStatus.PENDING.value
+            )
             .values(
-                delivery_status="delivered",
+                delivery_status=FlowOutboxDeliveryStatus.DELIVERED.value,
                 delivery_attempts=attempt_no,
                 next_delivery_at=None,
                 claim_token=None,
@@ -172,12 +181,19 @@ class FlowRunWebhookDeliveryRepository:
         next_delivery_at: datetime | None,
         dead_lettered_at: datetime | None,
     ) -> bool:
-        delivery_status = "dead_lettered" if dead_lettered_at is not None else "pending"
+        delivery_status = (
+            FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+            if dead_lettered_at is not None
+            else FlowOutboxDeliveryStatus.PENDING.value
+        )
         result = await self.session.execute(
             sa.update(FlowRunWebhookDeliveries)
             .where(FlowRunWebhookDeliveries.id == delivery_id)
             .where(FlowRunWebhookDeliveries.claim_token == claim_token)
-            .where(FlowRunWebhookDeliveries.delivery_status == "pending")
+            .where(
+                FlowRunWebhookDeliveries.delivery_status
+                == FlowOutboxDeliveryStatus.PENDING.value
+            )
             .values(
                 delivery_status=delivery_status,
                 delivery_attempts=attempt_no,

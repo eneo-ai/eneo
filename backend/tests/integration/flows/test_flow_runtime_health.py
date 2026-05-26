@@ -7,6 +7,7 @@ import pytest
 import sqlalchemy as sa
 
 from intric.database.tables.flow_tables import (
+    FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
     FlowRunReviewCheckpoints,
     FlowRuns,
@@ -395,7 +396,7 @@ async def test_flow_runtime_health_snapshot_reports_audit_outbox_delivery_state(
                 actor_type="user",
                 source="executor_completed",
                 target_status="completed",
-                delivery_status="pending",
+                delivery_status=FlowOutboxDeliveryStatus.PENDING.value,
                 delivery_attempts=0,
                 next_delivery_at=now
                 - timedelta(seconds=policy.audit_outbox_backlog_grace_seconds + 5),
@@ -418,7 +419,7 @@ async def test_flow_runtime_health_snapshot_reports_audit_outbox_delivery_state(
                 target_status="failed",
                 error_code="flow_task_failure",
                 error_message="flow_task_failure: task failed.",
-                delivery_status="dead_lettered",
+                delivery_status=FlowOutboxDeliveryStatus.DEAD_LETTERED.value,
                 delivery_attempts=5,
                 next_delivery_at=None,
                 dead_lettered_at=now - timedelta(minutes=2),

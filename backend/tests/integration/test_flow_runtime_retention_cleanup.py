@@ -14,6 +14,7 @@ from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
 from intric.database.tables.files_table import Files
 from intric.database.tables.flow_tables import (
+    FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
     FlowRuns,
     FlowRunStepResultFiles,
@@ -170,7 +171,6 @@ async def _create_flow_runtime_fixture(
         finished_at=created_at,
         input_payload_json={"input": "source"},
         output_payload_json={"result": "ok"},
-        error_message=None,
         job_id=None,
         created_at=created_at,
         updated_at=created_at,
@@ -280,8 +280,16 @@ async def _add_flow_audit_outbox_row(
     with_audit_log: bool,
 ):
     created_at = run.created_at
-    delivered_at = created_at if delivery_status == "delivered" else None
-    dead_lettered_at = created_at if delivery_status == "dead_lettered" else None
+    delivered_at = (
+        created_at
+        if delivery_status == FlowOutboxDeliveryStatus.DELIVERED.value
+        else None
+    )
+    dead_lettered_at = (
+        created_at
+        if delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+        else None
+    )
     outbox = FlowRunAuditOutbox(
         tenant_id=run.tenant_id,
         flow_id=run.flow_id,
@@ -301,12 +309,20 @@ async def _add_flow_audit_outbox_row(
         error_code=None,
         error_message=None,
         delivery_status=delivery_status,
-        delivery_attempts=1 if delivery_status != "pending" else 0,
-        next_delivery_at=None if delivery_status != "pending" else created_at,
+        delivery_attempts=(
+            1 if delivery_status != FlowOutboxDeliveryStatus.PENDING.value else 0
+        ),
+        next_delivery_at=(
+            None
+            if delivery_status != FlowOutboxDeliveryStatus.PENDING.value
+            else created_at
+        ),
         delivered_at=delivered_at,
         dead_lettered_at=dead_lettered_at,
         delivery_last_error=(
-            "audit projection failed" if delivery_status == "dead_lettered" else None
+            "audit projection failed"
+            if delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+            else None
         ),
         created_at=created_at,
         updated_at=created_at,
@@ -508,19 +524,19 @@ async def test_delete_old_delivered_flow_audit_outbox_rows_follows_audit_log_lif
         )
 
     orphaned_delivered_id = await create_outbox_row(
-        delivery_status="delivered",
+        delivery_status=FlowOutboxDeliveryStatus.DELIVERED.value,
         with_audit_log=False,
     )
     delivered_with_audit_id = await create_outbox_row(
-        delivery_status="delivered",
+        delivery_status=FlowOutboxDeliveryStatus.DELIVERED.value,
         with_audit_log=True,
     )
     pending_id = await create_outbox_row(
-        delivery_status="pending",
+        delivery_status=FlowOutboxDeliveryStatus.PENDING.value,
         with_audit_log=False,
     )
     dead_lettered_id = await create_outbox_row(
-        delivery_status="dead_lettered",
+        delivery_status=FlowOutboxDeliveryStatus.DEAD_LETTERED.value,
         with_audit_log=False,
     )
 
@@ -582,7 +598,7 @@ async def test_delete_old_delivered_flow_audit_outbox_rows_uses_retention_batche
                 async_session,
                 run=run,
                 user_id=admin_user.id,
-                delivery_status="delivered",
+                delivery_status=FlowOutboxDeliveryStatus.DELIVERED.value,
                 with_audit_log=False,
             )
         )

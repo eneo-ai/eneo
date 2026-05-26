@@ -11,7 +11,10 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
-from intric.database.tables.flow_tables import FlowRunAuditOutbox
+from intric.database.tables.flow_tables import (
+    FlowOutboxDeliveryStatus,
+    FlowRunAuditOutbox,
+)
 from intric.flows.application.flow_run_audit_outbox_delivery import (
     FlowRunAuditOutboxDeliveryService,
 )
@@ -210,7 +213,7 @@ async def test_flow_audit_outbox_delivery_creates_audit_log_and_marks_delivered(
     assert result.delivered_count == 1
     assert result.retry_scheduled_count == 0
     assert result.dead_lettered_count == 0
-    assert outbox_state.delivery_status == "delivered"
+    assert outbox_state.delivery_status == FlowOutboxDeliveryStatus.DELIVERED.value
     assert outbox_state.delivery_attempts == 1
     assert outbox_state.delivered_at is not None
     assert audit_state.description == "Flow run completed by executor_completed."
@@ -251,7 +254,7 @@ async def test_flow_audit_outbox_delivery_reuses_existing_audit_log_id(
             sa.update(FlowRunAuditOutbox)
             .where(FlowRunAuditOutbox.id == outbox_id)
             .values(
-                delivery_status="pending",
+                delivery_status=FlowOutboxDeliveryStatus.PENDING.value,
                 delivery_attempts=0,
                 next_delivery_at=datetime.now(timezone.utc),
                 delivered_at=None,
@@ -319,9 +322,9 @@ async def test_flow_audit_outbox_delivery_dead_letters_bad_row_and_delivers_neig
     assert result.delivered_count == 2
     assert result.dead_lettered_count == 1
     assert statuses == [
-        "delivered",
-        "dead_lettered",
-        "delivered",
+        FlowOutboxDeliveryStatus.DELIVERED.value,
+        FlowOutboxDeliveryStatus.DEAD_LETTERED.value,
+        FlowOutboxDeliveryStatus.DELIVERED.value,
     ]
 
 
@@ -390,18 +393,24 @@ async def test_flow_audit_outbox_delivery_retries_then_dead_letters_unexpected_f
         ).one()
 
     assert first.retry_scheduled_count == 1
-    assert retry_state.delivery_status == "pending"
+    assert retry_state.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
     assert retry_state.delivery_attempts == 1
     assert retry_state.next_delivery_at is not None
     assert second.dead_lettered_count == 1
-    assert dead_letter_state.delivery_status == "dead_lettered"
+    assert (
+        dead_letter_state.delivery_status
+        == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+    )
     assert dead_letter_state.dead_lettered_at is not None
 
 
 @pytest.mark.parametrize(
     "invalid_update",
     [
-        {"delivery_status": "delivered", "delivered_at": None},
+        {
+            "delivery_status": FlowOutboxDeliveryStatus.DELIVERED.value,
+            "delivered_at": None,
+        },
         {"delivery_status": "unsupported"},
         {"delivery_attempts": -1},
     ],

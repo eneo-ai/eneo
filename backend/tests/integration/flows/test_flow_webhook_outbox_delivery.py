@@ -12,6 +12,7 @@ from dependency_injector import providers
 from intric.audit.domain.outcome import Outcome
 from intric.database.database import sessionmanager
 from intric.database.tables.flow_tables import (
+    FlowOutboxDeliveryStatus,
     FlowRuns,
     FlowRunWebhookDeliveries,
     FlowStepResults,
@@ -411,7 +412,7 @@ async def test_flow_webhook_delivery_sends_outside_transaction_and_completes_run
     assert result.delivered_count == 1, delivery_state.delivery_last_error
     assert result.retry_scheduled_count == 0
     assert result.dead_lettered_count == 0
-    assert delivery_state.delivery_status == "delivered"
+    assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.DELIVERED.value
     assert delivery_state.delivery_attempts == 1
     assert delivery_state.delivered_at is not None
     assert run_state == FlowRunStatus.COMPLETED.value
@@ -480,7 +481,7 @@ async def test_flow_webhook_delivery_audits_failed_http_response(
     assert result.delivered_count == 0
     assert result.retry_scheduled_count == 1
     assert result.dead_lettered_count == 0
-    assert delivery_state.delivery_status == "pending"
+    assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
     assert delivery_state.delivery_attempts == 1
     assert "status 503" in delivery_state.delivery_last_error
     audit_service.log_async.assert_awaited_once()
@@ -603,7 +604,7 @@ async def test_flow_webhook_delivery_rolls_back_step_result_when_success_claim_l
     assert result.delivered_count == 0
     assert result.retry_scheduled_count == 0
     assert result.dead_lettered_count == 0
-    assert delivery_state.delivery_status == "pending"
+    assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
     assert delivery_state.claim_token is not None
     assert result_payload["webhook_delivered"] is False
 
@@ -670,7 +671,9 @@ async def test_flow_webhook_delivery_dead_letters_cancelled_run_without_http(
     assert result.delivered_count == 0
     assert result.retry_scheduled_count == 0
     assert result.dead_lettered_count == 1
-    assert delivery_state.delivery_status == "dead_lettered"
+    assert (
+        delivery_state.delivery_status == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+    )
     assert delivery_state.delivery_attempts == 1
     assert delivery_state.dead_lettered_at is not None
     assert "no longer running" in delivery_state.delivery_last_error
@@ -750,7 +753,7 @@ async def test_flow_webhook_delivery_rolls_back_step_result_when_failure_claim_l
     assert result.delivered_count == 0
     assert result.retry_scheduled_count == 0
     assert result.dead_lettered_count == 0
-    assert delivery_state.delivery_status == "pending"
+    assert delivery_state.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
     assert delivery_state.claim_token is not None
     assert run_state == FlowRunStatus.RUNNING.value
     assert result_payload["webhook_delivered"] is False

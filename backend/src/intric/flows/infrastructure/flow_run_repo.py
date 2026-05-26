@@ -14,6 +14,7 @@ from intric.audit.domain.actor_types import ActorType
 from intric.authentication.principal_types import PrincipalType
 from intric.database.tables.files_table import Files
 from intric.database.tables.flow_tables import (
+    FlowOutboxDeliveryStatus,
     FlowRunRerunInvalidatedSteps,
     FlowRunRerunOperations,
     FlowRunReviewCheckpoints,
@@ -1654,7 +1655,10 @@ class FlowRunRepository:
                 ~sa.select(FlowRunWebhookDeliveries.id)
                 .where(FlowRunWebhookDeliveries.flow_run_id == FlowRuns.id)
                 .where(FlowRunWebhookDeliveries.tenant_id == FlowRuns.tenant_id)
-                .where(FlowRunWebhookDeliveries.delivery_status == "pending")
+                .where(
+                    FlowRunWebhookDeliveries.delivery_status
+                    == FlowOutboxDeliveryStatus.PENDING.value
+                )
                 .exists()
             )
             .order_by(FlowRuns.updated_at.asc())

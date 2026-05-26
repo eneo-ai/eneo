@@ -7,14 +7,25 @@ output-type attributes, local names, or enum members.
 from __future__ import annotations
 
 import ast
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-FLOW_SOURCE_ROOT = Path(__file__).resolve().parents[3] / "src" / "intric" / "flows"
+from intric.database.tables.flow_tables import (
+    FLOW_RUN_AUDIT_OUTBOX_DELIVERY_STATUS_VALUES,
+    FLOW_RUN_WEBHOOK_DELIVERY_STATUS_VALUES,
+    FlowOutboxDeliveryStatus,
+    FlowRunAuditOutbox,
+    FlowRunWebhookDeliveries,
+)
+
+BACKEND_ROOT = Path(__file__).resolve().parents[3]
+FLOW_SOURCE_ROOT = BACKEND_ROOT / "src" / "intric" / "flows"
 FLOW_RUNTIME_ROOT = FLOW_SOURCE_ROOT / "runtime"
 FLOW_API_PACKAGES = {"api", "ai_builder"}
 OUTPUT_FORMATS_ROOT = FLOW_RUNTIME_ROOT / "output_formats"
+DATA_RETENTION_ROOT = BACKEND_ROOT / "src" / "intric" / "data_retention"
 
 _OUTPUT_AXIS_ENUMS = {
     "output_mode": "FlowOutputMode",
@@ -127,6 +138,17 @@ _REMOVED_INLINE_WEBHOOK_EXECUTOR_FUNCTIONS = frozenset(
         "_deliver_webhook",
     }
 )
+OUTBOX_DELIVERY_STATUS_SOURCE_FILES = (
+    FLOW_SOURCE_ROOT,
+    DATA_RETENTION_ROOT,
+)
+OUTBOX_DELIVERY_STATUS_OWNER_NAMES = frozenset(
+    {
+        "FlowOutboxDeliveryStatus",
+        "FlowRunAuditOutbox",
+        "FlowRunWebhookDeliveries",
+    }
+)
 
 
 def _flow_non_api_python_files() -> list[Path]:
@@ -148,6 +170,30 @@ def _flow_runtime_python_files() -> list[Path]:
 
 def _relative_runtime_path(path: Path) -> str:
     return path.relative_to(FLOW_RUNTIME_ROOT).as_posix()
+
+
+def _node_references_outbox_delivery_status_owner(node: ast.AST) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id in OUTBOX_DELIVERY_STATUS_OWNER_NAMES
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr in OUTBOX_DELIVERY_STATUS_OWNER_NAMES
+    )
+
+
+def _outbox_delivery_status_source_files() -> list[Path]:
+    files: list[Path] = []
+    for root in OUTBOX_DELIVERY_STATUS_SOURCE_FILES:
+        for path in root.rglob("*.py"):
+            if "__pycache__" in path.parts:
+                continue
+            tree = ast.parse(path.read_text(), filename=str(path))
+            if any(
+                _node_references_outbox_delivery_status_owner(node)
+                for node in ast.walk(tree)
+            ):
+                files.append(path)
+    return sorted(files)
 
 
 def _should_scan_path_for_axis(path: Path, *, axis: str) -> bool:
@@ -461,4 +507,54 @@ def test_executor_does_not_own_webhook_delivery_side_effects():
     assert offenders == [], (
         "Webhook HTTP side effects belong to the durable outbox worker, not "
         "FlowRunExecutor inline delivery: " + ", ".join(offenders)
+    )
+
+
+def test_flow_outbox_delivery_status_vocabulary_is_canonical():
+    expected = tuple(item.value for item in FlowOutboxDeliveryStatus)
+
+    assert FLOW_RUN_AUDIT_OUTBOX_DELIVERY_STATUS_VALUES == expected
+    assert FLOW_RUN_WEBHOOK_DELIVERY_STATUS_VALUES == expected
+
+
+def test_flow_outbox_delivery_status_sql_text_matches_vocabulary():
+    expected = {item.value for item in FlowOutboxDeliveryStatus}
+    sql_texts: list[str] = []
+    for table in (
+        FlowRunAuditOutbox.__table__,
+        FlowRunWebhookDeliveries.__table__,
+    ):
+        for constraint in table.constraints:
+            constraint_sql_text = getattr(constraint, "sqltext", None)
+            if constraint_sql_text is None:
+                continue
+            constraint_sql = str(constraint_sql_text)
+            if "delivery_status" in constraint_sql:
+                sql_texts.append(constraint_sql)
+        for index in table.indexes:
+            index_where = index.dialect_options["postgresql"]["where"]
+            if index_where is None:
+                continue
+            index_sql = str(index_where)
+            if "delivery_status" in index_sql:
+                sql_texts.append(index_sql)
+
+    sql_status_values = set(re.findall(r"'([^']+)'", "\n".join(sql_texts)))
+
+    assert sql_status_values == expected
+
+
+def test_flow_outbox_delivery_status_literals_use_canonical_vocabulary():
+    status_values = {item.value for item in FlowOutboxDeliveryStatus}
+    offenders: list[str] = []
+
+    for path in _outbox_delivery_status_source_files():
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and node.value in status_values:
+                offenders.append(f"{path.relative_to(BACKEND_ROOT)}:{node.lineno}")
+
+    assert offenders == [], (
+        "Outbox delivery status comparisons must use FlowOutboxDeliveryStatus "
+        "from flow_tables.py, not raw string literals: " + ", ".join(offenders)
     )

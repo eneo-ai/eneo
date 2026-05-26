@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.database.tables.flow_tables import (
+    FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
     FlowRunReviewCheckpoints,
     FlowRuns,
@@ -531,7 +532,9 @@ async def _load_audit_outbox_summary(
     pending_count = await session.scalar(
         sa.select(sa.func.count())
         .select_from(FlowRunAuditOutbox)
-        .where(FlowRunAuditOutbox.delivery_status == "pending")
+        .where(
+            FlowRunAuditOutbox.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
+        )
     )
     backlog_count, oldest_backlog_created_at = (
         await session.execute(
@@ -540,7 +543,10 @@ async def _load_audit_outbox_summary(
                 sa.func.min(FlowRunAuditOutbox.created_at),
             )
             .select_from(FlowRunAuditOutbox)
-            .where(FlowRunAuditOutbox.delivery_status == "pending")
+            .where(
+                FlowRunAuditOutbox.delivery_status
+                == FlowOutboxDeliveryStatus.PENDING.value
+            )
             .where(
                 sa.or_(
                     FlowRunAuditOutbox.next_delivery_at.is_(None),
@@ -556,7 +562,10 @@ async def _load_audit_outbox_summary(
                 sa.func.min(FlowRunAuditOutbox.dead_lettered_at),
             )
             .select_from(FlowRunAuditOutbox)
-            .where(FlowRunAuditOutbox.delivery_status == "dead_lettered")
+            .where(
+                FlowRunAuditOutbox.delivery_status
+                == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+            )
         )
     ).one()
     return _AuditOutboxSummary(

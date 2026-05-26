@@ -10,7 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.entity_types import EntityType
-from intric.database.tables.flow_tables import FlowRunAuditOutbox
+from intric.database.tables.flow_tables import (
+    FlowOutboxDeliveryStatus,
+    FlowRunAuditOutbox,
+)
 from intric.flows.domain.flow import (
     FlowRun,
     FlowRunReviewCheckpoint,
@@ -149,7 +152,10 @@ class FlowRunAuditOutboxRepository:
             (
                 await self.session.execute(
                     sa.select(FlowRunAuditOutbox)
-                    .where(FlowRunAuditOutbox.delivery_status == "pending")
+                    .where(
+                        FlowRunAuditOutbox.delivery_status
+                        == FlowOutboxDeliveryStatus.PENDING.value
+                    )
                     .where(
                         sa.or_(
                             FlowRunAuditOutbox.next_delivery_at.is_(None),
@@ -179,9 +185,12 @@ class FlowRunAuditOutboxRepository:
         await self.session.execute(
             sa.update(FlowRunAuditOutbox)
             .where(FlowRunAuditOutbox.id == outbox_id)
-            .where(FlowRunAuditOutbox.delivery_status == "pending")
+            .where(
+                FlowRunAuditOutbox.delivery_status
+                == FlowOutboxDeliveryStatus.PENDING.value
+            )
             .values(
-                delivery_status="delivered",
+                delivery_status=FlowOutboxDeliveryStatus.DELIVERED.value,
                 delivery_attempts=attempt_no,
                 next_delivery_at=None,
                 delivered_at=delivered_at,
@@ -200,11 +209,18 @@ class FlowRunAuditOutboxRepository:
         next_delivery_at: datetime | None,
         dead_lettered_at: datetime | None,
     ) -> None:
-        delivery_status = "dead_lettered" if dead_lettered_at is not None else "pending"
+        delivery_status = (
+            FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+            if dead_lettered_at is not None
+            else FlowOutboxDeliveryStatus.PENDING.value
+        )
         await self.session.execute(
             sa.update(FlowRunAuditOutbox)
             .where(FlowRunAuditOutbox.id == outbox_id)
-            .where(FlowRunAuditOutbox.delivery_status == "pending")
+            .where(
+                FlowRunAuditOutbox.delivery_status
+                == FlowOutboxDeliveryStatus.PENDING.value
+            )
             .values(
                 delivery_status=delivery_status,
                 delivery_attempts=attempt_no,

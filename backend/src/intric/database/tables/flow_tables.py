@@ -1,4 +1,5 @@
 from datetime import datetime
+from enum import Enum
 from typing import Any, Optional
 from uuid import UUID, uuid4
 
@@ -92,15 +93,21 @@ FLOW_RUN_AUDIT_TARGET_STATUS_VALUES = tuple(
         )
     )
 )
-FLOW_RUN_AUDIT_OUTBOX_DELIVERY_STATUS_VALUES = (
-    "pending",
-    "delivered",
-    "dead_lettered",
+
+
+class FlowOutboxDeliveryStatus(str, Enum):
+    PENDING = "pending"
+    DELIVERED = "delivered"
+    DEAD_LETTERED = "dead_lettered"
+
+
+# Keep table-specific tuple names because each SQL CHECK constraint belongs to
+# one table; the enum owns the shared vocabulary.
+FLOW_RUN_AUDIT_OUTBOX_DELIVERY_STATUS_VALUES = tuple(
+    item.value for item in FlowOutboxDeliveryStatus
 )
-FLOW_RUN_WEBHOOK_DELIVERY_STATUS_VALUES = (
-    "pending",
-    "delivered",
-    "dead_lettered",
+FLOW_RUN_WEBHOOK_DELIVERY_STATUS_VALUES = tuple(
+    item.value for item in FlowOutboxDeliveryStatus
 )
 FLOW_STEP_RESULT_STATUS_VALUES = tuple(item.value for item in FlowStepResultStatus)
 FLOW_STEP_ATTEMPT_STATUS_VALUES = tuple(item.value for item in FlowStepAttemptStatus)
@@ -1481,7 +1488,7 @@ class FlowRunAuditOutbox(BasePublic):
     delivery_status: Mapped[str] = mapped_column(
         sa.String(32),
         nullable=False,
-        server_default="pending",
+        server_default=FlowOutboxDeliveryStatus.PENDING.value,
     )
     delivery_attempts: Mapped[int] = mapped_column(
         nullable=False,
@@ -1621,7 +1628,7 @@ class FlowRunWebhookDeliveries(BasePublic):
     delivery_status: Mapped[str] = mapped_column(
         sa.String(32),
         nullable=False,
-        server_default="pending",
+        server_default=FlowOutboxDeliveryStatus.PENDING.value,
     )
     delivery_attempts: Mapped[int] = mapped_column(
         nullable=False,
