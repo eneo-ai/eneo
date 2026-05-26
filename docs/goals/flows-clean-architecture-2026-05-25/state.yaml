@@ -1833,12 +1833,13 @@ tasks:
       - "backend/src/intric/flows/runtime/step_attempt_runtime.py"
       - "backend/src/intric/flows/runtime/template_fill_runtime.py"
       - "backend/tests/unittests/flows/test_flow_runtime_step_handlers.py"
+      - "backend/tests/unittests/flows/test_step_execution_runtime.py"
       - "backend/tests/unittests/flows/test_step_attempt_runtime.py"
       - "backend/tests/integration/flows/test_flow_runtime_worker_contract.py"
     verify:
-      - "cd backend && uv run pytest tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py -q"
-      - "cd backend && uv run ruff check src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/step_handlers src/intric/flows/runtime/executor.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/runtime/step_attempt_runtime.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py"
-      - "cd backend && uv run ruff format --check src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/step_handlers src/intric/flows/runtime/executor.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/runtime/step_attempt_runtime.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/step_handlers src/intric/flows/runtime/executor.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/runtime/step_attempt_runtime.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/step_handlers src/intric/flows/runtime/executor.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/runtime/step_attempt_runtime.py tests/unittests/flows/test_flow_runtime_step_handlers.py tests/unittests/flows/test_step_execution_runtime.py tests/unittests/flows/test_step_attempt_runtime.py tests/integration/flows/test_flow_runtime_worker_contract.py"
       - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/models.py src/intric/flows/runtime/step_execution_result.py src/intric/flows/runtime/step_handlers src/intric/flows/runtime/executor.py src/intric/flows/runtime/step_execution_runtime.py src/intric/flows/runtime/step_attempt_runtime.py"
       - "git diff --check"
     stop_if:
@@ -1860,6 +1861,7 @@ tasks:
         - "HttpPostStepHandler emits a typed WebhookDeliveryIntent; executor remains the direct delivery consumer until T013 durable outbox."
         - "build_step_success_plan reads delivery_intents, not step.output_mode, for StepSuccessPlan.should_deliver_webhook."
         - "The handler registry is keyed by FlowOutputMode; the default LLM path is pass_through, not plain_text."
+        - "test_step_execution_runtime.py may be updated only to move stale transcribe_only ownership assertions to handler tests while preserving the LLM-path complete_step_execution tests."
         - "executor.py http_post attempt-start provenance, step_input_resolution.py transcribe_only input-resolution legality, and step_definition_parser.py transcribe_only parse/validation policy are documented allowlist candidates for T021; they are not output_mode behavior dispatch owners."
     consolidation_effect:
       reused_existing_owner: "Existing execute_template_fill_step, complete_step_execution LLM path, transcribe_only output construction, direct webhook delivery executor code, and step_attempt_runtime success-plan shape."
