@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T060
+active_task: T061
 
 tasks:
   - id: T001
@@ -5930,7 +5930,7 @@ tasks:
   - id: T060
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "judge(flows): choose draft step id-owned authoring update worker."
     inputs:
@@ -5967,6 +5967,140 @@ tasks:
       - "Cannot define behavior-focused tests proving secret preservation by FlowStep.id."
       - "Worker would need files outside a small reviewable source/test/generated-client/frontend slice."
       - "Claude raises a valid blocker that cannot be resolved in a small first Worker."
+    receipt:
+      result: done
+      summary: "Chose T061 as the first safe Worker for remaining draft step id-owned authoring updates. The Worker must cross backend authoring API models, assembler, update router call site, service validation/secret merge, repository sync, generated client, and FlowEditor payload/key behavior because the current path returns step ids but drops them on update. Accepted Claude's blockers around non-deferrable step_order uniqueness and router scope, and accepted Antigravity's requirements to flush between two repository reorder phases and treat _temp_ ids as stable local frontend keys."
+      decision: "activate T061"
+      note: "docs/goals/flows-clean-architecture-2026-05-25/notes/t060-draft-step-id-worker-judge.md"
+      evidence:
+        - "backend/src/intric/flows/domain/flow.py:39"
+        - "backend/src/intric/flows/api/flow_models.py:447"
+        - "backend/src/intric/flows/api/flow_models.py:530"
+        - "backend/src/intric/flows/api/flow_assembler.py:39"
+        - "backend/src/intric/flows/api/flow_authoring_router.py:226"
+        - "backend/src/intric/flows/api/flow_authoring_router.py:555"
+        - "backend/src/intric/flows/application/flow_service.py:673"
+        - "backend/src/intric/flows/infrastructure/flow_repo.py:745"
+        - "backend/src/intric/database/tables/flow_tables.py:246"
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts:109"
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts:751"
+        - "frontend/apps/web/src/lib/core/editing/getDiff.ts:201"
+      commands:
+        - cmd: "rg updated maintainer-map/naming/reuse/final-docs sections in goal.md, roadmap-and-taskfiles.md, new-codex-session-prompt.md"
+          result: pass
+          output: "Confirmed Human Maintainer Map and Naming Gate, final docs/flows/architecture.md requirement, where-to-change-X table, naming gate, and reuse/move/merge/delete before new logic."
+        - cmd: "test -f /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json && jq '{schema_version,status,active_task,blockers}' /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json || true"
+          result: pass
+          output: "schema_version=1 status=ok blockers=[]; stale active_task T039 advisory."
+        - cmd: "sed source around FlowEditor getStableStepKey and FlowRepository._sync_flow_steps"
+          result: pass
+          output: "Verified Antigravity's _temp_ key and reorder/flush concerns against source."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t060 --phase verification --iteration 3 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          result: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8; activate T061."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t060-synthesis --phase synthesis --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          result: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8; activate T061 with flush and _temp_ key requirements."
+      peer_review:
+        claude:
+          artifact: ".codex/artifacts/claude-peer-loop-t060-draft-step-identity-worker-judge-final-20260526T162643Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+          valid_concerns_addressed:
+            - "Use a two-phase repository reorder instead of assuming id-owned updates are safe under the non-deferrable uq_flow_steps_flow_step_order constraint."
+            - "Include flow_authoring_router.py in the Worker allowed files so PATCH can call the update-specific assembler method."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t060-draft-step-identity-antigravity-synthesis-20260526T163219Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+          valid_concerns_addressed:
+            - "Worker must flush between temporary negative and final positive repository reorder phases."
+            - "Worker must keep _temp_ ids stable for local frontend ordering before stripping them at the API boundary."
+            - "Worker must stop if clone/copy source evidence proves id-less secret sentinels are a shipped behavior requiring a product decision."
+        disagreements:
+          - "Did not rely on Antigravity's unverified claim that flows have a hard N <= 20 step policy; T061 instead requires O(n) maps/sets and no nested scans."
+      consolidation_effect:
+        reused_existing_owner: "FlowStep.id, Flow authoring API models, FlowAssembler, FlowService.update_flow/_merge_step_secrets, FlowRepository._sync_flow_steps, and FlowEditor."
+        logic_moved_from: "T061 will move draft update identity from step_order-owned matching to id-owned matching inside existing owners."
+        logic_deleted: "T061 will remove order-as-identity behavior for retained draft steps."
+        duplicate_path_removed: "T061 will close the split where clients receive FlowStep.id but update contracts and FlowEditor payloads drop it."
+        new_code_added: "T060 note only."
+        why_existing_owners_were_insufficient: "Existing owners are sufficient for behavior; only the update request shape needs a typed create/update distinction."
+        guard_preventing_duplicate_logic_from_returning: "T061 requires behavior-focused service, repository, API/OpenAPI, assembler, generated-client, and FlowEditor tests."
+        net_flow_logic_surface_area: "preserved in T060; T061 is expected to reduce it conceptually."
+      naming_gate:
+        result: "pass"
+        notes:
+          - "Use FlowStepUpdateRequest for the Flow authoring update axis; it should appear clearly in the final maintainer map and where-to-change-X table."
+          - "No generic helper, manager, processor, common, misc, generic handler, generic event, or generic outbox name is approved."
+      architecture_doc_readiness: "Recorded the draft authoring identity owner map for final T901 without writing docs/flows/architecture.md during active refactors."
+      next_task: T061
+
+  - id: T061
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "fix(flows): preserve draft step identity through authoring updates."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t059-draft-step-id-preflight.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t060-draft-step-id-worker-judge.md"
+      - ".codex/artifacts/claude-peer-loop-t060-draft-step-identity-worker-judge-final-20260526T162643Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t060-draft-step-identity-antigravity-synthesis-20260526T163219Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t061-draft-step-id-worker.md"
+      - "backend/src/intric/flows/api/flow_models.py"
+      - "backend/src/intric/flows/api/flow_assembler.py"
+      - "backend/src/intric/flows/api/flow_authoring_router.py"
+      - "backend/src/intric/flows/application/flow_service.py"
+      - "backend/src/intric/flows/infrastructure/flow_repo.py"
+      - "backend/tests/unittests/flows/test_flow_models.py"
+      - "backend/tests/unittests/flows/test_flow_review_policy.py"
+      - "backend/tests/unittests/flows/test_flow_service.py"
+      - "backend/tests/integration/flows/test_flow_repository.py"
+      - "backend/tests/unit/test_flow_openapi_contract.py"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts"
+      - "frontend/apps/web/src/lib/features/flows/FlowEditor.test.ts"
+    constraints:
+      - "Before implementation and before commit, check the watchdog blocker file."
+      - "Use the FastAPI skill before changing API models/router/OpenAPI behavior."
+      - "Use complexity-optimizer reasoning for repository sync complexity; keep step sync O(n) with maps/sets and no nested scans."
+      - "Do not edit migrations, retention, service-key identity/review/rerun, webhook outbox, docs/flows/architecture.md, Flow AI Builder, or unrelated cleanup."
+      - "Do not introduce Any, dict[str, Any], type ignores, casts to silence pyright, generic helpers, fake interfaces, or parallel identity owners."
+      - "Keep the repository two-phase reorder local to FlowRepository._sync_flow_steps and flush between temporary and final phases."
+      - "Keep create and update assembly typed separately; do not overload one assembler method with a union."
+      - "Public/generated contract impact must be explicit and limited to the allowed generated schema file."
+      - "Preserve _temp_ ids as stable frontend keys during local authoring, then strip them before API submit."
+      - "Write the T061 receipt with consolidation effect, naming-gate answer, maintainer-doc readiness, commands run, pass/fail, and peer-review verdicts."
+    expected_output:
+      - "Flow update request accepts optional persisted draft step ids while create request remains id-less."
+      - "Flow update route maps steps through an update-specific assembler method."
+      - "FlowService.update_flow validates duplicate, unknown, and id-less sentinel cases before secret merge/persistence."
+      - "FlowRepository._sync_flow_steps syncs retained rows by id, preserves cleanup behavior, and survives adjacent reorder under uq_flow_steps_flow_step_order."
+      - "FlowEditor sends persisted ids in update PATCH payloads, strips _temp_ ids at submit, and keeps _temp_ ids stable for local keying."
+      - "Generated `schema.d.ts` reflects the update-step request contract without broad generated churn."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_service.py -k \"step_id or secret or sentinel\""
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_repository.py -k \"step_id or reorder or insert\""
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_review_policy.py tests/unit/test_flow_openapi_contract.py -k \"FlowStep\""
+      - "cd backend && uv run pyright src/intric/flows/api/flow_models.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_authoring_router.py src/intric/flows/application/flow_service.py src/intric/flows/infrastructure/flow_repo.py tests/unittests/flows/test_flow_service.py tests/integration/flows/test_flow_repository.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_review_policy.py tests/unit/test_flow_openapi_contract.py"
+      - "cd backend && uv run ruff check src/intric/flows/api/flow_models.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_authoring_router.py src/intric/flows/application/flow_service.py src/intric/flows/infrastructure/flow_repo.py tests/unittests/flows/test_flow_service.py tests/integration/flows/test_flow_repository.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_review_policy.py tests/unit/test_flow_openapi_contract.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/api/flow_models.py src/intric/flows/api/flow_assembler.py src/intric/flows/api/flow_authoring_router.py src/intric/flows/application/flow_service.py src/intric/flows/infrastructure/flow_repo.py tests/unittests/flows/test_flow_service.py tests/integration/flows/test_flow_repository.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_review_policy.py tests/unit/test_flow_openapi_contract.py"
+      - "cd frontend/apps/web && bun test src/lib/features/flows/FlowEditor.test.ts"
+      - "cd frontend/packages/intric-js && bun run update"
+      - "git diff --stat"
+      - "git diff --check"
+      - "scripts/gate-local/anti_slippage.sh"
+    stop_if:
+      - "The two-phase repository reorder needs a migration or files outside allowed_files."
+      - "Unknown-id or id-less semantics require a product compatibility decision."
+      - "Generated client update changes files outside frontend/packages/intric-js/src/types/schema.d.ts."
+      - "Red tests cannot fail on the current bad behavior."
+      - "Pyright requires Any, broad casts, type ignores, a union-overloaded assembler method, or new generic helpers."
+      - "Implementation adds a parallel identity owner instead of deepening existing Flow authoring/API/service/repository/frontend owners."
+      - "Frontend clone/copy source evidence proves id-less sentinel secrets are shipped behavior that needs product decision before rejection."
     receipt: null
 
   - id: T901
