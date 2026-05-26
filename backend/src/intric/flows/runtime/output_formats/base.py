@@ -2,9 +2,83 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Protocol, cast
 
 from intric.flows.domain.flow import JsonObject
+from intric.flows.output_processing import (
+    JsonStructuredValue,
+    prune_extras_to_strict_schema,
+)
+from intric.flows.runtime.models import StepDiagnostic
+
+_MAX_DROPPED_PATHS_REPORTED = 20
+_MAX_DROPPED_PATH_LENGTH = 200
+_MAX_DROPPED_PATHS_MESSAGE_LENGTH = 1600
+
+
+class ParseJsonOutputFn(Protocol):
+    def __call__(self, raw_text: str, /) -> JsonStructuredValue: ...
+
+
+class ValidateAgainstContractFn(Protocol):
+    def __call__(
+        self,
+        data: object,
+        schema: JsonObject,
+        *,
+        label: str,
+    ) -> None: ...
+
+
+class RenderDocumentFn(Protocol):
+    def __call__(
+        self,
+        text: str,
+        output_type: str,
+        *,
+        step_order: int,
+    ) -> tuple[bytes, str, str]: ...
+
+
+class RenderStructuredDocumentFn(Protocol):
+    def __call__(
+        self,
+        data: JsonStructuredValue,
+        output_type: str,
+        *,
+        step_order: int,
+        schema: JsonObject | None = None,
+    ) -> tuple[bytes, str, str]: ...
+
+
+class EnsureSourceWithinLimitsFn(Protocol):
+    def __call__(self, text: str) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RenderedOutputArtifact:
+    blob: bytes
+    mimetype: str
+    filename: str
+
+
+@dataclass(frozen=True, slots=True)
+class OutputFormatProcessingResult:
+    structured_output: JsonStructuredValue | None = None
+    artifact: RenderedOutputArtifact | None = None
+    diagnostics: tuple[StepDiagnostic, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class OutputFormatProcessingContext:
+    parse_json_output: ParseJsonOutputFn
+    validate_against_contract: ValidateAgainstContractFn
+    render_document: RenderDocumentFn
+    render_structured_document: RenderStructuredDocumentFn
+    ensure_source_within_limits: EnsureSourceWithinLimitsFn
+    # JSON preserves the existing compiled-validator gate; document contracts validate directly.
+    json_contract_validation_enabled: bool
 
 
 class OutputFormatSpec(Protocol):
@@ -15,6 +89,15 @@ class OutputFormatSpec(Protocol):
     def should_request_native_json_object_mode(
         self, output_contract: JsonObject | None
     ) -> bool: ...
+
+    def process_model_output(
+        self,
+        full_text: str,
+        *,
+        step_order: int,
+        output_contract: JsonObject | None,
+        context: OutputFormatProcessingContext,
+    ) -> OutputFormatProcessingResult: ...
 
 
 def append_output_format_instructions(prompt: str, instructions: Sequence[str]) -> str:
@@ -84,3 +167,93 @@ def document_prefers_native_json_object_mode(
     if output_contract is None:
         return False
     return schema_yields_top_level_object(output_contract)
+
+
+def prune_model_output_extras(
+    structured_output: JsonStructuredValue,
+    output_contract: JsonObject,
+) -> tuple[StepDiagnostic, ...]:
+    result = prune_extras_to_strict_schema(structured_output, output_contract)
+    if not result.dropped_paths:
+        return ()
+    return (
+        StepDiagnostic(
+            code="typed_output_extra_properties_dropped",
+            message=_format_dropped_paths_message(result.dropped_paths),
+            severity="warning",
+        ),
+    )
+
+
+def process_structured_document_output(
+    full_text: str,
+    *,
+    output_type: str,
+    step_order: int,
+    output_contract: JsonObject,
+    context: OutputFormatProcessingContext,
+) -> OutputFormatProcessingResult:
+    structured_output = context.parse_json_output(full_text)
+    diagnostics = prune_model_output_extras(structured_output, output_contract)
+    context.validate_against_contract(
+        structured_output,
+        output_contract,
+        label=f"Step {step_order} output",
+    )
+    blob, mimetype, filename = context.render_structured_document(
+        structured_output,
+        output_type,
+        step_order=step_order,
+        schema=output_contract,
+    )
+    return OutputFormatProcessingResult(
+        structured_output=structured_output,
+        artifact=RenderedOutputArtifact(
+            blob=blob,
+            mimetype=mimetype,
+            filename=filename,
+        ),
+        diagnostics=diagnostics,
+    )
+
+
+def render_document_output(
+    full_text: str,
+    *,
+    output_type: str,
+    step_order: int,
+    context: OutputFormatProcessingContext,
+) -> OutputFormatProcessingResult:
+    blob, mimetype, filename = context.render_document(
+        full_text,
+        output_type,
+        step_order=step_order,
+    )
+    return OutputFormatProcessingResult(
+        artifact=RenderedOutputArtifact(
+            blob=blob,
+            mimetype=mimetype,
+            filename=filename,
+        )
+    )
+
+
+def _format_dropped_paths_message(dropped_paths: tuple[str, ...]) -> str:
+    shown_paths = tuple(
+        _truncate_path(path) for path in dropped_paths[:_MAX_DROPPED_PATHS_REPORTED]
+    )
+    suffix = ""
+    hidden_count = len(dropped_paths) - len(shown_paths)
+    if hidden_count > 0:
+        suffix = f"; {hidden_count} more omitted"
+    message = (
+        f"Dropped {len(dropped_paths)} undeclared field"
+        f"{'' if len(dropped_paths) == 1 else 's'}: {', '.join(shown_paths)}{suffix}"
+    )
+    return message[:_MAX_DROPPED_PATHS_MESSAGE_LENGTH]
+
+
+def _truncate_path(path: str) -> str:
+    if len(path) <= _MAX_DROPPED_PATH_LENGTH:
+        return path
+    return f"{path[: _MAX_DROPPED_PATH_LENGTH - 3]}..."

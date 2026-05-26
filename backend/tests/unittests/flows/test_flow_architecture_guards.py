@@ -102,24 +102,6 @@ ALLOWED_OUTPUT_TYPE_BRANCHES = frozenset(
         ),
         _OutputAxisBranch(
             axis="output_type",
-            relative_path="output_runtime.py",
-            function="process_typed_output",
-            expression="step.output_type == 'json'",
-        ),
-        _OutputAxisBranch(
-            axis="output_type",
-            relative_path="output_runtime.py",
-            function="process_typed_output",
-            expression="step.output_type in ('pdf', 'docx')",
-        ),
-        _OutputAxisBranch(
-            axis="output_type",
-            relative_path="output_runtime.py",
-            function="process_typed_output",
-            expression="step.output_type == 'pdf'",
-        ),
-        _OutputAxisBranch(
-            axis="output_type",
             relative_path="step_execution_runtime.py",
             function="citation_mode_for_step",
             expression="output_type is not FlowOutputType.TEXT",
@@ -127,7 +109,7 @@ ALLOWED_OUTPUT_TYPE_BRANCHES = frozenset(
     }
 )
 MAX_OUTPUT_MODE_BRANCH_ALLOWLIST_SIZE = 6
-MAX_OUTPUT_TYPE_BRANCH_ALLOWLIST_SIZE = 6
+MAX_OUTPUT_TYPE_BRANCH_ALLOWLIST_SIZE = 3
 _REMOVED_TYPED_OUTPUT_HELPERS = frozenset(
     {
         "augment_prompt_for_typed_output",
@@ -527,7 +509,7 @@ def test_output_type_literal_branches_only_appear_in_allowlisted_call_sites():
         axis="output_type",
         allowed=ALLOWED_OUTPUT_TYPE_BRANCHES,
         max_allowed=MAX_OUTPUT_TYPE_BRANCH_ALLOWLIST_SIZE,
-        canonical_owner="runtime/output_formats or runtime/output_runtime",
+        canonical_owner="runtime/output_formats",
         allowlist_name="ALLOWED_OUTPUT_TYPE_BRANCHES",
     )
 

@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T073
+active_task: T078
 
 tasks:
   - id: T001
@@ -7314,7 +7314,7 @@ tasks:
   - id: T073
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe architecture tranche after T072, with preference for read-only source mapping before any larger StepHandler/OutputFormatSpec implementation."
     inputs:
@@ -7335,6 +7335,449 @@ tasks:
       - "Next task decision or stop rule."
       - "If selecting a Scout: exact mapping questions, files, and output table."
       - "If selecting a Worker: allowed_files, verification, consolidation effect, and review tier."
+    receipt:
+      result: done
+      summary: "Chose a read-only Scout before more handler/output-format implementation. Current source already has StepHandler and OutputFormatSpec modules, so the next safe task must map source reality and remaining scattered behavior instead of assuming the roadmap is unimplemented."
+      evidence:
+        - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md:230"
+        - "docs/goals/flows-clean-architecture-2026-05-25/notes/step-handler-and-renderer-architecture.md:11"
+        - "backend/src/intric/flows/runtime/step_handlers/__init__.py:21"
+        - "backend/src/intric/flows/runtime/step_handlers/base.py:34"
+        - "backend/src/intric/flows/runtime/output_formats/__init__.py:18"
+        - "backend/src/intric/flows/runtime/output_formats/base.py:9"
+        - "backend/src/intric/flows/runtime/step_execution_runtime.py:865"
+        - "backend/src/intric/flows/runtime/step_execution_runtime.py:966"
+        - "backend/src/intric/flows/runtime/executor.py:1028"
+      commands:
+        - cmd: "rg -n \"output_mode|output_type|template_fill|docx|pdf|json_mode|response_format|render|OutputFormat|StepHandler|native JSON|json\" backend/src/intric/flows/runtime/executor.py backend/src/intric/flows/runtime/step_execution_runtime.py backend/src/intric/flows/runtime -g '*.py'"
+          status: pass
+        - cmd: "find backend/src/intric/flows/runtime/step_handlers backend/src/intric/flows/runtime/output_formats -maxdepth 2 -type f -print | sort"
+          status: pass
+        - cmd: "git status --short --branch"
+          status: pass
+      decision: "Activate T074 Scout."
+      rationale:
+        - "StepHandler and OutputFormatSpec concepts already exist in source, so implementation must begin from an evidence map of remaining duplicate/scattered logic."
+        - "Product/data-gated tasks remain blocked; final architecture doc T901 remains queued."
+      consolidation_effect:
+        reused_existing_owner: "step_handlers, output_formats, executor, step_execution_runtime, output_runtime, document_rendering, and docx_template_runtime as source evidence."
+        logic_moved_from: "None; Judge was read-only."
+        logic_deleted: "None."
+        duplicate_path_removed: "None."
+        new_code_added: "None."
+        why_existing_owners_were_insufficient: "N/A for Judge; existing owners must be mapped before Worker selection."
+        guard_preventing_duplicate_logic_from_returning: "T074 must identify candidate guard tests."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+
+  - id: T074
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Map current StepHandler, OutputFormatSpec, output rendering, and remaining executor/runtime output dispatch ownership before any further implementation."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/step-handler-and-renderer-architecture.md"
+      - "backend/src/intric/flows/runtime/executor.py"
+      - "backend/src/intric/flows/runtime/step_execution_runtime.py"
+      - "backend/src/intric/flows/runtime/output_runtime.py"
+      - "backend/src/intric/flows/runtime/output_formats/"
+      - "backend/src/intric/flows/runtime/step_handlers/"
+      - "backend/src/intric/flows/runtime/document_rendering/"
+      - "backend/src/intric/flows/runtime/docx_template_runtime.py"
+      - "backend/tests/unittests/flows"
+      - "backend/tests/integration/flows"
+    constraints:
+      - "Read-only: no source edits, test edits, deletion, migrations, OpenAPI/generated files, or docs/flows/architecture.md."
+      - "Check the watchdog before starting and before any task transition."
+      - "Map duplicate/scattered reusable Flow logic, not only dead code."
+      - "Do not propose copying runtime logic into new files. Prefer reuse, deepen, move, merge, or delete."
+      - "Do not broaden into Flow AI Builder unless a Flow proper file directly depends on the same contract."
+    expected_output:
+      - "A source-evidence table: Concept | Current locations | Behavior differences | Canonical owner | Merge/delete path."
+      - "Current StepHandler coverage and remaining executor output_mode dispatch."
+      - "Current OutputFormatSpec coverage and remaining output_type concerns: prompt instructions, native JSON-mode, validation/rendering requirements, and byte rendering."
+      - "OutputRenderer/document-rendering locality map, including DOCX/PDF/template-fill behavior."
+      - "Candidate guard tests that would prevent duplicate dispatch/rendering from returning."
+      - "Recommended next Worker or Judge task with allowed_files, review tier, and stop conditions."
+    receipt:
+      result: done
+      summary: "Mapped current StepHandler/OutputFormatSpec state. Step handlers and output format specs already exist and are used by executor/step_execution_runtime. The main remaining output-format scatter is output_runtime.process_typed_output, which still branches directly on step.output_type for JSON parsing/validation, PDF/DOCX rendering, artifact creation, and a PDF raw-bytes special case."
+      concepts:
+        - concept: "Step behavior dispatch by output_mode"
+          current_locations: "step_handlers registry at backend/src/intric/flows/runtime/step_handlers/__init__.py:21; executor handler construction at backend/src/intric/flows/runtime/executor.py:1007 and :1016."
+          behavior_differences: "Executor uses the registry to validate modes but still constructs concrete handlers through one match expression. This is a composition point, not scattered behavior execution, because pass_through/http_post/transcribe_only/template_fill behavior lives in handler classes."
+          canonical_owner: "flows/runtime/step_handlers plus executor as composition root."
+          merge_delete_path: "Later guard should allow the executor composition root but prevent output_mode behavior branches elsewhere."
+        - concept: "Output format prompt instructions"
+          current_locations: "output_formats base/specs at backend/src/intric/flows/runtime/output_formats/base.py:43 and :59; step_execution_runtime applies them at backend/src/intric/flows/runtime/step_execution_runtime.py:865."
+          behavior_differences: "Text returns no instructions; JSON returns JSON schema instructions; PDF/DOCX share document instructions."
+          canonical_owner: "flows/runtime/output_formats."
+          merge_delete_path: "Already mostly owned; guard should keep prompt instructions out of executor/runtime branches."
+        - concept: "Native JSON object-mode policy"
+          current_locations: "output_formats JSON/docx/pdf specs at backend/src/intric/flows/runtime/output_formats/json.py:16, docx.py:18, pdf.py:18; step_execution_runtime uses resolve_format_spec at :966."
+          behavior_differences: "JSON prefers native JSON mode without a contract; document formats prefer it only for object-shaped contracts; text does not."
+          canonical_owner: "flows/runtime/output_formats."
+          merge_delete_path: "Already mostly owned; guard should keep native JSON-mode decisions in specs."
+        - concept: "Typed output validation/rendering/artifact policy"
+          current_locations: "backend/src/intric/flows/runtime/output_runtime.py:110, :126, :141, :147, :153."
+          behavior_differences: "JSON parses/validates structured output; PDF/DOCX parse structured output when a contract exists, otherwise render text; PDF also accepts raw %PDF bytes; output_runtime persists artifact file rows."
+          canonical_owner: "OutputFormatSpec should own output_type policy; document_rendering remains byte-rendering leaf; output_runtime should orchestrate shared file persistence."
+          merge_delete_path: "Next Worker should move the output_type policy branch behind existing specs without copying render logic or creating new generic managers."
+        - concept: "Document byte rendering"
+          current_locations: "document_rendering service/renderer files; output_runtime delegates render_document/render_structured_document at :141 and :153."
+          behavior_differences: "DocumentRenderService owns renderer lookup and exceptions; output_runtime decides when to call it and persists file rows."
+          canonical_owner: "document_rendering for bytes; output_formats for policy; output_runtime for shared persistence until a deeper typed artifact boundary is approved."
+          merge_delete_path: "Keep byte rendering in document_rendering; move policy decisions out of output_runtime in behavior-preserving steps."
+        - concept: "DOCX template-fill behavior"
+          current_locations: "TemplateFillStepHandler at backend/src/intric/flows/runtime/step_handlers/template_fill.py:15; template_fill_runtime; docx_template_runtime leaf at inspect/render/extract functions."
+          behavior_differences: "Template-fill is step behavior, not output format policy. DOCX template bytes/placeholder logic already lives in docx_template_runtime."
+          canonical_owner: "TemplateFillStepHandler/template_fill_runtime for behavior; docx_template_runtime for DOCX template bytes."
+          merge_delete_path: "Guard later should keep DOCX template-fill logic out of generic output runtime."
+        - concept: "Webhook delivery side-effect intent"
+          current_locations: "HttpPostStepHandler emits WebhookDeliveryIntent at backend/src/intric/flows/runtime/step_handlers/http_post.py:17 and :32; StepExecutionResult carries delivery_intents at backend/src/intric/flows/runtime/step_execution_result.py:24."
+          behavior_differences: "Execution result now owns the intent; step_attempt_runtime tests assert delivery follows intents rather than output_mode."
+          canonical_owner: "StepHandler result intent until webhook outbox task deepens delivery persistence."
+          merge_delete_path: "Webhook outbox remains a later runtime reliability task; do not widen now."
+      guard_candidates:
+        - "After moving typed output processing behind specs, add an AST guard that output_runtime no longer branches directly on string output_type values except through the spec registry."
+        - "Add registry totality guards: every FlowOutputType has an OutputFormatSpec and every FlowOutputMode has a StepHandler."
+        - "Add renderer locality guard: DOCX/PDF rendering imports stay in document_rendering/docx_template_runtime/output format leaf modules, not executor."
+        - "Add executor dispatch guard: output_mode branching is confined to the handler registry/composition root."
+      commands:
+        - cmd: "find backend/src/intric/flows/runtime/step_handlers backend/src/intric/flows/runtime/output_formats -maxdepth 2 -type f -print | sort"
+          status: pass
+        - cmd: "rg -n \"output_mode|output_type|template_fill|docx|pdf|json_mode|response_format|render|OutputFormat|StepHandler|native JSON|json\" backend/src/intric/flows/runtime/executor.py backend/src/intric/flows/runtime/step_execution_runtime.py backend/src/intric/flows/runtime -g '*.py'"
+          status: pass
+        - cmd: "nl -ba backend/src/intric/flows/runtime/output_runtime.py | sed -n '1,230p'"
+          status: pass
+        - cmd: "nl -ba backend/src/intric/flows/runtime/step_execution_runtime.py | sed -n '850,1045p;1088,1145p'"
+          status: pass
+        - cmd: "rg -n \"step_handler|output_format|output_type|output_mode|document_render|docx|pdf|guard|STEP_HANDLER|OUTPUT_FORMAT\" backend/tests/unittests/flows backend/tests/integration/flows -g '*.py'"
+          status: pass
+      recommended_next_task: T075
+
+  - id: T075
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Approve the smallest behavior-preserving Worker that moves typed output processing policy behind existing OutputFormatSpec owners."
+    inputs:
+      - "T074 receipt"
+      - "backend/src/intric/flows/runtime/output_runtime.py"
+      - "backend/src/intric/flows/runtime/output_formats/"
+      - "backend/src/intric/flows/runtime/step_execution_runtime.py"
+      - "backend/tests/unittests/flows/test_typed_io_executor.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+    constraints:
+      - "Read-only."
+      - "Check the watchdog before starting and before task transition."
+      - "Do not create a new OutputFormatSpec system; deepen the existing one."
+      - "Do not copy output_runtime logic into new files; move/reuse behavior behind existing owners."
+      - "Do not touch API/OpenAPI/generated client, migrations, retention, service-key identity, webhook outbox, or Flow AI Builder."
+      - "If moving output_runtime policy requires a wider StepExecutionResult or artifact boundary, stop and choose a design task instead of Worker implementation."
+    expected_output:
+      - "Decision: Worker or design Scout."
+      - "If Worker: exact objective, allowed_files, focused red tests/guards, verification, review tier, and consolidation effect."
+      - "Stop conditions that prevent broad renderer/handler rewrites."
+    receipt:
+      result: done
+      summary: "Did not approve an immediate Worker. Current OutputFormatSpec owns prompt instructions and native JSON-mode policy, but output_runtime also owns validation, rendering dispatch, artifact persistence, file ownership, and render limits. Moving that branch without a minimal typed design would risk copying output_runtime logic into spec files. Activated T076 as a read-only design Scout."
+      evidence:
+        - "backend/src/intric/flows/runtime/output_formats/base.py:10"
+        - "backend/src/intric/flows/runtime/step_execution_runtime.py:865"
+        - "backend/src/intric/flows/runtime/step_execution_runtime.py:966"
+        - "backend/src/intric/flows/runtime/output_runtime.py:77"
+        - "backend/src/intric/flows/runtime/output_runtime.py:97"
+        - "backend/src/intric/flows/runtime/output_runtime.py:110"
+        - "backend/src/intric/flows/runtime/output_runtime.py:126"
+        - "backend/src/intric/flows/runtime/output_runtime.py:158"
+      decision: "Activate T076 design Scout instead of Worker."
+      reason: "Output format policy is partly owned by specs, but the remaining output_type branch crosses validation, renderer selection, artifact persistence, and file ownership. The minimal boundary must be approved before code moves."
+      consolidation_effect:
+        reused_existing_owner: "OutputFormatSpec, output_runtime, document_rendering, and step_execution_runtime as source evidence."
+        logic_moved_from: "None; Judge was read-only."
+        logic_deleted: "None."
+        duplicate_path_removed: "None."
+        new_code_added: "None."
+        why_existing_owners_were_insufficient: "The current specs do not yet own validation/rendering requirements, and output_runtime owns shared persistence concerns that should not be copied."
+        guard_preventing_duplicate_logic_from_returning: "T076 must propose specific guard tests before Worker implementation."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+
+  - id: T076
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Design the minimal behavior-preserving typed boundary for moving output_runtime output_type policy behind existing OutputFormatSpec owners."
+    inputs:
+      - "T074 receipt"
+      - "T075 receipt"
+      - "backend/src/intric/flows/runtime/output_runtime.py"
+      - "backend/src/intric/flows/runtime/output_formats/"
+      - "backend/src/intric/flows/runtime/document_rendering/"
+      - "backend/src/intric/flows/runtime/step_execution_runtime.py"
+      - "backend/tests/unittests/flows/test_typed_io_executor.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+    constraints:
+      - "Read-only."
+      - "Check the watchdog before starting and before task transition."
+      - "Do not edit source/tests."
+      - "Do not invent new plugin SDKs, generic managers, service locators, or one-implementation ports."
+      - "Reuse/deepen existing OutputFormatSpec and output_runtime owners."
+      - "Keep document_rendering as the byte-rendering leaf and output_runtime as shared file persistence unless source evidence proves a smaller owner."
+      - "Do not touch API/OpenAPI/generated client, migrations, retention, service-key identity, webhook outbox, Flow AI Builder, or docs/flows/architecture.md."
+    expected_output:
+      - "Minimal design with exact owner boundary: what remains in output_runtime, what moves to OutputFormatSpec, what stays in document_rendering."
+      - "Allowed files and review tier for the first Worker slice."
+      - "Focused red tests/guards that fail on current direct output_type branching."
+      - "Consolidation effect section showing logic surface area goes down."
+      - "Stop conditions if implementation would copy logic or require a larger artifact/result boundary."
+    receipt:
+      result: done
+      summary: "Designed the smallest behavior-preserving output-format policy move. Keep output_runtime as the shared orchestrator that compiles validators, owns file persistence, and writes artifact metadata. Deepen the existing OutputFormatSpec owner so each format processes model output into a typed result: structured output, diagnostics, and optional rendered artifact bytes. Keep document_rendering as the byte-rendering leaf."
+      proposed_boundary:
+        keep_in_output_runtime:
+          - "compile validators once for the step."
+          - "construct OutputRuntimeDeps and shared processing deps."
+          - "persist rendered artifact bytes through file_repo.add and build artifact metadata."
+          - "return TypedOutputProcessingResult to step_execution_runtime."
+        move_to_output_format_spec:
+          - "JSON output parsing and contract validation."
+          - "PDF/DOCX decision to parse structured output when a contract exists."
+          - "PDF raw %PDF byte special-case."
+          - "PDF/DOCX renderer selection between structured and text document rendering."
+          - "Format-specific diagnostics from pruned model output extras."
+        keep_in_document_rendering:
+          - "Markdown-to-block conversion, structured-data-to-block conversion, render limits, PDF/DOCX byte rendering, renderer exceptions."
+      evidence:
+        - "backend/src/intric/flows/runtime/output_formats/base.py:10"
+        - "backend/src/intric/flows/runtime/output_runtime.py:97"
+        - "backend/src/intric/flows/runtime/output_runtime.py:108"
+        - "backend/src/intric/flows/runtime/output_runtime.py:110"
+        - "backend/src/intric/flows/runtime/output_runtime.py:126"
+        - "backend/src/intric/flows/runtime/output_runtime.py:141"
+        - "backend/src/intric/flows/runtime/output_runtime.py:147"
+        - "backend/src/intric/flows/runtime/output_runtime.py:158"
+        - "backend/src/intric/flows/runtime/document_rendering/service.py:45"
+        - "backend/src/intric/flows/runtime/document_rendering/service.py:59"
+        - "backend/tests/unittests/flows/test_flow_architecture_guards.py:89"
+      commands:
+        - cmd: "rg -n \"process_typed_output|render_document|render_structured_document|pdf|docx|json output|typed output|OutputFormatSpec|native_json\" backend/tests/unittests/flows/test_typed_io_executor.py backend/tests/unittests/flows/test_flow_architecture_guards.py -g '*.py'"
+          status: pass
+        - cmd: "nl -ba backend/src/intric/flows/runtime/output_runtime.py | sed -n '1,230p'"
+          status: pass
+        - cmd: "nl -ba backend/src/intric/flows/runtime/document_rendering/service.py | sed -n '1,150p'"
+          status: pass
+      recommended_worker: T077
+      review_tier: "Claude-only: behavior-preserving runtime refactor inside existing owners; no Antigravity unless Claude and Codex disagree or the slice widens."
+      consolidation_effect:
+        reused_existing_owner: "OutputFormatSpec, output_runtime, document_rendering service, existing document renderers, and existing typed output behavior tests."
+        logic_moved_from: "output_runtime's direct output_type branch."
+        logic_deleted: "Direct output_type checks in output_runtime after Worker succeeds."
+        duplicate_path_removed: "Output format validation/rendering policy stops living partly in specs and partly in output_runtime."
+        new_code_added: "Typed output-format processing/result value objects inside the existing output_formats owner."
+        why_existing_owners_were_insufficient: "Current OutputFormatSpec owns prompt/native JSON policy only; it needs one processing method to own validation/rendering requirements without taking over file persistence."
+        guard_preventing_duplicate_logic_from_returning: "Architecture guard removing output_runtime output_type branch allowlist entries plus existing document/json behavior tests."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+
+  - id: T077
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "refactor(flows-runtime): move typed output policy behind OutputFormatSpec."
+    inputs:
+      - "T074 receipt"
+      - "T075 receipt"
+      - "T076 receipt"
+      - "backend/src/intric/flows/runtime/output_runtime.py"
+      - "backend/src/intric/flows/runtime/output_formats/base.py"
+      - "backend/src/intric/flows/runtime/output_formats/text.py"
+      - "backend/src/intric/flows/runtime/output_formats/json.py"
+      - "backend/src/intric/flows/runtime/output_formats/docx.py"
+      - "backend/src/intric/flows/runtime/output_formats/pdf.py"
+      - "backend/src/intric/flows/runtime/document_rendering/service.py"
+      - "backend/tests/unittests/flows/test_typed_io_executor.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "backend/src/intric/flows/runtime/output_runtime.py"
+      - "backend/src/intric/flows/runtime/output_formats/base.py"
+      - "backend/src/intric/flows/runtime/output_formats/text.py"
+      - "backend/src/intric/flows/runtime/output_formats/json.py"
+      - "backend/src/intric/flows/runtime/output_formats/docx.py"
+      - "backend/src/intric/flows/runtime/output_formats/pdf.py"
+      - "backend/tests/unittests/flows/test_output_formats.py"
+      - "backend/tests/unittests/flows/test_typed_io_executor.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+    constraints:
+      - "Before starting implementation and before committing, check the watchdog blocker file and verify any halt-worthy blocker against source/state/git evidence."
+      - "Run Claude plan gate before implementation and Claude commit gate after the diff is stable; Antigravity only if Claude/Codex disagree or the slice widens."
+      - "Deepen existing OutputFormatSpec; do not create a second output format system, plugin SDK, manager, processor, service locator, or one-implementation port."
+      - "Move/reuse output_runtime behavior; do not copy logic into spec files while leaving the old branch active."
+      - "Keep document_rendering as byte-rendering leaf and output_runtime as shared artifact file persistence owner."
+      - "No API/OpenAPI/generated client, schema/migration, retention, service-key identity, webhook outbox, Flow AI Builder, or docs/flows/architecture.md edits."
+      - "Do not change user-visible output behavior, artifact metadata shape, MIME types, filenames, raw-PDF handling, JSON contract validation behavior, or pruning diagnostics."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py::test_output_type_literal_branches_only_appear_in_allowlisted_call_sites tests/unittests/flows/test_output_formats.py tests/unittests/flows/test_typed_io_executor.py::test_document_outputs_generate_downloadable_artifacts tests/unittests/flows/test_typed_io_executor.py::test_docx_output_handles_empty_assistant_response tests/unittests/flows/test_typed_io_executor.py::test_document_output_prompt_instructs_model_to_return_markdown_not_binary tests/unittests/flows/test_typed_io_executor.py::test_document_output_prompt_with_contract_requests_validated_json -q"
+      - "cd backend && uv run pytest tests/unittests/flows/test_output_formats.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_architecture_guards.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/output_formats/base.py src/intric/flows/runtime/output_formats/text.py src/intric/flows/runtime/output_formats/json.py src/intric/flows/runtime/output_formats/docx.py src/intric/flows/runtime/output_formats/pdf.py tests/unittests/flows/test_output_formats.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_architecture_guards.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/output_formats/base.py src/intric/flows/runtime/output_formats/text.py src/intric/flows/runtime/output_formats/json.py src/intric/flows/runtime/output_formats/docx.py src/intric/flows/runtime/output_formats/pdf.py tests/unittests/flows/test_output_formats.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_architecture_guards.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/output_formats/base.py src/intric/flows/runtime/output_formats/text.py src/intric/flows/runtime/output_formats/json.py src/intric/flows/runtime/output_formats/docx.py src/intric/flows/runtime/output_formats/pdf.py tests/unittests/flows/test_output_formats.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_architecture_guards.py"
+      - "git diff --check"
+      - "! git diff -- backend/src/intric/flows/runtime/output_runtime.py backend/src/intric/flows/runtime/output_formats/base.py backend/src/intric/flows/runtime/output_formats/text.py backend/src/intric/flows/runtime/output_formats/json.py backend/src/intric/flows/runtime/output_formats/docx.py backend/src/intric/flows/runtime/output_formats/pdf.py backend/tests/unittests/flows/test_output_formats.py backend/tests/unittests/flows/test_typed_io_executor.py backend/tests/unittests/flows/test_flow_architecture_guards.py | rg -n '^\\+.*(pyright: ignore|type: ignore|cast\\(Any|dict\\[str, Any\\]|\\bAny\\b|helper|manager|processor|INPUT_CONFIG_AUTH|OUTPUT_CONFIG_AUTH|RerunDependencyKind\\.[A-Z_]+ =|T0[0-9][0-9]|Phase [0-9A-G]\\b)'"
+    stop_if:
+      - "The watchdog has a halt-worthy blocker that cannot be resolved or source-evidence-disagreed."
+      - "The implementation needs a wider StepExecutionResult, artifact persistence schema, file lifecycle, or public API change."
+      - "The diff copies output_runtime branches into specs while leaving the old branch in place."
+      - "The diff requires touching document_rendering byte-rendering internals beyond existing render calls."
+      - "The diff needs files outside allowed_files."
+      - "Focused verification fails twice for reasons unrelated to this task."
+    consolidation_effect:
+      reused_existing_owner: "OutputFormatSpec, output_runtime, document_rendering, and existing typed output tests."
+      logic_moved_from: "output_runtime direct output_type branch."
+      logic_deleted: "output_runtime direct output_type checks and guard allowlist entries."
+      duplicate_path_removed: "Output format policy split between specs and output_runtime."
+      new_code_added: "Typed format-processing result/methods in output_formats only if needed for the move."
+      why_existing_owners_were_insufficient: "Existing specs lack validation/rendering policy method; output_runtime has shared persistence that should stay centralized."
+      guard_preventing_duplicate_logic_from_returning: "Architecture guard plus document/json behavior tests."
+      net_flow_logic_surface_area: "reduced"
+      if_increased_why: "N/A"
+    receipt:
+      result: done
+      completed_at: "2026-05-26T21:41:43+02:00"
+      summary: "Moved typed output validation/rendering policy behind the existing OutputFormatSpec owner without changing public runtime behavior. output_runtime now compiles validators, builds the processing context, dispatches to the format spec, and persists any returned artifact. JSON/PDF/DOCX/text specs now own model-output processing policy; document_rendering remains the byte-rendering leaf."
+      changed_files:
+        - "backend/src/intric/flows/runtime/output_runtime.py"
+        - "backend/src/intric/flows/runtime/output_formats/base.py"
+        - "backend/src/intric/flows/runtime/output_formats/text.py"
+        - "backend/src/intric/flows/runtime/output_formats/json.py"
+        - "backend/src/intric/flows/runtime/output_formats/docx.py"
+        - "backend/src/intric/flows/runtime/output_formats/pdf.py"
+        - "backend/tests/unittests/flows/test_output_formats.py"
+        - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+        - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      evidence:
+        - "backend/src/intric/flows/runtime/output_runtime.py:89 resolves OutputFormatSpec and no longer branches on output_type."
+        - "backend/src/intric/flows/runtime/output_runtime.py:130 persists rendered artifacts centrally."
+        - "backend/src/intric/flows/runtime/output_formats/base.py:84 defines the deepened OutputFormatSpec contract."
+        - "backend/src/intric/flows/runtime/output_formats/base.py:188 owns the shared structured document pipeline."
+        - "backend/src/intric/flows/runtime/output_formats/json.py:25 owns JSON parse/prune/validate policy."
+        - "backend/src/intric/flows/runtime/output_formats/pdf.py:45 owns the PDF raw-bytes special case."
+        - "backend/tests/unittests/flows/test_output_formats.py:79 covers text no-op processing."
+        - "backend/tests/unittests/flows/test_output_formats.py:92 and :124 cover the JSON validation gate."
+        - "backend/tests/unittests/flows/test_output_formats.py:158 covers raw PDF bytes."
+        - "backend/tests/unittests/flows/test_output_formats.py:186 covers shared PDF/DOCX structured pipeline behavior."
+        - "backend/tests/unittests/flows/test_flow_architecture_guards.py:89 keeps only three output_type branch exceptions."
+      commands:
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py::test_output_type_literal_branches_only_appear_in_allowlisted_call_sites -q"
+          status: "fail_expected_red"
+          output: "Before source move, failed on the three output_runtime.py::process_typed_output output_type branches."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_output_formats.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_flow_architecture_guards.py -q"
+          status: pass
+          output: "33 passed."
+        - command: "cd backend && uv run pytest 'tests/unittests/flows/test_typed_io_executor.py::test_document_outputs_generate_downloadable_artifacts[docx-application/vnd.openxmlformats-officedocument.wordprocessingml.document-.docx]' tests/unittests/flows/test_typed_io_executor.py::test_docx_output_handles_empty_assistant_response tests/unittests/flows/test_typed_io_executor.py::test_document_output_prompt_instructs_model_to_return_markdown_not_binary tests/unittests/flows/test_typed_io_executor.py::test_document_output_prompt_with_contract_requests_validated_json -q"
+          status: pass
+          output: "4 passed, 1 warning."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_typed_io_executor.py -q"
+          status: "fail_environment"
+          output: "1 failed, 56 passed, 1 warning. Only failure was PDF artifact integration failing to load host WeasyPrint native dependency libgobject-2.0-0."
+        - command: "docker exec eneo-41ae93-eneo-1 bash -lc 'cd /workspace/backend && uv run pytest tests/unittests/flows/test_output_formats.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_architecture_guards.py -q'"
+          status: "fail_environment"
+          output: "Docker/OrbStack socket unavailable before test execution."
+        - command: "cd backend && uv run ruff check src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/output_formats/base.py src/intric/flows/runtime/output_formats/text.py src/intric/flows/runtime/output_formats/json.py src/intric/flows/runtime/output_formats/docx.py src/intric/flows/runtime/output_formats/pdf.py tests/unittests/flows/test_output_formats.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_architecture_guards.py"
+          status: pass
+        - command: "cd backend && uv run ruff format --check src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/output_formats/base.py src/intric/flows/runtime/output_formats/text.py src/intric/flows/runtime/output_formats/json.py src/intric/flows/runtime/output_formats/docx.py src/intric/flows/runtime/output_formats/pdf.py tests/unittests/flows/test_output_formats.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_architecture_guards.py"
+          status: pass
+          output: "9 files already formatted."
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/output_formats/base.py src/intric/flows/runtime/output_formats/text.py src/intric/flows/runtime/output_formats/json.py src/intric/flows/runtime/output_formats/docx.py src/intric/flows/runtime/output_formats/pdf.py tests/unittests/flows/test_output_formats.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_architecture_guards.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations."
+        - command: "git diff --check"
+          status: pass
+        - command: "added-line anti-leak grep for ignores, broad Any, dict[str, Any], generic helper/manager/processor names, plan/task comments, and unrelated enum leaks"
+          status: pass
+        - command: "rg -n \"step\\.output_type\\s*(==|!=|in|not in)|FlowOutputType\\.|match .*output_type|output_type\\s*(==|!=|in|not in)\" backend/src/intric/flows/runtime/output_runtime.py backend/src/intric/flows/runtime/output_formats -g '*.py'"
+          status: pass
+          output: "No output_runtime output_type branches; expected enum references remain inside output_formats."
+      peer_review:
+        claude_plan_initial:
+          artifact: ".codex/artifacts/claude-peer-loop-t077-output-format-policy-plan-20260526T192432Z.md"
+          verdict: "GREEN_LIGHT no; MIN_SCORE 7. Valid concerns: text no-op, shared pruning owner, per-format unit-test home, and explicit context shape."
+        claude_plan_revised:
+          artifact: ".codex/artifacts/claude-peer-loop-t077-output-format-policy-revised-plan-20260526T192843Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+        claude_commit:
+          artifact: ".codex/artifacts/claude-peer-loop-t077-output-format-policy-implementation-review-20260526T194123Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8. Accepted host WeasyPrint failure as environment-only and commit-safe."
+        antigravity:
+          verdict: "Skipped per tiered review: Claude green, no API/schema/generated/persistence boundary change, and no Claude/Codex disagreement."
+      reviewer_concerns_addressed:
+        - "Added and tested TextOutputFormatSpec no-op processing."
+        - "Moved pruning diagnostics and shared structured-document pipeline into output_formats/base.py instead of duplicating across PDF/DOCX specs."
+        - "Added focused per-format unit tests in test_output_formats.py."
+        - "Kept process_typed_output and OutputRuntimeDeps signatures stable so existing output_runtime tests remained unchanged."
+        - "Used existing JsonStructuredValue alias rather than creating a competing JSON value alias."
+        - "Tightened output_type branch allowlist size to 3."
+      consolidation_effect:
+        reused_existing_owner: "OutputFormatSpec, output_runtime, document_rendering, existing output-runtime tests."
+        logic_moved_from: "output_runtime direct output_type branch."
+        logic_deleted: "output_runtime direct checks for json/pdf/docx, raw-PDF handling, pruning helpers, and stale architecture-guard allowlist entries."
+        duplicate_path_removed: "Output-format validation/rendering policy split between specs and output_runtime."
+        new_code_added: "OutputFormatProcessingContext, OutputFormatProcessingResult, RenderedOutputArtifact, concrete process_model_output methods, and per-format behavior tests inside the existing output_formats owner."
+        why_existing_owners_were_insufficient: "The existing specs only owned prompt/native JSON-mode policy; they had no typed method for validation/rendering policy while output_runtime owned persistence that should remain centralized."
+        guard_preventing_duplicate_logic_from_returning: "Architecture guard rejects output_type branches outside output_formats; test_output_formats and test_output_runtime protect behavior."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+      naming_gate:
+        new_names_clear_for_architecture_doc: true
+        notes: "New names map to output format policy and artifact ownership: OutputFormatProcessingContext, OutputFormatProcessingResult, RenderedOutputArtifact, process_model_output."
+      residual_risk:
+        - "Host-local full typed_io executor suite still has the known WeasyPrint/libgobject native dependency failure for PDF rendering. Devcontainer verification could not run because Docker/OrbStack socket was unavailable."
+        - "Claude follow-ups: unify JsonStructuredValue alias usage in output_runtime, migrate remaining OutputRuntimeDeps Callable fields to Protocols, consider private-prefixing shared base functions, and review discarded compile_validators validator instance."
+      unrelated_files_preserved:
+        - ".devcontainer/docker-compose.yml"
+        - ".gitignore"
+        - "AGENTS.md"
+        - "frontend/packages/ui/src/icons/types.d.ts"
+        - ".devcontainer/devcontainer-lock.json and other untracked root/doc artifacts"
+      next_task: T078
+
+  - id: T078
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe Flow clean-architecture task after T077 output-format policy consolidation."
+    inputs:
+      - "T077 receipt"
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+    constraints:
+      - "Read-only except this board receipt/task transition."
+      - "Check the watchdog before starting and before activating any Worker."
+      - "Do not start retention, service-key identity, schema migration, webhook outbox, review/rerun service-key policy, or other blocked decision-gated work unless state.yaml records the required decision."
+      - "Do not write docs/flows/architecture.md until final docs Worker T901."
+      - "Prefer reuse/move/merge/delete before new logic."
+      - "Respect tiered review: Claude-only for medium-risk Worker/Judge tasks; Antigravity only for disagreement, high-risk boundaries, or final audit."
+    expected_output:
+      - "Decision: approve_worker | scout_first | blocked | final_audit_not_ready"
+      - "Exact next task objective."
+      - "If approving a Worker: allowed_files, verification commands, stop_if, review tier, and consolidation effect."
+      - "If choosing Scout: exact read-only evidence questions and stop conditions."
+      - "Explicitly reject blocked product/data-gated work if still blocked."
+    stop_if:
+      - "The next safe task requires product/data decisions not recorded in state.yaml."
+      - "The next task cannot be scoped to a small reviewable allowed_files set."
+      - "The next task would widen into API/OpenAPI/generated, migrations, retention, service-key identity, webhook outbox, or Flow AI Builder without an explicit board gate."
     receipt: null
 
   - id: T901
