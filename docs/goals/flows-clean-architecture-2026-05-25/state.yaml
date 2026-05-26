@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T080
+active_task: T082
 
 tasks:
   - id: T001
@@ -7928,7 +7928,7 @@ tasks:
   - id: T080
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe Flow clean-architecture task after T079 typed-boundary cleanup."
     inputs:
@@ -7953,6 +7953,165 @@ tasks:
       - "The next safe task requires product/data decisions not recorded in state.yaml."
       - "The next task cannot be scoped to a small reviewable allowed_files set."
       - "The next task would widen into API/OpenAPI/generated, migrations, retention, service-key identity, webhook outbox, or Flow AI Builder without an explicit board gate."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T22:00:00+02:00"
+      decision: "approve_worker"
+      summary: "Chose one final small output-runtime typed-boundary cleanup before leaving the output-format tranche: reuse the existing JsonObject alias for output_contract and the existing ParseJsonOutputFn protocol for parse_json_output. This is local-validation-only mechanical type/import cleanup inside the existing output_runtime owner."
+      evidence:
+        - "backend/src/intric/flows/runtime/output_runtime.py:34 still spells output_contract as dict[str, Any] | None."
+        - "backend/src/intric/flows/runtime/output_runtime.py:53 now uses JsonStructuredValue but still spells parse_json_output as a bare Callable."
+        - "backend/src/intric/flows/runtime/output_formats/base.py:20 defines ParseJsonOutputFn."
+        - "backend/src/intric/flows/domain/flow.py:36 defines JsonObject."
+        - ".codex/artifacts/claude-peer-loop-t079-output-boundary-cleanup-implementation-review-20260526T195046Z.md"
+      rejected_or_deferred:
+        - "Do not touch compile_validators semantics or validator construction."
+        - "Do not sweep unrelated runtime modules for JSON aliases in this slice."
+        - "Retention, service-key identity/review/rerun, schema migrations, webhook outbox, and final docs remain gated as before."
+      commands:
+        - command: "jq '{schema_version,status,active_task,blockers}' /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1 status=ok blockers=[]; stale active_task T039 advisory."
+      next_task: T081
+      review_tier: "Local validation only: mechanical import/type cleanup inside existing owner."
+      consolidation_effect:
+        reused_existing_owner: "JsonObject, ParseJsonOutputFn, and output_runtime."
+        logic_moved_from: "None."
+        logic_deleted: "Duplicate typed spelling for output_contract and parse_json_output callable shape."
+        duplicate_path_removed: "Two names for existing JSON object/parser boundary concepts."
+        new_code_added: "No new concept expected."
+        why_existing_owners_were_insufficient: "They are sufficient; T081 must reuse them."
+        guard_preventing_duplicate_logic_from_returning: "pyright, focused output runtime tests, and anti-leak grep."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+
+  - id: T081
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: low
+    objective: "refactor(flows-runtime): reuse existing JSON contract/parser boundary types in output_runtime."
+    inputs:
+      - "T079 receipt"
+      - "T080 receipt"
+      - "backend/src/intric/flows/runtime/output_runtime.py"
+      - "backend/src/intric/flows/runtime/output_formats/base.py"
+      - "backend/tests/unittests/flows/test_output_runtime.py"
+      - "backend/tests/unittests/flows/test_output_formats.py"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "backend/src/intric/flows/runtime/output_runtime.py"
+    constraints:
+      - "Before starting implementation and before committing, check the watchdog blocker file."
+      - "No behavior changes."
+      - "No API/OpenAPI/generated client, schema/migration, retention, service-key, webhook outbox, Flow AI Builder, frontend, or docs/flows/architecture.md edits."
+      - "Do not touch compile_validators semantics or validator construction."
+      - "Do not sweep unrelated runtime modules."
+      - "Do not add new aliases, protocols, modules, helpers, managers, processors, or compatibility paths."
+      - "Use local validation only unless the diff widens."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_output_formats.py tests/unittests/flows/test_output_runtime.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/runtime/output_runtime.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/runtime/output_runtime.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/output_runtime.py tests/unittests/flows/test_output_runtime.py"
+      - "git diff --check"
+      - "! git diff -- backend/src/intric/flows/runtime/output_runtime.py | rg -n '^\\+.*(pyright: ignore|type: ignore|cast\\(Any|dict\\[str, Any\\]|\\bAny\\b|helper|manager|processor|T0[0-9][0-9]|Phase [0-9A-G]\\b)'"
+    stop_if:
+      - "The watchdog has a halt-worthy blocker that cannot be resolved or source-evidence-disagreed."
+      - "The change needs files outside allowed_files."
+      - "The change requires behavior changes or compile_validators semantic changes."
+      - "Focused verification fails twice for reasons unrelated to this task."
+    consolidation_effect:
+      reused_existing_owner: "JsonObject, ParseJsonOutputFn, and output_runtime."
+      logic_moved_from: "None."
+      logic_deleted: "Duplicate inline JSON object/parser type spelling in output_runtime."
+      duplicate_path_removed: "Inline type spelling for existing JSON boundary concepts."
+      new_code_added: "No new concept expected."
+      why_existing_owners_were_insufficient: "They are sufficient; this Worker should only reuse them."
+      guard_preventing_duplicate_logic_from_returning: "pyright plus output runtime tests and anti-leak grep."
+      net_flow_logic_surface_area: "reduced"
+      if_increased_why: "N/A"
+    receipt:
+      result: done
+      completed_at: "2026-05-26T22:02:00+02:00"
+      summary: "Reused the existing JSON contract/parser boundary types inside output_runtime without behavior changes: RuntimeOutputStep.output_contract now uses JsonObject and OutputRuntimeDeps.parse_json_output now uses ParseJsonOutputFn."
+      changed_files:
+        - "backend/src/intric/flows/runtime/output_runtime.py"
+        - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      evidence:
+        - "backend/src/intric/flows/runtime/output_runtime.py imports JsonObject from the existing domain flow owner."
+        - "backend/src/intric/flows/runtime/output_runtime.py imports ParseJsonOutputFn from the existing output_formats/base.py owner."
+        - "No compile_validators behavior, output processing behavior, API/schema/frontend/migration code, or Flow AI Builder files were changed."
+      commands:
+        - command: "python3 watchdog blocker check"
+          status: pass
+          output: "schema_version=1 status=ok halt_blockers=[]"
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_output_formats.py tests/unittests/flows/test_output_runtime.py -q"
+          status: pass
+          output: "19 passed."
+        - command: "cd backend && uv run ruff check src/intric/flows/runtime/output_runtime.py"
+          status: pass
+          output: "All checks passed."
+        - command: "cd backend && uv run ruff format --check src/intric/flows/runtime/output_runtime.py"
+          status: pass
+          output: "1 file already formatted."
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/runtime/output_runtime.py tests/unittests/flows/test_output_runtime.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations."
+        - command: "git diff --check"
+          status: pass
+        - command: "added-line anti-leak grep for ignores, broad Any, dict[str, Any], generic helper/manager/processor names, and task/phase comments"
+          status: pass
+      peer_review:
+        claude:
+          verdict: "Skipped per tiered review: local-validation-only mechanical type/import cleanup inside existing owner."
+        antigravity:
+          verdict: "Skipped per tiered review: no high-risk boundary or reviewer disagreement."
+      consolidation_effect:
+        reused_existing_owner: "JsonObject, ParseJsonOutputFn, and output_runtime."
+        logic_moved_from: "None."
+        logic_deleted: "Duplicate inline JSON object/parser type spelling in output_runtime."
+        duplicate_path_removed: "Inline spelling for existing JSON object/parser boundary concepts."
+        new_code_added: "No new concept; two imports and two annotation changes."
+        why_existing_owners_were_insufficient: "Existing owners were sufficient."
+        guard_preventing_duplicate_logic_from_returning: "pyright, output runtime tests, and added-line anti-leak grep."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+      residual_risk:
+        - "Other JSON boundary spellings in Flow runtime may merit future source-preflighted cleanup, but were intentionally out of scope."
+      next_task: T082
+
+  - id: T082
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next safe Flow clean-architecture task after output-format typed-boundary cleanup."
+    inputs:
+      - "T077 receipt"
+      - "T081 receipt"
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only except this board receipt/task transition."
+      - "Before task transition or activating a Worker, check the watchdog blocker file."
+      - "Do not start retention, service-key identity/review/rerun, schema migration, materialized webhook request snapshots, webhook outbox, or other blocked product/data work without recorded decisions."
+      - "Do not activate T901 final architecture docs while runtime/API/schema/frontend architecture is still changing."
+      - "Prefer reuse, move, merge, or delete before creating new logic."
+      - "Apply the tiered review rule: Antigravity only for high-risk/disputed/final-audit decisions."
+    expected_output:
+      - "Decision: approve_worker | scout_first | blocked | final_audit_not_ready"
+      - "Exact next task objective."
+      - "If approving a Worker: allowed_files, verification commands, review tier, stop_if, and consolidation effect."
+      - "Explicit disposition of blocked product/data-gated work and T901 final docs."
+    stop_if:
+      - "The next safe task requires product/data decisions not recorded in state.yaml."
+      - "The next task cannot be scoped to a small reviewable allowed_files set."
+      - "The next task would widen into API/OpenAPI/generated, migrations, retention, service-key identity/review/rerun, webhook outbox, or Flow AI Builder without a source-backed board gate."
     receipt: null
 
   - id: T901

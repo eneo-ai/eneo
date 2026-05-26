@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
 from intric.files.file_models import FileCreate, FileType
+from intric.flows.domain.flow import JsonObject
 from intric.flows.output_processing import JsonStructuredValue
 from intric.flows.principal import FlowPrincipal
 from intric.flows.runtime.document_rendering.limits import (
@@ -16,6 +17,7 @@ from intric.flows.runtime.models import StepDiagnostic
 from intric.flows.runtime.output_formats import resolve_format_spec
 from intric.flows.runtime.output_formats.base import (
     OutputFormatProcessingContext,
+    ParseJsonOutputFn,
     RenderDocumentFn,
     RenderedOutputArtifact,
     RenderStructuredDocumentFn,
@@ -31,7 +33,7 @@ class RuntimeOutputStep(Protocol):
     def output_type(self) -> str: ...
 
     @property
-    def output_contract(self) -> dict[str, Any] | None: ...
+    def output_contract(self) -> JsonObject | None: ...
 
 
 class RuntimeOutputRun(Protocol):
@@ -51,7 +53,7 @@ class OutputRuntimeDeps:
     file_repo: Any
     user_id: Any
     compile_validators: Callable[[list[Any]], dict[tuple[str, int], Any]]
-    parse_json_output: Callable[[str], JsonStructuredValue]
+    parse_json_output: ParseJsonOutputFn
     validate_against_contract: ValidateAgainstContractFn
     render_document: RenderDocumentFn
     render_structured_document: RenderStructuredDocumentFn
