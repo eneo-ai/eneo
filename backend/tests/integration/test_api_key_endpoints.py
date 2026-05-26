@@ -1500,6 +1500,14 @@ async def test_rotate_disable_grace_period_revokes_old_key_immediately(
     )
     assert create_response.status_code == 201, create_response.text
     old_key_id = UUID(create_response.json()["api_key"]["id"])
+    old_secret = create_response.json()["secret"]
+
+    # Sanity check: the secret authenticates before rotation.
+    pre_response = await client.get(
+        _AUTH_ENDPOINT,
+        headers={"X-API-Key": old_secret},
+    )
+    assert pre_response.status_code == 200, pre_response.text
 
     rotate_response = await client.post(
         f"/api/v1/api-keys/{old_key_id}/rotate",
@@ -1519,6 +1527,16 @@ async def test_rotate_disable_grace_period_revokes_old_key_immediately(
         )
         assert grace_until is not None
         assert grace_until <= datetime.now(timezone.utc)
+
+    # End-to-end: the old secret must now be rejected. Verifying the DB field
+    # alone left a strict-less-than race in compute_effective_state where a
+    # request arriving on the same microsecond as grace_until could still
+    # authenticate.
+    post_response = await client.get(
+        _AUTH_ENDPOINT,
+        headers={"X-API-Key": old_secret},
+    )
+    assert post_response.status_code == 401, post_response.text
 
 
 @pytest.mark.integration

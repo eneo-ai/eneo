@@ -24,6 +24,9 @@
     type TokenUsageSummary,
     type UserTokenUsage
   } from "@intric/intric-js";
+  import { buildCostRateMap, type CostRateMap } from "$lib/features/ai-models/costRates";
+  import { estimateCostFromTokens, formatCostUSD } from "$lib/features/ai-models/formatModelStats";
+  import EstimatedCostCell from "../../tokens/EstimatedCostCell.svelte";
 
   const intric = getIntric();
   const userId = $page.params.userId;
@@ -42,6 +45,18 @@
   let isLoadingBreakdown = $state(false);
   let userError = $state<string | null>(null);
   let breakdownError = $state<string | null>(null);
+
+  // Lazily resolved cost rate map. Fetched once per mount; if the request
+  // fails we silently fall back to "–" cost cells rather than blocking the page.
+  let costRates = $state<CostRateMap>(new Map());
+  void intric.models
+    .list()
+    .then((models) => {
+      costRates = buildCostRateMap(models);
+    })
+    .catch(() => {
+      // Cost column degrades gracefully — see fallback in `estimateCostText`.
+    });
 
   // Load user data and model breakdown
   async function loadUserData() {
@@ -176,13 +191,33 @@
       accessor: "total_token_usage",
       id: "total_tokens",
       cell: (item) => formatNumber(item.value, "compact", 1)
+    }),
+    modelTable.column({
+      header: m.estimated_cost(),
+      accessor: (model) => model,
+      id: "estimated_cost",
+      cell: (item) => {
+        const rates = costRates.get(item.value.model_id);
+        const cost = rates
+          ? estimateCostFromTokens(
+              item.value.input_token_usage,
+              item.value.output_token_usage,
+              rates
+            )
+          : null;
+        return createRender(EstimatedCostCell, { label: formatCostUSD(cost) });
+      }
     })
   ]);
 
-  // Update model table when data changes
+  // Update model table when data or cost rates change. Reading `costRates`
+  // into a dummy local re-runs the effect (and the cell fns inside the
+  // column renderers) once the rate map arrives, so the cost column stops
+  // showing "–" as soon as the model list resolves.
   $effect(() => {
+    void costRates;
     if (modelBreakdown?.models) {
-      modelTable.update(modelBreakdown.models);
+      modelTable.update([...modelBreakdown.models]);
     }
   });
 

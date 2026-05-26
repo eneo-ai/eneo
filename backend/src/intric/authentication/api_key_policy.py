@@ -386,8 +386,11 @@ class ApiKeyPolicyService:
                     code="invalid_request",
                     message="allowed_origins is only supported for pk_ keys.",
                 )
-            if key_type == ApiKeyType.PK and allowed_origins is not None:
-                if len(allowed_origins) == 0:
+            if key_type == ApiKeyType.PK:
+                # Mirror create-path: pk_ keys must always carry a non-empty
+                # origin list. NULL is rejected here so the fail-closed check
+                # in _validate_origin never traps a key the admin just edited.
+                if allowed_origins is None or len(allowed_origins) == 0:
                     raise ApiKeyValidationError(
                         status_code=400,
                         code="invalid_request",
@@ -565,15 +568,13 @@ class ApiKeyPolicyService:
                 message="Origin header required for pk_ keys.",
             )
 
-        # Per-key allowed_origins is the only authority. The central tenant
-        # allowlist was dropped: trust the key creator to list exactly the
-        # origins their integration needs.
+        # Per-key allowed_origins is the only authority — trust the key
+        # creator to list exactly the origins their integration needs.
+        # Fail closed: a pk_ key without an allowed_origins list (NULL or
+        # empty) cannot authenticate. Legacy rows that ended up NULL need
+        # explicit remediation (rotate with an origin list).
         key_patterns = key.allowed_origins
-        if key_patterns is None:
-            # Legacy keys minted before allowed_origins became required.
-            # New pk_ keys always carry a non-empty list.
-            return
-        if len(key_patterns) == 0:
+        if not key_patterns:
             raise ApiKeyValidationError(
                 status_code=403,
                 code="origin_not_allowed",

@@ -34,6 +34,15 @@
       });
     }
   }
+
+  function startNewConversation() {
+    chat.newConversation();
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with assistant ID
+    pushState(`/dashboard/${chat.partner.id}?tab=chat`, {
+      conversation: undefined,
+      tab: "chat"
+    });
+  }
 </script>
 
 <svelte:head>
@@ -69,14 +78,7 @@
     </a>
     <Button
       variant="primary"
-      on:click={() => {
-        chat.newConversation();
-        // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with assistant ID
-        pushState(`/dashboard/${chat.partner.id}?tab=chat`, {
-          conversation: undefined,
-          tab: "chat"
-        });
-      }}
+      on:click={startNewConversation}
       class="!rounded-lg !border-b-2 !border-[var(--color-ui-blue-700)] !px-5 !py-1"
       >{m.new_chat()}
     </Button>
@@ -112,7 +114,7 @@
     </div>
   {/if}
 
-  <ConversationView></ConversationView>
+  <ConversationView onNewConversation={startNewConversation}></ConversationView>
 </div>
 
 <style>

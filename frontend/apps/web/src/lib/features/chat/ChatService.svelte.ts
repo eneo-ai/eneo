@@ -45,6 +45,76 @@ export class ChatService {
   // Tool approval state
   pendingToolApproval = $state<PendingToolApproval | null>(null);
 
+  // Context-window usage for the most recent turn. Split into input vs output
+  // so the bar can show what was sent to the LLM (system + MCP + RAG + history
+  // + question, lumped together in the provider's prompt_tokens) separately
+  // from what the model returned. Updated live via SSE token_usage and seeded
+  // from the last persisted message on conversation load.
+  lockedInputTokens = $state<number>(0);
+  lockedOutputTokens = $state<number>(0);
+  contextTokens = $derived(this.lockedInputTokens + this.lockedOutputTokens);
+
+  // Cumulative tokens billed over the entire conversation. Each turn re-sends
+  // the full prompt (system + RAG + history), so per-message prompt_tokens
+  // already include everything sent that turn; summing across messages gives
+  // the true running spend, which grows roughly linearly with turn count even
+  // when the per-turn snapshot looks flat. This is the cost-side view that
+  // complements the headroom-side view shown on the bar itself.
+  cumulativeTokens = $derived.by(() => {
+    const messages = this.currentConversation?.messages;
+    if (!messages?.length) return 0;
+    let total = 0;
+    for (const msg of messages) {
+      total += msg.num_tokens_question ?? 0;
+      total += msg.num_tokens_answer ?? 0;
+    }
+    return total;
+  });
+  turnCount = $derived(this.currentConversation?.messages?.length ?? 0);
+  averageTokensPerTurn = $derived(
+    this.turnCount > 0 ? Math.round(this.cumulativeTokens / this.turnCount) : 0
+  );
+
+  // Forward-looking estimate from the backend preflight endpoint. Set by the
+  // input component as the user types (debounced). Cleared on send and on
+  // conversation/partner switch. The total tokens this pending message will
+  // add equals `pendingInputTokens + pendingFileTokens`.
+  pendingInputTokens = $state<number>(0);
+  pendingFileTokens = $state<number>(0);
+  pendingModelName = $state<string>("");
+  pendingContextWindow = $state<number>(0);
+  #preflightDebounce: ReturnType<typeof setTimeout> | null = null;
+  #preflightGen = 0;
+  // Prefer the pending preflight model/window while the user is composing;
+  // otherwise use the model recorded on the most recent message (covers group
+  // chats where the active model varies per turn), then the partner's own
+  // completion model for fresh assistant conversations.
+  contextLimit = $derived<number>(
+    this.pendingContextWindow ||
+      this.#latestMessageTokenLimit() ||
+      (this.#chatPartner && "completion_model" in this.#chatPartner
+        ? (this.#chatPartner.completion_model?.token_limit ?? 0)
+        : 0)
+  );
+
+  // Single source of truth for "the next message would overflow context".
+  // Both the input (disable Send) and the usage bar (turn red) read from
+  // here so the two surfaces can't disagree.
+  willExceedContext = $derived<boolean>(
+    this.contextLimit > 0 &&
+      this.contextTokens + this.pendingInputTokens + this.pendingFileTokens > this.contextLimit
+  );
+
+  #latestMessageTokenLimit(): number | undefined {
+    const messages = this.currentConversation?.messages;
+    if (!messages?.length) return undefined;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const limit = messages[i].completion_model?.token_limit;
+      if (limit) return limit;
+    }
+    return undefined;
+  }
+
   // Streaming buffer for smoother text rendering (rAF-based for frame alignment)
   #streamBuffer = "";
   #streamAnimationFrame: number | null = null;
@@ -78,15 +148,104 @@ export class ChatService {
     waitFor(data.initialConversation, {
       onLoaded: (initialConversation) => {
         this.currentConversation = initialConversation;
+        this.#seedLockedFromHistory();
+        this.#clearPreflight();
       },
       onNull: () => {
         this.currentConversation = emptyConversation();
+        this.#resetLocked();
+        this.#clearPreflight();
       }
     });
   }
 
   newConversation() {
     this.currentConversation = emptyConversation();
+    this.#resetLocked();
+    this.#clearPreflight();
+  }
+
+  #seedLockedFromHistory() {
+    const messages = this.currentConversation?.messages;
+    if (!messages?.length) {
+      this.#resetLocked();
+      return;
+    }
+    // Caveat: messages persisted before token measurement was added report
+    // 0 here (backend stores NOT NULL int, no way to distinguish 0 from
+    // "unmeasured"). Loading an old conversation will underreport actual
+    // context fill — fixed when the user sends their next message and we
+    // receive a fresh token_usage SSE event.
+    const last = messages[messages.length - 1];
+    this.lockedInputTokens = last.num_tokens_question ?? 0;
+    this.lockedOutputTokens = last.num_tokens_answer ?? 0;
+  }
+
+  #resetLocked() {
+    this.lockedInputTokens = 0;
+    this.lockedOutputTokens = 0;
+  }
+
+  #clearPreflight() {
+    this.#preflightGen += 1;
+    if (this.#preflightDebounce) {
+      clearTimeout(this.#preflightDebounce);
+      this.#preflightDebounce = null;
+    }
+    this.pendingInputTokens = 0;
+    this.pendingFileTokens = 0;
+    this.pendingModelName = "";
+    this.pendingContextWindow = 0;
+  }
+
+  /**
+   * Estimate the token cost of the pending message. Debounced to avoid
+   * spamming the backend on every keystroke. Race-safe via generation
+   * counter — only the latest in-flight call wins.
+   */
+  requestPreflight(question: string, fileIds: string[], tools?: ConversationTools, delayMs = 400) {
+    if (this.#preflightDebounce) {
+      clearTimeout(this.#preflightDebounce);
+    }
+
+    if (!question && fileIds.length === 0) {
+      this.#clearPreflight();
+      return;
+    }
+
+    const gen = ++this.#preflightGen;
+    const partnerAtStart = this.#chatPartner;
+    const conversationAtStart = this.currentConversation;
+
+    this.#preflightDebounce = setTimeout(async () => {
+      try {
+        const res = await this.#intric.conversations.preflight({
+          chatPartner: partnerAtStart,
+          conversation: conversationAtStart.id ? { id: conversationAtStart.id } : undefined,
+          question,
+          files: fileIds.map((id) => ({ id })),
+          tools
+        });
+
+        // Discard if a newer request started or the user switched context
+        if (gen !== this.#preflightGen) return;
+        if (this.#chatPartner !== partnerAtStart) return;
+        if (this.currentConversation.id !== conversationAtStart.id) return;
+
+        this.pendingInputTokens = res.input_tokens;
+        this.pendingFileTokens = res.file_tokens;
+        this.pendingModelName = res.model_name;
+        this.pendingContextWindow = res.context_window;
+      } catch {
+        // Silent failure — preflight is best-effort, not a blocker
+        if (gen === this.#preflightGen) {
+          this.pendingInputTokens = 0;
+          this.pendingFileTokens = 0;
+          this.pendingModelName = "";
+          this.pendingContextWindow = 0;
+        }
+      }
+    }, delayMs);
   }
 
   // RAF-based flush loop for smooth frame-aligned rendering
@@ -194,6 +353,8 @@ export class ChatService {
     try {
       const loaded = await this.#intric.conversations.get(conversation);
       this.currentConversation = loaded;
+      this.#seedLockedFromHistory();
+      this.#clearPreflight();
       return loaded;
     } catch (e) {
       toastError(e);
@@ -220,6 +381,8 @@ export class ChatService {
       requireToolApproval?: boolean,
       abortController?: AbortController
     ) => {
+      // Clear preflight estimate — the message is leaving the input
+      this.#clearPreflight();
       // End any previous stream loop/buffer
       this.#finalizeStream();
       const streamGen = ++this.#streamGen;
@@ -310,10 +473,31 @@ export class ChatService {
               if (event.intric_event_type === "generating_image") {
                 if (!ref) return;
                 ref.generated_files.push({ id: "", name: "", mimetype: "", size: 0 });
+              } else if (event.intric_event_type === "token_usage") {
+                // The backend routes token_usage events through the same SSE
+                // channel as intric events. Reflect them on the live message
+                // so reload-from-history matches the in-memory state, then
+                // expose the running context fill for the UI bar.
+                const usage = (
+                  event as unknown as {
+                    usage?: { prompt_tokens: number; completion_tokens: number };
+                  }
+                ).usage;
+                if (!usage) return;
+                if (ref) {
+                  ref.num_tokens_question = usage.prompt_tokens;
+                  ref.num_tokens_answer = usage.completion_tokens;
+                }
+                this.lockedInputTokens = usage.prompt_tokens;
+                this.lockedOutputTokens = usage.completion_tokens;
               }
             },
             onToolCall: (event) => {
-              ensureCurrentSession(event);
+              // Guard order matches the other SSE handlers: ref is only set
+              // after onFirstChunk lands, so an early tool_call event would
+              // otherwise crash trying to read mcp_tool_calls on undefined.
+              if (!ref || isStale()) return;
+              if (!ensureCurrentSession(event)) return;
               // Store tool calls for rendering with translations
               // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
               if (!ref.mcp_tool_calls) {
@@ -345,7 +529,19 @@ export class ChatService {
               }
             },
             onToolApprovalRequired: (event) => {
-              ensureCurrentSession(event);
+              if (isStale()) return;
+              if (!ensureCurrentSession(event)) return;
+              // tool_approval_required can race ahead of onFirstChunk when the
+              // model returns a tool call before any text. Dropping the event
+              // would leave pendingToolApproval unset, hiding the approve/deny
+              // buttons forever while the backend keeps waiting. Materialise
+              // the message here so the approval UI has something to attach to.
+              if (!ref) {
+                this.currentConversation.messages?.push(emptyMessage({ question }));
+                ref =
+                  this.currentConversation.messages[this.currentConversation.messages.length - 1];
+                this.currentConversation.id = event.session_id;
+              }
               // Add tools to the message so they display in the UI
               // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
               if (!ref.mcp_tool_calls) {
@@ -571,6 +767,9 @@ function emptyMessage(partial?: Partial<ConversationMessage>): ConversationMessa
     tools: {
       assistants: []
     },
+    tool_calls: [],
+    num_tokens_question: 0,
+    num_tokens_answer: 0,
     ...partial
   };
 }

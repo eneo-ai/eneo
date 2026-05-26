@@ -11,7 +11,14 @@ from intric.ai_models.completion_models.completion_model import (
 from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
 from intric.database.tables.ai_models_table import CompletionModels
+from intric.database.tables.app_table import Apps
+from intric.database.tables.app_template_table import AppTemplates
+from intric.database.tables.assistant_table import Assistants
+from intric.database.tables.assistant_template_table import AssistantTemplates
 from intric.database.tables.model_providers_table import ModelProviders
+from intric.database.tables.service_table import Services
+from intric.database.tables.spaces_table import SpacesCompletionModels
+from intric.database.tables.users_table import Users
 from intric.main.exceptions import UniqueException
 from intric.main.models import IdAndName
 
@@ -35,6 +42,7 @@ class CompletionModelsRepository:
             )
             .where(
                 CompletionModels.id == id,
+                CompletionModels.deleted_at.is_(None),
                 sa.or_(
                     CompletionModels.tenant_id.is_(None),
                     CompletionModels.tenant_id == tenant_id,
@@ -89,14 +97,24 @@ class CompletionModelsRepository:
             model, exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE
         )
 
-    async def delete_model(self, id: UUID) -> CompletionModel | None:
-        stmt = (
-            sa.delete(CompletionModels)
-            .where(CompletionModels.id == id)
-            .returning(CompletionModels)
+    async def delete_model(self, id: UUID) -> None:
+        # Spaces are containers — a model "enabled" on a space without any
+        # resource using it is configuration, not active usage. Drop the
+        # cross-reference rows first so the soft-deleted model doesn't
+        # dangle in space-aware reads (`Spaces.completion_models`).
+        await self.session.execute(
+            sa.delete(SpacesCompletionModels).where(
+                SpacesCompletionModels.completion_model_id == id
+            )
         )
 
-        await self.delegate.get_record_from_query(stmt)
+        stmt = (
+            sa.update(CompletionModels)
+            .where(CompletionModels.id == id)
+            .values(deleted_at=sa.func.now())
+        )
+
+        await self.session.execute(stmt)
 
     async def get_models(
         self,
@@ -110,6 +128,7 @@ class CompletionModelsRepository:
                 ModelProviders, CompletionModels.provider_id == ModelProviders.id
             )
             .where(CompletionModels.is_deprecated == is_deprecated)
+            .where(CompletionModels.deleted_at.is_(None))
             .order_by(CompletionModels.created_at)
         )
 
@@ -143,3 +162,64 @@ class CompletionModelsRepository:
         models = await self.delegate.get_records_from_query(stmt)
 
         return [IdAndName(id=model.id, name=model.name) for model in models.all()]  # type: ignore[return-value]
+
+    async def has_active_references(
+        self, model_id: UUID, tenant_id: UUID | None = None
+    ) -> bool:
+        # Note: spaces are intentionally NOT counted here. Spaces are
+        # containers for resources (assistants, apps, services); a model
+        # "enabled" on a space without any resource using it is just
+        # configuration. The cross-reference rows are cleaned up in
+        # `delete_model`.
+        assistant_stmt = (
+            sa.select(sa.func.count())
+            .select_from(Assistants)
+            .where(Assistants.completion_model_id == model_id)
+        )
+        service_stmt = (
+            sa.select(sa.func.count())
+            .select_from(Services)
+            .where(Services.completion_model_id == model_id)
+        )
+        app_stmt = (
+            sa.select(sa.func.count())
+            .select_from(Apps)
+            .where(Apps.completion_model_id == model_id)
+        )
+        assistant_template_stmt = (
+            sa.select(sa.func.count())
+            .select_from(AssistantTemplates)
+            .where(
+                AssistantTemplates.completion_model_id == model_id,
+                AssistantTemplates.deleted_at.is_(None),
+            )
+        )
+        app_template_stmt = (
+            sa.select(sa.func.count())
+            .select_from(AppTemplates)
+            .where(
+                AppTemplates.completion_model_id == model_id,
+                AppTemplates.deleted_at.is_(None),
+            )
+        )
+
+        if tenant_id is not None:
+            tenant_user_ids = sa.select(Users.id).where(Users.tenant_id == tenant_id)
+            assistant_stmt = assistant_stmt.where(
+                Assistants.user_id.in_(tenant_user_ids)
+            )
+            service_stmt = service_stmt.where(Services.user_id.in_(tenant_user_ids))
+            app_stmt = app_stmt.where(Apps.tenant_id == tenant_id)
+
+        for stmt in (
+            assistant_stmt,
+            service_stmt,
+            app_stmt,
+            assistant_template_stmt,
+            app_template_stmt,
+        ):
+            result = await self.session.execute(stmt)
+            if (result.scalar_one() or 0) > 0:
+                return True
+
+        return False

@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index
+from sqlalchemy import CheckConstraint, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from intric.database.tables.api_keys_v2_table import ApiKeysV2
@@ -47,4 +47,10 @@ class Sessions(BasePublic):
     )
     group_chat: Mapped[Optional[GroupChatsTable]] = relationship(viewonly=True)
 
-    __table_args__ = (Index("created_at_idx", "created_at"),)
+    __table_args__ = (
+        Index("created_at_idx", "created_at"),
+        CheckConstraint(
+            "(user_id IS NOT NULL) <> (api_key_id IS NOT NULL)",
+            name="ck_sessions_user_xor_api_key",
+        ),
+    )

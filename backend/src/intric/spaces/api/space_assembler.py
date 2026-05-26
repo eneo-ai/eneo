@@ -536,7 +536,11 @@ class SpaceAssembler:
                 completion_model=model
             )
             for model in space.completion_models
-            if model.is_org_enabled
+            if (
+                model.is_org_enabled
+                and model.migrated_to_model_id is None
+                and model.deleted_at is None
+            )
         ]
 
         transcription_models = [

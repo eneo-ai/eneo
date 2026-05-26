@@ -17,11 +17,17 @@ export const load = async (event) => {
     endDate: today.add({ days: 1 }).toString()
   };
 
-  const [spaces, storageStats, tokenStats] = await Promise.all([
+  // We pull the model list alongside the token stats so the per-row "estimated
+  // cost" column can apply the current ratecard without a second round-trip.
+  // The mapping is `model_id → { input_cost_per_token, output_cost_per_token }`,
+  // built once on the page since both TokenOverviewTable and UserTokenTable
+  // consume it.
+  const [spaces, storageStats, tokenStats, models] = await Promise.all([
     intric.usage.storage.listSpaces().then((s) => s.sort((a, b) => b.size - a.size)),
     intric.usage.storage.getSummary(),
-    intric.usage.tokens.getSummary(dateRange)
+    intric.usage.tokens.getSummary(dateRange),
+    intric.models.list()
   ]);
 
-  return { spaces, storageStats, tokenStats };
+  return { spaces, storageStats, tokenStats, models };
 };

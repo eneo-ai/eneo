@@ -54,8 +54,8 @@ class TestCategoryMappings:
             for action, cat in CATEGORY_MAPPINGS.items()
             if cat == "admin_actions"
         ]
-        assert len(admin_actions) == 35, (
-            f"Expected 35 admin actions, got {len(admin_actions)}"
+        assert len(admin_actions) == 36, (
+            f"Expected 36 admin actions, got {len(admin_actions)}"
         )
 
     def test_admin_actions_mapping(self):
@@ -98,10 +98,17 @@ class TestCategoryMappings:
         user_actions = [
             action for action, cat in CATEGORY_MAPPINGS.items() if cat == "user_actions"
         ]
-        assert len(user_actions) == 29, (
-            f"Expected 29 user actions, got {len(user_actions)}"
+        assert len(user_actions) == 36, (
+            f"Expected 36 user actions, got {len(user_actions)}"
         )
         assert ActionType.TOOL_APPROVAL_SUBMITTED.value in user_actions
+
+    def test_completion_model_migrated_maps_to_user_actions(self):
+        """Verify completion model migration is tracked as a user action."""
+        assert (
+            CATEGORY_MAPPINGS[ActionType.COMPLETION_MODEL_MIGRATED.value]
+            == "user_actions"
+        )
 
     def test_security_events_mapping(self):
         """Verify security event action types are correctly mapped."""
@@ -299,8 +306,8 @@ class TestCategoryDistribution:
     def test_category_counts_match_expected(self):
         """Verify exact counts for each category."""
         expected_counts = {
-            "admin_actions": 35,
-            "user_actions": 29,
+            "admin_actions": 36,
+            "user_actions": 36,
             "security_events": 6,
             "file_operations": 2,
             "integration_events": 19,

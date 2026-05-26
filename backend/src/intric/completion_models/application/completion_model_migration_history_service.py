@@ -35,7 +35,7 @@ class CompletionModelMigrationHistoryService:
         limit: int = 50,
         offset: int = 0,
     ) -> list[ModelMigrationHistory]:
-        """Get migration history for a specific model with model names and user info."""
+        """Get migration history for a specific live model with names and user info."""
         migration_records = await self.repo.get_migration_history_for_model(
             model_id, tenant_id, limit, offset
         )
@@ -83,8 +83,12 @@ class CompletionModelMigrationHistoryService:
         user_ids: set[UUID] = set()
 
         for record in migration_records:
-            model_ids.add(cast(UUID, record.from_model_id))
-            model_ids.add(cast(UUID, record.to_model_id))
+            from_model_id = cast(UUID | None, record.from_model_id)
+            to_model_id = cast(UUID | None, record.to_model_id)
+            if from_model_id is not None:
+                model_ids.add(from_model_id)
+            if to_model_id is not None:
+                model_ids.add(to_model_id)
             user_ids.add(cast(UUID, record.initiated_by))
 
         # Batch fetch model names
@@ -96,8 +100,8 @@ class CompletionModelMigrationHistoryService:
         # Convert to public models
         public_models: list[ModelMigrationHistory] = []
         for record in migration_records:
-            from_model_id = cast(UUID, record.from_model_id)
-            to_model_id = cast(UUID, record.to_model_id)
+            from_model_id = cast(UUID | None, record.from_model_id)
+            to_model_id = cast(UUID | None, record.to_model_id)
             initiated_by = cast(UUID, record.initiated_by)
             migrated_count = cast(int, record.migrated_count)
             status = cast(str, record.status)
@@ -107,9 +111,26 @@ class CompletionModelMigrationHistoryService:
                 float | None, getattr(record, "duration_seconds", None)
             )
             error_message = cast(str | None, record.error_message)
+            stored_from_name = cast(
+                str | None, getattr(record, "from_model_name", None)
+            )
+            stored_to_name = cast(str | None, getattr(record, "to_model_name", None))
+            migration_details = cast(
+                dict[str, int] | None, getattr(record, "migration_details", None)
+            )
+            warnings = cast(list[str] | None, getattr(record, "warnings", None))
 
-            from_model_name = model_names.get(from_model_id, "Unknown Model")
-            to_model_name = model_names.get(to_model_id, "Unknown Model")
+            # Use stored names first, fall back to live lookup
+            from_model_name = stored_from_name or (
+                model_names.get(from_model_id, "Deleted model")
+                if from_model_id is not None
+                else "Deleted model"
+            )
+            to_model_name = stored_to_name or (
+                model_names.get(to_model_id, "Deleted model")
+                if to_model_id is not None
+                else "Deleted model"
+            )
             initiated_by_name = user_names.get(initiated_by, "Unknown User")
 
             public_model = ModelMigrationHistory(
@@ -126,6 +147,8 @@ class CompletionModelMigrationHistoryService:
                 completed_at=completed_at,
                 duration=duration_seconds,
                 error_message=error_message,
+                migration_details=migration_details,
+                warnings=warnings,
             )
             public_models.append(public_model)
 

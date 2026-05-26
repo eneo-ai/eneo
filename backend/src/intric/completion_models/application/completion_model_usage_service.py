@@ -132,6 +132,11 @@ class CompletionModelUsageService:
                     model_id, tenant_id, limit, cursor_data
                 )
 
+                # Count total for this entity type (not just current page)
+                total_count = await self._count_entities_for_type(
+                    entity_type, model_id, tenant_id
+                )
+
                 # Generate next cursor if there are more results
                 next_cursor = None
                 if has_more and details:
@@ -147,14 +152,13 @@ class CompletionModelUsageService:
 
                 return PaginatedResponse(
                     items=details,
-                    total=len(details),
+                    total=total_count,
                     has_more=has_more,
                     next_cursor=next_cursor,
-                    prev_cursor=None,  # Single direction for simplicity
+                    prev_cursor=None,
                 )
         else:
-            # For multiple entity types, use simpler approach
-            # This is less common and doesn't need full cursor support
+            # Combined mode: fetch from all entity types
             details: list[ModelUsageDetail] = []
             for _entity_type_name, query_func in entity_queries.items():
                 entity_details, _ = await query_func(
@@ -162,19 +166,51 @@ class CompletionModelUsageService:
                 )
                 details.extend(entity_details)
 
+            # Count real total across all entity types
+            total_count = 0
+            for et in entity_queries:
+                total_count += await self._count_entities_for_type(
+                    et, model_id, tenant_id
+                )
+
             # Sort by created_at descending
             details.sort(key=lambda x: x.created_at, reverse=True)
 
-            # Apply limit
+            # Apply limit to details (but total reflects the real count)
             details = details[:limit]
 
             return PaginatedResponse(
                 items=details,
-                total=len(details),
-                has_more=len(details) == limit,
+                total=total_count,
+                has_more=total_count > len(details),
                 next_cursor=None,
                 prev_cursor=None,
             )
+
+    async def _count_entities_for_type(
+        self, entity_type: str, model_id: UUID, tenant_id: UUID
+    ) -> int:
+        """Count total entities of a type using a model (for accurate pagination totals)."""
+        from sqlalchemy import func as sa_func
+
+        from intric.completion_models.constants import get_entity_table
+
+        table = get_entity_table(entity_type)
+        if table is None:
+            return 0
+
+        stmt = (
+            select(sa_func.count())
+            .select_from(table)
+            .where(
+                and_(
+                    table.completion_model_id == model_id,
+                    self._build_tenant_filter_condition(table, entity_type, tenant_id),
+                )
+            )
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one()
 
     async def get_all_models_usage_summary(
         self, tenant_id: UUID
@@ -245,6 +281,10 @@ class CompletionModelUsageService:
         self, table: Any, entity_type: str, tenant_id: UUID
     ) -> ColumnElement[bool]:
         """Build appropriate tenant filtering condition based on entity type."""
+        from intric.completion_models.constants import singular_entity_type
+
+        entity_type = singular_entity_type(entity_type)
+
         if entity_type in {"app", "question"}:
             # Direct tenant_id field
             return table.tenant_id == tenant_id
@@ -401,6 +441,7 @@ class CompletionModelUsageService:
                 Spaces.name.label("space_name"),
                 Users.username.label("owner_name"),
             ],
+            cursor_data=cursor_data,
         )
 
     async def _get_service_details(
@@ -424,6 +465,7 @@ class CompletionModelUsageService:
                 Services.user_id,
                 Users.username.label("owner_name"),
             ],
+            cursor_data=cursor_data,
         )
 
     async def _get_assistant_template_details(

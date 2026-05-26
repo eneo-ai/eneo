@@ -1315,6 +1315,34 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/conversations/preflight": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Preflight Tokens
+     * @description Returns the exact token cost the next chat request will add.
+     *
+     *     Excludes knowledge/RAG and web-search content (selected at request time
+     *     and unknowable up-front). Designed to be called debounced from the input
+     *     field — the cost is dominated by tokenization (~5-20ms).
+     *
+     *     Rate-limited at 600 req/min/user; a 400ms-debounced typist tops out at
+     *     ~150 req/min, so the limit catches scripted abuse while leaving multiple
+     *     tabs and fast input untouched.
+     */
+    post: operations["preflight_tokens_api_v1_conversations_preflight_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/conversations/{session_id}/": {
     parameters: {
       query?: never;
@@ -2986,9 +3014,29 @@ export interface paths {
     };
     /**
      * Get Model Usage Details
-     * @description Get detailed list of entities using this model with cursor pagination
+     * @description Get detailed list of entities using this model with cursor pagination.
      */
     get: operations["get_model_usage_details_api_v1_completion_models__model_id__usage_details_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/completion-models/{model_id}/migration-validate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Validate Migration
+     * @description Validate migration compatibility without executing. Used for preflight checks.
+     */
+    get: operations["validate_migration_api_v1_completion_models__model_id__migration_validate_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -3008,7 +3056,12 @@ export interface paths {
     put?: never;
     /**
      * Migrate Model Usage
-     * @description Migrate all usage from one model to another with safety checks
+     * @description Migrate all usage from one model to another.
+     *
+     *     Source/target validity, same-model rejection, tenant ownership and
+     *     entity-type whitelisting all live in
+     *     `CompletionModelMigrationService.migrate_model_usage` — the router
+     *     only enforces admin permission and persists the audit log on success.
      */
     post: operations["migrate_model_usage_api_v1_completion_models__model_id__migrate_post"];
     delete?: never;
@@ -3026,7 +3079,7 @@ export interface paths {
     };
     /**
      * Get All Models Usage Summary
-     * @description Get usage summary for all models (optimized with pre-aggregation)
+     * @description Get usage summary for all models (optimized with pre-aggregation).
      */
     get: operations["get_all_models_usage_summary_api_v1_completion_models_usage_summary_get"];
     put?: never;
@@ -3046,7 +3099,7 @@ export interface paths {
     };
     /**
      * Get Model Migration History
-     * @description Get migration history for a specific model (from or to this model)
+     * @description Get migration history for a specific live model (from or to this model)
      */
     get: operations["get_model_migration_history_api_v1_completion_models__model_id__migration_history_get"];
     put?: never;
@@ -3390,7 +3443,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Tenant Completion Model
-     * @description Delete a tenant-specific completion model.
+     * @description Soft-delete a tenant-specific completion model.
      */
     delete: operations["delete_tenant_completion_model_api_v1_admin_tenant_models_completion__model_id___delete"];
     options?: never;
@@ -4591,9 +4644,18 @@ export interface paths {
     /**
      * Delete Security Classification
      * @description Delete a security classification.
+     *
+     *     Refuses if any model, space or MCP server still references it — the
+     *     FK is `ON DELETE SET NULL`, so dropping a referenced classification
+     *     would silently downgrade every dependent row to "no classification".
+     *     Pass `?force=true` to override after reviewing the usage report.
+     *
      *     Args:
      *         id: The ID of the security classification to delete.
+     *         force: When true, delete even if rows still reference this
+     *             classification. Those rows will be downgraded to NULL.
      *     Raises:
+     *         400: If the classification is referenced and `force` is false.
      *         403: If the user doesn't have permission to delete the security classification.
      *         404: If the security classification doesn't exist.
      */
@@ -6130,12 +6192,12 @@ export interface paths {
     post?: never;
     /**
      * Delete Completion Model
-     * @description Delete a completion model (system-wide operation).
+     * @description Soft-delete a completion model (system-wide operation).
      *
      *     Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
-     *     WARNING: Deletion affects all tenants. Use with caution.
-     *     Set force=true to delete even if model is in use (may break references).
+     *     WARNING: Affects all tenants. Use with caution.
+     *     Set force=true to hard-delete (may break references).
      */
     delete: operations["delete_completion_model_api_v1_sysadmin_completion_models__id__delete"];
     options?: never;
@@ -6910,9 +6972,16 @@ export interface components {
       | "integration_knowledge_created"
       | "integration_knowledge_deleted"
       | "integration_knowledge_synced"
+      | "completion_model_created"
       | "completion_model_updated"
+      | "completion_model_deleted"
+      | "completion_model_migrated"
+      | "embedding_model_created"
       | "embedding_model_updated"
+      | "embedding_model_deleted"
+      | "transcription_model_created"
       | "transcription_model_updated"
+      | "transcription_model_deleted"
       | "template_created"
       | "template_updated"
       | "template_deleted"
@@ -8862,6 +8931,10 @@ export interface components {
       /** Litellm Model Name */
       litellm_model_name?: string | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -8878,6 +8951,8 @@ export interface components {
       provider_id?: string | null;
       /** Provider Type */
       provider_type?: string | null;
+      /** Migrated To Model Id */
+      migrated_to_model_id?: string | null;
       /**
        * Token Limit
        * @description Backward-compat: exposed in JSON responses for frontend.
@@ -8929,6 +9004,10 @@ export interface components {
       /** Litellm Model Name */
       litellm_model_name?: string | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: number | string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: number | string | null;
     };
     /** CompletionModelPublic */
     CompletionModelPublic: {
@@ -8983,6 +9062,10 @@ export interface components {
       /** Litellm Model Name */
       litellm_model_name?: string | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -8999,6 +9082,8 @@ export interface components {
       provider_id?: string | null;
       /** Provider Type */
       provider_type?: string | null;
+      /** Migrated To Model Id */
+      migrated_to_model_id?: string | null;
       /**
        * Can Access
        * @default false
@@ -9016,6 +9101,8 @@ export interface components {
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Provider Name */
       provider_name?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
       /**
        * Token Limit
        * @description Backward-compat: exposed in JSON responses for frontend.
@@ -9092,6 +9179,10 @@ export interface components {
       /** Litellm Model Name */
       litellm_model_name?: string | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -9108,6 +9199,8 @@ export interface components {
       provider_id?: string | null;
       /** Provider Type */
       provider_type?: string | null;
+      /** Migrated To Model Id */
+      migrated_to_model_id?: string | null;
       /**
        * Can Access
        * @default false
@@ -9125,6 +9218,8 @@ export interface components {
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Provider Name */
       provider_name?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
       /**
@@ -9187,6 +9282,10 @@ export interface components {
       /** Litellm Model Name */
       litellm_model_name?: string | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
       /** Provider Type */
       provider_type?: string | null;
       /**
@@ -9230,14 +9329,14 @@ export interface components {
      *     - If no assistant is targeted, the most appropriate assistant will be selected.
      */
     ConversationRequest: {
-      /** Question */
-      question: string;
       /** Session Id */
       session_id?: string | null;
       /** Assistant Id */
       assistant_id?: string | null;
       /** Group Chat Id */
       group_chat_id?: string | null;
+      /** Question */
+      question: string;
       /**
        * Files
        * @default []
@@ -9953,6 +10052,10 @@ export interface components {
       org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: number | string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: number | string | null;
     };
     /** EmbeddingModelLegacy */
     EmbeddingModelLegacy: {
@@ -9991,6 +10094,10 @@ export interface components {
       org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -10034,6 +10141,10 @@ export interface components {
       org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
       /**
        * Can Access
        * @default false
@@ -10062,6 +10173,8 @@ export interface components {
       provider_name?: string | null;
       /** Provider Type */
       provider_type?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
     };
     /** EmbeddingModelPublicLegacy */
     EmbeddingModelPublicLegacy: {
@@ -10100,6 +10213,10 @@ export interface components {
       org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
       /**
        * Is Org Enabled
        * @default false
@@ -10155,6 +10272,10 @@ export interface components {
       org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
       /**
        * Can Access
        * @default false
@@ -10183,6 +10304,8 @@ export interface components {
       provider_name?: string | null;
       /** Provider Type */
       provider_type?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -10223,6 +10346,10 @@ export interface components {
       org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: string | null;
     };
     /** EmbeddingModelUpdate */
     EmbeddingModelUpdate: {
@@ -10314,7 +10441,8 @@ export interface components {
       | 9035
       | 9036
       | 9037
-      | 9038;
+      | 9038
+      | 9039;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -11584,6 +11712,16 @@ export interface components {
        * @default []
        */
       tool_calls?: components["schemas"]["ToolCallInfo"][];
+      /**
+       * Num Tokens Question
+       * @default 0
+       */
+      num_tokens_question?: number;
+      /**
+       * Num Tokens Answer
+       * @default 0
+       */
+      num_tokens_answer?: number;
     };
     /** MessageLogging */
     MessageLogging: {
@@ -11612,6 +11750,16 @@ export interface components {
        * @default []
        */
       tool_calls?: components["schemas"]["ToolCallInfo"][];
+      /**
+       * Num Tokens Question
+       * @default 0
+       */
+      num_tokens_question?: number;
+      /**
+       * Num Tokens Answer
+       * @default 0
+       */
+      num_tokens_answer?: number;
       logging_details: components["schemas"]["LoggingDetailsPublic"];
     };
     /** MetadataCount */
@@ -11756,18 +11904,12 @@ export interface components {
        * Format: uuid
        */
       id: string;
-      /**
-       * From Model Id
-       * Format: uuid
-       */
-      from_model_id: string;
+      /** From Model Id */
+      from_model_id?: string | null;
       /** From Model Name */
       from_model_name: string;
-      /**
-       * To Model Id
-       * Format: uuid
-       */
-      to_model_id: string;
+      /** To Model Id */
+      to_model_id?: string | null;
       /** To Model Name */
       to_model_name: string;
       /** Migrated Count */
@@ -11789,6 +11931,12 @@ export interface components {
       duration?: number | null;
       /** Error Message */
       error_message?: string | null;
+      /** Migration Details */
+      migration_details?: {
+        [key: string]: number;
+      } | null;
+      /** Warnings */
+      warnings?: string[] | null;
     };
     /**
      * ModelMigrationRequest
@@ -12936,6 +13084,10 @@ export interface components {
       /** Litellm Model Name */
       litellm_model_name?: string | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: number | string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: number | string | null;
       /** Id */
       id?: string | null;
     };
@@ -12967,6 +13119,10 @@ export interface components {
       org?: string | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: number | string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: number | string | null;
       /** Id */
       id?: string | null;
     };
@@ -13123,6 +13279,56 @@ export interface components {
       name: components["schemas"]["Permission"];
       /** Description */
       description: string;
+    };
+    /**
+     * PreflightRequest
+     * @description Request shape for /conversations/preflight.
+     *
+     *     Inherits the "exactly one target" rule from `_ConversationTarget`. Adds
+     *     its own rule that at least one of `question` or `file_ids` must be
+     *     non-empty — an empty preflight would still trigger a model lookup with
+     *     no useful answer.
+     */
+    PreflightRequest: {
+      /** Session Id */
+      session_id?: string | null;
+      /** Assistant Id */
+      assistant_id?: string | null;
+      /** Group Chat Id */
+      group_chat_id?: string | null;
+      /**
+       * Question
+       * @default
+       */
+      question?: string;
+      /**
+       * File Ids
+       * @default []
+       */
+      file_ids?: string[];
+      tools?: components["schemas"]["UseTools"] | null;
+    };
+    /**
+     * PreflightResponse
+     * @description Exact token cost the next request will add to the context window.
+     *
+     *     Excludes knowledge/RAG chunks and web-search results — those are selected
+     *     at request time. The frontend pairs this delta with the persisted history
+     *     tokens to project total context fill.
+     *
+     *     `model_name` and `context_window` are echoed so a client can compute the
+     *     percentage fill locally without a separate round-trip to fetch model
+     *     metadata.
+     */
+    PreflightResponse: {
+      /** Input Tokens */
+      input_tokens: number;
+      /** File Tokens */
+      file_tokens: number;
+      /** Model Name */
+      model_name: string;
+      /** Context Window */
+      context_window: number;
     };
     /** PrivacyPolicy */
     PrivacyPolicy: {
@@ -14531,6 +14737,13 @@ export interface components {
        * @default false
        */
       is_default?: boolean;
+      /** Description */
+      description?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: number | string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: number | string | null;
+      security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantCompletionModelUpdate */
     TenantCompletionModelUpdate: {
@@ -14556,6 +14769,13 @@ export interface components {
       open_source?: boolean | null;
       /** Stability */
       stability?: string | null;
+      /** Input Cost Per Token */
+      input_cost_per_token?: number | string | null;
+      /** Output Cost Per Token */
+      output_cost_per_token?: number | string | null;
+      /** Is Default */
+      is_default?: boolean | null;
+      security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantEmbeddingModelCreate */
     TenantEmbeddingModelCreate: {
@@ -14609,6 +14829,23 @@ export interface components {
        * @default false
        */
       is_default?: boolean;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Input Cost Per Token
+       * @description Indicative USD per input token
+       */
+      input_cost_per_token?: number | string | null;
+      /**
+       * Output Cost Per Token
+       * @description Indicative USD per output token (usually 0)
+       */
+      output_cost_per_token?: number | string | null;
+      /** @description Security classification */
+      security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantEmbeddingModelUpdate */
     TenantEmbeddingModelUpdate: {
@@ -14652,6 +14889,23 @@ export interface components {
        * @description Model stability (stable, experimental)
        */
       stability?: string | null;
+      /**
+       * Input Cost Per Token
+       * @description Indicative USD per input token
+       */
+      input_cost_per_token?: number | string | null;
+      /**
+       * Output Cost Per Token
+       * @description Indicative USD per output token
+       */
+      output_cost_per_token?: number | string | null;
+      /**
+       * Is Default
+       * @description Set as tenant default
+       */
+      is_default?: boolean | null;
+      /** @description Security classification reference (null clears it) */
+      security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantInDB */
     TenantInDB: {
@@ -14950,6 +15204,18 @@ export interface components {
        * @default false
        */
       is_default?: boolean;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Cost Per Minute
+       * @description Indicative USD per minute of audio
+       */
+      cost_per_minute?: number | string | null;
+      /** @description Security classification */
+      security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantTranscriptionModelUpdate */
     TenantTranscriptionModelUpdate: {
@@ -14978,6 +15244,18 @@ export interface components {
        * @description Model stability (stable, experimental)
        */
       stability?: string | null;
+      /**
+       * Cost Per Minute
+       * @description Indicative USD per minute of audio
+       */
+      cost_per_minute?: number | string | null;
+      /**
+       * Is Default
+       * @description Set as tenant default
+       */
+      is_default?: boolean | null;
+      /** @description Security classification reference (null clears it) */
+      security_classification?: components["schemas"]["ModelId"] | null;
     };
     /** TenantUpdatePublic */
     TenantUpdatePublic: {
@@ -15245,6 +15523,8 @@ export interface components {
       hf_link?: string | null;
       /** Org */
       org?: string | null;
+      /** Cost Per Minute */
+      cost_per_minute?: string | null;
       /**
        * Can Access
        * @default false
@@ -15278,6 +15558,8 @@ export interface components {
       provider_name?: string | null;
       /** Provider Type */
       provider_type?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
     };
     /** TranscriptionModelSecurityStatus */
     TranscriptionModelSecurityStatus: {
@@ -15306,6 +15588,8 @@ export interface components {
       hf_link?: string | null;
       /** Org */
       org?: string | null;
+      /** Cost Per Minute */
+      cost_per_minute?: string | null;
       /**
        * Can Access
        * @default false
@@ -15339,6 +15623,8 @@ export interface components {
       provider_name?: string | null;
       /** Provider Type */
       provider_type?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -16118,6 +16404,28 @@ export interface components {
       msg: string;
       /** Error Type */
       type: string;
+    };
+    /**
+     * ValidationResult
+     * @description Result of migration compatibility validation.
+     */
+    ValidationResult: {
+      /** Compatible */
+      compatible: boolean;
+      /** Warnings */
+      warnings: string[];
+      /**
+       * Warning Codes
+       * @default []
+       */
+      warning_codes?: string[];
+      /** Requires Confirmation */
+      requires_confirmation: boolean;
+      /**
+       * User Confirmed
+       * @default false
+       */
+      user_confirmed?: boolean;
     };
     /**
      * WatchdogMetrics
@@ -20349,6 +20657,10 @@ export interface operations {
                 /** Litellm Model Name */
                 litellm_model_name?: string | null;
                 model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+                /** Input Cost Per Token */
+                input_cost_per_token?: number | string | null;
+                /** Output Cost Per Token */
+                output_cost_per_token?: number | string | null;
                 /**
                  * Is Org Enabled
                  * @default false
@@ -20365,6 +20677,8 @@ export interface operations {
                 provider_id?: string | null;
                 /** Provider Type */
                 provider_type?: string | null;
+                /** Migrated To Model Id */
+                migrated_to_model_id?: string | null;
                 /**
                  * Can Access
                  * @default false
@@ -20384,6 +20698,8 @@ export interface operations {
                   | null;
                 /** Provider Name */
                 provider_name?: string | null;
+                /** Deprecation Date */
+                deprecation_date?: string | null;
               };
               /** FilePublic */
               FilePublic: {
@@ -20698,6 +21014,10 @@ export interface operations {
                 /** Litellm Model Name */
                 litellm_model_name?: string | null;
                 model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+                /** Input Cost Per Token */
+                input_cost_per_token?: number | string | null;
+                /** Output Cost Per Token */
+                output_cost_per_token?: number | string | null;
                 /**
                  * Is Org Enabled
                  * @default false
@@ -20714,6 +21034,8 @@ export interface operations {
                 provider_id?: string | null;
                 /** Provider Type */
                 provider_type?: string | null;
+                /** Migrated To Model Id */
+                migrated_to_model_id?: string | null;
                 /**
                  * Can Access
                  * @default false
@@ -20733,6 +21055,8 @@ export interface operations {
                   | null;
                 /** Provider Name */
                 provider_name?: string | null;
+                /** Deprecation Date */
+                deprecation_date?: string | null;
               };
               /** FilePublic */
               FilePublic: {
@@ -21949,6 +22273,75 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  preflight_tokens_api_v1_conversations_preflight_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PreflightRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PreflightResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -26747,6 +27140,58 @@ export interface operations {
       };
     };
   };
+  validate_migration_api_v1_completion_models__model_id__migration_validate_get: {
+    parameters: {
+      query: {
+        /** @description Target model ID */
+        to_model_id: string;
+      };
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ValidationResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   migrate_model_usage_api_v1_completion_models__model_id__migrate_post: {
     parameters: {
       query?: never;
@@ -27242,6 +27687,8 @@ export interface operations {
     parameters: {
       query: {
         model_name: string;
+        /** @description Canonical provider type the model belongs to (e.g. 'openai', 'azure'). When provided, '{provider_type}/{model_name}' is preferred over the bare entry so Azure-served gpt-4o picks up azure/gpt-4o prices instead of openai/gpt-4o. */
+        provider_type?: string | null;
       };
       header?: never;
       path?: never;
@@ -30854,7 +31301,9 @@ export interface operations {
   };
   delete_security_classification_api_v1_security_classifications__id___delete: {
     parameters: {
-      query?: never;
+      query?: {
+        force?: boolean;
+      };
       header?: never;
       path: {
         id: string;
@@ -30869,6 +31318,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Forbidden */
       403: {

@@ -44,7 +44,7 @@
   {#if includeTrigger}
     <Dialog.Trigger let:trigger asFragment>
       <div class="flex items-center gap-2">
-        <Button is={trigger}><ModelNameAndVendor {model} /></Button>
+        <Button is={trigger}><ModelNameAndVendor {model} descriptionMode="hidden" /></Button>
         {#if "is_org_default" in model && model.is_org_default}
           <Tooltip text={m.default_model_tooltip()}>
             <div
