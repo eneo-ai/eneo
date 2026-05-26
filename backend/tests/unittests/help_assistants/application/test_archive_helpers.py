@@ -177,9 +177,7 @@ async def test_list_archivable_helpers_includes_former_helpers_with_no_active_ro
             return (former_one, [])
         if assistant_id == other_former_id:
             return (former_two, [])
-        raise AssertionError(
-            f"Unexpected get_assistant call for {assistant_id}"
-        )
+        raise AssertionError(f"Unexpected get_assistant call for {assistant_id}")
 
     assistant_service = AsyncMock()
     assistant_service.get_assistant.side_effect = _get_assistant
@@ -201,9 +199,7 @@ async def test_list_archivable_helpers_includes_former_helpers_with_no_active_ro
     history_repo.list_replaced_assistant_ids_by_org_space.assert_awaited_once_with(
         org_space_id=org_space_id
     )
-    role_repo.list_for_org_space.assert_awaited_once_with(
-        org_space_id=org_space_id
-    )
+    role_repo.list_for_org_space.assert_awaited_once_with(org_space_id=org_space_id)
 
 
 @pytest.mark.asyncio
@@ -366,9 +362,7 @@ async def test_archive_helper_hard_deletes_via_assistant_service_and_audits():
     role_repo.list_for_org_space.return_value = [active_role]
 
     history_repo = AsyncMock()
-    history_repo.list_replaced_assistant_ids_by_org_space.return_value = {
-        archivable_id
-    }
+    history_repo.list_replaced_assistant_ids_by_org_space.return_value = {archivable_id}
 
     target_assistant = _mock_assistant(
         assistant_id=archivable_id,
@@ -423,9 +417,7 @@ async def test_archive_helper_captures_name_before_deletion():
     role_repo.list_for_org_space.return_value = []
 
     history_repo = AsyncMock()
-    history_repo.list_replaced_assistant_ids_by_org_space.return_value = {
-        archivable_id
-    }
+    history_repo.list_replaced_assistant_ids_by_org_space.return_value = {archivable_id}
 
     target_assistant = _mock_assistant(
         assistant_id=archivable_id,
@@ -462,8 +454,7 @@ async def test_archive_helper_captures_name_before_deletion():
 
     audit_kwargs = mocks["audit_service"].log_async.await_args.kwargs
     assert (
-        audit_kwargs["metadata"]["extra"]["assistant_name_snapshot"]
-        == "Will be gone"
+        audit_kwargs["metadata"]["extra"]["assistant_name_snapshot"] == "Will be gone"
     )
 
 

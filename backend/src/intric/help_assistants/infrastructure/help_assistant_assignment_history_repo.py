@@ -25,9 +25,7 @@ from intric.help_assistants.domain.helper_kind import HelperKind
 
 
 class HelpAssistantAssignmentHistoryRepo:
-    def __init__(
-        self, session: AsyncSession, factory: HelperAssistantsFactory
-    ) -> None:
+    def __init__(self, session: AsyncSession, factory: HelperAssistantsFactory) -> None:
         self.session = session
         self.factory = factory
 
@@ -87,11 +85,7 @@ class HelpAssistantAssignmentHistoryRepo:
             .order_by(HelpAssistantAssignmentHistory.replaced_at.desc())
         )
         result = await self.session.scalars(stmt)
-        return [
-            entry
-            for row in result
-            if (entry := self._to_domain(row)) is not None
-        ]
+        return [entry for row in result if (entry := self._to_domain(row)) is not None]
 
     async def list_replaced_assistant_ids_by_org_space(
         self, org_space_id: UUID

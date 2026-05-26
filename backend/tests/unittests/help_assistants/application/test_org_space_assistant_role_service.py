@@ -392,9 +392,7 @@ async def test_assign_assistant_outside_org_space_raises_bad_request():
     )
 
     with pytest.raises(BadRequestException, match="org-space"):
-        await service.assign(
-            kind=HelperKind.PROMPT_GUIDE, assistant_id=assistant_id
-        )
+        await service.assign(kind=HelperKind.PROMPT_GUIDE, assistant_id=assistant_id)
 
     role_repo.add.assert_not_awaited()
     role_repo.update.assert_not_awaited()
@@ -420,9 +418,7 @@ async def test_assign_assistant_outside_org_space_raises_bad_request():
         ("list_history", {"kind": HelperKind.PROMPT_GUIDE}),
     ],
 )
-async def test_non_admin_mutations_raise_unauthorized(
-    method: str, kwargs: dict
-):
+async def test_non_admin_mutations_raise_unauthorized(method: str, kwargs: dict):
     non_admin = _make_user()  # no permissions
     org_space_id = uuid4()
 
@@ -484,9 +480,7 @@ async def test_toggle_enabled_writes_audit_entry_with_change_block():
         assistant_service=assistant_service,
     )
 
-    result = await service.toggle_enabled(
-        kind=HelperKind.PROMPT_GUIDE, value=False
-    )
+    result = await service.toggle_enabled(kind=HelperKind.PROMPT_GUIDE, value=False)
 
     assert result is role
     assert role.is_enabled is False
@@ -552,9 +546,7 @@ async def test_toggle_raises_when_no_active_assignment():
     )
 
     with pytest.raises(BadRequestException, match="No active assignment"):
-        await service.toggle_enabled(
-            kind=HelperKind.PROMPT_GUIDE, value=False
-        )
+        await service.toggle_enabled(kind=HelperKind.PROMPT_GUIDE, value=False)
 
 
 @pytest.mark.asyncio
@@ -579,9 +571,7 @@ async def test_list_for_calling_tenant_returns_assignments_for_org_space():
     result = await service.list_for_calling_tenant()
 
     assert result == rows
-    role_repo.list_for_org_space.assert_awaited_once_with(
-        org_space_id=org_space_id
-    )
+    role_repo.list_for_org_space.assert_awaited_once_with(org_space_id=org_space_id)
 
 
 @pytest.mark.asyncio

@@ -175,9 +175,7 @@ async def test_helper_run_does_not_produce_logging_or_insights(
         space_service = container.space_service()
         await space_service.get_or_create_tenant_space()
 
-        org_space_id = await _get_org_space(
-            session, tenant_id=admin_user.tenant_id
-        )
+        org_space_id = await _get_org_space(session, tenant_id=admin_user.tenant_id)
         completion_model_id = await _get_default_completion_model_id(
             session, tenant_id=admin_user.tenant_id
         )
@@ -239,9 +237,7 @@ async def test_helper_run_does_not_produce_logging_or_insights(
     async with db_container() as container:
         session = container.session()
 
-        logging_count = await session.scalar(
-            sa.text("SELECT COUNT(*) FROM logging")
-        )
+        logging_count = await session.scalar(sa.text("SELECT COUNT(*) FROM logging"))
         assert logging_count == 0, (
             f"Helper run leaked into `logging` table: {logging_count} row(s)"
         )
@@ -262,19 +258,19 @@ async def test_helper_run_does_not_produce_logging_or_insights(
         analysis_repo = container.analysis_repo()
         from_date = datetime.now(timezone.utc) - timedelta(days=1)
         to_date = datetime.now(timezone.utc) + timedelta(days=1)
-        items, total_count, has_more = (
-            await analysis_repo.get_assistant_question_history_page(
-                assistant_id=helper_assistant_id,
-                from_date=from_date,
-                to_date=to_date,
-                include_followups=True,
-                tenant_id=admin_user.tenant_id,
-                limit=50,
-            )
+        (
+            items,
+            total_count,
+            has_more,
+        ) = await analysis_repo.get_assistant_question_history_page(
+            assistant_id=helper_assistant_id,
+            from_date=from_date,
+            to_date=to_date,
+            include_followups=True,
+            tenant_id=admin_user.tenant_id,
+            limit=50,
         )
-        assert items == [], (
-            "Helper question must not appear in insights history page"
-        )
+        assert items == [], "Helper question must not appear in insights history page"
         assert total_count == 0
         assert has_more is False
 

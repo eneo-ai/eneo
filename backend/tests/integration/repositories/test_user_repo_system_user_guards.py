@@ -71,9 +71,7 @@ async def _insert_system_user(
     return user_id
 
 
-async def _row_exists(
-    session: sa.ext.asyncio.AsyncSession, *, user_id: UUID
-) -> bool:
+async def _row_exists(session: sa.ext.asyncio.AsyncSession, *, user_id: UUID) -> bool:
     return (
         await session.scalar(
             sa.select(sa.literal(1)).where(Users.id == user_id).limit(1)
@@ -199,9 +197,7 @@ async def test_regular_user_can_still_be_soft_deleted(db_container, admin_user):
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_get_all_users_excludes_system_user_by_default(
-    db_container, admin_user
-):
+async def test_get_all_users_excludes_system_user_by_default(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
         repo = container.user_repo()
@@ -235,9 +231,7 @@ async def test_internal_helper_opts_in_via_include_system_user(
 
         # Use the same shape as `get_all_users` but pass the opt-in.
         query = sa.select(Users).where(Users.tenant_id == admin_user.tenant_id)
-        users = await repo._get_models_from_query(
-            query=query, include_system_user=True
-        )
+        users = await repo._get_models_from_query(query=query, include_system_user=True)
         returned_ids = {u.id for u in users}
 
         assert system_user_id in returned_ids
@@ -302,8 +296,7 @@ async def test_list_tenant_admins_excludes_system_user(db_container, admin_user)
         for role in admin_user.roles:
             await session.execute(
                 sa.text(
-                    "INSERT INTO users_roles (user_id, role_id) "
-                    "VALUES (:uid, :rid)"
+                    "INSERT INTO users_roles (user_id, role_id) VALUES (:uid, :rid)"
                 ),
                 {"uid": system_user_id, "rid": role.id},
             )
@@ -342,8 +335,7 @@ async def test_count_users_with_admin_permission_excludes_system_user(
         for role in admin_user.roles:
             await session.execute(
                 sa.text(
-                    "INSERT INTO users_roles (user_id, role_id) "
-                    "VALUES (:uid, :rid)"
+                    "INSERT INTO users_roles (user_id, role_id) VALUES (:uid, :rid)"
                 ),
                 {"uid": system_user_id, "rid": role.id},
             )
@@ -362,9 +354,7 @@ async def test_count_users_with_admin_permission_excludes_system_user(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_system_user_survives_data_retention_cleanup(
-    db_container, admin_user
-):
+async def test_system_user_survives_data_retention_cleanup(db_container, admin_user):
     """Cleanup-job survival: the conversation-retention sweep does not touch
     the ``users`` table, so a system user with an old marker stays put.
 
@@ -402,9 +392,7 @@ async def test_system_user_survives_data_retention_cleanup(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_system_user_survives_audit_retention_purge(
-    db_container, admin_user
-):
+async def test_system_user_survives_audit_retention_purge(db_container, admin_user):
     """Audit-log retention purge runs per tenant and does not touch users."""
     from intric.audit.application.retention_service import RetentionService
 

@@ -192,10 +192,17 @@ class TestAuditConfigService:
                 assert len(category_config.example_actions) > 0
                 assert len(category_config.example_actions) <= 3
 
-    async def test_get_config_admin_actions_has_25_actions(
+    async def test_get_config_admin_actions_has_32_actions(
         self, db_session, seeded_tenant
     ):
-        """Verify admin_actions category has correct action count."""
+        """Verify admin_actions category has correct action count.
+
+        25 base admin actions + 7 Help Assistant admin actions
+        (role assign/unassign, enabled/visible toggles, reset-instructions,
+        reset-to-default, archive) = 32. Mirrors the unit assertions in
+        ``tests/unit/test_audit_config_service.py`` and
+        ``tests/unit/test_audit_category_mappings.py``.
+        """
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
             service = AuditConfigService(repository=repo)
@@ -204,7 +211,7 @@ class TestAuditConfigService:
             admin_config = next(
                 c for c in response.categories if c.category == "admin_actions"
             )
-            assert admin_config.action_count == 25
+            assert admin_config.action_count == 32
 
     async def test_update_config_single_category(self, db_session, seeded_tenant):
         """Test updating a single category."""

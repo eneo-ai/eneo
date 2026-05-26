@@ -29,9 +29,7 @@ from intric.help_assistants.domain.helper_run_status import HelperRunStatus
 
 
 class HelperRunRepo:
-    def __init__(
-        self, session: AsyncSession, factory: HelperAssistantsFactory
-    ) -> None:
+    def __init__(self, session: AsyncSession, factory: HelperAssistantsFactory) -> None:
         self.session = session
         self.factory = factory
 
@@ -135,13 +133,9 @@ class HelperRunRepo:
             query = query.where(HelpAssistantRuns.status == status.value)
 
         result = await self.session.scalars(query)
-        return [
-            run for row in result if (run := self._to_domain(row)) is not None
-        ]
+        return [run for row in result if (run := self._to_domain(row)) is not None]
 
-    async def delete_older_than(
-        self, tenant_id: UUID, threshold: datetime
-    ) -> int:
+    async def delete_older_than(self, tenant_id: UUID, threshold: datetime) -> int:
         stmt = sa.delete(HelpAssistantRuns).where(
             HelpAssistantRuns.tenant_id == tenant_id,
             HelpAssistantRuns.created_at < threshold,
@@ -150,7 +144,5 @@ class HelperRunRepo:
         return result.rowcount
 
     async def is_helper_session(self, session_id: UUID) -> bool:
-        stmt = sa.select(
-            sa.exists().where(HelpAssistantRuns.session_id == session_id)
-        )
+        stmt = sa.select(sa.exists().where(HelpAssistantRuns.session_id == session_id))
         return bool(await self.session.scalar(stmt))

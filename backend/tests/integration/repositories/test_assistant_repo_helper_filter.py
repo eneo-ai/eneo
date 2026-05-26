@@ -119,9 +119,7 @@ async def test_get_for_user_excludes_active_helper(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
 
-        org_space_id = await _get_org_space(
-            session, tenant_id=admin_user.tenant_id
-        )
+        org_space_id = await _get_org_space(session, tenant_id=admin_user.tenant_id)
         helper_id = await _insert_assistant(
             session, owner_user_id=admin_user.id, space_id=org_space_id
         )
@@ -151,9 +149,7 @@ async def test_get_for_tenant_excludes_active_helper(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
 
-        org_space_id = await _get_org_space(
-            session, tenant_id=admin_user.tenant_id
-        )
+        org_space_id = await _get_org_space(session, tenant_id=admin_user.tenant_id)
         helper_id = await _insert_assistant(
             session, owner_user_id=admin_user.id, space_id=org_space_id
         )
@@ -191,9 +187,7 @@ async def test_excludes_former_helper_with_history_only(db_container, admin_user
     async with db_container() as container:
         session = container.session()
 
-        org_space_id = await _get_org_space(
-            session, tenant_id=admin_user.tenant_id
-        )
+        org_space_id = await _get_org_space(session, tenant_id=admin_user.tenant_id)
         former_helper_id = await _insert_assistant(
             session, owner_user_id=admin_user.id, space_id=org_space_id
         )
@@ -212,9 +206,7 @@ async def test_excludes_former_helper_with_history_only(db_container, admin_user
 
         repo = container.assistant_repo()
         for_user_ids = {a.id for a in await repo.get_for_user(admin_user.id)}
-        for_tenant_ids = {
-            a.id for a in await repo.get_for_tenant(admin_user.tenant_id)
-        }
+        for_tenant_ids = {a.id for a in await repo.get_for_tenant(admin_user.tenant_id)}
 
         assert former_helper_id not in for_user_ids
         assert former_helper_id not in for_tenant_ids
@@ -233,9 +225,7 @@ async def test_returns_published_non_helper(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
 
-        org_space_id = await _get_org_space(
-            session, tenant_id=admin_user.tenant_id
-        )
+        org_space_id = await _get_org_space(session, tenant_id=admin_user.tenant_id)
         published_id = await _insert_assistant(
             session,
             owner_user_id=admin_user.id,
@@ -248,9 +238,7 @@ async def test_returns_published_non_helper(db_container, admin_user):
 
         repo = container.assistant_repo()
         for_user_ids = {a.id for a in await repo.get_for_user(admin_user.id)}
-        for_tenant_ids = {
-            a.id for a in await repo.get_for_tenant(admin_user.tenant_id)
-        }
+        for_tenant_ids = {a.id for a in await repo.get_for_tenant(admin_user.tenant_id)}
 
         assert published_id in for_user_ids
         assert published_id in for_tenant_ids
@@ -263,9 +251,7 @@ async def test_returns_regular_personal_assistant(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
 
-        org_space_id = await _get_org_space(
-            session, tenant_id=admin_user.tenant_id
-        )
+        org_space_id = await _get_org_space(session, tenant_id=admin_user.tenant_id)
         personal_id = await _insert_assistant(
             session,
             owner_user_id=admin_user.id,
@@ -278,9 +264,7 @@ async def test_returns_regular_personal_assistant(db_container, admin_user):
 
         repo = container.assistant_repo()
         for_user_ids = {a.id for a in await repo.get_for_user(admin_user.id)}
-        for_tenant_ids = {
-            a.id for a in await repo.get_for_tenant(admin_user.tenant_id)
-        }
+        for_tenant_ids = {a.id for a in await repo.get_for_tenant(admin_user.tenant_id)}
 
         assert personal_id in for_user_ids
         assert personal_id in for_tenant_ids
@@ -288,9 +272,7 @@ async def test_returns_regular_personal_assistant(db_container, admin_user):
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_published_does_not_override_helper_exclusion(
-    db_container, admin_user
-):
+async def test_published_does_not_override_helper_exclusion(db_container, admin_user):
     """Regression guard for PRD §4: ``published=true`` does NOT override.
 
     Helper-ness is independent of publish visibility. An assistant that is
@@ -300,9 +282,7 @@ async def test_published_does_not_override_helper_exclusion(
     async with db_container() as container:
         session = container.session()
 
-        org_space_id = await _get_org_space(
-            session, tenant_id=admin_user.tenant_id
-        )
+        org_space_id = await _get_org_space(session, tenant_id=admin_user.tenant_id)
         published_helper_id = await _insert_assistant(
             session,
             owner_user_id=admin_user.id,
@@ -322,9 +302,7 @@ async def test_published_does_not_override_helper_exclusion(
 
         repo = container.assistant_repo()
         for_user_ids = {a.id for a in await repo.get_for_user(admin_user.id)}
-        for_tenant_ids = {
-            a.id for a in await repo.get_for_tenant(admin_user.tenant_id)
-        }
+        for_tenant_ids = {a.id for a in await repo.get_for_tenant(admin_user.tenant_id)}
 
         assert published_helper_id not in for_user_ids
         assert published_helper_id not in for_tenant_ids

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+
 from intric.assistants.api.assistant_models import (
     AssistantBase,
     AssistantCreatePublic,

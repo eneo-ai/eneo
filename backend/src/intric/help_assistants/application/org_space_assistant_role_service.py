@@ -111,9 +111,7 @@ class OrgSpaceAssistantRoleService:
             org_space_id=org_space_id, kind=kind
         )
 
-    async def assign(
-        self, kind: HelperKind, assistant_id: UUID
-    ) -> RoleAssignment:
+    async def assign(self, kind: HelperKind, assistant_id: UUID) -> RoleAssignment:
         validate_permission(self.user, Permission.ADMIN)
         org_space_id = await self._resolve_org_space_id()
 
@@ -143,9 +141,7 @@ class OrgSpaceAssistantRoleService:
                 actor_user_id=self.user.id,
             )
             await self.history_repo.add(history_entry)
-            current.reassign_to(
-                assistant_id=assistant_id, actor_user_id=self.user.id
-            )
+            current.reassign_to(assistant_id=assistant_id, actor_user_id=self.user.id)
             assignment = await self.role_repo.update(current)
         else:
             new_role = self.factory.create_role_assignment(
@@ -232,9 +228,7 @@ class OrgSpaceAssistantRoleService:
             ),
         )
 
-    async def toggle_enabled(
-        self, kind: HelperKind, value: bool
-    ) -> RoleAssignment:
+    async def toggle_enabled(self, kind: HelperKind, value: bool) -> RoleAssignment:
         validate_permission(self.user, Permission.ADMIN)
         return await self._toggle(
             kind=kind,
@@ -268,17 +262,13 @@ class OrgSpaceAssistantRoleService:
             org_space_id=org_space_id, kind=kind
         )
         if current is None:
-            raise BadRequestException(
-                f"No active assignment for role '{kind.value}'."
-            )
+            raise BadRequestException(f"No active assignment for role '{kind.value}'.")
 
         previous_value = getattr(current, field_label)
         if field_label == "is_enabled":
             current.set_enabled(value=new_value, actor_user_id=self.user.id)
         else:
-            current.set_visible_to_users(
-                value=new_value, actor_user_id=self.user.id
-            )
+            current.set_visible_to_users(value=new_value, actor_user_id=self.user.id)
 
         assignment = await self.role_repo.update(current)
         assert assignment.id is not None
@@ -297,9 +287,7 @@ class OrgSpaceAssistantRoleService:
             metadata=AuditMetadata.standard(
                 actor=self.user,
                 target=assistant,
-                changes={
-                    field_label: {"old": previous_value, "new": new_value}
-                },
+                changes={field_label: {"old": previous_value, "new": new_value}},
                 extra={
                     "role_kind": kind.value,
                     "role_assignment_id": str(assignment.id),
@@ -318,9 +306,7 @@ class OrgSpaceAssistantRoleService:
             org_space_id=org_space_id, kind=kind
         )
         if current is None:
-            raise BadRequestException(
-                f"No active assignment for role '{kind.value}'."
-            )
+            raise BadRequestException(f"No active assignment for role '{kind.value}'.")
 
         system_user_id = await self._resolve_system_user_id()
         defaults = get_defaults(kind)
@@ -376,9 +362,7 @@ class OrgSpaceAssistantRoleService:
             org_space_id=org_space_id, kind=kind
         )
         if current is None:
-            raise BadRequestException(
-                f"No active assignment for role '{kind.value}'."
-            )
+            raise BadRequestException(f"No active assignment for role '{kind.value}'.")
 
         old_assistant_id = current.assistant_id
         old_assistant = await self._load_assistant(old_assistant_id)
@@ -437,9 +421,7 @@ class OrgSpaceAssistantRoleService:
         )
         await self.assistant_repo.add(new_assistant)
 
-        current.reassign_to(
-            assistant_id=new_assistant_id, actor_user_id=self.user.id
-        )
+        current.reassign_to(assistant_id=new_assistant_id, actor_user_id=self.user.id)
         assignment = await self.role_repo.update(current)
         assert assignment.id is not None
 
@@ -480,23 +462,17 @@ class OrgSpaceAssistantRoleService:
 
         return new_assistant
 
-    async def list_archivable_helpers(
-        self, kind: HelperKind
-    ) -> list[Assistant]:
+    async def list_archivable_helpers(self, kind: HelperKind) -> list[Assistant]:
         validate_permission(self.user, Permission.ADMIN)
         org_space_id = await self._resolve_org_space_id()
 
-        replaced_ids = (
-            await self.history_repo.list_replaced_assistant_ids_by_org_space(
-                org_space_id=org_space_id
-            )
+        replaced_ids = await self.history_repo.list_replaced_assistant_ids_by_org_space(
+            org_space_id=org_space_id
         )
         active_assignments = await self.role_repo.list_for_org_space(
             org_space_id=org_space_id
         )
-        active_ids = {
-            a.assistant_id for a in active_assignments if a.kind == kind
-        }
+        active_ids = {a.assistant_id for a in active_assignments if a.kind == kind}
         archivable_ids = replaced_ids - active_ids
 
         assistants: list[Assistant] = []
@@ -509,10 +485,8 @@ class OrgSpaceAssistantRoleService:
         validate_permission(self.user, Permission.ADMIN)
         org_space_id = await self._resolve_org_space_id()
 
-        replaced_ids = (
-            await self.history_repo.list_replaced_assistant_ids_by_org_space(
-                org_space_id=org_space_id
-            )
+        replaced_ids = await self.history_repo.list_replaced_assistant_ids_by_org_space(
+            org_space_id=org_space_id
         )
         if assistant_id not in replaced_ids:
             raise BadRequestException(
@@ -541,9 +515,7 @@ class OrgSpaceAssistantRoleService:
             action=ActionType.HELP_ASSISTANT_ARCHIVED,
             entity_type=EntityType.ASSISTANT,
             entity_id=assistant_id,
-            description=(
-                f"Archived helper assistant '{assistant_name_snapshot}'"
-            ),
+            description=(f"Archived helper assistant '{assistant_name_snapshot}'"),
             metadata=AuditMetadata.standard(
                 actor=self.user,
                 target=assistant,

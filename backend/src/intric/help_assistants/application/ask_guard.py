@@ -44,8 +44,7 @@ async def assert_not_helper_assistant(
     """
     if await role_repo.exists_active_for_assistant(assistant_id):
         raise UnauthorizedException(
-            "This assistant is a helper and cannot be asked via the normal "
-            "endpoint.",
+            "This assistant is a helper and cannot be asked via the normal endpoint.",
             code="forbidden_action",
             context={
                 "resource_type": "assistant",

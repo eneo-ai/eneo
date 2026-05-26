@@ -20,9 +20,7 @@ from intric.help_assistants.domain.role_assignment import RoleAssignment
 
 
 class OrgSpaceAssistantRoleRepo:
-    def __init__(
-        self, session: AsyncSession, factory: HelperAssistantsFactory
-    ) -> None:
+    def __init__(self, session: AsyncSession, factory: HelperAssistantsFactory) -> None:
         self.session = session
         self.factory = factory
 
@@ -64,9 +62,7 @@ class OrgSpaceAssistantRoleRepo:
         return result
 
     async def get_by_id(self, id: UUID) -> RoleAssignment | None:
-        stmt = sa.select(OrgSpaceAssistantRoles).where(
-            OrgSpaceAssistantRoles.id == id
-        )
+        stmt = sa.select(OrgSpaceAssistantRoles).where(OrgSpaceAssistantRoles.id == id)
         return self._to_domain(await self.session.scalar(stmt))
 
     async def get_by_org_space_and_kind(
@@ -78,9 +74,7 @@ class OrgSpaceAssistantRoleRepo:
         )
         return self._to_domain(await self.session.scalar(stmt))
 
-    async def list_for_org_space(
-        self, org_space_id: UUID
-    ) -> list[RoleAssignment]:
+    async def list_for_org_space(self, org_space_id: UUID) -> list[RoleAssignment]:
         stmt = (
             sa.select(OrgSpaceAssistantRoles)
             .where(OrgSpaceAssistantRoles.org_space_id == org_space_id)
@@ -112,9 +106,7 @@ class OrgSpaceAssistantRoleRepo:
         return result
 
     async def delete(self, id: UUID) -> None:
-        stmt = sa.delete(OrgSpaceAssistantRoles).where(
-            OrgSpaceAssistantRoles.id == id
-        )
+        stmt = sa.delete(OrgSpaceAssistantRoles).where(OrgSpaceAssistantRoles.id == id)
         await self.session.execute(stmt)
 
     async def exists_active_for_assistant(self, assistant_id: UUID) -> bool:

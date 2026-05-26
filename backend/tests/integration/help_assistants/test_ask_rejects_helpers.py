@@ -183,9 +183,7 @@ async def test_ask_active_helper_returns_403_and_creates_no_session(
         await space_service.get_or_create_tenant_space()
 
         session = container.session()
-        org_space_id = await _get_org_space(
-            session, tenant_id=admin_user.tenant_id
-        )
+        org_space_id = await _get_org_space(session, tenant_id=admin_user.tenant_id)
         helper_assistant_id = await _insert_assistant(
             session,
             owner_user_id=admin_user.id,
@@ -218,9 +216,7 @@ async def test_ask_active_helper_returns_403_and_creates_no_session(
 
     async with db_container() as container:
         session = container.session()
-        rows = await _sessions_row_count(
-            session, assistant_id=helper_assistant_id
-        )
+        rows = await _sessions_row_count(session, assistant_id=helper_assistant_id)
         assert rows == 0, (
             f"Guard should short-circuit before any sessions row is "
             f"inserted; found {rows} for helper assistant"
@@ -244,9 +240,7 @@ async def test_ask_followup_against_helper_returns_403(
         await space_service.get_or_create_tenant_space()
 
         session = container.session()
-        org_space_id = await _get_org_space(
-            session, tenant_id=admin_user.tenant_id
-        )
+        org_space_id = await _get_org_space(session, tenant_id=admin_user.tenant_id)
         helper_assistant_id = await _insert_assistant(
             session,
             owner_user_id=admin_user.id,
@@ -283,9 +277,7 @@ async def test_ask_followup_against_helper_returns_403(
         )
         await session.flush()
 
-        before = await _sessions_row_count(
-            session, assistant_id=helper_assistant_id
-        )
+        before = await _sessions_row_count(session, assistant_id=helper_assistant_id)
 
         auth_service = container.auth_service()
         token = auth_service.create_access_token_for_user(admin_user)
@@ -300,9 +292,7 @@ async def test_ask_followup_against_helper_returns_403(
 
     async with db_container() as container:
         session = container.session()
-        after = await _sessions_row_count(
-            session, assistant_id=helper_assistant_id
-        )
+        after = await _sessions_row_count(session, assistant_id=helper_assistant_id)
         # Only the helper-run-tagged session exists; no new row from the
         # blocked follow-up request.
         assert after == before == 1
@@ -323,9 +313,7 @@ async def test_ask_former_helper_returns_403_and_creates_no_session(
         await space_service.get_or_create_tenant_space()
 
         session = container.session()
-        org_space_id = await _get_org_space(
-            session, tenant_id=admin_user.tenant_id
-        )
+        org_space_id = await _get_org_space(session, tenant_id=admin_user.tenant_id)
         former_helper_id = await _insert_assistant(
             session,
             owner_user_id=admin_user.id,
@@ -359,17 +347,13 @@ async def test_ask_former_helper_returns_403_and_creates_no_session(
 
     async with db_container() as container:
         session = container.session()
-        rows = await _sessions_row_count(
-            session, assistant_id=former_helper_id
-        )
+        rows = await _sessions_row_count(session, assistant_id=former_helper_id)
         assert rows == 0
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_guard_does_not_block_regular_assistant(
-    db_container, admin_user
-):
+async def test_guard_does_not_block_regular_assistant(db_container, admin_user):
     """Regression: a normal assistant — never assigned to a helper role and
     never in history — passes the guard. Pairs with the 403 tests above so
     they remain a real signal, not vacuous truth."""
@@ -379,9 +363,7 @@ async def test_guard_does_not_block_regular_assistant(
         await space_service.get_or_create_tenant_space()
 
         session = container.session()
-        org_space_id = await _get_org_space(
-            session, tenant_id=admin_user.tenant_id
-        )
+        org_space_id = await _get_org_space(session, tenant_id=admin_user.tenant_id)
         regular_assistant_id = await _insert_assistant(
             session,
             owner_user_id=admin_user.id,
@@ -432,6 +414,4 @@ async def test_guard_does_not_block_regular_assistant(
             )
         assert excinfo.value.code == "forbidden_action"
         assert excinfo.value.context is not None
-        assert excinfo.value.context.get("auth_layer") == (
-            "helper_assistant_guard"
-        )
+        assert excinfo.value.context.get("auth_layer") == ("helper_assistant_guard")

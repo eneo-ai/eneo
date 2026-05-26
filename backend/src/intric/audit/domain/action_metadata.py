@@ -367,8 +367,7 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
     ActionType.HELP_ASSISTANT_ROLE_ASSIGNED.value: {
         "name_sv": "Hjälpassistent tilldelad",
         "description_sv": (
-            "Loggar när en assistent tilldelas en hjälpassistentroll i "
-            "organisationen"
+            "Loggar när en assistent tilldelas en hjälpassistentroll i organisationen"
         ),
     },
     ActionType.HELP_ASSISTANT_ROLE_UNASSIGNED.value: {
@@ -385,9 +384,7 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
     },
     ActionType.HELP_ASSISTANT_ROLE_TOGGLED_VISIBLE.value: {
         "name_sv": "Hjälpassistent synlighet ändrad",
-        "description_sv": (
-            "Loggar när synligheten för en hjälpassistentroll ändras"
-        ),
+        "description_sv": ("Loggar när synligheten för en hjälpassistentroll ändras"),
     },
     ActionType.HELP_ASSISTANT_RESET_INSTRUCTIONS.value: {
         "name_sv": "Hjälpassistentens instruktioner återställda",

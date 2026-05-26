@@ -210,9 +210,7 @@ async def test_get_by_id_returns_none_for_other_tenant(
 async def test_get_by_id_returns_none_when_missing(db_container, admin_user):
     async with db_container() as container:
         repo = container.helper_run_repo()
-        assert (
-            await repo.get_by_id(uuid4(), tenant_id=admin_user.tenant_id)
-        ) is None
+        assert (await repo.get_by_id(uuid4(), tenant_id=admin_user.tenant_id)) is None
 
 
 @pytest.mark.asyncio
@@ -424,9 +422,7 @@ async def test_update_status_does_not_touch_other_tenants_rows(
                 completed_at=datetime.now(timezone.utc),
             )
 
-        unchanged = await repo.get_by_id(
-            added.id, tenant_id=admin_user.tenant_id
-        )
+        unchanged = await repo.get_by_id(added.id, tenant_id=admin_user.tenant_id)
         assert unchanged is not None
         assert unchanged.status == HelperRunStatus.IN_PROGRESS
         assert unchanged.completed_at is None
@@ -464,9 +460,7 @@ async def test_list_by_tenant_excludes_other_tenants(
         )
 
         # tenant B run
-        space_b = await _get_org_space(
-            session, tenant_id=second_tenant_user.tenant_id
-        )
+        space_b = await _get_org_space(session, tenant_id=second_tenant_user.tenant_id)
         helper_b = await _insert_assistant(
             session, owner_user_id=second_tenant_user.id, space_id=space_b
         )
@@ -572,9 +566,7 @@ async def test_delete_older_than_purges_only_below_threshold_for_tenant(
         helper_a = await _insert_assistant(
             session, owner_user_id=admin_user.id, space_id=space_a
         )
-        space_b = await _get_org_space(
-            session, tenant_id=second_tenant_user.tenant_id
-        )
+        space_b = await _get_org_space(session, tenant_id=second_tenant_user.tenant_id)
         helper_b = await _insert_assistant(
             session, owner_user_id=second_tenant_user.id, space_id=space_b
         )
@@ -642,16 +634,12 @@ async def test_delete_older_than_purges_only_below_threshold_for_tenant(
         )
 
         assert purged == 1  # only old_a is purged
-        assert (
-            await repo.get_by_id(old_a.id, tenant_id=admin_user.tenant_id)
-        ) is None
+        assert (await repo.get_by_id(old_a.id, tenant_id=admin_user.tenant_id)) is None
         assert (
             await repo.get_by_id(new_a.id, tenant_id=admin_user.tenant_id)
         ) is not None
         assert (
-            await repo.get_by_id(
-                old_b.id, tenant_id=second_tenant_user.tenant_id
-            )
+            await repo.get_by_id(old_b.id, tenant_id=second_tenant_user.tenant_id)
         ) is not None
 
 
@@ -689,9 +677,7 @@ async def test_is_helper_session_true_for_existing_row(db_container, admin_user)
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_is_helper_session_false_for_unknown_session(
-    db_container, admin_user
-):
+async def test_is_helper_session_false_for_unknown_session(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
         repo = container.helper_run_repo()

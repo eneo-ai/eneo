@@ -161,9 +161,7 @@ def _to_json_response(response: HelperRunResponse) -> HelperRunResponsePublic:
 @router.post(
     "/runs/",
     response_model=HelperRunResponsePublic,
-    responses=responses.streaming_response(
-        HelperRunResponsePublic, [400, 403, 404]
-    ),
+    responses=responses.streaming_response(HelperRunResponsePublic, [400, 403, 404]),
 )
 async def start_helper_run(
     body: StartRunRequest,
@@ -193,9 +191,7 @@ async def start_helper_run(
 @router.post(
     "/runs/{run_id}/turns/",
     response_model=HelperRunResponsePublic,
-    responses=responses.streaming_response(
-        HelperRunResponsePublic, [400, 403, 404]
-    ),
+    responses=responses.streaming_response(HelperRunResponsePublic, [400, 403, 404]),
 )
 async def continue_helper_run(
     run_id: UUID,
@@ -273,35 +269,21 @@ async def get_helper_availability(
     role_service = container.org_space_assistant_role_service()
 
     try:
-        _, permissions = await assistant_service.get_assistant(
-            assistant_id=target_id
-        )
+        _, permissions = await assistant_service.get_assistant(assistant_id=target_id)
     except (NotFoundException, UnauthorizedException):
-        return AvailabilityResponse(
-            available=False, disabled_reason="no_edit_rights"
-        )
+        return AvailabilityResponse(available=False, disabled_reason="no_edit_rights")
     if ResourcePermission.EDIT not in permissions:
-        return AvailabilityResponse(
-            available=False, disabled_reason="no_edit_rights"
-        )
+        return AvailabilityResponse(available=False, disabled_reason="no_edit_rights")
 
     role = await role_service.get_active(kind)
     if role is None:
-        return AvailabilityResponse(
-            available=False, disabled_reason="no_assignment"
-        )
+        return AvailabilityResponse(available=False, disabled_reason="no_assignment")
     if not role.is_enabled:
-        return AvailabilityResponse(
-            available=False, disabled_reason="role_disabled"
-        )
+        return AvailabilityResponse(available=False, disabled_reason="role_disabled")
     if not role.is_visible_to_users:
-        return AvailabilityResponse(
-            available=False, disabled_reason="role_not_visible"
-        )
+        return AvailabilityResponse(available=False, disabled_reason="role_not_visible")
 
-    helper, _ = await assistant_service.get_assistant(
-        assistant_id=role.assistant_id
-    )
+    helper, _ = await assistant_service.get_assistant(assistant_id=role.assistant_id)
     if helper.completion_model is None or not helper.completion_model.can_access:
         return AvailabilityResponse(
             available=False, disabled_reason="no_completion_model"

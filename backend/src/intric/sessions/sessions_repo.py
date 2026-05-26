@@ -128,9 +128,7 @@ class SessionRepository:
         )
         return await self.delegate.get_model_from_query(query)
 
-    async def get_for_helper_run(
-        self, id: UUID, tenant_id: UUID
-    ) -> SessionInDB | None:
+    async def get_for_helper_run(self, id: UUID, tenant_id: UUID) -> SessionInDB | None:
         """Load a helper-run session with its prior questions eager-loaded.
 
         Documented exception to ``_exclude_helper_run_sessions``: the

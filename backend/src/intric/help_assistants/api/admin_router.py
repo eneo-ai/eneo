@@ -107,7 +107,9 @@ async def list_roles(container: AdminContainer):
     assistant_service = container.assistant_service()
     roles = await service.list_for_calling_tenant()
     items = [
-        _role_to_public(role, assistant_name=await _resolve_name(assistant_service, role))
+        _role_to_public(
+            role, assistant_name=await _resolve_name(assistant_service, role)
+        )
         for role in roles
     ]
     return protocol.to_paginated_response(items)

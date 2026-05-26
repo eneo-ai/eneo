@@ -49,9 +49,9 @@ Create Date: 2026-05-21
 
 from uuid import uuid4
 
-from alembic import op
 from sqlalchemy import text
 
+from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "202605211400"

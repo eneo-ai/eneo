@@ -384,9 +384,7 @@ class HelperRunService:
             )
         return run
 
-    async def _load_target_with_edit_permission(
-        self, target_id: UUID
-    ) -> Assistant:
+    async def _load_target_with_edit_permission(self, target_id: UUID) -> Assistant:
         target_assistant, permissions = await self.assistant_service.get_assistant(
             assistant_id=target_id
         )

@@ -51,9 +51,7 @@ def _captures_query() -> tuple[list[sa.Select[tuple]], AsyncMock]:
 
 def _has_system_user_filter(query: sa.Select[tuple]) -> bool:
     """True iff the rendered SQL filters on ``users.is_system_user IS false``."""
-    rendered = str(
-        query.compile(compile_kwargs={"literal_binds": True})
-    ).lower()
+    rendered = str(query.compile(compile_kwargs={"literal_binds": True})).lower()
     return "is_system_user is false" in rendered
 
 
@@ -142,9 +140,7 @@ class TestListExclusion:
         captured, recorder = _captures_query()
         repo.delegate.get_models_from_query = recorder
 
-        await repo._get_models_from_query(
-            sa.select(Users), include_system_user=True
-        )
+        await repo._get_models_from_query(sa.select(Users), include_system_user=True)
 
         assert len(captured) == 1
         assert not _has_system_user_filter(captured[0])

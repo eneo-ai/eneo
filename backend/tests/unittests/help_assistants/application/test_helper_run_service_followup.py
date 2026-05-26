@@ -265,9 +265,7 @@ async def test_continue_turn_reuses_session_and_persists_question():
     )
 
     # Session was reused, not created anew.
-    session_repo.get_for_helper_run.assert_awaited_once_with(
-        session_id, user.tenant_id
-    )
+    session_repo.get_for_helper_run.assert_awaited_once_with(session_id, user.tenant_id)
     session_repo.add.assert_not_awaited()
     assert result.session is session
     assert result.run is run
@@ -303,9 +301,7 @@ async def test_continue_turn_rejects_different_user():
     helper_run_repo = AsyncMock()
     helper_run_repo.get_by_id.return_value = run
 
-    service, mocks = _build_service(
-        user=other_user, helper_run_repo=helper_run_repo
-    )
+    service, mocks = _build_service(user=other_user, helper_run_repo=helper_run_repo)
 
     with pytest.raises(UnauthorizedException):
         await service.continue_turn(run_id=run.id, question="hi")
@@ -323,9 +319,7 @@ async def test_continue_turn_rejects_missing_run():
     helper_run_repo = AsyncMock()
     helper_run_repo.get_by_id.return_value = None
 
-    service, mocks = _build_service(
-        user=user, helper_run_repo=helper_run_repo
-    )
+    service, mocks = _build_service(user=user, helper_run_repo=helper_run_repo)
 
     with pytest.raises(NotFoundException):
         await service.continue_turn(run_id=uuid4(), question="hi")
@@ -390,9 +384,7 @@ async def test_set_status_only_allows_transitions_from_in_progress():
     service, _ = _build_service(user=user, helper_run_repo=helper_run_repo)
 
     with pytest.raises(BadRequestException, match="IN_PROGRESS"):
-        await service.set_status(
-            run_id=run.id, status=HelperRunStatus.ABANDONED
-        )
+        await service.set_status(run_id=run.id, status=HelperRunStatus.ABANDONED)
 
     helper_run_repo.update_status.assert_not_awaited()
 
@@ -408,9 +400,7 @@ async def test_set_status_rejects_in_progress_target():
     service, _ = _build_service(user=user, helper_run_repo=helper_run_repo)
 
     with pytest.raises(BadRequestException, match="terminal"):
-        await service.set_status(
-            run_id=run.id, status=HelperRunStatus.IN_PROGRESS
-        )
+        await service.set_status(run_id=run.id, status=HelperRunStatus.IN_PROGRESS)
 
     helper_run_repo.update_status.assert_not_awaited()
 
@@ -424,14 +414,10 @@ async def test_set_status_rejects_different_user():
     helper_run_repo = AsyncMock()
     helper_run_repo.get_by_id.return_value = run
 
-    service, _ = _build_service(
-        user=other_user, helper_run_repo=helper_run_repo
-    )
+    service, _ = _build_service(user=other_user, helper_run_repo=helper_run_repo)
 
     with pytest.raises(UnauthorizedException):
-        await service.set_status(
-            run_id=run.id, status=HelperRunStatus.COMPLETED
-        )
+        await service.set_status(run_id=run.id, status=HelperRunStatus.COMPLETED)
 
     helper_run_repo.update_status.assert_not_awaited()
 
@@ -451,9 +437,7 @@ async def test_set_status_completed_fills_completed_at():
 
     service, _ = _build_service(user=user, helper_run_repo=helper_run_repo)
 
-    await service.set_status(
-        run_id=run.id, status=HelperRunStatus.COMPLETED
-    )
+    await service.set_status(run_id=run.id, status=HelperRunStatus.COMPLETED)
 
     helper_run_repo.update_status.assert_awaited_once()
     call_kwargs = helper_run_repo.update_status.await_args.kwargs
@@ -491,7 +475,4 @@ async def test_set_status_accepts_all_terminal_statuses(
     await service.set_status(run_id=run.id, status=terminal_status)
 
     helper_run_repo.update_status.assert_awaited_once()
-    assert (
-        helper_run_repo.update_status.await_args.kwargs["status"]
-        == terminal_status
-    )
+    assert helper_run_repo.update_status.await_args.kwargs["status"] == terminal_status

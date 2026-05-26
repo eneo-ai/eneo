@@ -498,7 +498,9 @@ ANALYSIS_REPO_CASES: list[
         lambda repo, s: repo.get_assistant_sessions_since(
             assistant_id=s["helper_assistant"], tenant_id=s["tenant_id"]
         ),
-        lambda result, s: _assert_empty_sessions(result, "get_assistant_sessions_since"),
+        lambda result, s: _assert_empty_sessions(
+            result, "get_assistant_sessions_since"
+        ),
     ),
     (
         "get_group_chat_sessions_since_excludes_helper",
@@ -546,7 +548,9 @@ ANALYSIS_REPO_CASES: list[
         lambda repo, s: repo.get_assistant_conversation_counts(
             assistant_id=s["helper_assistant"], tenant_id=s["tenant_id"]
         ),
-        lambda result, s: _assert_eq(result, (0, 0), "get_assistant_conversation_counts"),
+        lambda result, s: _assert_eq(
+            result, (0, 0), "get_assistant_conversation_counts"
+        ),
     ),
     (
         "count_assistant_questions_since_helper_zero",
@@ -606,9 +610,7 @@ ANALYSIS_REPO_CASES: list[
         # admin_user is the only user; they have regular sessions, so still 1.
         # The point is that the count doesn't double-count via the helper row.
         lambda repo, s: repo.get_active_user_count_for_tenant(tenant_id=s["tenant_id"]),
-        lambda result, s: _assert_eq(
-            result, 1, "get_active_user_count_for_tenant"
-        ),
+        lambda result, s: _assert_eq(result, 1, "get_active_user_count_for_tenant"),
     ),
 ]
 
@@ -627,7 +629,9 @@ def _assert_tenant_counts(result, s) -> None:
     # owns that), but sessions/questions must hide helper-backed rows.
     assert assistants >= 2
     assert sessions == 2, f"get_tenant_counts session_count leaked helper: {sessions}"
-    assert questions == 2, f"get_tenant_counts question_count leaked helper: {questions}"
+    assert questions == 2, (
+        f"get_tenant_counts question_count leaked helper: {questions}"
+    )
 
 
 def _assert_empty_sessions(result, name: str) -> None:
@@ -671,7 +675,9 @@ def _assert_no_helper_in_question_metadata(result, s) -> None:
 
 def _assert_total_buckets(result, expected_total: int, name: str) -> None:
     total = sum(row.total for row in result)
-    assert total == expected_total, f"{name}: expected total {expected_total}, got {total}"
+    assert total == expected_total, (
+        f"{name}: expected total {expected_total}, got {total}"
+    )
 
 
 @pytest.mark.asyncio

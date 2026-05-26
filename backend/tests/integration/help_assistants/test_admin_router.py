@@ -271,9 +271,7 @@ async def test_full_lifecycle_round_trip(
     assert body["is_visible_to_users"] is True
 
     # GET /roles/
-    resp = await client.get(
-        "/api/v1/admin/help-assistants/roles/", headers=headers
-    )
+    resp = await client.get("/api/v1/admin/help-assistants/roles/", headers=headers)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["count"] >= 1

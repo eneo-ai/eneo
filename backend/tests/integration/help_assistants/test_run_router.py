@@ -53,7 +53,9 @@ _STUB_ANSWER = "Helper would say something polite here."
 # ---------------------------------------------------------------------------
 
 
-def _non_stream_response(*, model: Any, captured: dict[str, Any]) -> CompletionModelResponse:
+def _non_stream_response(
+    *, model: Any, captured: dict[str, Any]
+) -> CompletionModelResponse:
     captured["extended_logging"] = captured.get("extended_logging")  # touch
     return CompletionModelResponse(
         completion=Completion(text=_STUB_ANSWER, response_type=ResponseType.TEXT),
@@ -64,7 +66,9 @@ def _non_stream_response(*, model: Any, captured: dict[str, Any]) -> CompletionM
     )
 
 
-def _stream_response(*, model: Any, captured: dict[str, Any]) -> CompletionModelResponse:
+def _stream_response(
+    *, model: Any, captured: dict[str, Any]
+) -> CompletionModelResponse:
     """Yield two TEXT chunks then stop — enough to verify SSE framing.
 
     A non-string ``completion`` (here: an async generator) is what
@@ -383,9 +387,7 @@ async def test_start_run_returns_403_when_role_disabled(
 # ---------------------------------------------------------------------------
 
 
-async def _start_run_and_get_id(
-    client, *, admin_token, target_id: UUID
-) -> UUID:
+async def _start_run_and_get_id(client, *, admin_token, target_id: UUID) -> UUID:
     resp = await client.post(
         "/api/v1/help-assistants/runs/",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -530,7 +532,7 @@ async def test_stream_response_yields_sse_chunks(
     chunks: list[str] = []
     for line in resp.text.splitlines():
         if line.startswith("data:"):
-            payload = line[len("data:"):].strip()
+            payload = line[len("data:") :].strip()
             if not payload:
                 continue
             try:

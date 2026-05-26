@@ -312,18 +312,14 @@ async def test_list_replaced_assistant_ids_dedupes_and_ignores_null(
         # Sanity: the NULL row is still present in the table, it was just
         # excluded from the returned set.
         remaining = await session.scalar(
-            sa.select(sa.func.count()).select_from(
-                HelpAssistantAssignmentHistory
-            )
+            sa.select(sa.func.count()).select_from(HelpAssistantAssignmentHistory)
         )
         assert remaining == 3
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_exists_for_assistant_matches_both_columns(
-    db_container, admin_user
-):
+async def test_exists_for_assistant_matches_both_columns(db_container, admin_user):
     async with db_container() as container:
         session = container.session()
         repo = container.help_assistant_assignment_history_repo()
