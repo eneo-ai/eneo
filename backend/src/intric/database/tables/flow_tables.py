@@ -697,10 +697,7 @@ class FlowStepResults(BasePublic):
         nullable=False,
         index=True,
     )
-    step_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(FlowSteps.id, ondelete="SET NULL"),
-        nullable=True,
-    )
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
     step_order: Mapped[int] = mapped_column(nullable=False)
     assistant_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Assistants.id, ondelete="SET NULL"),
@@ -891,10 +888,7 @@ class FlowStepAttempts(BasePublic):
         nullable=False,
         index=True,
     )
-    step_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(FlowSteps.id, ondelete="SET NULL"),
-        nullable=True,
-    )
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
     step_order: Mapped[int] = mapped_column(nullable=False)
     attempt_no: Mapped[int] = mapped_column(nullable=False)
     rerun_operation_id: Mapped[Optional[UUID]] = mapped_column(

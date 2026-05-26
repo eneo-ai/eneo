@@ -1262,6 +1262,16 @@ async def test_flow_run_evidence_export_marks_corrupt_with_retention_tombstone(
         session = container.session()
         run_id = UUID(seeded["run_id"])
         flow_id = UUID(seeded["flow_id"])
+        purged_step_row = (
+            await session.execute(
+                sa.select(FlowStepResults.step_id, FlowStepResults.step_order)
+                .where(FlowStepResults.flow_run_id == run_id)
+                .where(FlowStepResults.flow_id == flow_id)
+                .order_by(FlowStepResults.step_order.asc())
+            )
+        ).first()
+        assert purged_step_row is not None
+        purged_step_id, purged_step_order = purged_step_row
         now = datetime.now(timezone.utc)
         session.add(
             FlowStepAttempts(
@@ -1269,8 +1279,8 @@ async def test_flow_run_evidence_export_marks_corrupt_with_retention_tombstone(
                 flow_run_id=run_id,
                 flow_id=flow_id,
                 tenant_id=trace_user.tenant_id,
-                step_id=None,
-                step_order=2,
+                step_id=purged_step_id,
+                step_order=purged_step_order,
                 attempt_no=2,
                 celery_task_id=None,
                 status="completed",

@@ -32,7 +32,7 @@ from intric.flows.flow_resource_bindings import (
     ResourceSlotKind,
     ResourceSlotRef,
 )
-from intric.main.exceptions import BadRequestException, NotFoundException
+from intric.main.exceptions import NotFoundException
 
 
 def _build_flow(
@@ -293,7 +293,9 @@ async def test_flow_repository_resource_binding_replacement_is_atomic_on_insert_
     async with db_container() as container:
         session = container.session()
         model = await completion_model_factory(session, "gpt-4o-mini")
-        space = await space_factory(session, "Flows binding atomicity space", [model.id])
+        space = await space_factory(
+            session, "Flows binding atomicity space", [model.id]
+        )
         assistant = await assistant_factory(
             session,
             "Binding Atomicity Assistant",
@@ -565,97 +567,6 @@ async def test_save_step_result_upserts_on_run_and_step(
             "model_id": str(model.id),
             "temperature": 0.1,
         }
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_save_step_result_rejects_missing_step_id(
-    db_container,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
-):
-    async with db_container() as container:
-        session = container.session()
-        model = await completion_model_factory(session, "gpt-4o-mini")
-        space = await space_factory(session, "Flow result contract space", [model.id])
-        assistant = await assistant_factory(
-            session,
-            "Flow Result Assistant",
-            model.id,
-            space_id=space.id,
-        )
-        flow_repo = FlowRepository(session=session, factory=FlowFactory())
-        flow = await flow_repo.create(
-            flow=_build_flow(
-                tenant_id=admin_user.tenant_id,
-                space_id=space.id,
-                user_id=admin_user.id,
-                assistant_id=assistant.id,
-            ),
-            tenant_id=admin_user.tenant_id,
-        )
-        step_id = flow.steps[0].id
-        assert step_id is not None
-        version_repo = FlowVersionRepository(session=session, factory=FlowFactory())
-        await version_repo.create(
-            flow_id=flow.id,
-            version=1,
-            definition_checksum="checksum-result-contract",
-            definition_json={"steps": [{"id": str(step_id), "step_order": 1}]},
-            tenant_id=admin_user.tenant_id,
-        )
-
-        run_row = FlowRuns(
-            flow_id=flow.id,
-            flow_version=1,
-            principal_type="user",
-            principal_user_id=admin_user.id,
-            user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
-            status="queued",
-            input_payload_json={"question": "What happened?"},
-        )
-        session.add(run_row)
-        await session.flush()
-
-        now = datetime.now(timezone.utc)
-        missing_row_update = FlowStepResult(
-            id=uuid4(),
-            flow_run_id=run_row.id,
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            step_id=None,
-            step_order=1,
-            assistant_id=assistant.id,
-            input_payload_json={"question": "What happened?"},
-            effective_prompt="missing step id",
-            output_payload_json={"summary": "should not be saved"},
-            model_parameters_json={"temperature": 0.2},
-            num_tokens_input=10,
-            num_tokens_output=10,
-            status=FlowStepResultStatus.COMPLETED,
-            error_message=None,
-            flow_step_execution_hash="hash-missing-step-id",
-            created_at=now,
-            updated_at=now,
-        )
-
-        with pytest.raises(BadRequestException) as exc_info:
-            await flow_repo.save_step_result(
-                flow_run_id=run_row.id,
-                result=missing_row_update,
-                tenant_id=admin_user.tenant_id,
-            )
-        assert exc_info.value.code == "flow_step_result_step_id_required"
-
-        result_count = await session.scalar(
-            sa.select(sa.func.count())
-            .select_from(FlowStepResults)
-            .where(FlowStepResults.flow_run_id == run_row.id)
-        )
-        assert result_count == 0
 
 
 @pytest.mark.asyncio

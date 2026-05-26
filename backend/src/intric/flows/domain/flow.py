@@ -212,7 +212,7 @@ class FlowStepResult(BaseModel):
     flow_run_id: UUID
     flow_id: UUID
     tenant_id: UUID
-    step_id: Optional[UUID] = None
+    step_id: UUID
     step_order: int
     assistant_id: Optional[UUID] = None
     current_attempt_no: Optional[int] = None
@@ -238,7 +238,7 @@ class FlowStepAttempt(BaseModel):
     flow_run_id: UUID
     flow_id: UUID
     tenant_id: UUID
-    step_id: Optional[UUID] = None
+    step_id: UUID
     step_order: int
     attempt_no: int
     rerun_operation_id: Optional[UUID] = None

@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T033
+active_task: T034
 
 tasks:
   - id: T001
@@ -2673,7 +2673,7 @@ tasks:
   - id: T033
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Make runtime result/attempt step identity snapshot-owned: preflight recoverability from pinned published snapshots, drop draft-step FKs, backfill null result/attempt step_id, enforce non-null DB/domain contracts, and remove stale optional handling from Flow repositories and tests."
     allowed_files:
@@ -2724,6 +2724,145 @@ tasks:
       guard_preventing_duplicate_logic_from_returning: "Migration isolation tests, table metadata tests, and domain non-null validation tests."
       net_flow_logic_surface_area: "reduced"
       if_increased_why: ""
+    receipt:
+      result: done
+      completed_at: "2026-05-26T07:27:19+02:00"
+      summary: "Made runtime result/attempt step identity snapshot-owned for DB/domain/repository code. Added migration 20260526_flow_step_identity to recover null runtime step_id values from pinned published snapshots, preflight unrecoverable and duplicate mappings, drop mutable draft flow_steps FKs, enforce non-null runtime columns, and downgrade by nulling orphan ids before restoring legacy FKs. Removed repository/domain optional-null handling and adjusted existing tests that seeded null runtime step ids."
+      evidence:
+        - "backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py:63 preflights null runtime rows are recoverable from the published snapshot."
+        - "backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py:106 preflights recovered result uniqueness before backfill."
+        - "backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py:139 preflights recovered attempt uniqueness before backfill."
+        - "backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py:195 drops draft-step FKs, backfills snapshot ids, and makes columns non-null."
+        - "backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py:231 downgrades by nulling orphan runtime ids with NOT EXISTS before restoring draft FKs."
+        - "backend/src/intric/database/tables/flow_tables.py:700 FlowStepResults.step_id is now non-null and no longer references flow_steps."
+        - "backend/src/intric/database/tables/flow_tables.py:891 FlowStepAttempts.step_id is now non-null and no longer references flow_steps."
+        - "backend/src/intric/flows/domain/flow.py:215 FlowStepResult requires step_id."
+        - "backend/src/intric/flows/domain/flow.py:241 FlowStepAttempt requires step_id."
+        - "backend/src/intric/flows/infrastructure/flow_repo.py:635 save_step_result no longer owns a missing-step-id compatibility branch."
+        - "backend/src/intric/flows/infrastructure/flow_run_repo.py:2429 current result lookup no longer filters away null step ids because runtime rows cannot be null."
+        - "backend/src/intric/flows/infrastructure/flow_run_repo.py:2455 completed attempt lookup no longer has a null-step branch."
+        - "backend/tests/integration/migrations/test_flow_runtime_step_identity_migration.py:338 migration happy path proves snapshot-id backfill without draft rows/FKs."
+        - "backend/tests/integration/migrations/test_flow_runtime_step_identity_migration.py:382 migration aborts unrecoverable null step ids without advancing revision."
+        - "backend/tests/integration/migrations/test_flow_runtime_step_identity_migration.py:409 result duplicate preflight."
+        - "backend/tests/integration/migrations/test_flow_runtime_step_identity_migration.py:441 attempt duplicate preflight."
+        - "backend/tests/integration/migrations/test_flow_runtime_step_identity_migration.py:476 ambiguous step_order preflight."
+        - "backend/tests/integration/migrations/test_flow_runtime_step_identity_migration.py:507 tenant-scoped recovery guard."
+        - "backend/tests/integration/migrations/test_flow_runtime_step_identity_migration.py:539 downgrade round-trip and orphan nulling."
+        - "backend/tests/unittests/flows/test_flow_step_data_model.py:82 table/domain non-null and no-draft-FK guards."
+      consolidation_effect:
+        reused_existing_owner: "Published runtime snapshot identity in flow_versions.definition_json remains the owner of executed step identity."
+        logic_moved_from: "Runtime identity ownership moved away from mutable draft flow_steps FKs and optional repository checks into snapshot-owned non-null UUID persistence."
+        logic_deleted: "Deleted runtime-to-draft FKs, repository/domain optional null handling, and the stale repository test for service-owned missing-step-id rejection."
+        duplicate_path_removed: "Runtime result/attempt identity is no longer both a nullable draft-step FK and a snapshot id."
+        new_code_added: "One Alembic migration plus migration isolation and data-model/domain guard tests."
+        why_existing_owners_were_insufficient: "The published snapshot owner already existed, but DB and typed models still allowed draft-step deletion or nulls to erase runtime identity."
+        guard_preventing_duplicate_logic_from_returning: "Migration isolation tests, table metadata tests, Pydantic validation tests, and zero-marker source grep."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: ""
+      commands:
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_step_data_model.py -q"
+          status: "fail_expected_red"
+          output: "6 failures before implementation: result/attempt step_id remained nullable/FK-backed and domain models accepted missing/null step_id."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_step_data_model.py -q"
+          status: "pass"
+          output: "6 passed."
+        - command: "cd backend && uv run pytest -m migration_isolation tests/integration/migrations/test_flow_runtime_step_identity_migration.py -q"
+          status: "fail_intermediate"
+          output: "Initial revision id exceeded alembic_version.version_num varchar(32); revised id to 20260526_flow_step_identity."
+        - command: "cd backend && uv run pytest -m migration_isolation tests/integration/migrations/test_flow_runtime_step_identity_migration.py -q"
+          status: "pass"
+          output: "7 passed."
+        - command: "cd backend && uv run pytest tests/integration/flows/test_flow_repository.py::test_save_step_result_upserts_on_run_and_step tests/integration/flows/test_flow_evidence_api_contracts.py::test_flow_run_evidence_export_marks_corrupt_with_retention_tombstone -q"
+          status: "pass"
+          output: "2 passed."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_published_definition_contract.py -q"
+          status: "pass"
+          output: "123 passed, 10 warnings."
+        - command: "cd backend && uv run pytest tests/unittests/flows -q"
+          status: "fail_environment_and_pre_existing"
+          output: "12 failed, 4286 passed, 4 skipped. 11 failures share the local WeasyPrint/libgobject missing dependency; one pre-existing test_flow_repo assistant snapshot expectation mismatch remains unrelated to T033."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_repo.py::test_get_assistant_snapshots_scopes_collection_query_to_tenant -q"
+          status: "fail_pre_existing"
+          output: "Isolated unrelated expectation mismatch: repo returns AssistantAuthoringSnapshot while test expects the old dict shape."
+        - command: "cd backend && uv run ruff check src/intric/database/tables/flow_tables.py src/intric/flows/domain/flow.py src/intric/flows/infrastructure/flow_repo.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/migrations/test_flow_runtime_step_identity_migration.py tests/integration/flows/test_flow_repository.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/unittests/flows/test_flow_step_data_model.py"
+          status: "pass"
+        - command: "cd backend && uv run ruff format --check src/intric/database/tables/flow_tables.py src/intric/flows/domain/flow.py src/intric/flows/infrastructure/flow_repo.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/migrations/test_flow_runtime_step_identity_migration.py tests/integration/flows/test_flow_repository.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/unittests/flows/test_flow_step_data_model.py"
+          status: "pass"
+          output: "8 files already formatted."
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/database/tables/flow_tables.py src/intric/flows/domain/flow.py src/intric/flows/infrastructure/flow_repo.py src/intric/flows/infrastructure/flow_run_repo.py tests/integration/migrations/test_flow_runtime_step_identity_migration.py tests/integration/flows/test_flow_repository.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/unittests/flows/test_flow_step_data_model.py"
+          status: "pass"
+          output: "0 errors, 0 warnings, 0 informations."
+        - command: "rg -n \"T033|T032|Phase [0-9A-G]\\b\" backend/alembic/versions/20260526_flow_runtime_step_identity_snapshot_owned.py backend/src/intric/database/tables/flow_tables.py backend/src/intric/flows/domain/flow.py backend/src/intric/flows/infrastructure/flow_repo.py backend/src/intric/flows/infrastructure/flow_run_repo.py backend/tests/integration/migrations/test_flow_runtime_step_identity_migration.py backend/tests/integration/flows/test_flow_repository.py backend/tests/integration/flows/test_flow_evidence_api_contracts.py backend/tests/unittests/flows/test_flow_step_data_model.py"
+          status: "pass"
+          output: "No matches; rg exit 1."
+        - command: "git diff --check"
+          status: "pass"
+        - command: "rg -n \"step_id=None|step_id: Optional\\[UUID\\] = None|step_id: UUID \\| None = None|row\\.step_id is None|row\\.step_id is not None\" backend/src/intric/flows backend/tests/unittests/flows backend/tests/integration/flows -g '*.py'"
+          status: "pass_with_expected_out_of_scope_matches"
+          output: "Remaining matches are public API/out-of-scope draft materializer/test-helper surfaces, not runtime result/attempt persistence."
+      peer_review:
+        claude:
+          first_pass:
+            status: "changes_required"
+            artifact: ".codex/artifacts/claude-peer-loop-runtime-step-identity-migration-implementation-review-20260526T051720Z.md"
+            verdict: "GREEN_LIGHT no; MIN_SCORE 7. Valid blockers: missing tenant-scoping migration test and missing attempt duplicate preflight test; requested ambiguous mapping and explicit no-draft-row assertions."
+          final_pass:
+            status: "pass"
+            artifact: ".codex/artifacts/claude-peer-loop-runtime-step-identity-migration-implementation-review-iteration-5-20260526T052211Z.md"
+            verdict: "GREEN_LIGHT yes; MIN_SCORE 8 after adding attempt duplicate, ambiguous mapping, tenant-scoped recovery, no-flow_steps assertion, and typed helper refinements."
+        antigravity:
+          status: "pass"
+          artifact: ".codex/artifacts/antigravity-peer-loop-runtime-step-identity-migration-antigravity-synthesis-20260526T052411Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8. No blockers; P3 notes only."
+      valid_reviewer_concerns_addressed:
+        - "Added attempt duplicate-key preflight and migration test."
+        - "Added tenant-scoped recovery test. Exact same-flow-id-across-tenant fixture is schema-impossible because flows.id is globally primary-keyed and flow_versions primary key is (flow_id, version), so the implemented test proves the actual tenant-join invariant without borrowing snapshots from another tenant."
+        - "Added ambiguous step_order mapping preflight/test."
+        - "Made happy path assert zero draft flow_steps rows, proving the migration does not rely on mutable draft rows."
+      residual_risk:
+        - "Public API Pydantic models still expose optional step_id fields; this was explicitly out of scope for T033 and should be judged as a separate published/public contract follow-up."
+        - "Ruff formatted one pre-existing line wrap in backend/tests/integration/flows/test_flow_repository.py inside an allowed file; peer reviewers classified it P3/non-blocking."
+        - "Full backend unit Flow suite remains blocked locally by missing WeasyPrint/libgobject plus one unrelated pre-existing AssistantAuthoringSnapshot expectation mismatch."
+      unrelated_files_preserved:
+        - ".devcontainer/docker-compose.yml"
+        - ".gitignore"
+        - "AGENTS.md"
+        - "frontend/packages/ui/src/icons/types.d.ts"
+        - ".devcontainer/devcontainer-lock.json"
+        - "root Flow review docs, PRODUCT.md, notes/source-material-index.md, notes/step-handler-and-renderer-architecture.md, flows-clean-architecture-2026-05-25/, and utvecklingssamtal.mp3"
+      next_task: T034
+
+  - id: T034
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Approve the next source/API/frontend id-owned draft persistence Worker after T033: refresh source evidence for remaining step-order/draft-step paths, decide exact allowed_files, verification, stop conditions, and whether public API runtime step_id nullability is a separate follow-up."
+    inputs:
+      - "T030 receipt"
+      - "T032 receipt"
+      - "T033 receipt"
+      - "backend/src/intric/flows/infrastructure/flow_repo.py"
+      - "backend/src/intric/flows/application/flow_service.py"
+      - "backend/src/intric/flows/application/flow_run_service.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+      - "backend/src/intric/flows/api/flow_models.py"
+      - "frontend generated Flow types and directly coupled Flow proper usage only if source evidence proves the public schema must change."
+    constraints:
+      - "Read-only."
+      - "Do not implement T012."
+      - "Do not edit source, tests, migrations, generated frontend files, or docs other than the board receipt."
+      - "Before transitioning from this Judge task into any Worker, re-check the watchdog file and verify any halt-worthy blocker against source/state/git evidence."
+      - "Do not start retention, service-key identity, webhook outbox, Flow AI Builder cleanup, runtime input retention, schema hardening, or flow_version_steps."
+      - "Approve a Worker only with exact allowed_files, verification commands, stop_if, and consolidation_effect."
+      - "If API schema nullability requires generated frontend changes, split it from source/runtime persistence unless evidence proves it belongs in the same Worker."
+      - "Prefer reuse/deepen/move/delete through canonical owners; reject new parallel paths or copied runtime logic."
+    expected_output:
+      - "Decision: approve_t012_worker | split_followup | blocked."
+      - "Exact Worker objective, allowed_files, verify, stop_if."
+      - "Source evidence for remaining duplicate/scattered step identity logic."
+      - "Consolidation effect section."
+      - "Public API/nullability/generated-client disposition."
     receipt: null
 
   - id: T999

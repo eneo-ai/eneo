@@ -2450,7 +2450,7 @@ class FlowRunRepository:
             .scalars()
             .all()
         )
-        return {row.step_id: row for row in rows if row.step_id is not None}
+        return {row.step_id: row for row in rows}
 
     async def _latest_completed_attempts_by_step_id(
         self,
@@ -2484,7 +2484,7 @@ class FlowRunRepository:
         )
         latest_attempts: dict[UUID, FlowStepAttempts] = {}
         for row in rows:
-            if row.step_id is None or row.step_id in latest_attempts:
+            if row.step_id in latest_attempts:
                 continue
             latest_attempts[row.step_id] = row
         return latest_attempts

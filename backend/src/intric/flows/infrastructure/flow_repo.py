@@ -649,13 +649,6 @@ class FlowRepository:
         """
         db_session = session or self.session
 
-        if result.step_id is None:
-            raise BadRequestException(
-                "Flow step result step_id is required.",
-                code="flow_step_result_step_id_required",
-                context={"step_order": result.step_order},
-            )
-
         payload: dict[str, Any] = {
             "flow_run_id": flow_run_id,
             "flow_id": result.flow_id,
