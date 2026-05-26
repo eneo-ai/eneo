@@ -29,7 +29,11 @@ from intric.help_assistants.infrastructure.org_space_assistant_role_repo import 
 )
 from intric.icons.icon_repo import IconRepository
 from intric.logging.logging import LoggingDetails
-from intric.main.exceptions import BadRequestException, UnauthorizedException
+from intric.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from intric.main.logging import get_logger
 from intric.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 from intric.prompts.api.prompt_models import PromptCreate
@@ -576,6 +580,52 @@ class AssistantService:
         return await self.org_space_assistant_role_repo.exists_active_for_assistant(
             assistant_id
         )
+
+    async def get_help_assistant(self, assistant_id: UUID) -> Assistant:
+        """Load a Help Assistant by id, bypassing the space-actor read gate.
+
+        Help Assistants live in the org-space, whose only members are the
+        tenant admins added by ``SpaceService.ensure_org_admin_members`` —
+        regular users are never org-space members and therefore cannot pass
+        the ``actor.can_read_assistants()`` check in :meth:`get_assistant`.
+        But the Prompt Guide is, by design (PRD §5/§6/§10), usable by *any*
+        authenticated user who has ``EDIT`` rights on the *target* assistant:
+        their authorization is governed by those target-edit rights plus the
+        role's ``is_enabled`` / ``is_visible_to_users`` flags — all enforced
+        by the caller — **not** by org-space membership.
+
+        This loads the assistant exactly as :meth:`get_assistant` does, minus
+        the org-space read gate. To keep the bypass narrow — only the assistant
+        *designated by a help-assistant role* is readable this way, never an
+        arbitrary org-space assistant — it first asserts the id currently
+        fills, or formerly filled, a help-assistant role. Anything else raises
+        :class:`NotFoundException`, so this can neither be used as a generic
+        permission-skipping read nor to probe org-space assistants.
+
+        Callers are :class:`HelperRunService` (``run`` / ``continue_turn``) and
+        the availability endpoint, always with an id resolved server-side from
+        an active ``OrgSpaceAssistantRole`` or an existing ``HelperRun`` — never
+        a client-supplied assistant id. ``continue_turn`` may legitimately load
+        a *former* helper (the role was reassigned mid-conversation), which is
+        why the assignment-history branch counts.
+        """
+        is_active_helper = (
+            await self.org_space_assistant_role_repo.exists_active_for_assistant(
+                assistant_id
+            )
+        )
+        is_former_helper = (
+            await self.help_assistant_assignment_history_repo.exists_for_assistant(
+                assistant_id
+            )
+        )
+        if not (is_active_helper or is_former_helper):
+            raise NotFoundException(
+                "Assistant is not a help assistant; refusing privileged read."
+            )
+
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        return space.get_assistant(assistant_id=assistant_id)
 
     async def get_assistants(
         self,

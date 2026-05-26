@@ -39,6 +39,7 @@ from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.spaces_table import Spaces
 from intric.help_assistants.domain.helper_kind import HelperKind
 from intric.main.models import ModelId
+from intric.roles.permissions import Permission
 from intric.roles.role import RoleCreate
 from intric.users.user import UserAdd, UserState
 
@@ -232,6 +233,34 @@ async def _seed_helper_and_target(
     return helper_id, target_id
 
 
+async def _create_member_target(db_container, member_user) -> UUID:
+    """A target assistant a non-admin member owns and can edit (personal space).
+
+    The real end-user flow (PRD §11): the user creates an assistant in their own
+    personal space, where ``space_actor._get_role`` resolves them to ``OWNER``
+    (they also need the tenant-level ``assistants`` permission — see the
+    ``member_*`` fixtures). ``_seed_helper_and_target`` puts its target in the
+    admin-owned org-space, so a non-admin never passed the target-edit gate here
+    — the run's *helper* read 403 (step 099) was therefore never reached.
+    """
+    async with db_container(user=member_user) as container:
+        space_service = container.space_service()
+        personal_space = await space_service.create_personal_space()
+        session = container.session()
+        completion_model_id = await _get_default_completion_model_id(
+            session, tenant_id=member_user.tenant_id
+        )
+        target_id = await _insert_assistant(
+            session,
+            owner_user_id=member_user.id,
+            space_id=personal_space.id,
+            completion_model_id=completion_model_id,
+            name="member-personal-target",
+        )
+        await session.flush()
+    return target_id
+
+
 # ---------------------------------------------------------------------------
 # Auth fixtures
 # ---------------------------------------------------------------------------
@@ -277,6 +306,45 @@ async def non_admin_token(db_container, patch_auth_service_jwt, non_admin_user):
     async with db_container() as container:
         auth_service = container.auth_service()
         return auth_service.create_access_token_for_user(non_admin_user)
+
+
+@pytest.fixture
+async def member_role(db_container, admin_user):
+    """A non-admin "Member" role: the ordinary ``assistants`` capability, no
+    ``admin``. Matches the repro's Member role — enough to create/edit one's
+    own assistants, but not an org-space member.
+    """
+    async with db_container() as container:
+        role_repo = container.role_repo()
+        return await role_repo.create_role(
+            RoleCreate(
+                name=f"member-{uuid4().hex[:8]}",
+                permissions=[Permission.ASSISTANTS],
+                tenant_id=admin_user.tenant_id,
+            )
+        )
+
+
+@pytest.fixture
+async def member_user(db_container, admin_user, member_role):
+    async with db_container() as container:
+        user_repo = container.user_repo()
+        return await user_repo.add(
+            UserAdd(
+                email=f"member-{uuid4().hex[:8]}@example.com",
+                username=f"member_{uuid4().hex[:8]}",
+                state=UserState.ACTIVE,
+                tenant_id=admin_user.tenant_id,
+                roles=[ModelId(id=member_role.id)],
+            )
+        )
+
+
+@pytest.fixture
+async def member_token(db_container, patch_auth_service_jwt, member_user):
+    async with db_container() as container:
+        auth_service = container.auth_service()
+        return auth_service.create_access_token_for_user(member_user)
 
 
 # ---------------------------------------------------------------------------
@@ -380,6 +448,46 @@ async def test_start_run_returns_403_when_role_disabled(
     # An operator distinguishing this 403 from a permission failure should
     # be able to do so without parsing the human-readable message.
     assert body.get("code") == "helper_not_available", body
+
+
+async def test_non_admin_can_run_on_own_target(
+    client,
+    db_container,
+    admin_user,
+    member_user,
+    member_token,
+    stub_completion_service,
+):
+    """Non-admin who can edit their own target runs the Prompt Guide → 200.
+
+    Step 099 regression. The run path loaded the org-space helper through the
+    permission-enforcing ``get_assistant``, so a non-admin (never an org-space
+    member) 403'd on the *helper* read even after clearing the target-edit
+    gate. With the privileged helper load the run gets past that read; the
+    completion is stubbed, so a 200 + answer proves the authorization rather
+    than the LLM. The run is stamped to the non-admin actor. PRD §5/§6/§10.
+    """
+    async with db_container() as container:
+        await _seed_helper_and_target(container, admin_user)
+    target_id = await _create_member_target(db_container, member_user)
+
+    resp = await client.post(
+        "/api/v1/help-assistants/runs/",
+        headers={"Authorization": f"Bearer {member_token}"},
+        json={
+            "kind": HelperKind.PROMPT_GUIDE.value,
+            "target_type": "assistant",
+            "target_id": str(target_id),
+            "question": "Help me write a system prompt.",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["answer"] == _STUB_ANSWER
+    assert body["run"]["actor_user_id"] == str(member_user.id)
+    assert body["run"]["target_id"] == str(target_id)
+    assert body["run"]["status"] == "in_progress"
+    assert stub_completion_service["stream"] is False
 
 
 # ---------------------------------------------------------------------------

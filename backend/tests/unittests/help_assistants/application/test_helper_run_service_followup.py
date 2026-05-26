@@ -231,7 +231,11 @@ async def test_continue_turn_reuses_session_and_persists_question():
     role_service.get_active.return_value = role
 
     assistant_service = AsyncMock()
-    assistant_service.get_assistant.return_value = (helper_assistant, [])
+    # continue_turn loads the helper via the privileged get_help_assistant
+    # (step 099): the helper lives in the org-space, so a non-admin actor
+    # would 403 through the permission-enforcing get_assistant. It returns the
+    # assistant directly, not the (assistant, permissions) tuple.
+    assistant_service.get_help_assistant.return_value = helper_assistant
 
     session_repo = AsyncMock()
     session_repo.get_for_helper_run.return_value = session

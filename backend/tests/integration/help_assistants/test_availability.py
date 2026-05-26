@@ -36,6 +36,7 @@ from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.spaces_table import Spaces
 from intric.help_assistants.domain.helper_kind import HelperKind
 from intric.main.models import ModelId
+from intric.roles.permissions import Permission
 from intric.roles.role import RoleCreate
 from intric.users.user import UserAdd, UserState
 
@@ -170,6 +171,37 @@ async def _seed_helper_and_target(
     return helper_id, target_id
 
 
+async def _create_member_target(db_container, member_user) -> UUID:
+    """A target assistant a non-admin member owns and can edit (personal space).
+
+    Mirrors the real end-user flow (PRD §11): the user creates an assistant in
+    their own personal space, where ``space_actor._get_role`` resolves them to
+    ``OWNER``. Note the user still needs the tenant-level ``assistants``
+    permission — ``can_perform_action`` gates every assistant action on it on
+    top of the space role (see the ``member_*`` fixtures). ``_seed_helper_and_target``
+    puts its target in the *admin-owned* org-space, so a non-admin fails the
+    target-edit gate (``no_edit_rights``) before the helper read is ever
+    reached — which is exactly why the org-space *helper* read 403 (step 099)
+    escaped the suite.
+    """
+    async with db_container(user=member_user) as container:
+        space_service = container.space_service()
+        personal_space = await space_service.create_personal_space()
+        session = container.session()
+        completion_model_id = await _get_default_completion_model_id(
+            session, tenant_id=member_user.tenant_id
+        )
+        target_id = await _insert_assistant(
+            session,
+            owner_user_id=member_user.id,
+            space_id=personal_space.id,
+            completion_model_id=completion_model_id,
+            name="member-personal-target",
+        )
+        await session.flush()
+    return target_id
+
+
 # ---------------------------------------------------------------------------
 # Auth fixtures
 # ---------------------------------------------------------------------------
@@ -215,6 +247,45 @@ async def non_admin_token(db_container, patch_auth_service_jwt, non_admin_user):
     async with db_container() as container:
         auth_service = container.auth_service()
         return auth_service.create_access_token_for_user(non_admin_user)
+
+
+@pytest.fixture
+async def member_role(db_container, admin_user):
+    """A non-admin "Member" role: the ordinary ``assistants`` capability, no
+    ``admin``. Matches the repro's Member role — enough to create/edit one's
+    own assistants, but not an org-space member.
+    """
+    async with db_container() as container:
+        role_repo = container.role_repo()
+        return await role_repo.create_role(
+            RoleCreate(
+                name=f"member-{uuid4().hex[:8]}",
+                permissions=[Permission.ASSISTANTS],
+                tenant_id=admin_user.tenant_id,
+            )
+        )
+
+
+@pytest.fixture
+async def member_user(db_container, admin_user, member_role):
+    async with db_container() as container:
+        user_repo = container.user_repo()
+        return await user_repo.add(
+            UserAdd(
+                email=f"member-{uuid4().hex[:8]}@example.com",
+                username=f"member_{uuid4().hex[:8]}",
+                state=UserState.ACTIVE,
+                tenant_id=admin_user.tenant_id,
+                roles=[ModelId(id=member_role.id)],
+            )
+        )
+
+
+@pytest.fixture
+async def member_token(db_container, patch_auth_service_jwt, member_user):
+    async with db_container() as container:
+        auth_service = container.auth_service()
+        return auth_service.create_access_token_for_user(member_user)
 
 
 # ---------------------------------------------------------------------------
@@ -442,4 +513,74 @@ async def test_happy_path(
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body == {"available": True, "disabled_reason": None}
+    _assert_response_shape(body)
+
+
+# ---------------------------------------------------------------------------
+# Tests — non-admin end users (step 099 regression)
+# ---------------------------------------------------------------------------
+
+
+async def test_non_admin_happy_path_on_own_target(
+    client,
+    db_container,
+    admin_user,
+    member_user,
+    member_token,
+):
+    """Non-admin who owns + can edit their own target → ``available=True``.
+
+    Step 099 regression. The helper assistant lives in the org-space, of which
+    non-admins are never members, so the pre-flight's *helper* read used to
+    403 through the permission-enforcing ``get_assistant`` — even though the
+    caller holds EDIT on their own target and the role is enabled + visible.
+    PRD §5/§6/§10 make the Prompt Guide usable by any such user; the privileged
+    helper load now lets the pre-flight reach ``available=True``.
+    """
+    async with db_container() as container:
+        # Seeds the org-space helper + an enabled, visible active role.
+        await _seed_helper_and_target(container, admin_user)
+    target_id = await _create_member_target(db_container, member_user)
+
+    resp = await _get_availability(
+        client,
+        token=member_token,
+        kind=HelperKind.PROMPT_GUIDE,
+        target_id=target_id,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body == {"available": True, "disabled_reason": None}
+    _assert_response_shape(body)
+
+
+async def test_non_admin_role_not_visible_stays_hidden(
+    client,
+    db_container,
+    admin_user,
+    member_user,
+    member_token,
+):
+    """``is_visible_to_users=False`` → ``role_not_visible`` for a non-admin.
+
+    Visibility is the end-user gate, checked *before* the helper read, so the
+    fix must not weaken it: an editable target plus a hidden role still yields
+    ``role_not_visible`` (button stays hidden) — never ``available=True`` and
+    never a leaked org-space 403.
+    """
+    async with db_container() as container:
+        await _seed_helper_and_target(
+            container, admin_user, role_visible_to_users=False
+        )
+    target_id = await _create_member_target(db_container, member_user)
+
+    resp = await _get_availability(
+        client,
+        token=member_token,
+        kind=HelperKind.PROMPT_GUIDE,
+        target_id=target_id,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body == {"available": False, "disabled_reason": "role_not_visible"}
     _assert_response_shape(body)

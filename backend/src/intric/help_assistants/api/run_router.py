@@ -283,7 +283,17 @@ async def get_helper_availability(
     if not role.is_visible_to_users:
         return AvailabilityResponse(available=False, disabled_reason="role_not_visible")
 
-    helper, _ = await assistant_service.get_assistant(assistant_id=role.assistant_id)
+    # Privileged read of the designated helper (PRD §5/§6/§10): non-admin end
+    # users are not org-space members, so the permission-enforcing
+    # get_assistant would 403 here even though they legitimately reach this
+    # pre-flight via edit rights on the target. get_help_assistant loads the
+    # role's assistant without the org-space read gate. If the helper was
+    # deleted/archived out from under the active role, treat it as "no usable
+    # assignment" rather than letting the pre-flight raise.
+    try:
+        helper = await assistant_service.get_help_assistant(role.assistant_id)
+    except NotFoundException:
+        return AvailabilityResponse(available=False, disabled_reason="no_assignment")
     if helper.completion_model is None or not helper.completion_model.can_access:
         return AvailabilityResponse(
             available=False, disabled_reason="no_completion_model"

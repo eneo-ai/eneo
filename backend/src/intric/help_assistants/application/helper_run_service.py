@@ -151,7 +151,7 @@ class HelperRunService:
                 code="helper_not_available",
             )
 
-        helper_assistant = await self._load_assistant(role.assistant_id)
+        helper_assistant = await self._load_helper_assistant(role.assistant_id)
         self._check_helper_completion_model(helper_assistant)
 
         session = await self._create_helper_session(
@@ -265,7 +265,7 @@ class HelperRunService:
             raise NotFoundException(
                 "Helper assistant for this run is no longer available."
             )
-        helper_assistant = await self._load_assistant(run.assistant_id)
+        helper_assistant = await self._load_helper_assistant(run.assistant_id)
         self._check_helper_completion_model(helper_assistant)
 
         session = await self.session_repo.get_for_helper_run(
@@ -400,11 +400,17 @@ class HelperRunService:
             )
         return target_assistant
 
-    async def _load_assistant(self, assistant_id: UUID) -> Assistant:
-        assistant, _permissions = await self.assistant_service.get_assistant(
-            assistant_id=assistant_id
-        )
-        return assistant
+    async def _load_helper_assistant(self, assistant_id: UUID) -> Assistant:
+        # PRIVILEGED helper read (PRD §5/§6/§10). The helper assistant lives in
+        # the org-space, whose only members are tenant admins, so the normal
+        # permission-enforcing assistant_service.get_assistant would 403 for
+        # every non-admin end user. End-user authorization for a helper run is
+        # the EDIT check on the *target* assistant
+        # (_load_target_with_edit_permission) plus the role's is_enabled /
+        # is_visible_to_users flags — both enforced above — NOT org-space
+        # membership. get_help_assistant keeps the read scoped to the assistant
+        # designated by the (active or former) help-assistant role.
+        return await self.assistant_service.get_help_assistant(assistant_id)
 
     def _check_helper_completion_model(self, helper: Assistant) -> None:
         if helper.completion_model is None:
