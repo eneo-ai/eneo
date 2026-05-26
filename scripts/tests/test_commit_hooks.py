@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -33,6 +34,7 @@ def run_script(
 class CommitHookTests(unittest.TestCase):
     def make_repo(self, branch: str = "feature/demo") -> Path:
         root = Path(tempfile.mkdtemp(prefix="eneo-commit-hooks-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
         subprocess.run(["git", "init", "-b", branch], cwd=root, check=True, capture_output=True, text=True)
         subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True, capture_output=True, text=True)
         subprocess.run(["git", "config", "user.name", "Test User"], cwd=root, check=True, capture_output=True, text=True)

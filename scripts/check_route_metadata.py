@@ -32,6 +32,10 @@ def iter_route_blocks(text: str) -> list[tuple[int, str, str]]:
         method = match.group(2)
         start_line = i + 1
         block_lines = [lines[i]]
+        # Heuristic block-end detection by paren balance. Parentheses inside
+        # string literals (e.g. description="see (note)") are not discounted, so
+        # a decorator with unbalanced parens in a string could be mis-bounded.
+        # Acceptable for a guardrail; revisit with a real parser if it bites.
         depth = lines[i].count("(") - lines[i].count(")")
         i += 1
         while i < len(lines) and depth > 0:
