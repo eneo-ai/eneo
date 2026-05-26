@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T044
+active_task: T045
 
 tasks:
   - id: T001
@@ -4154,7 +4154,7 @@ tasks:
   - id: T044
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "judge(flows): choose the next safe Flow clean-architecture task after durable webhook outbox."
     inputs:
@@ -4179,6 +4179,124 @@ tasks:
       - "Choosing a Worker requires retention, service-key identity, schema migration, Flow AI Builder cleanup, or other blocked product/data decisions."
       - "Choosing a Worker requires files outside a reviewable Flow proper scope."
       - "Evidence is insufficient to choose between published-contract cleanup, webhook follow-ups, and step behavior/output-format isolation."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T13:55:38+02:00"
+      summary: "Chose the next safe Worker after durable webhook outbox. Initial broad webhook-hardening scope was rejected by Claude because lifecycle-source changes require a DB constraint migration and audit best-effort needs a typed exception/observability decision. Revised to one no-migration consolidation slice: centralize the shared audit/webhook outbox delivery-status vocabulary at the DB check-constraint owner."
+      artifact: "docs/goals/flows-clean-architecture-2026-05-25/notes/t044-next-safe-judge.md"
+      decision:
+        next_task: T045
+        objective: "refactor(flows-runtime): centralize outbox delivery status vocabulary."
+        classification:
+          safe_now:
+            - "Centralize audit/webhook outbox delivery statuses with FlowOutboxDeliveryStatus(str, Enum)."
+          follow_up:
+            - "Name webhook wrapper timeout and add deterministic deadline-guard tests."
+            - "Remove cast(Any) in Flow executor task dependency wiring."
+            - "Add deployment smoke/check instructions for the webhook beat task."
+          needs_preflight:
+            - "Webhook audit actor best-effort behavior; requires typed exception boundary and observability contract."
+            - "Webhook-specific lifecycle source; requires Alembic/Postgres preflight for audit outbox source check constraint."
+          blocked_on_decision:
+            - "Runtime input retention."
+            - "Service-key identity/review/rerun matrix."
+      evidence:
+        - "backend/src/intric/database/tables/flow_tables.py:95-104 defines duplicate audit and webhook delivery-status tuples."
+        - "backend/src/intric/flows/infrastructure/flow_run_audit_outbox_repo.py:152,182,184,203,207 use raw delivery-status strings."
+        - "backend/src/intric/flows/infrastructure/flow_run_webhook_delivery_repo.py:88,149,151,175,180,182 use raw delivery-status strings."
+        - "backend/src/intric/flows/infrastructure/flow_run_repo.py:1657 uses raw pending webhook delivery status in stale-running exclusion."
+        - "backend/src/intric/flows/runtime/flow_runtime_health.py:534,543,559 use raw audit outbox delivery-status strings."
+        - "backend/src/intric/data_retention/infrastructure/data_retention_service.py:186 uses raw delivered audit outbox status."
+        - "backend/src/intric/database/tables/flow_tables.py:1554-1557 and backend/alembic/versions/20260514_review_expiry.py:139-142 prove lifecycle-source enum changes need migration review."
+      peer_review:
+        claude_iteration_1:
+          artifact: ".codex/artifacts/claude-peer-loop-t044-choose-next-safe-webhook-hardening-task-20260526T114554Z.md"
+          verdict: "changes_required; valid blockers on lifecycle-source migration and audit best-effort ValueError funnel."
+        claude_iteration_2:
+          artifact: ".codex/artifacts/claude-peer-loop-t044-revised-next-safe-outbox-status-task-20260526T115120Z.md"
+          verdict: "changes_required; valid blockers on remaining literal sites and under-specified typed vocabulary/worktree hygiene."
+        claude_iteration_3:
+          artifact: ".codex/artifacts/claude-peer-loop-t044-final-revised-outbox-status-task-20260526T115517Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+      commands:
+        - command: "python3 watchdog check /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          result: pass
+          notes: "schema_version 1; status ok; halt_blockers 0."
+        - command: "rg/nl source evidence for flow_tables.py, flow_run_audit_outbox_repo.py, flow_run_webhook_delivery_repo.py, flow_run_repo.py, flow_runtime_health.py, data_retention_service.py, and relevant tests"
+          result: pass
+          notes: "Verified all bounded delivery-status literal sites and migration blocker evidence."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t044-next-safe-judge --phase plan/verification --timeout-seconds 1200 ..."
+          result: pass_after_revisions
+          notes: "Iteration 3 returned GREEN_LIGHT yes; MIN_SCORE 8."
+      consolidation_effect:
+        reused_existing_owner: "flow_tables.py as DB check-constraint vocabulary owner, plus existing audit/webhook outbox repositories, stale-running query, runtime health query, and Flow audit retention cleanup."
+        logic_moved_from: "Duplicated raw delivery-status strings in persistence, runtime health, retention cleanup, and tests into one typed vocabulary."
+        logic_deleted: "T045 will delete duplicate raw literal usage; T044 deleted no source logic."
+        duplicate_path_removed: "T045 will remove independent audit and webhook outbox status tuples/literals as separate Python vocabularies."
+        new_code_added: "T044 added one Judge note only."
+        why_existing_owners_were_insufficient: "The current owner stores two identical tuples and callers still repeat raw strings, so the concept lacks a typed Python access point."
+        guard_preventing_duplicate_logic_from_returning: "T045 must add a vocabulary/SQL-text guard and raw-literal architecture guard."
+        net_flow_logic_surface_area: preserved
+      next_task: T045
+
+  - id: T045
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: medium
+    objective: "refactor(flows-runtime): centralize outbox delivery status vocabulary."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t044-next-safe-judge.md"
+      - ".codex/artifacts/claude-peer-loop-t044-final-revised-outbox-status-task-20260526T115517Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t045-outbox-delivery-status.md"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/src/intric/data_retention/infrastructure/data_retention_service.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_audit_outbox_repo.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_webhook_delivery_repo.py"
+      - "backend/src/intric/flows/runtime/flow_runtime_health.py"
+      - "backend/tests/integration/flows/test_flow_audit_outbox_delivery.py"
+      - "backend/tests/integration/flows/test_flow_webhook_outbox_delivery.py"
+      - "backend/tests/integration/flows/test_flow_runtime_health.py"
+      - "backend/tests/integration/test_flow_runtime_retention_cleanup.py"
+      - "backend/tests/unittests/flows/test_flow_runtime_health.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+    constraints:
+      - "Check watchdog before starting implementation and before committing."
+      - "Treat the T044 Claude green artifact as the plan gate; rerun Claude plan gate if implementation scope deviates."
+      - "Run Claude commit gate after implementation with --timeout-seconds 1200, --require-green, and --required-min-score 8."
+      - "Use Antigravity only if Claude and Codex disagree on a runtime/data/ownership blocker."
+      - "No Alembic migration, schema-shape change, new table, new DB constraint, or lifecycle-source change."
+      - "No router/API/OpenAPI/frontend/Flow AI Builder/runtime-retention/service-key identity edits."
+      - "No audit best-effort behavior change and no webhook timing/clock/deadline change."
+      - "No new helper, manager, processor, service locator, event bus, outbox base class, or generic retry abstraction."
+      - "Do not stage unrelated dirty/untracked files, especially docker-compose, AGENTS.md, PRODUCT.md, utvecklingssamtal.mp3, or devcontainer-lock files."
+    expected_output:
+      - "Define FlowOutboxDeliveryStatus(str, Enum) next to the DB delivery-status tuples in flow_tables.py."
+      - "Derive both audit and webhook outbox status value tuples from FlowOutboxDeliveryStatus while keeping per-table tuple names."
+      - "Prefer server_default=FlowOutboxDeliveryStatus.PENDING.value for audit and webhook delivery_status columns if accepted by SQLAlchemy."
+      - "Preserve raw status literals only inside unavoidable CheckConstraint/postgresql_where SQL text in flow_tables.py."
+      - "Replace raw outbox delivery-status literals in allowed source and test files with FlowOutboxDeliveryStatus values."
+      - "Add tests/guards proving enum values, both tuple values, and hand-coded SQL text stay in lockstep."
+      - "Add an architecture guard that fails if raw outbox delivery-status literals return in the bounded source paths."
+      - "Worker receipt with consolidation effect and commands run."
+    verify:
+      - "cd backend && uv run pytest tests/integration/flows/test_flow_audit_outbox_delivery.py tests/integration/flows/test_flow_webhook_outbox_delivery.py tests/integration/flows/test_flow_runtime_health.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/flows/test_flow_runtime_health.py tests/unittests/flows/test_flow_architecture_guards.py -q"
+      - "cd backend && uv run ruff check src/intric/database/tables/flow_tables.py src/intric/data_retention/infrastructure/data_retention_service.py src/intric/flows/infrastructure/flow_run_audit_outbox_repo.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/infrastructure/flow_run_webhook_delivery_repo.py src/intric/flows/runtime/flow_runtime_health.py tests/integration/flows/test_flow_audit_outbox_delivery.py tests/integration/flows/test_flow_webhook_outbox_delivery.py tests/integration/flows/test_flow_runtime_health.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/flows/test_flow_runtime_health.py tests/unittests/flows/test_flow_architecture_guards.py"
+      - "cd backend && uv run pyright src/intric/database/tables/flow_tables.py src/intric/data_retention/infrastructure/data_retention_service.py src/intric/flows/infrastructure/flow_run_audit_outbox_repo.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/infrastructure/flow_run_webhook_delivery_repo.py src/intric/flows/runtime/flow_runtime_health.py tests/integration/flows/test_flow_audit_outbox_delivery.py tests/integration/flows/test_flow_webhook_outbox_delivery.py tests/integration/flows/test_flow_runtime_health.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/flows/test_flow_runtime_health.py tests/unittests/flows/test_flow_architecture_guards.py"
+      - "git diff --check"
+      - "git diff --cached --name-only --diff-filter=ACMRTUXB must contain only T045 allowed files before commit."
+      - "git diff --cached --name-only --diff-filter=A must not include unrelated untracked files."
+    stop_if:
+      - "Need to change persisted delivery-status values or SQLAlchemy column type."
+      - "Need a migration or DB constraint change."
+      - "Need lifecycle-source, audit best-effort, webhook timing, retention policy, service-key identity, API, frontend, or Flow AI Builder changes."
+      - "Raw outbox delivery-status strings remain in bounded source paths outside the explicit flow_tables.py SQL text allowlist."
+      - "Tests require broad repo-wide cleanup or staging unrelated dirty/untracked files."
     receipt: null
 
 checks:
