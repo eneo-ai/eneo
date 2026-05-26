@@ -7,6 +7,7 @@
 <script lang="ts">
   import { page } from "$app/stores";
   import { resolve } from "$app/paths";
+  import { m } from "$lib/paraglide/messages";
   import { SlidersHorizontal, BookText } from "lucide-svelte";
 
   let { children } = $props();
@@ -19,15 +20,15 @@
   const tabs = $derived([
     {
       href: "/admin/personal-assistant/configuration",
-      label: "Konfiguration",
-      hint: "Modeller, MCP & prompts",
+      label: m.governance_tab_configuration(),
+      hint: m.governance_tab_configuration_hint(),
       icon: SlidersHorizontal,
       matches: (p: string) => p.startsWith(resolve("/admin/personal-assistant/configuration"))
     },
     {
       href: "/admin/personal-assistant/prompts",
-      label: "Promptbibliotek",
-      hint: "Återanvändbara prompts",
+      label: m.governance_tab_prompts(),
+      hint: m.governance_tab_prompts_hint(),
       icon: BookText,
       matches: (p: string) => p.startsWith(resolve("/admin/personal-assistant/prompts"))
     }
@@ -37,12 +38,12 @@
 <div class="flex h-full min-w-0 flex-grow flex-col overflow-hidden">
   <div class="border-default bg-primary border-b">
     <div class="px-6 pt-5 pb-3">
-      <h1 class="text-primary text-xl font-bold">Personlig assistent</h1>
+      <h1 class="text-primary text-xl font-bold">{m.governance_title()}</h1>
       <p class="text-secondary mt-0.5 text-sm">
-        Inställningar och prompts som styr användarnas personliga assistent i organisationen.
+        {m.governance_subtitle()}
       </p>
     </div>
-    <nav aria-label="Personlig assistent – undersektioner" class="px-6">
+    <nav aria-label={m.governance_subsections_aria()} class="px-6">
       <ul class="-mb-px flex items-end gap-1">
         {#each tabs as tab (tab.href)}
           {@const active = tab.matches(currentPath)}

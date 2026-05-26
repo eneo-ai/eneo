@@ -5582,17 +5582,17 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/admin/personal-assistant-policy/": {
+  "/api/v1/admin/governance-policy/": {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** Get Personal Assistant Policy */
-    get: operations["get_personal_assistant_policy_api_v1_admin_personal_assistant_policy__get"];
-    /** Update Personal Assistant Policy */
-    put: operations["update_personal_assistant_policy_api_v1_admin_personal_assistant_policy__put"];
+    /** Get Governance Policy */
+    get: operations["get_governance_policy_api_v1_admin_governance_policy__get"];
+    /** Update Governance Policy */
+    put: operations["update_governance_policy_api_v1_admin_governance_policy__put"];
     post?: never;
     delete?: never;
     options?: never;
@@ -8340,7 +8340,7 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
-      /** @description Personal-chat governance hints. Only populated when is_default=True and a tenant policy applies. */
+      /** @description Personal-assistant governance hints. Only populated for personal default assistants when a tenant policy applies. */
       effective_config?: components["schemas"]["EffectiveConfigPublic"] | null;
     };
     /** AssistantSparse */
@@ -10011,7 +10011,7 @@ export interface components {
       metadata_json?: {
         [key: string]: unknown;
       } | null;
-      /** @description Personal-chat governance hints. Only populated when is_default=True and a tenant policy applies. */
+      /** @description Personal-assistant governance hints. Only populated for personal default assistants when a tenant policy applies. */
       effective_config?: components["schemas"]["EffectiveConfigPublic"] | null;
     };
     /**
@@ -10087,7 +10087,7 @@ export interface components {
      * EffectiveConfigPublic
      * @description Frontend hint surface for personal-assistant governance.
      *
-     *     Only meaningful on default assistants. `prompt_locked` is exposed as a
+     *     Only meaningful on default assistants in personal spaces. `prompt_locked` is exposed as a
      *     boolean — we never leak the admin-prompt text to the user-facing API.
      */
     EffectiveConfigPublic: {
@@ -10837,6 +10837,22 @@ export interface components {
       completion_models: components["schemas"]["CompletionModelPublic"][];
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublicLegacy"][];
+    };
+    /** GovernancePolicyPublic */
+    GovernancePolicyPublic: {
+      models_restriction: components["schemas"]["ModelsRestrictionPublic"];
+      mcp_restriction: components["schemas"]["McpRestrictionPublic"];
+      prompt_enforcement: components["schemas"]["PromptEnforcementPublic"];
+      /** Updated At */
+      updated_at: string | null;
+      /** Updated By User Id */
+      updated_by_user_id: string | null;
+    };
+    /** GovernancePolicyUpdate */
+    GovernancePolicyUpdate: {
+      models_restriction?: components["schemas"]["ModelsRestrictionInput"] | null;
+      mcp_restriction?: components["schemas"]["McpRestrictionInput"] | null;
+      prompt_enforcement?: components["schemas"]["PromptEnforcementInput"] | null;
     };
     /** GroupChatAssistantPublic */
     GroupChatAssistantPublic: {
@@ -13413,22 +13429,6 @@ export interface components {
       /** Description */
       description: string;
     };
-    /** PersonalAssistantPolicyPublic */
-    PersonalAssistantPolicyPublic: {
-      models_restriction: components["schemas"]["ModelsRestrictionPublic"];
-      mcp_restriction: components["schemas"]["McpRestrictionPublic"];
-      prompt_enforcement: components["schemas"]["PromptEnforcementPublic"];
-      /** Updated At */
-      updated_at: string | null;
-      /** Updated By User Id */
-      updated_by_user_id: string | null;
-    };
-    /** PersonalAssistantPolicyUpdate */
-    PersonalAssistantPolicyUpdate: {
-      models_restriction?: components["schemas"]["ModelsRestrictionInput"] | null;
-      mcp_restriction?: components["schemas"]["McpRestrictionInput"] | null;
-      prompt_enforcement?: components["schemas"]["PromptEnforcementInput"] | null;
-    };
     /** PolicyCompletionModelInput */
     PolicyCompletionModelInput: {
       /**
@@ -13491,12 +13491,22 @@ export interface components {
      *     `model_name` and `context_window` are echoed so a client can compute the
      *     percentage fill locally without a separate round-trip to fetch model
      *     metadata.
+     *
+     *     `excluded_file_count` is the number of attached files we could not
+     *     tokenise here (images and other binary payloads use provider-specific
+     *     multimodal accounting). Callers should treat the response as a
+     *     conservative lower bound when this is non-zero.
      */
     PreflightResponse: {
       /** Input Tokens */
       input_tokens: number;
       /** File Tokens */
       file_tokens: number;
+      /**
+       * Excluded File Count
+       * @default 0
+       */
+      excluded_file_count?: number;
       /** Model Name */
       model_name: string;
       /** Context Window */
@@ -33599,7 +33609,7 @@ export interface operations {
       };
     };
   };
-  get_personal_assistant_policy_api_v1_admin_personal_assistant_policy__get: {
+  get_governance_policy_api_v1_admin_governance_policy__get: {
     parameters: {
       query?: never;
       header?: never;
@@ -33614,7 +33624,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PersonalAssistantPolicyPublic"];
+          "application/json": components["schemas"]["GovernancePolicyPublic"];
         };
       };
       /** @description Forbidden */
@@ -33628,7 +33638,7 @@ export interface operations {
       };
     };
   };
-  update_personal_assistant_policy_api_v1_admin_personal_assistant_policy__put: {
+  update_governance_policy_api_v1_admin_governance_policy__put: {
     parameters: {
       query?: never;
       header?: never;
@@ -33637,7 +33647,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["PersonalAssistantPolicyUpdate"];
+        "application/json": components["schemas"]["GovernancePolicyUpdate"];
       };
     };
     responses: {
@@ -33647,7 +33657,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PersonalAssistantPolicyPublic"];
+          "application/json": components["schemas"]["GovernancePolicyPublic"];
         };
       };
       /** @description Bad Request */

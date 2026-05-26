@@ -11,6 +11,7 @@
   import { Page } from "$lib/components/layout";
   import PromptLibraryForm from "$lib/features/prompt-library/components/PromptLibraryForm.svelte";
   import { getIntric } from "$lib/core/Intric";
+  import { m } from "$lib/paraglide/messages";
 
   const { data } = $props();
   const intric = getIntric();
@@ -30,12 +31,12 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Admin – Redigera prompt</title>
+  <title>{m.governance_prompt_edit_title()}</title>
 </svelte:head>
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title="Redigera prompt"></Page.Title>
+    <Page.Title title={m.governance_prompt_edit_heading()}></Page.Title>
   </Page.Header>
   <Page.Main>
     <div class="p-6">
@@ -45,7 +46,7 @@
           description: data.entry.description,
           text: data.entry.text
         }}
-        submitLabel="Spara"
+        submitLabel={m.save()}
         onSubmit={save}
         onCancel={() => goto(resolve("/admin/personal-assistant/prompts"))}
       />

@@ -72,7 +72,7 @@ export function initPromptLibrary(client) {
 
     /**
      * Delete a prompt library entry (admin only).
-     * Fails with 409 if the entry is referenced by a personal assistant policy.
+     * Fails with 409 if the entry is referenced by a personal assistant governance policy.
      * @param {Object} params
      * @param {string} params.id Entry ID
      * @throws {IntricError}

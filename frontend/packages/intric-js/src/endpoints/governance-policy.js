@@ -1,22 +1,22 @@
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
  */
-export function initPersonalAssistantPolicy(client) {
+export function initGovernancePolicy(client) {
   return {
     /**
-     * Get the tenant's personal assistant policy (auto-creates an empty one if none exists).
+     * Get the tenant's personal assistant governance policy (auto-creates an empty one if none exists).
      * Admin only.
      * @throws {IntricError}
      */
     get: async () => {
-      const res = await client.fetch("/api/v1/admin/personal-assistant-policy/", {
+      const res = await client.fetch("/api/v1/admin/governance-policy/", {
         method: "get"
       });
       return res;
     },
 
     /**
-     * Update the tenant's personal assistant policy. Only the provided
+     * Update the tenant's personal assistant governance policy. Only the provided
      * dimensions (models_restriction / mcp_restriction / prompt_enforcement)
      * are touched.
      * @param {Object} params
@@ -31,7 +31,7 @@ export function initPersonalAssistantPolicy(client) {
       if (models_restriction !== undefined) body.models_restriction = models_restriction;
       if (mcp_restriction !== undefined) body.mcp_restriction = mcp_restriction;
       if (prompt_enforcement !== undefined) body.prompt_enforcement = prompt_enforcement;
-      const res = await client.fetch("/api/v1/admin/personal-assistant-policy/", {
+      const res = await client.fetch("/api/v1/admin/governance-policy/", {
         method: "put",
         requestBody: { "application/json": body }
       });

@@ -12,6 +12,7 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { m } from "$lib/paraglide/messages";
   import { Plus, Trash2, Pencil } from "lucide-svelte";
 
   const { data } = $props();
@@ -35,9 +36,9 @@
     } catch (e) {
       const err = e as { status?: number; message?: string };
       if (err.status === 409) {
-        deleteError = "Prompten är aktiv i den personliga assistent-policyn. Avaktivera den först.";
+        deleteError = m.governance_prompts_delete_conflict();
       } else {
-        deleteError = err.message ?? "Kunde inte ta bort prompten.";
+        deleteError = err.message ?? m.governance_prompts_delete_error();
       }
     } finally {
       isDeleting = false;
@@ -46,33 +47,34 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Admin – Promptbibliotek</title>
+  <title>{m.governance_prompts_page_title()}</title>
 </svelte:head>
 
 <div class="flex-1 overflow-y-auto px-6 pt-6">
   <Settings.Page>
     <div class="mb-4 flex items-center justify-between gap-3">
       <p class="text-secondary max-w-2xl text-sm">
-        Skapa och förvalta återanvändbara prompts som kan tvingas på alla användares personliga
-        chatt via konfigurationen.
+        {m.governance_prompts_intro()}
       </p>
       <Button onclick={() => goto(resolve("/admin/personal-assistant/prompts/new"))} size="sm">
         <Plus class="mr-2 h-4 w-4" />
-        Skapa ny prompt
+        {m.governance_prompts_create()}
       </Button>
     </div>
-    <Settings.Group title="Promptmallar">
+    <Settings.Group title={m.governance_prompts_group_title()}>
       {#if data.entries.items.length === 0}
         <div
           class="border-default bg-secondary/30 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-8 py-16"
         >
-          <h3 class="text-default mb-2 text-lg font-medium">Inga prompts ännu</h3>
+          <h3 class="text-default mb-2 text-lg font-medium">
+            {m.governance_prompts_empty_title()}
+          </h3>
           <p class="text-muted mb-6 max-w-sm text-center text-sm">
-            Promptmallar kan senare delas till alla användares personliga assistent.
+            {m.governance_prompts_empty_desc()}
           </p>
           <Button onclick={() => goto(resolve("/admin/personal-assistant/prompts/new"))} size="sm">
             <Plus class="mr-2 h-4 w-4" />
-            Skapa första prompten
+            {m.governance_prompts_create_first()}
           </Button>
         </div>
       {:else}
@@ -80,10 +82,10 @@
           <Table.Root>
             <Table.Header>
               <Table.Row>
-                <Table.Head>Namn</Table.Head>
-                <Table.Head>Beskrivning</Table.Head>
-                <Table.Head>Uppdaterad</Table.Head>
-                <Table.Head class="w-32 text-right">Åtgärder</Table.Head>
+                <Table.Head>{m.name()}</Table.Head>
+                <Table.Head>{m.description()}</Table.Head>
+                <Table.Head>{m.governance_col_updated()}</Table.Head>
+                <Table.Head class="w-32 text-right">{m.actions()}</Table.Head>
               </Table.Row>
             </Table.Header>
             <Table.Body>
@@ -129,10 +131,9 @@
 >
   <Dialog.Content>
     <Dialog.Header>
-      <Dialog.Title>Ta bort prompt?</Dialog.Title>
+      <Dialog.Title>{m.governance_prompts_delete_title()}</Dialog.Title>
       <Dialog.Description>
-        Detta kan inte ångras. Om prompten är aktiv i en personlig assistent-policy måste den
-        avaktiveras där först.
+        {m.governance_prompts_delete_desc()}
       </Dialog.Description>
     </Dialog.Header>
     {#if deleteError}
@@ -140,10 +141,10 @@
     {/if}
     <Dialog.Footer>
       <Button variant="outline" onclick={() => (confirmDeleteId = null)} disabled={isDeleting}>
-        Avbryt
+        {m.cancel()}
       </Button>
       <Button variant="destructive" onclick={performDelete} disabled={isDeleting}>
-        {isDeleting ? "Tar bort..." : "Ta bort"}
+        {isDeleting ? m.governance_deleting() : m.delete()}
       </Button>
     </Dialog.Footer>
   </Dialog.Content>

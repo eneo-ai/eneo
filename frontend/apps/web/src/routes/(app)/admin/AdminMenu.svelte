@@ -45,7 +45,7 @@
     href={localizeHref("/admin/personal-assistant")}
     isActive={isSelected("/admin/personal-assistant", currentRoute)}
     icon={IconSpeechBubble}
-    label="Personlig assistent"
+    label={m.governance_title()}
   />
 
   <div class="border-default my-2 border-b-[0.5px]"></div>

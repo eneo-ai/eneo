@@ -27,7 +27,7 @@ import { initConversations } from "./endpoints/conversations";
 import { initSecurityClassifications } from "./endpoints/security-classifications";
 import { initMCPServers } from "./endpoints/mcp-servers";
 import { initPromptLibrary } from "./endpoints/prompt-library";
-import { initPersonalAssistantPolicy } from "./endpoints/personal-assistant-policy";
+import { initGovernancePolicy } from "./endpoints/governance-policy";
 import { initSettings } from "./endpoints/settings";
 import { initCredentials } from "./endpoints/credentials";
 import { initAudit } from "./endpoints/audit";
@@ -76,7 +76,7 @@ export function createIntric(args) {
     securityClassifications: initSecurityClassifications(client),
     mcpServers: initMCPServers(client),
     promptLibrary: initPromptLibrary(client),
-    personalAssistantPolicy: initPersonalAssistantPolicy(client),
+    governancePolicy: initGovernancePolicy(client),
     settings: initSettings(client),
     credentials: initCredentials(client),
     audit: initAudit(client),

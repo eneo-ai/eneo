@@ -5,10 +5,10 @@
 */
 
 export const load = async (event) => {
-  event.depends("admin:personal-assistant-policy");
+  event.depends("admin:governance-policy");
   const { intric } = await event.parent();
   const [policy, models, mcpSettings, promptLibrary, modelProviders] = await Promise.all([
-    intric.personalAssistantPolicy.get(),
+    intric.governancePolicy.get(),
     intric.models.list(),
     intric.mcpServers.listSettings(),
     intric.promptLibrary.list(),
