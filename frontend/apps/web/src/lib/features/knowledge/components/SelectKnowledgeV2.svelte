@@ -778,7 +778,7 @@
                 </div>
               {/if}
             {:else}
-              <div class="blob-item text-muted">No files found</div>
+              <div class="blob-item text-muted">{m.knowledge_no_files_found()}</div>
             {/if}
           </div>
         {/if}
@@ -1092,7 +1092,7 @@
                   </div>
                 {/if}
               {:else}
-                <div class="blob-item text-muted">No files found</div>
+                <div class="blob-item text-muted">{m.knowledge_no_files_found()}</div>
               {/if}
             </div>
           {/if}
@@ -1318,7 +1318,7 @@
           for="knowledgeFilterPersonal"
           class="text-muted pointer-events-none absolute top-0 bottom-0 left-3 flex items-center text-lg"
         >
-          Filter:
+          {m.knowledge_filter_label()}
         </label>
       </div>
     {:else}
@@ -1531,7 +1531,7 @@
           for="knowledgeFilterOrg"
           class="text-muted pointer-events-none absolute top-0 bottom-0 left-3 flex items-center text-lg"
         >
-          Filter:
+          {m.knowledge_filter_label()}
         </label>
       </div>
     {:else}

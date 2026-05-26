@@ -33,12 +33,26 @@ export default ts.config(
     ignores: ["build/", ".svelte-kit/", "dist/", "src/lib/paraglide/"]
   },
   {
-    // Block hardcoded human-facing text — every string must go through
-    // paraglide (m.*). Scoped to the personal-assistant governance admin for
-    // now; widen the glob once a given area has been fully translated.
-    files: ["src/routes/(app)/admin/personal-assistant/**/*.svelte"],
+    // Block hardcoded human-facing text — every human-facing string must go
+    // through paraglide (m.*). Enforced across the whole web app.
+    // The `ignore` patterns below allow genuinely non-translatable literals
+    // inline (brand, keyboard keys, technical identifiers). They are matched
+    // against the trimmed text, so they are position-independent — unlike
+    // inline eslint-disable comments, prettier reflowing markup cannot break
+    // them.
+    files: ["**/*.svelte"],
     rules: {
-      "intric/no-hardcoded-text": "error"
+      "intric/no-hardcoded-text": [
+        "error",
+        {
+          ignore: [
+            "Eneo\\.ai", // product brand, used in page <title>s
+            "^(sk|pk)_$", // API key type prefixes
+            "^ENEO_[A-Z_]+$", // environment variable names
+            "^(Ctrl|Enter|Shift|Alt|Cmd|Tab|Esc)$" // keyboard keys in <kbd>
+          ]
+        }
+      ]
     }
   },
   {

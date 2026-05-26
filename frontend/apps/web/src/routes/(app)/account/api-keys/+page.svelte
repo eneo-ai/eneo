@@ -189,7 +189,7 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Account – {$userInfo.firstName}</title>
+  <title>Eneo.ai – {m.account()} – {$userInfo.firstName}</title>
 </svelte:head>
 
 <Page.Root>

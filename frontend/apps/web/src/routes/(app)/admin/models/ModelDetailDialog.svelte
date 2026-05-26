@@ -268,7 +268,9 @@
             rel="noopener noreferrer"
             class="text-accent-default mt-4 inline-flex items-center gap-1.5 text-sm hover:underline"
           >
+            <!-- eslint-disable intric/no-hardcoded-text -- HuggingFace is a brand name -->
             HuggingFace
+            <!-- eslint-enable intric/no-hardcoded-text -->
             <ExternalLink size={13} aria-hidden="true" />
           </a>
           <!-- eslint-enable svelte/no-navigation-without-resolve -->

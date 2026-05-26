@@ -838,7 +838,7 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Admin – Audit Logs</title>
+  <title>Eneo.ai – {m.admin()} – {m.audit_logs()}</title>
 </svelte:head>
 
 <svelte:window onclick={handleClickOutside} />
@@ -899,7 +899,7 @@
             class="!rounded-r-none"
           >
             <IconDownload class="h-4 w-4" />
-            Export ({totalCount})
+            {m.audit_export_with_count({ count: totalCount })}
           </Button>
           <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
             <Dropdown.Trigger asFragment let:trigger>
@@ -916,11 +916,11 @@
             <Dropdown.Menu let:item>
               <Button is={item} onclick={() => exportLogs("csv")}>
                 <IconDownload size="sm"></IconDownload>
-                Download as CSV
+                {m.audit_download_csv()}
               </Button>
               <Button is={item} onclick={() => exportLogs("json")}>
                 <IconDownload size="sm"></IconDownload>
-                Download as JSON
+                {m.audit_download_json()}
               </Button>
             </Dropdown.Menu>
           </Dropdown.Root>
@@ -986,7 +986,7 @@
                 <div>
                   <h3 class="text-default text-sm font-semibold">{m.audit_retention_policy()}</h3>
                   <p class="text-muted mt-0.5 text-xs">
-                    Automatisk borttagning av gamla granskningsloggar
+                    {m.audit_retention_subtitle()}
                   </p>
                 </div>
               </div>
@@ -1074,7 +1074,7 @@
                         size="sm"
                         class="w-full text-sm font-medium"
                       >
-                        3 mån
+                        {m.audit_preset_3_months()}
                       </Button>
                       <Button
                         onclick={() => (retentionInputValue = "365")}
@@ -1082,7 +1082,7 @@
                         size="sm"
                         class="w-full text-sm font-medium"
                       >
-                        1 år
+                        {m.audit_preset_1_year()}
                       </Button>
                       <Button
                         onclick={() => (retentionInputValue = "730")}
@@ -1090,7 +1090,7 @@
                         size="sm"
                         class="w-full text-sm font-medium"
                       >
-                        2 år
+                        {m.audit_preset_2_years()}
                       </Button>
                       <Button
                         onclick={() => (retentionInputValue = "2555")}
@@ -1098,7 +1098,7 @@
                         size="sm"
                         class="w-full text-sm font-medium"
                       >
-                        7 år
+                        {m.audit_preset_7_years()}
                       </Button>
                     </div>
                   </div>
@@ -1219,7 +1219,12 @@
                     onclick={() => (showScopeDropdown = !showScopeDropdown)}
                     aria-haspopup="listbox"
                     aria-expanded={showScopeDropdown}
-                    aria-label="Search scope: {searchScope === 'entity' ? 'Entity' : 'User'}"
+                    aria-label={m.audit_search_scope_aria({
+                      scope:
+                        searchScope === "entity"
+                          ? m.audit_search_scope_entity()
+                          : m.audit_search_scope_user()
+                    })}
                     class="text-muted bg-subtle/80 border-default/40 hover:bg-hover hover:text-default hover:border-default/60 focus-visible:ring-accent-default flex h-7 items-center
                     gap-1.5 rounded-md border px-2.5
                     text-xs font-semibold transition-all
@@ -1237,7 +1242,7 @@
                   {#if showScopeDropdown}
                     <div
                       role="listbox"
-                      aria-label="Select search scope"
+                      aria-label={m.audit_select_search_scope()}
                       class="bg-primary border-default absolute top-full left-0 z-30 mt-1.5 min-w-[140px] overflow-hidden rounded-lg border py-1 shadow-lg"
                       transition:slide={{ duration: 150 }}
                     >
@@ -1323,7 +1328,7 @@
                 {#if searchScope === "user" && showUserDropdown && userSearchResults.length > 0}
                   <div
                     role="listbox"
-                    aria-label="User search results"
+                    aria-label={m.audit_user_search_results()}
                     class="border-default bg-primary absolute top-full right-0 left-0 z-20 mt-2 max-h-64 overflow-y-auto rounded-lg border shadow-xl"
                     transition:slide={{ duration: 150 }}
                   >
@@ -1359,8 +1364,8 @@
                       <div class="bg-muted/20 rounded-full p-2">
                         <IconXMark class="text-muted h-5 w-5" />
                       </div>
-                      <p class="text-muted text-sm">Inga användare hittades</p>
-                      <p class="text-muted/70 text-xs">Försök med en annan sökning</p>
+                      <p class="text-muted text-sm">{m.audit_no_users_found()}</p>
+                      <p class="text-muted/70 text-xs">{m.audit_try_different_search()}</p>
                     </div>
                   </div>
                 {/if}
@@ -1374,7 +1379,7 @@
                 <div
                   class="border-default/60 bg-subtle/50 flex h-10 flex-shrink-0 items-center overflow-hidden rounded-lg border"
                   role="group"
-                  aria-label="Quick date presets"
+                  aria-label={m.audit_quick_date_presets()}
                 >
                   <button
                     onclick={() => setDatePreset(7)}
@@ -1385,7 +1390,7 @@
                         : "text-muted hover:bg-hover hover:text-default active:scale-95"
                     }`}
                   >
-                    7d
+                    {m.audit_date_7d()}
                   </button>
                   <button
                     onclick={() => setDatePreset(30)}
@@ -1396,7 +1401,7 @@
                         : "text-muted hover:bg-hover hover:text-default active:scale-95"
                     }`}
                   >
-                    30d
+                    {m.audit_date_30d()}
                   </button>
                   <button
                     onclick={() => setDatePreset(90)}
@@ -1407,7 +1412,7 @@
                         : "text-muted hover:bg-hover hover:text-default active:scale-95"
                     }`}
                   >
-                    90d
+                    {m.audit_date_90d()}
                   </button>
                 </div>
 
@@ -1451,7 +1456,7 @@
                           <input
                             type="text"
                             bind:value={actionSearchQuery}
-                            placeholder="Sök åtgärder..."
+                            placeholder={m.audit_search_actions_placeholder()}
                             class="border-default bg-subtle text-default placeholder:text-muted focus:ring-accent-default/30 focus:border-accent-default h-8 w-full rounded-md border
                             px-3 text-sm transition-all duration-150 focus:ring-2 focus:outline-none"
                             onclick={(e) => e.stopPropagation()}
@@ -1471,7 +1476,7 @@
                               onclick={() => {
                                 selectedActions = [];
                               }}
-                              aria-label="Clear all selected actions"
+                              aria-label={m.audit_clear_selected_actions()}
                             >
                               {m.audit_clear_all()}
                             </button>
@@ -1488,7 +1493,7 @@
                           <!-- Items list -->
                           {#if filteredActionOptions.length === 0}
                             <div class="text-muted px-3 py-4 text-center text-sm">
-                              Inga åtgärder hittades
+                              {m.audit_no_actions_found()}
                             </div>
                           {:else}
                             {#each filteredActionOptions as option (option.value)}
@@ -1528,7 +1533,7 @@
                                   {option.label}
                                 </span>
                                 {#if isSelected}
-                                  <span class="sr-only">(selected)</span>
+                                  <span class="sr-only">{m.audit_option_selected()}</span>
                                 {/if}
                               </button>
                             {/each}
@@ -1557,10 +1562,10 @@
                       <div
                         class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
                       ></div>
-                      Tillämpar...
+                      {m.audit_applying()}
                     </div>
                   {:else}
-                    Tillämpa
+                    {m.audit_apply_filters()}
                   {/if}
                 </Button>
               </div>

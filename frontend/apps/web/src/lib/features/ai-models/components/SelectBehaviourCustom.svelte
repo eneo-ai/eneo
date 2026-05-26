@@ -21,7 +21,7 @@
       aria-labelledby="temperature_label"
     >
       <Tooltip text={m.temperature_tooltip()}>
-        <p class="w-24" aria-label="Temperature setting" id="temperature_label">
+        <p class="w-24" aria-label={m.model_temperature_setting()} id="temperature_label">
           {m.temperature()}
         </p>
       </Tooltip>

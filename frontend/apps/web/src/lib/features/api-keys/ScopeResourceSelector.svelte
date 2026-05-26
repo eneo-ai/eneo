@@ -166,7 +166,7 @@
               <span
                 role="button"
                 tabindex="0"
-                aria-label="Clear selection"
+                aria-label={m.clear_selection()}
                 class="hover:bg-muted text-muted-foreground hover:text-foreground rounded p-0.5 transition-colors"
                 onclick={clearSelection}
                 onkeydown={(e) => {

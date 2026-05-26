@@ -175,7 +175,7 @@
         <div class="text-muted text-center">
           {#if filterValue}
             <p class="font-medium">{m.no_results_found()}</p>
-            <p class="text-muted/70 mt-1 text-xs">Försök med en annan sökterm</p>
+            <p class="text-muted/70 mt-1 text-xs">{m.mcp_try_different_search()}</p>
           {:else}
             <p>{m.no_mcp_servers_available()}</p>
           {/if}

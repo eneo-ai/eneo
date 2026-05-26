@@ -35,7 +35,7 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Dashboard – {data.app.name}</title>
+  <title>Eneo.ai – {m.dashboard()} – {data.app.name}</title>
 </svelte:head>
 
 <div class="outer bg-primary flex w-full flex-col">

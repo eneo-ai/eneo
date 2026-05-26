@@ -260,7 +260,7 @@
   {/if}
 
   <!-- Tools list -->
-  <div class="mr-4 ml-10" role="list" aria-label="Tillgängliga verktyg">
+  <div class="mr-4 ml-10" role="list" aria-label={m.mcp_available_tools_aria()}>
     {#if tools.length === 0}
       <div
         class="border-dimmer bg-primary/30 flex flex-col items-center justify-center rounded-lg border border-dashed px-6 py-8 text-center"
@@ -302,7 +302,7 @@
               onclick={enableAllTools}
               disabled={bulkUpdating}
             >
-              Alla på
+              {m.mcp_all_on()}
             </button>
             <span class="text-dimmer">|</span>
             <button
@@ -311,7 +311,7 @@
               onclick={disableAllTools}
               disabled={bulkUpdating}
             >
-              Alla av
+              {m.mcp_all_off()}
             </button>
           </div>
         </div>
@@ -429,7 +429,8 @@
                   <Input.Switch
                     value={tool.is_enabled_by_default}
                     sideEffect={() => toggleToolEnabled(tool)}
-                    ><span class="sr-only">Aktivera {tool.name}</span></Input.Switch
+                    ><span class="sr-only">{m.mcp_activate_tool({ name: tool.name })}</span
+                    ></Input.Switch
                   >
                 </div>
               {/if}
