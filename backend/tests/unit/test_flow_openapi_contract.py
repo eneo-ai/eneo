@@ -2181,15 +2181,16 @@ def test_openapi_flow_authoring_docs_separate_draft_and_service_key_runtime(
     assert "published-flow discovery" in list_description
     assert "/published/" in list_description
     assert "runtime paths" in list_description
-    assert "Service-key runtime clients should call" in draft_description
-    assert "/published/" in draft_description
+    assert "Admin service-key principals" in draft_description
     assert "current draft definition" in draft_description
+    assert "Read and write service-key clients" in draft_description
+    assert "/published/" in draft_description
     assert "external webapps" in published_description
     assert "review checkpoints" in published_description
     assert "artifact/evidence retrieval" in published_description
 
 
-def test_openapi_get_flow_service_key_denial_points_to_published_runtime(
+def test_openapi_get_flow_service_key_admin_required_points_to_published_runtime(
     openapi_spec: dict,
 ) -> None:
     operation = _get_operation(openapi_spec, "/api/v1/flows/{id}/", "get")
@@ -2197,14 +2198,16 @@ def test_openapi_get_flow_service_key_denial_points_to_published_runtime(
     examples = (
         response.get("content", {}).get("application/json", {}).get("examples", {})
     )
-    service_key_example = examples["flow_service_key_principal_not_supported"]["value"]
+    assert "flow_service_key_principal_not_supported" not in examples
+    service_key_example = examples["service_key_admin_required"]["value"]
     context = service_key_example["context"]
     hint = context["runtime_endpoint_hint"]
 
     assert service_key_example["intric_error_code"] == 9001
-    assert service_key_example["code"] == "flow_service_key_principal_not_supported"
+    assert service_key_example["code"] == "service_key_admin_required"
     assert context["auth_layer"] == "service_key_principal"
-    assert context["capability"] == "view"
+    assert context["capability"] == "view_current_definition"
+    assert context["required_role"] == "admin"
     assert hint == {
         "key": "published_flow_runtime",
         "description": "Use the published runtime projection for service-key Flow clients.",

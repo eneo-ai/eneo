@@ -528,7 +528,7 @@ async def test_list_flows_requests_published_only_for_non_editors(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_flow_keeps_service_key_principals_human_only(monkeypatch):
+async def test_get_flow_allows_admin_service_key_principal(monkeypatch):
     container = MagicMock()
     flow_id = uuid4()
     flow = _flow(flow_id)
@@ -547,6 +547,46 @@ async def test_get_flow_keeps_service_key_principals_human_only(monkeypatch):
         "get_scope_filter",
         lambda _request: ScopeFilter(scope_type="space", space_id=flow.space_id),
     )
+    actor = _enable_space_access(
+        container, can_read=True, user_permissions=[Permission.FLOWS]
+    )
+    actor.get_current_role.return_value = SpaceRole.ADMIN
+
+    result = await definition_get_flow(
+        id=flow_id,
+        request=_request_with_published_runtime_route(),
+        container=container,
+    )
+
+    assert result.id == flow.id
+    assert result.steps[0].id == flow.steps[0].id
+    actor.can_read_flow.assert_called_once_with(flow)
+
+
+@pytest.mark.asyncio
+async def test_get_flow_requires_admin_service_key_principal(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    flow = _flow(flow_id)
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = flow
+    container.flow_service.return_value = flow_service
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[Permission.FLOWS],
+        active_api_key=_service_key(),
+    )
+
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(scope_type="space", space_id=flow.space_id),
+    )
+    actor = _enable_space_access(
+        container, can_read=True, user_permissions=[Permission.FLOWS]
+    )
+    actor.get_current_role.return_value = SpaceRole.EDITOR
 
     with pytest.raises(UnauthorizedException) as exc_info:
         await definition_get_flow(
@@ -555,9 +595,16 @@ async def test_get_flow_keeps_service_key_principals_human_only(monkeypatch):
             container=container,
         )
 
-    assert exc_info.value.code == "flow_service_key_principal_not_supported"
+    assert exc_info.value.code == "service_key_admin_required"
+    assert str(exc_info.value) == (
+        "Service-key principals require admin role to read draft definitions. "
+        "Use /api/v1/flows/{id}/published/ for runtime-safe published projections."
+    )
     context = exc_info.value.context
     assert context is not None
+    assert context["auth_layer"] == "service_key_principal"
+    assert context["capability"] == "view_current_definition"
+    assert context["required_role"] == "admin"
     hint = context["runtime_endpoint_hint"]
     assert isinstance(hint, dict)
     assert hint == {
@@ -565,6 +612,7 @@ async def test_get_flow_keeps_service_key_principals_human_only(monkeypatch):
         "description": "Use the published runtime projection for service-key Flow clients.",
         "endpoint_template": "/api/v1/flows/{id}/published/",
     }
+    actor.can_read_flow.assert_not_called()
 
 
 @pytest.mark.asyncio

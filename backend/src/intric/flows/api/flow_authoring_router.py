@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from typing import Annotated, Any, Protocol, cast
+from typing import Annotated, Any, NoReturn, Protocol, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Request, status
 
+from intric.actors.actors.space_actor import SpaceRole
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
@@ -25,7 +26,10 @@ from intric.flows.api.flow_models import (
     FlowUpdateRequest,
 )
 from intric.flows.application.flow_service import FlowService
-from intric.flows.flow_access_policy import ServiceKeyRuntimeAlternativeKey
+from intric.flows.flow_access_policy import (
+    PUBLISHED_FLOW_RUNTIME_ALTERNATIVE,
+    ServiceKeyRuntimeAlternativeKey,
+)
 from intric.flows.principal import FlowPrincipal
 from intric.main.container.container import Container
 from intric.main.exceptions import ErrorCodes, NotFoundException, UnauthorizedException
@@ -75,7 +79,41 @@ _PUBLISHED_FLOW_RUNTIME_OPERATION_ID = "get_published_flow_runtime"
 
 
 class _FlowReaderProtocol(Protocol):
+    def get_current_role(self) -> SpaceRole | None: ...
+
     def can_read_flow(self, flow: object) -> bool: ...
+
+
+_SERVICE_KEY_CURRENT_DEFINITION_ROLES = frozenset({SpaceRole.ADMIN, SpaceRole.OWNER})
+_SERVICE_KEY_ADMIN_REQUIRED_MESSAGE = (
+    "Service-key principals require admin role to read draft definitions. "
+    "Use /api/v1/flows/{id}/published/ for runtime-safe published projections."
+)
+
+
+def _raise_service_key_admin_required() -> NoReturn:
+    raise UnauthorizedException(
+        _SERVICE_KEY_ADMIN_REQUIRED_MESSAGE,
+        code="service_key_admin_required",
+        context={
+            "auth_layer": "service_key_principal",
+            "capability": "view_current_definition",
+            "required_role": SpaceRole.ADMIN.value,
+            "runtime_endpoint_hint": PUBLISHED_FLOW_RUNTIME_ALTERNATIVE.as_error_context(),
+        },
+    )
+
+
+def _ensure_service_key_can_read_current_definition(
+    *,
+    principal: FlowPrincipal,
+    actor: _FlowReaderProtocol,
+) -> None:
+    if not principal.is_service_key:
+        return
+    if actor.get_current_role() in _SERVICE_KEY_CURRENT_DEFINITION_ROLES:
+        return
+    _raise_service_key_admin_required()
 
 
 def _get_flow_service(container: Container) -> FlowService:
@@ -312,14 +350,22 @@ async def list_flows(
     operation_id="get_flow",
     summary="Get Flow",
     description=(
-        "Return the full draft representation of a flow, including all configured steps "
-        f"and metadata. {_FLOW_DRAFT_OWNERSHIP_DESCRIPTION} "
-        "This endpoint is user-principal-oriented and returns the current draft definition. "
-        "Service-key runtime clients should call `/api/v1/flows/{id}/published/` instead."
+        "Return the full current draft representation of a flow, including all configured "
+        f"steps and metadata. {_FLOW_DRAFT_OWNERSHIP_DESCRIPTION} "
+        "Admin service-key principals may read the current draft definition when their "
+        "scope covers the flow. Read and write service-key clients should call "
+        "`/api/v1/flows/{id}/published/` for runtime-safe published projections and "
+        "runtime paths."
     ),
     responses={
         403: error_response(
-            description=_FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
+            description=(
+                "Forbidden. Machine-readable codes include `insufficient_scope` when the "
+                "API key space scope does not match the flow, "
+                "`service_key_admin_required` when a non-admin service-key principal "
+                "calls the current draft definition endpoint, and "
+                "`insufficient_space_permission` when the caller cannot read the flow."
+            ),
             examples={
                 "insufficient_scope": {
                     "summary": "API key scope mismatch",
@@ -330,18 +376,16 @@ async def list_flows(
                         "context": {"auth_layer": "api_key_scope"},
                     },
                 },
-                "flow_service_key_principal_not_supported": {
-                    "summary": "Service-key principal called draft Flow endpoint",
+                "service_key_admin_required": {
+                    "summary": "Non-admin service-key principal called current draft endpoint",
                     "value": {
-                        "message": (
-                            "This Flows endpoint requires a user principal. "
-                            "Service-key principals cannot use this action."
-                        ),
+                        "message": _SERVICE_KEY_ADMIN_REQUIRED_MESSAGE,
                         "intric_error_code": int(ErrorCodes.UNAUTHORIZED),
-                        "code": "flow_service_key_principal_not_supported",
+                        "code": "service_key_admin_required",
                         "context": {
                             "auth_layer": "service_key_principal",
-                            "capability": "view",
+                            "capability": "view_current_definition",
+                            "required_role": "admin",
                             "runtime_endpoint_hint": {
                                 "key": "published_flow_runtime",
                                 "description": (
@@ -376,17 +420,28 @@ async def get_flow(
             container,
             flow_id=id,
             required_access=common.FlowApiAction.VIEW,
+            allow_service_key_principals=True,
         )
+        actor = cast(_FlowReaderProtocol | None, access_context.actor)
+        if actor is None:
+            raise UnauthorizedException(
+                "You do not have permission to access this flow.",
+                code="insufficient_space_permission",
+                context={"auth_layer": "space_membership"},
+            )
+        _ensure_service_key_can_read_current_definition(
+            principal=FlowPrincipal.from_user(container.user()),
+            actor=actor,
+        )
+        if not actor.can_read_flow(cast(Any, access_context.flow)):
+            raise UnauthorizedException(
+                "You do not have permission to access this flow.",
+                code="insufficient_space_permission",
+                context={"auth_layer": "space_membership"},
+            )
     except UnauthorizedException as exc:
         raise _with_published_runtime_endpoint_hint(request, exc) from exc
     assembler = FlowAssembler()
-    actor = cast(_FlowReaderProtocol | None, access_context.actor)
-    if actor is None or not actor.can_read_flow(cast(Any, access_context.flow)):
-        raise UnauthorizedException(
-            "You do not have permission to access this flow.",
-            code="insufficient_space_permission",
-            context={"auth_layer": "space_membership"},
-        )
 
     return assembler.to_public(access_context.flow)
 

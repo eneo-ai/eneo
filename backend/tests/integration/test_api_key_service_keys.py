@@ -17,6 +17,9 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from intric.database.tables.roles_table import Roles
+from intric.database.tables.users_table import users_roles_table
+from intric.roles.permissions import Permission
 from intric.users.user import UserAdd, UserState
 
 # ---------------------------------------------------------------------------
@@ -38,6 +41,37 @@ async def default_user_token(db_container, patch_auth_service_jwt, default_user)
         auth_service = container.auth_service()
         token = auth_service.create_access_token_for_user(default_user)
     return token
+
+
+@pytest.fixture
+async def flow_admin_token(db_container, patch_auth_service_jwt, default_user):
+    _ = patch_auth_service_jwt
+    async with db_container() as container:
+        session = container.session()
+        user_repo = container.user_repo()
+        auth_service = container.auth_service()
+
+        role = Roles(
+            name=f"Flow Service Key Test {uuid4().hex[:8]}",
+            permissions=[
+                Permission.FLOWS_MANAGE.value,
+                Permission.FLOWS_RUN.value,
+                Permission.FLOWS_TRACE.value,
+            ],
+            tenant_id=default_user.tenant_id,
+        )
+        session.add(role)
+        await session.flush()
+        await session.execute(
+            sa.insert(users_roles_table).values(
+                user_id=default_user.id,
+                role_id=role.id,
+            )
+        )
+        await session.flush()
+
+        refreshed_user = await user_repo.get_user_by_email(default_user.email)
+        return auth_service.create_access_token_for_user(refreshed_user)
 
 
 @pytest.fixture
@@ -194,6 +228,21 @@ async def _remove_space_member(db_container, space_id: str, user_id: UUID):
             {"sid": space_id, "uid": str(user_id)},
         )
         await session.commit()
+
+
+def _assert_service_key_admin_required(response) -> None:
+    assert response.status_code == 403, response.text
+    body = response.json()
+    assert body["code"] == "service_key_admin_required"
+    context = body["context"]
+    assert context["auth_layer"] == "service_key_principal"
+    assert context["capability"] == "view_current_definition"
+    assert context["required_role"] == "admin"
+    assert context["runtime_endpoint_hint"] == {
+        "key": "published_flow_runtime",
+        "description": "Use the published runtime projection for service-key Flow clients.",
+        "endpoint_template": "/api/v1/flows/{id}/published/",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -587,26 +636,26 @@ async def test_service_key_survives_member_removal(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_service_key_space_scoped_lists_only_published_flows(
-    client, default_user_token
+    client, flow_admin_token
 ):
-    space_id = await _create_space(client, token=default_user_token)
+    space_id = await _create_space(client, token=flow_admin_token)
     published_flow_id = await _create_flow(
         client,
-        token=default_user_token,
+        token=flow_admin_token,
         space_id=space_id,
         name=f"published-flow-{uuid4().hex[:8]}",
     )
-    await _publish_flow(client, token=default_user_token, flow_id=published_flow_id)
+    await _publish_flow(client, token=flow_admin_token, flow_id=published_flow_id)
     await _create_flow(
         client,
-        token=default_user_token,
+        token=flow_admin_token,
         space_id=space_id,
         name=f"draft-flow-{uuid4().hex[:8]}",
     )
 
     resp = await _create_service_key(
         client,
-        token=default_user_token,
+        token=flow_admin_token,
         scope_type="space",
         scope_id=space_id,
         permission="read",
@@ -625,22 +674,105 @@ async def test_service_key_space_scoped_lists_only_published_flows(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_service_key_space_scoped_published_runtime_surfaces_work_and_ai_builder_stays_denied(
-    client, default_user_token
+async def test_service_key_direct_flow_get_requires_admin_and_preserves_runtime_projection(
+    client, flow_admin_token
 ):
-    space_id = await _create_space(client, token=default_user_token)
+    space_id = await _create_space(client, token=flow_admin_token)
+    published_flow_id = await _create_flow(
+        client,
+        token=flow_admin_token,
+        space_id=space_id,
+        name=f"direct-published-flow-{uuid4().hex[:8]}",
+    )
+    await _publish_flow(client, token=flow_admin_token, flow_id=published_flow_id)
+    draft_flow_id = await _create_flow(
+        client,
+        token=flow_admin_token,
+        space_id=space_id,
+        name=f"direct-draft-flow-{uuid4().hex[:8]}",
+    )
+
+    read_resp = await _create_service_key(
+        client,
+        token=flow_admin_token,
+        scope_type="space",
+        scope_id=space_id,
+        permission="read",
+    )
+    assert read_resp.status_code == 201, read_resp.text
+    read_secret = read_resp.json()["secret"]
+
+    expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    admin_resp = await _create_service_key(
+        client,
+        token=flow_admin_token,
+        scope_type="space",
+        scope_id=space_id,
+        permission="admin",
+        expires_at=expires,
+    )
+    assert admin_resp.status_code == 201, admin_resp.text
+    admin_secret = admin_resp.json()["secret"]
+
+    admin_published = await client.get(
+        f"/api/v1/flows/{published_flow_id}/",
+        headers={"X-API-Key": admin_secret},
+    )
+    assert admin_published.status_code == 200, admin_published.text
+    assert admin_published.json()["id"] == published_flow_id
+
+    admin_draft = await client.get(
+        f"/api/v1/flows/{draft_flow_id}/",
+        headers={"X-API-Key": admin_secret},
+    )
+    assert admin_draft.status_code == 200, admin_draft.text
+    assert admin_draft.json()["id"] == draft_flow_id
+    assert admin_draft.json()["published_version"] is None
+
+    read_published_direct = await client.get(
+        f"/api/v1/flows/{published_flow_id}/",
+        headers={"X-API-Key": read_secret},
+    )
+    _assert_service_key_admin_required(read_published_direct)
+
+    read_published_runtime = await client.get(
+        f"/api/v1/flows/{published_flow_id}/published/",
+        headers={"X-API-Key": read_secret},
+    )
+    assert read_published_runtime.status_code == 200, read_published_runtime.text
+    assert read_published_runtime.json()["id"] == published_flow_id
+
+    read_draft_direct = await client.get(
+        f"/api/v1/flows/{draft_flow_id}/",
+        headers={"X-API-Key": read_secret},
+    )
+    _assert_service_key_admin_required(read_draft_direct)
+
+    read_draft_runtime = await client.get(
+        f"/api/v1/flows/{draft_flow_id}/published/",
+        headers={"X-API-Key": read_secret},
+    )
+    assert read_draft_runtime.status_code == 404, read_draft_runtime.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_service_key_space_scoped_published_runtime_surfaces_work_and_ai_builder_stays_denied(
+    client, flow_admin_token
+):
+    space_id = await _create_space(client, token=flow_admin_token)
     flow_id = await _create_flow(
         client,
-        token=default_user_token,
+        token=flow_admin_token,
         space_id=space_id,
         name=f"runtime-flow-{uuid4().hex[:8]}",
     )
-    await _publish_flow(client, token=default_user_token, flow_id=flow_id)
+    await _publish_flow(client, token=flow_admin_token, flow_id=flow_id)
 
     expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
     resp = await _create_service_key(
         client,
-        token=default_user_token,
+        token=flow_admin_token,
         scope_type="space",
         scope_id=space_id,
         permission="admin",
@@ -687,7 +819,7 @@ async def test_service_key_space_scoped_published_runtime_surfaces_work_and_ai_b
     human_run_resp = await client.post(
         f"/api/v1/flows/{flow_id}/runs/",
         json={"input_payload_json": {"text": "hello from human"}},
-        headers={"Authorization": f"Bearer {default_user_token}"},
+        headers={"Authorization": f"Bearer {flow_admin_token}"},
     )
     assert human_run_resp.status_code == 201, human_run_resp.text
     human_run_id = human_run_resp.json()["id"]
@@ -707,18 +839,18 @@ async def test_service_key_space_scoped_published_runtime_surfaces_work_and_ai_b
         headers={"X-API-Key": secret},
     )
     assert ai_builder_resp.status_code == 403, ai_builder_resp.text
-    assert ai_builder_resp.json()["code"] == "flow_service_key_principal_not_supported"
+    assert ai_builder_resp.json()["code"] == "insufficient_space_permission"
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_service_key_runtime_projection_hides_unpublished_flow(
-    client, default_user_token
+    client, flow_admin_token
 ):
-    space_id = await _create_space(client, token=default_user_token)
+    space_id = await _create_space(client, token=flow_admin_token)
     flow_id = await _create_flow(
         client,
-        token=default_user_token,
+        token=flow_admin_token,
         space_id=space_id,
         name=f"draft-only-flow-{uuid4().hex[:8]}",
     )
@@ -726,7 +858,7 @@ async def test_service_key_runtime_projection_hides_unpublished_flow(
     expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
     resp = await _create_service_key(
         client,
-        token=default_user_token,
+        token=flow_admin_token,
         scope_type="space",
         scope_id=space_id,
         permission="admin",

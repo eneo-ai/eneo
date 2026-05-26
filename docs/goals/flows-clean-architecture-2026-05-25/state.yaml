@@ -2378,6 +2378,111 @@ tasks:
       - "The plan would create a parallel step identity implementation instead of reusing/deepening the published snapshot and FlowStep owners."
     receipt: null
 
+  - id: T031
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Allow admin service-key principals to read direct current Flow definitions while preserving /published/ as the runtime-safe projection for read/write service-key clients."
+    allowed_files:
+      - "backend/src/intric/flows/api/flow_authoring_router.py"
+      - "backend/tests/unittests/flows/test_flow_router_crud.py"
+      - "backend/tests/integration/test_api_key_service_keys.py"
+      - "backend/tests/unit/test_flow_openapi_contract.py"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Do not use or echo owner-provided API keys."
+      - "Do not edit service-key identity, review/rerun/resume policy, retention, schema migrations, webhook outbox, global auth, or Flow AI Builder source."
+      - "Preserve /published/ as the service-key-safe runtime projection owner."
+      - "Do not merge from develop; compare only."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_router_crud.py::test_get_flow_allows_admin_service_key_principal tests/unittests/flows/test_flow_router_crud.py::test_get_flow_requires_admin_service_key_principal tests/unit/test_flow_openapi_contract.py::test_openapi_flow_authoring_docs_separate_draft_and_service_key_runtime tests/unit/test_flow_openapi_contract.py::test_openapi_get_flow_service_key_admin_required_points_to_published_runtime -q"
+      - "cd backend && uv run pytest tests/integration/test_api_key_service_keys.py::test_service_key_space_scoped_lists_only_published_flows tests/integration/test_api_key_service_keys.py::test_service_key_direct_flow_get_requires_admin_and_preserves_runtime_projection tests/integration/test_api_key_service_keys.py::test_service_key_space_scoped_published_runtime_surfaces_work_and_ai_builder_stays_denied tests/integration/test_api_key_service_keys.py::test_service_key_runtime_projection_hides_unpublished_flow -q"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_router_crud.py tests/unittests/flows/test_flow_scope_errors.py tests/unit/test_flow_openapi_contract.py tests/integration/test_api_key_service_keys.py -q"
+      - "cd backend && uv run ruff check src/intric/flows/api/flow_authoring_router.py tests/unittests/flows/test_flow_router_crud.py tests/unittests/flows/test_flow_scope_errors.py tests/unit/test_flow_openapi_contract.py tests/integration/test_api_key_service_keys.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/api/flow_authoring_router.py tests/unittests/flows/test_flow_router_crud.py tests/unittests/flows/test_flow_scope_errors.py tests/unit/test_flow_openapi_contract.py tests/integration/test_api_key_service_keys.py"
+      - "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/api/flow_authoring_router.py tests/unittests/flows/test_flow_router_crud.py tests/unittests/flows/test_flow_scope_errors.py tests/unit/test_flow_openapi_contract.py tests/integration/test_api_key_service_keys.py"
+      - "git diff --check"
+    stop_if:
+      - "The fix requires changing service-key identity, review/rerun/resume behavior, retention, schema migrations, webhook outbox, global auth, or Flow AI Builder source."
+      - "The direct GET route would expose current draft definitions to read/write service-key clients."
+      - "The policy would make /published/ a duplicate or fallback instead of the canonical runtime projection owner."
+    consolidation_effect:
+      reused_existing_owner: "flow_authoring_router.get_flow remains the direct current-definition route owner; FlowActionRequirement remains the generic service-key VIEW opt-in owner; SpaceActor.get_current_role remains the service-key permission-to-space-role owner; PUBLISHED_FLOW_RUNTIME_ALTERNATIVE remains the published runtime hint owner."
+      logic_moved_from: "None."
+      logic_deleted: "The old direct-GET OpenAPI service-key example that documented flow_service_key_principal_not_supported for all service-key principals."
+      duplicate_path_removed: "None; direct GET and /published/ remain distinct owners for current definition and runtime projection."
+      new_code_added: "A route-local admin/owner role guard and service_key_admin_required error contract for service-key current-definition reads, plus behavior/OpenAPI/integration tests."
+      why_existing_owners_were_insufficient: "The generic VIEW policy can only decide whether a route may opt into service keys; it cannot know that this specific response exposes current draft definitions and therefore must require admin while read/write clients use /published/."
+      guard_preventing_duplicate_logic_from_returning: "Unit, OpenAPI, and integration tests assert admin service-key direct GET succeeds, non-admin service-key direct GET fails before can_read_flow with service_key_admin_required, and read service-key clients still use /published/ for published flows."
+      net_flow_logic_surface_area: "preserved"
+      if_increased_why: ""
+    receipt:
+      result: done
+      completed_at: "2026-05-26T06:12:00+02:00"
+      summary: "Changed GET /api/v1/flows/{id}/ from service-key fail-closed to admin-service-key current-definition access. Read/write service keys still get service_key_admin_required with a /published/ runtime hint and must use the published runtime projection. No service-key identity, review/rerun/resume, retention, schema, webhook, global auth, Flow AI Builder source, or runtime-contract behavior changed."
+      evidence:
+        - "backend/src/intric/flows/api/flow_authoring_router.py:82-115 adds the route-local service-key current-definition role guard and typed service_key_admin_required denial."
+        - "backend/src/intric/flows/api/flow_authoring_router.py:354-410 updates GET /flows/{id}/ OpenAPI description and 403 examples."
+        - "backend/src/intric/flows/api/flow_authoring_router.py:418-446 opts direct GET into service-key VIEW and applies the admin guard before can_read_flow."
+        - "backend/src/intric/flows/flow_access_policy.py:83-89 already allows VIEW service keys when a route explicitly opts in and owns the published-runtime hint."
+        - "backend/src/intric/actors/actors/space_actor.py:494-543 maps service-key read/write/admin to viewer/editor/admin roles."
+        - "backend/src/intric/flows/ai_builder/ai_builder_router.py:154-167 and backend/src/intric/flows/ai_builder/ai_builder_error_contract.py:597-609 explain why the stale AI Builder assertion maps raw service-key denial to insufficient_space_permission through the AI Builder adapter."
+      commands:
+        - command: "git rev-parse origin/develop && git ls-remote origin refs/heads/develop"
+          status: "pass"
+          output: "Both reported 6c43e95c48982e5f56d66466d59c8d008d400737; no fetch/merge/switch was needed."
+        - command: "git diff --stat HEAD..origin/develop -- backend/src/intric/flows backend/tests/unittests/flows backend/tests/integration/test_api_key_service_keys.py backend/tests/unit/test_flow_openapi_contract.py"
+          status: "pass"
+          output: "origin/develop differs by large Flow deletions; no small direct service-key Flow GET fix to merge."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_router_crud.py::test_get_flow_allows_admin_service_key_principal tests/unittests/flows/test_flow_router_crud.py::test_get_flow_requires_admin_service_key_principal tests/unit/test_flow_openapi_contract.py::test_openapi_flow_authoring_docs_separate_draft_and_service_key_runtime tests/unit/test_flow_openapi_contract.py::test_openapi_get_flow_service_key_admin_required_points_to_published_runtime -q"
+          status: "fail_expected_red"
+          output: "4 failed before implementation because direct GET still rejected service-key principals and OpenAPI still documented flow_service_key_principal_not_supported."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_router_crud.py::test_get_flow_allows_admin_service_key_principal tests/unittests/flows/test_flow_router_crud.py::test_get_flow_requires_admin_service_key_principal tests/unit/test_flow_openapi_contract.py::test_openapi_flow_authoring_docs_separate_draft_and_service_key_runtime tests/unit/test_flow_openapi_contract.py::test_openapi_get_flow_service_key_admin_required_points_to_published_runtime -q"
+          status: "pass"
+          output: "4 passed, 15 warnings."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_router_crud.py tests/unittests/flows/test_flow_scope_errors.py tests/unit/test_flow_openapi_contract.py tests/integration/test_api_key_service_keys.py -q"
+          status: "fail_intermediate"
+          output: "4 integration tests initially failed because the default integration user token lacked Flow manage permission before the Flow-specific test fixture was aligned."
+        - command: "cd backend && uv run pytest tests/integration/test_api_key_service_keys.py::test_service_key_space_scoped_lists_only_published_flows tests/integration/test_api_key_service_keys.py::test_service_key_direct_flow_get_requires_admin_and_preserves_runtime_projection tests/integration/test_api_key_service_keys.py::test_service_key_space_scoped_published_runtime_surfaces_work_and_ai_builder_stays_denied tests/integration/test_api_key_service_keys.py::test_service_key_runtime_projection_hides_unpublished_flow -q"
+          status: "pass"
+          output: "4 passed, 16 warnings."
+        - command: "cd backend && uv run pytest tests/unittests/flows/test_flow_router_crud.py tests/unittests/flows/test_flow_scope_errors.py tests/unit/test_flow_openapi_contract.py tests/integration/test_api_key_service_keys.py -q"
+          status: "pass"
+          output: "125 passed, 22 warnings."
+        - command: "cd backend && uv run ruff check src/intric/flows/api/flow_authoring_router.py tests/unittests/flows/test_flow_router_crud.py tests/unittests/flows/test_flow_scope_errors.py tests/unit/test_flow_openapi_contract.py tests/integration/test_api_key_service_keys.py"
+          status: "pass"
+          output: "All checks passed."
+        - command: "cd backend && uv run ruff format --check src/intric/flows/api/flow_authoring_router.py tests/unittests/flows/test_flow_router_crud.py tests/unittests/flows/test_flow_scope_errors.py tests/unit/test_flow_openapi_contract.py tests/integration/test_api_key_service_keys.py"
+          status: "fail_intermediate"
+          output: "test_flow_router_crud.py needed formatting before ruff format was applied."
+        - command: "cd backend && uv run ruff format tests/unittests/flows/test_flow_router_crud.py"
+          status: "pass"
+          output: "1 file reformatted."
+        - command: "cd backend && uv run ruff format --check src/intric/flows/api/flow_authoring_router.py tests/unittests/flows/test_flow_router_crud.py tests/unittests/flows/test_flow_scope_errors.py tests/unit/test_flow_openapi_contract.py tests/integration/test_api_key_service_keys.py"
+          status: "pass"
+          output: "5 files already formatted."
+        - command: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run pyright src/intric/flows/api/flow_authoring_router.py tests/unittests/flows/test_flow_router_crud.py tests/unittests/flows/test_flow_scope_errors.py tests/unit/test_flow_openapi_contract.py tests/integration/test_api_key_service_keys.py"
+          status: "pass"
+          output: "0 errors, 0 warnings, 0 informations."
+        - command: "git diff --check"
+          status: "pass"
+      peer_review:
+        claude:
+          status: "pass"
+          artifact: ".codex/artifacts/claude-peer-loop-service-key-direct-flow-get-implementation-review-20260526T035711Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8. Asked that the AI Builder assertion alignment be documented in the commit/receipt."
+        antigravity:
+          status: "pass"
+          artifact: ".codex/artifacts/antigravity-peer-loop-service-key-direct-flow-get-antigravity-synthesis-20260526T040000Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8. Verified the AI Builder assertion alignment is expected adapter coercion, not source behavior changed in this slice."
+      notes:
+        - "The owner-provided API keys were not used, echoed, staged, or committed; integration-generated service keys were used instead."
+        - "Direct GET now supports admin service keys for current definitions because the owner changed the product expectation after T026-T029; read/write service-key API consumers still use /published/ for runtime-safe projections."
+        - "Flow AI Builder source remains unchanged; its service-key session denial currently surfaces as insufficient_space_permission because AI Builder coerces unsupported raw Flow auth codes into its own public error enum."
+        - "Follow-up candidate: a separate read-only Scout/Judge can decide whether AI Builder should expose a more specific service-key public denial code; not part of this Flow proper slice."
+      next_task: T030
+
   - id: T999
     type: judge
     assignee: Judge
