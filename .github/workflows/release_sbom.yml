@@ -1,0 +1,190 @@
+name: Release SBOM
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to scan, for example v2.0.0-rc.2
+        required: true
+        type: string
+      upload_release_assets:
+        description: Attach generated SBOMs to the GitHub release
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  packages: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  BACKEND_IMAGE: ghcr.io/eneo-ai/eneo-backend
+  FRONTEND_IMAGE: ghcr.io/eneo-ai/eneo-frontend
+  PLATFORM: linux/amd64
+  PLATFORM_OS: linux
+  PLATFORM_ARCH: amd64
+  SYFT_VERSION: v1.44.0
+
+jobs:
+  release-sbom:
+    name: Release SBOM
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve release inputs
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          WORKFLOW_UPLOAD_RELEASE_ASSETS: ${{ inputs.upload_release_assets || false }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$RELEASE_TAG" ]]; then
+            echo "::error::Release tag is required."
+            exit 1
+          fi
+
+          if [[ "$RELEASE_TAG" != v* ]]; then
+            echo "::error::Release tag '$RELEASE_TAG' must start with v."
+            exit 1
+          fi
+
+          upload_release_assets="false"
+          if [[ "$EVENT_NAME" == "release" || "$WORKFLOW_UPLOAD_RELEASE_ASSETS" == "true" ]]; then
+            upload_release_assets="true"
+          fi
+
+          {
+            echo "tag=$RELEASE_TAG"
+            echo "image-tag=${RELEASE_TAG#v}"
+            echo "upload-release-assets=$upload_release_assets"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download Syft
+        id: syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          syft-version: ${{ env.SYFT_VERSION }}
+
+      - name: Generate image SBOMs
+        env:
+          SYFT_CMD: ${{ steps.syft.outputs.cmd }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          IMAGE_TAG: ${{ steps.release.outputs.image-tag }}
+        run: |
+          set -euo pipefail
+
+          out_dir="release-sbom"
+          mkdir -p "$out_dir"
+          : > "$out_dir/IMAGE-DIGESTS.txt"
+
+          resolve_platform_digest() {
+            local image_ref="$1"
+            local raw_manifest
+            local digest
+
+            for attempt in {1..60}; do
+              if raw_manifest="$(docker buildx imagetools inspect "$image_ref" --raw 2>/tmp/image-inspect-error.log)"; then
+                digest="$(jq -r --arg os "$PLATFORM_OS" --arg arch "$PLATFORM_ARCH" '
+                  [.manifests[]?
+                    | select(.platform.os == $os and .platform.architecture == $arch)
+                    | .digest][0] // empty
+                ' <<< "$raw_manifest")"
+
+                if [[ -n "$digest" ]]; then
+                  echo "$digest"
+                  return 0
+                fi
+
+                echo "::error::Image $image_ref does not expose a $PLATFORM platform manifest." >&2
+                return 1
+              fi
+
+              if [[ "$attempt" -eq 60 ]]; then
+                echo "::error::Image $image_ref was not available for $PLATFORM after waiting." >&2
+                cat /tmp/image-inspect-error.log >&2 || true
+                return 1
+              fi
+
+              sleep 30
+            done
+          }
+
+          generate_component_sbom() {
+            local component="$1"
+            local image="$2"
+            local image_ref="$image:$IMAGE_TAG"
+            local digest
+            local digest_ref
+            local asset_prefix
+
+            digest="$(resolve_platform_digest "$image_ref")"
+            digest_ref="$image@$digest"
+            asset_prefix="eneo-${component}-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}"
+
+            printf '%s %s %s\n' "$component" "$image_ref" "$digest_ref" >> "$out_dir/IMAGE-DIGESTS.txt"
+
+            "$SYFT_CMD" "registry:$digest_ref" \
+              --platform "$PLATFORM" \
+              -q \
+              -o "cyclonedx-json=$out_dir/${asset_prefix}.cyclonedx.json" \
+              -o "spdx-json=$out_dir/${asset_prefix}.spdx.json" \
+              -o "syft-table=$out_dir/${asset_prefix}.table.txt"
+          }
+
+          generate_component_sbom "backend" "$BACKEND_IMAGE"
+          generate_component_sbom "frontend" "$FRONTEND_IMAGE"
+
+          (
+            cd "$out_dir"
+            sha256sum -- IMAGE-DIGESTS.txt *.cyclonedx.json *.spdx.json *.table.txt > SBOM-SHA256SUMS.txt
+          )
+
+          {
+            echo "## Release SBOMs"
+            echo ""
+            echo "Generated SBOMs for \`$RELEASE_TAG\` from \`$PLATFORM\` image digests."
+            echo ""
+            echo "| Component | Image tag | Image digest |"
+            echo "| --- | --- | --- |"
+            while read -r component image_ref digest_ref; do
+              echo "| $component | \`$image_ref\` | \`$digest_ref\` |"
+            done < "$out_dir/IMAGE-DIGESTS.txt"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-sbom-${{ steps.release.outputs.tag }}
+          path: release-sbom/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attach SBOMs to GitHub release
+        if: steps.release.outputs.upload-release-assets == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          gh release upload "$RELEASE_TAG" release-sbom/* --repo "$GITHUB_REPOSITORY"
