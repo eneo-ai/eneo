@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T094
+active_task: T095
 
 tasks:
   - id: T001
@@ -9111,7 +9111,7 @@ tasks:
   - id: T094
     type: scout
     assignee: Scout
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Recheck T014 DB/schema preflight with Docker/Postgres available and collect read-only catalog/data/EXPLAIN evidence."
     inputs:
@@ -9146,6 +9146,158 @@ tasks:
       - "Read-only checks reveal violating data requiring human/product/data decision before implementation."
       - "A safe Worker cannot be narrowed below multiple unrelated schema/index/FK changes."
       - "The next step would require retention, service-key identity/review/rerun, broad tenant-hardening, Flow AI Builder cleanup, or final architecture docs."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T23:05:22+02:00"
+      summary: "Rechecked T014 with Docker/Postgres available. DB/catalog evidence supports a Judge for one narrow candidate, the published-version pointer invariant, because flows.published_version has zero orphaned pointers and flow_versions has a unique/primary key on (flow_id, version). Other T014 sub-scopes are not ready: files.user_id has live/source/caller compatibility questions, stale queued/running index work is not justified by current data and one running query cannot be planned because the local DB is behind current source migrations, and tenant FK work should not broaden beyond already-present runtime composite constraints."
+      skills_used:
+        - "complexity-optimizer: used to require current data shape and measured query-plan evidence before index optimization."
+        - "supabase-postgres-best-practices: used for WHERE/JOIN and partial-index evidence requirements."
+        - "sqlalchemy-alembic-expert-best-practices-code-review: used for concurrent-index and NOT VALID/validation-split migration posture."
+      docker_postgres:
+        available: true
+        evidence:
+          - "docker ps showed eneo-41ae93-db-1, eneo-41ae93-eneo-1, eneo-41ae93-redis-1, and eneo-41ae93-celery-worker-flows-1 running."
+          - "docker exec eneo-41ae93-db-1 pg_isready -U postgres -d postgres returned accepting connections."
+          - "psql current_database/current_user/table count returned postgres|postgres|108."
+          - "App container has /workspace/backend mounted; uv/alembic CLI was not available there, so catalog checks used psql directly."
+      published_pointer_fk:
+        classification: "judge_next"
+        source_evidence:
+          - "backend/src/intric/database/tables/flow_tables.py:141-181 defines flows.published_version as nullable integer with no FK."
+          - "backend/src/intric/database/tables/flow_tables.py:326-348 defines flow_versions with primary key/unique key on flow_id/version and tenant linkage."
+        db_evidence:
+          - "flows.published_version is nullable integer with no default."
+          - "flows has no FK involving published_version."
+          - "flow_versions constraints include uq_flow_versions_flow_version as PRIMARY KEY (flow_id, version)."
+          - "flow_versions indexes include uq_flow_versions_flow_version on (flow_id, version)."
+          - "flows_total=439; flows_with_published_version=196; orphaned_published_version_pointers=0."
+        feasibility_notes:
+          - "A narrow migration can likely add a FK from flows(id, published_version) to flow_versions(flow_id, version), but delete/circular-reference behavior must be designed explicitly because flow_versions also references flows."
+          - "Use Alembic/Postgres best practice: create the FK NOT VALID first and validate separately or in a lock-conscious step; Judge must decide whether row counts justify same-slice validation."
+          - "Full Claude plan gate is required before any Worker implementation."
+      files_user_id_drift:
+        classification: "needs_preflight"
+        source_evidence:
+          - "backend/src/intric/database/tables/files_table.py:24-38 declares files.user_id with ON DELETE SET NULL while owner_user_id/owner_api_key_id are typed owner fields."
+          - "backend/alembic/versions/20260411_flow_run_identity_and_idempotency.py:126-185 added typed file owner identity while preserving files.user_id."
+          - "backend/src/intric/files/file_service.py:236-242 still writes user_id from _owner_user_id for user-owned files."
+          - "backend/src/intric/files/file_service.py:244-250 still falls back to file.user_id when owner_type is missing."
+          - "backend/src/intric/files/file_repo.py:25-33 keeps get_list_by_id_and_user as a user-owner compatibility method, implemented through owner_user_id."
+          - "backend/src/intric/flows/flow_run_step_inputs.py:170-183 and backend/src/intric/flows/runtime/input_files.py:42-50 still route human-owned runtime files through get_list_by_id_and_user."
+          - "backend/tests/unittests/files/test_file_service.py:71 and :115 assert the legacy user_id write."
+        db_evidence:
+          - "Live DB has files_users_fkey as FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, which differs from current source model ON DELETE SET NULL."
+          - "files total=170; user_id non-null=162; owner_user_id non-null=162; owner_api_key_id non-null=8."
+          - "legacy_only_user_id=0; typed_user_without_legacy_user_id=0; user_owner_legacy_mismatch=0; service_key_rows_with_legacy_user_id=0; no_typed_owner=0."
+          - "files indexes are only files_pkey and ix_files_checksum; no user/owner index exists."
+        recommendation: "Do not include files.user_id in the first T014 Worker; it needs a separate Judge because live FK behavior differs from source and tests/callers still preserve legacy user_id."
+      queued_stale_indexes:
+        classification: "reject_worker_now"
+        source_evidence:
+          - "backend/src/intric/flows/infrastructure/flow_run_repo.py:1617-1640 lists stale queued runs by tenant_id, status='queued', updated_at <= stale_before, ordered by updated_at."
+          - "backend/src/intric/flows/infrastructure/flow_run_repo.py:1642-1668 lists stale running runs and excludes pending flow_run_webhook_deliveries."
+          - "backend/src/intric/flows/infrastructure/flow_run_repo.py:1670-1693 claims stale queued runs by id/tenant/status/updated_at."
+          - "backend/src/intric/database/tables/flow_tables.py:687-692 defines ix_flow_runs_running_updated_at on (status, updated_at) where status='running'."
+        db_evidence:
+          - "flow_runs total=81; statuses are completed=61, failed=9, cancelled=11; queued=0 and running=0."
+          - "flow_runs indexes include ix_flow_runs_status, ix_flow_runs_tenant_id, ix_flow_runs_tenant_created_at, ix_flow_runs_flow_id_status, and ix_flow_runs_running_updated_at."
+          - "EXPLAIN ANALYZE for stale queued used ix_flow_runs_status and completed in about 0.039 ms on current data."
+          - "EXPLAIN for stale queued claim used ix_flow_runs_status with id/tenant/updated_at filters."
+          - "EXPLAIN for stale running failed because flow_run_webhook_deliveries does not exist in the local DB."
+          - "alembic_version is 20260522_builder_lock; source has later 20260526_flow_step_identity and 20260526_flow_webhook_deliveries migrations."
+        recommendation: "Do not add queued/stale indexes now; current data and plans do not justify them, and running-query evidence requires DB at current migration head."
+      tenant_fks:
+        classification: "keep_temporarily"
+        db_evidence:
+          - "flow_runs has fk_flow_runs_flow_tenant and fk_flow_runs_flow_version plus id/tenant and id/flow unique keys."
+          - "flow_step_results and flow_step_attempts have run_tenant and run_flow composite FKs to flow_runs."
+          - "flow_run_review_checkpoints and flow_run_rerun_operations have run_tenant and run_flow composite FKs to flow_runs."
+          - "flow_run_webhook_deliveries and flow_run_files are absent in this local DB; source defines webhook delivery table and migration, but DB is not at that migration."
+        recommendation: "Do not propose broad tenant-hardening. Any tenant FK Worker must be exact and source/data-backed; current evidence does not justify one."
+      commands:
+        - cmd: "watchdog check"
+          status: pass
+          output: "schema_version=1 status=ok halt_blockers=[]"
+        - cmd: "docker ps --format '{{.Names}}\\t{{.Status}}'"
+          status: pass
+          output: "db/app/redis/flow-worker containers running."
+        - cmd: "docker exec eneo-41ae93-db-1 pg_isready -U postgres -d postgres"
+          status: pass
+          output: "accepting connections"
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql ... current_database/current_user/table count"
+          status: pass
+          output: "postgres|postgres|108"
+        - cmd: "docker exec eneo-41ae93-eneo-1 bash -lc 'test -d /workspace/backend'"
+          status: pass
+          output: "backend-ok"
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql ... published pointer columns/flow_versions constraints/indexes/orphan count"
+          status: pass
+          output: "orphaned_published_version_pointers=0"
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql ... files constraints/counts/indexes"
+          status: pass
+          output: "files_users_fkey ON DELETE CASCADE; no owner mismatch; no typed owner gaps."
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql ... flow_runs indexes/status distribution/stale queued EXPLAIN"
+          status: pass
+          output: "81 flow_runs; 0 queued/running; stale queued query uses ix_flow_runs_status; execution about 0.039 ms."
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql ... stale running EXPLAIN"
+          status: fail
+          output: "flow_run_webhook_deliveries relation does not exist; DB is behind source migrations."
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql ... runtime table constraints/indexes"
+          status: pass
+          output: "flow_runs/results/attempts/review/rerun have tenant/run composite constraints; webhook delivery table absent."
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql ... alembic_version"
+          status: pass
+          output: "20260522_builder_lock"
+        - cmd: "docker exec eneo-41ae93-eneo-1 bash -lc 'cd /workspace/backend && uv run alembic current'"
+          status: fail
+          output: "uv not found in app container."
+        - cmd: "rg/nl source reads for flow_tables.py, files_table.py, file_service.py, file_repo.py, flow_run_repo.py, flow_run_step_inputs.py, runtime/input_files.py, and relevant Alembic migrations"
+          status: pass
+      next_recommendation: T095
+      consolidation_effect:
+        reused_existing_owner: "Existing SQLAlchemy table definitions, Alembic migration chain, and repository query owners."
+        logic_moved_from: "N/A, read-only Scout."
+        logic_deleted: "N/A."
+        duplicate_path_removed: "N/A."
+        new_code_added: "No source code."
+        why_existing_owners_were_insufficient: "The Scout only collected DB/source evidence; any implementation must be selected by Judge."
+        guard_preventing_duplicate_logic_from_returning: "T095 must choose a single narrow Worker with exact allowed_files, verification, rollback notes, and a full Claude plan gate before implementation."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+
+  - id: T095
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the smallest safe T014 schema Worker from T094 evidence, or block if the published-pointer FK candidate is not migration-safe."
+    inputs:
+      - "T014 queued schema task"
+      - "T094 receipt"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/alembic/versions"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only except this board receipt/task transition."
+      - "Before choosing a Worker, check the watchdog blocker file."
+      - "Do not approve a Worker that bundles published pointer FK, files.user_id cleanup, stale indexes, and tenant FK hardening together."
+      - "Prefer the published-pointer FK only if the FK delete/circular-reference behavior, NOT VALID/validation posture, downgrade, and verification commands are exact."
+      - "Do not approve files.user_id changes without a separate source/data/caller decision because live DB delete behavior differs from source and legacy callers/tests remain."
+      - "Do not approve queued/stale indexes without stronger data/EXPLAIN evidence."
+      - "Do not activate T901 final docs or T009/T010/T011 product/data-decision work."
+      - "Any Worker proposed after this Judge must require full Claude plan gate before implementation."
+    expected_output:
+      - "Decision: approve_worker | blocked | scout_first."
+      - "If approve_worker, exact objective, allowed_files, verify commands, rollback/downgrade notes, lock/validation posture, full Claude plan gate command, and stop_if conditions."
+      - "Explicit deferred disposition for files.user_id, queued/stale indexes, tenant FKs, T015, T016, T901, and T009/T010/T011."
+      - "Consolidation effect and naming-gate answer."
+    stop_if:
+      - "Published-pointer FK semantics are not safe without a broader schema design."
+      - "The only safe Worker would require DB writes before a reviewed migration plan."
+      - "The next implementation would require product/data decisions or broad tenant-hardening."
     receipt: null
 
   - id: T901
