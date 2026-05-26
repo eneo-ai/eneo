@@ -5,7 +5,7 @@ goal:
   slug: "flows-clean-architecture-2026-05-25"
   kind: open_ended
   tranche: "Reconfirm current source evidence, implement the first safe verified Flow architecture slice, verify it, and audit before continuing toward canonical runtime ownership."
-  status: blocked
+  status: active
 
 rules:
   pm_owns_state: true
@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: null
+active_task: T094
 
 tasks:
   - id: T001
@@ -9107,6 +9107,46 @@ tasks:
         guard_preventing_duplicate_logic_from_returning: "No Worker is approved; future T014 Worker must include catalog/data/EXPLAIN receipt plus exact allowed_files and verification."
         net_flow_logic_surface_area: "preserved"
         if_increased_why: "N/A"
+
+  - id: T094
+    type: scout
+    assignee: Scout
+    status: active
+    reasoning_hint: high
+    objective: "Recheck T014 DB/schema preflight with Docker/Postgres available and collect read-only catalog/data/EXPLAIN evidence."
+    inputs:
+      - "T014 queued schema task"
+      - "T083 and T093 blocked-environment receipts"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/src/intric/database/tables/files_table.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_webhook_delivery_repo.py"
+      - "backend/alembic/versions"
+      - "Docker containers: eneo-41ae93-db-1 and eneo-41ae93-eneo-1"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only except this board receipt/task transition."
+      - "Before starting, check the watchdog blocker file."
+      - "Use complexity-optimizer, Supabase Postgres best practices, and SQLAlchemy/Alembic expert guidance for schema/index/query-shape analysis."
+      - "No migrations, source edits, test edits, generated-client edits, frontend edits, docs/flows/architecture.md, or Flow AI Builder cleanup."
+      - "Run only read-only DB/catalog/data/EXPLAIN checks."
+      - "Do not run Alembic upgrade/downgrade or write to the database."
+      - "Do not activate T901 final docs."
+      - "Do not unblock T009/T010/T011 without owner product/data decisions."
+    expected_output:
+      - "Docker/Postgres availability evidence."
+      - "Published pointer FK evidence: current flows.published_version schema, flow_versions constraints/indexes, orphan count, and lock/migration feasibility notes."
+      - "files.user_id drift evidence: live FK/delete rule, legacy-vs-typed owner row counts, and callers/tests still depending on files.user_id."
+      - "Queued/stale index evidence: current flow_runs indexes, EXPLAIN for stale queued/running recovery queries from flow_run_repo.py, and whether new indexes are justified."
+      - "Tenant FK evidence: catalog constraints for Flow runtime tables touched by T014 and only source-backed FK candidates that clarify normal correctness."
+      - "Next recommendation: approve Judge for smallest safe T014 Worker | blocked | scout_first."
+    stop_if:
+      - "Docker/Postgres becomes unavailable again."
+      - "Read-only checks reveal violating data requiring human/product/data decision before implementation."
+      - "A safe Worker cannot be narrowed below multiple unrelated schema/index/FK changes."
+      - "The next step would require retention, service-key identity/review/rerun, broad tenant-hardening, Flow AI Builder cleanup, or final architecture docs."
+    receipt: null
 
   - id: T901
     type: worker
