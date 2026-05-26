@@ -1,10 +1,14 @@
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Any
 
 import aiohttp
 from aiohttp.typedefs import Query
 
-from intric.libs.clients.throttle_retry import retry_on_throttle
+from intric.libs.clients.throttle_retry import (
+    THROTTLE_AND_OVERLOAD_STATUS_CODES,
+    THROTTLE_STATUS_CODES,
+    retry_on_throttle,
+)
 from intric.main.exceptions import InternalHTTPException
 from intric.main.logging import get_logger
 
@@ -22,11 +26,18 @@ class WrappedAiohttpClient:
     def _create_url(self, endpoint: str) -> str:
         return f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
 
-    async def _handle_response(self, response: aiohttp.ClientResponse) -> Any:
+    async def _handle_response(
+        self,
+        response: aiohttp.ClientResponse,
+        *,
+        retryable_status_codes: Collection[int] = THROTTLE_STATUS_CODES,
+    ) -> Any:
         try:
             response.raise_for_status()
             return await response.json()
         except aiohttp.ClientResponseError as http_err:
+            if http_err.status in retryable_status_codes:
+                raise http_err
             logger.exception("HTTP error occurred:")
             raise http_err
         except aiohttp.ClientConnectionError as conn_err:
@@ -46,9 +57,15 @@ class WrappedAiohttpClient:
 
         async def _do() -> Any:
             async with self.client.get(url, params=params, headers=headers) as response:
-                return await self._handle_response(response)
+                return await self._handle_response(
+                    response,
+                    retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+                )
 
-        return await retry_on_throttle(_do)
+        return await retry_on_throttle(
+            _do,
+            retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+        )
 
     async def post(
         self,
@@ -60,9 +77,15 @@ class WrappedAiohttpClient:
 
         async def _do() -> Any:
             async with self.client.post(url, json=data, headers=headers) as response:
-                return await self._handle_response(response)
+                return await self._handle_response(
+                    response,
+                    retryable_status_codes=THROTTLE_STATUS_CODES,
+                )
 
-        return await retry_on_throttle(_do)
+        return await retry_on_throttle(
+            _do,
+            retryable_status_codes=THROTTLE_STATUS_CODES,
+        )
 
     async def request(
         self,
@@ -78,9 +101,15 @@ class WrappedAiohttpClient:
             async with self.client.request(
                 method, url, json=data, params=params, headers=headers
             ) as response:
-                return await self._handle_response(response)
+                return await self._handle_response(
+                    response,
+                    retryable_status_codes=THROTTLE_STATUS_CODES,
+                )
 
-        return await retry_on_throttle(_do)
+        return await retry_on_throttle(
+            _do,
+            retryable_status_codes=THROTTLE_STATUS_CODES,
+        )
 
     async def download(
         self,
@@ -103,6 +132,8 @@ class WrappedAiohttpClient:
                     response.raise_for_status()
                     return await response.read()
             except aiohttp.ClientResponseError as http_err:
+                if http_err.status in THROTTLE_AND_OVERLOAD_STATUS_CODES:
+                    raise http_err
                 logger.exception(f"HTTP error while downloading from {url}:")
                 raise http_err
             except aiohttp.ClientConnectionError as conn_err:
@@ -112,7 +143,10 @@ class WrappedAiohttpClient:
                 logger.exception(f"Unknown error while downloading from {url}:")
                 raise InternalHTTPException from err
 
-        return await retry_on_throttle(_do)
+        return await retry_on_throttle(
+            _do,
+            retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+        )
 
     async def close(self) -> None:
         if self.client and not self.client.closed:

@@ -9,7 +9,10 @@ from intric.integration.infrastructure.content_service.utils import (
     process_sharepoint_response,
 )
 from intric.libs.clients import BaseClient
-from intric.libs.clients.throttle_retry import retry_on_throttle
+from intric.libs.clients.throttle_retry import (
+    THROTTLE_AND_OVERLOAD_STATUS_CODES,
+    retry_on_throttle,
+)
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 
@@ -167,7 +170,10 @@ class SharePointContentClient(BaseClient):
                 )
                 return text, detected_content_type
 
-        return await retry_on_throttle(_download)
+        return await retry_on_throttle(
+            _download,
+            retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+        )
 
     async def get_sites(self) -> dict[str, Any]:
         endpoint = "v1.0/sites?search=*"

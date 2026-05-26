@@ -92,19 +92,48 @@ async def test_releases_even_when_body_raises():
 
 
 @pytest.mark.asyncio
-async def test_watchdog_stops_quietly_when_lease_lost():
+async def test_watchdog_cancels_body_when_lease_lost():
     redis_mock = _redis(set_result=True)
 
-    # refresh returns False → lease lost; watchdog must stop without raising.
-    with (
-        patch(_REFRESH, new=AsyncMock(return_value=False)) as refresh,
-        patch(_RELEASE, new=AsyncMock(return_value=False)),
-    ):
+    async def run_with_lease():
         async with redis_lease(
             redis_mock, "lock:k", ttl_seconds=300, renew_interval_seconds=0.01
         ) as acquired:
             assert acquired is True
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(10)
+
+    # refresh returns False → lease lost; watchdog must cancel protected work.
+    with (
+        patch(_REFRESH, new=AsyncMock(return_value=False)) as refresh,
+        patch(_RELEASE, new=AsyncMock(return_value=False)) as release,
+    ):
+        task = asyncio.create_task(run_with_lease())
+        with pytest.raises(asyncio.CancelledError):
+            await task
 
     # Stopped after detecting the loss rather than spinning on every interval.
     assert refresh.await_count == 1
+    release.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_watchdog_cancels_body_when_ownership_unconfirmed_for_ttl():
+    redis_mock = _redis(set_result=True)
+
+    async def run_with_lease():
+        async with redis_lease(
+            redis_mock, "lock:k", ttl_seconds=300, renew_interval_seconds=0.01
+        ) as acquired:
+            assert acquired is True
+            await asyncio.sleep(10)
+
+    with (
+        patch(_REFRESH, new=AsyncMock(side_effect=RuntimeError("redis down"))),
+        patch(_RELEASE, new=AsyncMock(return_value=False)) as release,
+        patch("intric.worker.redis.lease.monotonic", side_effect=[0.0, 301.0]),
+    ):
+        task = asyncio.create_task(run_with_lease())
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    release.assert_awaited_once()

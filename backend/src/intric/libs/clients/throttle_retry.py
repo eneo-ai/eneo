@@ -1,4 +1,4 @@
-"""Retry helper for HTTP throttling (429) and transient overload (503).
+"""Retry helper for HTTP throttling and transient overload.
 
 Microsoft Graph (SharePoint) and other upstreams throttle per app/tenant and
 reply with HTTP 429 — and sometimes 503 — together with a ``Retry-After``
@@ -11,7 +11,7 @@ the stack (401 token refresh, 410 delta-token expiry) is left untouched — thos
 statuses are never retried here and propagate as before.
 """
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import TypeVar
@@ -31,17 +31,23 @@ logger = get_logger(__name__)
 
 T = TypeVar("T")
 
-# 429 = throttled, 503 = service busy. Both mean the request was rejected (not
-# processed), so retrying is safe regardless of HTTP method.
-RETRYABLE_STATUS_CODES = frozenset({429, 503})
+# 429 means the upstream rejected the request due to throttling; treat it as
+# safe to retry for all methods. 503 is ambiguous for non-idempotent requests,
+# so callers must opt in when retrying an operation that is safe to repeat.
+THROTTLE_STATUS_CODES = frozenset({429})
+THROTTLE_AND_OVERLOAD_STATUS_CODES = frozenset({429, 503})
 DEFAULT_MAX_ATTEMPTS = 5
-DEFAULT_MAX_WAIT_SECONDS = 60.0
+DEFAULT_MAX_BACKOFF_SECONDS = 60.0
+DEFAULT_MAX_RETRY_AFTER_SECONDS = 300.0
 
 
-def _is_throttle_error(exc: BaseException) -> bool:
+def _is_retryable_response_error(
+    exc: BaseException,
+    retryable_status_codes: Collection[int],
+) -> bool:
     return (
         isinstance(exc, aiohttp.ClientResponseError)
-        and exc.status in RETRYABLE_STATUS_CODES
+        and exc.status in retryable_status_codes
     )
 
 
@@ -82,14 +88,14 @@ def _retry_after_seconds(retry_state: RetryCallState) -> float | None:
 class _RetryAfterWait:
     """Honor a server ``Retry-After`` header, else exponential backoff w/ jitter."""
 
-    def __init__(self, max_wait: float):
-        self._max_wait = max_wait
-        self._fallback = wait_exponential_jitter(initial=1.0, max=max_wait)
+    def __init__(self, max_backoff: float, max_retry_after: float):
+        self._max_retry_after = max_retry_after
+        self._fallback = wait_exponential_jitter(initial=1.0, max=max_backoff)
 
     def __call__(self, retry_state: RetryCallState) -> float:
         retry_after = _retry_after_seconds(retry_state)
         if retry_after is not None:
-            return min(retry_after, self._max_wait)
+            return min(retry_after, self._max_retry_after)
         return self._fallback(retry_state)
 
 
@@ -109,16 +115,23 @@ async def retry_on_throttle(
     fn: Callable[[], Awaitable[T]],
     *,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
-    max_wait: float = DEFAULT_MAX_WAIT_SECONDS,
+    max_backoff: float = DEFAULT_MAX_BACKOFF_SECONDS,
+    max_retry_after: float = DEFAULT_MAX_RETRY_AFTER_SECONDS,
+    retryable_status_codes: Collection[int] = THROTTLE_STATUS_CODES,
 ) -> T:
-    """Run ``fn`` and retry on throttling (429/503), honoring ``Retry-After``.
+    """Run ``fn`` and retry on configured HTTP statuses.
 
     After ``max_attempts`` the last error is re-raised, preserving the original
     failure semantics for callers.
     """
     retryer = AsyncRetrying(
-        retry=retry_if_exception(_is_throttle_error),
-        wait=_RetryAfterWait(max_wait=max_wait),
+        retry=retry_if_exception(
+            lambda exc: _is_retryable_response_error(exc, retryable_status_codes)
+        ),
+        wait=_RetryAfterWait(
+            max_backoff=max_backoff,
+            max_retry_after=max_retry_after,
+        ),
         stop=stop_after_attempt(max_attempts),
         before_sleep=_log_before_sleep,
         reraise=True,
