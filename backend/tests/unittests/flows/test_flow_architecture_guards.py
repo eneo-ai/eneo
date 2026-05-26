@@ -28,6 +28,9 @@ FLOW_TASKS_PATH = FLOW_RUNTIME_ROOT / "tasks.py"
 FLOW_API_PACKAGES = {"api", "ai_builder"}
 OUTPUT_FORMATS_ROOT = FLOW_RUNTIME_ROOT / "output_formats"
 DATA_RETENTION_ROOT = BACKEND_ROOT / "src" / "intric" / "data_retention"
+PYRIGHT_REPORT_UNKNOWN_MEMBER_IGNORE_RE = re.compile(
+    r"#\s*pyright\s*:\s*ignore\s*\[\s*[^\]]*\breportUnknownMemberType\b[^\]]*\]"
+)
 
 _OUTPUT_AXIS_ENUMS = {
     "output_mode": "FlowOutputMode",
@@ -247,13 +250,9 @@ def _container_provider_any_erasure_offenders(path: Path) -> list[str]:
         node.lineno for node in ast.walk(tree) if _is_container_provider_call(node)
     }
     for line_number, line in enumerate(source.splitlines(), start=1):
-        if (
-            "pyright: ignore" in line
-            and "reportUnknownMemberType" in line
-            and any(
-                provider_line <= line_number <= provider_line + 2
-                for provider_line in container_provider_lines
-            )
+        if PYRIGHT_REPORT_UNKNOWN_MEMBER_IGNORE_RE.search(line) and any(
+            provider_line <= line_number <= provider_line + 2
+            for provider_line in container_provider_lines
         ):
             offenders.append(f"pyright-ignore:{line_number}")
 
@@ -646,6 +645,42 @@ def test_flow_outbox_delivery_status_sql_text_matches_vocabulary():
     assert sql_status_values == expected
 
 
+def test_container_provider_erasure_detector_catches_report_unknown_member_spacing(
+    tmp_path: Path,
+):
+    source_path = tmp_path / "provider_wiring.py"
+    source_path.write_text(
+        "\n".join(
+            [
+                "from typing import Any, cast",
+                "",
+                "def sample(container):",
+                "    one = container.flow_service()  # pyright:ignore[reportUnknownMemberType]",
+                "    two = container.flow_run_service()  # pyright: ignore[reportUnknownMemberType]",
+                "    three = container.flow_version_repo()",
+                "    # pyright:  ignore [ reportUnknownMemberType ]",
+                "    four = container.space_service()",
+                "    # pyright: ignore[reportGeneralTypeIssues, reportUnknownMemberType]",
+                "    no_provider_nearby = object()",
+                "    still_no_provider_nearby = object()",
+                "    # pyright: ignore[reportUnknownMemberType]",
+                "    # pyright: ignore[reportUnknownMemberType]",
+                "    five = container.tenant_repo()",
+                "    erased = cast(Any, container.actor_manager())",
+            ]
+        )
+    )
+
+    offenders = _container_provider_any_erasure_offenders(source_path)
+    assert set(offenders) == {
+        "cast(Any):15",
+        "pyright-ignore:4",
+        "pyright-ignore:5",
+        "pyright-ignore:7",
+        "pyright-ignore:9",
+    }
+
+
 def test_flow_outbox_delivery_status_literals_use_canonical_vocabulary():
     status_values = {item.value for item in FlowOutboxDeliveryStatus}
     offenders: list[str] = []
@@ -671,7 +706,7 @@ def test_flow_celery_task_provider_wiring_is_not_erased_to_any():
     )
 
 
-def test_flow_api_provider_passthrough_helpers_are_not_reintroduced():
+def test_flow_api_provider_wiring_uses_typed_container_providers():
     offenders: list[str] = []
 
     for path in _flow_api_python_files():
@@ -701,6 +736,8 @@ def test_flow_api_provider_passthrough_helpers_are_not_reintroduced():
                 )
 
     assert offenders == [], (
-        "Flow API provider pass-through helpers must not be reintroduced; "
-        "route through the Container provider directly instead: " + ", ".join(offenders)
+        "Flow API provider wiring must use typed Container providers: no "
+        "cast(Any, container...), no provider reportUnknownMemberType ignores, "
+        "no private provider pass-through helpers, and no direct Flow service "
+        "construction: " + ", ".join(offenders)
     )
