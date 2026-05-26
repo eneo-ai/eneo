@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T046
+active_task: T047
 
 tasks:
   - id: T001
@@ -4372,7 +4372,7 @@ tasks:
   - id: T046
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "judge(flows): choose the next safe Flow clean-architecture task after outbox status consolidation and apply the maintainer-map/naming gate."
     inputs:
@@ -4400,6 +4400,122 @@ tasks:
       - "Choosing a Worker requires retention, service-key identity/review/rerun, schema migration, Flow AI Builder cleanup, or other blocked product/data decisions."
       - "Choosing a Worker requires files outside a reviewable Flow proper scope."
       - "Evidence is insufficient to choose between remaining safe runtime reliability, API DX, frontend DX, or output-format isolation candidates."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T14:40:10+02:00"
+      summary: "Chose T047 as the next smallest safe Flow clean-architecture Worker: remove Any-erased Flow task template-asset-service wiring while preserving the existing Container provider and FlowRunExecutor typed constructor boundary. Deferred outbox task payload-key cleanup, webhook timing/docs follow-ups, schema/API/frontend tasks, and final maintainer architecture docs."
+      artifact: "docs/goals/flows-clean-architecture-2026-05-25/notes/t046-next-safe-judge.md"
+      decision:
+        next_task: T047
+        objective: "refactor(flows-runtime): type Flow task template asset service wiring."
+        classification:
+          safe_now:
+            - "Remove cast(Any) and pyright ignore from Flow Celery task template_asset_service wiring, with guard against container-provider Any erasure."
+          follow_up:
+            - "Outbox result task-payload delivered/dead_lettered keys remain literal keys; do not import DB status enum into payload shape without a separate owner review."
+            - "Name webhook wrapper timeout and add deterministic deadline guard tests."
+            - "Add deployment smoke/check instructions for webhook beat task."
+          needs_preflight:
+            - "T012 draft step id-owned persistence."
+            - "T014 schema invariants and migrations."
+            - "T015 public API consumer DX."
+            - "T016 frontend state ownership."
+          blocked_on_decision:
+            - "T009/T010/T011 retention, service-key identity, and review/rerun policy."
+          final_docs_only:
+            - "T901 docs/flows/architecture.md maintainer map."
+      evidence:
+        - "backend/src/intric/flows/runtime/tasks.py:143-146 erases container.flow_template_asset_service() through cast(Any) and a pyright unknown-member ignore."
+        - "backend/src/intric/flows/runtime/executor.py:386 already requires template_asset_service: FlowTemplateAssetService."
+        - "backend/src/intric/main/container/container.py:1248-1254 defines flow_template_asset_service as the canonical FlowTemplateAssetService factory."
+        - "backend/src/intric/flows/application/flow_run_audit_outbox_delivery.py:37,39 and backend/src/intric/flows/runtime/flow_webhook_delivery.py:68,70 use delivered/dead_lettered as task payload keys, not DB delivery-status comparisons."
+      peer_review:
+        claude:
+          artifact: ".codex/artifacts/claude-peer-loop-t046-next-safe-flow-task-judge-20260526T123911Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8"
+          valid_clarifications_applied:
+            - "T047 must try plain deletion before adding any fallback."
+            - "T047 may use only a typed contract-preserving fallback if pyright proves plain deletion insufficient."
+            - "T047 guard should block cast(Any) or pyright-ignore erasure on container provider calls in tasks.py, not only the single template_asset_service symbol."
+            - "T047 must prove the guard fails red against the original bad pattern before committing."
+      commands:
+        - command: "python3 -m json.tool /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          result: pass
+          notes: "schema_version 1; status ok; blockers empty. Stale watchdog active_task T039 is advisory because status is ok."
+        - command: "sed -n relevant sections of goal.md, roadmap-and-taskfiles.md, and new-codex-session-prompt.md"
+          result: pass
+          notes: "Re-read Human Maintainer Map, final docs requirement, naming gate, and reuse/move/merge/delete rules after owner reminder."
+        - command: "rg source evidence for outbox payload-key literals, cast(Any) sites, timeout/deadline leads, and blocked task markers"
+          result: pass
+          notes: "Confirmed T047 is narrow and does not bypass product/data gates or final-docs sequencing."
+        - command: "cd backend && uv run pyright src/intric/flows/runtime/tasks.py"
+          result: pass
+          notes: "Baseline pyright passes with the existing cast(Any); T047 must verify plain deletion first."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t046-next-safe-judge --phase plan --iteration 1 --timeout-seconds 1200 --require-green --required-min-score 8 ..."
+          result: pass
+          notes: "GREEN_LIGHT yes; MIN_SCORE 8."
+      consolidation_effect:
+        reused_existing_owner: "Container.flow_template_asset_service factory and FlowRunExecutor template_asset_service constructor type."
+        logic_moved_from: "None; T047 removes untyped wiring at the task adapter boundary."
+        logic_deleted: "T047 deletes cast(Any) and the provider-call pyright ignore if source evidence confirms plain or typed-contract wiring is sufficient."
+        duplicate_path_removed: "No parallel service construction; the canonical container factory remains the only provider."
+        new_code_added: "Only a narrow guard test and, only if necessary, a typed local assignment or typed cast preserving FlowTemplateAssetService."
+        why_existing_owners_were_insufficient: "The owners exist, but tasks.py currently erases the provider result to Any before passing it to the typed executor."
+        guard_preventing_duplicate_logic_from_returning: "Architecture guard forbids container-provider cast(Any) and reportUnknownMemberType ignores in Flow task wiring."
+        net_flow_logic_surface_area: "reduced"
+      naming_gate:
+        new_names_expected: "No new module/class/status/file names expected; any local name must identify Flow task/runtime dependency wiring rather than helper/manager/processor terminology."
+        would_appear_in_architecture_doc: true
+        would_appear_in_where_to_change_table: true
+      next_task: T047
+
+  - id: T047
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: medium
+    objective: "refactor(flows-runtime): type Flow task template asset service wiring."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t046-next-safe-judge.md"
+      - ".codex/artifacts/claude-peer-loop-t046-next-safe-flow-task-judge-20260526T123911Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t047-flow-task-template-asset-wiring.md"
+      - "backend/src/intric/flows/runtime/tasks.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+      - "backend/tests/unittests/flows/test_celery_runtime.py"
+    constraints:
+      - "Check watchdog before starting implementation and before committing."
+      - "Treat the T046 Claude green artifact as the plan gate; rerun Claude plan gate if implementation scope deviates."
+      - "Run Claude commit gate after implementation with --timeout-seconds 1200, --require-green, and --required-min-score 8."
+      - "No source edits outside allowed_files; no API/router/OpenAPI/frontend/migration/Flow AI Builder/retention/service-key identity/review/rerun changes."
+      - "Do not change FlowRunExecutor constructor semantics or Container provider definitions."
+      - "Do not introduce a protocol, adapter, generic helper, manager, processor, service locator, or one-implementation interface."
+      - "Do not write docs/flows/architecture.md in this task."
+    expected_output:
+      - "Confirm FlowRunExecutor still expects template_asset_service: FlowTemplateAssetService before editing."
+      - "Try plain removal of cast(Any) and the pyright ignore first; keep it if pyright passes."
+      - "If plain removal fails pyright, prefer a typed local assignment; allow typed cast(FlowTemplateAssetService, ...) only as the last contract-preserving fallback."
+      - "Forbid Any, cast(Any), and pyright ignores around container provider calls in Flow task wiring."
+      - "Add or extend an architecture guard that detects container-provider cast(Any) and reportUnknownMemberType ignores in backend/src/intric/flows/runtime/tasks.py."
+      - "Prove the guard fails red against a deliberately re-broken tasks.py pattern, then revert before committing."
+      - "Worker receipt with consolidation effect, naming-gate answer, commands, and peer-review result."
+    verify:
+      - "After plain removal: cd backend && uv run pyright src/intric/flows/runtime/tasks.py"
+      - "Mutation red check: temporarily reintroduce cast(Any, container.flow_template_asset_service()) or a reportUnknownMemberType ignore on a container provider call and verify the new guard fails; revert before commit."
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py::test_flow_celery_task_provider_wiring_is_not_erased_to_any tests/unittests/flows/test_celery_runtime.py -q"
+      - "cd backend && uv run pyright src/intric/flows/runtime/tasks.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_celery_runtime.py"
+      - "cd backend && uv run ruff check src/intric/flows/runtime/tasks.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_celery_runtime.py"
+      - "rg -n 'cast\\(\\s*Any|pyright: ignore\\[reportUnknownMemberType\\]|template_asset_service=cast' backend/src/intric/flows/runtime/tasks.py"
+      - "git diff --check"
+    stop_if:
+      - "Plain removal and typed contract-preserving fallback both fail strict pyright."
+      - "A correct fix requires changing FlowRunExecutor constructor semantics, Container provider definitions, or files outside allowed_files."
+      - "The fix still needs Any, cast(Any), or a pyright ignore around container provider calls."
+      - "The implementation requires a generic provider helper, manager, processor, fake interface, or one-implementation protocol."
+      - "The task expands into webhook timing, task payload keys, API/frontend, schema migration, retention, service-key identity/review/rerun, docs/flows/architecture.md, or Flow AI Builder."
     receipt: null
 
   - id: T901
