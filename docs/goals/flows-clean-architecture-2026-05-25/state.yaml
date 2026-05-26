@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T050
+active_task: T051
 
 tasks:
   - id: T001
@@ -4853,7 +4853,7 @@ tasks:
   - id: T050
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "judge(flows): choose the next safe Flow clean-architecture task after Flow upload-service provider consolidation."
     inputs:
@@ -4879,6 +4879,144 @@ tasks:
       - "Choosing a Worker requires retention, service-key identity/review/rerun, schema migration, Flow AI Builder cleanup, or other blocked product/data decisions."
       - "Choosing a Worker requires files outside a reviewable Flow proper scope."
       - "Evidence is insufficient to choose between remaining safe runtime reliability, API DX, frontend DX, schema/preflight, output-format, or provider-wiring candidates."
+    receipt:
+      result: done
+      completed_at: "2026-05-26T15:33:10+02:00"
+      summary: "Chose T051 as the next smallest safe Flow clean-architecture Worker: delete the symmetric run-contract service provider pass-through, call Container.flow_run_contract_service directly from the run-contract endpoint, and generalize the existing Flow API provider guard instead of adding a parallel test."
+      artifact: "docs/goals/flows-clean-architecture-2026-05-25/notes/t050-next-safe-judge.md"
+      decision:
+        next_task: T051
+        objective: "refactor(flows-api): use the run-contract service provider directly."
+        classification:
+          safe_now:
+            - "Delete flow_router_common.flow_run_contract_service and inline container.flow_run_contract_service() at get_flow_run_contract, with a generalized Flow API pass-through guard."
+          follow_up:
+            - "Broader Flow API provider-erasure cleanup, including flow_api_common.py and flow_run_steps_router.py."
+            - "Future Container typed-accessor task if dependency-injector provider typing keeps creating cast(Any, container.X()) pressure."
+          needs_preflight:
+            - "Draft step id-owned persistence and runtime step identity schema follow-ups."
+            - "Schema migrations, JSONB ownership, and index/lock changes."
+            - "Runtime output-mode/output-type movement when the active task reaches the output-format tranche."
+            - "Frontend state ownership or generated client cleanup outside a dedicated frontend Worker."
+          blocked_on_decision:
+            - "Retention behavior."
+            - "Service-key identity model."
+            - "Review/rerun service-key capability."
+          final_docs_only:
+            - "T901 docs/flows/architecture.md maintainer map; do not start during active runtime/API/schema work."
+      evidence:
+        - "backend/src/intric/flows/api/flow_router_common.py:113-114 is a one-line flow_run_contract_service provider pass-through."
+        - "backend/src/intric/main/container/container.py:1263-1269 already defines the canonical flow_run_contract_service provider."
+        - "backend/src/intric/flows/api/flow_upload_router.py:117-119 is the only production caller."
+        - "backend/tests/unittests/flows/test_flow_upload_router.py:64-68 is the only test monkeypatching the helper."
+      peer_review:
+        claude:
+          iterations:
+            - artifact: ".codex/artifacts/claude-peer-loop-t050-next-safe-flow-task-judge-20260526T132940Z.md"
+              verdict: "GREEN_LIGHT no; MIN_SCORE 7"
+              valid_blocker: "Plan would add a parallel guard instead of generalizing the existing API provider guard; red protocol and dirty-worktree handling needed tightening."
+            - artifact: ".codex/artifacts/claude-peer-loop-t050-next-safe-flow-task-judge-iteration-2-20260526T133246Z.md"
+              verdict: "GREEN_LIGHT yes; MIN_SCORE 8"
+          valid_concerns_addressed:
+            - "Generalize the existing Flow API provider guard and rename it to an invariant-level test."
+            - "Explicitly detect FunctionDef names and manual construction class calls so the guard fails red against current source."
+            - "Preserve unrelated dirty files by verifying target-file cleanliness and staged subsets instead of stashing/resetting."
+        antigravity:
+          verdict: "Skipped by rule; Claude green and no high-risk/disputed public contract, schema, data, runtime reliability, or architecture synthesis issue remained."
+      commands:
+        - command: "python3 -m json.tool /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          result: pass
+          notes: "schema_version 1; status ok; blockers empty. Stale watchdog active_task T039 is advisory because status is ok."
+        - command: "rg source evidence for flow_run_contract_service, container.flow_run_contract_service, and affected router test"
+          result: pass
+          notes: "Confirmed canonical provider owner, one production caller, and one affected test fixture."
+        - command: "cd backend && uv run pyright src/intric/flows/api/flow_router_common.py src/intric/flows/api/flow_upload_router.py tests/unittests/flows/test_flow_upload_router.py"
+          result: pass
+          notes: "0 errors, 0 warnings, 0 informations baseline."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t050-next-safe-judge --phase plan --iteration 1 --timeout-seconds 1200 --require-green --required-min-score 8 ..."
+          result: fail_then_revised
+          notes: "GREEN_LIGHT no; MIN_SCORE 7; accepted guard-generalization blocker."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t050-next-safe-judge --phase verification --iteration 2 --timeout-seconds 1200 --require-green --required-min-score 8 ..."
+          result: pass
+          notes: "GREEN_LIGHT yes; MIN_SCORE 8."
+      consolidation_effect:
+        reused_existing_owner: "Container.flow_run_contract_service and FlowRunContractService."
+        logic_moved_from: "flow_router_common.flow_run_contract_service pass-through to direct provider use in get_flow_run_contract."
+        logic_deleted: "T051 will delete the pass-through helper and FlowRunContractService import from flow_router_common.py."
+        duplicate_path_removed: "Flow API run-contract wiring will no longer have a second helper surface."
+        new_code_added: "T051 should generalize the existing Flow API provider guard and migrate one test fixture; no production helper or abstraction."
+        why_existing_owners_were_insufficient: "Existing owners are sufficient; the API helper only forwards to them."
+        guard_preventing_duplicate_logic_from_returning: "Generalized Flow API provider pass-through guard."
+        net_flow_logic_surface_area: "reduced"
+      naming_gate:
+        new_names_expected: "No new Flow production module/class/type/status/file names."
+        guard_name: "test_flow_api_provider_passthrough_helpers_are_not_reintroduced names the provider-ownership invariant instead of one helper instance."
+        would_appear_in_architecture_doc: true
+        would_appear_in_where_to_change_table: true
+      next_task: T051
+
+  - id: T051
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: medium
+    objective: "refactor(flows-api): use the run-contract service provider directly."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t050-next-safe-judge.md"
+      - ".codex/artifacts/claude-peer-loop-t050-next-safe-flow-task-judge-iteration-2-20260526T133246Z.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/t051-run-contract-service-provider.md"
+      - "backend/src/intric/flows/api/flow_router_common.py"
+      - "backend/src/intric/flows/api/flow_upload_router.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+      - "backend/tests/unittests/flows/test_flow_upload_router.py"
+    constraints:
+      - "Check watchdog before starting implementation and before committing."
+      - "Treat the T050 Claude iteration-2 artifact as the plan gate; rerun Claude plan gate if implementation scope deviates."
+      - "Use FastAPI/API adapter guidance; do not change endpoint signatures, request/response models, dependency declarations, OpenAPI, generated clients, or public API behavior."
+      - "No source edits outside allowed_files; no migrations, schema changes, frontend edits, retention, service-key identity/review/rerun, webhook outbox, output-format architecture, final architecture docs, or Flow AI Builder changes."
+      - "Do not change Container provider definitions or FlowRunContractService constructor semantics."
+      - "Do not introduce Any, cast(Any), dict[str, Any], pyright ignores, generic helpers, managers, processors, service locators, fake interfaces, or one-implementation protocols."
+      - "Do not stash, reset, clean, stage, or otherwise alter unrelated dirty/untracked files."
+      - "Do not write docs/flows/architecture.md in this task."
+    expected_output:
+      - "Confirm Container.flow_run_contract_service is still the existing provider owner."
+      - "Verify the four T051 source/test files are clean before implementation while preserving unrelated dirty files."
+      - "Generalize test_flow_api_upload_service_uses_container_provider_without_any_erasure into test_flow_api_provider_passthrough_helpers_are_not_reintroduced."
+      - "Rename FLOW_API_UPLOAD_PROVIDER_FILES to FLOW_API_PROVIDER_PASSTHROUGH_FILES or similarly axis-specific name."
+      - "Promote forbidden helper names and manual construction class names into module-level sets including flow_upload_service, flow_run_contract_service, FlowFileUploadService, and FlowRunContractService."
+      - "Prove the generalized guard fails red against the current flow_router_common.py:113-114 helper before production edits."
+      - "Delete flow_router_common.flow_run_contract_service(container)."
+      - "Call container.flow_run_contract_service() directly from get_flow_run_contract."
+      - "Migrate test_get_flow_run_contract_enforces_scope_and_returns_contract to container.flow_run_contract_service.return_value = run_contract_service and preserve assert_awaited_once_with(flow_id=flow_id)."
+      - "Worker receipt with consolidation effect, naming-gate answer, commands, Claude commit gate, and next-task recommendation."
+    verify:
+      - "git status --short"
+      - "git diff --name-only -- backend/src/intric/flows/api/flow_router_common.py backend/src/intric/flows/api/flow_upload_router.py backend/tests/unittests/flows/test_flow_architecture_guards.py backend/tests/unittests/flows/test_flow_upload_router.py"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py::test_flow_api_provider_passthrough_helpers_are_not_reintroduced -q"
+      - "cd backend && uv run pyright src/intric/flows/api/flow_router_common.py src/intric/flows/api/flow_upload_router.py"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_upload_router.py -q"
+      - "cd backend && uv run pyright src/intric/flows/api/flow_router_common.py src/intric/flows/api/flow_upload_router.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_upload_router.py"
+      - "cd backend && uv run ruff check src/intric/flows/api/flow_router_common.py src/intric/flows/api/flow_upload_router.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_upload_router.py"
+      - "cd backend && uv run ruff format --check src/intric/flows/api/flow_router_common.py src/intric/flows/api/flow_upload_router.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/flows/test_flow_upload_router.py"
+      - "rg -n 'def flow_run_contract_service|common\\.flow_run_contract_service|FlowRunContractService\\(' backend/src/intric/flows/api/flow_router_common.py backend/src/intric/flows/api/flow_upload_router.py backend/tests/unittests/flows/test_flow_upload_router.py"
+      - "rg -n 'FLOW_API_UPLOAD_PROVIDER_FILES' backend/tests/unittests/flows/test_flow_architecture_guards.py"
+      - "git diff --check"
+      - "git diff --staged --name-only"
+    stop_if:
+      - "Direct container.flow_run_contract_service() call fails strict pyright."
+      - "The generalized guard does not fail red against the current helper before production edits."
+      - "The guard is implemented as a parallel test instead of deepening the existing Flow API provider guard."
+      - "The router test stops asserting run_contract_service.get_run_contract.assert_awaited_once_with(flow_id=flow_id)."
+      - "The fix requires changing endpoint signatures, response models, dependencies, OpenAPI, generated clients, or Flow run-contract behavior."
+      - "The fix requires changing Container provider definitions or FlowRunContractService constructor semantics."
+      - "The fix requires Any, cast(Any), dict[str, Any], a pyright ignore, a generic helper, manager, processor, service locator, fake interface, or one-implementation protocol."
+      - "The task expands into retention, service-key identity/review/rerun, schema migrations, webhook outbox, output-format architecture, final architecture docs, or Flow AI Builder."
+      - "Staged files include anything outside the T051 allowed files."
+      - "Any unrelated pre-existing dirty file is staged, stashed, reset, cleaned, or otherwise modified."
     receipt: null
 
   - id: T901
