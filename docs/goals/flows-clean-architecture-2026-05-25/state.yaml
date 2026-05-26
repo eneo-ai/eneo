@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T097
+active_task: T102
 
 tasks:
   - id: T001
@@ -9552,7 +9552,7 @@ tasks:
   - id: T097
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the next safe task after T096 from remaining queued Flows work, with special attention to deferred T014 schema sub-scopes and product/data gates."
     inputs:
@@ -9576,6 +9576,697 @@ tasks:
       - "Disposition of deferred T014 sub-scopes: files.user_id drift, queued/stale indexes, tenant FK candidates."
       - "Disposition of T015/T016/T901 and blocked T009/T010/T011."
       - "If approving a Worker: objective, allowed_files, verification commands, rollback notes, stop_if, review tier, and consolidation effect."
+    receipt:
+      result: done
+      decision: scout_first
+      summary: "Did not approve another T014 Worker immediately after the published-pointer FK. The only remaining T014 sub-scope with plausible near-term value is files.user_id drift, but it still has source/live/caller compatibility uncertainty: live DB uses files.user_id ON DELETE CASCADE, current source declares ON DELETE SET NULL, typed owner columns are populated cleanly, and source/tests still preserve legacy user_id writes/fallbacks. The next safe task is a read-only Scout to map the canonical file owner, compatibility callers, DB catalog/data shape, and deletion/consolidation options before any migration or source cleanup."
+      evidence:
+        - "T094 receipt: files total=170; user_id non-null=162; owner_user_id non-null=162; owner_api_key_id non-null=8; legacy_only_user_id=0; typed_user_without_legacy_user_id=0; user_owner_legacy_mismatch=0; no_typed_owner=0."
+        - "T094 receipt: live files_users_fkey is ON DELETE CASCADE while backend/src/intric/database/tables/files_table.py declares ON DELETE SET NULL."
+        - "T094 receipt: backend/src/intric/files/file_service.py still writes files.user_id and falls back to it when typed owner fields are missing."
+        - "T094 receipt: backend/src/intric/files/file_repo.py, backend/src/intric/flows/flow_run_step_inputs.py, and backend/src/intric/flows/runtime/input_files.py still have human-owned runtime file paths using user-owner file lookup."
+        - "T094 receipt: queued/stale indexes are not justified now and tenant FK hardening should not broaden."
+        - "T085 receipt: no immediate T015 API Worker; service-key review/rerun policy remains product-gated."
+        - "T091 receipt: no immediate T016 frontend Worker."
+        - "T901 remains final-docs-only while architecture is still changing."
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "status ok; blockers empty"
+        - cmd: "sed/rg reads for T014, T094, T095, T096, T015/T085, T016/T091, T901, files.user_id source references, and file owner migrations"
+          status: pass
+      dispositions:
+        files_user_id_drift: "scout_first via T098; no migration/source cleanup yet."
+        queued_stale_indexes: "reject_worker_now; current data and EXPLAIN do not justify new indexes."
+        tenant_fks: "keep_temporarily; no broad tenant-hardening without exact source/data-backed candidate."
+        T015: "queued; no immediate API Worker after T085 and product-gated service-key review/rerun questions remain blocked."
+        T016: "queued; no immediate frontend Worker after T091."
+        T901: "queued final docs; do not activate during active schema/API/frontend refactors."
+        T009_T010_T011: "remain product/data-decision blocked."
+      next_task: T098
+      review_tier: "Local validation for read-only Scout. Any later files.user_id Worker that touches schema/migrations or persistence requires full Claude plan and commit gates; Antigravity only if Claude/Codex disagree or the design crosses product-data boundaries."
+      consolidation_effect:
+        reused_existing_owner: "T014 schema/data-integrity tranche, Files table, FileService/FileRepository owner fields, and Flow runtime file-input callers."
+        logic_moved_from: "N/A, Judge only."
+        logic_deleted: "None."
+        duplicate_path_removed: "None yet."
+        new_code_added: "No source code."
+        why_existing_owners_were_insufficient: "Existing owners may be sufficient, but the relationship between legacy files.user_id and typed owner fields must be mapped before changing schema or callers."
+        guard_preventing_duplicate_logic_from_returning: "T098 must classify reuse/merge/delete/keep paths with DB/source/test evidence before any Worker."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+
+  - id: T098
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Read-only preflight for files.user_id drift and typed file-owner consolidation before any schema/source cleanup."
+    inputs:
+      - "T094 receipt"
+      - "T097 receipt"
+      - "backend/src/intric/database/tables/files_table.py"
+      - "backend/src/intric/files/file_service.py"
+      - "backend/src/intric/files/file_repo.py"
+      - "backend/src/intric/flows/flow_run_step_inputs.py"
+      - "backend/src/intric/flows/runtime/input_files.py"
+      - "backend/alembic/versions/20260411_flow_run_identity_and_idempotency.py"
+      - "backend/tests touching file owner/user_id behavior"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only except this board receipt/task transition."
+      - "Before starting, check the watchdog blocker file."
+      - "Use complexity-optimizer, Supabase Postgres best practices, and SQLAlchemy/Alembic guidance for DB/query/schema evidence."
+      - "No migrations, source edits, test edits, generated-client edits, frontend edits, docs/flows/architecture.md, or Flow AI Builder cleanup."
+      - "Run only read-only DB/catalog/data/EXPLAIN checks."
+      - "Do not change service-key, retention, review/rerun, or product/data decision-gated behavior."
+      - "Do not propose deletion unless zero-reference evidence or caller/persisted-data preflight supports it."
+    expected_output:
+      - "Current canonical owner map for file ownership: files.user_id, owner_user_id, owner_api_key_id, owner_type, FileService, FileRepository, Flow runtime callers."
+      - "DB catalog evidence for files.user_id, fk_files_owner_user_id, fk_files_owner_api_key_id delete rules, nullability, checks, and indexes."
+      - "Data counts for legacy-only, typed-only, mismatch, service-key, no-owner, and rows that would be affected by source/live FK alignment."
+      - "Source/test caller inventory for legacy files.user_id writes, fallbacks, and assertions."
+      - "Classification: delete_now | merge_or_consolidate | needs_preflight | keep_temporarily."
+      - "Recommendation for next Judge: approve narrow Worker | block | scout_more."
+    stop_if:
+      - "DB/catalog evidence is unavailable."
+      - "Source evidence shows files.user_id is still a public or persisted-data contract requiring product/data decision."
+      - "A safe change would require retention/service-key/review-rerun decisions."
+      - "The next step would require broad file-service cleanup outside Flows proper plus directly coupled file-owner code."
+    receipt:
+      result: done
+      summary: "Mapped files.user_id drift and typed file-owner ownership read-only. The canonical file owner is already the typed owner tuple: files.owner_type plus owner_user_id or owner_api_key_id, with FileService._owner_fields and FlowPrincipal.file_owner_fields as the application entry points. Current data is clean: no legacy-only user_id rows, no typed-user rows missing user_id, no mismatches, no service-key rows with user_id, and no rows without a typed owner. The only small schema candidate is aligning the live legacy files.user_id FK delete rule to the current source model's SET NULL behavior; deleting files.user_id or removing fallback/mirror writes is not safe without a later consolidation Worker because source and tests still preserve the mirror and fallback paths."
+      owner_map:
+        canonical_owner: "files.owner_type plus exactly one of owner_user_id or owner_api_key_id."
+        schema_owner:
+          - "backend/src/intric/database/tables/files_table.py:25"
+          - "backend/src/intric/database/tables/files_table.py:26"
+          - "backend/src/intric/database/tables/files_table.py:30"
+          - "backend/alembic/versions/20260411_flow_run_identity_and_idempotency.py:126"
+          - "backend/alembic/versions/20260411_flow_run_identity_and_idempotency.py:140"
+          - "backend/alembic/versions/20260411_flow_run_identity_and_idempotency.py:150"
+          - "backend/alembic/versions/20260411_flow_run_identity_and_idempotency.py:160"
+          - "backend/alembic/versions/20260411_flow_run_identity_and_idempotency.py:168"
+        application_owner:
+          - "backend/src/intric/files/file_service.py:236"
+          - "backend/src/intric/flows/principal.py:92"
+        repository_owner:
+          - "backend/src/intric/files/file_repo.py:35"
+          - "backend/src/intric/files/file_repo.py:96"
+          - "backend/src/intric/files/file_repo.py:132"
+        flow_runtime_callers:
+          - "backend/src/intric/flows/flow_run_step_inputs.py:170"
+          - "backend/src/intric/flows/flow_run_step_inputs.py:179"
+          - "backend/src/intric/flows/runtime/input_files.py:42"
+          - "backend/src/intric/flows/runtime/input_files.py:50"
+          - "backend/src/intric/flows/application/flow_run_rerun_service.py:266"
+          - "backend/src/intric/flows/runtime/executor.py:1804"
+          - "backend/src/intric/flows/runtime/output_runtime.py:121"
+          - "backend/src/intric/flows/runtime/template_fill_runtime.py:165"
+        public_api_note: "FilePublic does not expose user_id/owner_user_id/owner_api_key_id; files.user_id is internal persistence/domain compatibility, not current public API shape."
+      db_catalog:
+        alembic_version: "20260526_flow_published_fk"
+        files_user_id_source_rule: "backend/src/intric/database/tables/files_table.py:34-36 declares ON DELETE SET NULL."
+        live_constraints:
+          - "files_users_fkey: FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE; validated."
+          - "fk_files_owner_user_id: FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT; validated."
+          - "fk_files_owner_api_key_id: FOREIGN KEY (owner_api_key_id) REFERENCES api_keys_v2(id) ON DELETE RESTRICT; validated."
+          - "ck_files_owner_type: owner_type IN ('user','service_key'); validated."
+          - "ck_files_owner_identity: user rows require owner_user_id only; service_key rows require owner_api_key_id only; validated."
+        indexes:
+          - "files_pkey on id."
+          - "ix_files_checksum on checksum."
+          - "No owner_user_id/owner_type index. Current owner-id lookups by id are PK-dominated; get_files owner listing seq-scans 170 local rows in about 0.064 ms, so no index Worker is justified from this Scout alone."
+      data_counts:
+        total: 170
+        user_id_non_null: 162
+        owner_user_id_non_null: 162
+        owner_api_key_id_non_null: 8
+        owner_type_user: 162
+        owner_type_service_key: 8
+        legacy_only_user_id: 0
+        typed_user_without_legacy_user_id: 0
+        user_owner_legacy_mismatch: 0
+        service_key_rows_with_legacy_user_id: 0
+        no_typed_owner: 0
+        legacy_user_count: 1
+        owner_user_count: 1
+      source_and_test_inventory:
+        legacy_mirror_writes:
+          - "backend/src/intric/files/file_service.py:236-242 writes user_id as _owner_user_id."
+          - "backend/src/intric/flows/principal.py:92-98 emits user_id as legacy_user_id in file_owner_fields."
+        legacy_fallbacks_or_compatibility_paths:
+          - "backend/src/intric/files/file_service.py:244-250 falls back to file.user_id when owner_type is missing."
+          - "backend/src/intric/files/file_repo.py:25-33 keeps get_list_by_id_and_user as a typed-owner wrapper for legacy callers."
+          - "backend/src/intric/files/file_repo.py:124-130 keeps delete_by_owner as a typed-owner wrapper for legacy callers."
+          - "backend/src/intric/flows/runtime/output_runtime.py:121-125 and backend/src/intric/flows/runtime/template_fill_runtime.py:165-169 have user_id-only fallback branches when principal is absent; these need separate runtime-owner preflight before removal."
+        tests_preserving_mirror_or_compatibility:
+          - "backend/tests/unittests/files/test_file_service.py:69-72 asserts save_file persists user_id."
+          - "backend/tests/unittests/files/test_file_service.py:110-116 asserts save_file_content persists user_id."
+          - "backend/tests/unit/test_file_service.py:62-78 asserts delete_file calls principal-aware owner delete for user owner."
+          - "backend/tests/unit/test_file_service.py:213-244 still tests the delete_by_owner compatibility wrapper and weakly asserts a user_id-shaped SQL predicate."
+          - "backend/tests/integration/flows/test_flow_step_file_mapping_contract.py:77-98 creates Flow file rows with both owner_user_id and user_id."
+          - "backend/tests/unittests/flows/test_flow_run_service.py:1281-1344 and :1346-1429 distinguish user file lookup from service-key owner lookup."
+      classifications:
+        delete_now:
+          - "None. files.user_id has zero drift in data, but source/test/runtime compatibility still references it."
+        merge_or_consolidate:
+          - "Future consolidation should make typed owner fields the only ownership truth in FileCreate/FileInfo/FileService/FlowPrincipal and remove legacy user_id wrappers/tests in the same slice."
+        needs_preflight:
+          - "Removing files.user_id column or mirror writes."
+          - "Removing FileService._owns_file owner_type None fallback."
+          - "Removing output_runtime/template_fill_runtime user_id-only fallback branches."
+          - "Adding owner indexes; current EXPLAIN/data do not justify this from T098."
+        keep_temporarily:
+          - "files.user_id as a legacy mirror until a Judge-approved consolidation Worker can update source, tests, persisted-data preflight, and runtime fallback behavior together."
+      recommended_next: T099
+      recommendation: "Judge a narrow schema Worker to align live files.user_id FK delete rule with the current source model (SET NULL), without deleting user_id, changing FileService/FileRepository/Flow runtime callers, or adding indexes. If approved, the Worker should include a migration test or catalog verification and full Claude schema plan/commit gates."
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "status ok; blockers empty"
+        - cmd: "nl/rg source reads for files_table.py, file_service.py, file_repo.py, file_models.py, FlowPrincipal, Flow runtime file callers, output persistence paths, and relevant tests"
+          status: pass
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql ... files owner columns/constraints/indexes/data counts/EXPLAIN"
+          status: pass
+          output: "files_users_fkey live ON DELETE CASCADE; typed owner constraints validated; no owner data drift; owner lookup/list plans are seq scans on 170 rows with <=0.142 ms execution."
+      consolidation_effect:
+        reused_existing_owner: "Files table typed owner constraints, FileService._owner_fields, FlowPrincipal.file_owner_fields, and FileRepository typed owner queries."
+        logic_moved_from: "N/A, read-only Scout."
+        logic_deleted: "None."
+        duplicate_path_removed: "None yet."
+        new_code_added: "No source code."
+        why_existing_owners_were_insufficient: "The Scout found the existing typed owners are sufficient as canonical ownership, but live schema drift and compatibility references must be resolved in separate approved slices."
+        guard_preventing_duplicate_logic_from_returning: "Recommended T099 Judge must keep FK alignment separate from later mirror/fallback deletion."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+
+  - id: T099
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Decide whether to approve a narrow files.user_id FK-drift Worker after T098, or block for more preflight."
+    inputs:
+      - "T094 receipt"
+      - "T097 receipt"
+      - "T098 receipt"
+      - "backend/src/intric/database/tables/files_table.py"
+      - "backend/alembic/versions"
+      - "backend/tests/integration/migrations"
+    constraints:
+      - "Before this task transition, verify the watchdog state file."
+      - "Read-only Judge except board receipt/task transition."
+      - "Do not approve deleting files.user_id, removing mirror writes, removing typed owner fallbacks, adding owner indexes, or broad file-service cleanup in this Worker."
+      - "If approving a schema Worker, produce exact allowed_files, migration revision/down_revision, verification commands, rollback notes, stop_if conditions, and full Claude plan gate before implementation."
+      - "Do not activate service-key, retention, review/rerun, product/data-decision, T901 final docs, API/OpenAPI/generated-client, frontend, or Flow AI Builder work."
+    expected_output:
+      - "Decision: approve_worker | blocked | scout_more."
+      - "If approved: exact migration/source/test allowed_files, target FK semantics, migration posture, verification commands, and rollback notes."
+      - "If blocked: source/data/product reason with file:line or catalog evidence."
+      - "Consolidation effect and naming-gate answer."
+    receipt:
+      result: done
+      decision: "scout_more"
+      summary: "Rejected the narrow FK-only Worker after the owner clarified Flows has no production users and legacy Flow compatibility should not preserve duplicate owner concepts. Claude and Antigravity both agreed Scout-first is the right transition before any migration Worker because `files` is shared and `flow_runs.user_id` symmetry, public model leakage, runtime fallback sites, test rewrite scope, and downgrade semantics need exact evidence. Activated T100 as a read-only Scout for paired typed-owner cleanup blast-radius mapping."
+      owner_clarification:
+        - "Flows has no production users and is not in production."
+        - "Legacy Flow data compatibility is not a reason to keep duplicate owner concepts when a cleaner typed-owner path is source-backed."
+        - "The next implementation should optimize for the long-term canonical owner, not fear of pre-production legacy rows."
+      evidence:
+        - "backend/src/intric/database/tables/files_table.py:25"
+        - "backend/src/intric/database/tables/files_table.py:26"
+        - "backend/src/intric/database/tables/files_table.py:34"
+        - "backend/src/intric/database/tables/flow_tables.py:575"
+        - "backend/src/intric/database/tables/flow_tables.py:580"
+        - "backend/src/intric/database/tables/flow_tables.py:588"
+        - "backend/src/intric/files/file_service.py:236"
+        - "backend/src/intric/files/file_service.py:241"
+        - "backend/src/intric/files/file_service.py:244"
+        - "backend/src/intric/files/file_repo.py:25"
+        - "backend/src/intric/files/file_repo.py:124"
+        - "backend/src/intric/files/file_repo.py:195"
+        - "backend/src/intric/flows/principal.py:35"
+        - "backend/src/intric/flows/principal.py:66"
+        - "backend/src/intric/flows/principal.py:84"
+        - "backend/src/intric/flows/principal.py:92"
+        - "backend/src/intric/flows/runtime/output_runtime.py:121"
+        - "backend/src/intric/flows/runtime/template_fill_runtime.py:165"
+        - "backend/src/intric/flows/runtime/tasks.py:197"
+        - "backend/src/intric/flows/runtime/tasks.py:227"
+        - "backend/src/intric/flows/runtime/flow_webhook_delivery.py:426"
+        - "backend/src/intric/flows/runtime/flow_webhook_delivery.py:430"
+        - ".codex/artifacts/t099-files-user-id-fk-drift-judge-brief.md"
+        - ".codex/artifacts/t099-files-user-id-clean-owner-revision.md"
+        - ".codex/artifacts/t099-files-user-id-clean-owner-scout-activation.md"
+        - ".codex/artifacts/claude-peer-loop-t099-files-user-id-fk-drift-judge-20260526T212825Z.md"
+        - ".codex/artifacts/claude-peer-loop-t099-files-user-id-clean-owner-revision-20260526T213613Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t099-files-user-id-clean-owner-antigravity-synthesis-20260526T214144Z.md"
+      reviewer_verdicts:
+        claude:
+          artifact: ".codex/artifacts/claude-peer-loop-t099-files-user-id-clean-owner-revision-20260526T213613Z.md"
+          verdict: "changes_required"
+          min_score: 7
+          accepted_concerns:
+            - "Scout-first is correct; direct Worker is too wide."
+            - "T100 must explicitly cover flow_runs.user_id symmetry."
+            - "T100 must audit FileInfo/FileCreate public contract leakage."
+            - "T100 must count and classify test rewrite scope."
+            - "T100 must specify upgrade preflight and downgrade/backfill semantics."
+            - "T100 must propose a guard preventing the legacy mirror from returning."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t099-files-user-id-clean-owner-antigravity-synthesis-20260526T214144Z.md"
+          verdict: "changes_required"
+          min_score: 7
+          accepted_concerns:
+            - "Use the Scout to target paired files.user_id and flow_runs.user_id cleanup instead of a file-only half-migration."
+            - "Map output/template-fill fallback dicts that still pass legacy user_id."
+            - "Map Celery/webhook flow_run legacy user_id fallbacks."
+            - "Do not approve a direct Worker before shared-table and public-contract blast radius are locked."
+      local_verification:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1, status=ok, blockers=[]"
+        - cmd: "rg/nl verification for FlowPrincipal, FlowRuns.user_id, output/template-fill fallback dicts, Celery task legacy user_id, webhook audit fallback, file repository wrappers, and FileCreate/FileInfo references"
+          status: pass
+      deferred:
+        - "No migration Worker is approved by T099."
+        - "No source/test/router/frontend/generated-client edits are approved by T099."
+        - "T009/T010/T011 remain product/data-decision blocked."
+        - "T901 remains final-docs-only and is not active during schema cleanup."
+      consolidation_effect:
+        reused_existing_owner: "T100 must treat typed file ownership (`owner_type`, `owner_user_id`, `owner_api_key_id`) and typed run principal identity (`principal_type`, `principal_user_id`, `principal_api_key_id`) as the canonical owners."
+        logic_moved_from: "None in T099; read-only Judge."
+        logic_deleted: "None in T099."
+        duplicate_path_removed: "None in T099; the FK-only path was rejected so the next Worker can remove duplicate owner paths instead of cementing them."
+        new_code_added: "None in source; one local review artifact brief under .codex/artifacts."
+        why_existing_owners_were_insufficient: "Existing typed owners are sufficient; the legacy mirror paths are the insufficiency and need Scout mapping before deletion."
+        guard_preventing_duplicate_logic_from_returning: "T100 must propose table/model/public-contract guards proving files.user_id and flow_runs.user_id mirrors cannot return."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+      naming_gate: "No new source names in T099; T100 must ensure any proposed owner/type names are clear enough for the final docs/flows/architecture.md where-to-change-X table."
+      next_task: T100
+
+  - id: T100
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Map exact source/test/migration/DB/public-contract blast radius for making typed file ownership and typed Flow run principal identity the sole owner paths, including deletion of legacy files.user_id and flow_runs.user_id mirrors if source evidence supports a paired Worker."
+    inputs:
+      - "T098 receipt"
+      - "T099 receipt"
+      - ".codex/artifacts/t099-files-user-id-clean-owner-scout-activation.md"
+      - "backend/src/intric/database/tables/files_table.py"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/src/intric/files"
+      - "backend/src/intric/flows/principal.py"
+      - "backend/src/intric/flows/flow_run_step_inputs.py"
+      - "backend/src/intric/flows/runtime/input_files.py"
+      - "backend/src/intric/flows/runtime/output_runtime.py"
+      - "backend/src/intric/flows/runtime/template_fill_runtime.py"
+      - "backend/src/intric/flows/runtime/tasks.py"
+      - "backend/src/intric/flows/runtime/flow_webhook_delivery.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+      - "backend/alembic/versions"
+      - "backend/tests/integration/migrations"
+      - "backend/tests/unittests/files"
+      - "backend/tests/unit/test_file_service.py"
+      - "backend/tests/unittests/flows"
+    constraints:
+      - "Before this task transition, verify the watchdog state file."
+      - "Read-only Scout only; no source edits, test edits, migrations, generated-client edits, frontend edits, or docs/flows/architecture.md."
+      - "Do not approve a Worker directly; T100 output feeds a Judge task."
+      - "Stay within Flows proper plus directly coupled shared file-owner/run-principal code."
+      - "Do not run repo-wide cleanup or Flow AI Builder cleanup unless a Flow proper file directly depends on the same contract."
+      - "Do not activate retention, service-key identity/review/rerun, webhook outbox, materialized webhook request snapshots, or other product/data-decision-gated work."
+      - "Use DB/catalog/data checks for schema facts and EXPLAIN only when relevant; do not mutate DB schema except harmless read-only catalog queries."
+      - "Treat the owner clarification as permission to prefer clean deletion over pre-production compatibility, but still identify shared non-Flow callers before proposing deletion."
+      - "If the blast radius crosses unrelated non-Flow product behavior, return blocked or propose sequencing rather than approving a broad Worker."
+    expected_output:
+      - "Duplicate/scattered owner inventory: concept, current locations, behavior differences, canonical owner, merge/delete path."
+      - "files.user_id evidence: source model, live catalog FK/column, write/read/fallback callers, public model leakage, DB drift counts."
+      - "flow_runs.user_id evidence: source model, live catalog FK/column, write/read/fallback callers, task/webhook/repo impacts, DB drift counts."
+      - "Public/API contract audit for FileInfo/FileCreate/FilePublic and Flow run models; classify whether OpenAPI/generated-client files are in scope for the eventual Worker."
+      - "Concrete test rewrite count and per-file strategy for wrappers, FileCreate/FileInfo.user_id assertions, runtime fallback tests, Celery/webhook run-principal tests, and migration tests."
+      - "Migration posture: exact upgrade preflight checks, drop order, lock notes, downgrade backfill semantics or explicit one-way decision requirement."
+      - "Recommended next Judge task with exact Worker allowed_files, verify commands, rollback notes, stop_if conditions, and peer-review tier."
+      - "Guard/test strategy preventing files.user_id, flow_runs.user_id, compatibility wrappers, or legacy fallback dicts from returning."
+      - "Consolidation effect and naming-gate answer."
+    stop_if:
+      - "The live DB is unreachable for required catalog/data evidence."
+      - "A public API/generated-client surface exposes the legacy fields and the cleanup would become a broad public contract task without a smaller safe sequence."
+      - "Shared non-Flow callers directly rely on files.user_id or flow_runs.user_id in a way that cannot be safely scoped to Flows proper plus directly coupled ownership code."
+      - "The Scout cannot produce exact allowed_files and verification commands for a reviewable Worker."
+    receipt:
+      result: done
+      summary: "Completed the read-only blast-radius map for deleting legacy `files.user_id` and `flow_runs.user_id` mirrors. File ownership can be cleaned internally without public file contract impact because public file routes and app assemblers expose FilePublic, not FileInfo/FileCreate. Flow run identity cleanup is a public contract change because FlowRunPublic exposes `user_id` and generated intric-js types include it. Data is clean for both tables, so deletion is feasible in this non-production branch, but the next Worker must be judged as a schema + runtime + API/generated-client slice, not as a narrow FK fix."
+      duplicate_inventory:
+        - concept: "File ownership"
+          current_locations: "files.user_id; files.owner_type/owner_user_id/owner_api_key_id; FileCreate/FileInfo.user_id; FileService._owner_fields; FileService._owns_file fallback; FileRepository get_list_by_id_and_user/delete_by_owner wrappers; FlowPrincipal.file_owner_fields; Flow runtime file lookup branches."
+          behavior_differences: "Typed owner supports user and service-key principals; legacy user_id only represents user principals and forces fallbacks/wrappers."
+          canonical_owner: "files.owner_type plus owner_user_id or owner_api_key_id, written through FileService._owner_fields or FlowPrincipal.file_owner_fields and queried through FileRepository typed owner methods."
+          merge_delete_path: "Drop files.user_id/FK, remove FileCreate/FileInfo.user_id, remove mirror writes/fallbacks/wrappers, collapse Flow runtime file lookup branches to typed owner queries."
+        - concept: "Flow run principal identity"
+          current_locations: "flow_runs.user_id; flow_runs.principal_type/principal_user_id/principal_api_key_id; FlowRun.user_id; FlowRunPublic.user_id; FlowPrincipal.legacy_user_id/from_run fallback; FlowRunRepository.create/list fallback args; Celery task user_id arg; webhook audit fallback."
+          behavior_differences: "Typed principal supports user and service-key runs; legacy user_id only represents user runs and leaks into public API."
+          canonical_owner: "flow_runs.principal_type plus principal_user_id or principal_api_key_id, represented by FlowPrincipal and exposed through explicit public principal fields/policy rather than legacy user_id."
+          merge_delete_path: "Drop flow_runs.user_id/FK, remove FlowRun/FlowRunPublic.user_id and generated-client examples/types, remove task/webhook/repo/service fallbacks, and keep access-policy guard preventing FlowRuns.user_id read filters."
+      db_catalog:
+        alembic_version: "20260526_flow_published_fk"
+        files:
+          columns: "tenant_id NOT NULL, user_id nullable, owner_type NOT NULL, owner_user_id nullable, owner_api_key_id nullable."
+          constraints:
+            - "files_users_fkey: FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, validated."
+            - "fk_files_owner_user_id: FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT, validated."
+            - "fk_files_owner_api_key_id: FOREIGN KEY (owner_api_key_id) REFERENCES api_keys_v2(id) ON DELETE RESTRICT, validated."
+            - "ck_files_owner_type and ck_files_owner_identity validated."
+          counts: "total=170; user_id_non_null=162; owner_user_id_non_null=162; owner_api_key_id_non_null=8; owner_type_user=162; owner_type_service_key=8; legacy_only_user_id=0; typed_user_without_legacy_user_id=0; user_owner_legacy_mismatch=0; service_key_rows_with_legacy_user_id=0; no_typed_owner=0."
+        flow_runs:
+          columns: "user_id nullable, tenant_id NOT NULL, principal_type NOT NULL, principal_user_id nullable, principal_api_key_id nullable."
+          constraints:
+            - "flow_runs_user_id_fkey: FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL, validated."
+            - "fk_flow_runs_principal_user_id: FOREIGN KEY (principal_user_id) REFERENCES users(id) ON DELETE RESTRICT, validated."
+            - "ck_flow_runs_principal_type and ck_flow_runs_principal_identity validated."
+          counts: "total=81; user_id_non_null=77; principal_user_id_non_null=77; principal_api_key_id_non_null=4; principal_type_user=77; principal_type_service_key=4; principal_type_null=0; legacy_only_user_id=0; typed_user_without_legacy_user_id=0; user_principal_legacy_mismatch=0; service_key_rows_with_legacy_user_id=0; no_typed_principal=0."
+        query_shape: "No new index justified by this cleanup. Existing typed idempotency indexes cover principal_user_id/principal_api_key_id; local typed file/run lookups are sub-millisecond on small data. The Worker should avoid speculative owner indexes."
+      source_evidence:
+        file_public_contract:
+          - "backend/src/intric/files/file_models.py:64-77 defines FileInfo/FileCreate.user_id internally."
+          - "backend/src/intric/files/file_models.py:84-94 defines FilePublic without user_id/owner fields."
+          - "backend/src/intric/files/file_router.py:38-99 exposes FilePublic."
+          - "backend/src/intric/flows/api/flow_upload_router.py:120-225 exposes FilePublic for Flow uploads."
+          - "backend/src/intric/apps/app_runs/api/app_run_assembler.py:13-24 maps FileInfo to FilePublic."
+          - "OpenAPI generation: FileInfo/FileCreate/File schemas absent; FilePublic present without user_id/owner_type."
+        flow_public_contract:
+          - "backend/src/intric/flows/api/flow_models.py:944-954 exposes FlowRunPublic.user_id."
+          - "OpenAPI generation: FlowRunPublic.user_id present; principal_user_id/principal_api_key_id absent."
+          - "frontend/packages/intric-js/src/types/schema.d.ts:15328-15343 includes FlowRunPublic.user_id."
+          - "frontend/packages/intric-js/src/types/resources.d.ts:205 aliases FlowRun to FlowRunPublic."
+          - "frontend/apps/web/src/lib/features/flows has no direct `.user_id` or `user_id:` Flow run consumption outside generated schema usage."
+        file_runtime_callers:
+          - "backend/src/intric/files/file_service.py:236-247 writes user_id and falls back to file.user_id when owner_type is missing."
+          - "backend/src/intric/files/file_repo.py:25-33 wraps typed owner lookup as get_list_by_id_and_user."
+          - "backend/src/intric/files/file_repo.py:124-130 wraps typed owner delete as delete_by_owner."
+          - "backend/src/intric/files/file_repo.py:186-196 maps file.user_id into File models."
+          - "backend/src/intric/flows/flow_run_step_inputs.py:170-183 branches service-key to typed lookup and user to get_list_by_id_and_user."
+          - "backend/src/intric/flows/runtime/input_files.py:42-50 has the same branch."
+          - "backend/src/intric/flows/runtime/output_runtime.py:121-125 and backend/src/intric/flows/runtime/template_fill_runtime.py:165-169 still use legacy `{'user_id': deps.user_id}` if principal is absent."
+        run_runtime_callers:
+          - "backend/src/intric/flows/principal.py:35-39 exposes legacy_user_id."
+          - "backend/src/intric/flows/principal.py:66-70 falls back from missing principal_type to run.user_id."
+          - "backend/src/intric/flows/principal.py:84-98 writes user_id into run_create_fields and file_owner_fields."
+          - "backend/src/intric/flows/application/flow_run_service.py:389-396 passes principal.legacy_user_id into FlowRunRepository.create."
+          - "backend/src/intric/flows/infrastructure/flow_run_repo.py:230-240 mirrors user_id into principal_user_id on create."
+          - "backend/src/intric/flows/infrastructure/flow_run_repo.py:1503-1512 and :1545-1565 retain user_id compatibility args while querying principal_user_id."
+          - "backend/src/intric/flows/runtime/tasks.py:197-223 still accepts legacy user_id and maps principal_user_id from it when principal_type is missing."
+          - "backend/src/intric/flows/runtime/flow_webhook_delivery.py:426-430 falls back from principal_user_id to run.user_id."
+          - "backend/tests/unittests/flows/test_flow_access_policy.py:252-264 already guards against FlowRuns.user_id read filters."
+      test_rewrite_strategy:
+        counts:
+          get_list_by_id_and_user: "28 references across source/tests: source wrappers/callers plus tests in test_typed_io_executor, test_flow_run_service, test_flow_transcription, test_flow_executor_runtime, and test_flow_run_rerun_service."
+          delete_by_owner: "1 source wrapper plus 4 references in backend/tests/unit/test_file_service.py and 1 unrelated coverage-string mention."
+          template_fill_user_id: "16 test_template_fill_runtime fixture sites pass user_id=run.user_id."
+          flow_run_public_user_id: "FlowRunPublic schema and examples in backend/src/intric/flows/api/flow_models.py and generated intric-js schema."
+        strategy:
+          - "Rewrite file lookup tests to mock/assert get_list_by_id_for_owner with owner_type, owner_user_id, and owner_api_key_id."
+          - "Delete compatibility-wrapper tests only in the same Worker that deletes get_list_by_id_and_user/delete_by_owner."
+          - "Update file service tests to assert typed owner fields and absence of legacy user_id."
+          - "Update output/template-fill tests to require a typed principal or typed owner fields, not user_id fallback."
+          - "Update Celery/webhook tests to require typed principal identity and reject legacy user_id fallback."
+          - "Add migration roundtrip test proving both legacy columns are dropped on upgrade and recreated/backfilled on downgrade."
+          - "Add OpenAPI/architecture guards proving FlowRunPublic has no user_id and no source references FlowRuns.user_id or files.user_id outside migrations/tests designed for the migration."
+      migration_posture:
+        upgrade_preflight:
+          - "Abort if any user-owned files have user_id IS DISTINCT FROM owner_user_id."
+          - "Abort if any files have owner_type NULL, no typed owner, legacy-only user_id, or service-key owner rows with user_id."
+          - "Abort if any flow_runs have principal_type NULL, no typed principal, legacy-only user_id, user principal mismatch, or service-key rows with user_id."
+        upgrade_steps:
+          - "Drop files_users_fkey and files.user_id."
+          - "Drop flow_runs_user_id_fkey and flow_runs.user_id."
+          - "Do not add speculative indexes."
+        downgrade_steps:
+          - "Recreate files.user_id nullable and backfill owner_user_id for owner_type='user', then recreate FK to users(id) ON DELETE SET NULL."
+          - "Recreate flow_runs.user_id nullable and backfill principal_user_id for principal_type='user', then recreate FK to users(id) ON DELETE SET NULL."
+        lock_notes: "Dropping columns/FKs takes ACCESS EXCLUSIVE locks. This is acceptable only because the owner clarified Flows is non-production/no users; the Worker still must keep the migration direct, reviewable, and preflight guarded."
+      recommended_next: T101
+      recommendation: "Activate a Judge to choose the exact paired legacy owner cleanup Worker. The Worker should not start until Claude and Antigravity both review the schema/API/generated-client plan."
+      proposed_worker_allowed_files:
+        - "backend/alembic/versions/20260526_flow_remove_legacy_user_id_mirrors.py"
+        - "backend/src/intric/database/tables/files_table.py"
+        - "backend/src/intric/database/tables/flow_tables.py"
+        - "backend/src/intric/files/file_models.py"
+        - "backend/src/intric/files/file_service.py"
+        - "backend/src/intric/files/file_repo.py"
+        - "backend/src/intric/flows/principal.py"
+        - "backend/src/intric/flows/domain/flow.py"
+        - "backend/src/intric/flows/api/flow_models.py"
+        - "backend/src/intric/flows/application/flow_run_service.py"
+        - "backend/src/intric/flows/application/flow_run_rerun_service.py"
+        - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+        - "backend/src/intric/flows/flow_run_step_inputs.py"
+        - "backend/src/intric/flows/runtime/input_files.py"
+        - "backend/src/intric/flows/runtime/output_runtime.py"
+        - "backend/src/intric/flows/runtime/template_fill_runtime.py"
+        - "backend/src/intric/flows/runtime/tasks.py"
+        - "backend/src/intric/flows/runtime/flow_webhook_delivery.py"
+        - "backend/tests/integration/migrations/test_flow_legacy_user_id_mirrors_removed.py"
+        - "backend/tests/unittests/files/test_file_service.py"
+        - "backend/tests/unit/test_file_service.py"
+        - "backend/tests/integration/flows/test_flow_step_file_mapping_contract.py"
+        - "backend/tests/unit/test_flow_openapi_contract.py"
+        - "backend/tests/unittests/flows/test_flow_access_policy.py"
+        - "backend/tests/unittests/flows/test_flow_run_service.py"
+        - "backend/tests/unittests/flows/test_flow_run_rerun_service.py"
+        - "backend/tests/unittests/flows/test_flow_transcription.py"
+        - "backend/tests/unittests/flows/test_typed_io_executor.py"
+        - "backend/tests/unittests/flows/test_flow_executor_runtime.py"
+        - "backend/tests/unittests/flows/test_output_runtime.py"
+        - "backend/tests/unittests/flows/test_template_fill_runtime.py"
+        - "backend/tests/unittests/flows/test_celery_runtime.py"
+        - "frontend/packages/intric-js/src/types/schema.d.ts"
+        - "frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts"
+      proposed_verify:
+        - "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+        - "cd backend && uv run alembic upgrade head"
+        - "cd backend && uv run pytest tests/integration/migrations/test_flow_legacy_user_id_mirrors_removed.py -q"
+        - "cd backend && uv run pytest tests/unittests/files/test_file_service.py tests/unit/test_file_service.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_run_rerun_service.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_template_fill_runtime.py tests/unittests/flows/test_celery_runtime.py -q"
+        - "cd backend && uv run pyright src/intric/database/tables/files_table.py src/intric/database/tables/flow_tables.py src/intric/files/file_models.py src/intric/files/file_service.py src/intric/files/file_repo.py src/intric/flows/principal.py src/intric/flows/domain/flow.py src/intric/flows/api/flow_models.py src/intric/flows/application/flow_run_service.py src/intric/flows/application/flow_run_rerun_service.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/flow_run_step_inputs.py src/intric/flows/runtime/input_files.py src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/template_fill_runtime.py src/intric/flows/runtime/tasks.py src/intric/flows/runtime/flow_webhook_delivery.py"
+        - "cd backend && uv run ruff check <allowed backend files>"
+        - "cd backend && uv run ruff format --check <allowed backend files>"
+        - "cd frontend/packages/intric-js && bun run update"
+        - "cd frontend/apps/web && bun run check"
+        - "git diff --check"
+        - "rg -n 'files\\.user_id|Files\\.user_id|flow_runs\\.user_id|FlowRuns\\.user_id|get_list_by_id_and_user|delete_by_owner\\(|legacy_user_id|\\\"user_id\\\": self\\.legacy_user_id|\\{\\\"user_id\\\": deps\\.user_id\\}' backend/src/intric/files backend/src/intric/flows"
+      commands:
+        - cmd: "rg/nl source inventory for FileCreate/FileInfo/FilePublic, FileService/FileRepository, FlowPrincipal, FlowRun domain/API/repo/service/runtime/task/webhook callers, generated intric-js schema, and Flow frontend references"
+          status: pass
+        - cmd: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run python - <<'PY' ... app.openapi() FileInfo/FileCreate/FilePublic audit ... PY"
+          status: pass
+          output: "FileInfo/FileCreate/File absent from OpenAPI; FilePublic present without user_id/owner fields."
+        - cmd: "cd backend && PYTHONDONTWRITEBYTECODE=1 uv run python - <<'PY' ... app.openapi() FlowRunPublic audit ... PY"
+          status: pass
+          output: "FlowRunPublic.user_id present; principal_user_id/principal_api_key_id absent."
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql ... files/flow_runs catalog, counts, indexes"
+          status: pass
+          output: "No data drift for either legacy mirror; both typed identity constraints validated."
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql ... EXPLAIN (ANALYZE, BUFFERS) typed file owner and flow run principal lookups"
+          status: pass
+          output: "Local plans are sub-millisecond except first idempotency index read at ~3.9ms; no index change justified."
+      consolidation_effect:
+        reused_existing_owner: "Typed file owner columns and typed Flow run principal columns are already the canonical owners."
+        logic_moved_from: "N/A, read-only Scout."
+        logic_deleted: "None in T100."
+        duplicate_path_removed: "None in T100; mapped exact duplicate paths for deletion."
+        new_code_added: "No source code."
+        why_existing_owners_were_insufficient: "Existing owners are sufficient; the problem is legacy mirror fields and compatibility paths."
+        guard_preventing_duplicate_logic_from_returning: "Next Worker should add migration/OpenAPI/source guards preventing files.user_id, flow_runs.user_id, compatibility wrappers, and legacy fallback dicts from returning."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+      naming_gate: "No new source names in T100. Proposed migration/test names use domain-specific legacy-user-id-mirror wording and would be clear in docs/flows/architecture.md."
+
+  - id: T101
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the exact Worker for paired legacy Flow user-id mirror cleanup after T100, or reject/split it if the source/API/schema blast radius is too broad."
+    inputs:
+      - "T099 receipt"
+      - "T100 receipt"
+      - ".codex/artifacts/claude-peer-loop-t099-files-user-id-clean-owner-revision-20260526T213613Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t099-files-user-id-clean-owner-antigravity-synthesis-20260526T214144Z.md"
+      - "backend/src/intric/database/tables/files_table.py"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/src/intric/files"
+      - "backend/src/intric/flows"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+    constraints:
+      - "Before this task transition, verify the watchdog state file."
+      - "Read-only Judge except board receipt/task transition and local review artifacts."
+      - "Do not start implementation directly."
+      - "If approving a Worker, treat it as high-risk schema + runtime + public API/generated-client work and require Claude plus Antigravity plan gates before source edits."
+      - "Do not activate T901 final docs, retention, service-key identity/review/rerun, webhook outbox, materialized webhook request snapshots, or Flow AI Builder cleanup."
+      - "Prefer the clean long-term canonical owner over pre-production legacy compatibility, but keep the Worker reviewable."
+    expected_output:
+      - "Decision: approve_worker | split_worker | blocked | scout_more."
+      - "If approved: exact Worker objective, allowed_files, migration revision/down_revision, generated-client impact, verify commands, rollback/downgrade notes, stop_if, and review tier."
+      - "If split: exact first Worker and deferred second Worker with reason."
+      - "Consolidation effect and naming-gate answer."
+    receipt:
+      result: done
+      decision: "approve_worker"
+      summary: "Approved one paired Worker, T102, to delete the legacy `files.user_id` and `flow_runs.user_id` mirrors and make typed file/run identity the sole owner path. The Worker must remove `FlowRunPublic.user_id` outright with no replacement, update generated intric-js types, remove runtime/Celery/webhook/repo compatibility paths, and add migration/OpenAPI/source guards. Claude and Antigravity both returned green after the brief was revised."
+      reviewer_verdicts:
+        claude_iteration_1:
+          artifact: ".codex/artifacts/claude-peer-loop-t101-legacy-user-id-mirror-cleanup-judge-20260526T215914Z.md"
+          verdict: "changes_required"
+          min_score: 7
+          accepted_concerns:
+            - "Remove FlowRunPublic.user_id outright; do not introduce a typed public replacement in this Worker."
+            - "Extend the existing Flow access-policy guard instead of adding a parallel guard."
+            - "Make migration preflight/downgrade ordering explicit."
+            - "Remove user_id from OutputRuntimeDeps, TemplateFillRuntimeDeps, and StepInputResolutionDeps."
+        claude_iteration_2:
+          artifact: ".codex/artifacts/claude-peer-loop-t101-legacy-user-id-mirror-cleanup-judge-revised-20260526T220308Z.md"
+          verdict: "green"
+          green_light: true
+          min_score: 8
+          notes:
+            - "Approved one paired Worker; no split."
+            - "Worker should make runtime principal deps non-Optional and may narrow FlowPrincipal.from_run with a typed Protocol if useful."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t101-legacy-user-id-mirror-cleanup-antigravity-synthesis-20260526T220619Z.md"
+          verdict: "green"
+          green_light: true
+          min_score: 9
+          accepted_concerns:
+            - "Delete redundant user_id parameter from validate_submitted_step_inputs."
+            - "Delete redundant user_id parameter from load_files_by_requested_ids."
+            - "Make OutputRuntimeDeps, TemplateFillRuntimeDeps, and StepInputResolutionDeps require non-Optional FlowPrincipal."
+      implementation_decisions:
+        flow_run_public_user_id: "Remove outright with no typed replacement in T102. Future public actor/principal id exposure remains product/API-decision gated."
+        worker_shape: "One paired Worker, not split, because splitting would leave a half-migrated owner architecture and both tables have zero drift."
+        migration_behavior: "Upgrade preflight in the same transaction before drops; downgrade add nullable columns, backfill typed user rows, then add FKs."
+        local_celery_wire_shape: "T102 is a non-production stop-the-world Celery kwarg removal. Receipt must state local queues should not contain old flow execution messages; flush/restart local workers if needed for verification."
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1, status=ok, blockers=[]"
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t101-legacy-user-id-mirror-cleanup --phase plan --iteration 1 --timeout-seconds 1200 ..."
+          status: pass
+          output: "changes_required; MIN_SCORE=7"
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t101-legacy-user-id-mirror-cleanup --phase verification --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE=8"
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t101-legacy-user-id-mirror-cleanup-synthesis --phase synthesis --iteration 1 --spend-mode auto --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE=9"
+      consolidation_effect:
+        reused_existing_owner: "Typed file owner tuple and typed Flow run principal tuple."
+        logic_moved_from: "N/A, Judge only."
+        logic_deleted: "None in T101; T102 must delete mirrors, wrappers, fallback branches, and public legacy field."
+        duplicate_path_removed: "None in T101; approved T102 to remove duplicate paths."
+        new_code_added: "No source code; local review briefs under .codex/artifacts."
+        why_existing_owners_were_insufficient: "Existing typed owners are sufficient; legacy mirror paths are the insufficiency."
+        guard_preventing_duplicate_logic_from_returning: "T102 must extend the existing Flow access-policy guard plus OpenAPI/migration tests."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+      naming_gate: "T102 migration/test names must use domain-specific legacy-user-id-mirror wording and be clear in the final architecture where-to-change-X table."
+      next_task: T102
+
+  - id: T102
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Delete legacy `files.user_id` and `flow_runs.user_id` mirrors and make typed file ownership plus typed Flow run principal identity the only owner paths."
+    allowed_files:
+      - "backend/alembic/versions/20260526_flow_remove_legacy_user_id_mirrors.py"
+      - "backend/src/intric/database/tables/files_table.py"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/src/intric/files/file_models.py"
+      - "backend/src/intric/files/file_service.py"
+      - "backend/src/intric/files/file_repo.py"
+      - "backend/src/intric/flows/principal.py"
+      - "backend/src/intric/flows/domain/flow.py"
+      - "backend/src/intric/flows/api/flow_models.py"
+      - "backend/src/intric/flows/application/flow_run_service.py"
+      - "backend/src/intric/flows/application/flow_run_rerun_service.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+      - "backend/src/intric/flows/flow_run_step_inputs.py"
+      - "backend/src/intric/flows/runtime/executor.py"
+      - "backend/src/intric/flows/runtime/input_files.py"
+      - "backend/src/intric/flows/runtime/output_runtime.py"
+      - "backend/src/intric/flows/runtime/template_fill_runtime.py"
+      - "backend/src/intric/flows/runtime/step_input_resolution.py"
+      - "backend/src/intric/flows/runtime/tasks.py"
+      - "backend/src/intric/flows/runtime/flow_webhook_delivery.py"
+      - "backend/tests/integration/migrations/test_flow_legacy_user_id_mirrors_removed.py"
+      - "backend/tests/unittests/files/test_file_service.py"
+      - "backend/tests/unit/test_file_service.py"
+      - "backend/tests/integration/flows/test_flow_step_file_mapping_contract.py"
+      - "backend/tests/unit/test_flow_openapi_contract.py"
+      - "backend/tests/unittests/flows/test_flow_access_policy.py"
+      - "backend/tests/unittests/flows/test_flow_run_service.py"
+      - "backend/tests/unittests/flows/test_flow_run_rerun_service.py"
+      - "backend/tests/unittests/flows/test_flow_transcription.py"
+      - "backend/tests/unittests/flows/test_typed_io_executor.py"
+      - "backend/tests/unittests/flows/test_flow_executor_runtime.py"
+      - "backend/tests/unittests/flows/test_output_runtime.py"
+      - "backend/tests/unittests/flows/test_template_fill_runtime.py"
+      - "backend/tests/unittests/flows/test_celery_runtime.py"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts"
+    constraints:
+      - "Before starting implementation, verify the watchdog state file."
+      - "Use FastAPI guidance for FlowRunPublic/OpenAPI changes."
+      - "Use complexity-optimizer, Supabase Postgres, and SQLAlchemy/Alembic guidance for migration/query/schema decisions."
+      - "Use impeccable only if this unexpectedly becomes frontend UI/design work; generated type updates alone do not require it."
+      - "No files outside allowed_files unless T102 is paused and a Judge widens scope."
+      - "Do not add typed public principal ids or actor ids to FlowRunPublic in this Worker."
+      - "Do not activate service-key identity/review/rerun, retention, webhook outbox, materialized webhook request snapshots, T901 final docs, or Flow AI Builder cleanup."
+      - "No speculative indexes."
+      - "No pyright/type ignores, Any widening, generic helpers, fake interfaces, or tutorial comments."
+      - "Delete compatibility tests only in the same Worker as the behavior/wrapper they protected."
+    implementation_requirements:
+      - "Remove `files.user_id` and `flow_runs.user_id` columns and FKs in the migration."
+      - "Upgrade preflight must run in the same transaction before drops and abort on any files/flow_runs drift or missing typed identity."
+      - "Downgrade must add nullable legacy columns, backfill user rows from typed owner/principal fields, then add FKs ON DELETE SET NULL."
+      - "Remove FileCreate/FileInfo/File user_id and all source mappings/writes/fallbacks."
+      - "Delete FileRepository.get_list_by_id_and_user and FileRepository.delete_by_owner."
+      - "Collapse validate_submitted_step_inputs and load_files_by_requested_ids to required non-Optional FlowPrincipal and typed get_list_by_id_for_owner calls; delete redundant user_id parameters."
+      - "Remove user_id from OutputRuntimeDeps, TemplateFillRuntimeDeps, and StepInputResolutionDeps; make their principal field non-Optional FlowPrincipal."
+      - "Remove FlowPrincipal.legacy_user_id and the principal_type-is-missing fallback from FlowPrincipal.from_run."
+      - "Remove FlowRun.user_id and FlowRunPublic.user_id; update examples and generated intric-js schema."
+      - "Remove FlowRunRepository user_id args/fallback/writes and FlowRunService call sites."
+      - "Remove Celery task user_id kwarg/fallback and update tests. Treat as non-production stop-the-world wire-shape removal."
+      - "Collapse webhook audit fallback to principal_user_id only."
+      - "Extend the existing test_flow_run_user_id_is_not_used_as_a_read_filter guard into the canonical source ban; do not add a parallel guard file."
+    verify:
+      - "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+      - "cd backend && uv run alembic upgrade head"
+      - "cd backend && uv run pytest tests/integration/migrations/test_flow_legacy_user_id_mirrors_removed.py -q"
+      - "cd backend && uv run pytest tests/unittests/files/test_file_service.py tests/unit/test_file_service.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_run_rerun_service.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_template_fill_runtime.py tests/unittests/flows/test_celery_runtime.py -q"
+      - "cd backend && uv run pyright src/intric/database/tables/files_table.py src/intric/database/tables/flow_tables.py src/intric/files/file_models.py src/intric/files/file_service.py src/intric/files/file_repo.py src/intric/flows/principal.py src/intric/flows/domain/flow.py src/intric/flows/api/flow_models.py src/intric/flows/application/flow_run_service.py src/intric/flows/application/flow_run_rerun_service.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/flow_run_step_inputs.py src/intric/flows/runtime/executor.py src/intric/flows/runtime/input_files.py src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/template_fill_runtime.py src/intric/flows/runtime/step_input_resolution.py src/intric/flows/runtime/tasks.py src/intric/flows/runtime/flow_webhook_delivery.py"
+      - "cd backend && uv run ruff check backend/alembic/versions/20260526_flow_remove_legacy_user_id_mirrors.py src/intric/database/tables/files_table.py src/intric/database/tables/flow_tables.py src/intric/files/file_models.py src/intric/files/file_service.py src/intric/files/file_repo.py src/intric/flows/principal.py src/intric/flows/domain/flow.py src/intric/flows/api/flow_models.py src/intric/flows/application/flow_run_service.py src/intric/flows/application/flow_run_rerun_service.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/flow_run_step_inputs.py src/intric/flows/runtime/executor.py src/intric/flows/runtime/input_files.py src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/template_fill_runtime.py src/intric/flows/runtime/step_input_resolution.py src/intric/flows/runtime/tasks.py src/intric/flows/runtime/flow_webhook_delivery.py tests/integration/migrations/test_flow_legacy_user_id_mirrors_removed.py tests/unittests/files/test_file_service.py tests/unit/test_file_service.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_run_rerun_service.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_template_fill_runtime.py tests/unittests/flows/test_celery_runtime.py"
+      - "cd backend && uv run ruff format --check backend/alembic/versions/20260526_flow_remove_legacy_user_id_mirrors.py src/intric/database/tables/files_table.py src/intric/database/tables/flow_tables.py src/intric/files/file_models.py src/intric/files/file_service.py src/intric/files/file_repo.py src/intric/flows/principal.py src/intric/flows/domain/flow.py src/intric/flows/api/flow_models.py src/intric/flows/application/flow_run_service.py src/intric/flows/application/flow_run_rerun_service.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/flow_run_step_inputs.py src/intric/flows/runtime/executor.py src/intric/flows/runtime/input_files.py src/intric/flows/runtime/output_runtime.py src/intric/flows/runtime/template_fill_runtime.py src/intric/flows/runtime/step_input_resolution.py src/intric/flows/runtime/tasks.py src/intric/flows/runtime/flow_webhook_delivery.py tests/integration/migrations/test_flow_legacy_user_id_mirrors_removed.py tests/unittests/files/test_file_service.py tests/unit/test_file_service.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_access_policy.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_run_rerun_service.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_typed_io_executor.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_output_runtime.py tests/unittests/flows/test_template_fill_runtime.py tests/unittests/flows/test_celery_runtime.py"
+      - "cd frontend/packages/intric-js && bun run update"
+      - "cd frontend/apps/web && bun run check"
+      - "rg -n 'Files\\.user_id|files\\.user_id|FlowRuns\\.user_id|flow_runs\\.user_id|get_list_by_id_and_user|delete_by_owner\\(|legacy_user_id|\\{\"user_id\": deps\\.user_id\\}' backend/src/intric/files backend/src/intric/flows"
+      - "git diff --check"
+      - "Claude commit gate with --require-green --required-min-score 8 and --timeout-seconds 1200."
+      - "Antigravity commit/synthesis gate with --spend-mode auto and --timeout-seconds 1200."
+    stop_if:
+      - "The watchdog reports a halt-worthy blocker."
+      - "Migration preflight finds drift or missing typed identity."
+      - "Removing FlowRunPublic.user_id requires adding a new public principal/actor field."
+      - "A shared non-Flow file caller directly depends on FileInfo.user_id/FileCreate.user_id outside the allowed scope."
+      - "Frontend Flow code relies on FlowRun.user_id beyond generated schema changes."
+      - "Strict typing cannot be maintained without ignores, broad Any, or fake abstractions."
+      - "A needed file is outside allowed_files."
+      - "Verification fails twice for in-scope reasons that require widening the task."
     receipt: null
 
   - id: T901
