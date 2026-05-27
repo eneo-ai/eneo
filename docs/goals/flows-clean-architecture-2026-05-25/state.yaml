@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T108
+active_task: T902
 
 tasks:
   - id: T001
@@ -2357,7 +2357,7 @@ tasks:
   - id: T016
     type: worker
     assignee: Worker
-    status: queued
+    status: blocked
     reasoning_hint: medium
     objective: "Clean Flow frontend state ownership for form schema, step list identity/order, run dialog upload/recording state, and generated type usage."
     allowed_files: []
@@ -2365,7 +2365,44 @@ tasks:
     stop_if:
       - "Backend contract shape is not yet stable."
       - "UX conflict behavior for form schema edits is undecided."
-    receipt: null
+    receipt:
+      result: blocked_deferred
+      completed_by_subtasks:
+        - id: T087
+          summary: "Centralized draft step-list move/remove ownership in FlowEditor."
+        - id: T089
+          summary: "Aligned Flow run progress fixtures with the current generated FlowRunStep contract."
+        - id: T091
+          summary: "Inventoried remaining frontend state ownership candidates and found form-schema and runtime upload/recording preflight needs."
+        - id: T105
+          summary: "Confirmed form-schema conflict semantics are product/UX-gated and identified the safe RecordingSession consolidation candidate."
+        - id: T107
+          summary: "Deleted the unused RecordingSession upload/persistence/resume path and narrowed RecordingSession to lifecycle/retry ownership."
+      summary: "T016 has no remaining source-backed safe Worker before final docs. Step-list identity/order, generated-contract fixture usage, launch input ownership, wizard/progress projection, and the RecordingSession duplicate path are resolved or have clear owners. Remaining form-schema dirty-edit conflict semantics need a product/UX decision, and moving browser upload/audio side effects needs a dedicated design gate with behavior tests. Because Flow proper has no production users, this is not legacy preservation; it is a current-product semantics gate."
+      remaining_blockers:
+        form_schema_conflict_semantics:
+          owner_now: "flowFormSchema owns persisted shape; FlowEditor owns metadata writes; FlowFormSchemaEditor owns transient local edit buffer."
+          blocked_by: "No recorded product/UX decision for whether dirty local edits should merge, overwrite, warn, or discard when persisted metadata changes."
+          next_safe_step: "Add a product/UX decision, then judge whether to deepen FlowEditor/component ownership or delete local buffering."
+        runtime_file_upload_and_audio_side_effects:
+          owner_now: "FlowRunFileInputState owns runtime file state; flowRunWizard owns blockers; FlowRunDialog owns browser picker/drop/audio/SDK side effects; flowRunRecordingSession owns recording ledger persistence."
+          blocked_by: "Moving browser upload/audio side effects without a tested canonical owner would copy behavior into another controller."
+          next_safe_step: "Dedicated design gate only if the goal later chooses to move this side-effect boundary."
+        unrelated_frontend_check_errors:
+          owner_now: "intric-js stream client and API-key dialog, outside Flows proper."
+          blocked_by: "Out of scope for the Flows clean architecture goal."
+          next_safe_step: "Handle in a separate non-Flow frontend hygiene task."
+      consolidation_effect:
+        reused_existing_owner: "FlowEditor, flowFormSchema, FlowFormSchemaEditor, FlowRunFileInputState, flowRunWizard, FlowRunDialog, flowRunRecordingSession, RecordingSession, and generated Flow contracts."
+        logic_moved_from: "Draft step-list reorder/remove intent was centralized earlier in FlowEditor."
+        logic_deleted: "The unused RecordingSession upload/persistence/resume path was deleted in T107."
+        duplicate_path_removed: "RecordingSession no longer duplicates FlowRunDialog plus flowRunRecordingSession persistence/upload responsibility."
+        new_code_added: "No new T016 source code outside approved subtasks."
+        why_existing_owners_were_insufficient: "They are sufficient for the safe parts. Remaining changes need product/UX/design decisions, not speculative new owners."
+        guard_preventing_duplicate_logic_from_returning: "T107 rg guards and lifecycle tests; existing FlowEditor, flowRunWizard, FlowRunFileInputState, flowRunProgress, and generated-contract tests."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+      naming_gate: "No new broad names. Current owner names are domain-specific enough for the final docs/flows/architecture.md where-to-change-X table."
 
   - id: T900
     type: judge
@@ -10907,7 +10944,7 @@ tasks:
   - id: T108
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Reassess T016 after T107 and decide whether any safe frontend state Worker remains before final maintainer docs."
     inputs:
@@ -10936,12 +10973,56 @@ tasks:
       - "Any remaining candidate requires product/UX decisions not recorded in state.yaml."
       - "A useful source Worker would move browser upload/audio side effects without a tested canonical owner."
       - "The next step would broaden into unrelated frontend diagnostics or Flow AI Builder cleanup."
-    receipt: null
+    receipt:
+      result: done
+      completed_at: "2026-05-27T02:23:17+02:00"
+      decision: "block_defer_t016_activate_t901"
+      summary: "After T107, no safe frontend state Worker remains. The source-backed duplicate RecordingSession path is gone; the remaining T016 concerns are product/UX-gated form-schema conflict semantics, runtime-sensitive upload/audio side-effect relocation that needs a dedicated design gate, or unrelated non-Flow check errors. T016 is explicitly blocked/deferred, so T901 can activate as final maintainer docs that document current owners and known open decisions."
+      evidence:
+        - "T087 centralized draft step-list move/remove ownership in FlowEditor."
+        - "T089 aligned Flow progress fixtures with generated FlowRunStep contract fields."
+        - "T091 and T105 both classify form-schema dirty local edit conflict behavior as needing product/UX preflight."
+        - "T105 classifies runtime file upload state split as current-owner-valid unless a design gate approves moving browser side effects."
+        - "T107 removed the only source-backed duplicate recording persistence/upload path by narrowing RecordingSession."
+        - "Post-T107 rg found no remaining RecordingSession upload/persistence/resume production calls."
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1, status=ok, blockers=[]"
+        - cmd: "ruby -ryaml -e '... statuses for T016/T091/T105/T106/T107/T108/T901/T009/T010/T011 ...'"
+          status: pass
+          output: "T016 queued before this receipt; T901 queued; T009/T010/T011 blocked."
+        - cmd: "rg -n 'localDirty|replaceFormSchemaFields|FlowFormSchemaEditor|form_schema|formSchema' frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte frontend/apps/web/src/lib/features/flows/FlowEditor.ts frontend/apps/web/src/lib/features/flows/flowFormSchema.ts"
+          status: pass
+          output: "Confirmed current split between persisted form-schema owner, metadata write owner, and transient local edit buffer."
+        - cmd: "rg -n 'uploadRuntimeFile|handleRecordedAudio|continueResumedSession|FlowRunFileInputState|recordingSession|flowRunRecordingSession|buildRunWizard|upload' frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.svelte.ts frontend/apps/web/src/lib/features/flows/flowRunWizard.ts frontend/apps/web/src/lib/features/audio/flowRunRecordingSession.ts frontend/apps/web/src/lib/features/audio/recordingSession.ts"
+          status: pass
+          output: "Confirmed runtime file state, wizard blockers, dialog side effects, recording ledger, and lifecycle session owners."
+        - cmd: "rg -n 'onSegmentFinalized|uploadSegment:|deleteUploadedSegment:|continueRecordingExternal|listRecoverable\\b|markSubmitted\\(|uploadedFileIdsSortedBySegmentIndex|RecordingSession\\.resume|session\\.resume\\(' frontend/apps/web/src/lib/features -g '*.ts' -g '*.svelte'"
+          status: pass
+          output: "No hits."
+      disposition:
+        T016: "blocked/deferred with source-backed resolved items and explicit product/UX/design gates."
+        T901: "activate now as final maintainer docs; docs must reflect current source reality and blocked decisions, not desired future state."
+        T009_T010_T011: "remain blocked; T901 may document these as open decisions but must not implement them."
+      peer_review: "Not run. T108 made no source/API/data/runtime change and only applied conclusions already reviewed in T105-T107; T901 final docs/audit can receive the next review gate if needed."
+      consolidation_effect:
+        reused_existing_owner: "T091/T105/T107 receipts and the current frontend source owners."
+        logic_moved_from: "N/A; read-only Judge."
+        logic_deleted: "N/A in T108; T107 deleted the duplicate recording path."
+        duplicate_path_removed: "N/A in T108."
+        new_code_added: "No source code; board transition only."
+        why_existing_owners_were_insufficient: "They are sufficient for current safe work. Remaining changes are blocked by current semantics, not missing abstractions."
+        guard_preventing_duplicate_logic_from_returning: "T901 must document owner map and where-to-change-X table; existing tests/guards continue to cover implemented frontend ownership."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+      naming_gate: "No new source names; final docs must make existing owners clear enough for a maintainer entry point."
+      next_task: T901
 
   - id: T901
     type: worker
     assignee: Worker
-    status: queued
+    status: done
     reasoning_hint: high
     objective: "docs(flows): add the stable maintainer architecture map before merge."
     inputs:
@@ -10966,6 +11047,99 @@ tasks:
     stop_if:
       - "The runtime/API/schema architecture is still changing enough that docs/flows/architecture.md would become a task receipt or stale future-state document."
       - "Source evidence is insufficient to explain a required owner or open decision."
+    receipt:
+      result: done
+      completed_at: "2026-05-27T02:38:12+02:00"
+      summary: "Added docs/flows/architecture.md as the stable Flow maintainer entry point. The doc is source-reality oriented and covers the Draft Flow / Published Flow Version / Run model, canonical owner map, consumer/authoring/execution journeys, StepHandler / OutputFormatSpec / OutputRenderer split, webhook outbox lifecycle, runtime step identity, files/artifacts/evidence/retention caveats, review/rerun/service-key decisions, API/frontend contract ownership, architecture guards, where-to-change-X, and known open decisions/compatibility paths."
+      files_changed:
+        - "docs/flows/architecture.md"
+        - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      evidence:
+        - "docs/flows/architecture.md cites current backend/frontend/test owners with 130 path-line references."
+        - "The doc records that compatibility paths are not architecture goals and should remain only with current caller, current data, or product-decision evidence."
+        - "The no-production-users posture is reflected in the compatibility/deletion guidance without unblocking product/data-gated tasks."
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1, status=ok, blockers=[]"
+        - cmd: "sed -n '1,220p' /Users/ccimen/.agents/skills/writing-clearly-and-concisely/SKILL.md && sed -n '1,220p' /Users/ccimen/.agents/skills/stop-slop/SKILL.md"
+          status: pass
+          output: "Used writing and anti-slop guidance for the committed maintainer doc."
+        - cmd: "rg -n 'Draft Flow|Published Flow Version|Run|Canonical Owner Map|Runtime Consumer Journey|Authoring And Publish Journey|Runtime Execution Journey|Step Behavior And Output Format|OutputRenderer|Webhook Outbox Lifecycle|Runtime Step Identity|Files, Artifacts, Evidence, And Retention|Review, Rerun, And Service-Key Decisions|API And Frontend Contract Ownership|Architecture Guard Tests|Where To Change X|Known Open Decisions' docs/flows/architecture.md"
+          status: pass
+          output: "All required maintainer-map sections are present."
+        - cmd: "ruby -ryaml -e '... active_task/status check ...' docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+          status: pass
+          output: "YAML parsed; T901 was active during doc validation."
+        - cmd: "python3 - <<'PY' ... path-line reference checker ... PY"
+          status: pass
+          output: "checked 130 path-line references"
+        - cmd: "perl -ne 'if(/[ \\t]+$/){print \"$ARGV:$.: trailing whitespace\\n\"; $bad=1} END{exit($bad ? 1 : 0)}' docs/flows/architecture.md docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+          status: pass
+          output: "No trailing whitespace."
+        - cmd: "rg -n 'T[0-9]{2,3}\\b|/tmp/|plan/phases|plan/progress|ai_builder|Last updated' docs/flows/architecture.md"
+          status: pass
+          output: "No hits; command exited 1 because the anti-leak grep found nothing."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py -q"
+          status: pass
+          output: "14 passed in 2.06s"
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t901-maintainer-architecture-doc --phase commit-gate --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: fail
+          output: "GREEN_LIGHT: no; MIN_SCORE: 7. Valid blocker: opaque T107 task id leaked into maintainer doc. Valid concerns also covered alembic touchpoint, published definition builder citation, stale Last updated line, and form-schema owner discoverability."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t901-maintainer-architecture-doc --phase verification --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT: yes; MIN_SCORE: 8. Artifact: .codex/artifacts/claude-peer-loop-t901-flow-maintainer-architecture-doc-verification-20260527T003623Z.md"
+      peer_review:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t901-flow-maintainer-architecture-doc-20260527T003202Z.md"
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t901-flow-maintainer-architecture-doc-verification-20260527T003623Z.md"
+        verdict: "green after iteration 2"
+        valid_concerns_addressed:
+          - "Removed opaque T107 planning vocabulary from the maintainer doc."
+          - "Added backend/alembic/versions to persisted draft-field change guidance."
+          - "Added published_definition.py:112 builder citation."
+          - "Removed stale static Last updated line."
+          - "Added frontend form-schema owner row."
+          - "Tightened two line references and documented that the consumer projection currently lives in the authoring router file."
+        disagreements: "None. Claude's blocking claims were concrete and source-backed."
+        antigravity: "Not run. This was a docs-only Worker, Claude's concerns were resolved without disagreement, and no migration/API/runtime decision was made."
+      consolidation_effect:
+        reused_existing_owner: "FlowService, FlowRepository, published_definition.py, FlowRunContractService, FlowAssembler, flow_access_policy.py, FlowRunService, FlowRunExecutor, runtime/step_handlers, runtime/output_formats, FlowRunWebhookDeliveryService, FlowRunEvidenceService, FlowRunReviewCheckpointService, FlowRunRerunService, FlowEditor, flowFormSchema, flowRunContract, FlowRunFileInputState, FlowRunDialog, RecordingSession, and flowRunRecordingSession."
+        logic_moved_from: "N/A; documentation-only maintainer map."
+        logic_deleted: "N/A; documentation-only maintainer map."
+        duplicate_path_removed: "N/A; documentation-only maintainer map."
+        new_code_added: "No source code. Added docs/flows/architecture.md only."
+        why_existing_owners_were_insufficient: "Existing source owners were sufficient. The missing artifact was a stable human entry point that mapped them."
+        guard_preventing_duplicate_logic_from_returning: "The doc points maintainers to architecture guard tests, output-axis guards, document-renderer guards, API/consumer contract tests, and frontend ownership tests."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+      naming_gate: "No new source names. The doc uses domain-specific owner names that are clear in the where-to-change-X table."
+      next_task: T902
+
+  - id: T902
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Run the final PM/Judge audit after T901 and decide whether the goal can complete or must remain blocked by product/data decisions."
+    inputs:
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/flows/architecture.md"
+      - "Completed task receipts, current source reality, and blocked product/data tasks."
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only audit except for the state receipt."
+      - "No source edits, test edits, migrations, frontend edits, OpenAPI generation, deletion, or docs/flows edits."
+      - "Do not mark the goal complete unless every scorecard dimension is verified at least 9/10."
+      - "Do not unblock T009, T010, or T011 without explicit owner product/data decisions."
+      - "If remaining work is blocked only by product/data decisions, record the exact decisions needed and set the board/goal state accordingly."
+    expected_output:
+      - "A final audit receipt with scorecard result, blocked decisions, and next unblock conditions."
+      - "Goal status complete only if the strict 9/10 floor is source-verified; otherwise blocked with concrete owner decisions needed."
+    stop_if:
+      - "Any queued non-blocked implementation task remains."
+      - "A product/data decision needed for T009/T010/T011 is absent."
     receipt: null
 
 checks:
