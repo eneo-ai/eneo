@@ -3243,5 +3243,18 @@
   "view_all_conversations_users_had": "View all conversations users had with this assistant in the selected time frame.",
   "you_are_about_to_change_security_classification": "You are about to change the security classification for this space.",
   "do_you_want_to_proceed": "Do you want to proceed?",
-  "publishing": "Publishing"
+  "publishing": "Publishing",
+  "governance_prompt_form_desc": "The prompt library lets you share the same system prompt across all users' personal chats.",
+  "governance_prompt_form_name_placeholder": "e.g. Standard personal assistant",
+  "governance_prompt_form_description_optional": "Description (optional)",
+  "governance_prompt_form_description_placeholder": "A short description to help admins recognize the prompt",
+  "governance_prompt_form_text_label": "Prompt text",
+  "governance_prompt_form_characters": "{count} characters",
+  "governance_prompt_form_save_error": "Could not save the prompt.",
+  "governance_locked_by_admin": "Locked by administrator",
+  "governance_locked_short": "(locked)",
+  "governance_assistant_prompt_locked_hint": "The system prompt is controlled by your organization's policy. Your saved prompt is shown but not used.",
+  "governance_assistant_locked_by_policy": "Locked by your organization's policy.",
+  "governance_assistant_models_filtered_hint": "Only models allowed by your organization's policy are shown.",
+  "governance_assistant_mcp_filtered_hint": "Only MCP servers allowed by your organization's policy are shown."
 }

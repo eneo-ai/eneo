@@ -295,7 +295,7 @@
               class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
             >
               <span class="font-bold">{m.warning()}:&nbsp;</span>
-              System-prompten styrs av organisationens policy. Din sparade prompt visas men används inte.
+              {m.governance_assistant_prompt_locked_hint()}
             </p>
           {/if}
           <textarea
@@ -408,7 +408,7 @@
               <p class="text-default text-sm font-medium">
                 {lockedModel.nickname ?? lockedModel.name}
               </p>
-              <p class="text-muted text-xs">Låst av organisationens policy.</p>
+              <p class="text-muted text-xs">{m.governance_assistant_locked_by_policy()}</p>
             </div>
           {:else}
             <SelectAIModelV2
@@ -419,7 +419,7 @@
             ></SelectAIModelV2>
             {#if modelsEnforced}
               <p class="text-muted mt-2 text-xs">
-                Endast modeller som är tillåtna av organisationens policy visas.
+                {m.governance_assistant_models_filtered_hint()}
               </p>
             {/if}
           {/if}
@@ -494,7 +494,7 @@
             />
             {#if mcpEnforced}
               <p class="text-muted mt-2 text-xs">
-                Endast MCP-servrar som är tillåtna av organisationens policy visas.
+                {m.governance_assistant_mcp_filtered_hint()}
               </p>
             {/if}
           </div>

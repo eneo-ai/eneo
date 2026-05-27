@@ -72,10 +72,10 @@
   <div
     in:fly|global={{ x: -5, duration: 300, easing: quadInOut, opacity: 0.3 }}
     class="border-default text-primary flex max-w-[calc(100%_-_4rem)] items-center gap-2 overflow-hidden rounded-lg border py-1 pr-3 pl-2 text-[1.4rem] leading-normal font-extrabold"
-    title="Låst av administratör"
+    title={m.governance_locked_by_admin()}
   >
     <span class="truncate text-base font-medium">{lockedModel.nickname}</span>
-    <span class="text-muted text-xs">(låst)</span>
+    <span class="text-muted text-xs">{m.governance_locked_short()}</span>
   </div>
 {:else}
   <button

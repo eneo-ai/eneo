@@ -3243,5 +3243,18 @@
   "pagination_showing_range": "{start}–{end} av {total}",
   "spaces_more_members": "+{count} till",
   "could_not_delete_crawl": "Kunde inte ta bort genomsökningen.",
-  "this_run_did_not_receive_any_inputs": "Den här körningen tog inte emot några indata."
+  "this_run_did_not_receive_any_inputs": "Den här körningen tog inte emot några indata.",
+  "governance_prompt_form_desc": "Promptbiblioteket gör det möjligt att dela samma system-prompt till alla användares personliga chatt.",
+  "governance_prompt_form_name_placeholder": "t.ex. Standard personlig assistent",
+  "governance_prompt_form_description_optional": "Beskrivning (valfritt)",
+  "governance_prompt_form_description_placeholder": "En kort beskrivning som hjälper admin att känna igen prompten",
+  "governance_prompt_form_text_label": "Prompt-text",
+  "governance_prompt_form_characters": "{count} tecken",
+  "governance_prompt_form_save_error": "Kunde inte spara prompten.",
+  "governance_locked_by_admin": "Låst av administratör",
+  "governance_locked_short": "(låst)",
+  "governance_assistant_prompt_locked_hint": "System-prompten styrs av organisationens policy. Din sparade prompt visas men används inte.",
+  "governance_assistant_locked_by_policy": "Låst av organisationens policy.",
+  "governance_assistant_models_filtered_hint": "Endast modeller som är tillåtna av organisationens policy visas.",
+  "governance_assistant_mcp_filtered_hint": "Endast MCP-servrar som är tillåtna av organisationens policy visas."
 }

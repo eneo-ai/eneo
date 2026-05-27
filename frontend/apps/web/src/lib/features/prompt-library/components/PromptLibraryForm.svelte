@@ -10,6 +10,7 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
+  import { m } from "$lib/paraglide/messages";
 
   type Props = {
     initial?: { name: string; description: string | null; text: string };
@@ -63,7 +64,7 @@
       });
     } catch (e) {
       const err = e as { message?: string };
-      error = err.message ?? "Kunde inte spara prompten.";
+      error = err.message ?? m.governance_prompt_form_save_error();
     } finally {
       saving = false;
     }
@@ -72,38 +73,39 @@
 
 <Card.Root class="mx-auto max-w-3xl">
   <Card.Header>
-    <Card.Title>Prompt</Card.Title>
+    <Card.Title>{m.prompt()}</Card.Title>
     <Card.Description>
-      Promptbiblioteket gör det möjligt att dela samma system-prompt till alla användares personliga
-      chatt.
+      {m.governance_prompt_form_desc()}
     </Card.Description>
   </Card.Header>
   <Card.Content>
     <form onsubmit={submit} class="space-y-4">
       <div class="space-y-2">
-        <Label for="name">Namn</Label>
+        <Label for="name">{m.name()}</Label>
         <Input
           id="name"
           bind:value={name}
           required
           maxlength={200}
-          placeholder="t.ex. Standard personlig assistent"
+          placeholder={m.governance_prompt_form_name_placeholder()}
         />
       </div>
 
       <div class="space-y-2">
-        <Label for="description">Beskrivning (valfritt)</Label>
+        <Label for="description">{m.governance_prompt_form_description_optional()}</Label>
         <Input
           id="description"
           bind:value={description}
-          placeholder="En kort beskrivning som hjälper admin att känna igen prompten"
+          placeholder={m.governance_prompt_form_description_placeholder()}
         />
       </div>
 
       <div class="space-y-2">
-        <Label for="text">Prompt-text</Label>
+        <Label for="text">{m.governance_prompt_form_text_label()}</Label>
         <Textarea id="text" bind:value={text} rows={12} required />
-        <p class="text-muted text-xs">{text.length} tecken</p>
+        <p class="text-muted text-xs">
+          {m.governance_prompt_form_characters({ count: text.length })}
+        </p>
       </div>
 
       {#if error}
@@ -111,9 +113,11 @@
       {/if}
 
       <div class="flex justify-end gap-2 pt-2">
-        <Button type="button" variant="outline" onclick={onCancel} disabled={saving}>Avbryt</Button>
+        <Button type="button" variant="outline" onclick={onCancel} disabled={saving}
+          >{m.cancel()}</Button
+        >
         <Button type="submit" disabled={!canSubmit || saving}>
-          {saving ? "Sparar..." : submitLabel}
+          {saving ? m.governance_saving() : submitLabel}
         </Button>
       </div>
     </form>
