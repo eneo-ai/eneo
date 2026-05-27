@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T110
+active_task: T111
 
 tasks:
   - id: T001
@@ -11439,7 +11439,7 @@ tasks:
   - id: T110
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the smallest safe Worker to delete or consolidate the review-checkpoint legacy snapshot fallback."
     inputs:
@@ -11479,6 +11479,199 @@ tasks:
       - "DB preflight shows any current checkpoint missing review_mode or output_type."
       - "The deletion requires broad frontend UI redesign rather than generated type/test alignment."
       - "The cleanup cannot be kept reviewable as one Worker and needs to be split."
+    receipt:
+      completed_at: "2026-05-27T03:15:00+02:00"
+      result: worker_approved
+      decision: "Approve T111 as one coherent Worker. Do not split DB nullability from public API/source cleanup because that would leave a temporary state where either the API or DB lies about the invariant."
+      approved_worker: T111
+      worker_title: "fix(flows-api): require review checkpoint snapshots"
+      summary: "T110 reviewed the T109 preflight and chose the smallest safe Worker for deleting the review-checkpoint legacy snapshot fallback. Claude initially blocked on missing executor.py/docs scope and missing positive tests; those blockers were accepted. Claude then green-lit the revised Worker. Antigravity also green-lit and added a concrete migration requirement: drop and recreate the review_mode/output_type check constraints without their IS NULL clauses so SQLAlchemy and PostgreSQL constraints match the new NOT NULL invariant."
+      exact_allowed_files:
+        - "backend/alembic/versions/20260527_flow_review_checkpoint_snapshot_required.py"
+        - "backend/src/intric/database/tables/flow_tables.py"
+        - "backend/src/intric/flows/domain/flow.py"
+        - "backend/src/intric/flows/runtime/executor.py"
+        - "backend/src/intric/flows/api/flow_models.py"
+        - "backend/src/intric/flows/api/flow_run_execution_router.py"
+        - "backend/src/intric/flows/api/flow_assembler.py"
+        - "backend/src/intric/flows/flow_run_evidence_bundle.py"
+        - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+        - "backend/tests/unit/test_flow_openapi_contract.py"
+        - "backend/tests/unittests/flows/test_flow_models.py"
+        - "backend/tests/unittests/flows/test_flow_router.py"
+        - "backend/tests/unittests/flows/test_flow_run_evidence.py"
+        - "backend/tests/unittests/flows/test_flow_run_review_checkpoint_service.py"
+        - "backend/tests/unittests/flows/test_flow_executor_runtime.py"
+        - "backend/tests/integration/flows/test_flow_consumer_api_contract.py"
+        - "backend/tests/integration/flows/test_flow_evidence_api_contracts.py"
+        - "backend/tests/integration/flows/test_flow_review_pause_worker_contract.py"
+        - "backend/tests/integration/flows/test_flow_run_review_checkpoint_repository.py"
+        - "backend/tests/integration/migrations/test_flow_review_checkpoint_snapshot_required.py"
+        - "frontend/packages/intric-js/src/types/schema.d.ts"
+        - "frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunReviewCheckpointPanel.test.ts"
+        - "docs/flows/architecture.md"
+        - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      implementation_requirements:
+        - "Add RED tests first: OpenAPI contract for absent step_snapshot_available and required review_mode/output_type; migration tests for dirty-row abort, clean-row NOT NULL success, and downgrade loosening; domain validation test for missing review_mode/output_type."
+        - "Delete backend/tests/unittests/flows/test_flow_models.py:250-278 compatibility-only missing-snapshot test instead of converting it."
+        - "Make FlowRunReviewCheckpoint.review_mode and output_type non-optional; remove step_snapshot_available; scrub legacy wording from step_label/output_contract descriptions."
+        - "Because backend/src/intric/flows/runtime/executor.py:858 guards review checkpoint opening, remove the dead step.review_policy else None branch at :1501 and pass step.review_policy.mode unconditionally."
+        - "Require review_mode and output_type in FlowRunRepository.create_or_get_review_checkpoint_for_attempt and open_review_checkpoint_for_completed_step; update repository fixtures to pass production-equivalent snapshot metadata."
+        - "Remove step_snapshot_available from FlowRunReviewCheckpointPublic and FlowRunReviewCheckpointEvidencePublic, flow assembler mapping, active endpoint docs, evidence bundle serialization, generated client schema, and tests."
+        - "Keep output_contract nullable; a valid checkpoint can have no output contract."
+        - "Keep step_label nullable only for the legitimate no-label case; do not use it as the snapshot availability guard."
+        - "Migration revision must be 20260527_flow_review_checkpoint_snapshot_required with down_revision 20260526_flow_user_mirror_drop."
+        - "Migration upgrade must preflight-abort on any row with review_mode IS NULL OR output_type IS NULL, drop ck_flow_run_review_checkpoints_review_mode and ck_flow_run_review_checkpoints_output_type, set review_mode/output_type NOT NULL, then recreate both check constraints without IS NULL branches. Downgrade reverses this by dropping strict checks, loosening nullability, then restoring checks that allow NULL."
+        - "Update backend/src/intric/database/tables/flow_tables.py check constraints to remove the review_mode/output_type IS NULL branches."
+        - "Update docs/flows/architecture.md so the review-checkpoint legacy snapshot fallback row is no longer listed as a live compatibility path."
+      generated_client:
+        canonical_command: "cd frontend/packages/intric-js && bun run update"
+        stop_if: "The update modifies broad unrelated files or generated output outside the approved generated-client/type fixture paths."
+      verification_commands:
+        - "ruby -rjson -e '<watchdog halt blocker check>'"
+        - "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -At -c \"select count(*) from public.flow_run_review_checkpoints where review_mode is null or output_type is null;\""
+        - "cd backend && uv run pytest tests/integration/migrations/test_flow_review_checkpoint_snapshot_required.py -q"
+        - "cd backend && uv run pytest tests/unit/test_flow_openapi_contract.py::test_openapi_flow_review_checkpoint_schema_is_public_contract tests/unit/test_flow_openapi_contract.py::test_openapi_flow_review_checkpoint_schema_documents_consumer_snapshot tests/unit/test_flow_openapi_contract.py::test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients -q"
+        - "cd backend && uv run pytest tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_run_evidence.py tests/unittests/flows/test_flow_run_review_checkpoint_service.py tests/unittests/flows/test_flow_executor_runtime.py -q"
+        - "cd backend && uv run pytest tests/integration/flows/test_flow_evidence_api_contracts.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_run_review_checkpoint_repository.py tests/integration/flows/test_flow_consumer_api_contract.py -q"
+        - "cd backend && uv run ruff check <approved backend source and test files>"
+        - "cd backend && uv run ruff format --check <approved backend source and test files>"
+        - "cd backend && uv run pyright <approved backend source and test files>"
+        - "cd backend && uv run alembic check"
+        - "cd frontend/packages/intric-js && bun run update"
+        - "cd frontend/packages/intric-js && bun run check"
+        - "cd frontend && NODE_ENV=production FORCE_COLOR=1 bun run --filter @intric/web check"
+        - "rg -n 'step_snapshot_available|legacy checkpoints|legacy checkpoint created before step snapshots|created before step snapshots' backend/src/intric/flows backend/tests/unit/test_flow_openapi_contract.py backend/tests/unittests/flows backend/tests/integration/flows frontend/packages/intric-js/src frontend/apps/web/src docs/flows/architecture.md"
+        - "git diff --check"
+      stop_if:
+        - "DB preflight shows any flow_run_review_checkpoints row missing review_mode or output_type."
+        - "A current frontend/API/generated-client caller depends on step_snapshot_available=false behavior."
+        - "Generated-client update touches broad unrelated files."
+        - "Migration requires a broad backfill/table rewrite beyond the NOT NULL invariant."
+        - "API version or product decision becomes necessary."
+        - "The Worker needs retention, service-key identity/review/rerun, raw evidence export, frontend form-schema, browser upload/audio, webhook outbox, or Flow AI Builder changes."
+      rollback_notes:
+        - "If implementation fails before migration: revert the Worker diff only; no data state changes are made."
+        - "Migration downgrade loosens review_mode/output_type back to nullable and restores the NULL-allowing checks for local rollback."
+        - "Because no production Flow users exist and current DB rows are clean, no compatibility backfill is required."
+      peer_review:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t110-review-checkpoint-snapshot-fallback-judge-20260527T010630Z.md"
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t110-review-checkpoint-snapshot-fallback-judge-revision-20260527T010940Z.md"
+        claude_verdict: "green after iteration 2; MIN_SCORE 8"
+        antigravity_iteration_1: ".codex/artifacts/antigravity-peer-loop-t110-review-checkpoint-snapshot-fallback-antigravity-synthesis-20260527T011237Z.md"
+        antigravity_verdict: "green; MIN_SCORE 9"
+        valid_concerns_addressed:
+          - "Added executor.py to allowed files and required deletion of the dead review_policy else None branch."
+          - "Added docs/flows/architecture.md to allowed files so the compatibility table cannot go stale."
+          - "Required positive OpenAPI/domain/migration RED tests instead of only deleting old assertions."
+          - "Added Antigravity's check-constraint replacement requirement to prevent SQLAlchemy/Postgres constraint drift."
+        disagreements: "None. Claude and Antigravity both support one coherent Worker after the revisions."
+      commands:
+        - cmd: "ruby -rjson -e '<watchdog halt blocker check>'"
+          status: pass
+          output: "schema_version=1; status=ok; halt_blockers=[]"
+        - cmd: "git status --short --branch && git diff --cached --name-only"
+          status: pass
+          output: "feature/refactor-flows-flowai ahead 76; no staged files before T110; unrelated dirty/untracked files preserved."
+        - cmd: "cd backend && uv run alembic heads"
+          status: pass
+          output: "20260526_flow_user_mirror_drop (head)"
+        - cmd: "cd backend && uv run alembic current"
+          status: pass
+          output: "20260526_flow_user_mirror_drop (head)"
+        - cmd: "rg/nl source reads for executor.py, flow_run_repo.py, flow_models.py, flow_tables.py, OpenAPI tests, generated client fixtures, and docs/flows/architecture.md"
+          status: pass
+          output: "Verified Claude blocker sources and Antigravity check-constraint concern."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t110-review-checkpoint-snapshot-required --phase plan --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: fail
+          output: "GREEN_LIGHT no; MIN_SCORE 6. Valid blockers: executor.py/docs allowed_files missing and positive tests not explicit."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t110-review-checkpoint-snapshot-required --phase plan --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t110-review-checkpoint-snapshot-required-synthesis --phase synthesis --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 --spend-mode auto ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 9. Added requirement to replace NULL-allowing check constraints."
+        - cmd: "ruby -e 'require \"yaml\"; ... assert active_task=T111, T110 done, T111 active ...'"
+          status: pass
+          output: "active_task=T111; status groups after receipt: done=109, blocked=4, complete=1, active=1."
+        - cmd: "git diff --check -- docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+          status: pass
+          output: "No whitespace errors."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py -q"
+          status: pass
+          output: "14 passed in 3.22s"
+      consolidation_effect:
+        reused_existing_owner: "Runtime executor review guard, FlowRunRepository review checkpoint creation, FlowRunReviewCheckpoint domain model, Flow API models/router docs, FlowAssembler, evidence bundle serialization, DB table/migration owner, generated client, and maintainer architecture map."
+        logic_moved_from: "N/A; Judge only."
+        logic_deleted: "Planned in T111: public step_snapshot_available fallback and nullable review_mode/output_type compatibility path."
+        duplicate_path_removed: "Planned in T111: four-layer snapshot availability fallback across DB/repo/domain/API/generated client."
+        new_code_added: "No source code in T110; T111 may add one migration and migration tests to enforce the deletion."
+        why_existing_owners_were_insufficient: "Existing owners are sufficient but currently model an obsolete optional path; T111 should deepen them instead of adding new owners."
+        guard_preventing_duplicate_logic_from_returning: "T111 must add/adjust OpenAPI, domain validation, migration, and architecture guards/tests."
+        net_flow_logic_surface_area: "preserved in T110; expected reduced in T111"
+        if_increased_why: "N/A"
+      naming_gate: "Approved new migration/test names are domain-specific and would read clearly in docs/flows/architecture.md and the where-to-change-X table."
+      next_task: T111
+
+  - id: T111
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "fix(flows-api): require review checkpoint snapshots"
+    inputs:
+      - "T109 Scout evidence."
+      - "T110 Judge receipt, Claude artifact, and Antigravity artifact."
+      - "No production Flow users; prefer deletion/consolidation over legacy compatibility once source/data/caller evidence is clean."
+    allowed_files:
+      - "backend/alembic/versions/20260527_flow_review_checkpoint_snapshot_required.py"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/src/intric/flows/domain/flow.py"
+      - "backend/src/intric/flows/runtime/executor.py"
+      - "backend/src/intric/flows/api/flow_models.py"
+      - "backend/src/intric/flows/api/flow_run_execution_router.py"
+      - "backend/src/intric/flows/api/flow_assembler.py"
+      - "backend/src/intric/flows/flow_run_evidence_bundle.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+      - "backend/tests/unit/test_flow_openapi_contract.py"
+      - "backend/tests/unittests/flows/test_flow_models.py"
+      - "backend/tests/unittests/flows/test_flow_router.py"
+      - "backend/tests/unittests/flows/test_flow_run_evidence.py"
+      - "backend/tests/unittests/flows/test_flow_run_review_checkpoint_service.py"
+      - "backend/tests/unittests/flows/test_flow_executor_runtime.py"
+      - "backend/tests/integration/flows/test_flow_consumer_api_contract.py"
+      - "backend/tests/integration/flows/test_flow_evidence_api_contracts.py"
+      - "backend/tests/integration/flows/test_flow_review_pause_worker_contract.py"
+      - "backend/tests/integration/flows/test_flow_run_review_checkpoint_repository.py"
+      - "backend/tests/integration/migrations/test_flow_review_checkpoint_snapshot_required.py"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowRunReviewCheckpointPanel.test.ts"
+      - "docs/flows/architecture.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "No files outside allowed_files."
+      - "Start with RED tests for the new invariant before source changes."
+      - "Use FastAPI, complexity-optimizer, supabase-postgres-best-practices, sqlalchemy-alembic-expert-best-practices-code-review, and karpathy-guidelines before implementation."
+      - "Do not use Any/casts/ignores or generic adapters to hide typing fallout."
+      - "Do not preserve step_snapshot_available or nullable review_mode/output_type for imaginary legacy users."
+      - "Do not broaden into retention, service-key identity/review/rerun, raw evidence export, frontend form-schema conflict behavior, browser upload/audio ownership, webhook outbox, or Flow AI Builder cleanup."
+      - "Run full Claude commit gate after implementation; run Antigravity again only if migration/API risk remains unresolved or Claude/Codex disagree."
+    expected_output:
+      - "Behavior-preserving except for deliberate public removal of step_snapshot_available and rejection of invalid missing snapshot rows."
+      - "Review checkpoints require review_mode and output_type in domain/repository/API/DB."
+      - "OpenAPI/generated client and frontend fixtures align with the required snapshot contract."
+      - "Migration enforces NOT NULL and strict check constraints with dirty-row abort and downgrade."
+      - "Architecture doc no longer lists the fallback as live."
+      - "Receipt with validation commands, peer-review verdicts, consolidation effect, and naming-gate answer."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "DB preflight shows any current checkpoint missing review_mode or output_type."
+      - "OpenAPI/generated-client update modifies files outside allowed generated-client paths."
+      - "Implementation needs API version/product decision."
+      - "Migration expands beyond NOT NULL/check-constraint enforcement."
+      - "Required verification cannot run due environment failure; record blocked_environment instead of guessing."
     receipt: null
 
 checks:
