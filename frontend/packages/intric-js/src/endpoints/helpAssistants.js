@@ -125,37 +125,6 @@ export function initHelpAssistants(client) {
       },
 
       /**
-       * Assign an existing assistant to a helper kind.
-       * @param {{kind: HelperKind, assistant_id: string}} params
-       * @returns {Promise<RoleAssignmentPublic>}
-       * @throws {IntricError}
-       */
-      assign: async ({ kind, assistant_id }) => {
-        // @ts-ignore - endpoint exists in backend but not yet in generated schema
-        const res = await client.fetch("/api/v1/admin/help-assistants/roles/{kind}/assign", {
-          method: "post",
-          params: { path: { kind } },
-          requestBody: { "application/json": { assistant_id } }
-        });
-        return /** @type {RoleAssignmentPublic} */ (res);
-      },
-
-      /**
-       * Unassign the active role for a helper kind. Returns `true` on success.
-       * @param {{kind: HelperKind}} params
-       * @returns {Promise<true>}
-       * @throws {IntricError}
-       */
-      unassign: async ({ kind }) => {
-        // @ts-ignore - endpoint exists in backend but not yet in generated schema
-        await client.fetch("/api/v1/admin/help-assistants/roles/{kind}/", {
-          method: "delete",
-          params: { path: { kind } }
-        });
-        return true;
-      },
-
-      /**
        * Toggle `is_enabled` on the active role.
        * @param {{kind: HelperKind, value: boolean}} params
        * @returns {Promise<RoleAssignmentPublic>}

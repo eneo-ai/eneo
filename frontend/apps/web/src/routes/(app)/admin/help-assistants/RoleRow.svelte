@@ -8,14 +8,12 @@
   import { Button, Input } from "@intric/ui";
   import { IconSparkles } from "@intric/icons/sparkles";
   import { ChevronRight } from "lucide-svelte";
-  import { writable } from "svelte/store";
   import { invalidate } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { toastError } from "$lib/core/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
   import type { Intric } from "@intric/intric-js";
-  import ReassignDialog from "./ReassignDialog.svelte";
 
   type Role = Awaited<ReturnType<Intric["helpAssistants"]["admin"]["listRoles"]>>[number];
 
@@ -24,15 +22,13 @@
   // Optimistic switch state. Initialise from a literal (referencing `role`
   // directly here would trip svelte's state_referenced_locally), then sync from
   // the server value before first paint and on every loader refresh (after a
-  // successful toggle / re-assign). Mirrors the admin landing page's toggles.
+  // successful toggle). Mirrors the admin landing page's toggles.
   let isEnabled = $state(false);
   let isVisible = $state(false);
   $effect.pre(() => {
     isEnabled = role.is_enabled;
     isVisible = role.is_visible_to_users;
   });
-
-  const reassignOpen = writable(false);
 
   function roleKindLabel(kind: string): string {
     switch (kind) {
@@ -108,7 +104,7 @@
   </header>
 
   <!-- The assistant currently assigned to this role -->
-  <div class="flex flex-col items-start gap-3 px-5 py-4">
+  <div class="px-5 py-4">
     <a
       class="hover:bg-hover-dimmer -mx-2 flex w-full items-center gap-3 rounded-lg px-2 py-2 transition-colors"
       href={resolve(`/spaces/${role.org_space_id}/assistants/${role.assistant_id}/edit`)}
@@ -121,9 +117,6 @@
       <span class="truncate font-medium">{displayName}</span>
       <ChevronRight class="text-secondary ml-auto size-5 shrink-0" />
     </a>
-    <Button variant="outlined" onclick={() => ($reassignOpen = true)}>
-      {m.admin_help_assistants_reassign_button()}
-    </Button>
   </div>
 
   <div class="border-default border-t px-5 py-4">
@@ -165,5 +158,3 @@
     </div>
   </div>
 </section>
-
-<ReassignDialog {role} {intric} openController={reassignOpen} />

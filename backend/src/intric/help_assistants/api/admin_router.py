@@ -28,7 +28,6 @@ if TYPE_CHECKING:
 
 from intric.help_assistants.api.admin_models import (
     AssignmentHistoryPublic,
-    AssignRoleRequest,
     AssistantSummaryPublic,
     RoleAssignmentPublic,
     ToggleRequest,
@@ -129,31 +128,6 @@ async def get_active_role(kind: HelperKind, container: AdminContainer):
     return _role_to_public(
         role, assistant_name=await _resolve_name(assistant_service, role)
     )
-
-
-@router.post(
-    "/roles/{kind}/assign",
-    response_model=RoleAssignmentPublic,
-    responses=responses.get_responses([400, 403]),
-)
-async def assign_role(
-    kind: HelperKind,
-    body: AssignRoleRequest,
-    container: AdminContainer,
-):
-    service = container.org_space_assistant_role_service()
-    role = await service.assign(kind=kind, assistant_id=body.assistant_id)
-    return _role_to_public(role)
-
-
-@router.delete(
-    "/roles/{kind}/",
-    status_code=status.HTTP_204_NO_CONTENT,
-    responses=responses.get_responses([403]),
-)
-async def unassign_role(kind: HelperKind, container: AdminContainer):
-    service = container.org_space_assistant_role_service()
-    await service.unassign(kind=kind)
 
 
 @router.patch(

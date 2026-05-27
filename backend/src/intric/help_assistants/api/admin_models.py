@@ -68,9 +68,5 @@ class AssistantSummaryPublic(BaseModel):
     name: str
 
 
-class AssignRoleRequest(BaseModel):
-    assistant_id: UUID
-
-
 class ToggleRequest(BaseModel):
     value: bool
