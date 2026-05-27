@@ -59,11 +59,17 @@ class FileRepository:
     async def delete(self, id: UUID) -> File:
         return cast(File, await self._delegate.delete(id))
 
-    async def delete_by_owner(self, id: UUID, user_id: UUID) -> File | None:
-        """Atomic owner-bound delete. Returns None if no matching row."""
+    async def delete_by_owner(
+        self, id: UUID, user_id: UUID, tenant_id: UUID
+    ) -> File | None:
+        """Atomic tenant- and owner-bound delete. Returns None if no row matches."""
         stmt = (
             sa.delete(Files)
-            .where(Files.id == id, Files.user_id == user_id)
+            .where(
+                Files.id == id,
+                Files.user_id == user_id,
+                Files.tenant_id == tenant_id,
+            )
             .returning(Files)
         )
         result = await self.session.execute(stmt)

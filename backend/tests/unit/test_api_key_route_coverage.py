@@ -589,7 +589,7 @@ class TestHighRiskExactRouteGuards:
             f"{label} should not require _api_key_permission_dep"
         )
 
-    def test_files_routes_have_scope_resource_and_delete_stash_guards(self):
+    def test_files_routes_have_scope_resource_and_delete_scope_guards(self):
         list_route = _find_route_by_method_and_paths("GET", "/files/", "/files")
         post_route = _find_route_by_method_and_paths("POST", "/files/", "/files")
         detail_get_route = _find_route_by_method_and_paths(
@@ -613,7 +613,7 @@ class TestHighRiskExactRouteGuards:
             )
 
         assert _route_has_dep_name(detail_delete_route, "_stash"), (
-            "DELETE /files/{id}/ missing deferred tenant-scope delete guard (_stash)"
+            "DELETE /files/{id}/ missing deferred file delete scope guard (_stash)"
         )
 
     def test_prompts_route_has_scope_and_resource_permission_guard(self):
@@ -1009,8 +1009,9 @@ class TestScopeCheckPathParamSafety:
             "DELETE",
             "/files/{id}/",
         ): "Files are owner-scoped: file_service.delete_file() calls "
-        "repo.delete_by_owner(id, user_id=self.user.id). The require_tenant_scope_for_delete "
-        "dep also blocks DELETE for non-tenant-scoped keys.",
+        "repo.delete_by_owner(id, user_id=self.user.id, tenant_id=self.user.tenant_id). "
+        "The file delete scope guard "
+        "blocks service keys because files are user-owned.",
         (
             "POST",
             "/files/{id}/signed-url/",

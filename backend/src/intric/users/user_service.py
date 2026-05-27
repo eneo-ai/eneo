@@ -962,22 +962,34 @@ class UserService:
         request.state.api_key_scope_id = resolved.key.scope_id
         request.state.api_key_resource_permissions = resolved.key.resource_permissions
 
-        # Deferred tenant-scope-for-delete check (stashed by router-level dep)
-        if getattr(request.state, "_require_tenant_scope_for_delete", False):
-            scope_type_str = (
-                resolved.key.scope_type.value
-                if hasattr(resolved.key.scope_type, "value")
-                else str(resolved.key.scope_type)
-            )
-            if scope_type_str != "tenant":
+        # File DELETE scope guard (stashed by router-level dep). User-owned
+        # scoped keys continue to FileService, where delete_by_owner enforces
+        # tenant and file ownership in SQL. Service keys have no real users.id
+        # owner, so they cannot delete user-owned files until files support
+        # service-principal ownership.
+        if getattr(request.state, "_require_file_delete_scope_guard", False):
+            if ownership == ApiKeyOwnership.SERVICE:
+                scope_type_str = (
+                    resolved.key.scope_type.value
+                    if hasattr(resolved.key.scope_type, "value")
+                    else str(resolved.key.scope_type)
+                )
                 exc = ApiKeyValidationError(
                     status_code=403,
-                    code="insufficient_scope",
+                    code="service_key_cannot_delete_files",
                     message=(
-                        "File deletion requires a tenant-scoped API key. "
-                        "Files are user-scoped and may be attached to conversations "
-                        "across multiple spaces."
+                        "Service API keys cannot delete files because files are owned "
+                        "by users. Use a user-owned API key with files admin permission "
+                        "to upload and clean up runtime files."
                     ),
+                    context={
+                        "resource_type": "file",
+                        "action": "delete",
+                        "auth_layer": "api_key_scope",
+                        "required_capability": "user_owned_api_key",
+                        "scope_type": scope_type_str,
+                        "ownership": "service",
+                    },
                 )
                 await self._log_api_key_auth_failed(
                     user,
@@ -1454,7 +1466,8 @@ class UserService:
 
         if scope_type == ApiKeyScopeType.ASSISTANT:
             if resource_type == "file":
-                # Files are user-scoped; assistant keys can use non-destructive file routes.
+                # Files are user-scoped; delete authorization is handled by the
+                # file delete guard plus FileService's owner-bound SQL.
                 return
             if resource_type == "assistant":
                 if key.scope_id == resource_id:
@@ -1491,7 +1504,8 @@ class UserService:
 
         if scope_type == ApiKeyScopeType.APP:
             if resource_type == "file":
-                # Files are user-scoped; app keys can use non-destructive file routes.
+                # Files are user-scoped; delete authorization is handled by the
+                # file delete guard plus FileService's owner-bound SQL.
                 return
             if resource_type == "app":
                 if key.scope_id == resource_id:
