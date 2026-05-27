@@ -17,10 +17,8 @@ All columns are nullable. Self-hosted/unknown providers are expected to leave
 them unset; the UI displays an em-dash and excludes the model from cost
 aggregation when any contributing rate is missing.
 
-This revision also merges the two parallel heads on the develop branch.
-
 Revision ID: 20260430_add_model_costs
-Revises: 202604291030, 20260403_cleanup_history
+Revises: 20260403_cleanup_history
 Create Date: 2026-04-30 12:00:00.000000
 """
 
@@ -30,7 +28,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "20260430_add_model_costs"
-down_revision = ("202604291030", "20260403_cleanup_history")
+down_revision = "20260403_cleanup_history"
 branch_labels = None
 depends_on = None
 

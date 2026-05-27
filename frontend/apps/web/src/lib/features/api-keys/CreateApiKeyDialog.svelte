@@ -1126,7 +1126,7 @@
         <!-- Step indicator - improved contrast and accessibility (WCAG 2.2 AA) -->
         <nav
           class="mt-6 hidden items-center justify-between sm:flex"
-          aria-label="API key creation progress"
+          aria-label={m.apikey_creation_progress()}
         >
           <ol class="flex w-full items-center justify-between" role="list">
             {#each steps as step, index (step.number)}
@@ -1142,7 +1142,7 @@
                   type="button"
                   onclick={() => goToStep(step.number)}
                   disabled={!canNavigate}
-                  aria-label="Step {step.number}: {step.title}"
+                  aria-label={m.apikey_step_label({ number: step.number, title: step.title })}
                   aria-current={isActive ? "step" : undefined}
                   class="group focus-visible:ring-accent-default flex items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
                   {isActive ? 'bg-accent-default/10' : ''}
@@ -1207,7 +1207,7 @@
               {isCompleted ? 'bg-positive-default' : ''}
               {!isActive && !isCompleted ? 'bg-tertiary' : ''}
               disabled:opacity-40"
-              aria-label="Step {step.number}"
+              aria-label={m.apikey_step_number({ number: step.number })}
             ></button>
           {/each}
         </div>
@@ -1334,9 +1334,8 @@
                               >
                               <span
                                 class="bg-accent-default/15 text-accent-default rounded-md px-2 py-0.5 font-mono text-xs font-bold"
+                                >sk_</span
                               >
-                                sk_
-                              </span>
                             </div>
                             <p class="text-muted mt-1 text-sm leading-relaxed">
                               {m.api_keys_secret_key_desc()}
@@ -1385,9 +1384,8 @@
                               >
                               <span
                                 class="bg-label-dimmer text-label-stronger rounded-md px-2 py-0.5 font-mono text-xs font-bold"
+                                >pk_</span
                               >
-                                pk_
-                              </span>
                             </div>
                             <p class="text-muted mt-1 text-sm leading-relaxed">
                               {m.api_keys_public_key_desc()}
@@ -1865,7 +1863,7 @@
                       bind:value={allowedOrigins}
                       label={m.api_keys_allowed_origins()}
                       description={m.api_keys_allowed_origins_desc()}
-                      placeholder="https://example.com"
+                      placeholder={m.apikey_origins_placeholder()}
                       required={isCreateMode}
                       disabled={readonly}
                     />

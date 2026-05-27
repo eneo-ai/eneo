@@ -1,0 +1,75 @@
+# Release SBOMs
+
+Each Eneo release includes Software Bill of Materials files for the published
+backend and frontend container images. The files are attached to the GitHub
+Release so you can download them for security review, compliance work, or
+release comparison.
+
+The release workflow creates SBOMs for:
+
+- `ghcr.io/eneo-ai/eneo-backend:<version>`
+- `ghcr.io/eneo-ai/eneo-frontend:<version>`
+
+For a release tag such as `v2.0.0`, the image tag is `2.0.0`.
+The SBOM filenames use the release tag, including the `v` prefix.
+
+## When SBOMs are published
+
+When maintainers publish a GitHub Release, Eneo waits for the matching backend
+and frontend images to appear in GitHub Container Registry. The workflow then
+scans the `linux/amd64` image digests and attaches the generated files to the
+same release page.
+
+Each new release gets its own SBOM files. Older release pages keep their
+original SBOM files, so you can compare one version with the next.
+
+## Files on the release page
+
+Each release publishes these files:
+
+| File | Purpose |
+| --- | --- |
+| `eneo-backend-<release-tag>-linux-amd64.cyclonedx.json` | Backend SBOM in CycloneDX JSON |
+| `eneo-backend-<release-tag>-linux-amd64.spdx.json` | Backend SBOM in SPDX JSON |
+| `eneo-backend-<release-tag>-linux-amd64.table.txt` | Backend package list for human review |
+| `eneo-frontend-<release-tag>-linux-amd64.cyclonedx.json` | Frontend SBOM in CycloneDX JSON |
+| `eneo-frontend-<release-tag>-linux-amd64.spdx.json` | Frontend SBOM in SPDX JSON |
+| `eneo-frontend-<release-tag>-linux-amd64.table.txt` | Frontend package list for human review |
+| `IMAGE-DIGESTS.txt` | Exact image tags and digests that were scanned |
+| `SBOM-SHA256SUMS.txt` | SHA-256 checksums for the SBOM bundle |
+
+Use the `.table.txt` files when you want to inspect the package list quickly.
+Use CycloneDX or SPDX when you need to import the SBOM into another tool.
+
+## What the SBOM covers
+
+The SBOMs describe packages Syft finds inside the released container images.
+For the backend image, this usually includes Debian packages, Python packages,
+and binaries. For the frontend image, this usually includes Debian packages,
+npm packages, and binaries.
+
+The SBOMs are generated from immutable image digest references, not only from
+tags. `IMAGE-DIGESTS.txt` records the digest references used during the scan.
+
+## What the SBOM does not cover
+
+An SBOM is an inventory. It does not decide whether a package is vulnerable or
+whether a vulnerability is reachable in Eneo.
+
+Use vulnerability scanners such as Grype, Trivy, GitHub Advanced Security, or
+your internal tooling if you need vulnerability findings based on the SBOM.
+
+The current release assets are not signed. Their authenticity relies on
+GitHub-managed release asset storage and the image digests recorded in
+`IMAGE-DIGESTS.txt`.
+
+## Checking a release
+
+1. Open the GitHub Release page for the version you use.
+2. Download the backend and frontend `.table.txt` files for a quick review.
+3. Download CycloneDX or SPDX files for your security tooling.
+4. Check `IMAGE-DIGESTS.txt` if you need the exact image digests scanned.
+5. Check `SBOM-SHA256SUMS.txt` if you need file checksums for the SBOM bundle.
+
+To compare two releases, compare the SBOM files from both release pages. Package
+additions, removals, and version changes show what changed between the images.

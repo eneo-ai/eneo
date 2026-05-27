@@ -160,7 +160,9 @@
     class="border-default hover:bg-hover-stronger flex h-[4.125rem] items-center justify-between gap-8 border-b px-4"
   >
     <div class="flex items-center gap-2">
-      <p class="w-24" aria-label="Temperature setting" id="temperature_label">{m.temperature()}</p>
+      <p class="w-24" aria-label={m.model_temperature_setting()} id="temperature_label">
+        {m.temperature()}
+      </p>
       <Tooltip text={m.temperature_tooltip()}>
         <IconQuestionMark class="text-muted hover:text-primary" />
       </Tooltip>
@@ -187,7 +189,8 @@
   <p
     class="label-info border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
   >
-    <span class="font-bold">Info:&nbsp;</span>{m.model_uses_specific_parameters_info()}
+    <span class="font-bold">{m.model_info_label()}:&nbsp;</span
+    >{m.model_uses_specific_parameters_info()}
   </p>
 {:else if isDisabled || isDisabledDueToUnsupportedTemperature}
   <p

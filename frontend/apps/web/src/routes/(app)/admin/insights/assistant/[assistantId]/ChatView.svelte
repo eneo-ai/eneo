@@ -98,7 +98,7 @@
       <label for="question" class="text-sm font-semibold tracking-tight"
         >{m.ask_about_insights()}</label
       >
-      <span class="text-muted text-[11px]">Enter / Shift+Enter</span>
+      <span class="text-muted text-[11px]">{m.insights_enter_hint()}</span>
     </div>
 
     <div

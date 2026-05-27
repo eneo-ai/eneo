@@ -86,6 +86,10 @@
     "packages/eslint-plugin": {
       "name": "@intric/eslint-plugin",
       "version": "1.15.0",
+      "devDependencies": {
+        "eslint": "^9.28.0",
+        "svelte-eslint-parser": "^1.1.2",
+      },
     },
     "packages/intric-js": {
       "name": "@intric/intric-js",

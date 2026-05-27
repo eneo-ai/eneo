@@ -68,13 +68,18 @@ Thumbs.db
 .idea/
 .vscode/
 *.code-workspace
+.codex/
 .env.*
 !.env.example
+!.env.template
 node_modules/
 .next/
+.svelte-kit/
 dist/
 build/
 __pycache__/
+.pytest_cache/
+.ruff_cache/
 venv/
 target/
 vendor/
@@ -82,3 +87,4 @@ vendor/
 coverage/
 .cache/
 tmp/
+backend/celerybeat-schedule

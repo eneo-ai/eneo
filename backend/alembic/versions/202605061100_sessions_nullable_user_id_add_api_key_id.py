@@ -19,7 +19,7 @@ This migration:
    invisible to user-scoped listings and dereferences nothing useful.
 
 Revision ID: 202605061100
-Revises: 20260501_backfill_model_costs
+Revises: 202604291030
 Create Date: 2026-05-06
 """
 
@@ -29,7 +29,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "202605061100"
-down_revision = "20260501_backfill_model_costs"
+down_revision = "202604291030"
 branch_labels = None
 depends_on = None
 

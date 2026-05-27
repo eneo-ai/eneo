@@ -111,6 +111,6 @@
 
 {#if models.length === 0}
   <div class="py-12 text-center">
-    <p class="text-gray-500">No model usage data available for this period</p>
+    <p class="text-gray-500">{m.usage_no_model_data_available()}</p>
   </div>
 {/if}

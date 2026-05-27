@@ -28,6 +28,7 @@
   {#if showCloseButton}
     <DialogPrimitive.Close>
       {#snippet child({ props })}
+        <!-- eslint-disable-next-line intric/no-hardcoded-text -- shadcn primitive; keep close to upstream -->
         <Button variant="outline" {...props}>Close</Button>
       {/snippet}
     </DialogPrimitive.Close>

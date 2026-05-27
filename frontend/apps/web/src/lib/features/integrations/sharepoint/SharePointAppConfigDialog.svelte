@@ -409,7 +409,7 @@
             bind:value={clientSecret}
             required
             type="password"
-            placeholder="Enter client secret"
+            placeholder={m.sharepoint_enter_client_secret()}
             description={m.client_secret_description()}
             autocomplete="off"
           />
@@ -418,7 +418,7 @@
             label={m.tenant_id_or_domain()}
             bind:value={tenantDomain}
             required
-            placeholder="contoso.onmicrosoft.com"
+            placeholder={m.sharepoint_tenant_domain_placeholder()}
             description={m.tenant_id_or_domain_description()}
             autocomplete="off"
           />

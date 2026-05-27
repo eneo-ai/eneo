@@ -203,7 +203,9 @@
       <div class="border-default border-b px-4 py-3">
         <p class="text-default text-sm font-medium">{m.context_usage()}</p>
         <p class="text-secondary mt-0.5 text-xs tabular-nums">
-          {fmt(projectedTotal)} / {fmt(chat.contextLimit)} tokens · {projectedPercent.toFixed(1)}%
+          {fmt(projectedTotal)} / {fmt(chat.contextLimit)}
+          {m.chat_tokens_separator()}
+          {projectedPercent.toFixed(1)}%
         </p>
       </div>
 

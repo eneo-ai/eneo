@@ -91,12 +91,16 @@
                   {/if}
                   <span class="text-muted-foreground flex gap-3 text-xs">
                     {#if model.max_input_tokens}
-                      <span>{formatTokens(model.max_input_tokens)} context</span>
+                      <span
+                        >{m.model_context_tokens({
+                          tokens: formatTokens(model.max_input_tokens)
+                        })}</span
+                      >
                     {/if}
-                    {#if model.supports_vision}<span>Vision</span>{/if}
-                    {#if model.supports_reasoning}<span>Reasoning</span>{/if}
+                    {#if model.supports_vision}<span>{m.capability_vision()}</span>{/if}
+                    {#if model.supports_reasoning}<span>{m.reasoning()}</span>{/if}
                     {#if model.output_vector_size}
-                      <span>{model.output_vector_size}d</span>
+                      <span>{m.model_vector_dimensions({ size: model.output_vector_size })}</span>
                     {/if}
                   </span>
                 </div>
