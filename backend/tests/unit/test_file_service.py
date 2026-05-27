@@ -1,7 +1,7 @@
 """Tests for file service delete-before-auth fix (Plan 1E).
 
 Covers:
-- Atomic delete_by_owner pattern: ownership checked in SQL, not in Python
+- Atomic delete_by_owner pattern: tenant and ownership checked in SQL, not in Python
 - NotFoundException for non-owned and missing files (IDOR prevention: 404, not 403)
 - Successful delete returns the deleted File record
 - Unexpected repo errors propagate (not swallowed as 404)
@@ -18,7 +18,6 @@ import pytest
 from intric.files.file_models import File, FileType
 from intric.files.file_service import FileService
 from intric.main.exceptions import NotFoundException
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -61,7 +60,7 @@ class TestDeleteFile:
     """FileService.delete_file() unit tests."""
 
     @pytest.mark.asyncio
-    async def test_delete_file_calls_delete_by_owner_with_user_id(self):
+    async def test_delete_file_calls_delete_by_owner_with_user_and_tenant_id(self):
         """delete_file must use delete_by_owner (atomic), not plain delete."""
         svc, repo = _make_service()
         file_id = uuid4()
@@ -70,8 +69,11 @@ class TestDeleteFile:
 
         await svc.delete_file(file_id)
 
-        # Verify delete_by_owner is called with both id and user_id
-        repo.delete_by_owner.assert_awaited_once_with(id=file_id, user_id=svc.user.id)
+        repo.delete_by_owner.assert_awaited_once_with(
+            id=file_id,
+            user_id=svc.user.id,
+            tenant_id=svc.user.tenant_id,
+        )
         # Verify plain delete is NOT called
         repo.delete.assert_not_awaited()
 
@@ -155,7 +157,11 @@ class TestDeleteByOwnerRepo:
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         repo = FileRepository(session=mock_session)
-        result = await repo.delete_by_owner(id=uuid4(), user_id=uuid4())
+        result = await repo.delete_by_owner(
+            id=uuid4(),
+            user_id=uuid4(),
+            tenant_id=uuid4(),
+        )
 
         assert result is None
         mock_session.execute.assert_awaited_once()
@@ -198,7 +204,11 @@ class TestDeleteByOwnerRepo:
             "model_validate",
             return_value=_make_file(user_id=user_id, file_id=file_id),
         ) as mock_validate:
-            result = await repo.delete_by_owner(id=file_id, user_id=user_id)
+            result = await repo.delete_by_owner(
+                id=file_id,
+                user_id=user_id,
+                tenant_id=tenant_id,
+            )
 
         assert result is not None
         assert result.id == file_id
@@ -206,8 +216,8 @@ class TestDeleteByOwnerRepo:
         mock_validate.assert_called_once_with(mock_row)
 
     @pytest.mark.asyncio
-    async def test_delete_by_owner_sql_includes_both_where_clauses(self):
-        """The DELETE statement must include BOTH id AND user_id in WHERE clause.
+    async def test_delete_by_owner_sql_includes_id_user_and_tenant_clauses(self):
+        """The DELETE statement must include id, user_id, and tenant_id predicates.
 
         This verifies the atomic pattern — ownership is checked in SQL, not
         in a separate Python check that could race.
@@ -223,8 +233,9 @@ class TestDeleteByOwnerRepo:
         repo = FileRepository(session=mock_session)
         file_id = uuid4()
         user_id = uuid4()
+        tenant_id = uuid4()
 
-        await repo.delete_by_owner(id=file_id, user_id=user_id)
+        await repo.delete_by_owner(id=file_id, user_id=user_id, tenant_id=tenant_id)
 
         # Inspect the SQL statement that was executed
         call_args = mock_session.execute.call_args
@@ -232,12 +243,12 @@ class TestDeleteByOwnerRepo:
         compiled = stmt.compile(compile_kwargs={"literal_binds": False})
         sql_text = str(compiled)
 
-        # Verify the SQL is a DELETE with RETURNING and includes both WHERE predicates
+        # Verify the SQL is a DELETE with RETURNING and includes the ownership predicates
         assert "DELETE FROM" in sql_text.upper()
         assert "RETURNING" in sql_text.upper()
-        # The WHERE clause should reference both the id and user_id columns
         assert "files.id" in sql_text or "id" in sql_text
         assert "user_id" in sql_text
+        assert "tenant_id" in sql_text
 
 
 class TestGetByIdRepo:

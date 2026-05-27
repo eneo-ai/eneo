@@ -43,6 +43,7 @@ class ResourceDenialContext(TypedDict, total=False):
     action: str
     auth_layer: str
     required_capability: str
+    ownership: str
 
 
 class ApiKeyValidationError(Exception):

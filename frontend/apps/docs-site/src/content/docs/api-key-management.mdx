@@ -14,13 +14,13 @@ Every API key has a type prefix that determines its intended use and security co
 |--------|--------------------|--------------------|
 | **Use case** | Server-to-server, backend integrations | Browser-based, frontend apps |
 | **Access restriction** | IP allowlist (CIDR notation) | Origin allowlist (scheme required) |
-| **Max permission** | `admin` | `write` (no admin) |
-| **Resource permissions** | Supported | Not supported |
+| **Max permission** | `admin` | `read` |
+| **Resource permissions** | Supported | Supported for `none`/`read` only (`jobs` and `prompts` are not available) |
 | **Origin restrictions** | Not allowed | Required (at least one) |
 | **IP restrictions** | Optional | Not allowed |
 
 <Callout type="info">
-The key prefix (`sk_` or `pk_`) is embedded in the key string itself and validated on every request. A `pk_` key that somehow acquires admin permission will be rejected at creation time.
+The key prefix (`sk_` or `pk_`) is embedded in the key string itself and validated on every request. A `pk_` key that requests write or admin permission is rejected by policy validation.
 </Callout>
 
 ---
@@ -35,7 +35,7 @@ User keys are bound to a specific user via `owner_user_id`. On every request, th
 
 1. Looks up the owner in the database
 2. Verifies the owner account is **active** (not deactivated or deleted)
-3. For tenant-scoped keys: verifies the owner still has **admin** permissions
+3. For tenant-scoped admin keys: verifies the owner still has **admin** permissions
 4. For space/assistant/app-scoped keys: verifies the owner is still a **member** of the target space
 
 If any of these checks fail, the request is denied. This means user keys inherit the lifecycle of their owner: if a user is deactivated, suspended, or removed from a space, all their keys stop working.
@@ -56,7 +56,9 @@ Only tenant administrators can create service keys. Service keys with write or a
 
 #### What service keys cannot do
 
-Service keys are automation principals, not service accounts. They can read, update, and delete resources within their scope, but they **cannot create new resources**. Endpoints that would insert a row keyed on `user_id` (assistants, apps, spaces, group chats, prompts, collections, websites, files, info blobs, roles, MCP servers, and the like) return `403` with `code: "service_key_cannot_create_resources"` when called by a service key. Resource creation belongs to humans; the service key can operate on the resource once it exists.
+Service keys are automation principals, not service accounts. They can read, update, and delete supported existing resources within their scope, but they **cannot create new user-owned resources**. Endpoints that would insert a row keyed on `user_id` (assistants, apps, spaces, group chats, prompts, collections, websites, files, info blobs, roles, MCP servers, and the like) return `403` with `code: "service_key_cannot_create_resources"` when called by a service key. Resource creation belongs to humans; the service key can operate on supported endpoints once the resource exists.
+
+Files are the important exception to "delete existing resources": files are user-owned today. Service keys cannot upload files and cannot delete files. File upload returns `403` with `code: "service_key_cannot_create_resources"`, and file delete returns `403` with `code: "service_key_cannot_delete_files"`. Use a user key for workflows that upload runtime files and clean them up after a run.
 
 Two related guardrails come from the same principle:
 
@@ -138,11 +140,11 @@ Per-key overrides are possible via the `rate_limit` field. The tenant policy `ma
 
 Some endpoints override this mapping. For example, certain POST endpoints that are semantically read operations (like search) accept `read` permission.
 
-**Resource-level** (feature-gated): If the key has `resource_permissions` configured, per-resource-type overrides are checked. Each resource type (assistants, apps, spaces, knowledge) can have an independent permission ceiling that must not exceed the key's main permission.
+**Resource-level** (feature-gated): If the key has `resource_permissions` configured, per-resource-type permissions are checked for `assistants`, `apps`, `spaces`, `knowledge`, `conversations`, `files`, `jobs`, and `prompts`. For `sk_` keys, the top-level `permission` is derived from the highest configured resource permission when the key is created or updated. For `pk_` keys, every resource permission is capped to `none` or `read`, and `jobs`/`prompts` are rejected.
 
 ### 7. Scope Enforcement
 
-If scope enforcement is enabled (both globally and per-tenant), the system verifies that the key's scope covers the requested resource. See [Scope & Permissions](#scope--permissions) for details.
+On scope-enforced routes, the system verifies that the key's scope covers the requested resource. See [Scope & Permissions](#scope--permissions) for details.
 
 ### 8. Request Proceeds
 
@@ -163,6 +165,8 @@ Scopes define the boundary of what a key can access, from broadest to narrowest:
 | `assistant` | Single assistant and its conversations | Assistant UUID |
 | `app` | Single app and its runs | App UUID |
 
+Files are user-owned rather than space-owned. A scoped user key can access the file API when its `files` resource permission allows it, but file reads and deletes are still constrained to files owned by that key's user.
+
 ### Permission Levels
 
 Permissions define what operations a key can perform within its scope:
@@ -170,8 +174,10 @@ Permissions define what operations a key can perform within its scope:
 | Permission | Space Role | User keys can do | Service keys can do |
 |-----------|-----------|------------------|---------------------|
 | `read` | VIEWER | Read resources, list items | Same |
-| `write` | EDITOR | Create, update resources | Update existing resources (creation is gated) |
-| `admin` | ADMIN | Delete resources, manage space settings | Delete existing resources, manage settings (creation is gated) |
+| `write` | EDITOR | Create and update resources | Update supported existing resources (creation is gated) |
+| `admin` | ADMIN | Delete resources, manage space settings | Delete supported existing resources, manage settings (creation is gated) |
+
+For files, `write` allows a user key to upload files owned by that user. `admin` is required to delete files, and deletion is still limited to files owned by the key's user. Service keys cannot upload or delete files.
 
 ### How Service Keys Derive Space Roles
 
@@ -210,7 +216,9 @@ Keys are created via `POST /api/v1/api-keys`. The policy service validates:
 - Scope and permission compatibility
 - Service key guardrails (admin-only creation, IP/expiry for write/admin tenant scope)
 - `pk_` key constraints (origins required, no admin, no IPs)
-- Resource permission ceilings (cannot exceed main permission)
+- Resource permission shape and scope compatibility
+- `sk_` effective permission derivation from the highest resource permission
+- `pk_` resource permission caps (`none`/`read` only)
 - Tenant policy limits (expiration requirements, rate limit ceilings)
 
 The plain key secret is returned **exactly once** in the response. It is never stored or retrievable again.
@@ -287,7 +295,7 @@ API key secrets are **never stored in plaintext**. They are hashed with HMAC-SHA
 
 ### Guardrails
 
-- Service keys with tenant-wide write/admin scope **must** have an IP allowlist or expiration date
+- Service keys with write/admin permission **must** have an IP allowlist or expiration date
 - `pk_` keys **cannot** have admin permission and **must** specify allowed origins
 - Each origin must include a scheme (`https://example.com`) or be a localhost address
 

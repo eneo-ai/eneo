@@ -20,8 +20,8 @@ from intric.authentication.auth_dependencies import (
     KNOWLEDGE_READ_OVERRIDES,
     require_api_key_permission,
     require_api_key_scope_check,
+    require_file_delete_scope_guard,
     require_resource_permission_for_method,
-    require_tenant_scope_for_delete,
 )
 from intric.authentication.auth_models import ApiKeyPermission
 from intric.authentication.federation_router import router as federation_router
@@ -388,7 +388,7 @@ router.include_router(
             )
         ),
         Depends(require_api_key_scope_check(resource_type="file", path_param=None)),
-        Depends(require_tenant_scope_for_delete()),
+        Depends(require_file_delete_scope_guard()),
     ],
 )
 router.include_router(icons_router, prefix="/icons", tags=["icons"])
