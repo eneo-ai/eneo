@@ -1,5 +1,4 @@
 import logging
-from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, TypedDict, cast
@@ -13,12 +12,10 @@ from intric.database.tables.app_table import AppRuns, Apps
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
 from intric.database.tables.audit_retention_policy_table import AuditRetentionPolicy
-from intric.database.tables.files_table import Files
 from intric.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
     FlowRuns,
-    FlowRunStepResultFiles,
     Flows,
     FlowStepAttempts,
     FlowStepResults,
@@ -40,7 +37,6 @@ from intric.flows.flow_retention_tombstone import (
     FlowRetentionState,
     FlowRetentionTombstone,
     FlowRetentionTombstoneCounts,
-    GeneratedArtifactRetentionCounts,
     RunDebugAttemptRetentionCounts,
     RunDebugStepResultRetentionCounts,
     append_retention_tombstone,
@@ -74,15 +70,6 @@ class _FlowRuntimeRetentionAction:
     cutoff: datetime
     policy_source: str
     cleanup_timestamp: datetime
-
-
-@dataclass
-class _GeneratedArtifactRetentionTarget:
-    step_result_id: UUID
-    flow_run_id: UUID
-    tenant_id: UUID
-    output_payload_json: Any
-    file_ids: set[UUID]
 
 
 class DataRetentionService:
@@ -618,114 +605,14 @@ class DataRetentionService:
         }
 
     async def _cleanup_old_generated_flow_artifacts(
-        self, actions_by_run_id: dict[UUID, _FlowRuntimeRetentionAction]
+        self, _actions_by_run_id: dict[UUID, _FlowRuntimeRetentionAction]
     ) -> FlowRuntimeCleanupCounts:
-        if not actions_by_run_id:
-            return {
-                "debug_step_results": 0,
-                "debug_step_attempts": 0,
-                "generated_artifact_rows": 0,
-                "generated_artifact_files": 0,
-                "reconciled_artifact_references": 0,
-            }
-
-        stmt = (
-            sa.select(
-                FlowStepResults.id,
-                FlowStepResults.flow_run_id,
-                FlowStepResults.tenant_id,
-                FlowStepResults.output_payload_json,
-                FlowRunStepResultFiles.file_id,
-            )
-            .join(
-                FlowRunStepResultFiles,
-                FlowRunStepResultFiles.step_result_id == FlowStepResults.id,
-            )
-            .where(FlowRunStepResultFiles.flow_run_id.in_(set(actions_by_run_id)))
-        )
-        rows = await self.session.execute(stmt)
-        targets: dict[UUID, _GeneratedArtifactRetentionTarget] = {}
-        for row in rows.fetchall():
-            target = targets.get(row.id)
-            if target is None:
-                target = _GeneratedArtifactRetentionTarget(
-                    step_result_id=row.id,
-                    flow_run_id=row.flow_run_id,
-                    tenant_id=row.tenant_id,
-                    output_payload_json=row.output_payload_json,
-                    file_ids=set(),
-                )
-                targets[row.id] = target
-            target.file_ids.add(row.file_id)
-
-        file_ids_by_tenant: dict[UUID, set[UUID]] = defaultdict(set)
-        updated_rows = 0
-
-        for target in targets.values():
-            if not target.file_ids:
-                continue
-            object_id = str(target.step_result_id)
-            action = actions_by_run_id[target.flow_run_id]
-            has_marker = has_retention_tombstone(
-                target.output_payload_json,
-                data_class="generated_artifact",
-                object_type="flow_step_result",
-                object_id=object_id,
-                retention_state="artifact_content_purged",
-            )
-            output_payload = (
-                append_retention_tombstone(
-                    target.output_payload_json,
-                    _build_retention_tombstone(
-                        action=action,
-                        data_class="generated_artifact",
-                        object_type="flow_step_result",
-                        object_id=object_id,
-                        retention_state="artifact_content_purged",
-                        counts=GeneratedArtifactRetentionCounts(
-                            referenced_file_count=len(target.file_ids)
-                        ),
-                    ),
-                )
-                if not has_marker
-                else target.output_payload_json
-            )
-            if output_payload == target.output_payload_json:
-                file_ids_by_tenant[target.tenant_id].update(target.file_ids)
-                continue
-            update_result = await self.session.execute(
-                sa.update(FlowStepResults)
-                .where(FlowStepResults.id == target.step_result_id)
-                .values(output_payload_json=output_payload)
-            )
-            updated_rows += _sqlalchemy_affected_row_count(update_result)
-            file_ids_by_tenant[target.tenant_id].update(target.file_ids)
-
-        cleared_files = 0
-        for tenant_id, file_ids in file_ids_by_tenant.items():
-            clear_stmt = (
-                sa.update(Files)
-                .where(
-                    sa.and_(
-                        Files.tenant_id == tenant_id,
-                        Files.id.in_(file_ids),
-                        sa.or_(
-                            Files.blob.is_not(None),
-                            Files.text.is_not(None),
-                            Files.transcription.is_not(None),
-                        ),
-                    )
-                )
-                .values(blob=None, text=None, transcription=None)
-            )
-            clear_result = await self.session.execute(clear_stmt)
-            cleared_files += _sqlalchemy_affected_row_count(clear_result)
-
+        # Safety fence for T124: no run-private file lifecycle owner exists yet.
         return {
             "debug_step_results": 0,
             "debug_step_attempts": 0,
-            "generated_artifact_rows": updated_rows,
-            "generated_artifact_files": cleared_files,
+            "generated_artifact_rows": 0,
+            "generated_artifact_files": 0,
             "reconciled_artifact_references": 0,
         }
 

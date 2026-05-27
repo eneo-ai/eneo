@@ -28,7 +28,6 @@ from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
 from intric.flows.flow_retention_tombstone import (
     FLOW_RETENTION_ACTOR_SOURCE,
-    FLOW_RETENTION_TOMBSTONES_KEY,
     FlowAttemptRetentionMarker,
     RunDebugAttemptRetentionCounts,
     extract_retention_tombstones,
@@ -269,6 +268,78 @@ async def _create_flow_runtime_fixture(
     return run, step_result, step_attempt, generated_file
 
 
+async def _add_younger_flow_runtime_result_file_reference(
+    async_session: AsyncSession,
+    *,
+    source_run: FlowRuns,
+    source_step_result: FlowStepResults,
+    generated_file: Files,
+) -> None:
+    """Add a second live Flow result-file reference to the same file row."""
+    created_at = datetime.now(timezone.utc)
+    reference_run = FlowRuns(
+        flow_id=source_run.flow_id,
+        flow_version=source_run.flow_version,
+        principal_type="user",
+        principal_user_id=source_run.principal_user_id,
+        tenant_id=source_run.tenant_id,
+        trace_id=uuid4(),
+        idempotency_key=None,
+        request_fingerprint=None,
+        status="completed",
+        cancelled_at=None,
+        started_at=created_at,
+        finished_at=created_at,
+        input_payload_json={"input": "still live"},
+        output_payload_json={"result": "still live"},
+        job_id=None,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    async_session.add(reference_run)
+    await async_session.flush()
+
+    reference_step_result = FlowStepResults(
+        flow_run_id=reference_run.id,
+        flow_id=reference_run.flow_id,
+        tenant_id=reference_run.tenant_id,
+        step_id=source_step_result.step_id,
+        step_order=source_step_result.step_order,
+        assistant_id=source_step_result.assistant_id,
+        input_payload_json={"text": "live input"},
+        effective_prompt="Live prompt",
+        output_payload_json={"text": "live output"},
+        model_parameters_json={"temperature": 0.2},
+        num_tokens_input=5,
+        num_tokens_output=8,
+        status="completed",
+        error_message=None,
+        flow_step_execution_hash=None,
+        started_at=created_at,
+        finished_at=created_at,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    async_session.add(reference_step_result)
+    await async_session.flush()
+
+    async_session.add(
+        FlowRunStepResultFiles(
+            flow_run_id=reference_run.id,
+            flow_id=reference_run.flow_id,
+            tenant_id=reference_run.tenant_id,
+            step_result_id=reference_step_result.id,
+            step_id=reference_step_result.step_id,
+            step_order=reference_step_result.step_order,
+            attempt_no=1,
+            file_id=generated_file.id,
+            ordinal=0,
+            source="declared_artifact",
+        )
+    )
+    await async_session.flush()
+
+
 async def _add_flow_audit_outbox_row(
     async_session: AsyncSession,
     *,
@@ -354,7 +425,7 @@ async def _add_flow_audit_outbox_row(
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_clears_debug_evidence_and_generated_artifacts(
+async def test_cleanup_old_flow_runtime_data_clears_debug_evidence_and_preserves_generated_artifact_content(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -388,8 +459,8 @@ async def test_cleanup_old_flow_runtime_data_clears_debug_evidence_and_generated
     assert counts == {
         "debug_step_results": 1,
         "debug_step_attempts": 1,
-        "generated_artifact_rows": 1,
-        "generated_artifact_files": 1,
+        "generated_artifact_rows": 0,
+        "generated_artifact_files": 0,
         "reconciled_artifact_references": 0,
     }
 
@@ -405,10 +476,7 @@ async def test_cleanup_old_flow_runtime_data_clears_debug_evidence_and_generated
     assert refreshed_step_result.output_payload_json["text"] == "kept output"
     assert refreshed_step_result.output_payload_json["webhook_delivered"] is False
     tombstones = extract_retention_tombstones(refreshed_step_result.output_payload_json)
-    assert [item.retention_state for item in tombstones] == [
-        "retention_purged",
-        "artifact_content_purged",
-    ]
+    assert [item.retention_state for item in tombstones] == ["retention_purged"]
     assert {item.actor_source for item in tombstones} == {FLOW_RETENTION_ACTOR_SOURCE}
     assert {item.tenant_id for item in tombstones} == {str(test_tenant.id)}
     assert {item.run_id for item in tombstones} == {str(run.id)}
@@ -423,7 +491,7 @@ async def test_cleanup_old_flow_runtime_data_clears_debug_evidence_and_generated
     assert isinstance(attempt_marker.tombstone.counts, RunDebugAttemptRetentionCounts)
     assert attempt_marker.tombstone.counts.cleared_field_count == 1
     assert refreshed_file is not None
-    assert refreshed_file.blob is None
+    assert refreshed_file.blob == b"docx-bytes"
     assert refreshed_file.text is None
     assert refreshed_file.transcription is None
 
@@ -440,7 +508,7 @@ async def test_cleanup_old_flow_runtime_data_clears_debug_evidence_and_generated
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_uses_result_file_rows_without_payload_refs(
+async def test_cleanup_old_flow_runtime_data_preserves_generated_artifact_content_without_payload_refs(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -468,8 +536,8 @@ async def test_cleanup_old_flow_runtime_data_uses_result_file_rows_without_paylo
     assert counts == {
         "debug_step_results": 0,
         "debug_step_attempts": 0,
-        "generated_artifact_rows": 1,
-        "generated_artifact_files": 1,
+        "generated_artifact_rows": 0,
+        "generated_artifact_files": 0,
         "reconciled_artifact_references": 0,
     }
 
@@ -482,14 +550,68 @@ async def test_cleanup_old_flow_runtime_data_uses_result_file_rows_without_paylo
         "text",
         "webhook_delivered",
         "template_fill_debug",
-        FLOW_RETENTION_TOMBSTONES_KEY,
     }
     assert payload["text"] == "kept output"
     assert payload["webhook_delivered"] is False
     assert payload["template_fill_debug"] == {"rendered_docx_text_raw": "debug body"}
-    assert len(extract_retention_tombstones(payload)) == 1
+    assert extract_retention_tombstones(payload) == ()
+    assert "artifact_content_purged" not in str(payload)
     assert refreshed_file is not None
-    assert refreshed_file.blob is None
+    assert refreshed_file.blob == b"docx-bytes"
+    assert refreshed_file.text is None
+    assert refreshed_file.transcription is None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_old_flow_runtime_data_preserves_file_content_with_younger_flow_reference(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_assistant: Assistants,
+    flow_retention_service: DataRetentionService,
+):
+    run, step_result, _attempt, generated_file = await _create_flow_runtime_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        assistant=flow_retention_assistant,
+        days_old=3,
+        flow_settings={
+            "retention_policy": {
+                "generated_artifact_days": 1,
+            }
+        },
+    )
+    await _add_younger_flow_runtime_result_file_reference(
+        async_session,
+        source_run=run,
+        source_step_result=step_result,
+        generated_file=generated_file,
+    )
+
+    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    await async_session.flush()
+
+    assert counts == {
+        "debug_step_results": 0,
+        "debug_step_attempts": 0,
+        "generated_artifact_rows": 0,
+        "generated_artifact_files": 0,
+        "reconciled_artifact_references": 0,
+    }
+
+    refreshed_step_result = await async_session.get(FlowStepResults, step_result.id)
+    refreshed_file = await async_session.get(Files, generated_file.id)
+    assert refreshed_step_result is not None
+    assert refreshed_step_result.output_payload_json is not None
+    assert "artifact_content_purged" not in str(
+        refreshed_step_result.output_payload_json
+    )
+    assert extract_retention_tombstones(refreshed_step_result.output_payload_json) == ()
+    assert refreshed_file is not None
+    assert refreshed_file.blob == b"docx-bytes"
     assert refreshed_file.text is None
     assert refreshed_file.transcription is None
 

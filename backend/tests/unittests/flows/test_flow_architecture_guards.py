@@ -31,6 +31,11 @@ DATA_RETENTION_ROOT = BACKEND_ROOT / "src" / "intric" / "data_retention"
 PYRIGHT_REPORT_UNKNOWN_MEMBER_IGNORE_RE = re.compile(
     r"#\s*pyright\s*:\s*ignore\s*\[\s*[^\]]*\breportUnknownMemberType\b[^\]]*\]"
 )
+FILES_CONTENT_COLUMNS = frozenset({"blob", "text", "transcription"})
+FILES_CONTENT_LIFECYCLE_GUARD_MESSAGE = (
+    "T124 file lifecycle decision: data_retention must not null principal-owned "
+    "Files.blob/text/transcription until run-private file lifecycle ownership exists."
+)
 
 _OUTPUT_AXIS_ENUMS = {
     "output_mode": "FlowOutputMode",
@@ -167,6 +172,14 @@ def _flow_api_python_files() -> list[Path]:
     ]
 
 
+def _data_retention_python_files() -> list[Path]:
+    return [
+        path
+        for path in DATA_RETENTION_ROOT.rglob("*.py")
+        if "__pycache__" not in path.parts
+    ]
+
+
 def _relative_runtime_path(path: Path) -> str:
     return path.relative_to(FLOW_RUNTIME_ROOT).as_posix()
 
@@ -193,6 +206,83 @@ def _outbox_delivery_status_source_files() -> list[Path]:
             ):
                 files.append(path)
     return sorted(files)
+
+
+def _call_chain_root(call: ast.Call) -> ast.Call:
+    current = call
+    while isinstance(current.func, ast.Attribute) and isinstance(
+        current.func.value, ast.Call
+    ):
+        current = current.func.value
+    return current
+
+
+def _is_files_table_update_call(call: ast.Call) -> bool:
+    if len(call.args) != 1:
+        return False
+    target = call.args[0]
+    if not isinstance(target, ast.Name) or target.id != "Files":
+        return False
+    if isinstance(call.func, ast.Name):
+        return call.func.id == "update"
+    return (
+        isinstance(call.func, ast.Attribute)
+        and call.func.attr == "update"
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id == "sa"
+    )
+
+
+def _none_literal(node: ast.AST) -> bool:
+    return isinstance(node, ast.Constant) and node.value is None
+
+
+def _files_content_nulling_columns(values_call: ast.Call) -> frozenset[str]:
+    columns: set[str] = set()
+    for keyword in values_call.keywords:
+        if (
+            keyword.arg in FILES_CONTENT_COLUMNS
+            and keyword.arg is not None
+            and _none_literal(keyword.value)
+        ):
+            columns.add(keyword.arg)
+    for arg in values_call.args:
+        if not isinstance(arg, ast.Dict):
+            continue
+        for key, value in zip(arg.keys, arg.values, strict=True):
+            if (
+                isinstance(key, ast.Constant)
+                and isinstance(key.value, str)
+                and key.value in FILES_CONTENT_COLUMNS
+                and _none_literal(value)
+            ):
+                columns.add(key.value)
+    return frozenset(columns)
+
+
+def _files_content_nulling_update_offenders(
+    tree: ast.AST, *, relative_path: str
+) -> list[str]:
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if (
+            not isinstance(node, ast.Call)
+            or not isinstance(node.func, ast.Attribute)
+            or node.func.attr != "values"
+        ):
+            continue
+        columns = _files_content_nulling_columns(node)
+        if not columns:
+            continue
+        if _is_files_table_update_call(_call_chain_root(node)):
+            offenders.append(
+                f"{relative_path}:{node.lineno}:{','.join(sorted(columns))}"
+            )
+    return offenders
+
+
+def _format_files_content_lifecycle_guard_failure(offenders: list[str]) -> str:
+    return FILES_CONTENT_LIFECYCLE_GUARD_MESSAGE + " Offenders: " + ", ".join(offenders)
 
 
 def _is_container_provider_call(node: ast.AST) -> bool:
@@ -677,6 +767,38 @@ def test_flow_outbox_delivery_status_literals_use_canonical_vocabulary():
         "Outbox delivery status comparisons must use FlowOutboxDeliveryStatus "
         "from flow_tables.py, not raw string literals: " + ", ".join(offenders)
     )
+
+
+def test_data_retention_does_not_null_files_content_directly():
+    offenders: list[str] = []
+    for path in _data_retention_python_files():
+        tree = ast.parse(path.read_text(), filename=str(path))
+        offenders.extend(
+            _files_content_nulling_update_offenders(
+                tree,
+                relative_path=path.relative_to(BACKEND_ROOT).as_posix(),
+            )
+        )
+
+    assert offenders == [], _format_files_content_lifecycle_guard_failure(offenders)
+
+
+def test_files_content_nulling_guard_reports_forbidden_update():
+    tree = ast.parse(
+        "def cleanup():\n"
+        "    sa.update(Files).where(Files.id == file_id).values(blob=None)\n"
+        "    update(Files).values({'text': None})\n"
+    )
+
+    offenders = _files_content_nulling_update_offenders(
+        tree,
+        relative_path="sample.py",
+    )
+    message = _format_files_content_lifecycle_guard_failure(offenders)
+
+    assert offenders == ["sample.py:2:blob", "sample.py:3:text"]
+    assert "T124" in message
+    assert "file lifecycle" in message
 
 
 def test_flow_celery_task_provider_wiring_is_not_erased_to_any():
