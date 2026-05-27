@@ -343,6 +343,7 @@
               bind:runId={promptGuideRunId}
               targetType="assistant"
               targetId={data.assistant.id}
+              targetPrompt={$update.prompt.text}
               onApply={(text) => {
                 // Apply only mutates local editor state (PRD §10): the produced
                 // prompt is written into $update.prompt.text and persisted later
