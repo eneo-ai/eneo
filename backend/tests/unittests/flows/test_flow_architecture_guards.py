@@ -33,8 +33,12 @@ PYRIGHT_REPORT_UNKNOWN_MEMBER_IGNORE_RE = re.compile(
 )
 FILES_CONTENT_COLUMNS = frozenset({"blob", "text", "transcription"})
 FILES_CONTENT_LIFECYCLE_GUARD_MESSAGE = (
-    "T124 file lifecycle decision: data_retention must not null principal-owned "
+    "Data retention must not null principal-owned "
     "Files.blob/text/transcription until run-private file lifecycle ownership exists."
+)
+GENERATED_ARTIFACT_RETENTION_GUARD_MESSAGE = (
+    "Data retention must not schedule generated-artifact cleanup work while no "
+    "run-private Flow file lifecycle owner exists."
 )
 
 _OUTPUT_AXIS_ENUMS = {
@@ -283,6 +287,48 @@ def _files_content_nulling_update_offenders(
 
 def _format_files_content_lifecycle_guard_failure(offenders: list[str]) -> str:
     return FILES_CONTENT_LIFECYCLE_GUARD_MESSAGE + " Offenders: " + ", ".join(offenders)
+
+
+def _is_generated_artifact_literal(node: ast.AST) -> bool:
+    return isinstance(node, ast.Constant) and node.value == "generated_artifact"
+
+
+def _retention_for_generated_artifact_call(call: ast.Call) -> bool:
+    if not isinstance(call.func, ast.Attribute):
+        return False
+    if call.func.attr != "retention_for_class":
+        return False
+    if call.args and _is_generated_artifact_literal(call.args[0]):
+        return True
+    return any(
+        keyword.arg == "data_class" and _is_generated_artifact_literal(keyword.value)
+        for keyword in call.keywords
+    )
+
+
+def _generated_artifact_retention_schedule_offenders(
+    tree: ast.AST, *, relative_path: str
+) -> list[str]:
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.name == "_cleanup_old_generated_flow_artifacts"
+        ):
+            offenders.append(f"{relative_path}:{node.lineno}:cleanup-helper")
+        elif isinstance(node, ast.Call) and _retention_for_generated_artifact_call(
+            node
+        ):
+            offenders.append(f"{relative_path}:{node.lineno}:retention_for_class")
+    return offenders
+
+
+def _format_generated_artifact_retention_guard_failure(offenders: list[str]) -> str:
+    return (
+        GENERATED_ARTIFACT_RETENTION_GUARD_MESSAGE
+        + " Offenders: "
+        + ", ".join(offenders)
+    )
 
 
 def _is_container_provider_call(node: ast.AST) -> bool:
@@ -783,6 +829,48 @@ def test_data_retention_does_not_null_files_content_directly():
     assert offenders == [], _format_files_content_lifecycle_guard_failure(offenders)
 
 
+def test_data_retention_does_not_schedule_generated_artifact_cleanup():
+    offenders: list[str] = []
+    for path in _data_retention_python_files():
+        tree = ast.parse(path.read_text(), filename=str(path))
+        offenders.extend(
+            _generated_artifact_retention_schedule_offenders(
+                tree,
+                relative_path=path.relative_to(BACKEND_ROOT).as_posix(),
+            )
+        )
+
+    assert offenders == [], _format_generated_artifact_retention_guard_failure(
+        offenders
+    )
+
+
+def test_generated_artifact_retention_guard_reports_forbidden_scheduler():
+    tree = ast.parse(
+        "class Cleanup:\n"
+        "    async def _cleanup_old_generated_flow_artifacts(self):\n"
+        "        return None\n"
+        "    def schedule(self, policy):\n"
+        "        policy.retention_for_class('generated_artifact')\n"
+        "        policy.retention_for_class(data_class='generated_artifact')\n"
+    )
+
+    offenders = _generated_artifact_retention_schedule_offenders(
+        tree,
+        relative_path="sample.py",
+    )
+    message = _format_generated_artifact_retention_guard_failure(offenders)
+
+    assert offenders == [
+        "sample.py:2:cleanup-helper",
+        "sample.py:5:retention_for_class",
+        "sample.py:6:retention_for_class",
+    ]
+    assert "run-private Flow file lifecycle owner" in message
+    assert "T124" not in message
+    assert "T128" not in message
+
+
 def test_files_content_nulling_guard_reports_forbidden_update():
     tree = ast.parse(
         "def cleanup():\n"
@@ -797,7 +885,8 @@ def test_files_content_nulling_guard_reports_forbidden_update():
     message = _format_files_content_lifecycle_guard_failure(offenders)
 
     assert offenders == ["sample.py:2:blob", "sample.py:3:text"]
-    assert "T124" in message
+    assert "run-private file lifecycle ownership" in message
+    assert "T124" not in message
     assert "file lifecycle" in message
 
 

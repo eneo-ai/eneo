@@ -92,7 +92,6 @@ class DataRetentionService:
             older_than=now - timedelta(days=1)
         ):
             debug_actions: dict[UUID, _FlowRuntimeRetentionAction] = {}
-            artifact_actions: dict[UUID, _FlowRuntimeRetentionAction] = {}
 
             for row in terminal_runs:
                 anchor = row["retention_anchor"]
@@ -127,44 +126,12 @@ class DataRetentionService:
                         cleanup_timestamp=now,
                     )
 
-                artifact_retention_days = policy.retention_for_class(
-                    "generated_artifact",
-                    space_default_days=space_default_days,
-                    flow_override_days=flow_override_days,
-                )
-                if artifact_retention_days is not None and anchor <= now - timedelta(
-                    days=artifact_retention_days
-                ):
-                    artifact_actions[run_id] = _FlowRuntimeRetentionAction(
-                        run_id=run_id,
-                        tenant_id=tenant_id,
-                        trace_id=trace_id,
-                        cutoff=now - timedelta(days=artifact_retention_days),
-                        policy_source=_flow_runtime_policy_source(
-                            data_class="generated_artifact",
-                            policy=policy,
-                            flow_override_days=flow_override_days,
-                            space_default_days=space_default_days,
-                        ),
-                        cleanup_timestamp=now,
-                    )
-
             if debug_actions:
                 debug_counts = await self._cleanup_old_flow_debug_evidence(
                     debug_actions
                 )
                 counts["debug_step_results"] += debug_counts["debug_step_results"]
                 counts["debug_step_attempts"] += debug_counts["debug_step_attempts"]
-            if artifact_actions:
-                artifact_counts = await self._cleanup_old_generated_flow_artifacts(
-                    artifact_actions
-                )
-                counts["generated_artifact_rows"] += artifact_counts[
-                    "generated_artifact_rows"
-                ]
-                counts["generated_artifact_files"] += artifact_counts[
-                    "generated_artifact_files"
-                ]
         return counts
 
     async def delete_old_delivered_flow_audit_outbox_rows(self) -> int:
@@ -599,18 +566,6 @@ class DataRetentionService:
         return {
             "debug_step_results": debug_step_results,
             "debug_step_attempts": debug_step_attempts,
-            "generated_artifact_rows": 0,
-            "generated_artifact_files": 0,
-            "reconciled_artifact_references": 0,
-        }
-
-    async def _cleanup_old_generated_flow_artifacts(
-        self, _actions_by_run_id: dict[UUID, _FlowRuntimeRetentionAction]
-    ) -> FlowRuntimeCleanupCounts:
-        # Safety fence for T124: no run-private file lifecycle owner exists yet.
-        return {
-            "debug_step_results": 0,
-            "debug_step_attempts": 0,
             "generated_artifact_rows": 0,
             "generated_artifact_files": 0,
             "reconciled_artifact_references": 0,

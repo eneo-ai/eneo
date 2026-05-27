@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T126
+active_task: T129
 
 tasks:
   - id: T001
@@ -2214,7 +2214,7 @@ tasks:
   - id: T010
     type: worker
     assignee: Worker
-    status: queued
+    status: blocked
     reasoning_hint: medium
     objective: "Implement runtime input file retention lifecycle selected by Judge."
     decision_required:
@@ -2225,7 +2225,15 @@ tasks:
       - "No read-only Scout/Judge has narrowed the retention Worker after the recorded owner decision."
       - "Migration/data model impact exceeds approved scope."
       - "Evidence/API behavior after purge is ambiguous."
-    receipt: null
+    receipt:
+      result: blocked_by_lifecycle_owner_judge
+      completed_at: "2026-05-27T18:03:00+02:00"
+      summary: "The broad runtime input file retention lifecycle Worker remains blocked after T126/T127. The owner decisions allow retention design work, but T126/T127 did not approve runtime input/source-audio/default-90 lifecycle implementation or any content purge. They selected the immediate no-op generated-artifact scan fence instead. A future file-content-lifetime Judge must first choose copy-on-write/run-private semantics, attempt-history behavior, generated-file orphan reconciliation, evidence/API projection, and migration strategy."
+      blocking_evidence:
+        - "T126 content_nulling_invariant: shared/principal-owned Files content cannot be nulled without run-private byte isolation proof."
+        - "T127 rejected file-content lifecycle schema and source-input/default-90 retention for the immediate slice."
+        - "T128 is limited to stopping generated-artifact scan scheduling and preserving zero result keys."
+      unblock_trigger: "A later read-only Judge approves a runtime input/source-audio lifecycle Worker with exact allowed_files, migration/preflight evidence, red tests, rollback notes, and Claude/Antigravity schema review gates."
 
   - id: T011
     type: worker
@@ -13471,7 +13479,7 @@ tasks:
   - id: T126
     type: scout
     assignee: Scout
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Read-only Flow runtime file-lifecycle/schema preflight: define the canonical owner for runtime uploaded/generated file content lifetime before any retention Worker or migration."
     inputs:
@@ -13510,6 +13518,404 @@ tasks:
       - "DB/Postgres is unavailable for required catalog/preflight evidence."
       - "A product/data decision is missing for ownership, retention, or public API semantics."
       - "The next safe action would require source edits before the Scout/Judge evidence is complete."
+    receipt:
+      result: done
+      completed_at: "2026-05-27T17:45:00+02:00"
+      summary: "T126 completed the read-only Flow runtime file-lifecycle/schema preflight. Current source and live DB evidence show that Flow runtime files are principal-owned Files rows plus Flow xref rows, not run-private byte ownership. T126 does not approve retention/source-input/default-90 behavior or a migration Worker. The next safe task is T127 Judge, scoped to deciding whether to extend the T125 fence and stop generated-artifact scan work, approve a projection-backed scan-completion marker, or queue a separate file-content-lifetime Judge before any purge behavior."
+      artifact: ".codex/artifacts/t126-flow-runtime-file-lifecycle-preflight.md"
+      source_evidence:
+        files_owner: "backend/src/intric/database/tables/files_table.py:15-60 defines shared Files content and principal ownership; source head uses owner_service_id while live DB is still one migration behind."
+        runtime_uploads: "backend/src/intric/flows/flow_file_upload_service.py:254-269 delegates pre-run Flow uploads to FileService.save_file(), so uploads start as shared principal-owned Files."
+        file_service: "backend/src/intric/files/file_service.py:40-71 saves FileCreate rows with principal owner fields."
+        input_validation: "backend/src/intric/flows/flow_run_step_inputs.py:164-199 validates submitted file ids through principal-owner filtering and type/limit checks."
+        input_xrefs: "backend/src/intric/database/tables/flow_tables.py:1363-1431 defines FlowRunStepInputFiles with file_id ON DELETE RESTRICT and run/tenant/run-flow constraints."
+        result_xrefs: "backend/src/intric/database/tables/flow_tables.py:1434-1510 defines FlowRunStepResultFiles with source, file_id ON DELETE RESTRICT, attempt_no-aware uniqueness, and indexes."
+        xref_writes: "backend/src/intric/flows/infrastructure/flow_run_repo.py:279-299 inserts input-file refs; backend/src/intric/flows/infrastructure/flow_repo.py:719-743 replaces result-file rows for the same attempt_no only."
+        generated_artifacts: "backend/src/intric/flows/runtime/executor.py:1793-1819, backend/src/intric/flows/runtime/output_runtime.py:112-142, and backend/src/intric/flows/runtime/template_fill_runtime.py:153-168 persist generated/output files before result-file refs are saved."
+        evidence_projection: "backend/src/intric/flows/infrastructure/flow_run_repo.py:2552-2579 derives result-file availability from Files.blob/text; backend/src/intric/flows/application/flow_run_evidence_service.py:80-120 guards artifact download from result-file membership and availability."
+        retention_scan: "backend/src/intric/data_retention/infrastructure/data_retention_service.py:82-168 still builds generated-artifact actions while the fenced leaf at :607-617 returns zero counts."
+      db_evidence:
+        migration_state: "cd backend && uv run alembic current returned 20260527_service_principals; heads returned 20260527_flow_sp_runtime_owner, so live DB is one migration behind source head."
+        counts: "Live DB: files=170, files_with_any_content=170, flow_runs=81, flow_run_step_input_files=61, flow_run_step_result_files=46, terminal_runs_older_than_1d=81, terminal_runs_older_than_90d=0."
+        reference_overlap: "Live fixture has flow_files=107 with 0 multiple surfaces and 0 multiple ref rows, but schema permits shared Files reuse; fixture counts are not a safety proof."
+        result_sources: "Live fixture result-file source distribution is declared_artifact=46 and generated_output=0."
+        retention_settings: "Live fixture has 0 flow/space/tenant Flow retention settings configured."
+        fk_rules: "Files references include Flow input/result/template FKs ON DELETE RESTRICT and assistant/question/app/builder references with CASCADE; none prevent content-null UPDATEs."
+        explain: "Local EXPLAIN is sub-millisecond on 81 runs, but production-shape risk is repeated historical terminal-run reconsideration without lifecycle/completion state."
+      decisions:
+        no_worker_yet: true
+        next_task: T127
+        next_task_type: judge
+        content_nulling_invariant: "No shared/principal-owned Files.blob/text/transcription may be nulled unless the payload was created in a run-private copy-on-write scope or an equivalent isolation proof exists."
+        completion_marker_invariant: "Any scan-completion marker must be a projection of completed cleanup/lifecycle work or a no-op/fence marker; it must not become independent purge truth."
+        attempt_history_invariant: "Lifecycle design must preserve or explicitly collapse attempt history; result-file replacement deletes only same-attempt rows, not previous attempts."
+        orphan_invariant: "Generated Files created before result-file xref insertion/replacement must be linked to lifecycle state atomically or reconciled without leaking unreferenced bytes."
+        option_d: "Extending the T125 fence and stopping generated-artifact scan scheduling is a first-class valid outcome."
+      reviewer_results:
+        claude:
+          first_artifact: ".codex/artifacts/claude-peer-loop-t126-flow-runtime-file-lifecycle-preflight-20260527T173244Z.md"
+          first_verdict: "changes_required"
+          first_min_score: 7
+          second_artifact: ".codex/artifacts/claude-peer-loop-t126-flow-runtime-file-lifecycle-preflight-revision-20260527T173618Z.md"
+          second_green_light: true
+          second_min_score: 8
+          final_artifact: ".codex/artifacts/claude-peer-loop-t126-flow-runtime-file-lifecycle-antigravity-revision-20260527T174134Z.md"
+          final_green_light: true
+          final_min_score: 9
+          valid_concerns_addressed:
+            - "Added Option D as a first-class no-op/fence outcome."
+            - "Defined run-private meanings and forced the Judge to pick one."
+            - "Added attempt_no history, no parallel reference graph, projection-backed completion, copy-on-write, and generated-file orphan requirements."
+            - "Verified and corrected Antigravity's previous-attempt deletion claim with source evidence."
+        antigravity:
+          first_artifact: ".codex/artifacts/antigravity-peer-loop-t126-flow-runtime-file-lifecycle-antigravity-synthesis-20260527T173731Z.md"
+          first_verdict: "changes_required"
+          first_min_score: 6
+          final_artifact: ".codex/artifacts/antigravity-peer-loop-t126-flow-runtime-file-lifecycle-antigravity-revision-20260527T174221Z.md"
+          final_green_light: true
+          final_min_score: 9
+          valid_concerns_addressed:
+            - "Made copy-on-write/run-private byte isolation a hard invariant before any Files content nulling."
+            - "Forbid standalone completion markers that can drift from cleanup/lifecycle truth."
+            - "Added generated-file orphan reconciliation for the pre-xref/same-attempt replacement window."
+            - "Documented disagreement: prior attempt rows are not deleted by save_step_result; the corrected risk is same-attempt/pre-xref orphaning."
+      commands:
+        - cmd: "ruby -rjson -e '<read watchdog>' /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1; status=ok; blockers empty."
+        - cmd: "rg/nl reads for Files, Flow runtime upload/input/result xrefs, output persistence, evidence projection, retention policy/tombstones, and DataRetentionService"
+          status: pass
+          output: "Collected source evidence in .codex/artifacts/t126-flow-runtime-file-lifecycle-preflight.md."
+        - cmd: "cd backend && uv run alembic current && uv run alembic heads && uv run alembic history -r 20260527_service_principals:head"
+          status: pass
+          output: "Live DB current=20260527_service_principals; source head=20260527_flow_sp_runtime_owner; one pending service-principal runtime ownership migration."
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -P pager=off < T126 catalog/count/FK/index/EXPLAIN SQL"
+          status: pass
+          output: "Collected columns, FK delete rules, file reference overlap, retention settings, indexes, and EXPLAIN plans."
+        - cmd: "python3 /Users/ccimen/.codex/skills/complexity-optimizer/scripts/analyze_complexity.py /Users/ccimen/eneo/eneo/backend/src/intric/data_retention --format markdown"
+          status: pass_with_leads
+          output: "Scanner flagged DB operations in DataRetentionService loops; manually verified the relevant production concern is repeated historical terminal-run consideration, not local latency."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t126-file-lifecycle-preflight --phase review --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: changes_required
+          output: "GREEN_LIGHT no; MIN_SCORE 7; brief tightened for Option D, run-private semantics, attempt history, parallel graph stop-if, and completion marker axis."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t126-file-lifecycle-preflight --phase review --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t126-file-lifecycle-synthesis --phase synthesis --iteration 1 --spend-mode auto --timeout-seconds 1200 ..."
+          status: changes_required
+          output: "GREEN_LIGHT no; MIN_SCORE 6; copy-on-write, completion-marker duplicate truth, and orphan-window concerns addressed; previous-attempt deletion claim rejected with source evidence."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t126-file-lifecycle-preflight --phase review --iteration 3 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 9."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t126-file-lifecycle-synthesis --phase synthesis --iteration 2 --spend-mode auto --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 9."
+      non_flow_scope_for_future:
+        - file: "backend/src/intric/data_retention/infrastructure/data_retention_service.py"
+          canonical_owner_role: "Flow runtime retention executor living in the shared data-retention package."
+          why_flow_requires_this_change: "Only if T127 chooses to stop generated-artifact action scheduling, add projection-backed completion, or later execute lifecycle-owned purge work."
+          deliberately_not_changed: "Generic question/app retention, assistant/app/question file lifecycle behavior, and worker result shape unless a Judge explicitly approves it."
+        - file: "backend/src/intric/files/file_service.py"
+          canonical_owner_role: "Shared file persistence/access owner."
+          why_flow_requires_this_change: "Only if a future copy/promote design proves run-private byte materialization must happen at the shared file persistence boundary."
+          deliberately_not_changed: "Generic API-key/file refactor and assistant/app/question file semantics."
+        - file: "backend/src/intric/database/tables/files_table.py"
+          canonical_owner_role: "Shared Files schema owner."
+          why_flow_requires_this_change: "Only if a future lifecycle design proves a stable shared file invariant is required; otherwise avoid broadening Files semantics."
+          deliberately_not_changed: "Generic file lifecycle redesign."
+      consolidation_effect:
+        reused_existing_owner: "Existing Files owner, Flow input/result xref owners, Flow retention policy/tombstone owners, DataRetentionService, and evidence projection owners were mapped instead of creating a new implementation."
+        logic_moved_from: "None; T126 was read-only."
+        logic_deleted: "None; T126 was read-only."
+        duplicate_path_removed: "None yet; T126 prevents the next task from creating a parallel run/file reference graph or duplicate completion truth."
+        new_code_added: "No source/test/migration code. Added local .codex artifact only and this board receipt."
+        why_existing_owners_were_insufficient: "Existing owners do not prove run-private byte lifetime, copy-on-write isolation, completion-state projection, or generated-file orphan reconciliation."
+        guard_test_preventing_duplicate_logic_from_returning: "T127 must name red tests for scan completion, completion-marker ordering, attempt history, generated-file orphan reconciliation, and direct Files content-nulling guard before any Worker."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "No runtime source logic added."
+      followups:
+        - "T127 should consider Option D as the likely first safe slice: extend the T125 fence and stop generated-artifact scan scheduling/reporting noise while retention settings are absent."
+        - "Any later Worker should remove the committed source comment that names T124 and replace it with the architectural reason."
+        - "If a lifecycle owner is introduced later, _file_availability should derive from lifecycle state instead of peeking directly at Files.blob/text."
+      next_task: T127
+
+  - id: T127
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the smallest safe next step after T126 for Flow runtime file lifecycle and retention scan behavior without starting a migration or source Worker."
+    inputs:
+      - "T126 receipt."
+      - ".codex/artifacts/t126-flow-runtime-file-lifecycle-preflight.md"
+      - ".codex/artifacts/claude-peer-loop-t126-flow-runtime-file-lifecycle-antigravity-revision-20260527T174134Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t126-flow-runtime-file-lifecycle-antigravity-revision-20260527T174221Z.md"
+      - "backend/src/intric/data_retention/infrastructure/data_retention_service.py"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/src/intric/database/tables/files_table.py"
+      - "backend/src/intric/flows/infrastructure/flow_repo.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+      - "backend/src/intric/flows/runtime/executor.py"
+      - "backend/src/intric/flows/runtime/output_runtime.py"
+      - "backend/src/intric/flows/runtime/template_fill_runtime.py"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only Judge only: no source edits, test edits, migrations, frontend, generated client, docs/flows/architecture.md, or retention implementation."
+      - "Check watchdog before transition and before any later Worker implementation."
+      - "Do not bundle retention source-input/default-90 behavior, service-principal ownership migration, generic Files redesign, assistant/app/question file lifecycle behavior, or Flow AI Builder."
+      - "Use T126's copy-on-write invariant: no shared/principal-owned Files content nulling without run-private byte isolation proof."
+      - "Use T126's completion-marker invariant: any completion marker must be a projection of completed cleanup/lifecycle work or a no-op/fence marker, not independent purge truth."
+      - "Use T126's orphan invariant: generated file rows created before result xref insertion/replacement must be lifecycle-visible atomically or reconciled."
+      - "Treat Option D, extending the safety fence and stopping generated-artifact action scans, as a first-class outcome."
+      - "If proposing a schema Worker, require Claude and Antigravity plan gates before implementation and include Alembic/FK/index rollback notes."
+    expected_output:
+      - "Choose one immediate outcome: keep/extend no-op fence and stop generated-artifact scan scheduling, approve a projection-backed scan-completion Worker, queue a separate file-content-lifetime Judge, or block with evidence."
+      - "If approving any Worker, provide exact allowed_files, stop_if conditions, non-Flow scope table, migration/preflight requirements, rollback/recovery notes, red tests, and verification commands."
+      - "Explicitly answer consolidation effect: reused owner, moved logic, deleted logic, duplicate path removed, new code added, why existing owners were insufficient, guard preventing duplicate logic, and net Flow logic surface area."
+      - "Explicitly reject any Worker that creates a parallel (run_id, file_id) reference graph, independent completion truth, or generic Files behavior change without source-backed necessity."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "The proposed next action requires source edits before the Judge decision is complete."
+      - "No single canonical owner can be named for the proposed Worker."
+      - "The proposal permits direct Files content nulling for shared/principal-owned files without copy-on-write/run-private proof."
+      - "The proposal sets completion markers independently of cleanup/lifecycle success."
+      - "The proposal ignores attempt history or generated-file orphan reconciliation."
+      - "The proposal broadens into generic data retention, generic Files cleanup, assistant/app/question file lifecycle behavior, service-key ownership migration, or Flow AI Builder."
+    receipt:
+      result: done
+      completed_at: "2026-05-27T17:51:00+02:00"
+      summary: "T127 chose Option D as the immediate next slice: keep the generated-artifact content purge disabled and stop scheduling/generated-artifact retention actions while no run-private file lifecycle owner exists. T127 explicitly rejects schema work, run-private/copy-promote implementation, source-input/default-90 retention, service-principal ownership migration, and generic Files redesign for this slice."
+      chosen_outcome: "Option D: extend the T125 safety fence and remove no-op generated-artifact scan scheduling/reporting noise from DataRetentionService while preserving public/result keys as zero."
+      rejected_outcomes:
+        projection_backed_completion_marker: "Rejected for the immediate slice because no generated-artifact lifecycle work succeeds yet; a completion marker would be either duplicate truth or a no-op marker that is not needed once scan scheduling is removed."
+        file_content_lifecycle_schema: "Rejected for this slice. T126 proved it needs a separate Judge/Worker with copy-on-write, orphan reconciliation, attempt-history, and projection semantics."
+        direct_content_purge: "Rejected. Shared/principal-owned Files content cannot be nulled without run-private byte isolation proof."
+        generic_files_redesign: "Rejected as scope creep; no source evidence requires changing shared Files semantics for this immediate slice."
+      approved_worker:
+        id: T128
+        objective: "Stop scheduling generated-artifact retention actions while the lifecycle fence remains active; preserve generated artifact content and stable cleanup result keys."
+        allowed_files:
+          - "backend/src/intric/data_retention/infrastructure/data_retention_service.py"
+          - "backend/tests/integration/test_flow_runtime_retention_cleanup.py"
+          - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+          - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+        required_changes:
+          - "Remove artifact_actions construction and generated_artifact retention_for_class scheduling from cleanup_old_flow_runtime_data()."
+          - "Delete the fenced _cleanup_old_generated_flow_artifacts() helper if no longer referenced, removing the committed T124 task-id comment."
+          - "Keep FlowRuntimeCleanupCounts keys generated_artifact_rows/generated_artifact_files/reconciled_artifact_references stable and zero; do not edit data_retention_worker result shape in this slice."
+          - "Keep FlowRetentionPolicy generated_artifact fields and artifact_content_purged parsing/tombstone compatibility untouched."
+          - "Add/update focused integration or architecture guard coverage proving generated_artifact policy does not trigger content nulling or scheduled cleanup work before lifecycle ownership exists."
+        stop_if:
+          - "Watchdog reports a halt-worthy blocker before Worker implementation."
+          - "The diff requires migrations, Files schema/service changes, source-input/default-90 behavior, public API/OpenAPI/generated-client changes, or frontend changes."
+          - "The diff changes data_retention_worker logging/result shape."
+          - "The diff introduces tombstone vocabulary, lifecycle schema, completion markers, copy/promote semantics, or generic file cleanup."
+          - "Tests would need to assert broad internals instead of the narrow architecture invariant and observable zero-count/content-preservation behavior."
+        validation_commands:
+          - "cd backend && uv run ruff format src/intric/data_retention/infrastructure/data_retention_service.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/flows/test_flow_architecture_guards.py"
+          - "cd backend && uv run ruff check src/intric/data_retention/infrastructure/data_retention_service.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/flows/test_flow_architecture_guards.py"
+          - "cd backend && uv run ruff format --check src/intric/data_retention/infrastructure/data_retention_service.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/flows/test_flow_architecture_guards.py"
+          - "cd backend && uv run pytest tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/flows/test_flow_architecture_guards.py -q"
+          - "cd backend && uv run pytest tests/unittests/data_retention/test_data_retention_worker.py -q"
+          - "cd backend && uv run pyright src/intric/data_retention/infrastructure/data_retention_service.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/data_retention/test_data_retention_worker.py"
+          - "rg -n \"retention_for_class\\(\\s*['\\\"]generated_artifact|_cleanup_old_generated_flow_artifacts|Safety fence for T124|sa\\.update\\(Files\\)|update\\(Files\\).*values\\(|\\.values\\([^\\n]*(blob|text|transcription)\\s*=\\s*None\" backend/src/intric/data_retention backend/src/intric/flows"
+          - "git diff --check"
+      non_flow_scope:
+        - file: "backend/src/intric/data_retention/infrastructure/data_retention_service.py"
+          canonical_owner_role: "Flow runtime retention executor living in the shared data-retention package."
+          why_flow_requires_this_change: "It still schedules generated-artifact retention work even though T125 made the generated-artifact cleanup leaf a no-op because no run-private lifecycle owner exists."
+          deliberately_not_changed: "Generic question/app/session retention, audit outbox cleanup, data_retention_worker result shape, assistant/app/question file lifecycle, source-input/default-90 behavior."
+        - file: "backend/tests/integration/test_flow_runtime_retention_cleanup.py"
+          canonical_owner_role: "Integration coverage for DataRetentionService Flow runtime cleanup behavior."
+          why_flow_requires_this_change: "It already owns observable Flow retention behavior and generated artifact content preservation."
+          deliberately_not_changed: "Non-Flow retention behavior and generic worker result-shape tests."
+      consolidation_effect:
+        reused_existing_owner: "DataRetentionService remains the Flow runtime retention executor; existing retention integration tests and architecture guards remain the test owners."
+        logic_moved_from: "None in the Judge."
+        logic_deleted: "Approved deletion of the generated-artifact scheduling/no-op helper path in T128."
+        duplicate_path_removed: "Approved removal of the retention-side no-op generated-artifact path that pretends to own content lifetime."
+        new_code_added: "No source code in T127; T128 may add only focused tests/guards."
+        why_existing_owners_were_insufficient: "Existing owners are sufficient for this immediate slice: retention can stop scheduling generated-artifact work until a lifecycle owner exists."
+        guard_test_preventing_duplicate_logic_from_returning: "T128 must guard against generated_artifact scheduling/direct Files content nulling returning under DataRetentionService."
+        net_flow_logic_surface_area: "reduced after T128"
+        if_increased_why: "No increase approved."
+      commands:
+        - cmd: "ruby -rjson -e '<read watchdog>' /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1; status=ok; blockers empty."
+        - cmd: "nl/rg reads for DataRetentionService generated_artifact scheduling, retention integration tests, worker result-shape tests, and architecture guards"
+          status: pass
+          output: "Confirmed the smallest source slice is DataRetentionService plus existing Flow retention test/guard owners."
+      next_task: T128
+
+  - id: T128
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Stop scheduling generated-artifact retention actions while no run-private Flow file lifecycle owner exists, preserving content and stable cleanup result keys."
+    inputs:
+      - "T126 receipt and artifact."
+      - "T127 receipt."
+      - "backend/src/intric/data_retention/infrastructure/data_retention_service.py"
+      - "backend/tests/integration/test_flow_runtime_retention_cleanup.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+    allowed_files:
+      - "backend/src/intric/data_retention/infrastructure/data_retention_service.py"
+      - "backend/tests/integration/test_flow_runtime_retention_cleanup.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Check watchdog before implementation and before commit."
+      - "Run Claude plan gate before implementation because this touches Flow runtime retention behavior; Antigravity is optional unless Claude or local evidence finds a data-integrity dispute."
+      - "No migrations, Files schema/service changes, source-input/default-90 retention, public API/OpenAPI/generated-client changes, frontend, data_retention_worker result-shape changes, tombstone vocabulary changes, completion markers, lifecycle schema, copy/promote implementation, generic file cleanup, or Flow AI Builder."
+      - "Preserve generated_artifact_rows/generated_artifact_files/reconciled_artifact_references keys as stable zero outputs."
+      - "Delete the T124 task-id source comment by deleting or rewriting the fenced no-op helper; source comments must explain architecture, not board IDs."
+      - "Do not create new abstractions, generic helpers, managers, processors, lifecycle tables, or pass-through services."
+      - "The generated-artifact scheduling guard must be AST-based, scan _data_retention_python_files(), detect retention_for_class(... generated_artifact ...) and _cleanup_old_generated_flow_artifacts definitions, and include a positive self-test."
+      - "New assertion/failure messages must use architecture vocabulary only; no T-IDs, phase IDs, plan-section markers, Claude, or Antigravity in committed test/source text."
+    expected_output:
+      - "Small DataRetentionService diff removing generated-artifact action scheduling/no-op helper while keeping debug retention behavior unchanged."
+      - "Focused tests/guards proving generated_artifact policy no longer schedules cleanup work and direct Files content nulling cannot return."
+      - "Receipt with non-Flow scope table, commands, reviewer verdict, consolidation effect, and next task activation."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "Implementation requires touching files outside allowed_files."
+      - "Implementation requires schema/API/frontend/generated-client changes or data_retention_worker result-shape changes."
+      - "Implementation would weaken the T125 content-preservation tests or delete compatibility parsing for existing artifact_content_purged tombstones."
+      - "Claude plan gate finds a blocker that cannot be resolved within this allowed_files scope."
+      - "The architecture guard would have to be a raw substring/rg check instead of an AST scanner with a positive self-test."
+    receipt:
+      result: done
+      completed_at: "2026-05-27T18:04:00+02:00"
+      summary: "Removed generated-artifact retention scheduling from DataRetentionService while no run-private Flow file lifecycle owner exists. The cleanup path now only schedules debug-evidence retention; generated_artifact_rows/generated_artifact_files/reconciled_artifact_references remain stable zero keys. Added an AST architecture guard over data_retention code so generated-artifact scheduling and the deleted helper cannot return before lifecycle ownership exists."
+      source_changes:
+        - "backend/src/intric/data_retention/infrastructure/data_retention_service.py: removed artifact_actions construction, generated_artifact retention_for_class scheduling, the no-op cleanup branch, and the _cleanup_old_generated_flow_artifacts helper."
+        - "backend/tests/unittests/flows/test_flow_architecture_guards.py: added an AST guard and positive self-test for generated-artifact retention scheduling; reworded the Files content-nulling guard message to remove internal task vocabulary."
+        - "backend/tests/integration/test_flow_runtime_retention_cleanup.py: existing content-preservation and zero-count integration tests remained unchanged and still pass."
+      deliberately_not_changed:
+        - "No migrations, lifecycle tables, completion markers, copy/promote behavior, source-input/default-90 retention, public API/OpenAPI/generated-client/frontend changes, Flow AI Builder, or generic Files cleanup."
+        - "No data_retention_worker.py result/logging shape changes; worker artifact counters remain stable contract debt until a run-private lifecycle owner lands."
+        - "No FlowRetentionPolicy generated_artifact field or artifact_content_purged tombstone compatibility deletion."
+      reviewer_results:
+        claude:
+          plan_artifact: ".codex/artifacts/claude-peer-loop-t128-generated-artifact-scan-fence-20260527T175121Z.md"
+          first_verdict: "changes_required"
+          first_min_score: 7
+          revised_plan_artifact: ".codex/artifacts/claude-peer-loop-t128-generated-artifact-scan-fence-revised-plan-20260527T175348Z.md"
+          revised_plan_green_light: true
+          revised_plan_min_score: 8
+          implementation_artifact: ".codex/artifacts/claude-peer-loop-t128-generated-artifact-scan-fence-implementation-20260527T175945Z.md"
+          implementation_green_light: true
+          implementation_min_score: 8
+          valid_concerns_addressed:
+            - "Made the generated-artifact scheduling guard AST-based and package-scoped through _data_retention_python_files()."
+            - "Added a positive scanner self-test for positional and data_class keyword forms plus the deleted helper definition."
+            - "Kept failure messages in architectural vocabulary and removed board IDs from the existing content-nulling guard message."
+            - "Verified _cleanup_old_generated_flow_artifacts has no source references outside the guard self-test."
+        antigravity:
+          status: "not_run"
+          reason: "T128 is a narrow non-schema Option D Worker, Claude's concrete concerns were resolved, and there was no remaining data-integrity disagreement after the T126/T127 Antigravity synthesis."
+      commands:
+        - cmd: "ruby -rjson -e '<read watchdog>' /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1; status=ok; blockers empty."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t128-generated-artifact-scan-fence --phase plan --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: changes_required
+          output: "GREEN_LIGHT no; MIN_SCORE 7; plan tightened for AST guard, positive self-test, failure-message discipline, and reference validation."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t128-generated-artifact-scan-fence --phase verification --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8."
+        - cmd: "cd backend && uv run ruff format src/intric/data_retention/infrastructure/data_retention_service.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/flows/test_flow_architecture_guards.py"
+          status: pass
+          output: "1 file reformatted, 2 files left unchanged."
+        - cmd: "cd backend && uv run ruff check src/intric/data_retention/infrastructure/data_retention_service.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/flows/test_flow_architecture_guards.py"
+          status: pass
+          output: "All checks passed."
+        - cmd: "cd backend && uv run ruff format --check src/intric/data_retention/infrastructure/data_retention_service.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/flows/test_flow_architecture_guards.py"
+          status: pass
+          output: "3 files already formatted."
+        - cmd: "rg -n \"_cleanup_old_generated_flow_artifacts\" backend/ -g '!**/test_flow_architecture_guards.py'"
+          status: pass
+          output: "No matches."
+        - cmd: "rg -n \"retention_for_class\\(\\s*['\\\"]generated_artifact|retention_for_class\\([^\\n]*data_class\\s*=\\s*['\\\"]generated_artifact|Safety fence for T124|sa\\.update\\(Files\\)|update\\(Files\\).*values\\(|\\.values\\([^\\n]*(blob|text|transcription)\\s*=\\s*None\" backend/src/intric/data_retention backend/src/intric/flows"
+          status: pass
+          output: "No matches."
+        - cmd: "cd backend && uv run pytest tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/flows/test_flow_architecture_guards.py -q"
+          status: pass
+          output: "23 passed, 16 existing warnings."
+        - cmd: "cd backend && uv run pytest tests/unittests/data_retention/test_data_retention_worker.py -q"
+          status: pass
+          output: "1 passed, 9 existing warnings."
+        - cmd: "cd backend && uv run pyright src/intric/data_retention/infrastructure/data_retention_service.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/data_retention/test_data_retention_worker.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations."
+        - cmd: "git diff --check"
+          status: pass
+          output: "No whitespace errors."
+        - cmd: "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/goals/flows-clean-architecture-2026-05-25/state.yaml\")'"
+          status: pass
+          output: "state.yaml parsed after T128 receipt and T129 activation."
+        - cmd: "cd backend && uv run pytest tests/integration/test_flow_runtime_retention_cleanup.py tests/unittests/flows/test_flow_architecture_guards.py tests/unittests/data_retention/test_data_retention_worker.py -q"
+          status: pass
+          output: "24 passed, 16 existing warnings."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t128-generated-artifact-scan-fence --phase commit-gate --iteration 3 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8."
+      non_flow_scope:
+        - file: "backend/src/intric/data_retention/infrastructure/data_retention_service.py"
+          canonical_owner_role: "Flow runtime retention executor living in the shared data-retention package."
+          why_flow_requires_this_change: "This owner was still scheduling generated-artifact cleanup work even though no Flow file lifecycle owner exists and the cleanup leaf was fenced to zero."
+          deliberately_not_changed: "Generic question/app/session retention, audit outbox cleanup, worker result shape, assistant/app/question file lifecycle, and source-input/default-90 retention."
+      consolidation_effect:
+        reused_existing_owner: "DataRetentionService remains the Flow runtime retention executor; existing Flow retention integration tests and architecture guard file remain the test owners."
+        logic_moved_from: "None."
+        logic_deleted: "Deleted generated_artifact action scheduling and the no-op _cleanup_old_generated_flow_artifacts helper."
+        duplicate_path_removed: "Removed the retention-side generated-artifact path that implied DataRetentionService could own Flow file content lifetime before a lifecycle owner exists."
+        new_code_added: "Only AST guard helpers and self-tests in the existing Flow architecture guard file."
+        why_existing_owners_were_insufficient: "No new owner was needed for this slice; the correct action was to stop scheduling lifecycle work until an owner exists."
+        guard_test_preventing_duplicate_logic_from_returning: "test_data_retention_does_not_schedule_generated_artifact_cleanup and test_generated_artifact_retention_guard_reports_forbidden_scheduler."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "Not increased; source cleanup behavior shrank while guard coverage increased."
+      followups:
+        - "When a run-private Flow file lifecycle owner lands, revisit permanently-zero generated_artifact_rows/generated_artifact_files/reconciled_artifact_references worker keys."
+        - "When a lifecycle owner lands, derive result-file availability from lifecycle state instead of direct Files.blob/text peeking."
+        - "Dead _flow_runtime_policy_source branches for source_audio/transcript_text/generated_artifact are deferred until retention data classes are narrowed by a future Judge."
+      next_task: T129
+
+  - id: T129
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: medium
+    objective: "Read-only frontend Judge: narrow the next safe T016 Flow frontend state ownership slice after the owner decisions."
+    inputs:
+      - "T009 owner decisions for form-schema conflict and browser upload/audio owner."
+      - "T016 receipt and remaining blockers."
+      - "frontend Flow state owners: FlowEditor, FlowFormSchemaEditor, flowFormSchema, FlowRunDialog, FlowRunFileInputState, flowRunWizard, RecordingSession, flowRunRecordingSession."
+      - "docs/goals/flows-clean-architecture-2026-05-25/notes/roadmap-and-taskfiles.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only Judge only: no frontend/source/test/generated-client edits."
+      - "Check watchdog before task transition and before any later Worker implementation."
+      - "Do not broaden into Flow AI Builder, non-Flow frontend hygiene, generic upload managers, or UI redesign outside the active Flow state ownership task."
+      - "Use the owner decision: form schema conflict warns and asks keep local edits or reload server version."
+      - "Use the owner decision: FlowRunDialog / Flow-run submission owner handles upload and persistence; RecordingSession remains lifecycle-only."
+      - "If a later Worker changes frontend UI/design, use the impeccable skill before implementation."
+      - "If a later Worker changes generated API types or public Flow API contract, require the appropriate API/generated-client validation and reviewer gate."
+    expected_output:
+      - "Choose the smallest safe frontend Worker or block with source evidence."
+      - "If approving a Worker, provide exact allowed_files, non-Flow scope table, generated-type/OpenAPI considerations, behavior tests, browser/UI validation if needed, stop_if conditions, and consolidation effect."
+      - "Prefer reuse/move/merge/delete over new controllers; extract a narrow Flow-run submission controller only if source evidence proves FlowRunDialog is too large or unclear."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "No source evidence proves a current duplicate/scattered Flow frontend ownership problem."
+      - "The proposed Worker requires backend/API/schema changes not already reviewed."
+      - "The proposed Worker would create a generic upload manager, generic state manager, or duplicate generated contract shape."
+      - "The proposed Worker broadens into non-Flow frontend hygiene or Flow AI Builder."
     receipt: null
 
 checks:
