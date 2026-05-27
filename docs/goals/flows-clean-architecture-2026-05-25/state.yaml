@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T120
+active_task: T123
 
 tasks:
   - id: T001
@@ -12765,7 +12765,7 @@ tasks:
   - id: T120
     type: scout
     assignee: Scout
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Read-only retention lifecycle preflight after the owner provided retention decisions; identify the smallest safe Worker/Judge path for T010 without implementing retention."
     inputs:
@@ -12796,6 +12796,250 @@ tasks:
       - "Retention requires product decisions beyond the owner decisions recorded in this task."
       - "Current source shows retention cannot be scoped without broad evidence/export/API redesign."
       - "A correct preflight requires mutating source, tests, migrations, or production data."
+    receipt:
+      result: done
+      completed_at: "2026-05-27T16:09:00+02:00"
+      summary: "Read-only retention preflight found an existing Flow runtime retention owner: DataRetentionService.cleanup_old_flow_runtime_data already handles run debug evidence and generated artifact content by preserving rows, nulling file content, and writing typed tombstones. The structural gap is runtime uploaded input files: FlowRetentionPolicy exposes source_audio/transcript_text retention fields, but the cleanup path never schedules them and FlowRetentionTombstone cannot represent them. The next task must be a Judge that picks the source-input tombstone landing site before any Worker implements input-file retention."
+      source_evidence:
+        - "backend/src/intric/data_retention/infrastructure/data_retention_service.py:95"
+        - "backend/src/intric/data_retention/infrastructure/data_retention_service.py:121"
+        - "backend/src/intric/data_retention/infrastructure/data_retention_service.py:143"
+        - "backend/src/intric/data_retention/infrastructure/data_retention_service.py:620"
+        - "backend/src/intric/data_retention/infrastructure/data_retention_service.py:704"
+        - "backend/src/intric/data_retention/infrastructure/data_retention_service.py:928"
+        - "backend/src/intric/flows/flow_retention_policy.py:6"
+        - "backend/src/intric/flows/flow_retention_tombstone.py:17"
+        - "backend/src/intric/flows/flow_retention_tombstone.py:69"
+        - "backend/src/intric/database/tables/flow_tables.py:1363"
+        - "backend/src/intric/database/tables/flow_tables.py:1434"
+        - "backend/src/intric/flows/application/flow_run_evidence_service.py:60"
+        - "backend/src/intric/flows/application/flow_run_evidence_service.py:108"
+        - "backend/tests/integration/test_flow_runtime_retention_cleanup.py:147"
+        - "backend/tests/integration/test_flow_runtime_retention_cleanup.py:162"
+      db_preflight:
+        - "Live Postgres reachable through eneo-41ae93-db-1; app container was not running during this Scout, so Alembic current/head could not be checked inside it."
+        - "Live DB is behind the T119 service-principal migration: files still has owner_api_key_id and flow_runs still has principal_api_key_id."
+        - "files=170; blob rows=136; text rows=34; transcription rows=54; all files have at least one content field."
+        - "Flow file refs: 61 input refs and 46 result refs; all referenced files currently have content; none are older than 90 days."
+        - "Retention settings are unset in live data: 0 tenants with flow_settings.retention_policy, 0 flows with data_retention_days, 0 spaces with data_retention_days."
+        - "Terminal flow runs: 81 terminal, all older than 1 day, none older than 90 days."
+        - "No retention tombstones exist yet in flow_step_results or flow_step_attempts."
+        - "Existing run/file indexes cover current row-id/file-id cleanup joins; local EXPLAINs were sub-ms and did not justify a new index now. Repeated terminal-run scans remain a future scalability trigger."
+      review:
+        claude:
+          first_artifact: ".codex/artifacts/claude-peer-loop-t120-retention-lifecycle-scout-20260527T160422Z.md"
+          first_verdict: changes_required
+          revised_artifact: ".codex/artifacts/claude-peer-loop-t120-retention-lifecycle-scout-revised-judge-20260527T160753Z.md"
+          revised_verdict: green
+          green_light: true
+          min_score: 8
+          valid_concerns_addressed:
+            - "T121 must choose the source-input tombstone landing site explicitly."
+            - "Stale retention integration fixture repair is T119 test debt and must be split from retention behavior."
+            - "The 90-day owner decision applies to runtime uploaded/generated blob content, not automatically to run_debug_evidence."
+            - "API tombstone surface, manual admin purge, and scan-marker/index follow-ups must be assigned rather than hidden inside the first Worker."
+      commands:
+        - cmd: "docker ps --format '{{.Names}}\\t{{.Status}}'"
+          status: pass
+          output: "Only eneo-41ae93-db-1 was running during this Scout."
+        - cmd: "docker exec eneo-41ae93-db-1 pg_isready -U postgres -d postgres"
+          status: pass
+          output: "accepting connections"
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -P pager=off < retention catalog/count/index/constraint SQL"
+          status: pass
+          output: "Captured files/Flow runtime counts, tombstone counts, indexes, and FK/delete rules."
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -P pager=off < retention EXPLAIN SQL"
+          status: pass
+          output: "Current terminal-run scan, debug cleanup scans, generated-artifact target scan, and possible input-file purge target scan were sub-ms on local data."
+        - cmd: "docker exec eneo-41ae93-eneo-1 bash -lc 'cd /workspace/backend && alembic current'"
+          status: fail_environment
+          output: "App container was not running."
+        - cmd: "cd backend && uv run pytest ../backend/tests/integration/test_flow_runtime_retention_cleanup.py -q"
+          status: fail
+          output: "4 failed. Fixture inserts Flows(published_version=1) before FlowVersions, violating fk_flows_published_version; fixture also still references removed exact-key/user columns."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t120-retention-scout --phase plan --iteration 1 --timeout-seconds 1200 ..."
+          status: pass_with_concerns
+          output: "GREEN_LIGHT no; MIN_SCORE 6; blockers accepted and used to revise T121."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t120-retention-scout --phase verification --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8."
+      conclusions:
+        - "Do not create a parallel retention module. Deepen the existing DataRetentionService, FlowRetentionPolicy, and FlowRetentionTombstone owners."
+        - "Do not activate a retention Worker until T121 chooses the tombstone landing site and API surface for source input purges."
+        - "Do not apply the 90-day blob default to debug evidence without a separate owner decision."
+        - "Treat manual admin purge and retention scan completion/index work as separate follow-ups unless T121 proves they block the first runtime-file retention slice."
+      next_task: T121
+
+  - id: T121
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the smallest safe retention implementation path after T120 by deciding the source-input tombstone landing site and separating stale test-fixture repair from retention behavior."
+    inputs:
+      - "T120 receipt."
+      - ".codex/artifacts/t120-retention-scout-brief.md"
+      - ".codex/artifacts/t120-retention-scout-revised.md"
+      - ".codex/artifacts/claude-peer-loop-t120-retention-lifecycle-scout-revised-judge-20260527T160753Z.md"
+      - "Owner retention decisions from 2026-05-27."
+      - "backend/src/intric/data_retention/infrastructure/data_retention_service.py"
+      - "backend/src/intric/flows/flow_retention_policy.py"
+      - "backend/src/intric/flows/flow_retention_tombstone.py"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/src/intric/database/tables/files_table.py"
+      - "backend/tests/integration/test_flow_runtime_retention_cleanup.py"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only except state.yaml receipt/task transition."
+      - "Before any task transition or later Worker implementation, check the watchdog blocker file."
+      - "Do not edit source, tests, migrations, frontend, generated-client, or docs/flows/architecture.md."
+      - "Do not implement retention in T121."
+      - "Do not add a new retention owner unless the Judge explicitly approves a data table or column as the tombstone storage owner."
+      - "Do not fold the 90-day runtime uploaded/generated blob default into run_debug_evidence unless the owner explicitly decides that."
+      - "Do not bundle manual admin purge, service-principal ownership, frontend conflict UI, webhook outbox redesign, Flow AI Builder, or raw evidence export policy changes."
+      - "If the chosen path requires a migration/schema change, require full Claude plan gate and Antigravity migration synthesis before Worker implementation."
+    expected_output:
+      - "Decision on whether the first Worker is T122 fixture preflight or T123 retention behavior, with a clear verdict rather than an option matrix."
+      - "Decision on source-input tombstone landing site, evaluating: FlowRunStepInputFiles payload column, FlowRuns retention_state_json, dedicated flow_run_retention_states table, Files-level metadata, or no persisted typed tombstone."
+      - "Joint decision on API tombstone surface because the landing site and API read model are coupled."
+      - "Concrete seams the behavior Worker must touch: RetentionDataClass, FlowRetentionDataClass, FlowRetentionTombstoneCounts, FlowRetentionTombstone.validate_count_shape, _flow_runtime_policy_source, cleanup_old_flow_runtime_data action dispatch, source-input file cleanup batching, and cleanup counts."
+      - "Exact allowed_files for the first Worker, verification commands, rollback/downgrade notes if migration is involved, stop_if conditions, and consolidation effect."
+      - "Required red tests for source-input purge if behavior Worker is chosen: content fields clear, typed tombstone appears at chosen site, API/evidence surface exposes the tombstone or 410 by design, idempotent second cleanup, and already-null content does not emit duplicate tombstones."
+      - "Follow-up tasks for manual admin purge, default 90 public/config semantics, and scan/index/completion-marker trigger if not included."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "The source-input tombstone landing site cannot be chosen without a new product decision."
+      - "The first Worker cannot be scoped to exact allowed_files."
+      - "A correct behavior Worker would require broad evidence export/API redesign, frontend changes, service-principal changes, webhook outbox redesign, or Flow AI Builder changes."
+      - "A schema/migration Worker is needed but has not received Claude plan gate and Antigravity migration synthesis."
+    receipt:
+      result: done
+      completed_at: "2026-05-27T16:16:00+02:00"
+      summary: "Chose a two-step path. First, run a tiny Worker T122 to repair stale retention integration fixtures against the current branch schema and published-version FK ordering so retention tests become trustworthy again. Second, run T123 as a schema/review-gated Judge for the actual runtime uploaded/generated blob retention design. T121 chooses a dedicated flow_run_retention_states table as the preferred long-term source-input tombstone landing site because retention facts are per-run lifecycle facts, it gives the evidence/API read model one typed source, and it can later serve as the retention completion marker without leaking Flow runtime policy into generic Files."
+      decisions:
+        first_worker: T122
+        source_input_tombstone_landing_site: "dedicated flow_run_retention_states table"
+        api_tombstone_surface: "Project retention-state rows through Flow evidence/export APIs; keep direct content download failures as 410 where a download endpoint exists."
+        default_90_scope: "runtime uploaded/generated blob content only; do not apply automatically to run_debug_evidence."
+        manual_admin_purge: "defer to a later Worker after runtime retention state owner exists."
+        scan_marker_index: "defer; dedicated retention-state rows can become the completion marker, and local EXPLAIN/data do not justify an index-first Worker."
+      rationale:
+        - "T122 comes first because the current retention integration suite is red from fixture drift, not from retention behavior evidence."
+        - "FlowRunStepInputFiles has no payload column today; adding ad hoc JSON there would make a join table own lifecycle facts."
+        - "Files-level tombstones would leak Flow runtime retention semantics into the shared Files model."
+        - "No persisted typed tombstone conflicts with the owner decision that API tombstones are required."
+        - "Run-level JSON would centralize state but is harder to query, constrain, and use as an API read model than a dedicated typed table."
+      consolidation_effect:
+        reused_existing_owner: "DataRetentionService, FlowRetentionPolicy, FlowRetentionTombstone, Flow evidence/export owner, and the existing integration test file."
+        logic_moved_from: "No code moved in T121; the future tombstone fact moves away from scattered payload carriers toward a dedicated run-retention state owner."
+        logic_deleted: "None in T121."
+        duplicate_path_removed: "None in T121."
+        new_code_added: "Only board state."
+        why_existing_owners_were_insufficient: "Existing cleanup/policy/tombstone owners exist, but there is no persisted source-input tombstone carrier. The Judge selects a data owner for that missing fact before implementation."
+        guard_test_preventing_duplicate_logic_from_returning: "T122 must restore retention integration tests; T123 must add source-input purge/tombstone red tests and evidence/API projection tests."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "No runtime code added by the Judge."
+      next_tasks:
+        - "T122 fixture preflight Worker."
+        - "T123 retention-state schema/design Judge with Claude plan gate and Antigravity migration synthesis before any migration Worker."
+
+  - id: T122
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Repair stale Flow runtime retention integration fixtures so existing retention cleanup tests run against the current branch schema and published-version FK ordering without changing retention behavior."
+    inputs:
+      - "T120 receipt."
+      - "T121 receipt."
+      - "backend/tests/integration/test_flow_runtime_retention_cleanup.py"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/src/intric/database/tables/files_table.py"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "backend/tests/integration/test_flow_runtime_retention_cleanup.py"
+    constraints:
+      - "Before implementation and before commit, check the watchdog blocker file."
+      - "Do not edit source, migrations, frontend, generated-client, or docs/flows/architecture.md."
+      - "Do not change retention behavior or assertions except where fixture construction must match current schema."
+      - "Do not implement source-input retention, default 90, manual purge, API tombstones, or schema changes."
+      - "If the fixture repair requires behavior/source changes, stop and return to Judge."
+      - "Preserve unrelated dirty/untracked files."
+    expected_output:
+      - "Fixture inserts FlowVersions/Flows in an order that satisfies fk_flows_published_version."
+      - "Fixture no longer passes removed exact-key/user columns and uses current FlowRuns/Files owner fields."
+      - "Existing retention assertions still prove generated artifact content purge, debug evidence purge, idempotency, and audit-outbox cleanup."
+      - "Commands recorded with pass/fail."
+      - "Activate T123 Judge if T122 passes."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "Any required edit falls outside allowed_files."
+      - "Tests fail for a real retention behavior regression rather than fixture drift."
+      - "Current schema/source evidence contradicts T121's premise."
+    receipt:
+      result: done
+      completed_at: "2026-05-27T16:23:00+02:00"
+      summary: "Repaired stale Flow runtime retention integration fixtures without changing retention behavior. The fixture now creates Flows with no published_version, inserts the matching FlowVersions row, then marks the Flow published to satisfy fk_flows_published_version. It also stopped passing removed exact-key/user columns to Files and FlowRuns, using the current branch owner fields instead."
+      files_changed:
+        - "backend/tests/integration/test_flow_runtime_retention_cleanup.py"
+      implementation:
+        - "Changed the retention fixture to set published_version after the FlowVersions row exists."
+        - "Removed obsolete Files.owner_api_key_id / Files.user_id fixture kwargs."
+        - "Removed obsolete FlowRuns.principal_api_key_id / FlowRuns.user_id fixture kwargs."
+      behavior:
+        - "No retention assertions changed."
+        - "Existing tests still cover debug evidence purge, generated artifact content purge, idempotent cleanup, and delivered audit-outbox cleanup."
+      commands:
+        - cmd: "cd backend && uv run pytest ../backend/tests/integration/test_flow_runtime_retention_cleanup.py -q"
+          status: pass
+          output: "4 passed, 16 warnings."
+        - cmd: "cd backend && uv run ruff check tests/integration/test_flow_runtime_retention_cleanup.py"
+          status: pass
+          output: "All checks passed."
+        - cmd: "cd backend && uv run ruff format --check tests/integration/test_flow_runtime_retention_cleanup.py"
+          status: pass
+          output: "1 file already formatted."
+        - cmd: "cd backend && uv run pyright tests/integration/test_flow_runtime_retention_cleanup.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations."
+      consolidation_effect:
+        reused_existing_owner: "Existing integration fixture and current Flow/Files SQLAlchemy table ownership fields."
+        logic_moved_from: "None."
+        logic_deleted: "Removed stale exact-key/user fixture kwargs that no longer exist in current source tables."
+        duplicate_path_removed: "Test fixture no longer preserves the old exact api_keys_v2 ownership path."
+        new_code_added: "A fixture ordering flush and assignment to satisfy the published-version FK."
+        why_existing_owners_were_insufficient: "No new owners were needed; the fixture only needed to use current owners correctly."
+        guard_test_preventing_duplicate_logic_from_returning: "The targeted integration suite now exercises the current schema and fails if stale constructor fields or FK ordering return."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "Not applicable."
+      next_task: T123
+
+  - id: T123
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Plan the schema/review-gated runtime file retention Worker around a dedicated flow_run_retention_states owner, source-input purge, API tombstone projection, and default 90-day runtime uploaded/generated blob policy."
+    inputs:
+      - "T120 receipt."
+      - "T121 receipt."
+      - "T122 receipt."
+      - "Owner retention decisions from 2026-05-27."
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only except state.yaml receipt/task transition."
+      - "Require Claude plan gate and Antigravity migration synthesis before any schema/migration Worker."
+      - "Do not implement source edits in T123."
+      - "Do not bundle manual admin purge unless proven necessary for the first runtime file retention slice."
+    expected_output:
+      - "Exact migration/Worker slice, allowed_files, validation commands, rollback/downgrade notes, and stop_if."
+      - "Decision on flow_run_retention_states table shape, indexes, constraints, typed Pydantic model, and evidence/API projection owner."
+      - "Red tests and DB preflight for source-input and generated-artifact content purge, idempotency, no duplicate tombstones, and default 90 behavior."
+    stop_if:
+      - "T122 has not restored the retention integration test baseline."
+      - "Claude or Antigravity finds a migration/data-model blocker that cannot be resolved inside a small Worker."
     receipt: null
 
 checks:

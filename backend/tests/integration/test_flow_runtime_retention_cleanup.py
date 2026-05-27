@@ -112,7 +112,7 @@ async def _create_flow_runtime_fixture(
         space_id=space.id,
         created_by_user_id=user.id,
         owner_user_id=user.id,
-        published_version=1,
+        published_version=None,
         metadata_json={},
         data_retention_days=flow_retention_days,
         draft_revision=0,
@@ -133,6 +133,8 @@ async def _create_flow_runtime_fixture(
             updated_at=created_at,
         )
     )
+    await async_session.flush()
+    flow.published_version = 1
 
     generated_file = Files(
         name="generated.docx",
@@ -145,8 +147,6 @@ async def _create_flow_runtime_fixture(
         transcription=None if generated_file_has_content else "stale-transcript",
         owner_type="user",
         owner_user_id=user.id,
-        owner_api_key_id=None,
-        user_id=user.id,
         tenant_id=tenant.id,
         created_at=created_at,
         updated_at=created_at,
@@ -159,8 +159,6 @@ async def _create_flow_runtime_fixture(
         flow_version=1,
         principal_type="user",
         principal_user_id=user.id,
-        principal_api_key_id=None,
-        user_id=user.id,
         tenant_id=tenant.id,
         trace_id=uuid4(),
         idempotency_key=None,
