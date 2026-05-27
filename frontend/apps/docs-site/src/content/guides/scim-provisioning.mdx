@@ -164,32 +164,6 @@ Azure Entra ID derives the `email` claim from the user's `mail` attribute. If `m
 { "detail": "Email claim not found in ID token" }
 ```
 
-This is a common gotcha because the `mail` attribute is often empty:
-
-- **CSV-imported users** typically have only `userPrincipalName` set — the bulk-import template rarely populates `mail`
-- **Guest users (B2B invitees)** have `mail` empty in the resource tenant until set manually
-- **Users created interactively in the Azure portal** usually have `mail` populated correctly
-
-### Checklist before the first sign-in
-
-1. The user has `mail` populated in Azure (**Microsoft Entra ID → Users → [user] → Contact info → Mail**)
-2. The App Registration has `email` configured as an **optional claim** for ID tokens (**App registrations → [app] → Token configuration → Add optional claim → ID → email**)
-3. The Microsoft Graph **email** delegated permission is granted on the App Registration
-
-### Bulk-fix missing `mail` attributes
-
-To populate `mail = userPrincipalName` for every user in the tenant currently missing `mail`:
-
-```powershell
-Connect-MgGraph -Scopes "User.ReadWrite.All"
-
-Get-MgUser -All -Filter "Mail eq null" | ForEach-Object {
-    Update-MgUser -UserId $_.Id -Mail $_.UserPrincipalName
-}
-```
-
-Test on a single user before running against the whole tenant. After the bulk update, trigger a SCIM resync from Entra (**Enterprise applications → [app] → Provisioning → Provision on demand**) so Eneo's `users.email` column reflects the updated values.
-
 ---
 
 ## How Eneo handles existing users
@@ -263,12 +237,43 @@ Groups created via SCIM are stored in the same `user_groups` table as native Ene
 Eneo supports the SCIM `/Bulk` endpoint for batched changes, which Entra and other IdPs use to reduce request volume.
 
 - Up to **100 operations** per request
-- Up to **1 MB** payload size
+- Up to **1 MiB** total payload size
 - Each operation runs in its own savepoint, so a failure in one operation does not corrupt earlier successes
 - `failOnErrors` aborts the batch after a configurable number of errors
 - `bulkId` references let you create a user and reference them as a group member in the same request
 
 These behaviors are advertised in `ServiceProviderConfig` and follow RFC 7644 §3.7.
+
+### Why these limits?
+
+The 100-operation and 1 MiB limits are aligned with the conservative side of common SCIM server defaults (Azure Entra ID, Okta, Ping, Microsoft Identity Manager). They balance two competing concerns:
+
+- **Large enough to be useful**: matches the chunk sizes that Entra and Okta use by default, so well-behaved IdPs rarely need to split a sync into more requests than necessary.
+- **Small enough to bound resource use**: a single bulk fits comfortably within one database transaction and one worker without risking long-running locks or large memory spikes.
+
+Both limits are independent — whichever is reached first triggers rejection. For example, a request with 50 operations totalling 1.5 MiB is rejected on payload size, and a request with 150 small operations is rejected on operation count.
+
+### What happens when a limit is exceeded?
+
+Per RFC 7644 §3.7.3, Eneo returns **HTTP 413 Payload Too Large** with a SCIM error response:
+
+```json
+{
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:Error"],
+  "status": "413",
+  "detail": "Bulk request has 150 operations, exceeds maxOperations (100)"
+}
+```
+
+Clients reading `ServiceProviderConfig` (which all standard IdPs do) will automatically chunk requests to stay within these limits, so you should not see 413 responses during normal operation. Receiving one usually indicates a misconfigured client or a custom integration that does not consult discovery.
+
+### How the size limit is enforced
+
+The 1 MiB payload limit is checked server-side against the request's `Content-Length` header. This catches well-behaved clients that send the header correctly — which all standard SCIM IdPs do.
+
+Clients that omit the header (for example, using chunked transfer encoding) or that report it incorrectly can bypass the application-level check. In those cases the limit is enforced by the upstream reverse proxy in front of Eneo (Traefik in the reference deployment), which applies its own body-size limit before the request reaches the application.
+
+For deployments exposing SCIM to untrusted networks, ensure the reverse proxy is configured with a payload limit at or below 1 MiB. The application-level check is best-effort and should not be relied on as the only defense against oversized payloads.
 
 ---
 

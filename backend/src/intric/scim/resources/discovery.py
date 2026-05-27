@@ -1,6 +1,11 @@
 from fastapi import APIRouter, Depends
 
 from intric.scim.auth import require_scim_auth
+from intric.scim.constants import (
+    SCIM_BULK_MAX_OPERATIONS,
+    SCIM_BULK_MAX_PAYLOAD_BYTES,
+    SCIM_FILTER_MAX_RESULTS,
+)
 from intric.scim.schemas.common import ListResponse
 
 router = APIRouter(dependencies=[Depends(require_scim_auth)], tags=["SCIM Discovery"])
@@ -11,8 +16,12 @@ async def service_provider_config() -> dict[str, object]:
     return {
         "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
         "patch": {"supported": True},
-        "bulk": {"supported": True, "maxOperations": 100, "maxPayloadSize": 1048576},
-        "filter": {"supported": True, "maxResults": 200},
+        "bulk": {
+            "supported": True,
+            "maxOperations": SCIM_BULK_MAX_OPERATIONS,
+            "maxPayloadSize": SCIM_BULK_MAX_PAYLOAD_BYTES,
+        },
+        "filter": {"supported": True, "maxResults": SCIM_FILTER_MAX_RESULTS},
         "changePassword": {"supported": False},
         "sort": {"supported": True},
         "etag": {"supported": False},

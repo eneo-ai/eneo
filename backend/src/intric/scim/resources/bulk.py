@@ -4,11 +4,15 @@ import re
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.database.database import get_session_with_transaction
 from intric.scim.auth import require_scim_auth
+from intric.scim.constants import (
+    SCIM_BULK_MAX_OPERATIONS,
+    SCIM_BULK_MAX_PAYLOAD_BYTES,
+)
 from intric.scim.deps import get_scim_group_service, get_scim_user_service
 from intric.scim.domain.errors import (
     ScimGroupConflictError,
@@ -60,11 +64,42 @@ def _scim_error_response(
 
 @router.post("/Bulk")
 async def bulk_operations(
+    request: Request,
     payload: BulkRequest,
     session: Annotated[AsyncSession, Depends(get_session_with_transaction)],
     user_service: Annotated[ScimUserService, Depends(get_scim_user_service)],
     group_service: Annotated[ScimGroupService, Depends(get_scim_group_service)],
 ) -> BulkResponse:
+    # Enforce the limits advertised in ServiceProviderConfig (RFC 7644 §3.7.3).
+    # The Content-Length check catches oversized payloads from well-behaved
+    # clients before the body is parsed further; FastAPI/Starlette has already
+    # buffered the body by the time we get here, but rejecting fast is still
+    # better than processing operations we know we'll have to abort.
+    content_length_header = request.headers.get("content-length")
+    if content_length_header is not None:
+        try:
+            content_length = int(content_length_header)
+        except ValueError:
+            content_length = 0
+        if content_length > SCIM_BULK_MAX_PAYLOAD_BYTES:
+            raise ScimHttpError(
+                413,
+                (
+                    f"Bulk payload size {content_length} exceeds "
+                    f"maxPayloadSize ({SCIM_BULK_MAX_PAYLOAD_BYTES} bytes)"
+                ),
+            )
+
+    if len(payload.Operations) > SCIM_BULK_MAX_OPERATIONS:
+        raise ScimHttpError(
+            413,
+            (
+                f"Bulk request has {len(payload.Operations)} operations, "
+                f"exceeds maxOperations ({SCIM_BULK_MAX_OPERATIONS})"
+            ),
+            "tooMany",
+        )
+
     results: list[BulkOperationResponse] = []
     bulk_id_map: dict[str, str] = {}
     error_count = 0
