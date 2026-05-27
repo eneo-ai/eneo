@@ -6,6 +6,9 @@
 
 <script lang="ts">
   import { Button, Input } from "@intric/ui";
+  import { IconSparkles } from "@intric/icons/sparkles";
+  import { ChevronRight } from "lucide-svelte";
+  import { Settings } from "$lib/components/layout";
   import { writable } from "svelte/store";
   import { invalidate } from "$app/navigation";
   import { resolve } from "$app/paths";
@@ -19,13 +22,16 @@
 
   let { role, intric }: { role: Role; intric: Intric } = $props();
 
-  // Optimistic overrides layered over the server value: a toggle sets its
-  // override immediately, then clears it once the loader refresh (success) or
-  // a failed mutation settles the switch back to the server truth.
-  let enabledOverride = $state<boolean | null>(null);
-  let visibleOverride = $state<boolean | null>(null);
-  const isEnabled = $derived(enabledOverride ?? role.is_enabled);
-  const isVisible = $derived(visibleOverride ?? role.is_visible_to_users);
+  // Optimistic switch state. Initialise from a literal (referencing `role`
+  // directly here would trip svelte's state_referenced_locally), then sync from
+  // the server value before first paint and on every loader refresh (after a
+  // successful toggle / re-assign). Mirrors the admin landing page's toggles.
+  let isEnabled = $state(false);
+  let isVisible = $state(false);
+  $effect.pre(() => {
+    isEnabled = role.is_enabled;
+    isVisible = role.is_visible_to_users;
+  });
 
   const reassignOpen = writable(false);
 
@@ -40,29 +46,29 @@
 
   const displayName = $derived(role.assistant_name ?? roleKindLabel(role.kind));
 
-  const setEnabled = createAsyncState(async (next: boolean) => {
-    enabledOverride = next;
+  // Input.Switch only fires sideEffect on a real user change; flip optimistically
+  // (the bind already did), persist, then re-sync from the loader. Revert on error.
+  async function onToggleEnabled({ current, next }: { current: boolean; next: boolean }) {
+    if (current === next) return;
     try {
       await intric.helpAssistants.admin.setEnabled({ kind: role.kind, value: next });
       await invalidate("admin:help-assistants:load");
     } catch (e) {
+      isEnabled = current;
       toastError(e);
-    } finally {
-      enabledOverride = null;
     }
-  });
+  }
 
-  const setVisible = createAsyncState(async (next: boolean) => {
-    visibleOverride = next;
+  async function onToggleVisible({ current, next }: { current: boolean; next: boolean }) {
+    if (current === next) return;
     try {
       await intric.helpAssistants.admin.setVisible({ kind: role.kind, value: next });
       await invalidate("admin:help-assistants:load");
     } catch (e) {
+      isVisible = current;
       toastError(e);
-    } finally {
-      visibleOverride = null;
     }
-  });
+  }
 
   const resetInstructions = createAsyncState(async () => {
     if (!confirm(m.admin_help_assistants_reset_instructions_confirm({ name: displayName }))) return;
@@ -85,52 +91,54 @@
   });
 </script>
 
-<div class="border-default flex flex-col gap-4 border-b py-5">
-  <div class="flex items-start justify-between gap-4">
-    <div class="flex flex-col gap-0.5">
-      <span class="text-secondary text-sm">{roleKindLabel(role.kind)}</span>
-      <a
-        class="text-lg font-medium hover:underline"
-        href={resolve(`/spaces/${role.org_space_id}/assistants/${role.assistant_id}/edit`)}
-        >{displayName}</a
+<Settings.Group title={roleKindLabel(role.kind)}>
+  <!-- The group title is the helper kind (e.g. "Promptguide"); the assigned
+       assistant leads the group as a prominent card, so no separate row label. -->
+  <div class="flex flex-col items-start gap-3 px-4">
+    <a
+      class="border-default bg-primary hover:bg-hover-dimmer flex w-full max-w-xl items-center gap-3 rounded-lg border px-4 py-3 transition-colors"
+      href={resolve(`/spaces/${role.org_space_id}/assistants/${role.assistant_id}/edit`)}
+    >
+      <span
+        class="bg-accent-dimmer text-accent-stronger flex size-9 shrink-0 items-center justify-center rounded-md"
       >
-    </div>
+        <IconSparkles class="!size-5" />
+      </span>
+      <span class="truncate font-medium">{displayName}</span>
+      <ChevronRight class="text-secondary ml-auto size-5 shrink-0" />
+    </a>
     <Button variant="outlined" onclick={() => ($reassignOpen = true)}>
       {m.admin_help_assistants_reassign_button()}
     </Button>
   </div>
 
-  <div class="flex flex-col gap-3">
-    <div class="flex items-center justify-between gap-4">
-      <span class="font-medium">{m.admin_help_assistants_toggle_enabled()}</span>
-      <Input.RadioSwitch
-        value={isEnabled}
-        sideEffect={({ next }) => setEnabled(next)}
-        labelTrue={m.enabled()}
-        labelFalse={m.disabled()}
-        disabled={setEnabled.isLoading}
-      ></Input.RadioSwitch>
-    </div>
-    <div class="flex items-center justify-between gap-4">
-      <span class="font-medium">{m.admin_help_assistants_toggle_visible()}</span>
-      <Input.RadioSwitch
-        value={isVisible}
-        sideEffect={({ next }) => setVisible(next)}
-        labelTrue={m.enabled()}
-        labelFalse={m.disabled()}
-        disabled={setVisible.isLoading}
-      ></Input.RadioSwitch>
-    </div>
-  </div>
+  <Settings.Row
+    title={m.admin_help_assistants_toggle_enabled()}
+    description={m.admin_help_assistants_toggle_enabled_description()}
+  >
+    <Input.Switch bind:value={isEnabled} sideEffect={onToggleEnabled} />
+  </Settings.Row>
 
-  <div class="flex flex-wrap gap-2">
-    <Button variant="outlined" onclick={resetInstructions} disabled={resetInstructions.isLoading}>
-      {m.admin_help_assistants_reset_instructions_button()}
-    </Button>
-    <Button variant="destructive" onclick={resetToDefault} disabled={resetToDefault.isLoading}>
-      {m.admin_help_assistants_reset_to_default_button()}
-    </Button>
-  </div>
-</div>
+  <Settings.Row
+    title={m.admin_help_assistants_toggle_visible()}
+    description={m.admin_help_assistants_toggle_visible_description()}
+  >
+    <Input.Switch bind:value={isVisible} sideEffect={onToggleVisible} />
+  </Settings.Row>
+
+  <Settings.Row
+    title={m.admin_help_assistants_reset_section_title()}
+    description={m.admin_help_assistants_reset_section_description()}
+  >
+    <div class="flex flex-col items-start gap-2">
+      <Button variant="outlined" onclick={resetInstructions} disabled={resetInstructions.isLoading}>
+        {m.admin_help_assistants_reset_instructions_button()}
+      </Button>
+      <Button variant="destructive" onclick={resetToDefault} disabled={resetToDefault.isLoading}>
+        {m.admin_help_assistants_reset_to_default_button()}
+      </Button>
+    </div>
+  </Settings.Row>
+</Settings.Group>
 
 <ReassignDialog {role} {intric} openController={reassignOpen} />

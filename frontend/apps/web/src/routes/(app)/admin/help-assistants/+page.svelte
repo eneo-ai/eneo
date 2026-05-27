@@ -11,35 +11,9 @@
   import { toastError } from "$lib/core/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
-  import dayjs from "dayjs";
   import RoleRow from "./RoleRow.svelte";
 
   let { data } = $props();
-
-  function historyReasonLabel(reason: string): string {
-    switch (reason) {
-      case "reassigned":
-        return m.admin_help_assistants_history_reason_reassigned();
-      case "unassigned":
-        return m.admin_help_assistants_history_reason_unassigned();
-      case "reset_instructions_only":
-        return m.admin_help_assistants_history_reason_reset_instructions_only();
-      case "reset_to_default":
-        return m.admin_help_assistants_history_reason_reset_to_default();
-      case "archived":
-        return m.admin_help_assistants_history_reason_archived();
-      default:
-        return reason;
-    }
-  }
-
-  // History rows only carry an actor id, not a name; show a localized generic
-  // (the precise actor lives in the audit log this feature writes).
-  function historyActor(actorUserId: string | null): string {
-    return actorUserId
-      ? m.admin_help_assistants_history_actor_admin()
-      : m.admin_help_assistants_history_actor_system();
-  }
 
   const archive = createAsyncState(async (assistantId: string, name: string) => {
     if (!confirm(m.admin_help_assistants_archive_confirm({ name }))) return;
@@ -65,52 +39,36 @@
   </Page.Header>
   <Page.Main>
     <Settings.Page>
-      <p class="text-secondary max-w-3xl px-4 pt-4">{m.admin_help_assistants_page_intro()}</p>
-
-      <Settings.Group title={m.admin_help_assistants_page_title()}>
-        {#if data.roles.length === 0}
-          <p class="text-secondary py-4">{m.admin_help_assistants_roles_empty()}</p>
-        {:else}
-          {#each data.roles as role (role.kind)}
-            <RoleRow {role} intric={data.intric}></RoleRow>
-          {/each}
-        {/if}
-      </Settings.Group>
+      {#if data.roles.length === 0}
+        <Settings.Group title={m.admin_help_assistants_page_title()}>
+          <p class="text-secondary px-4 py-3">{m.admin_help_assistants_roles_empty()}</p>
+        </Settings.Group>
+      {:else}
+        {#each data.roles as role (role.kind)}
+          <RoleRow {role} intric={data.intric}></RoleRow>
+        {/each}
+      {/if}
 
       <Settings.Group title={m.admin_help_assistants_archive_section_title()}>
         {#if data.archivable.length === 0}
-          <p class="text-secondary py-4">{m.admin_help_assistants_archive_empty()}</p>
+          <p class="text-secondary px-4 py-3">{m.admin_help_assistants_archive_empty()}</p>
         {:else}
-          {#each data.archivable as item (item.id)}
-            <div class="border-default flex items-center justify-between gap-4 border-b py-3">
-              <span>{item.name}</span>
-              <Button
-                variant="destructive"
-                disabled={archive.isLoading}
-                onclick={() => archive(item.id, item.name)}
-                >{m.admin_help_assistants_archive_button()}</Button
+          <div class="flex flex-col px-4">
+            {#each data.archivable as item (item.id)}
+              <div
+                class="border-default flex items-center justify-between gap-4 border-b py-3 last:border-b-0"
               >
-            </div>
-          {/each}
-        {/if}
-      </Settings.Group>
-
-      <Settings.Group title={m.admin_help_assistants_history_section_title()}>
-        {#if data.history.length === 0}
-          <p class="text-secondary py-4">{m.admin_help_assistants_history_empty()}</p>
-        {:else}
-          <ul class="flex flex-col gap-2 py-2">
-            {#each data.history as entry (entry.id)}
-              <li class="text-secondary text-sm">
-                {m.admin_help_assistants_history_entry_summary({
-                  date: dayjs(entry.replaced_at).format("YYYY-MM-DD HH:mm"),
-                  actor: historyActor(entry.actor_user_id),
-                  name: entry.assistant_name_snapshot,
-                  reason: historyReasonLabel(entry.reason)
-                })}
-              </li>
+                <span class="font-medium">{item.name}</span>
+                <Button
+                  variant="destructive"
+                  disabled={archive.isLoading}
+                  onclick={() => archive(item.id, item.name)}
+                >
+                  {m.admin_help_assistants_archive_button()}
+                </Button>
+              </div>
             {/each}
-          </ul>
+          </div>
         {/if}
       </Settings.Group>
     </Settings.Page>
