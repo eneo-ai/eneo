@@ -3166,6 +3166,7 @@
   "admin_help_assistants_page_title": "Help assistants",
   "admin_help_assistants_page_intro": "Manage the built-in helpers that support users across Eneo. Assign, enable, or hide them for your organization.",
   "admin_help_assistants_role_kind_prompt_guide": "Prompt Guide",
+  "admin_help_assistants_kind_badge": "Help assistant",
   "admin_help_assistants_toggle_enabled": "Enabled",
   "admin_help_assistants_toggle_visible": "Visible to users",
   "admin_help_assistants_toggle_enabled_description": "Enable help assistants for the organisation, or turn off to disable help assistants entirely.",

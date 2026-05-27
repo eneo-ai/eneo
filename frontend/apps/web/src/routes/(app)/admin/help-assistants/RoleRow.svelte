@@ -8,7 +8,6 @@
   import { Button, Input } from "@intric/ui";
   import { IconSparkles } from "@intric/icons/sparkles";
   import { ChevronRight } from "lucide-svelte";
-  import { Settings } from "$lib/components/layout";
   import { writable } from "svelte/store";
   import { invalidate } from "$app/navigation";
   import { resolve } from "$app/paths";
@@ -91,18 +90,33 @@
   });
 </script>
 
-<Settings.Group title={roleKindLabel(role.kind)}>
-  <!-- The group title is the helper kind (e.g. "Promptguide"); the assigned
-       assistant leads the group as a prominent card, so no separate row label. -->
-  <div class="flex flex-col items-start gap-3 px-4">
+<!-- One card = one help assistant (kind). The header names it; everything inside
+     (assigned assistant, toggles, reset) belongs to that single assistant. -->
+<section class="border-default bg-primary overflow-hidden rounded-xl border shadow-sm">
+  <header class="border-default bg-secondary flex items-center gap-3 border-b px-5 py-4">
+    <span
+      class="bg-accent-dimmer text-accent-stronger flex size-9 shrink-0 items-center justify-center rounded-lg"
+    >
+      <IconSparkles class="!size-5" />
+    </span>
+    <h2 class="text-lg font-medium">{roleKindLabel(role.kind)}</h2>
+    <span
+      class="border-default text-secondary ml-auto rounded-full border px-2.5 py-0.5 text-xs font-medium"
+    >
+      {m.admin_help_assistants_kind_badge()}
+    </span>
+  </header>
+
+  <!-- The assistant currently assigned to this role -->
+  <div class="flex flex-col items-start gap-3 px-5 py-4">
     <a
-      class="border-default bg-primary hover:bg-hover-dimmer flex w-full max-w-xl items-center gap-3 rounded-lg border px-4 py-3 transition-colors"
+      class="hover:bg-hover-dimmer -mx-2 flex w-full items-center gap-3 rounded-lg px-2 py-2 transition-colors"
       href={resolve(`/spaces/${role.org_space_id}/assistants/${role.assistant_id}/edit`)}
     >
       <span
-        class="bg-accent-dimmer text-accent-stronger flex size-9 shrink-0 items-center justify-center rounded-md"
+        class="bg-accent-dimmer text-accent-stronger flex size-8 shrink-0 items-center justify-center rounded-md"
       >
-        <IconSparkles class="!size-5" />
+        <IconSparkles class="!size-4" />
       </span>
       <span class="truncate font-medium">{displayName}</span>
       <ChevronRight class="text-secondary ml-auto size-5 shrink-0" />
@@ -112,25 +126,36 @@
     </Button>
   </div>
 
-  <Settings.Row
-    title={m.admin_help_assistants_toggle_enabled()}
-    description={m.admin_help_assistants_toggle_enabled_description()}
-  >
-    <Input.Switch bind:value={isEnabled} sideEffect={onToggleEnabled} />
-  </Settings.Row>
+  <div class="border-default border-t px-5 py-4">
+    <Input.Switch bind:value={isEnabled} sideEffect={onToggleEnabled}>
+      <span class="flex flex-col gap-0.5">
+        <span class="font-medium">{m.admin_help_assistants_toggle_enabled()}</span>
+        <span class="text-secondary text-sm">
+          {m.admin_help_assistants_toggle_enabled_description()}
+        </span>
+      </span>
+    </Input.Switch>
+  </div>
 
-  <Settings.Row
-    title={m.admin_help_assistants_toggle_visible()}
-    description={m.admin_help_assistants_toggle_visible_description()}
-  >
-    <Input.Switch bind:value={isVisible} sideEffect={onToggleVisible} />
-  </Settings.Row>
+  <div class="border-default border-t px-5 py-4">
+    <Input.Switch bind:value={isVisible} sideEffect={onToggleVisible}>
+      <span class="flex flex-col gap-0.5">
+        <span class="font-medium">{m.admin_help_assistants_toggle_visible()}</span>
+        <span class="text-secondary text-sm">
+          {m.admin_help_assistants_toggle_visible_description()}
+        </span>
+      </span>
+    </Input.Switch>
+  </div>
 
-  <Settings.Row
-    title={m.admin_help_assistants_reset_section_title()}
-    description={m.admin_help_assistants_reset_section_description()}
-  >
-    <div class="flex flex-col items-start gap-2">
+  <div class="border-default flex flex-col gap-3 border-t px-5 py-4">
+    <span class="flex flex-col gap-0.5">
+      <span class="font-medium">{m.admin_help_assistants_reset_section_title()}</span>
+      <span class="text-secondary text-sm">
+        {m.admin_help_assistants_reset_section_description()}
+      </span>
+    </span>
+    <div class="flex flex-wrap gap-2">
       <Button variant="outlined" onclick={resetInstructions} disabled={resetInstructions.isLoading}>
         {m.admin_help_assistants_reset_instructions_button()}
       </Button>
@@ -138,7 +163,7 @@
         {m.admin_help_assistants_reset_to_default_button()}
       </Button>
     </div>
-  </Settings.Row>
-</Settings.Group>
+  </div>
+</section>
 
 <ReassignDialog {role} {intric} openController={reassignOpen} />

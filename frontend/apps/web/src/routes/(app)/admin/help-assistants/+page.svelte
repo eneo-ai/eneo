@@ -39,15 +39,17 @@
   </Page.Header>
   <Page.Main>
     <Settings.Page>
-      {#if data.roles.length === 0}
-        <Settings.Group title={m.admin_help_assistants_page_title()}>
-          <p class="text-secondary px-4 py-3">{m.admin_help_assistants_roles_empty()}</p>
-        </Settings.Group>
-      {:else}
-        {#each data.roles as role (role.kind)}
-          <RoleRow {role} intric={data.intric}></RoleRow>
-        {/each}
-      {/if}
+      <div class="flex flex-col gap-6 px-4 pt-2 pb-10 lg:px-2.5">
+        <p class="text-secondary max-w-3xl">{m.admin_help_assistants_page_intro()}</p>
+
+        {#if data.roles.length === 0}
+          <p class="text-secondary">{m.admin_help_assistants_roles_empty()}</p>
+        {:else}
+          {#each data.roles as role (role.kind)}
+            <RoleRow {role} intric={data.intric}></RoleRow>
+          {/each}
+        {/if}
+      </div>
 
       <Settings.Group title={m.admin_help_assistants_archive_section_title()}>
         {#if data.archivable.length === 0}

@@ -3166,6 +3166,7 @@
   "admin_help_assistants_page_title": "Hjälpassistenter",
   "admin_help_assistants_page_intro": "Hantera de inbyggda hjälpassistenterna som stöder användarna i Eneo. Tilldela, aktivera eller dölj dem för din organisation.",
   "admin_help_assistants_role_kind_prompt_guide": "Promptguide",
+  "admin_help_assistants_kind_badge": "Hjälpassistent",
   "admin_help_assistants_toggle_enabled": "Aktiverad",
   "admin_help_assistants_toggle_visible": "Synlig för användare",
   "admin_help_assistants_toggle_enabled_description": "Aktivera hjälpassistenter för organisationen eller stäng av för att inaktivera hjälpassistenter helt.",
