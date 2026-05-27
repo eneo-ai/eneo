@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from intric.main.exceptions import BadRequestException
 from intric.settings.setting_service import SettingService
@@ -751,9 +752,8 @@ async def test_get_flow_retention_policy_reads_tenant_override():
         update={
             "flow_settings": {
                 "retention_policy": {
-                    "shared_default_days": 30,
                     "source_audio_days": 3,
-                    "transcript_text_days": 7,
+                    "run_debug_evidence_days": 7,
                 }
             }
         }
@@ -770,9 +770,7 @@ async def test_get_flow_retention_policy_reads_tenant_override():
 
     policy = await service.get_flow_retention_policy()
 
-    assert policy.shared_default_days == 30
-    assert policy.source_audio_days == 3
-    assert policy.transcript_text_days == 7
+    assert policy.run_debug_evidence_days == 7
 
 
 async def test_update_flow_retention_policy_persists_and_audits():
@@ -796,18 +794,12 @@ async def test_update_flow_retention_policy_persists_and_audits():
     )
 
     updated = await service.update_flow_retention_policy(
-        FlowRetentionPolicyUpdate(
-            shared_default_days=30,
-            source_audio_days=3,
-            run_debug_evidence_days=14,
-        )
+        FlowRetentionPolicyUpdate(run_debug_evidence_days=14)
     )
 
-    assert updated.shared_default_days == 30
-    assert updated.source_audio_days == 3
     assert updated.run_debug_evidence_days == 14
     tenant = await tenant_repo.get(TEST_USER.tenant_id)
-    assert tenant.flow_settings["retention_policy"]["source_audio_days"] == 3
+    assert tenant.flow_settings["retention_policy"] == {"run_debug_evidence_days": 14}
     assert calls[0]["metadata"]["setting"] == "flow_retention_policy"
 
 
@@ -819,8 +811,8 @@ async def test_update_flow_retention_policy_can_clear_override():
         update={
             "flow_settings": {
                 "retention_policy": {
-                    "shared_default_days": 30,
                     "source_audio_days": 3,
+                    "run_debug_evidence_days": 7,
                 }
             }
         }
@@ -836,13 +828,52 @@ async def test_update_flow_retention_policy_can_clear_override():
     )
 
     updated = await service.update_flow_retention_policy(
-        FlowRetentionPolicyUpdate(source_audio_days=None)
+        FlowRetentionPolicyUpdate(run_debug_evidence_days=None)
     )
 
-    assert updated.shared_default_days == 30
-    assert updated.source_audio_days is None
+    assert updated.run_debug_evidence_days is None
     tenant = await tenant_repo.get(TEST_USER.tenant_id)
-    assert "source_audio_days" not in tenant.flow_settings["retention_policy"]
+    assert "retention_policy" not in tenant.flow_settings
+
+
+async def test_update_flow_retention_policy_rejects_deleted_fields():
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        FlowRetentionPolicyUpdate(source_audio_days=3)
+
+
+async def test_update_flow_runtime_policy_scrubs_stale_retention_policy_keys():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "retention_policy": {
+                    "source_audio_days": 3,
+                    "run_debug_evidence_days": 7,
+                }
+            }
+        }
+    )
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+    )
+
+    updated = await service.update_flow_runtime_policy(
+        FlowRuntimePolicyUpdate(default_step_timeout_seconds=1200)
+    )
+
+    assert updated.default_step_timeout_seconds == 1200
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert tenant.flow_settings["runtime_policy"] == {
+        "default_step_timeout_seconds": 1200
+    }
+    assert tenant.flow_settings["retention_policy"] == {"run_debug_evidence_days": 7}
 
 
 async def test_update_flow_retention_policy_rejects_empty_patch():

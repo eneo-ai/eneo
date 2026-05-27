@@ -3,28 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
-RetentionDataClass = Literal[
-    "source_audio",
-    "transcript_text",
-    "generated_artifact",
-    "run_debug_evidence",
-]
+RetentionDataClass = Literal["run_debug_evidence"]
 
 RETENTION_POLICY_FIELDS = {
-    "shared_default_days",
-    "source_audio_days",
-    "transcript_text_days",
-    "generated_artifact_days",
     "run_debug_evidence_days",
 }
 
 
 @dataclass(frozen=True)
 class FlowRetentionPolicy:
-    shared_default_days: int | None = None
-    source_audio_days: int | None = None
-    transcript_text_days: int | None = None
-    generated_artifact_days: int | None = None
     run_debug_evidence_days: int | None = None
 
     def retention_for_class(
@@ -36,17 +23,12 @@ class FlowRetentionPolicy:
     ) -> int | None:
         if flow_override_days is not None:
             return flow_override_days
-        class_specific = {
-            "source_audio": self.source_audio_days,
-            "transcript_text": self.transcript_text_days,
-            "generated_artifact": self.generated_artifact_days,
-            "run_debug_evidence": self.run_debug_evidence_days,
-        }[data_class]
-        if class_specific is not None:
-            return class_specific
-        if space_default_days is not None:
-            return space_default_days
-        return self.shared_default_days
+        if (
+            data_class == "run_debug_evidence"
+            and self.run_debug_evidence_days is not None
+        ):
+            return self.run_debug_evidence_days
+        return space_default_days
 
 
 def resolve_flow_retention_policy(
@@ -61,41 +43,52 @@ def resolve_flow_retention_policy(
     retention_policy_dict = cast(dict[str, Any], retention_policy)
 
     return FlowRetentionPolicy(
-        shared_default_days=_int_or_none(
-            retention_policy_dict.get("shared_default_days")
-        ),
-        source_audio_days=_int_or_none(retention_policy_dict.get("source_audio_days")),
-        transcript_text_days=_int_or_none(
-            retention_policy_dict.get("transcript_text_days")
-        ),
-        generated_artifact_days=_int_or_none(
-            retention_policy_dict.get("generated_artifact_days")
-        ),
         run_debug_evidence_days=_int_or_none(
             retention_policy_dict.get("run_debug_evidence_days")
         ),
     )
 
 
-def apply_flow_retention_policy_patch(
+def normalize_flow_retention_policy_settings(
     current_flow_settings: dict[str, Any] | None,
-    *,
-    shared_default_days: int | None = None,
-    source_audio_days: int | None = None,
-    transcript_text_days: int | None = None,
-    generated_artifact_days: int | None = None,
-    run_debug_evidence_days: int | None = None,
-    remove_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     next_settings = (
         dict(current_flow_settings) if isinstance(current_flow_settings, dict) else {}
     )
-    retention_policy = dict(next_settings.get("retention_policy", {}))
+    retention_policy = next_settings.get("retention_policy")
+    if retention_policy is None:
+        return next_settings
+    if not isinstance(retention_policy, dict):
+        return next_settings
+
+    retention_policy_dict = cast(dict[str, Any], retention_policy)
+    next_retention_policy: dict[str, Any] = {}
+    if "run_debug_evidence_days" in retention_policy_dict:
+        next_retention_policy["run_debug_evidence_days"] = retention_policy_dict[
+            "run_debug_evidence_days"
+        ]
+
+    if next_retention_policy:
+        next_settings["retention_policy"] = next_retention_policy
+    else:
+        next_settings.pop("retention_policy", None)
+    return next_settings
+
+
+def apply_flow_retention_policy_patch(
+    current_flow_settings: dict[str, Any] | None,
+    *,
+    run_debug_evidence_days: int | None = None,
+    remove_keys: set[str] | None = None,
+) -> dict[str, Any]:
+    next_settings = normalize_flow_retention_policy_settings(current_flow_settings)
+    existing_retention_policy = next_settings.get("retention_policy")
+    retention_policy: dict[str, Any] = (
+        dict(cast(dict[str, Any], existing_retention_policy))
+        if isinstance(existing_retention_policy, dict)
+        else {}
+    )
     updates = {
-        "shared_default_days": shared_default_days,
-        "source_audio_days": source_audio_days,
-        "transcript_text_days": transcript_text_days,
-        "generated_artifact_days": generated_artifact_days,
         "run_debug_evidence_days": run_debug_evidence_days,
     }
     for key, value in updates.items():

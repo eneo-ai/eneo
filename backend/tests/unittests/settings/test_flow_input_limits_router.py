@@ -333,9 +333,7 @@ async def test_get_flow_retention_policy_delegates_to_service() -> None:
     container = MagicMock()
     service = AsyncMock()
     service.get_flow_retention_policy.return_value = FlowRetentionPolicyPublic(
-        shared_default_days=30,
-        source_audio_days=3,
-        transcript_text_days=7,
+        run_debug_evidence_days=7,
     )
     container.settings_service.return_value = service
     container.user.return_value = SimpleNamespace(
@@ -344,7 +342,7 @@ async def test_get_flow_retention_policy_delegates_to_service() -> None:
 
     response = await get_flow_retention_policy(container=container)
 
-    assert response.shared_default_days == 30
+    assert response.run_debug_evidence_days == 7
     service.get_flow_retention_policy.assert_awaited_once_with()
 
 
@@ -353,8 +351,6 @@ async def test_patch_flow_retention_policy_delegates_to_service() -> None:
     container = MagicMock()
     service = AsyncMock()
     service.update_flow_retention_policy.return_value = FlowRetentionPolicyPublic(
-        shared_default_days=30,
-        source_audio_days=3,
         run_debug_evidence_days=14,
     )
     container.settings_service.return_value = service
@@ -362,11 +358,8 @@ async def test_patch_flow_retention_policy_delegates_to_service() -> None:
         id="u", tenant_id="t", permissions=[Permission.ADMIN]
     )
 
-    payload = FlowRetentionPolicyUpdate(
-        shared_default_days=30,
-        source_audio_days=3,
-    )
+    payload = FlowRetentionPolicyUpdate(run_debug_evidence_days=14)
     response = await update_flow_retention_policy(payload=payload, container=container)
 
-    assert response.source_audio_days == 3
+    assert response.run_debug_evidence_days == 14
     service.update_flow_retention_policy.assert_awaited_once_with(payload)

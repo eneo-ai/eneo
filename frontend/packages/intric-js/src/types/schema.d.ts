@@ -961,7 +961,7 @@ export interface paths {
     };
     /**
      * Get flow retention policy
-     * @description Return the tenant's effective layered Flow retention policy defaults and class-specific overrides. Use this admin endpoint to show how long source audio, transcript text, generated artifacts, and run debug evidence are retained before cleanup policies can remove them.
+     * @description Return the tenant Flow retention policy for implemented runtime debug-evidence cleanup. The policy exposes run_debug_evidence_days; runtime uploaded or generated blob retention is configured by a future file-lifecycle owner, not this endpoint.
      */
     get: operations["get_flow_retention_policy"];
     put?: never;
@@ -971,7 +971,7 @@ export interface paths {
     head?: never;
     /**
      * Update flow retention policy
-     * @description Update tenant-level layered Flow retention defaults and class-specific overrides used by runtime cleanup. Omitted fields are left unchanged; send an integer day count to set an override or null to remove one where the field supports falling back to the broader default.
+     * @description Update the tenant Flow retention policy for implemented runtime debug-evidence cleanup. Omitted fields are unchanged; send an integer day count to set run_debug_evidence_days or null to fall back to Flow or space retention defaults.
      */
     patch: operations["update_flow_retention_policy"];
     trace?: never;
@@ -13690,40 +13690,20 @@ export interface components {
     /**
      * FlowRetentionPolicyPublic
      * @example {
-     *       "generated_artifact_days": 30,
-     *       "run_debug_evidence_days": 7,
-     *       "shared_default_days": 30,
-     *       "source_audio_days": 14,
-     *       "transcript_text_days": 30
+     *       "run_debug_evidence_days": 7
      *     }
      */
     FlowRetentionPolicyPublic: {
-      /** Shared Default Days */
-      shared_default_days?: number | null;
-      /** Source Audio Days */
-      source_audio_days?: number | null;
-      /** Transcript Text Days */
-      transcript_text_days?: number | null;
-      /** Generated Artifact Days */
-      generated_artifact_days?: number | null;
       /** Run Debug Evidence Days */
       run_debug_evidence_days?: number | null;
     };
     /**
      * FlowRetentionPolicyUpdate
      * @example {
-     *       "source_audio_days": 14
+     *       "run_debug_evidence_days": 14
      *     }
      */
     FlowRetentionPolicyUpdate: {
-      /** Shared Default Days */
-      shared_default_days?: number | null;
-      /** Source Audio Days */
-      source_audio_days?: number | null;
-      /** Transcript Text Days */
-      transcript_text_days?: number | null;
-      /** Generated Artifact Days */
-      generated_artifact_days?: number | null;
       /** Run Debug Evidence Days */
       run_debug_evidence_days?: number | null;
     };

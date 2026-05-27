@@ -160,7 +160,7 @@ export function initSettings(client) {
     },
 
     /**
-     * Get layered flow retention policy for the current tenant.
+     * Get flow debug-evidence retention policy for the current tenant.
      * @throws {IntricError}
      * @returns {Promise<import('../types/resources').FlowRetentionPolicy>}
      */
@@ -172,7 +172,7 @@ export function initSettings(client) {
     },
 
     /**
-     * Update layered flow retention policy for the current tenant.
+     * Update flow debug-evidence retention policy for the current tenant.
      * @param {Partial<import('../types/resources').FlowRetentionPolicy>} patch
      * @throws {IntricError}
      * @returns {Promise<import('../types/resources').FlowRetentionPolicy>}

@@ -370,10 +370,10 @@ async def update_flow_evidence_policy(
     operation_id="get_flow_retention_policy",
     summary="Get flow retention policy",
     description=(
-        "Return the tenant's effective layered Flow retention policy defaults and "
-        "class-specific overrides. Use this admin endpoint to show how long source "
-        "audio, transcript text, generated artifacts, and run debug evidence are "
-        "retained before cleanup policies can remove them."
+        "Return the tenant Flow retention policy for implemented runtime debug-evidence "
+        "cleanup. The policy exposes run_debug_evidence_days; runtime uploaded or "
+        "generated blob retention is configured by a future file-lifecycle owner, not "
+        "this endpoint."
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
@@ -391,10 +391,10 @@ async def get_flow_retention_policy(
     operation_id="update_flow_retention_policy",
     summary="Update flow retention policy",
     description=(
-        "Update tenant-level layered Flow retention defaults and class-specific "
-        "overrides used by runtime cleanup. Omitted fields are left unchanged; send "
-        "an integer day count to set an override or null to remove one where the field "
-        "supports falling back to the broader default."
+        "Update the tenant Flow retention policy for implemented runtime debug-evidence "
+        "cleanup. Omitted fields are unchanged; send an integer day count to set "
+        "run_debug_evidence_days or null to fall back to Flow or space retention "
+        "defaults."
     ),
     responses={
         400: _flow_settings_invalid_payload_response(

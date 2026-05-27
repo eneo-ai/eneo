@@ -4,7 +4,7 @@ import { initSettings } from "./settings";
 
 describe("settings flow policy endpoints", () => {
   it("gets flow retention policy from canonical settings route", async () => {
-    const fetch = vi.fn(async () => ({ shared_default_days: 30 }));
+    const fetch = vi.fn(async () => ({ run_debug_evidence_days: 7 }));
     const settings = initSettings({ fetch });
 
     await settings.getFlowRetentionPolicy();
@@ -15,12 +15,11 @@ describe("settings flow policy endpoints", () => {
   });
 
   it("patches flow retention policy to canonical settings route", async () => {
-    const fetch = vi.fn(async () => ({ source_audio_days: 3 }));
+    const fetch = vi.fn(async () => ({ run_debug_evidence_days: 14 }));
     const settings = initSettings({ fetch });
 
     await settings.updateFlowRetentionPolicy({
-      source_audio_days: 3,
-      transcript_text_days: null
+      run_debug_evidence_days: 14
     });
 
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -29,8 +28,7 @@ describe("settings flow policy endpoints", () => {
       method: "patch",
       requestBody: {
         "application/json": {
-          source_audio_days: 3,
-          transcript_text_days: null
+          run_debug_evidence_days: 14
         }
       }
     });

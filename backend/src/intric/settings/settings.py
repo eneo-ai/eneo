@@ -110,16 +110,11 @@ FLOW_EVIDENCE_POLICY_UPDATE_EXAMPLE: JsonDict = {
 }
 
 FLOW_RETENTION_POLICY_EXAMPLE: JsonDict = {
-    "shared_default_days": 30,
-    "source_audio_days": 14,
-    "transcript_text_days": 30,
-    "generated_artifact_days": 30,
     "run_debug_evidence_days": 7,
 }
 
 FLOW_RETENTION_POLICY_UPDATE_EXAMPLE: JsonDict = {
-    "source_audio_days": 14,
-    "run_debug_evidence_days": None,
+    "run_debug_evidence_days": 14,
 }
 
 
@@ -362,20 +357,13 @@ class FlowRetentionPolicyPublic(BaseModel):
         json_schema_extra={"example": FLOW_RETENTION_POLICY_EXAMPLE}
     )
 
-    shared_default_days: int | None = None
-    source_audio_days: int | None = None
-    transcript_text_days: int | None = None
-    generated_artifact_days: int | None = None
     run_debug_evidence_days: int | None = None
 
 
 class FlowRetentionPolicyUpdate(BaseModel):
     model_config = ConfigDict(
-        json_schema_extra={"example": FLOW_RETENTION_POLICY_UPDATE_EXAMPLE}
+        extra="forbid",
+        json_schema_extra={"example": FLOW_RETENTION_POLICY_UPDATE_EXAMPLE},
     )
 
-    shared_default_days: int | None = None
-    source_audio_days: int | None = None
-    transcript_text_days: int | None = None
-    generated_artifact_days: int | None = None
     run_debug_evidence_days: int | None = None

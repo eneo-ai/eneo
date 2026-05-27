@@ -448,7 +448,6 @@ async def test_cleanup_old_flow_runtime_data_clears_debug_evidence_and_preserves
         flow_settings={
             "retention_policy": {
                 "run_debug_evidence_days": 1,
-                "generated_artifact_days": 1,
             }
         },
     )
@@ -508,7 +507,7 @@ async def test_cleanup_old_flow_runtime_data_clears_debug_evidence_and_preserves
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_preserves_generated_artifact_content_without_payload_refs(
+async def test_cleanup_old_flow_runtime_data_ignores_stale_generated_artifact_policy_without_payload_refs(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -563,7 +562,7 @@ async def test_cleanup_old_flow_runtime_data_preserves_generated_artifact_conten
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_preserves_file_content_with_younger_flow_reference(
+async def test_cleanup_old_flow_runtime_data_ignores_stale_generated_artifact_policy_with_younger_flow_reference(
     async_session: AsyncSession,
     test_tenant,
     admin_user,

@@ -26,6 +26,7 @@ from intric.flows.flow_input_limits import (
 )
 from intric.flows.flow_retention_policy import (
     apply_flow_retention_policy_patch,
+    normalize_flow_retention_policy_settings,
     resolve_flow_retention_policy,
 )
 from intric.flows.flow_runtime_policy import (
@@ -197,9 +198,12 @@ class SettingService:
         return await self.tenant_repo.get(self.user.tenant_id)
 
     async def _persist_flow_settings(self, flow_settings: dict[str, Any]) -> None:
+        normalized_flow_settings = normalize_flow_retention_policy_settings(
+            flow_settings
+        )
         tenant_update = TenantUpdate(
             id=self.user.tenant_id,
-            flow_settings=flow_settings,
+            flow_settings=normalized_flow_settings,
         )
         update_tenant = getattr(self.tenant_repo, "update_tenant", None)
         if callable(update_tenant):
@@ -208,7 +212,9 @@ class SettingService:
             )
             return
         tenant = await self._get_tenant_for_flow_settings()
-        next_tenant = tenant.model_copy(update={"flow_settings": flow_settings})
+        next_tenant = tenant.model_copy(
+            update={"flow_settings": normalized_flow_settings}
+        )
         setattr(self.tenant_repo, "tenant", next_tenant)
 
         async def _get_updated_tenant(_tenant_id: Any) -> Any:
@@ -458,10 +464,6 @@ class SettingService:
         tenant = await self._get_tenant_for_flow_settings()
         policy = resolve_flow_retention_policy(getattr(tenant, "flow_settings", None))
         return FlowRetentionPolicyPublic(
-            shared_default_days=policy.shared_default_days,
-            source_audio_days=policy.source_audio_days,
-            transcript_text_days=policy.transcript_text_days,
-            generated_artifact_days=policy.generated_artifact_days,
             run_debug_evidence_days=policy.run_debug_evidence_days,
         )
 

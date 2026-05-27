@@ -781,6 +781,18 @@ def test_openapi_flow_settings_invalid_payload_examples_match_runtime_code(
         assert example["code"] == FLOW_SETTINGS_INVALID_PAYLOAD_CODE
 
 
+def test_openapi_flow_retention_policy_exposes_implemented_field_only(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+
+    for component_name in ("FlowRetentionPolicyPublic", "FlowRetentionPolicyUpdate"):
+        component = schemas.get(component_name, {})
+        assert set(component.get("properties", {})) == {"run_debug_evidence_days"}
+
+    assert schemas["FlowRetentionPolicyUpdate"].get("additionalProperties") is False
+
+
 def test_openapi_all_flow_success_responses_have_examples(
     openapi_spec: dict,
 ) -> None:

@@ -128,7 +128,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T135
+active_task: T136
 
 tasks:
   - id: T001
@@ -14881,7 +14881,7 @@ tasks:
   - id: T135
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Fence the public and internal Flow retention policy vocabulary to the implemented run_debug_evidence_days class only."
     inputs:
@@ -14894,6 +14894,7 @@ tasks:
       - "backend/src/intric/settings/settings.py"
       - "backend/src/intric/settings/setting_service.py"
       - "backend/src/intric/settings/settings_router.py"
+      - "backend/src/intric/tenants/tenant.py"
       - "backend/tests/unittests/flows/test_flow_retention_policy.py"
       - "backend/tests/unittests/settings/test_settings_service.py"
       - "backend/tests/unittests/settings/test_flow_input_limits_router.py"
@@ -14920,7 +14921,7 @@ tasks:
       - "FlowRetentionPolicy and DataRetentionService only name implemented run_debug_evidence retention."
       - "Settings API public/update models, service persistence, router descriptions, docs-site guide, intric-js endpoint tests/JSDoc, and generated schema expose only run_debug_evidence_days."
       - "OpenAPI schema regression tests pin FlowRetentionPolicyPublic/Update properties exactly to run_debug_evidence_days."
-      - "Tests prove deleted fields fail loudly at Pydantic update and tenant flow_settings validation boundaries."
+      - "Tests prove deleted fields fail loudly at the Pydantic update/direct validator boundaries, and stale tenant flow_settings keys are scrubbed before persistence."
       - "Receipt with architecture challenge, consolidation effect, non-Flow scope table, validation commands, generated-client diff notes, reviewer results, and next safe task activation."
     stop_if:
       - "Watchdog reports a halt-worthy blocker."
@@ -14929,6 +14930,168 @@ tasks:
       - "DataRetentionService or tests prove source_audio/transcript_text/generated_artifact cleanup is actually implemented."
       - "OpenAPI/generated-client update produces broad unrelated churn."
       - "Implementation requires files outside allowed_files."
+    receipt:
+      completed_at: "2026-05-27T22:33:00+02:00"
+      result: done
+      summary: "Fenced the Flow retention policy vocabulary to the implemented run_debug_evidence_days cleanup only. Removed unimplemented shared/source-audio/transcript/generated-artifact knobs from the Flow policy owner, settings API, OpenAPI/generated client, docs-site guide, JS endpoint tests, and DataRetentionService policy-source strings. Added a Flow-owned normalizer so stale unshipped tenant JSONB retention keys are scrubbed at tenant/settings boundaries without accepting them in public update payloads."
+      architecture_challenge:
+        correct_model_if_designed_today: "A public/admin Flow retention policy exposes only lifecycle classes that are actually implemented. Today that is runtime debug-evidence cleanup via run_debug_evidence_days; runtime uploaded/generated blob retention waits for a run-private Flow file lifecycle owner."
+        current_model: "Before T135, FlowRetentionPolicy, settings API models, docs, generated client, and JS tests exposed a speculative five-field layered policy while DataRetentionService only scheduled run_debug_evidence cleanup."
+        current_model_wrong_or_incomplete: "Wrong as a public contract, incomplete for future blob lifecycle."
+        refactor_replace_needed: "yes"
+        why_not_just_improve_existing_path: "Preserving unimplemented knobs would continue teaching operators and API consumers false cleanup behavior, and implementing blob purge now would mutate shared Files content without the correct owner model."
+        canonical_owner: "backend/src/intric/flows/flow_retention_policy.py for retention vocabulary/normalization/validation; DataRetentionService as the cleanup consumer; settings router/service/models as adapters."
+        existing_code_to_reuse_move_merge_delete:
+          - "Reused existing run_debug_evidence cleanup and settings route."
+          - "Deleted unsupported policy fields and policy-source branches."
+          - "Rebuilt docs/generated-client/tests around the implemented field."
+        compatibility_paths_to_delete:
+          - "Public/admin fields for shared_default_days, source_audio_days, transcript_text_days, and generated_artifact_days."
+          - "Generated-client/docs/test mirrors for those fields."
+        tests_deleted_or_replaced:
+          - "Layered/five-field policy tests replaced with one-field, scrub-on-write, extra-forbid, OpenAPI field-set, and stale-key regression tests."
+        migration_data_preflight_needed: "No migration. Pre-worker DB query found 0 tenants with deleted legacy retention keys."
+        smallest_reviewable_slice: "Vocabulary/contract fence only; no runtime blob purge, schema migration, tombstone API, admin purge, frontend UI, or generated-artifact lifecycle implementation."
+      consolidation_effect:
+        reused_existing_owner: "FlowRetentionPolicy, DataRetentionService, settings API/schema owners, generated client schema, docs-site Flow API guide, and existing settings endpoint tests."
+        logic_moved_from: "Tenant/settings stale-key handling now delegates to the Flow-owned retention normalizer instead of preserving deleted keys in adapters."
+        logic_deleted: "Unimplemented retention policy fields/branches and their public/docs/generated/test mirrors."
+        duplicate_path_removed: "Public/admin five-knob retention policy no longer diverges from one-class runtime cleanup."
+        new_code_added: "A small Flow-owned retention normalizer and focused behavior/contract tests."
+        why_existing_owners_were_insufficient: "Existing owners were sufficient after deepening FlowRetentionPolicy; no new lifecycle owner was created."
+        guard_test_preventing_duplicate_logic_from_returning: "OpenAPI field-set test, FlowRetentionPolicyUpdate extra-forbid test, stale-key scrub tests, and source/client/docs grep."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+      commands:
+        - cmd: "ruby/json watchdog check via cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1 status=ok blockers=[]"
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -F $'\\t' -A -c \"select count(*) as tenants_with_removed_keys ...\""
+          status: pass
+          output: "tenants_with_removed_keys=0"
+        - cmd: "find . -path './.git' -prune -o -name 'run_codex_review.sh' -print"
+          status: pass
+          output: "No script found."
+        - cmd: "test -e scripts/run_codex_review.sh"
+          status: pass
+          output: "scripts/run_codex_review.sh missing; gate-local scripts delegate to it."
+        - cmd: "cd backend && uv run ruff format <T135 backend files>"
+          status: pass
+          output: "4 files reformatted, then stable."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_retention_policy.py tests/unittests/settings/test_settings_service.py tests/unittests/settings/test_flow_input_limits_router.py tests/integration/test_flow_runtime_retention_cleanup.py tests/unit/test_flow_openapi_contract.py -q"
+          status: pass
+          output: "114 passed, 16 pre-existing warnings."
+        - cmd: "cd frontend/packages/intric-js && bun run update"
+          status: pass
+          output: "Generated schema from http://localhost:8123; update completed successfully."
+        - cmd: "cd frontend/packages/intric-js && bun test src/endpoints/settings.test.js"
+          status: pass
+          output: "6 pass."
+        - cmd: "cd backend && uv run ruff check <T135 backend files> && uv run ruff format --check <T135 backend files>"
+          status: pass
+          output: "All checks passed; 11 files already formatted."
+        - cmd: "cd backend && uv run pyright <T135 backend files/tests>"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations."
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "rg -n 'source_audio_days|transcript_text_days|generated_artifact_days|shared_default_days' backend/src/intric frontend/packages/intric-js/src frontend/apps/docs-site/src/content/guides/flows-api-guide.mdx"
+          status: pass
+          output: "No production source/client/docs matches."
+        - cmd: "rg -n 'T125|T134|Phase [A-Z]|source_audio_days|transcript_text_days|generated_artifact_days|shared_default_days' <T135 changed files>"
+          status: pass
+          output: "Only deliberate stale-key/negative backend test matches for deleted field names; no task-id/phase leakage in code comments."
+      reviewer_results:
+        claude_plan_iteration_1:
+          artifact: ".codex/artifacts/claude-peer-loop-t135-flow-retention-vocabulary-fence-plan-20260527T201318Z.md"
+          verdict: "changes_required"
+          valid_concerns_addressed:
+            - "Tenant flow_settings stale-key path needed normalization or unrelated settings writes could fail."
+            - "Scrub-on-write semantic shift needed explicit tests."
+            - "Policy-source fallback string named deleted shared_default_days."
+            - "Generated-artifact zero counters needed an invariant reason if preserved."
+        claude_plan_iteration_2:
+          artifact: ".codex/artifacts/claude-peer-loop-t135-flow-retention-vocabulary-fence-revised-plan-20260527T201905Z.md"
+          verdict: "green"
+          min_score: 8
+        claude_commit_gate:
+          artifact: ".codex/artifacts/claude-peer-loop-t135-flow-retention-vocabulary-fence-implementation-review-20260527T203237Z.md"
+          verdict: "green"
+          min_score: 9
+          procedural_warning: "Stage only T135 files; unrelated AI Builder and user dirty files must remain unstaged."
+        antigravity: "not_run; Claude/Codex agreed, generated-client churn was narrow, and no schema/migration or unresolved data-integrity decision remained."
+      generated_client_diff: "Narrow: Flow retention GET/PATCH descriptions changed; FlowRetentionPolicyPublic/Update now expose only run_debug_evidence_days; update example uses run_debug_evidence_days=14 so generated docs are non-empty."
+      non_flow_scope:
+        - file: "backend/src/intric/settings/settings.py"
+          canonical_owner_role: "Pydantic public/admin Flow settings schema owner."
+          why_flow_requires_this_change: "The public Flow retention contract must expose only implemented cleanup policy."
+          deliberately_not_changed: "Non-Flow settings schemas."
+        - file: "backend/src/intric/settings/setting_service.py"
+          canonical_owner_role: "Admin settings persistence/audit adapter."
+          why_flow_requires_this_change: "Flow settings writes must persist scrubbed retention policy vocabulary."
+          deliberately_not_changed: "Other settings behavior and audit shape."
+        - file: "backend/src/intric/settings/settings_router.py"
+          canonical_owner_role: "FastAPI/OpenAPI adapter for Flow settings."
+          why_flow_requires_this_change: "OpenAPI text must match the narrowed retention contract."
+          deliberately_not_changed: "Paths, auth, permissions, and status shape."
+        - file: "backend/src/intric/tenants/tenant.py"
+          canonical_owner_role: "Tenant flow_settings JSONB validation boundary."
+          why_flow_requires_this_change: "Existing tenant validation must delegate stale retention-key normalization to the Flow owner before validation."
+          deliberately_not_changed: "Generic tenant model behavior."
+        - file: "backend/src/intric/data_retention/infrastructure/data_retention_service.py"
+          canonical_owner_role: "Runtime cleanup executor."
+          why_flow_requires_this_change: "Internal policy source vocabulary must match the implemented cleanup class."
+          deliberately_not_changed: "Blob purge, API tombstones, and other retention domains."
+        - file: "frontend/packages/intric-js/src/types/schema.d.ts"
+          canonical_owner_role: "Generated OpenAPI client types."
+          why_flow_requires_this_change: "Public Flow retention schema changed."
+          deliberately_not_changed: "Handwritten client surfaces."
+        - file: "frontend/packages/intric-js/src/endpoints/settings.js"
+          canonical_owner_role: "JS settings endpoint wrapper docs."
+          why_flow_requires_this_change: "JSDoc must not document deleted layered retention policy."
+          deliberately_not_changed: "Wrapper implementation."
+        - file: "frontend/packages/intric-js/src/endpoints/settings.test.js"
+          canonical_owner_role: "JS settings endpoint contract test."
+          why_flow_requires_this_change: "Tests must not teach deleted request fields."
+          deliberately_not_changed: "Other settings endpoint tests."
+        - file: "frontend/apps/docs-site/src/content/guides/flows-api-guide.mdx"
+          canonical_owner_role: "Published Flow API guide."
+          why_flow_requires_this_change: "Docs must not advertise unimplemented retention classes."
+          deliberately_not_changed: "Other guide sections."
+      next_task: T136
+
+  - id: T136
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next smallest safe Flow retention/file-lifecycle task after T135, or keep T010 blocked with evidence."
+    inputs:
+      - "T010 blocked task and owner retention decisions."
+      - "T131 retention lifecycle preflight."
+      - "T132/T133 transcript isolation receipts."
+      - "T134/T135 retention vocabulary fence receipts."
+      - "Current source and DB state."
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only Judge: no source, test, migration, generated-client, frontend, or docs/flows/architecture.md edits."
+      - "Check watchdog before the task transition and before activating any Worker."
+      - "Apply the architecture challenge rule: do not assume current Flow implementation is the correct model."
+      - "Do not auto-start runtime uploaded/generated blob purge, schema migrations, admin purge, API tombstones, service-key identity/review/rerun, webhook outbox, frontend UI, or Flow AI Builder work."
+      - "If proposing schema/data-model/index work, require fresh DB catalog/data/EXPLAIN evidence, complexity-optimizer, supabase-postgres-best-practices, sqlalchemy-alembic review, Claude plan gate, and Antigravity data-integrity review before implementation."
+      - "T010 remains blocked unless this Judge records exact source/DB evidence, allowed_files, stop_if, rollback/recovery, validation commands, and peer-review requirements for a Worker."
+    expected_output:
+      - "Decision: activate a small Worker, activate a Scout/preflight, or keep T010 blocked."
+      - "Architecture challenge for the proposed next slice."
+      - "Consolidation effect for any proposed Worker."
+      - "Exact allowed_files, verification commands, peer-review requirements, DB preflight needs, rollback/recovery notes, and stop_if conditions."
+      - "Disposition of T010, T009/T011, T014/T015/T016, and T901."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "The next correct model requires product/data decisions not yet recorded in state.yaml."
+      - "Required DB/source preflight cannot be run."
+      - "A proposed Worker would need files outside an exact allowed_files list."
     receipt: null
 
 checks:

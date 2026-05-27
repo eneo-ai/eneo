@@ -26,7 +26,6 @@ from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
 from intric.flows.flow_retention_policy import (
     FlowRetentionPolicy,
-    RetentionDataClass,
     resolve_flow_retention_policy,
 )
 from intric.flows.flow_retention_tombstone import (
@@ -84,6 +83,8 @@ class DataRetentionService:
         counts: FlowRuntimeCleanupCounts = {
             "debug_step_results": 0,
             "debug_step_attempts": 0,
+            # Reserved for the generated-artifact lifecycle owner; cleanup
+            # consumers depend on this stable result shape.
             "generated_artifact_rows": 0,
             "generated_artifact_files": 0,
             "reconciled_artifact_references": 0,
@@ -118,7 +119,6 @@ class DataRetentionService:
                         trace_id=trace_id,
                         cutoff=now - timedelta(days=debug_retention_days),
                         policy_source=_flow_runtime_policy_source(
-                            data_class="run_debug_evidence",
                             policy=policy,
                             flow_override_days=flow_override_days,
                             space_default_days=space_default_days,
@@ -758,7 +758,6 @@ def _is_current_attempt_retention_marker(payload: Any) -> bool:
 
 def _flow_runtime_policy_source(
     *,
-    data_class: RetentionDataClass,
     policy: FlowRetentionPolicy,
     flow_override_days: int | None,
     space_default_days: int | None,
@@ -766,27 +765,8 @@ def _flow_runtime_policy_source(
     if flow_override_days is not None:
         return "flow.data_retention_days"
 
-    class_specific_sources = {
-        "source_audio": (
-            policy.source_audio_days,
-            "tenant.flow_settings.retention_policy.source_audio_days",
-        ),
-        "transcript_text": (
-            policy.transcript_text_days,
-            "tenant.flow_settings.retention_policy.transcript_text_days",
-        ),
-        "generated_artifact": (
-            policy.generated_artifact_days,
-            "tenant.flow_settings.retention_policy.generated_artifact_days",
-        ),
-        "run_debug_evidence": (
-            policy.run_debug_evidence_days,
-            "tenant.flow_settings.retention_policy.run_debug_evidence_days",
-        ),
-    }
-    class_specific_days, source = class_specific_sources[data_class]
-    if class_specific_days is not None:
-        return source
+    if policy.run_debug_evidence_days is not None:
+        return "tenant.flow_settings.retention_policy.run_debug_evidence_days"
     if space_default_days is not None:
         return "space.data_retention_days"
-    return "tenant.flow_settings.retention_policy.shared_default_days"
+    raise ValueError("Flow runtime retention policy source is unset.")

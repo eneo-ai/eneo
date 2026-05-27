@@ -119,24 +119,16 @@ These are admin surfaces, not end-user runtime endpoints:
 | --------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | Flow input limits     | `GET/PATCH /api/v1/settings/flow-input-limits`     | Control maximum file/audio sizes and file-count limits                                                                                      |
 | Flow evidence policy  | `GET/PATCH /api/v1/settings/flow-evidence-policy`  | Control sensitive-flow export defaults and stricter raw evidence export behavior, especially for classification-3 spaces                    |
-| Flow retention policy | `GET/PATCH /api/v1/settings/flow-retention-policy` | Configure shared default retention plus class-specific overrides for source audio, transcripts, generated artifacts, and run/debug evidence |
+| Flow retention policy | `GET/PATCH /api/v1/settings/flow-retention-policy` | Configure runtime debug-evidence retention for completed Flow runs                                                                           |
 | AI Builder budget     | `GET/PATCH /api/v1/settings/ai-builder-budget`     | Tune planner token-budget behavior for AI Builder sessions                                                                                  |
 
 ### Flow retention policy shape
 
-`/api/v1/settings/flow-retention-policy` uses a **layered** model:
+`/api/v1/settings/flow-retention-policy` exposes the implemented cleanup policy:
 
-- `shared_default_days`
-- `source_audio_days`
-- `transcript_text_days`
-- `generated_artifact_days`
 - `run_debug_evidence_days`
 
-The idea is:
-
-- use `shared_default_days` as the baseline
-- override only the sensitive classes that need stricter handling
-- send `null` in a PATCH request to clear an override and fall back to the shared/default hierarchy
+Send an integer day count to set the tenant override, or `null` in a PATCH request to fall back to Flow or space retention defaults. Runtime uploaded/generated blob retention is intentionally not part of this endpoint until the Flow file lifecycle owner exists.
 
 This is the intended operator-facing seam for sensitive care-data workflows. Avoid hardcoding these policies in consumer apps when an admin/operator setting is the more appropriate control point.
 

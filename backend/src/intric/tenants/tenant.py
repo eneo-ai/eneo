@@ -246,7 +246,11 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     ) -> dict[str, Any]:
         if v is None:
             return {}
-        return v
+        from intric.flows.flow_retention_policy import (
+            normalize_flow_retention_policy_settings,
+        )
+
+        return normalize_flow_retention_policy_settings(v)
 
     @field_validator("flow_settings")
     @classmethod
@@ -264,6 +268,8 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         - ai_builder.unknown_model_context_window_tokens
         - runtime_policy.default_step_timeout_seconds
         - runtime_policy.max_step_timeout_seconds
+        - retention_policy.run_debug_evidence_days
+        - evidence_policy.classification_3.*
         """
         if not v:
             return {}
