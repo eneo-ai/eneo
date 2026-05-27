@@ -3,23 +3,25 @@ from __future__ import annotations
 from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from intric.authentication.api_key_resolver import (
     ApiKeyAuthResolver,
     ApiKeyValidationError,
 )
-from sqlalchemy.exc import IntegrityError
-
 from intric.authentication.auth_models import (
     ApiKeyHashVersion,
+    ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyType,
     ApiKeyV2InDB,
+    ServicePrincipalInDB,
+    ServicePrincipalState,
 )
 
 
@@ -77,6 +79,20 @@ def _make_v2_key(**overrides: object) -> ApiKeyV2InDB:
     return ApiKeyV2InDB(**base)
 
 
+def _make_service_principal(
+    *, tenant_id: UUID, state: ServicePrincipalState = ServicePrincipalState.ACTIVE
+) -> ServicePrincipalInDB:
+    return ServicePrincipalInDB(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        display_name="Resolver Service",
+        description=None,
+        scope_type=ApiKeyScopeType.TENANT,
+        scope_id=None,
+        state=state,
+    )
+
+
 @pytest.fixture()
 def resolver():
     api_key_repo = AsyncMock()
@@ -113,6 +129,101 @@ async def test_resolve_returns_v2_hmac_match(resolver: ApiKeyAuthResolver):
 
     assert resolved.key.id == key.id
     assert resolved.prefix == ApiKeyType.SK.value
+
+
+@pytest.mark.asyncio
+async def test_resolve_returns_service_key_with_active_service_principal(
+    resolver: ApiKeyAuthResolver,
+):
+    tenant_id = uuid4()
+    principal = _make_service_principal(tenant_id=tenant_id)
+    key = _make_v2_key(
+        tenant_id=tenant_id,
+        ownership=ApiKeyOwnership.SERVICE,
+        owner_user_id=None,
+        service_principal_id=principal.id,
+    )
+    resolver.api_key_repo.get_by_hash = AsyncMock(return_value=key)
+    resolver.api_key_repo.get_service_principal = AsyncMock(return_value=principal)
+
+    resolved = await resolver.resolve("sk_abc123")
+
+    assert resolved.key.id == key.id
+    assert resolved.key.service_principal_id == principal.id
+    resolver.api_key_repo.get_service_principal.assert_awaited_once_with(
+        service_principal_id=principal.id,
+        tenant_id=tenant_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_rejects_service_key_without_service_principal(
+    resolver: ApiKeyAuthResolver,
+):
+    key = _make_v2_key(
+        ownership=ApiKeyOwnership.SERVICE,
+        owner_user_id=None,
+        service_principal_id=None,
+    )
+    resolver.api_key_repo.get_by_hash = AsyncMock(return_value=key)
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await resolver.resolve("sk_abc123")
+
+    assert exc.value.status_code == 401
+    assert exc.value.code == "invalid_api_key"
+    resolver.api_key_repo.get_service_principal.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_rejects_service_key_with_missing_service_principal_row(
+    resolver: ApiKeyAuthResolver,
+):
+    tenant_id = uuid4()
+    principal_id = uuid4()
+    key = _make_v2_key(
+        tenant_id=tenant_id,
+        ownership=ApiKeyOwnership.SERVICE,
+        owner_user_id=None,
+        service_principal_id=principal_id,
+    )
+    resolver.api_key_repo.get_by_hash = AsyncMock(return_value=key)
+    resolver.api_key_repo.get_service_principal = AsyncMock(return_value=None)
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await resolver.resolve("sk_abc123")
+
+    assert exc.value.status_code == 401
+    assert exc.value.code == "invalid_api_key"
+    resolver.api_key_repo.get_service_principal.assert_awaited_once_with(
+        service_principal_id=principal_id,
+        tenant_id=tenant_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_rejects_service_key_with_disabled_service_principal(
+    resolver: ApiKeyAuthResolver,
+):
+    tenant_id = uuid4()
+    principal = _make_service_principal(
+        tenant_id=tenant_id,
+        state=ServicePrincipalState.DISABLED,
+    )
+    key = _make_v2_key(
+        tenant_id=tenant_id,
+        ownership=ApiKeyOwnership.SERVICE,
+        owner_user_id=None,
+        service_principal_id=principal.id,
+    )
+    resolver.api_key_repo.get_by_hash = AsyncMock(return_value=key)
+    resolver.api_key_repo.get_service_principal = AsyncMock(return_value=principal)
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await resolver.resolve("sk_abc123")
+
+    assert exc.value.status_code == 403
+    assert exc.value.code == "service_principal_disabled"
 
 
 @pytest.mark.asyncio

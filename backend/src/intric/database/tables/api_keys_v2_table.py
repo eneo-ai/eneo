@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from intric.database.tables.base_class import BasePublic
+from intric.database.tables.service_principals_table import ServicePrincipals
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
 
@@ -19,6 +20,14 @@ class ApiKeysV2(BasePublic):
     ownership: Mapped[str] = mapped_column(nullable=False, server_default="user")
     owner_user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
+    )
+    service_principal_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            ServicePrincipals.id,
+            ondelete="RESTRICT",
+            name="fk_api_keys_v2_service_principal",
+        ),
+        nullable=True,
     )
     scope_type: Mapped[str] = mapped_column(nullable=False)
     scope_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
@@ -68,6 +77,19 @@ class ApiKeysV2(BasePublic):
     delegation_depth: Mapped[int] = mapped_column(nullable=False, server_default="0")
 
     __table_args__ = (
+        sa.CheckConstraint(
+            "ownership <> 'service' OR service_principal_id IS NOT NULL",
+            name="ck_api_keys_v2_service_principal_required",
+        ),
+        sa.CheckConstraint(
+            "ownership <> 'user' OR service_principal_id IS NULL",
+            name="ck_api_keys_v2_user_without_service_principal",
+        ),
+        sa.Index(
+            "idx_api_keys_v2_service_principal_id",
+            "service_principal_id",
+            postgresql_where=sa.text("service_principal_id IS NOT NULL"),
+        ),
         sa.Index("idx_api_keys_v2_tenant_scope", "tenant_id", "scope_type", "scope_id"),
         sa.Index("idx_api_keys_v2_key_hash", "key_hash"),
         sa.Index("idx_api_keys_v2_expires_at", "expires_at"),

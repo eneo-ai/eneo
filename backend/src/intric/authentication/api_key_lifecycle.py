@@ -117,11 +117,23 @@ class ApiKeyLifecycleService:
         owner_user_id = (
             None if request.ownership == ApiKeyOwnership.SERVICE else user.id
         )
+        service_principal_id: UUID | None = None
+        if request.ownership == ApiKeyOwnership.SERVICE:
+            service_principal = await self.api_key_repo.create_service_principal(
+                tenant_id=user.tenant_id,
+                display_name=request.name,
+                description=request.description,
+                scope_type=request.scope_type.value,
+                scope_id=request.scope_id,
+                created_by_user_id=user.id,
+            )
+            service_principal_id = service_principal.id
 
         record = await self.api_key_repo.create(
             tenant_id=user.tenant_id,
             ownership=request.ownership.value,
             owner_user_id=owner_user_id,
+            service_principal_id=service_principal_id,
             created_by_user_id=user.id,
             scope_type=request.scope_type.value,
             scope_id=request.scope_id,
@@ -142,6 +154,22 @@ class ApiKeyLifecycleService:
         )
 
         if self.audit_service is not None:
+            audit_extra = {
+                "scope_type": record.scope_type,
+                "scope_id": str(record.scope_id) if record.scope_id else None,
+                "permission": record.permission,
+                "key_type": record.key_type,
+                "expires_at": record.expires_at.isoformat()
+                if record.expires_at
+                else None,
+                "resource_permissions": resource_permissions_value,
+                "allowed_origins": record.allowed_origins,
+                "allowed_ips": record.allowed_ips,
+                "rate_limit": record.rate_limit,
+            }
+            if service_principal_id is not None:
+                audit_extra["service_principal_id"] = str(service_principal_id)
+
             await self.audit_service.log_async(
                 tenant_id=user.tenant_id,
                 user=user,
@@ -152,19 +180,7 @@ class ApiKeyLifecycleService:
                 metadata=AuditMetadata.standard(
                     actor=user,
                     target=record,
-                    extra={
-                        "scope_type": record.scope_type,
-                        "scope_id": str(record.scope_id) if record.scope_id else None,
-                        "permission": record.permission,
-                        "key_type": record.key_type,
-                        "expires_at": record.expires_at.isoformat()
-                        if record.expires_at
-                        else None,
-                        "resource_permissions": resource_permissions_value,
-                        "allowed_origins": record.allowed_origins,
-                        "allowed_ips": record.allowed_ips,
-                        "rate_limit": record.rate_limit,
-                    },
+                    extra=audit_extra,
                 ),
                 ip_address=ip_address,
                 request_id=request_id,
@@ -228,11 +244,17 @@ class ApiKeyLifecycleService:
         resource_permissions_value = _resource_permissions_to_json(
             key.resource_permissions
         )
+        service_principal_id = (
+            self._require_service_principal_id(key)
+            if key.ownership == ApiKeyOwnership.SERVICE
+            else None
+        )
 
         record = await self.api_key_repo.create(
             tenant_id=key.tenant_id,
             ownership=key.ownership,
             owner_user_id=key.owner_user_id,
+            service_principal_id=service_principal_id,
             created_by_user_id=user.id,
             scope_type=key.scope_type,
             scope_id=key.scope_id,
@@ -272,6 +294,14 @@ class ApiKeyLifecycleService:
         )
 
         if self.audit_service is not None:
+            audit_extra = {
+                "old_key_id": str(key.id),
+                "rotation_grace_until": grace_until.isoformat(),
+                "grace_period_disabled": disable_grace,
+            }
+            if service_principal_id is not None:
+                audit_extra["service_principal_id"] = str(service_principal_id)
+
             await self.audit_service.log_async(
                 tenant_id=user.tenant_id,
                 user=user,
@@ -282,11 +312,7 @@ class ApiKeyLifecycleService:
                 metadata=AuditMetadata.standard(
                     actor=user,
                     target=record,
-                    extra={
-                        "old_key_id": str(key.id),
-                        "rotation_grace_until": grace_until.isoformat(),
-                        "grace_period_disabled": disable_grace,
-                    },
+                    extra=audit_extra,
                 ),
                 ip_address=ip_address,
                 request_id=request_id,
@@ -427,6 +453,22 @@ class ApiKeyLifecycleService:
         )
 
         updated_key = updated or key
+        if key.ownership == ApiKeyOwnership.SERVICE and (
+            "name" in updates or "description" in updates
+        ):
+            service_principal_id = self._require_service_principal_id(key)
+            synced = await self.api_key_repo.update_service_principal_display(
+                service_principal_id=service_principal_id,
+                tenant_id=key.tenant_id,
+                display_name=updated_key.name,
+                description=updated_key.description,
+            )
+            if synced is None:
+                raise ApiKeyValidationError(
+                    status_code=500,
+                    code="service_principal_missing",
+                    message="Service-owned API key is missing a service principal.",
+                )
 
         if self.audit_service is not None:
             changes: dict[str, dict[str, object]] = {}
@@ -956,6 +998,15 @@ class ApiKeyLifecycleService:
                 message="API key not found.",
             )
         return key
+
+    def _require_service_principal_id(self, key: ApiKeyV2InDB) -> UUID:
+        if key.service_principal_id is None:
+            raise ApiKeyValidationError(
+                status_code=500,
+                code="service_principal_missing",
+                message="Service-owned API key is missing a service principal.",
+            )
+        return key.service_principal_id
 
     async def create_legacy_key(
         self,

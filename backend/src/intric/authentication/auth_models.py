@@ -259,6 +259,11 @@ class ApiKeyState(str, Enum):
     EXPIRED = "expired"
 
 
+class ServicePrincipalState(str, Enum):
+    ACTIVE = "active"
+    DISABLED = "disabled"
+
+
 class ApiKeyStateReasonCode(str, Enum):
     SECURITY_CONCERN = "security_concern"
     ABUSE_DETECTED = "abuse_detected"
@@ -403,8 +408,25 @@ class ApiKeyV2(BaseModel):
         return resource_permissions.model_dump(mode="json", exclude_unset=True)
 
 
+class ServicePrincipalInDB(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    display_name: str
+    description: Optional[str] = None
+    scope_type: ApiKeyScopeType
+    scope_id: Optional[UUID] = None
+    state: ServicePrincipalState
+    created_by_user_id: Optional[UUID] = None
+    disabled_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ApiKeyV2InDB(ApiKeyV2):
     tenant_id: UUID
+    service_principal_id: Optional[UUID] = None
     created_by_key_id: Optional[UUID] = None
     delegation_depth: int = 0
     key_hash: str

@@ -20,12 +20,14 @@ from intric.authentication.auth_models import (
     PERMISSION_LEVEL_ORDER,
     ApiKeyHashVersion,
     ApiKeyInDB,
+    ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyType,
     ApiKeyV2InDB,
     ResourcePermissions,
+    ServicePrincipalState,
 )
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.users_table import Users
@@ -258,6 +260,30 @@ class ApiKeyAuthResolver:
                 and prefix != ApiKeyType.SK.value
             ):
                 return None
+
+        if record.ownership == ApiKeyOwnership.SERVICE:
+            if record.service_principal_id is None:
+                raise ApiKeyValidationError(
+                    status_code=401,
+                    code="invalid_api_key",
+                    message="API key service principal is invalid.",
+                )
+            service_principal = await self.api_key_repo.get_service_principal(
+                service_principal_id=record.service_principal_id,
+                tenant_id=record.tenant_id,
+            )
+            if service_principal is None:
+                raise ApiKeyValidationError(
+                    status_code=401,
+                    code="invalid_api_key",
+                    message="API key service principal is invalid.",
+                )
+            if service_principal.state != ServicePrincipalState.ACTIVE:
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="service_principal_disabled",
+                    message="Service principal is disabled.",
+                )
 
         return ResolvedApiKey(key=record, plain_key=plain_key, prefix=prefix)
 

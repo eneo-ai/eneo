@@ -8,8 +8,15 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
-from intric.authentication.auth_models import ApiKeyScopeType, ApiKeyState, ApiKeyV2InDB
+from intric.authentication.auth_models import (
+    ApiKeyScopeType,
+    ApiKeyState,
+    ApiKeyV2InDB,
+    ServicePrincipalInDB,
+    ServicePrincipalState,
+)
 from intric.database.tables.api_keys_v2_table import ApiKeysV2
+from intric.database.tables.service_principals_table import ServicePrincipals
 from intric.database.tables.users_table import Users
 
 
@@ -24,6 +31,71 @@ class ApiKeysV2Repository:
         record = await self.session.scalar(query)
 
         return ApiKeyV2InDB.model_validate(record)
+
+    async def create_service_principal(
+        self,
+        *,
+        tenant_id: UUID,
+        display_name: str,
+        description: str | None,
+        scope_type: str,
+        scope_id: UUID | None,
+        created_by_user_id: UUID | None,
+    ) -> ServicePrincipalInDB:
+        query = (
+            sa.insert(ServicePrincipals)
+            .values(
+                tenant_id=tenant_id,
+                display_name=display_name,
+                description=description,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                state=ServicePrincipalState.ACTIVE.value,
+                created_by_user_id=created_by_user_id,
+            )
+            .returning(ServicePrincipals)
+        )
+        record = await self.session.scalar(query)
+
+        return ServicePrincipalInDB.model_validate(record)
+
+    async def update_service_principal_display(
+        self,
+        *,
+        service_principal_id: UUID,
+        tenant_id: UUID,
+        display_name: str,
+        description: str | None,
+    ) -> ServicePrincipalInDB | None:
+        query = (
+            sa.update(ServicePrincipals)
+            .where(ServicePrincipals.id == service_principal_id)
+            .where(ServicePrincipals.tenant_id == tenant_id)
+            .values(display_name=display_name, description=description)
+            .returning(ServicePrincipals)
+        )
+        record = await self.session.scalar(query)
+        if record is None:
+            return None
+
+        return ServicePrincipalInDB.model_validate(record)
+
+    async def get_service_principal(
+        self,
+        *,
+        service_principal_id: UUID,
+        tenant_id: UUID,
+    ) -> ServicePrincipalInDB | None:
+        query = (
+            sa.select(ServicePrincipals)
+            .where(ServicePrincipals.id == service_principal_id)
+            .where(ServicePrincipals.tenant_id == tenant_id)
+        )
+        record = await self.session.scalar(query)
+        if record is None:
+            return None
+
+        return ServicePrincipalInDB.model_validate(record)
 
     async def get(self, *, key_id: UUID, tenant_id: UUID) -> Optional[ApiKeyV2InDB]:
         query = (

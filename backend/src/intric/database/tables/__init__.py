@@ -4,6 +4,7 @@ _TABLE_MODULES = (
     "intric.database.tables.ai_models_table",
     "intric.database.tables.allowed_origins_table",
     "intric.database.tables.api_keys_table",
+    "intric.database.tables.service_principals_table",
     "intric.database.tables.api_keys_v2_table",
     "intric.database.tables.audit_action_config_table",
     "intric.database.tables.audit_category_config_table",
