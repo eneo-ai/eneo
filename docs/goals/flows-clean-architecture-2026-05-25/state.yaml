@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T109
+active_task: T110
 
 tasks:
   - id: T001
@@ -11281,7 +11281,7 @@ tasks:
   - id: T109
     type: scout
     assignee: Scout
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Preflight the review-checkpoint legacy snapshot fallback and decide whether it can move to Judge/Worker deletion or must remain temporarily."
     inputs:
@@ -11317,6 +11317,168 @@ tasks:
       - "The DB is unavailable and current-data evidence cannot be collected."
       - "A current frontend/generated-client/API caller depends on step_snapshot_available=false semantics in a way that requires product/API version decision."
       - "Deletion would require a migration or generated-client/API change beyond a small reviewable Worker."
+    receipt:
+      completed_at: "2026-05-27T02:40:00+02:00"
+      result: delete_now_via_judge
+      classification: delete_now
+      summary: "T109 preflighted the review-checkpoint legacy snapshot fallback. Current runtime source always opens checkpoints from a published runtime step and passes review_mode/output_type snapshot data; current local DB data has zero checkpoints missing review_mode or output_type; the frontend review panel does not use step_snapshot_available or fallback metadata; only generated schema/docs and backend compatibility tests preserve the false branch. The next step should be a Judge for a small API/schema cleanup Worker, not immediate Scout-side deletion."
+      source_inventory:
+        runtime_snapshot_owner:
+          - "backend/src/intric/flows/runtime/executor.py:1477 opens review checkpoints after completed steps."
+          - "backend/src/intric/flows/runtime/executor.py:1500 passes step_label, :1501 passes review_mode, :1502 passes output_type, and :1503 passes output_contract_json from RuntimeStep."
+        persistence_optional_fallback:
+          - "backend/src/intric/flows/infrastructure/flow_run_repo.py:326-329 keeps snapshot inputs optional on create_or_get_review_checkpoint_for_attempt."
+          - "backend/src/intric/flows/infrastructure/flow_run_repo.py:397-400 keeps snapshot inputs optional on open_review_checkpoint_for_completed_step."
+          - "backend/src/intric/flows/infrastructure/flow_run_repo.py:360-363 persists nullable review_mode/output_type/output_contract_json."
+        domain_api_fallback:
+          - "backend/src/intric/flows/domain/flow.py:331-349 models snapshot fields as optional and describes legacy checkpoints."
+          - "backend/src/intric/flows/domain/flow.py:367-369 computes step_snapshot_available from review_mode/output_type nullability."
+          - "backend/src/intric/flows/api/flow_models.py:1005-1039 exposes optional snapshot fields and step_snapshot_available on FlowRunReviewCheckpointPublic."
+          - "backend/src/intric/flows/api/flow_models.py:1804-1838 exposes the same legacy fallback shape on FlowRunReviewCheckpointEvidencePublic."
+          - "backend/src/intric/flows/api/flow_run_execution_router.py:204-210 documents the client fallback behavior for step_snapshot_available=false."
+          - "backend/src/intric/flows/api/flow_assembler.py:193-199 maps the domain property into public responses."
+          - "backend/src/intric/flows/flow_run_evidence_bundle.py:305-311 serializes step_snapshot_available and output_contract into evidence bundles."
+        db_schema:
+          - "backend/src/intric/database/tables/flow_tables.py:1143-1146 keeps step_label/review_mode/output_type/output_contract_json nullable."
+          - "backend/src/intric/database/tables/flow_tables.py:1223-1231 allows review_mode/output_type to be NULL through check constraints."
+          - "backend/alembic/versions/20260508_review_checkpoint_contract_snapshot.py:28-56 added the snapshot columns as nullable compatibility columns."
+        frontend_and_generated_client:
+          - "frontend/packages/intric-js/src/types/schema.d.ts:15688-15703 and :15831-15846 contain generated optional step_snapshot_available and legacy descriptions."
+          - "frontend/apps/web/src/lib/features/flows/components/FlowRunReviewCheckpointPanel.svelte:92-96 consumes current_payload_json, and :342-345 renders original_payload_json; it does not branch on step_snapshot_available, step_label, review_mode, output_type, or output_contract."
+          - "frontend/apps/web/src/lib/features/flows/components/FlowRunReviewCheckpointPanel.test.ts:33-64 builds checkpoints without snapshot metadata because the generated type makes the fields optional."
+      db_evidence:
+        table: public.flow_run_review_checkpoints
+        row_count: 15
+        missing_snapshot_flag_inputs: 0
+        missing_review_mode: 0
+        missing_output_type: 0
+        missing_step_label: 0
+        missing_output_contract_json: 0
+        requires_step_snapshot_false: 0
+        review_mode_output_type_counts:
+          - "edit/json: 8"
+          - "edit/text: 6"
+          - "view/json: 1"
+        catalog:
+          - "review_mode and output_type are nullable columns with CHECK constraints that allow NULL."
+          - "Current indexes are unrelated to snapshot nullability; no index change is justified by the T109 query shape."
+        explain: "The null-count preflight used a sequential scan over 15 rows, execution time 0.076 ms. This is acceptable for read-only Scout evidence; any Worker migration should preflight row counts and fail before altering nullability if rows are missing required snapshots."
+      caller_and_test_classification:
+        current_frontend_callers: "No web frontend caller branches on step_snapshot_available; the panel uses payload/revision/deadline/state only."
+        generated_client_impact: "OpenAPI regeneration will remove or reshape generated optional fields and comments in frontend/packages/intric-js/src/types/schema.d.ts."
+        normal_snapshot_tests:
+          - "backend/tests/unittests/flows/test_flow_models.py:208-247 protects normal public render-contract exposure."
+          - "backend/tests/integration/flows/test_flow_review_pause_worker_contract.py:764-769 protects immutable snapshot behavior after draft mutation."
+          - "backend/tests/integration/flows/test_flow_evidence_api_contracts.py:815-820 and :977-982 protect evidence/export snapshot fields."
+        compatibility_only_tests:
+          - "backend/tests/unittests/flows/test_flow_models.py:250-278 only protects missing legacy snapshot behavior and should be deleted with the fallback."
+        fixture_debt:
+          - "backend/tests/integration/flows/test_flow_run_review_checkpoint_repository.py:230-242, :357-369, and :488-544 directly create checkpoints without production-equivalent snapshot metadata; a Worker should update these fixtures rather than preserving nullable source defaults."
+          - "frontend/apps/web/src/lib/features/flows/components/FlowRunReviewCheckpointPanel.test.ts:33-64 omits optional generated snapshot fields but does not test fallback behavior."
+      consolidation_effect:
+        reused_existing_owner: "FlowRunReviewCheckpoint domain model, FlowRunRepository review-checkpoint creation, FlowAssembler public mapping, Flow evidence bundle serialization, generated OpenAPI client types, and frontend review panel."
+        logic_moved_from: "N/A; Scout only."
+        logic_deleted: "N/A; Scout only."
+        duplicate_path_removed: "N/A; proposed deletion Worker should remove the step_snapshot_available false/fallback path."
+        new_code_added: "No source code."
+        why_existing_owners_were_insufficient: "Existing owners are sufficient; the cleanup should deepen them by making snapshot ownership required instead of adding a parallel adapter."
+        guard_preventing_duplicate_logic_from_returning: "Future Worker should update architecture/API guards or focused tests so review checkpoints cannot reintroduce missing snapshot fallback behavior."
+        net_flow_logic_surface_area: "preserved in T109; expected reduced in deletion Worker"
+        if_increased_why: "N/A"
+      recommendation:
+        next_task: T110
+        action: "Activate a Judge to choose the smallest safe Worker for deleting the review-checkpoint legacy snapshot fallback."
+        rationale: "Current data and current frontend callers do not require the fallback, but the cleanup crosses public API schemas, OpenAPI/generated client, tests, repository signatures, and likely DB nullability. That requires a Judge and full review gates before implementation."
+        not_product_blocked: true
+        worker_shape_to_evaluate:
+          - "Remove public step_snapshot_available from checkpoint/evidence schemas, router docs, assembler mapping, evidence bundle serialization, generated client, and compatibility-only tests."
+          - "Make review_mode and output_type required in domain/application/repository creation paths, or split DB nullability into a separate Worker if the Judge decides the migration blast radius is too large."
+          - "Keep output_contract nullable because a valid text/document checkpoint may have no output contract; do not confuse no contract with missing snapshot."
+          - "Keep step_label nullable only if source review labels can genuinely be empty; otherwise the Judge may include it in the required snapshot invariant."
+      commands:
+        - cmd: "ruby -rjson -e '... watchdog halt blocker check ...'"
+          status: pass
+          output: "schema_version=1; status=ok; halt_blockers=[]"
+        - cmd: "git status --short --branch && git diff --cached --name-only"
+          status: pass
+          output: "feature/refactor-flows-flowai ahead 75; no staged files before T109; unrelated dirty/untracked files preserved."
+        - cmd: "sed -n '1,220p' /Users/ccimen/.codex/skills/complexity-optimizer/SKILL.md && sed -n '1,220p' /Users/ccimen/.agents/skills/supabase-postgres-best-practices/SKILL.md && sed -n '1,220p' /Users/ccimen/.agents/skills/sqlalchemy-alembic-expert-best-practices-code-review/SKILL.md && sed -n '1,220p' /Users/ccimen/.agents/skills/fastapi/SKILL.md"
+          status: pass
+          output: "Loaded complexity, Postgres/Alembic, and FastAPI guidance for read-only DB/API schema preflight."
+        - cmd: "rg -n 'step_snapshot_available|legacy checkpoints|legacy checkpoint|step snapshots|step snapshot|output_contract_json|step_label|review_mode|output_type' backend/src/intric/flows/domain/flow.py backend/src/intric/flows/api/flow_models.py backend/src/intric/flows/api/flow_assembler.py backend/src/intric/flows/api/flow_run_execution_router.py backend/src/intric/flows/flow_run_evidence_bundle.py backend/src/intric/flows/flow_run_export_json.py backend/src/intric/flows/infrastructure/flow_run_repo.py"
+          status: pass
+          output: "Mapped backend fallback and snapshot surfaces."
+        - cmd: "rg -n 'step_snapshot_available|legacy checkpoints|legacy checkpoint|FlowRunReviewCheckpoint' frontend/apps/web/src frontend/packages/intric-js/src frontend/apps/docs-site/src/content/guides/flows-api-guide.mdx --glob '!**/schema.d.ts'"
+          status: pass
+          output: "No web frontend fallback branch found; generated client/type aliases and panel tests reference the checkpoint type."
+        - cmd: "rg -n 'step_snapshot_available|legacy checkpoints|legacy checkpoint|FlowRunReviewCheckpoint' frontend/packages/intric-js/src/types/schema.d.ts frontend/packages/intric-js/src/types/resources.d.ts frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts frontend/packages/intric-js/src/endpoints/flows.js"
+          status: pass
+          output: "Generated schema and endpoint types expose the public checkpoint shape."
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -At < read-only count/catalog queries >"
+          status: pass
+          output: "row_count=15; missing snapshot inputs=0; missing review_mode=0; missing output_type=0; missing step_label=0; missing output_contract_json=0."
+        - cmd: "EXPLAIN (ANALYZE, BUFFERS) < review checkpoint null-count query >"
+          status: pass
+          output: "Seq Scan on flow_run_review_checkpoints over 15 rows; Execution Time 0.076 ms."
+        - cmd: "rg -n 'step_snapshot_available|legacy_review_checkpoint|missing_step_snapshot|legacy checkpoints|legacy checkpoint|step snapshots' backend/tests/unittests/flows backend/tests/integration/flows frontend/apps/web/src/lib/features/flows frontend/packages/intric-js/src"
+          status: pass
+          output: "Identified normal snapshot tests and one compatibility-only backend unit test."
+        - cmd: "ruby -e 'require \"yaml\"; s=YAML.load_file(\"docs/goals/flows-clean-architecture-2026-05-25/state.yaml\"); puts \"goal.status=#{s.dig(\"goal\",\"status\")}\"; puts \"active_task=#{s[\"active_task\"].inspect}\"; tasks=s[\"tasks\"]||[]; puts tasks.group_by{|t| t[\"status\"]}.transform_values(&:size).inspect; %w[T109 T110].each{|id| t=tasks.find{|x| x[\"id\"]==id}; puts \"#{id}=#{t&&t.slice(\"id\",\"status\",\"objective\")}\"}; raise \"bad active\" unless s[\"active_task\"]==\"T110\"; raise \"T109 not done\" unless tasks.find{|t| t[\"id\"]==\"T109\"}[\"status\"]==\"done\"; raise \"T110 not active\" unless tasks.find{|t| t[\"id\"]==\"T110\"}[\"status\"]==\"active\"'"
+          status: pass
+          output: "active_task=T110; status groups after receipt: done=108, blocked=4, complete=1, active=1."
+        - cmd: "git diff --check -- docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+          status: pass
+          output: "No whitespace errors."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py -q"
+          status: pass
+          output: "14 passed in 3.76s"
+      review_tier: "T109 used local validation only because it is read-only. T110/T111 must use full Claude review, and Antigravity should be used if the Worker includes a migration or public OpenAPI/generated-client deletion."
+      naming_gate: "No new source names. Future Worker names should use review-checkpoint snapshot language, not generic compatibility cleanup."
+      next_task: T110
+
+  - id: T110
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the smallest safe Worker to delete or consolidate the review-checkpoint legacy snapshot fallback."
+    inputs:
+      - "T109 receipt and source/data/caller/test inventory."
+      - "docs/flows/architecture.md Known Open Decisions And Compatibility Paths."
+      - "backend/src/intric/flows/domain/flow.py"
+      - "backend/src/intric/flows/api/flow_models.py"
+      - "backend/src/intric/flows/api/flow_run_execution_router.py"
+      - "backend/src/intric/flows/api/flow_assembler.py"
+      - "backend/src/intric/flows/flow_run_evidence_bundle.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/alembic/versions"
+      - "backend/tests/unittests/flows"
+      - "backend/tests/integration/flows"
+      - "frontend/packages/intric-js/src"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowRunReviewCheckpointPanel.test.ts"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Judge only; no source edits, test edits, migrations, frontend edits, generated-client edits, or docs/flows edits."
+      - "Before approving a Worker, decide whether the source/API cleanup and DB nullability migration stay in one small slice or split into two Workers."
+      - "Do not preserve step_snapshot_available or nullable review_mode/output_type for imaginary legacy users. There are no production Flow users; preserve only if current source/data/caller evidence requires it."
+      - "Do not broaden into retention, service-key identity/review/rerun, raw evidence export policy, frontend form-schema conflict behavior, browser upload/audio ownership, webhook outbox, or Flow AI Builder cleanup."
+      - "Do not create a new adapter/helper/manager; deepen existing review-checkpoint owners."
+    expected_output:
+      - "Exact Worker objective and commit message."
+      - "Exact allowed_files, including migrations/generated-client files only if the Judge approves that blast radius."
+      - "FastAPI/OpenAPI/generated-client impact and required update command."
+      - "DB migration plan if nullability is included: revision/down_revision, preflight null-row abort, upgrade/downgrade behavior, lock notes, and rollback notes."
+      - "Verification commands: targeted backend tests, integration tests, migration tests if any, OpenAPI/generated-client update/check, frontend type/test checks if generated types change, ruff/pyright where relevant."
+      - "Peer-review tier: full Claude plan gate before implementation; Antigravity required if the approved Worker includes a migration or public API/generated-client deletion, otherwise optional only on disagreement."
+      - "Consolidation effect and naming-gate answer."
+      - "Stop_if conditions for DB data drift, OpenAPI/client incompatibility, product/API version decision, broad unrelated test failures, or scope expansion."
+    stop_if:
+      - "The Worker would require product/API versioning decision because a current caller depends on step_snapshot_available=false behavior."
+      - "DB preflight shows any current checkpoint missing review_mode or output_type."
+      - "The deletion requires broad frontend UI redesign rather than generated type/test alignment."
+      - "The cleanup cannot be kept reviewable as one Worker and needs to be split."
     receipt: null
 
 checks:
