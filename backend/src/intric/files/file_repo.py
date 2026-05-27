@@ -28,7 +28,8 @@ class FileRepository:
         ids: list[UUID],
         owner_type: str,
         owner_user_id: UUID | None = None,
-        owner_api_key_id: UUID | None = None,
+        owner_service_id: UUID | None = None,
+        tenant_id: UUID | None = None,
         include_transcription: bool = True,
     ) -> list[File]:
         stmt = (
@@ -37,10 +38,12 @@ class FileRepository:
             .where(Files.owner_type == owner_type)
             .order_by(Files.created_at)
         )
+        if tenant_id is not None:
+            stmt = stmt.where(Files.tenant_id == tenant_id)
         if owner_user_id is not None:
             stmt = stmt.where(Files.owner_user_id == owner_user_id)
-        if owner_api_key_id is not None:
-            stmt = stmt.where(Files.owner_api_key_id == owner_api_key_id)
+        if owner_service_id is not None:
+            stmt = stmt.where(Files.owner_service_id == owner_service_id)
 
         if not include_transcription:
             stmt = stmt.options(defer(Files.transcription, raiseload=True))
@@ -88,17 +91,20 @@ class FileRepository:
         *,
         owner_type: str,
         owner_user_id: UUID | None = None,
-        owner_api_key_id: UUID | None = None,
+        owner_service_id: UUID | None = None,
+        tenant_id: UUID | None = None,
     ) -> list[File]:
         stmt = (
             sa.select(Files)
             .where(Files.owner_type == owner_type)
             .order_by(Files.created_at)
         )
+        if tenant_id is not None:
+            stmt = stmt.where(Files.tenant_id == tenant_id)
         if owner_user_id is not None:
             stmt = stmt.where(Files.owner_user_id == owner_user_id)
-        if owner_api_key_id is not None:
-            stmt = stmt.where(Files.owner_api_key_id == owner_api_key_id)
+        if owner_service_id is not None:
+            stmt = stmt.where(Files.owner_service_id == owner_service_id)
         files_in_db = await self.session.scalars(stmt)
         return [File.model_validate(file) for file in files_in_db]
 
@@ -117,7 +123,8 @@ class FileRepository:
         id: UUID,
         owner_type: str,
         owner_user_id: UUID | None = None,
-        owner_api_key_id: UUID | None = None,
+        owner_service_id: UUID | None = None,
+        tenant_id: UUID | None = None,
     ) -> File | None:
         """Atomic owner-bound delete. Returns None if no matching row."""
         stmt = (
@@ -125,10 +132,12 @@ class FileRepository:
             .where(Files.id == id, Files.owner_type == owner_type)
             .returning(Files)
         )
+        if tenant_id is not None:
+            stmt = stmt.where(Files.tenant_id == tenant_id)
         if owner_user_id is not None:
             stmt = stmt.where(Files.owner_user_id == owner_user_id)
-        if owner_api_key_id is not None:
-            stmt = stmt.where(Files.owner_api_key_id == owner_api_key_id)
+        if owner_service_id is not None:
+            stmt = stmt.where(Files.owner_service_id == owner_service_id)
         result = await self.session.execute(stmt)
         row = result.scalar_one_or_none()
         if row is None:
@@ -173,7 +182,7 @@ class FileRepository:
                 "transcription": None,
                 "owner_type": file.owner_type,
                 "owner_user_id": file.owner_user_id,
-                "owner_api_key_id": file.owner_api_key_id,
+                "owner_service_id": file.owner_service_id,
                 "tenant_id": file.tenant_id,
             }
         )

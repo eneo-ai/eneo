@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 
+from intric.authentication.auth_models import ApiKeyPermission
 from intric.authentication.principal_types import PrincipalType
 from intric.flows.application.flow_run_review_checkpoint_service import (
     FlowRunReviewCheckpointService,
@@ -55,6 +56,8 @@ def _service_key_user(user):
             "active_api_key": SimpleNamespace(
                 id=uuid4(),
                 ownership="service",
+                service_principal_id=uuid4(),
+                permission=ApiKeyPermission.WRITE,
                 resource_permissions=None,
             ),
         }
@@ -89,8 +92,10 @@ def _review_checkpoint(
         output_type=FlowOutputType.JSON,
         output_contract_json=output_contract_json,
         requester_user_id=user.id,
+        requester_service_id=None,
         requester_principal_type=PrincipalType.USER,
         decided_by_user_id=None,
+        decided_by_service_id=None,
         decided_by_principal_type=None,
         next_step_ids_json=[],
         resume_idempotency_key=resume_idempotency_key,
@@ -147,12 +152,15 @@ async def test_review_mutations_allow_service_key_for_own_run(user, method_name)
             "user_id": None,
             "principal_type": PrincipalType.SERVICE_KEY.value,
             "principal_user_id": None,
-            "principal_api_key_id": service_user.active_api_key.id,
+            "principal_service_id": service_user.active_api_key.service_principal_id,
+            "created_by_api_key_id": service_user.active_api_key.id,
+            "runtime_service_permission": ApiKeyPermission.WRITE,
         }
     )
     checkpoint = _review_checkpoint(user, run).model_copy(
         update={
             "requester_user_id": None,
+            "requester_service_id": service_user.active_api_key.service_principal_id,
             "requester_principal_type": PrincipalType.SERVICE_KEY,
         }
     )
@@ -196,7 +204,11 @@ async def test_review_mutations_allow_service_key_for_own_run(user, method_name)
         awaited = getattr(flow_run_repo, repo_method_name).await_args.kwargs
     principal = awaited["principal"]
     assert principal.principal_type == PrincipalType.SERVICE_KEY
-    assert principal.principal_api_key_id == service_user.active_api_key.id
+    assert (
+        principal.principal_service_id
+        == service_user.active_api_key.service_principal_id
+    )
+    assert principal.actor_api_key_id == service_user.active_api_key.id
     access_policy.load_run.assert_awaited_once_with(
         run_id=run.id,
         flow_id=flow_id,

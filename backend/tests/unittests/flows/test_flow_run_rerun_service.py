@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 
+from intric.authentication.principal_types import PrincipalType
 from intric.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from intric.flows.application.flow_run_rerun_service import FlowRunRerunService
 from intric.flows.enums import RerunDependencyKind
@@ -17,7 +18,7 @@ from intric.flows.flow_run_rerun_request import (
 )
 from intric.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from intric.flows.published_definition import FLOW_PUBLISHED_FORM_SCHEMA_INVALID
-from intric.main.exceptions import BadRequestException
+from intric.main.exceptions import BadRequestException, UnauthorizedException
 from tests.unittests.flows.test_flow_run_service import (
     _flow,
     _flow_repo,
@@ -25,6 +26,7 @@ from tests.unittests.flows.test_flow_run_service import (
     _rerun_command_result,
     _run,
     _runtime_version,
+    _service_key_user,
 )
 
 
@@ -131,13 +133,16 @@ async def test_rerun_step_builds_repository_command(user):
         ids=expected_file_ids,
         owner_type="user",
         owner_user_id=user.id,
-        owner_api_key_id=None,
+        owner_service_id=None,
+        tenant_id=user.tenant_id,
         include_transcription=False,
     )
     expected_fingerprint = build_rerun_request_fingerprint(
         FlowRunRerunRequestFingerprintInput(
             tenant_id=user.tenant_id,
+            requested_by_principal_type=PrincipalType.USER,
             requested_by_user_id=user.id,
+            requested_by_service_id=None,
             flow_id=flow.id,
             flow_run_id=run.id,
             rerun_step_id=root_step.id,
@@ -160,7 +165,9 @@ async def test_rerun_step_builds_repository_command(user):
     assert kwargs["step_inputs_json"] == {
         str(root_step.id): {"file_ids": [str(file_id) for file_id in expected_file_ids]}
     }
-    assert kwargs["requested_by_user_id"] == user.id
+    assert kwargs["requested_by_principal"].principal_type == PrincipalType.USER
+    assert kwargs["requested_by_principal"].principal_user_id == user.id
+    assert kwargs["requested_by_principal"].principal_service_id is None
     invalidated_steps = kwargs["invalidated_steps"]
     assert [
         (step.step_id, step.step_order, step.dependency_kinds)
@@ -173,6 +180,121 @@ async def test_rerun_step_builds_repository_command(user):
             (RerunDependencyKind.INPUT_SOURCE_PREVIOUS_STEP,),
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_service_principal_reruns_own_run(user):
+    service_user = _service_key_user(user)
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    flow = flow.model_copy(update={"steps": [flow.steps[0]]})
+    root_step = flow.steps[0]
+    run = _run(user=user, flow_id=flow.id).model_copy(
+        update={
+            "status": FlowRunStatus.COMPLETED,
+            "revision": 5,
+            "principal_type": PrincipalType.SERVICE_KEY.value,
+            "principal_user_id": None,
+            "principal_service_id": service_user.active_api_key.service_principal_id,
+            "created_by_api_key_id": service_user.active_api_key.id,
+            "runtime_service_permission": service_user.active_api_key.permission,
+        }
+    )
+    service = FlowRunRerunService(
+        user=service_user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+    )
+    flow_run_repo.get.return_value = run
+    flow_version_repo.get.return_value = _runtime_version(user=user, flow=flow)
+    flow_run_repo.get_latest_completed_attempt_id_for_step.return_value = None
+    expected_result = _rerun_command_result(
+        user=user,
+        run=run,
+        rerun_step_id=root_step.id,
+        invalidated_step_ids=[root_step.id],
+    )
+    flow_run_repo.accept_or_replay_rerun_operation.return_value = expected_result
+
+    result = await service.rerun_step(
+        flow_id=flow.id,
+        run_id=run.id,
+        rerun_step_id=root_step.id,
+        expected_run_revision=5,
+        reason="Refresh service-owned output",
+    )
+
+    assert result == expected_result
+    expected_fingerprint = build_rerun_request_fingerprint(
+        FlowRunRerunRequestFingerprintInput(
+            tenant_id=service_user.tenant_id,
+            requested_by_principal_type=PrincipalType.SERVICE_KEY,
+            requested_by_user_id=None,
+            requested_by_service_id=service_user.active_api_key.service_principal_id,
+            flow_id=flow.id,
+            flow_run_id=run.id,
+            rerun_step_id=root_step.id,
+            expected_run_revision=5,
+            prior_root_attempt_id=None,
+            input_payload_json=None,
+            root_step_inputs=None,
+        )
+    )
+    kwargs = flow_run_repo.accept_or_replay_rerun_operation.await_args.kwargs
+    assert kwargs["request_fingerprint"] == expected_fingerprint
+    assert kwargs["requested_by_principal"].principal_type == PrincipalType.SERVICE_KEY
+    assert (
+        kwargs["requested_by_principal"].principal_service_id
+        == service_user.active_api_key.service_principal_id
+    )
+    assert (
+        kwargs["requested_by_principal"].actor_api_key_id
+        == service_user.active_api_key.id
+    )
+
+
+@pytest.mark.asyncio
+async def test_service_principal_cannot_rerun_other_principals_run(user):
+    service_user = _service_key_user(user)
+    flow_repo = _flow_repo()
+    flow_run_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user, published_version=1)
+    other_service_principal_id = uuid4()
+    run = _run(user=user, flow_id=flow.id).model_copy(
+        update={
+            "status": FlowRunStatus.COMPLETED,
+            "revision": 5,
+            "principal_type": PrincipalType.SERVICE_KEY.value,
+            "principal_user_id": None,
+            "principal_service_id": other_service_principal_id,
+            "created_by_api_key_id": uuid4(),
+            "runtime_service_permission": service_user.active_api_key.permission,
+        }
+    )
+    service = FlowRunRerunService(
+        user=service_user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+    )
+    flow_run_repo.get.return_value = run
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await service.rerun_step(
+            flow_id=flow.id,
+            run_id=run.id,
+            rerun_step_id=flow.steps[0].id,
+            expected_run_revision=5,
+            reason="Should not cross service-principal boundary",
+        )
+
+    assert exc_info.value.code == "flow_run_access_denied"
+    flow_version_repo.get.assert_not_awaited()
+    flow_run_repo.accept_or_replay_rerun_operation.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -227,7 +349,9 @@ async def test_rerun_step_preserves_empty_root_step_inputs(user):
     expected_fingerprint = build_rerun_request_fingerprint(
         FlowRunRerunRequestFingerprintInput(
             tenant_id=user.tenant_id,
+            requested_by_principal_type=PrincipalType.USER,
             requested_by_user_id=user.id,
+            requested_by_service_id=None,
             flow_id=flow.id,
             flow_run_id=run.id,
             rerun_step_id=root_step.id,
@@ -282,7 +406,9 @@ async def test_rerun_step_fingerprint_uses_none_without_completed_root_attempt(u
     expected_fingerprint = build_rerun_request_fingerprint(
         FlowRunRerunRequestFingerprintInput(
             tenant_id=user.tenant_id,
+            requested_by_principal_type=PrincipalType.USER,
             requested_by_user_id=user.id,
+            requested_by_service_id=None,
             flow_id=flow.id,
             flow_run_id=run.id,
             rerun_step_id=root_step.id,

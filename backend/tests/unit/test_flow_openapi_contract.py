@@ -283,6 +283,7 @@ REQUIRED_SCHEMAS = {
     "FlowRunReviewCheckpointResumeRequest",
     "FlowRunReviewCheckpointResumeResponse",
     "FlowRunReviewCheckpointEvidencePublic",
+    "FlowServicePrincipalActorPublic",
     "FlowRunRerunOperationPublic",
     "FlowRunRerunInvalidatedStepPublic",
     "FlowRunEvidenceResponse",
@@ -999,8 +1000,10 @@ def test_openapi_flow_review_checkpoint_schema_is_public_contract(
         "next_step_ids",
         "requester_user_id",
         "requester_principal_type",
+        "requester_service_principal",
         "decided_by_user_id",
         "decided_by_principal_type",
+        "decided_by_service_principal",
         "edited_at",
         "approved_at",
         "rejected_at",
@@ -1011,6 +1014,8 @@ def test_openapi_flow_review_checkpoint_schema_is_public_contract(
         "created_at",
         "updated_at",
     } <= set(properties)
+    assert "requester_service_id" not in properties
+    assert "decided_by_service_id" not in properties
     assert "step_snapshot_available" not in properties
     assert "resume_idempotency_key" not in properties
     assert {"review_mode", "output_type"} <= set(schema.get("required", []))
@@ -1297,11 +1302,8 @@ def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(
     assert "after the original `expires_at`" in resume_description
     assert "resource_permissions.flows = write" in resume_description
     assert "committed before the response" in resume_description
-    assert "Service-key principals can edit and resume" in rerun_description
-    assert (
-        "rerun operations are still persisted against a human actor"
-        in rerun_description
-    )
+    assert "service-key principals may rerun only their own runs" in rerun_description
+    assert "stable service\nprincipal ownership" in rerun_description
     assert "committed before the response" in rerun_description
 
     edit_400 = edit_operation["responses"]["400"]
@@ -1520,7 +1522,9 @@ def test_openapi_flow_run_evidence_response_exposes_rerun_lineage(
         "step_inputs_json",
         "requested_by_principal_type",
         "requested_by_user_id",
+        "requested_by_service_principal",
     }
+    assert "requested_by_service_id" not in rerun_operation.get("properties", {})
 
     rerun_invalidated_steps = _resolve_component_ref(
         openapi_spec, evidence_properties.get("rerun_invalidated_steps", {})

@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from uuid import uuid4
+
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import CheckConstraint, Index
 
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.category_mappings import CATEGORY_MAPPINGS
 from intric.audit.domain.entity_types import EntityType
+from intric.authentication.auth_models import FlowServicePrincipalActorPublic
+from intric.authentication.principal_types import PrincipalType
 from intric.database.tables.flow_tables import (
     FLOW_RUN_ACTIVE_REVIEW_CHECKPOINT_STATE_VALUES,
     FLOW_RUN_AUDIT_OUTBOX_DELIVERY_STATUS_VALUES,
@@ -15,12 +22,18 @@ from intric.database.tables.flow_tables import (
     FlowRunReviewCheckpoints,
     FlowRuns,
 )
+from intric.flows.api.flow_models import (
+    FlowRunReviewCheckpointEvidencePublic,
+    FlowRunReviewCheckpointPublic,
+)
 from intric.flows.enums import (
     ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES,
+    FlowOutputType,
     FlowRunLifecycleSource,
     FlowRunReviewCheckpointState,
     FlowRunStatus,
 )
+from intric.flows.flow_review_policy import FlowStepReviewMode
 
 
 def _constraint_names(table: object) -> set[str]:
@@ -48,6 +61,43 @@ def _index_by_name(table: object, index_name: str) -> Index:
     raise AssertionError(f"Index {index_name} was not found.")
 
 
+def _service_principal_actor() -> FlowServicePrincipalActorPublic:
+    return FlowServicePrincipalActorPublic(
+        id=uuid4(),
+        display_name="Runtime service principal",
+    )
+
+
+def _review_checkpoint_public_payload() -> dict[str, object]:
+    now = datetime.now(timezone.utc)
+    return {
+        "id": uuid4(),
+        "tenant_id": uuid4(),
+        "flow_id": uuid4(),
+        "flow_run_id": uuid4(),
+        "step_id": uuid4(),
+        "step_order": 1,
+        "attempt_no": 1,
+        "state": FlowRunReviewCheckpointState.AWAITING_REVIEW,
+        "revision": 1,
+        "schema_version": 1,
+        "review_mode": FlowStepReviewMode.VIEW,
+        "output_type": FlowOutputType.JSON,
+        "requester_principal_type": PrincipalType.SERVICE_KEY,
+        "requester_service_principal": _service_principal_actor(),
+        "decided_by_principal_type": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _review_checkpoint_evidence_payload() -> dict[str, object]:
+    payload = _review_checkpoint_public_payload()
+    payload["decision"] = None
+    payload["resume_key_present"] = False
+    return payload
+
+
 def test_review_checkpoint_status_values_are_canonical_enum_values() -> None:
     assert FlowRunStatus.AWAITING_REVIEW.value == "awaiting_review"
     assert FlowRunStatus.AWAITING_REVIEW.value in FLOW_RUN_STATUS_VALUES
@@ -64,6 +114,42 @@ def test_review_checkpoint_status_values_are_canonical_enum_values() -> None:
         FlowRunReviewCheckpointState.EDITED,
         FlowRunReviewCheckpointState.APPROVED,
     }
+
+
+def test_review_checkpoint_public_accepts_service_principal_actor_shape() -> None:
+    checkpoint = FlowRunReviewCheckpointPublic.model_validate(
+        _review_checkpoint_public_payload()
+    )
+
+    assert checkpoint.requester_principal_type == PrincipalType.SERVICE_KEY
+    assert checkpoint.requester_service_principal is not None
+    assert checkpoint.requester_user_id is None
+
+
+def test_review_checkpoint_public_rejects_service_principal_without_summary() -> None:
+    payload = _review_checkpoint_public_payload()
+    payload["requester_service_principal"] = None
+
+    with pytest.raises(ValidationError, match="requester service principal"):
+        FlowRunReviewCheckpointPublic.model_validate(payload)
+
+
+def test_review_checkpoint_public_rejects_mixed_requester_actor_shape() -> None:
+    payload = _review_checkpoint_public_payload()
+    payload["requester_principal_type"] = PrincipalType.USER
+    payload["requester_user_id"] = uuid4()
+
+    with pytest.raises(ValidationError, match="requester user principal"):
+        FlowRunReviewCheckpointPublic.model_validate(payload)
+
+
+def test_review_checkpoint_evidence_rejects_mismatched_decider_actor_shape() -> None:
+    payload = _review_checkpoint_evidence_payload()
+    payload["decided_by_principal_type"] = PrincipalType.SERVICE_KEY
+    payload["decided_by_user_id"] = uuid4()
+
+    with pytest.raises(ValidationError, match="decider service principal"):
+        FlowRunReviewCheckpointEvidencePublic.model_validate(payload)
 
 
 def test_review_lifecycle_audit_vocabulary_is_explicit() -> None:
@@ -115,8 +201,10 @@ def test_review_checkpoint_table_owns_state_payloads_and_resume_key() -> None:
         "original_payload_json",
         "current_payload_json",
         "requester_user_id",
+        "requester_service_id",
         "requester_principal_type",
         "decided_by_user_id",
+        "decided_by_service_id",
         "decided_by_principal_type",
         "next_step_ids_json",
         "resume_idempotency_key",
@@ -134,6 +222,13 @@ def test_review_checkpoint_table_owns_state_payloads_and_resume_key() -> None:
     )
     assert "ck_flow_run_review_checkpoints_requester_principal" in _constraint_names(
         FlowRunReviewCheckpoints
+    )
+    assert "ck_flow_run_review_checkpoints_decider_principal" in _constraint_names(
+        FlowRunReviewCheckpoints
+    )
+    assert "requester_service_id IS NOT NULL" in _check_constraint_sql(
+        FlowRunReviewCheckpoints,
+        "ck_flow_run_review_checkpoints_requester_principal",
     )
 
     active_index = _index_by_name(

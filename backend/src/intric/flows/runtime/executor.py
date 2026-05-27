@@ -85,6 +85,7 @@ from intric.flows.runtime.document_rendering.service import (
     default_document_render_service,
 )
 from intric.flows.runtime.execution_state_builder import build_run_execution_state
+from intric.flows.runtime.flow_run_actor import FlowRunActor
 from intric.flows.runtime.http_audit import (
     HttpAuditDeps,
 )
@@ -377,6 +378,8 @@ class FlowRunExecutor:
         self,
         *,
         user: UserInDB,
+        principal: FlowPrincipal | None = None,
+        runtime_actor: FlowRunActor | None = None,
         session: AsyncSession,
         flow_repo: FlowRepository,
         flow_run_repo: FlowRunRepository,
@@ -409,7 +412,8 @@ class FlowRunExecutor:
             )
 
         self.user = user
-        self.principal = FlowPrincipal.from_user(user)
+        self.principal = principal or FlowPrincipal.from_user(user)
+        self.runtime_actor = runtime_actor or FlowRunActor.from_user(user=user)
         self.session = session
         self.flow_repo = flow_repo
         self.flow_run_repo = flow_run_repo
@@ -1562,7 +1566,7 @@ class FlowRunExecutor:
             space_repo=self.space_repo,
             flow_run_repo=self.flow_run_repo,
             audit_service=self.audit_service,
-            actor=self.user,
+            actor=self.runtime_actor,
             max_generic_files=self.max_generic_files,
             max_audio_files=self.max_audio_files,
             max_inline_text_bytes=self.max_inline_text_bytes,
@@ -1738,7 +1742,7 @@ class FlowRunExecutor:
     ) -> None:
         deps = HttpAuditDeps(
             audit_service=self.audit_service,
-            user=self.user,
+            actor=self.runtime_actor,
             logger=logger,
         )
         await audit_http_outbound_runtime(

@@ -38,7 +38,7 @@ def _make_file(*, user_id: UUID, file_id: UUID | None = None) -> File:
         transcription=None,
         owner_type=PrincipalType.USER,
         owner_user_id=user_id,
-        owner_api_key_id=None,
+        owner_service_id=None,
         tenant_id=uuid4(),
     )
 
@@ -74,7 +74,8 @@ class TestDeleteFile:
             id=file_id,
             owner_type="user",
             owner_user_id=svc.user.id,
-            owner_api_key_id=None,
+            owner_service_id=None,
+            tenant_id=svc.user.tenant_id,
         )
         repo.delete.assert_not_awaited()
 
@@ -190,7 +191,7 @@ class TestDeleteByOwnerRepo:
         mock_row.transcription = None
         mock_row.owner_type = PrincipalType.USER
         mock_row.owner_user_id = user_id
-        mock_row.owner_api_key_id = None
+        mock_row.owner_service_id = None
         mock_row.created_at = None
         mock_row.updated_at = None
 

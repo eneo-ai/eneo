@@ -32,7 +32,8 @@ class _FileRepositoryProtocol(Protocol):
         ids: list[UUID],
         owner_type: str,
         owner_user_id: UUID | None = None,
-        owner_api_key_id: UUID | None = None,
+        owner_service_id: UUID | None = None,
+        tenant_id: UUID | None = None,
         include_transcription: bool = True,
     ) -> list[File]: ...
 
@@ -123,6 +124,7 @@ async def validate_submitted_step_inputs(
     normalized_step_inputs: dict[UUID, list[UUID]],
     file_repo: _FileRepositoryProtocol | None,
     principal: FlowPrincipal,
+    tenant_id: UUID,
 ) -> None:
     step_by_id = {step.step_id: step for step in steps}
     aggregate_count = 0
@@ -163,7 +165,8 @@ async def validate_submitted_step_inputs(
             ids=requested_file_ids,
             owner_type=principal.principal_type.value,
             owner_user_id=principal.principal_user_id,
-            owner_api_key_id=principal.principal_api_key_id,
+            owner_service_id=principal.principal_service_id,
+            tenant_id=tenant_id,
             include_transcription=False,
         )
         resolved_ids = {file.id for file in files}

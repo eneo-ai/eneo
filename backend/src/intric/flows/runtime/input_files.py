@@ -17,7 +17,8 @@ class RuntimeInputFileRepository(Protocol):
         ids: list[UUID],
         owner_type: str,
         owner_user_id: UUID | None = None,
-        owner_api_key_id: UUID | None = None,
+        owner_service_id: UUID | None = None,
+        tenant_id: UUID | None = None,
         include_transcription: bool = True,
     ) -> list["File"]: ...
 
@@ -45,6 +46,7 @@ async def load_files_by_requested_ids(
     file_repo: RuntimeInputFileRepository,
     requested_ids: list[UUID],
     principal: FlowPrincipal,
+    tenant_id: UUID,
     file_cache: dict[frozenset[UUID], list["File"]] | None = None,
 ) -> list["File"]:
     cache_key = frozenset(requested_ids)
@@ -54,7 +56,8 @@ async def load_files_by_requested_ids(
         ids=requested_ids,
         owner_type=principal.principal_type.value,
         owner_user_id=principal.principal_user_id,
-        owner_api_key_id=principal.principal_api_key_id,
+        owner_service_id=principal.principal_service_id,
+        tenant_id=tenant_id,
     )
     if file_cache is not None:
         file_cache[cache_key] = files

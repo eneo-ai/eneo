@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, cast
 from uuid import UUID
@@ -96,6 +97,29 @@ class ApiKeysV2Repository:
             return None
 
         return ServicePrincipalInDB.model_validate(record)
+
+    async def list_service_principals_by_ids(
+        self,
+        *,
+        service_principal_ids: Iterable[UUID],
+        tenant_id: UUID,
+    ) -> dict[UUID, ServicePrincipalInDB]:
+        principal_ids = tuple(dict.fromkeys(service_principal_ids))
+        if not principal_ids:
+            return {}
+        query = (
+            sa.select(ServicePrincipals)
+            .where(ServicePrincipals.tenant_id == tenant_id)
+            .where(ServicePrincipals.id.in_(principal_ids))
+        )
+        records = await self.session.scalars(query)
+
+        return {
+            service_principal.id: service_principal
+            for service_principal in (
+                ServicePrincipalInDB.model_validate(record) for record in records
+            )
+        }
 
     async def get(self, *, key_id: UUID, tenant_id: UUID) -> Optional[ApiKeyV2InDB]:
         query = (

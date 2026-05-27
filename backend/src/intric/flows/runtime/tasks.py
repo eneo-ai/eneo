@@ -11,7 +11,6 @@ from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.authentication.principal_types import PrincipalType
-from intric.authentication.service_key_user import build_service_key_user
 from intric.database.database import sessionmanager
 from intric.flows.application.flow_run_audit_outbox_policy import (
     FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE,
@@ -36,6 +35,11 @@ from intric.flows.flow_run_error import FlowRunError
 from intric.flows.flow_runtime_policy import resolve_flow_runtime_policy
 from intric.flows.runtime.celery_app import celery_app
 from intric.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
+from intric.flows.runtime.flow_run_actor import (
+    FlowRunActor,
+    FlowRunActorError,
+    FlowRunServicePrincipalInactiveError,
+)
 from intric.main.config import get_settings
 from intric.main.container.container import Container
 from intric.main.container.container_overrides import override_user
@@ -78,6 +82,79 @@ def enable_autobegin_for_flow_task_session(session: AsyncSession) -> None:
     session.sync_session.autobegin = True
 
 
+async def _resolve_flow_run_actor(
+    *,
+    container: Container,
+    user_repo: UsersRepository,
+    run: object,
+    expected_principal_type: PrincipalType,
+    expected_principal_user_id: UUID | None,
+    expected_principal_service_id: UUID | None,
+) -> FlowRunActor:
+    raw_principal_type = getattr(run, "principal_type")
+    run_principal_type = (
+        raw_principal_type
+        if isinstance(raw_principal_type, PrincipalType)
+        else PrincipalType(str(raw_principal_type))
+    )
+    if run_principal_type != expected_principal_type:
+        raise FlowRunActorError("task principal type does not match run principal")
+
+    if expected_principal_type == PrincipalType.USER:
+        run_user_id = getattr(run, "principal_user_id", None)
+        if run_user_id is None or run_user_id != expected_principal_user_id:
+            raise FlowRunActorError("task user principal does not match run principal")
+        user = await user_repo.get_user_by_id_and_tenant_id(
+            id=run_user_id,
+            tenant_id=getattr(run, "tenant_id"),
+        )
+        if user is None:
+            raise FlowRunActorError("run user principal is missing")
+        return FlowRunActor.from_user_run(run=run, user=user)
+
+    run_service_id = getattr(run, "principal_service_id", None)
+    if run_service_id is None or run_service_id != expected_principal_service_id:
+        raise FlowRunActorError("task service principal does not match run principal")
+    service_principal = await container.api_key_v2_repo().get_service_principal(
+        service_principal_id=run_service_id,
+        tenant_id=getattr(run, "tenant_id"),
+    )
+    if service_principal is None:
+        raise FlowRunActorError("run service principal is missing")
+    try:
+        return FlowRunActor.from_service_principal_run(
+            run=run,
+            service_principal=service_principal,
+        )
+    except FlowRunServicePrincipalInactiveError:
+        raise
+    except ValueError as exc:
+        raise FlowRunActorError(str(exc)) from exc
+
+
+async def _terminalize_actor_resolution_failure(
+    *,
+    container: Container,
+    session: AsyncSession,
+    run_id: UUID,
+    tenant_id: UUID,
+    code: str,
+    message: str,
+) -> None:
+    await container.flow_run_terminalizer().terminalize_run(
+        run_id=run_id,
+        tenant_id=tenant_id,
+        target_status=FlowRunStatus.FAILED,
+        source=FlowRunLifecycleSource.MISSING_PRINCIPAL,
+        error=FlowRunError.from_source(
+            FlowRunLifecycleSource.MISSING_PRINCIPAL,
+            code=code,
+            message=message,
+        ),
+    )
+    await session.commit()
+
+
 async def _execute_flow_run_async(
     *,
     run_id: UUID,
@@ -85,7 +162,7 @@ async def _execute_flow_run_async(
     tenant_id: UUID,
     principal_type: PrincipalType,
     principal_user_id: UUID | None,
-    principal_api_key_id: UUID | None,
+    principal_service_id: UUID | None,
     celery_task_id: str | None,
     retry_count: int,
 ) -> dict[str, str]:
@@ -97,27 +174,43 @@ async def _execute_flow_run_async(
         if tenant is None:
             raise RuntimeError("Flow execution task tenant not found.")
 
-        if principal_type == PrincipalType.USER:
-            if principal_user_id is None:
-                raise RuntimeError("Flow execution task principal_user_id is missing.")
-            user = await user_repo.get_user_by_id_and_tenant_id(
-                id=principal_user_id, tenant_id=tenant_id
+        flow_run_repo = container.flow_run_repo()
+        run = await flow_run_repo.get(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+        )
+        try:
+            run_actor = await _resolve_flow_run_actor(
+                container=container,
+                user_repo=user_repo,
+                run=run,
+                expected_principal_type=principal_type,
+                expected_principal_user_id=principal_user_id,
+                expected_principal_service_id=principal_service_id,
             )
-            if user is None:
-                raise RuntimeError("Flow execution task user not found for tenant.")
-        else:
-            if principal_api_key_id is None:
-                raise RuntimeError(
-                    "Flow execution task principal_api_key_id is missing."
-                )
-            key = await container.api_key_v2_repo().get(
-                key_id=principal_api_key_id,
+        except FlowRunServicePrincipalInactiveError as exc:
+            await _terminalize_actor_resolution_failure(
+                container=container,
+                session=session,
+                run_id=run_id,
                 tenant_id=tenant_id,
+                code="flow_service_principal_disabled",
+                message=f"flow_service_principal_disabled: {exc}",
             )
-            if key is None:
-                raise RuntimeError("Flow execution task API key not found for tenant.")
-            user = build_service_key_user(key=key, tenant=tenant)
+            return {"status": "failed", "reason": "service_principal_disabled"}
+        except FlowRunActorError as exc:
+            await _terminalize_actor_resolution_failure(
+                container=container,
+                session=session,
+                run_id=run_id,
+                tenant_id=tenant_id,
+                code="flow_runtime_actor_invalid",
+                message=f"flow_runtime_actor_invalid: {exc}",
+            )
+            return {"status": "failed", "reason": "runtime_actor_invalid"}
 
+        user = run_actor.container_user_bridge(tenant=tenant)
         override_user(container=container, user=user)
 
         flow_limits = resolve_flow_input_limits(
@@ -134,7 +227,7 @@ async def _execute_flow_run_async(
             user=user,
             session=session,
             flow_repo=container.flow_repo(),
-            flow_run_repo=container.flow_run_repo(),
+            flow_run_repo=flow_run_repo,
             flow_run_terminalizer=container.flow_run_terminalizer(),
             flow_version_repo=container.flow_version_repo(),
             space_repo=container.space_repo(),
@@ -145,6 +238,8 @@ async def _execute_flow_run_async(
             audit_service=container.audit_service(),
             references_service=container.references_service(),
             transcriber=container.transcriber(),
+            principal=run_actor.principal,
+            runtime_actor=run_actor,
             config=FlowRunExecutorConfig.from_settings(
                 max_inline_text_bytes=get_settings().flow_max_inline_text_bytes,
                 max_audio_files=flow_limits.audio_max_files_per_run
@@ -196,7 +291,7 @@ def execute_flow_run(
     tenant_id: str,
     principal_type: str | None = None,
     principal_user_id: str | None = None,
-    principal_api_key_id: str | None = None,
+    principal_service_id: str | None = None,
 ) -> dict[str, str]:
     return _execute_flow_run_task(
         run_id=run_id,
@@ -204,7 +299,7 @@ def execute_flow_run(
         tenant_id=tenant_id,
         principal_type=principal_type,
         principal_user_id=principal_user_id,
-        principal_api_key_id=principal_api_key_id,
+        principal_service_id=principal_service_id,
         task_id=self.request.id,
         retry_count=self.request.retries,
     )
@@ -217,7 +312,7 @@ def _execute_flow_run_task(
     tenant_id: str,
     principal_type: str | None = None,
     principal_user_id: str | None = None,
-    principal_api_key_id: str | None = None,
+    principal_service_id: str | None = None,
     task_id: str | None,
     retry_count: int,
 ) -> dict[str, str]:
@@ -233,7 +328,7 @@ def _execute_flow_run_task(
             "tenant_id": tenant_id,
             "principal_type": principal_type,
             "principal_user_id": principal_user_id,
-            "principal_api_key_id": principal_api_key_id,
+            "principal_service_id": principal_service_id,
         },
     )
     resolved_principal_type = (
@@ -244,7 +339,7 @@ def _execute_flow_run_task(
         or (resolved_principal_type == PrincipalType.USER and principal_user_id is None)
     ) or (
         resolved_principal_type == PrincipalType.SERVICE_KEY
-        and principal_api_key_id is None
+        and principal_service_id is None
     ):
         loop = _get_flow_task_loop()
         asyncio.run_coroutine_threadsafe(
@@ -281,9 +376,9 @@ def _execute_flow_run_task(
                 principal_user_id=(
                     UUID(principal_user_id) if principal_user_id is not None else None
                 ),
-                principal_api_key_id=(
-                    UUID(principal_api_key_id)
-                    if principal_api_key_id is not None
+                principal_service_id=(
+                    UUID(principal_service_id)
+                    if principal_service_id is not None
                     else None
                 ),
                 celery_task_id=task_id,

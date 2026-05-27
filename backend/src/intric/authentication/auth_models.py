@@ -424,6 +424,13 @@ class ServicePrincipalInDB(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class FlowServicePrincipalActorPublic(BaseModel):
+    id: UUID
+    display_name: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ApiKeyV2InDB(ApiKeyV2):
     tenant_id: UUID
     service_principal_id: Optional[UUID] = None

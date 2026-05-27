@@ -581,8 +581,16 @@ class FlowRuns(BasePublic):
         ForeignKey(Users.id, ondelete="RESTRICT"),
         nullable=True,
     )
-    principal_api_key_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey("api_keys_v2.id", ondelete="RESTRICT"),
+    principal_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("service_principals.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    created_by_api_key_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("api_keys_v2.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    runtime_service_permission: Mapped[Optional[str]] = mapped_column(
+        sa.String(32),
         nullable=True,
     )
     tenant_id: Mapped[UUID] = mapped_column(
@@ -639,9 +647,15 @@ class FlowRuns(BasePublic):
         ),
         CheckConstraint(
             "("
-            "(principal_type = 'user' AND principal_user_id IS NOT NULL AND principal_api_key_id IS NULL) "
+            "(principal_type = 'user' "
+            "AND principal_user_id IS NOT NULL "
+            "AND principal_service_id IS NULL "
+            "AND runtime_service_permission IS NULL) "
             "OR "
-            "(principal_type = 'service_key' AND principal_user_id IS NULL AND principal_api_key_id IS NOT NULL)"
+            "(principal_type = 'service_key' "
+            "AND principal_user_id IS NULL "
+            "AND principal_service_id IS NOT NULL "
+            "AND runtime_service_permission IN ('read','write','admin'))"
             ")",
             name="ck_flow_runs_principal_identity",
         ),
@@ -680,12 +694,19 @@ class FlowRuns(BasePublic):
             "uq_flow_runs_idempotency_service_key",
             "tenant_id",
             "flow_id",
-            "principal_api_key_id",
+            "principal_service_id",
             "idempotency_key",
             unique=True,
             postgresql_where=sa.text(
                 "principal_type = 'service_key' AND idempotency_key IS NOT NULL"
             ),
+        ),
+        Index(
+            "ix_flow_runs_service_principal_created_at",
+            "tenant_id",
+            "principal_service_id",
+            sa.text("created_at DESC"),
+            postgresql_where=sa.text("principal_type = 'service_key'"),
         ),
         Index(
             "ix_flow_runs_running_updated_at",
@@ -823,13 +844,21 @@ class FlowRunRerunOperations(BasePublic):
     requested_by_principal_type: Mapped[str] = mapped_column(
         sa.String(32), nullable=False
     )
-    requested_by_user_id: Mapped[UUID] = mapped_column(
+    requested_by_user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(
             Users.id,
             ondelete="RESTRICT",
             name="fk_rerun_operations_requested_by_user",
         ),
-        nullable=False,
+        nullable=True,
+    )
+    requested_by_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "service_principals.id",
+            ondelete="RESTRICT",
+            name="fk_rerun_operations_requested_by_service",
+        ),
+        nullable=True,
     )
     failure_code: Mapped[Optional[str]] = mapped_column(sa.String(64), nullable=True)
     failure_message: Mapped[Optional[str]] = mapped_column(nullable=True)
@@ -846,8 +875,16 @@ class FlowRunRerunOperations(BasePublic):
             name="ck_flow_run_rerun_operations_status",
         ),
         CheckConstraint(
-            "requested_by_principal_type = 'user'",
-            name="ck_flow_run_rerun_operations_user_principal",
+            "("
+            "requested_by_principal_type = 'user' "
+            "AND requested_by_user_id IS NOT NULL "
+            "AND requested_by_service_id IS NULL"
+            ") OR ("
+            "requested_by_principal_type = 'service_key' "
+            "AND requested_by_user_id IS NULL "
+            "AND requested_by_service_id IS NOT NULL"
+            ")",
+            name="ck_flow_run_rerun_operations_requester_principal",
         ),
         ForeignKeyConstraint(
             ["flow_run_id", "tenant_id"],
@@ -1155,6 +1192,14 @@ class FlowRunReviewCheckpoints(BasePublic):
         ),
         nullable=True,
     )
+    requester_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "service_principals.id",
+            ondelete="SET NULL",
+            name="fk_review_checkpoints_requester_service",
+        ),
+        nullable=True,
+    )
     requester_principal_type: Mapped[str] = mapped_column(
         sa.String(32),
         nullable=False,
@@ -1164,6 +1209,14 @@ class FlowRunReviewCheckpoints(BasePublic):
             Users.id,
             ondelete="SET NULL",
             name="fk_review_checkpoints_decided_by_user",
+        ),
+        nullable=True,
+    )
+    decided_by_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "service_principals.id",
+            ondelete="SET NULL",
+            name="fk_review_checkpoints_decided_by_service",
         ),
         nullable=True,
     )
@@ -1229,12 +1282,28 @@ class FlowRunReviewCheckpoints(BasePublic):
             name="ck_flow_run_review_checkpoints_output_type",
         ),
         CheckConstraint(
-            "requester_principal_type IN ('user','service_key')",
+            "("
+            "requester_principal_type = 'user' "
+            "AND requester_user_id IS NOT NULL "
+            "AND requester_service_id IS NULL"
+            ") OR ("
+            "requester_principal_type = 'service_key' "
+            "AND requester_user_id IS NULL "
+            "AND requester_service_id IS NOT NULL"
+            ")",
             name="ck_flow_run_review_checkpoints_requester_principal",
         ),
         CheckConstraint(
             "decided_by_principal_type IS NULL "
-            "OR decided_by_principal_type IN ('user','service_key')",
+            "OR ("
+            "decided_by_principal_type = 'user' "
+            "AND decided_by_user_id IS NOT NULL "
+            "AND decided_by_service_id IS NULL"
+            ") OR ("
+            "decided_by_principal_type = 'service_key' "
+            "AND decided_by_user_id IS NULL "
+            "AND decided_by_service_id IS NOT NULL"
+            ")",
             name="ck_flow_run_review_checkpoints_decider_principal",
         ),
         ForeignKeyConstraint(

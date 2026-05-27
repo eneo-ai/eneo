@@ -92,7 +92,7 @@ def _file(
         transcription=None,
         owner_type="user",
         owner_user_id=user_id,
-        owner_api_key_id=None,
+        owner_service_id=None,
         tenant_id=tenant_id,
     )
 

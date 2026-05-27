@@ -66,7 +66,7 @@ async def test_celery_execution_backend_dispatches_task():
             "tenant_id": str(tenant_id),
             "principal_type": "user",
             "principal_user_id": str(user_id),
-            "principal_api_key_id": None,
+            "principal_service_id": None,
         },
         queue="flows.execute",
     )
@@ -81,14 +81,14 @@ async def test_celery_execution_backend_dispatches_service_key_principal():
     run_id = uuid4()
     flow_id = uuid4()
     tenant_id = uuid4()
-    api_key_id = uuid4()
+    service_principal_id = uuid4()
 
     await backend.dispatch(
         request=FlowRunServiceKeyDispatchRequest(
             run_id=run_id,
             flow_id=flow_id,
             tenant_id=tenant_id,
-            principal_api_key_id=api_key_id,
+            principal_service_id=service_principal_id,
         ),
     )
 
@@ -100,7 +100,7 @@ async def test_celery_execution_backend_dispatches_service_key_principal():
             "tenant_id": str(tenant_id),
             "principal_type": "service_key",
             "principal_user_id": None,
-            "principal_api_key_id": str(api_key_id),
+            "principal_service_id": str(service_principal_id),
         },
         queue="flows.execute",
     )
@@ -486,14 +486,13 @@ def test_redispatch_stale_queued_task_processes_all_tenants(monkeypatch):
     tenant_one = SimpleNamespace(id=uuid4())
     tenant_two = SimpleNamespace(id=uuid4())
     user_run_user_id = uuid4()
-    service_key_id = uuid4()
+    service_principal_id = uuid4()
     user_run = SimpleNamespace(
         id=uuid4(),
         flow_id=uuid4(),
         tenant_id=tenant_one.id,
         principal_type="user",
         principal_user_id=user_run_user_id,
-        principal_api_key_id=None,
     )
     service_run = SimpleNamespace(
         id=uuid4(),
@@ -501,7 +500,7 @@ def test_redispatch_stale_queued_task_processes_all_tenants(monkeypatch):
         tenant_id=tenant_two.id,
         principal_type="service_key",
         principal_user_id=None,
-        principal_api_key_id=service_key_id,
+        principal_service_id=service_principal_id,
     )
     repo = MagicMock()
     repo.list_stale_queued_runs = AsyncMock(side_effect=[[user_run], [service_run]])
@@ -559,7 +558,7 @@ def test_redispatch_stale_queued_task_processes_all_tenants(monkeypatch):
         run_id=service_run.id,
         flow_id=service_run.flow_id,
         tenant_id=tenant_two.id,
-        principal_api_key_id=service_key_id,
+        principal_service_id=service_principal_id,
     )
 
 
@@ -578,7 +577,6 @@ def test_redispatch_stale_queued_skips_runs_lost_to_concurrent_claim(monkeypatch
         tenant_id=tenant.id,
         principal_type="user",
         principal_user_id=uuid4(),
-        principal_api_key_id=None,
     )
     repo = MagicMock()
     repo.list_stale_queued_runs = AsyncMock(return_value=[stale_run])
@@ -678,7 +676,6 @@ def test_redispatch_stale_queued_commits_claim_before_dispatch(monkeypatch):
         tenant_id=tenant.id,
         principal_type="user",
         principal_user_id=uuid4(),
-        principal_api_key_id=None,
     )
     events: list[str] = []
     repo = MagicMock()

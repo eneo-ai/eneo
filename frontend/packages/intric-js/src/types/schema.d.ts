@@ -4386,10 +4386,9 @@ export interface paths {
      *     lifecycle. On replay, the nested `run` is the current persisted run state, so
      *     `run.revision` can be newer than the submitted `expected_run_revision`.
      *
-     *     Rerun is a run lifecycle mutation and currently requires a user principal with flow
-     *     management access. Service-key principals can edit and resume human-review checkpoints
-     *     for their own runs, but rerun operations are still persisted against a human actor in
-     *     this API version.
+     *     Rerun is a run lifecycle mutation. Human callers follow the existing flow management
+     *     policy; service-key principals may rerun only their own runs under stable service
+     *     principal ownership.
      *
      *     Successful runtime mutations are committed before the response is returned, so clients can immediately use the returned id or revision in the next poll/edit/approve/resume request.
      */
@@ -9146,6 +9145,8 @@ export interface components {
        * Format: uuid
        */
       tenant_id: string;
+      /** Service Principal Id */
+      service_principal_id?: string | null;
       /** Created By Key Id */
       created_by_key_id?: string | null;
       /**
@@ -15524,11 +15525,11 @@ export interface components {
         [key: string]: unknown;
       } | null;
       requested_by_principal_type: components["schemas"]["PrincipalType"];
-      /**
-       * Requested By User Id
-       * Format: uuid
-       */
-      requested_by_user_id: string;
+      /** Requested By User Id */
+      requested_by_user_id?: string | null;
+      requested_by_service_principal?:
+        | components["schemas"]["FlowServicePrincipalActorPublic"]
+        | null;
       /** Failure Code */
       failure_code?: string | null;
       /** Failure Message */
@@ -15701,9 +15702,13 @@ export interface components {
       resume_key_present: boolean;
       /** Requester User Id */
       requester_user_id?: string | null;
+      requester_service_principal?: components["schemas"]["FlowServicePrincipalActorPublic"] | null;
       requester_principal_type: components["schemas"]["PrincipalType"];
       /** Decided By User Id */
       decided_by_user_id?: string | null;
+      decided_by_service_principal?:
+        | components["schemas"]["FlowServicePrincipalActorPublic"]
+        | null;
       decided_by_principal_type?: components["schemas"]["PrincipalType"] | null;
       /** Edited At */
       edited_at?: string | null;
@@ -15833,9 +15838,13 @@ export interface components {
       next_step_ids?: string[] | null;
       /** Requester User Id */
       requester_user_id?: string | null;
+      requester_service_principal?: components["schemas"]["FlowServicePrincipalActorPublic"] | null;
       requester_principal_type: components["schemas"]["PrincipalType"];
       /** Decided By User Id */
       decided_by_user_id?: string | null;
+      decided_by_service_principal?:
+        | components["schemas"]["FlowServicePrincipalActorPublic"]
+        | null;
       decided_by_principal_type?: components["schemas"]["PrincipalType"] | null;
       /** Edited At */
       edited_at?: string | null;
@@ -16732,6 +16741,16 @@ export interface components {
        * @description Timeout clients should allow after the latest upload progress event.
        */
       idle_timeout_seconds: number;
+    };
+    /** FlowServicePrincipalActorPublic */
+    FlowServicePrincipalActorPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Display Name */
+      display_name: string;
     };
     /**
      * FlowSparsePublic

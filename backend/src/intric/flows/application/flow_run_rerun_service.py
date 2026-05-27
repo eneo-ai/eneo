@@ -136,10 +136,13 @@ class FlowRunRerunService:
                 step_id=rerun_step_id,
             )
         )
+        principal = self._principal()
         request_fingerprint = build_rerun_request_fingerprint(
             FlowRunRerunRequestFingerprintInput(
                 tenant_id=self.user.tenant_id,
-                requested_by_user_id=self.user.id,
+                requested_by_principal_type=principal.principal_type,
+                requested_by_user_id=principal.principal_user_id,
+                requested_by_service_id=principal.principal_service_id,
                 flow_id=run.flow_id,
                 flow_run_id=run.id,
                 rerun_step_id=rerun_step_id,
@@ -160,7 +163,7 @@ class FlowRunRerunService:
             reason=normalized_reason,
             input_payload_json=normalized_inline_payload,
             step_inputs_json=serialized_step_inputs,
-            requested_by_user_id=self.user.id,
+            requested_by_principal=principal,
             invalidated_steps=invalidation_graph.invalidated_steps,
         )
 
@@ -269,5 +272,6 @@ class FlowRunRerunService:
             normalized_step_inputs=normalized_step_inputs,
             file_repo=self.file_repo,
             principal=self._principal(),
+            tenant_id=self.user.tenant_id,
         )
         return normalized_step_inputs

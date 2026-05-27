@@ -12,13 +12,15 @@ from intric.authentication.principal_types import PrincipalType
 JsonPrimitive: TypeAlias = str | int | float | bool | None
 JsonValue: TypeAlias = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"]
 
-RERUN_REQUEST_FINGERPRINT_ALGORITHM_VERSION = 1
+RERUN_REQUEST_FINGERPRINT_ALGORITHM_VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)
 class FlowRunRerunRequestFingerprintInput:
     tenant_id: UUID
-    requested_by_user_id: UUID
+    requested_by_principal_type: PrincipalType
+    requested_by_user_id: UUID | None
+    requested_by_service_id: UUID | None
     flow_id: UUID
     flow_run_id: UUID
     rerun_step_id: UUID
@@ -36,8 +38,17 @@ def build_rerun_request_fingerprint(
             RERUN_REQUEST_FINGERPRINT_ALGORITHM_VERSION
         ),
         "tenant_id": str(request.tenant_id),
-        "principal_type": PrincipalType.USER.value,
-        "requested_by_user_id": str(request.requested_by_user_id),
+        "principal_type": request.requested_by_principal_type.value,
+        "requested_by_user_id": (
+            str(request.requested_by_user_id)
+            if request.requested_by_user_id is not None
+            else None
+        ),
+        "requested_by_service_id": (
+            str(request.requested_by_service_id)
+            if request.requested_by_service_id is not None
+            else None
+        ),
         "flow_id": str(request.flow_id),
         "flow_run_id": str(request.flow_run_id),
         "rerun_step_id": str(request.rerun_step_id),

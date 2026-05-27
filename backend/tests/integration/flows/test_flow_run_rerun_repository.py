@@ -41,6 +41,7 @@ from intric.flows.infrastructure.flow_run_repo import (
     _RERUN_STEP_RESULT_RESET_VALUES,
     FlowRunRepository,
 )
+from intric.flows.principal import FlowPrincipal
 from intric.flows.published_definition import (
     build_published_definition_json,
     parse_published_runtime_steps,
@@ -355,7 +356,10 @@ async def _accept_rerun(
         reason="Regenerate source output after reviewer edit.",
         input_payload_json={"case_id": "case-456"},
         step_inputs_json={"1": {"case_id": "case-456"}},
-        requested_by_user_id=scenario.requested_by_user_id,
+        requested_by_principal=FlowPrincipal(
+            principal_type=PrincipalType.USER,
+            principal_user_id=scenario.requested_by_user_id,
+        ),
         invalidated_steps=(
             scenario.invalidated_steps
             if invalidated_steps is None

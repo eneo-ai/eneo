@@ -3,12 +3,12 @@ from __future__ import annotations
 from typing import Any, Sequence
 from uuid import UUID
 
+from intric.authentication.auth_models import FlowServicePrincipalActorPublic
 from intric.flows.api.flow_models import (
     FlowPublic,
     FlowReviewCheckpointRuntimePathsPublic,
     FlowRunPublic,
     FlowRunReviewCheckpointPublic,
-    FlowRunReviewCheckpointResumeResponse,
     FlowRunStepPublic,
     FlowRunStepRerunResponse,
     FlowRuntimePathsPublic,
@@ -186,6 +186,9 @@ class FlowAssembler:
     def to_review_checkpoint_public(
         self,
         checkpoint: FlowRunReviewCheckpoint,
+        *,
+        requester_service_principal: FlowServicePrincipalActorPublic | None = None,
+        decided_by_service_principal: FlowServicePrincipalActorPublic | None = None,
     ) -> FlowRunReviewCheckpointPublic:
         # Public API names omit persistence-only `_json` suffixes because every
         # response is already JSON-serialized; keep the suffix on domain fields
@@ -195,18 +198,9 @@ class FlowAssembler:
                 **checkpoint.model_dump(),
                 "next_step_ids": checkpoint.next_step_ids_json,
                 "output_contract": checkpoint.output_contract_json,
+                "requester_service_principal": requester_service_principal,
+                "decided_by_service_principal": decided_by_service_principal,
             }
-        )
-
-    def to_review_checkpoint_resume_response(
-        self,
-        *,
-        checkpoint: FlowRunReviewCheckpoint,
-        run: FlowRun,
-    ) -> FlowRunReviewCheckpointResumeResponse:
-        return FlowRunReviewCheckpointResumeResponse(
-            checkpoint=self.to_review_checkpoint_public(checkpoint),
-            run=self.to_run_public(run),
         )
 
     @staticmethod

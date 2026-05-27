@@ -160,7 +160,7 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
     assert file_create.blob == blob
     assert file_create.owner_type == PrincipalType.USER
     assert file_create.owner_user_id == user_id
-    assert file_create.owner_api_key_id is None
+    assert file_create.owner_service_id is None
     assert file_create.tenant_id == run.tenant_id
 
 

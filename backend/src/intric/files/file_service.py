@@ -128,7 +128,8 @@ class FileService:
             ids=file_ids,
             owner_type=self._owner_type().value,
             owner_user_id=self._owner_user_id(),
-            owner_api_key_id=self._owner_api_key_id(),
+            owner_service_id=self._owner_service_id(),
+            tenant_id=self.user.tenant_id,
             include_transcription=include_transcription,
         )
 
@@ -146,7 +147,8 @@ class FileService:
             return await self.repo.get_list_by_user(user_id=self.user.id)
         return await self.repo.get_list_by_owner_principal(
             owner_type=self._owner_type().value,
-            owner_api_key_id=self._owner_api_key_id(),
+            owner_service_id=self._owner_service_id(),
+            tenant_id=self.user.tenant_id,
         )
 
     async def get_file_infos(self, file_ids: list[UUID]):
@@ -171,7 +173,8 @@ class FileService:
             id=id,
             owner_type=self._owner_type().value,
             owner_user_id=self._owner_user_id(),
-            owner_api_key_id=self._owner_api_key_id(),
+            owner_service_id=self._owner_service_id(),
+            tenant_id=self.user.tenant_id,
         )
 
         if file_deleted is None:
@@ -221,10 +224,10 @@ class FileService:
                 return PrincipalType.SERVICE_KEY
         return PrincipalType.USER
 
-    def _owner_api_key_id(self) -> UUID | None:
+    def _owner_service_id(self) -> UUID | None:
         if self._owner_type() == PrincipalType.SERVICE_KEY:
             key = getattr(self.user, "active_api_key", None)
-            return getattr(key, "id", None)
+            return getattr(key, "service_principal_id", None)
         return None
 
     def _owner_user_id(self) -> UUID | None:
@@ -236,7 +239,7 @@ class FileService:
         return {
             "owner_type": self._owner_type(),
             "owner_user_id": self._owner_user_id(),
-            "owner_api_key_id": self._owner_api_key_id(),
+            "owner_service_id": self._owner_service_id(),
         }
 
     def _owns_file(self, file: File | FileInfo) -> bool:
@@ -245,7 +248,7 @@ class FileService:
             return False
         if owner_type == PrincipalType.USER:
             return file.owner_user_id == self.user.id
-        return file.owner_api_key_id == self._owner_api_key_id()
+        return file.owner_service_id == self._owner_service_id()
 
     async def get_file_content_no_auth(self, file_id: UUID):
         """Get file content without checking user authorization.

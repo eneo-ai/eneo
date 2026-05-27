@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
+from intric.flows.runtime.flow_run_actor import FlowRunActor
 
 
 class RuntimeAuditRun(Protocol):
@@ -35,7 +35,7 @@ class RuntimeAuditStep(Protocol):
 @dataclass(frozen=True)
 class HttpAuditDeps:
     audit_service: Any | None
-    user: Any
+    actor: FlowRunActor
     logger: Any
 
 
@@ -73,14 +73,17 @@ async def audit_http_outbound(
             extra["status_code"] = status_code
         if duration_ms is not None:
             extra["duration_ms"] = round(duration_ms, 2)
+        actor_fields = deps.actor.audit_actor_fields()
         await deps.audit_service.log_async(
             tenant_id=run.tenant_id,
-            actor_id=deps.user.id,
+            actor_id=actor_fields["actor_id"],
+            actor_type=actor_fields["actor_type"],
+            actor_api_key_id=actor_fields["actor_api_key_id"],
             action=ActionType.FLOW_HTTP_OUTBOUND_CALL,
             entity_type=EntityType.FLOW_RUN,
             entity_id=run.id,
             description=f"Flow HTTP {call_type} {method} to {safe_url_host}{safe_url_path}",
-            metadata=AuditMetadata.standard(actor=deps.user, target=run, extra=extra),
+            metadata=deps.actor.audit_metadata(target=run, extra=extra),
             outcome=outcome,
             error_message=error_message,
         )

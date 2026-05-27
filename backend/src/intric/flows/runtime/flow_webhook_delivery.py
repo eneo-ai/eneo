@@ -12,7 +12,6 @@ from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.outcome import Outcome
 from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.principal_types import PrincipalType
-from intric.authentication.service_key_user import build_service_key_user
 from intric.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from intric.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
@@ -33,6 +32,7 @@ from intric.flows.infrastructure.flow_run_webhook_delivery_repo import (
 from intric.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from intric.flows.published_definition import parse_published_runtime_steps
 from intric.flows.runtime.execution_state_builder import build_run_execution_state
+from intric.flows.runtime.flow_run_actor import FlowRunActor
 from intric.flows.runtime.http_audit import HttpAuditDeps
 from intric.flows.runtime.http_audit import (
     audit_http_outbound as audit_http_outbound_runtime,
@@ -48,7 +48,6 @@ from intric.flows.runtime.step_result_builder import with_webhook_delivery_statu
 from intric.flows.variable_resolver import FlowVariableResolver
 from intric.settings.encryption_service import EncryptionService
 from intric.tenants.tenant_repo import TenantRepository
-from intric.users.user import UserInDB
 from intric.users.user_repo import UsersRepository
 
 logger = logging.getLogger(__name__)
@@ -78,7 +77,7 @@ class WebhookDeliveryPayload:
     step_result: FlowStepResult
     text_payload: str
     context: dict[str, Any]
-    audit_user: UserInDB | None
+    audit_actor: FlowRunActor | None
 
 
 class WebhookDeliveryClaimLostError(RuntimeError):
@@ -234,7 +233,7 @@ class FlowRunWebhookDeliveryService:
             raise ValueError("Webhook delivery step result is missing.")
         if step_result.current_attempt_no != row.attempt_no:
             raise ValueError("Webhook delivery attempt no longer matches step result.")
-        audit_user = await self._resolve_audit_user(run)
+        audit_actor = await self._resolve_audit_actor(run)
         payload = step_result.output_payload_json or {}
         text_payload = payload.get("text")
         if not isinstance(text_payload, str):
@@ -261,7 +260,7 @@ class FlowRunWebhookDeliveryService:
             step_result=step_result,
             text_payload=text_payload,
             context=context,
-            audit_user=audit_user,
+            audit_actor=audit_actor,
         )
 
     async def _deliver_payload(
@@ -292,7 +291,7 @@ class FlowRunWebhookDeliveryService:
                 error_message=error_message,
                 status_code=status_code,
                 duration_ms=duration_ms,
-                audit_user=payload.audit_user,
+                audit_actor=payload.audit_actor,
             )
 
         deps = FlowHttpOrchestrationDeps(
@@ -419,7 +418,7 @@ class FlowRunWebhookDeliveryService:
             )
         return dead_lettered_at is not None
 
-    async def _resolve_audit_user(self, run: FlowRun) -> UserInDB | None:
+    async def _resolve_audit_actor(self, run: FlowRun) -> FlowRunActor | None:
         if self.audit_service is None:
             return None
 
@@ -434,21 +433,21 @@ class FlowRunWebhookDeliveryService:
             )
             if user is None:
                 raise ValueError("Webhook delivery audit user is missing.")
-            return user
+            return FlowRunActor.from_user_run(run=run, user=user)
 
         if principal_type == PrincipalType.SERVICE_KEY:
-            if run.principal_api_key_id is None:
-                raise ValueError("Webhook delivery run has no service-key principal.")
-            tenant = await self.tenant_repo.get(run.tenant_id)
-            if tenant is None:
-                raise ValueError("Webhook delivery tenant is missing.")
-            key = await self.api_key_repo.get(
-                key_id=run.principal_api_key_id,
+            if run.principal_service_id is None:
+                raise ValueError("Webhook delivery run has no service-principal owner.")
+            service_principal = await self.api_key_repo.get_service_principal(
+                service_principal_id=run.principal_service_id,
                 tenant_id=run.tenant_id,
             )
-            if key is None:
-                raise ValueError("Webhook delivery service key is missing.")
-            return build_service_key_user(key=key, tenant=tenant)
+            if service_principal is None:
+                raise ValueError("Webhook delivery service principal is missing.")
+            return FlowRunActor.from_service_principal_run(
+                run=run,
+                service_principal=service_principal,
+            )
 
         raise ValueError("Webhook delivery run has an unsupported principal type.")
 
@@ -488,13 +487,13 @@ class FlowRunWebhookDeliveryService:
         error_message: str | None = None,
         status_code: int | None = None,
         duration_ms: float | None = None,
-        audit_user: UserInDB | None,
+        audit_actor: FlowRunActor | None,
     ) -> None:
-        if self.audit_service is None or audit_user is None:
+        if self.audit_service is None or audit_actor is None:
             return
         deps = HttpAuditDeps(
             audit_service=self.audit_service,
-            user=audit_user,
+            actor=audit_actor,
             logger=logger,
         )
         await audit_http_outbound_runtime(

@@ -73,7 +73,9 @@ def test_resource_permissions_document_flow_runtime_review_levels(openapi_spec: 
     assert "run contracts" in flows_description
     assert "active human-review checkpoints" in flows_description
     assert "create published-flow runs" in flows_description
-    assert "edit, approve, reject, or resume human-review checkpoints" in flows_description
+    assert (
+        "edit, approve, reject, or resume human-review checkpoints" in flows_description
+    )
     assert "runs created by that same API key" in flows_description
 
     evidence_description = properties["flow_evidence"].get("description", "")

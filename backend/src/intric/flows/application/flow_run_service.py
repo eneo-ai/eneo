@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Sequence
 from uuid import UUID
 
+from intric.authentication.api_key_resolver import resolve_effective_resource_permission
+from intric.authentication.auth_models import ApiKeyPermission
 from intric.files.file_repo import FileRepository
 from intric.flows.application.flow_run_access_policy import (
     FlowRunAccessKind,
@@ -156,6 +158,20 @@ class FlowRunService:
     def _principal(self) -> FlowPrincipal:
         return FlowPrincipal.from_user(self.user)
 
+    def _runtime_service_permission(
+        self,
+        principal: FlowPrincipal,
+    ) -> ApiKeyPermission | None:
+        if not principal.is_service_key:
+            return None
+        key = getattr(self.user, "active_api_key", None)
+        if key is None:
+            raise BadRequestException(
+                "Service-key Flow run creation requires an active API key.",
+                code="flow_service_key_missing",
+            )
+        return resolve_effective_resource_permission(key, "flows")
+
     def build_dispatch_request(self, run: FlowRun) -> FlowRunDispatchRequest:
         return build_flow_run_dispatch_request(run)
 
@@ -295,6 +311,7 @@ class FlowRunService:
                 normalized_step_inputs=normalized_step_inputs,
                 file_repo=self.file_repo,
                 principal=principal,
+                tenant_id=self.user.tenant_id,
             )
             step_order_by_id = {
                 runtime_step.step_id: runtime_step.step_order
@@ -390,7 +407,9 @@ class FlowRunService:
             flow_version=flow_version,
             principal_type=principal.principal_type.value,
             principal_user_id=principal.principal_user_id,
-            principal_api_key_id=principal.principal_api_key_id,
+            principal_service_id=principal.principal_service_id,
+            created_by_api_key_id=principal.actor_api_key_id,
+            runtime_service_permission=self._runtime_service_permission(principal),
             tenant_id=self.user.tenant_id,
             input_payload_json=prepared.input_payload_json,
             preseed_steps=prepared.preseed_steps,
@@ -412,7 +431,7 @@ class FlowRunService:
         input_payload_json: JsonObject | None,
     ) -> str:
         normalized = {
-            "request_fingerprint_algo_version": 1,
+            "request_fingerprint_algo_version": 2,
             "tenant_id": str(tenant_id),
             "principal_type": principal.principal_type.value,
             "principal_user_id": (
@@ -420,9 +439,9 @@ class FlowRunService:
                 if principal.principal_user_id is not None
                 else None
             ),
-            "principal_api_key_id": (
-                str(principal.principal_api_key_id)
-                if principal.principal_api_key_id is not None
+            "principal_service_id": (
+                str(principal.principal_service_id)
+                if principal.principal_service_id is not None
                 else None
             ),
             "flow_id": str(flow_id),
@@ -465,7 +484,7 @@ class FlowRunService:
                     tenant_id=self.user.tenant_id,
                     flow_id=flow_id,
                     principal_user_id=None,
-                    principal_api_key_id=None,
+                    principal_service_id=None,
                     limit=limit,
                     offset=offset,
                 )
@@ -477,8 +496,8 @@ class FlowRunService:
                 if is_tenant_admin or principal.is_service_key
                 else principal.principal_user_id
             ),
-            principal_api_key_id=(
-                principal.principal_api_key_id
+            principal_service_id=(
+                principal.principal_service_id
                 if not is_tenant_admin and principal.is_service_key
                 else None
             ),

@@ -185,6 +185,7 @@ async def test_create_flow_run_allows_service_key_principals():
         permissions=[Permission.FLOWS],
         active_api_key=_service_key(),
     )
+    container.user.return_value.active_api_key.service_principal_id = uuid4()
     _enable_space_access(container, user_permissions=[Permission.FLOWS])
 
     flow = _flow(uuid4())
@@ -195,7 +196,9 @@ async def test_create_flow_run_allows_service_key_principals():
             run_id=run.id,
             flow_id=flow.id,
             tenant_id=run.tenant_id,
-            principal_api_key_id=container.user.return_value.active_api_key.id,
+            principal_service_id=(
+                container.user.return_value.active_api_key.service_principal_id
+            ),
         )
     )
     flow_service.get_flow.return_value = flow

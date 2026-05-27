@@ -26,6 +26,7 @@ from intric.authentication.auth_models import (
     ApiKeyState,
     ApiKeyType,
     ApiKeyV2InDB,
+    ResourcePermissionLevel,
     ResourcePermissions,
     ServicePrincipalState,
 )
@@ -62,6 +63,49 @@ class ApiKeyValidationError(Exception):
         self.message = message
         self.headers = headers
         self.context = context
+
+
+def resolve_effective_resource_permission(
+    key: ApiKeyV2InDB,
+    resource_type: str,
+) -> ApiKeyPermission:
+    if not get_settings().api_key_enforce_resource_permissions:
+        return ApiKeyPermission(key.permission)
+
+    if key.resource_permissions is None:
+        return ApiKeyPermission(key.permission)
+
+    try:
+        resource_permissions = ResourcePermissions.model_validate(
+            key.resource_permissions
+        )
+    except Exception:
+        raise ApiKeyValidationError(
+            status_code=403,
+            code="insufficient_resource_permission",
+            message="API key has malformed resource permissions.",
+        )
+
+    granted_value = getattr(resource_permissions, resource_type, None)
+    if granted_value in (None, ResourcePermissionLevel.NONE):
+        raise ApiKeyValidationError(
+            status_code=403,
+            code="insufficient_resource_permission",
+            message=f"API key does not have '{resource_type}' permission.",
+            context=ResourceDenialContext(
+                resource_type=resource_type,
+                required_level=ApiKeyPermission.READ.value,
+                granted_level=(
+                    granted_value.value
+                    if isinstance(granted_value, ResourcePermissionLevel)
+                    else "none"
+                ),
+                auth_layer="api_key_resource",
+                action="resource_permission_check",
+            ),
+        )
+
+    return ApiKeyPermission(granted_value.value)
 
 
 def check_resource_permission(

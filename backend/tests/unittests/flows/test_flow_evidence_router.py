@@ -125,6 +125,147 @@ async def test_flow_run_alias_evidence_delegates_to_evidence_service(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_flow_run_alias_evidence_enriches_service_principal_actor_summaries(
+    monkeypatch,
+):
+    container = MagicMock()
+    flow_id = uuid4()
+    tenant_id = uuid4()
+    requester_service_id = uuid4()
+    rerun_service_id = uuid4()
+    run = _run(flow_id=flow_id, tenant_id=tenant_id)
+    evidence = {
+        "run": run.model_dump(mode="json"),
+        "definition_snapshot": {"steps": []},
+        "step_results": [],
+        "step_attempts": [],
+        "result_files": [],
+        "rerun_operations": [
+            {
+                "id": str(uuid4()),
+                "tenant_id": str(tenant_id),
+                "flow_id": str(flow_id),
+                "flow_run_id": str(run.id),
+                "rerun_step_id": str(uuid4()),
+                "rerun_step_order": 1,
+                "root_attempt_no": 2,
+                "status": "completed",
+                "request_fingerprint": "fingerprint",
+                "expected_run_revision": 1,
+                "accepted_run_revision": 2,
+                "reason": "Refresh output",
+                "requested_by_principal_type": "service_key",
+                "requested_by_service_id": str(rerun_service_id),
+                "created_at": "2026-03-20T12:00:00Z",
+                "updated_at": "2026-03-20T12:00:00Z",
+            }
+        ],
+        "rerun_invalidated_steps": [],
+        "review_checkpoints": [
+            {
+                "id": str(uuid4()),
+                "tenant_id": str(tenant_id),
+                "flow_id": str(flow_id),
+                "flow_run_id": str(run.id),
+                "step_id": str(uuid4()),
+                "step_order": 1,
+                "attempt_no": 1,
+                "state": "resumed",
+                "revision": 4,
+                "schema_version": 1,
+                "review_mode": "edit",
+                "output_type": "json",
+                "decision": "approved",
+                "resume_key_present": True,
+                "requester_principal_type": "service_key",
+                "requester_service_id": str(requester_service_id),
+                "decided_by_principal_type": None,
+                "created_at": "2026-03-20T12:00:00Z",
+                "updated_at": "2026-03-20T12:00:00Z",
+            }
+        ],
+        "debug_export": {
+            "schema_version": "eneo.flow.debug-export.v2",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "run": {
+                "run_id": str(run.id),
+                "flow_id": str(run.flow_id),
+                "flow_version": run.flow_version,
+                "status": run.status.value,
+            },
+            "definition": {
+                "flow_id": str(run.flow_id),
+                "version": 1,
+                "checksum": "abc",
+                "steps_count": 0,
+            },
+            "definition_snapshot": {"steps": []},
+            "steps": [],
+            "security": {
+                "redaction_applied": True,
+                "classification_field": "output_classification_override",
+                "mcp_policy_field": "mcp_policy",
+            },
+        },
+    }
+    run_service = AsyncMock()
+    run_service.get_run.return_value = run
+    run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(
+        to_dict=lambda: evidence
+    )
+    container.flow_run_evidence_service.return_value = run_service
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
+    )
+    api_key_repo = AsyncMock()
+    api_key_repo.list_service_principals_by_ids.return_value = {
+        requester_service_id: SimpleNamespace(
+            id=requester_service_id,
+            display_name="Requester service",
+        ),
+        rerun_service_id: SimpleNamespace(
+            id=rerun_service_id,
+            display_name="Rerun service",
+        ),
+    }
+    container.api_key_v2_repo.return_value = api_key_repo
+    container.audit_service.return_value = AsyncMock()
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+
+    monkeypatch.setattr(
+        router_common_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    _enable_space_access(
+        container,
+        user_permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
+    )
+
+    response = await get_flow_run_evidence_alias(
+        id=flow_id,
+        run_id=run.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    checkpoint = response.review_checkpoints[0]
+    assert checkpoint.requester_service_principal is not None
+    assert checkpoint.requester_service_principal.id == requester_service_id
+    assert checkpoint.requester_service_principal.display_name == "Requester service"
+    rerun_operation = response.rerun_operations[0]
+    assert rerun_operation.requested_by_service_principal is not None
+    assert rerun_operation.requested_by_service_principal.id == rerun_service_id
+    assert (
+        rerun_operation.requested_by_service_principal.display_name == "Rerun service"
+    )
+
+
+@pytest.mark.asyncio
 async def test_flow_run_alias_evidence_requires_trace_permission(monkeypatch):
     container = MagicMock()
     flow_id = uuid4()

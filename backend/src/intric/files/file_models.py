@@ -64,14 +64,14 @@ class FileBaseWithContent(FileBase):
 class FileInfo(InDB, FileBase):
     owner_type: PrincipalType | None = None
     owner_user_id: UUID | None = None
-    owner_api_key_id: UUID | None = None
+    owner_service_id: UUID | None = None
     tenant_id: UUID
 
 
 class FileCreate(FileBaseWithContent):
     owner_type: PrincipalType | None = None
     owner_user_id: UUID | None = None
-    owner_api_key_id: UUID | None = None
+    owner_service_id: UUID | None = None
     tenant_id: UUID
 
 

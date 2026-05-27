@@ -13,6 +13,7 @@ from pydantic import (
     model_validator,
 )
 
+from intric.authentication.auth_models import ApiKeyPermission
 from intric.authentication.principal_types import PrincipalType
 from intric.flows.enums import (
     FlowInputSource,
@@ -157,7 +158,9 @@ class FlowRun(BaseModel):
     flow_version: int
     principal_type: PrincipalType | None = None
     principal_user_id: Optional[UUID] = None
-    principal_api_key_id: Optional[UUID] = None
+    principal_service_id: Optional[UUID] = None
+    created_by_api_key_id: Optional[UUID] = None
+    runtime_service_permission: ApiKeyPermission | None = None
     tenant_id: UUID
     trace_id: UUID
     revision: int = 1
@@ -283,7 +286,8 @@ class FlowRunRerunOperation(BaseModel):
     input_payload_json: JsonObject | None = None
     step_inputs_json: JsonObject | None = None
     requested_by_principal_type: PrincipalType
-    requested_by_user_id: UUID
+    requested_by_user_id: UUID | None = None
+    requested_by_service_id: UUID | None = None
     failure_code: Optional[str] = None
     failure_message: Optional[str] = None
     started_at: Optional[datetime] = None
@@ -346,8 +350,10 @@ class FlowRunReviewCheckpoint(BaseModel):
         ),
     )
     requester_user_id: UUID | None = None
+    requester_service_id: UUID | None = None
     requester_principal_type: PrincipalType
     decided_by_user_id: UUID | None = None
+    decided_by_service_id: UUID | None = None
     decided_by_principal_type: PrincipalType | None = None
     next_step_ids_json: list[UUID] | None = None
     resume_idempotency_key: str | None = None

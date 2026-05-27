@@ -113,6 +113,7 @@ async def resolve_step_input(
         files = await _load_runtime_files(
             requested_ids=requested_ids,
             step_order=step.step_order,
+            tenant_id=run.tenant_id,
             state=state,
             deps=deps,
         )
@@ -323,6 +324,7 @@ async def _load_runtime_files(
     *,
     requested_ids: list[Any],
     step_order: int,
+    tenant_id: Any,
     state: RunExecutionState | None,
     deps: StepInputResolutionDeps,
 ) -> list[Any]:
@@ -331,6 +333,7 @@ async def _load_runtime_files(
         file_repo=deps.file_repo,
         requested_ids=requested_ids,
         principal=deps.principal,
+        tenant_id=tenant_id,
         file_cache=file_cache,
     )
     returned_ids = {f.id for f in files}

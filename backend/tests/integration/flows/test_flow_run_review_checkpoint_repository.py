@@ -20,6 +20,7 @@ from intric.database.tables.flow_tables import (
     FlowRuns,
     FlowStepResults,
 )
+from intric.database.tables.service_principals_table import ServicePrincipals
 from intric.flows import (
     Flow,
     FlowFactory,
@@ -238,10 +239,33 @@ async def _create_checkpoint(
         current_payload_json={"answer": "draft"},
         requester_principal_type=PrincipalType.USER,
         requester_user_id=requester_user_id,
+        requester_service_id=None,
         review_mode=FlowStepReviewMode.VIEW,
         output_type=FlowOutputType.JSON,
         next_step_ids=(second_step_id,),
     )
+
+
+async def _create_service_principal_id(
+    *,
+    session: AsyncSession,
+    tenant_id: UUID,
+    created_by_user_id: UUID,
+) -> UUID:
+    service_principal_id = uuid4()
+    await session.execute(
+        sa.insert(ServicePrincipals).values(
+            id=service_principal_id,
+            tenant_id=tenant_id,
+            display_name="Review checkpoint service principal",
+            description=None,
+            scope_type="tenant",
+            scope_id=None,
+            state="active",
+            created_by_user_id=created_by_user_id,
+        )
+    )
+    return service_principal_id
 
 
 async def _complete_reviewed_step_result(
@@ -355,6 +379,11 @@ async def test_service_key_run_can_open_review_checkpoint_without_user_requester
             admin_user=admin_user,
         )
         repo = FlowRunRepository(session=session, factory=FlowFactory())
+        service_principal_id = await _create_service_principal_id(
+            session=session,
+            tenant_id=scenario.tenant_id,
+            created_by_user_id=admin_user.id,
+        )
 
         checkpoint = await repo.create_or_get_review_checkpoint_for_attempt(
             tenant_id=scenario.tenant_id,
@@ -367,6 +396,7 @@ async def test_service_key_run_can_open_review_checkpoint_without_user_requester
             current_payload_json={"answer": "draft"},
             requester_principal_type=PrincipalType.SERVICE_KEY,
             requester_user_id=None,
+            requester_service_id=service_principal_id,
             review_mode=FlowStepReviewMode.VIEW,
             output_type=FlowOutputType.JSON,
             next_step_ids=(scenario.step_ids[1],),
@@ -374,6 +404,7 @@ async def test_service_key_run_can_open_review_checkpoint_without_user_requester
 
     assert checkpoint.requester_principal_type == PrincipalType.SERVICE_KEY
     assert checkpoint.requester_user_id is None
+    assert checkpoint.requester_service_id == service_principal_id
 
 
 @pytest.mark.asyncio
@@ -413,6 +444,7 @@ async def test_review_checkpoint_allows_one_active_checkpoint_per_run(
                 current_payload_json={"next": "draft"},
                 requester_principal_type=PrincipalType.USER,
                 requester_user_id=admin_user.id,
+                requester_service_id=None,
                 review_mode=FlowStepReviewMode.VIEW,
                 output_type=FlowOutputType.TEXT,
             )
@@ -502,6 +534,7 @@ async def test_list_review_checkpoints_for_run_orders_by_step_and_attempt(
             current_payload_json={"answer": "second"},
             requester_principal_type=PrincipalType.USER,
             requester_user_id=admin_user.id,
+            requester_service_id=None,
             review_mode=FlowStepReviewMode.VIEW,
             output_type=FlowOutputType.TEXT,
             next_step_ids=(),
@@ -526,6 +559,7 @@ async def test_list_review_checkpoints_for_run_orders_by_step_and_attempt(
             current_payload_json={"answer": "first rerun"},
             requester_principal_type=PrincipalType.USER,
             requester_user_id=admin_user.id,
+            requester_service_id=None,
             review_mode=FlowStepReviewMode.VIEW,
             output_type=FlowOutputType.JSON,
             next_step_ids=(second_step_id,),
@@ -550,6 +584,7 @@ async def test_list_review_checkpoints_for_run_orders_by_step_and_attempt(
             current_payload_json={"answer": "first"},
             requester_principal_type=PrincipalType.USER,
             requester_user_id=admin_user.id,
+            requester_service_id=None,
             review_mode=FlowStepReviewMode.VIEW,
             output_type=FlowOutputType.JSON,
             next_step_ids=(second_step_id,),
@@ -1783,7 +1818,7 @@ async def test_awaiting_review_run_rejects_rerun_without_waiting_branch(
                 reason="should reject while awaiting review",
                 input_payload_json=None,
                 step_inputs_json=None,
-                requested_by_user_id=admin_user.id,
+                requested_by_principal=FlowPrincipal.from_user(admin_user),
                 invalidated_steps=(),
             )
 

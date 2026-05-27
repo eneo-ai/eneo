@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from intric.authentication.auth_models import (
+    ApiKeyPermission,
     ResourcePermissionLevel,
     ResourcePermissions,
 )
@@ -156,6 +157,8 @@ def _service_key_user(user):
             "active_api_key": SimpleNamespace(
                 id=uuid4(),
                 ownership="service",
+                service_principal_id=uuid4(),
+                permission=ApiKeyPermission.WRITE,
                 resource_permissions=None,
             ),
         }
@@ -355,6 +358,7 @@ def _rerun_command_result(
         step_inputs_json=None,
         requested_by_principal_type=PrincipalType.USER,
         requested_by_user_id=user.id,
+        requested_by_service_id=None,
         failure_code=None,
         failure_message=None,
         started_at=None,
@@ -642,7 +646,7 @@ def test_create_run_idempotency_fingerprint_shape_is_stable(user):
     )
 
     assert fingerprint == (
-        "7c74534a589bfcc338ff089c193770aec72e9e0a9dafc4c43af9db82445757cc"
+        "8715930761bd747292bf49e3f1986baf7aab7f4f0502c7725d39f6667b72b875"
     )
 
 
@@ -705,7 +709,9 @@ async def test_create_run_persists_service_key_principal(user):
         update={
             "principal_type": "service_key",
             "principal_user_id": None,
-            "principal_api_key_id": service_user.active_api_key.id,
+            "principal_service_id": service_user.active_api_key.service_principal_id,
+            "created_by_api_key_id": service_user.active_api_key.id,
+            "runtime_service_permission": ApiKeyPermission.WRITE,
         }
     )
     service = FlowRunService(
@@ -734,7 +740,12 @@ async def test_create_run_persists_service_key_principal(user):
     kwargs = flow_run_repo.create.await_args.kwargs
     assert kwargs["principal_type"] == "service_key"
     assert kwargs["principal_user_id"] is None
-    assert kwargs["principal_api_key_id"] == service_user.active_api_key.id
+    assert (
+        kwargs["principal_service_id"]
+        == service_user.active_api_key.service_principal_id
+    )
+    assert kwargs["created_by_api_key_id"] == service_user.active_api_key.id
+    assert kwargs["runtime_service_permission"] == ApiKeyPermission.WRITE
 
 
 @pytest.mark.asyncio
@@ -1365,7 +1376,9 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
         update={
             "principal_type": "service_key",
             "principal_user_id": None,
-            "principal_api_key_id": service_user.active_api_key.id,
+            "principal_service_id": service_user.active_api_key.service_principal_id,
+            "created_by_api_key_id": service_user.active_api_key.id,
+            "runtime_service_permission": ApiKeyPermission.WRITE,
         }
     )
     service = FlowRunService(
@@ -1419,7 +1432,8 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
         ids=[file_id],
         owner_type="service_key",
         owner_user_id=None,
-        owner_api_key_id=service_user.active_api_key.id,
+        owner_service_id=service_user.active_api_key.service_principal_id,
+        tenant_id=service_user.tenant_id,
         include_transcription=False,
     )
 
@@ -1520,7 +1534,7 @@ async def test_list_runs_delegates_to_repo(user):
         tenant_id=user.tenant_id,
         flow_id=flow_id,
         principal_user_id=user.id,
-        principal_api_key_id=None,
+        principal_service_id=None,
         limit=None,
         offset=None,
     )
@@ -1552,14 +1566,14 @@ async def test_list_runs_allows_tenant_admin_to_see_all_runs(user):
         tenant_id=admin_user.tenant_id,
         flow_id=flow_id,
         principal_user_id=None,
-        principal_api_key_id=None,
+        principal_service_id=None,
         limit=None,
         offset=None,
     )
 
 
 @pytest.mark.asyncio
-async def test_list_runs_filters_service_key_runs_by_api_key(user):
+async def test_list_runs_filters_service_key_runs_by_service_principal(user):
     service_user = _service_key_user(user)
     flow_repo = _flow_repo()
     flow_run_repo = AsyncMock()
@@ -1570,7 +1584,9 @@ async def test_list_runs_filters_service_key_runs_by_api_key(user):
             update={
                 "principal_type": "service_key",
                 "principal_user_id": None,
-                "principal_api_key_id": service_user.active_api_key.id,
+                "principal_service_id": service_user.active_api_key.service_principal_id,
+                "created_by_api_key_id": service_user.active_api_key.id,
+                "runtime_service_permission": ApiKeyPermission.WRITE,
             }
         )
     ]
@@ -1590,7 +1606,7 @@ async def test_list_runs_filters_service_key_runs_by_api_key(user):
         tenant_id=service_user.tenant_id,
         flow_id=flow_id,
         principal_user_id=None,
-        principal_api_key_id=service_user.active_api_key.id,
+        principal_service_id=service_user.active_api_key.service_principal_id,
         limit=None,
         offset=None,
     )
@@ -1630,7 +1646,7 @@ async def test_list_runs_keeps_service_keys_scoped_even_with_space_admin_role(us
         tenant_id=service_user.tenant_id,
         flow_id=flow.id,
         principal_user_id=None,
-        principal_api_key_id=service_user.active_api_key.id,
+        principal_service_id=service_user.active_api_key.service_principal_id,
         limit=None,
         offset=None,
     )
@@ -1652,7 +1668,9 @@ async def test_get_evidence_rejects_service_key_even_for_own_run(user):
         update={
             "principal_type": "service_key",
             "principal_user_id": None,
-            "principal_api_key_id": service_user.active_api_key.id,
+            "principal_service_id": service_user.active_api_key.service_principal_id,
+            "created_by_api_key_id": service_user.active_api_key.id,
+            "runtime_service_permission": ApiKeyPermission.WRITE,
         }
     )
     flow_run_repo.get.return_value = run
@@ -1676,7 +1694,9 @@ async def test_get_evidence_allows_service_key_with_view_capability(user):
         update={
             "principal_type": "service_key",
             "principal_user_id": None,
-            "principal_api_key_id": service_user.active_api_key.id,
+            "principal_service_id": service_user.active_api_key.service_principal_id,
+            "created_by_api_key_id": service_user.active_api_key.id,
+            "runtime_service_permission": ApiKeyPermission.WRITE,
         }
     )
     flow = _flow(user=user).model_copy(update={"id": run.flow_id})
@@ -1715,7 +1735,9 @@ async def test_export_evidence_json_allows_service_key_redacted_export_with_writ
         update={
             "principal_type": "service_key",
             "principal_user_id": None,
-            "principal_api_key_id": service_user.active_api_key.id,
+            "principal_service_id": service_user.active_api_key.service_principal_id,
+            "created_by_api_key_id": service_user.active_api_key.id,
+            "runtime_service_permission": ApiKeyPermission.WRITE,
         }
     )
     flow = _flow(user=user).model_copy(update={"id": run.flow_id})
@@ -1760,7 +1782,9 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
         update={
             "principal_type": "service_key",
             "principal_user_id": None,
-            "principal_api_key_id": service_user.active_api_key.id,
+            "principal_service_id": service_user.active_api_key.service_principal_id,
+            "created_by_api_key_id": service_user.active_api_key.id,
+            "runtime_service_permission": ApiKeyPermission.WRITE,
         }
     )
     version = _version(user=user, flow=flow, version=1)
@@ -2020,7 +2044,9 @@ async def test_service_key_unknown_access_kind_fails_closed(user):
         update={
             "principal_type": "service_key",
             "principal_user_id": None,
-            "principal_api_key_id": service_user.active_api_key.id,
+            "principal_service_id": service_user.active_api_key.service_principal_id,
+            "created_by_api_key_id": service_user.active_api_key.id,
+            "runtime_service_permission": ApiKeyPermission.WRITE,
         }
     )
     flow_run_repo.get.return_value = run
@@ -2089,12 +2115,14 @@ async def test_get_run_rejects_service_key_for_other_principals_run(user):
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
     )
-    other_key_id = uuid4()
+    other_service_principal_id = uuid4()
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
             "principal_type": "service_key",
             "principal_user_id": None,
-            "principal_api_key_id": other_key_id,
+            "principal_service_id": other_service_principal_id,
+            "created_by_api_key_id": uuid4(),
+            "runtime_service_permission": ApiKeyPermission.WRITE,
         }
     )
     flow_run_repo.get.return_value = run
@@ -2422,12 +2450,15 @@ def test_build_dispatch_request_uses_service_key_identity(user):
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
     )
+    service_principal_id = uuid4()
     api_key_id = uuid4()
     run = _run(user=user, flow_id=uuid4()).model_copy(
         update={
             "principal_type": PrincipalType.SERVICE_KEY.value,
             "principal_user_id": None,
-            "principal_api_key_id": api_key_id,
+            "principal_service_id": service_principal_id,
+            "created_by_api_key_id": api_key_id,
+            "runtime_service_permission": ApiKeyPermission.WRITE,
         }
     )
 
@@ -2437,7 +2468,7 @@ def test_build_dispatch_request_uses_service_key_identity(user):
         run_id=run.id,
         flow_id=run.flow_id,
         tenant_id=run.tenant_id,
-        principal_api_key_id=api_key_id,
+        principal_service_id=service_principal_id,
     )
 
 

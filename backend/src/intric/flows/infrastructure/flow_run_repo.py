@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
+from intric.authentication.auth_models import ApiKeyPermission
 from intric.authentication.principal_types import PrincipalType
 from intric.database.tables.files_table import Files
 from intric.database.tables.flow_tables import (
@@ -218,7 +219,9 @@ class FlowRunRepository:
         flow_version: int,
         principal_type: str = "user",
         principal_user_id: UUID | None = None,
-        principal_api_key_id: UUID | None = None,
+        principal_service_id: UUID | None = None,
+        created_by_api_key_id: UUID | None = None,
+        runtime_service_permission: ApiKeyPermission | None = None,
         tenant_id: UUID,
         input_payload_json: dict[str, Any] | None,
         preseed_steps: Sequence["PreseedStep"],
@@ -229,7 +232,8 @@ class FlowRunRepository:
         principal = FlowPrincipal(
             principal_type=PrincipalType(principal_type),
             principal_user_id=principal_user_id,
-            principal_api_key_id=principal_api_key_id,
+            principal_service_id=principal_service_id,
+            actor_api_key_id=created_by_api_key_id,
         )
         run_row = await self.session.scalar(
             sa.insert(FlowRuns)
@@ -238,7 +242,13 @@ class FlowRunRepository:
                 flow_version=flow_version,
                 principal_type=principal.principal_type.value,
                 principal_user_id=principal.principal_user_id,
-                principal_api_key_id=principal.principal_api_key_id,
+                principal_service_id=principal.principal_service_id,
+                created_by_api_key_id=principal.actor_api_key_id,
+                runtime_service_permission=(
+                    runtime_service_permission.value
+                    if runtime_service_permission is not None
+                    else None
+                ),
                 tenant_id=tenant_id,
                 trace_id=uuid4(),
                 idempotency_key=idempotency_key,
@@ -323,6 +333,7 @@ class FlowRunRepository:
         current_payload_json: JsonObject | None,
         requester_principal_type: PrincipalType,
         requester_user_id: UUID | None,
+        requester_service_id: UUID | None,
         review_mode: FlowStepReviewMode,
         output_type: FlowOutputType,
         step_label: str | None = None,
@@ -363,6 +374,7 @@ class FlowRunRepository:
                 output_contract_json=output_contract_json,
                 requester_principal_type=requester_principal_type.value,
                 requester_user_id=requester_user_id,
+                requester_service_id=requester_service_id,
                 next_step_ids_json=next_step_ids_json,
                 expires_at=expires_at,
             )
@@ -481,6 +493,7 @@ class FlowRunRepository:
             output_contract_json=output_contract_json,
             requester_principal_type=requester_principal.principal_type,
             requester_user_id=requester_principal.principal_user_id,
+            requester_service_id=requester_principal.principal_service_id,
             next_step_ids=next_step_ids,
             review_expires_after_seconds=review_expires_after_seconds,
         )
@@ -847,6 +860,7 @@ class FlowRunRepository:
         if principal is not None:
             values["decided_by_principal_type"] = principal.principal_type.value
             values["decided_by_user_id"] = principal.principal_user_id
+            values["decided_by_service_id"] = principal.principal_service_id
         checkpoint_row = await self.session.scalar(
             sa.update(FlowRunReviewCheckpoints)
             .where(FlowRunReviewCheckpoints.flow_run_id == flow_run_id)
@@ -1137,6 +1151,7 @@ class FlowRunRepository:
             "revision": FlowRunReviewCheckpoints.revision + 1,
             "decided_by_principal_type": principal.principal_type.value,
             "decided_by_user_id": principal.principal_user_id,
+            "decided_by_service_id": principal.principal_service_id,
         }
         timestamp_field = _REVIEW_CHECKPOINT_TIMESTAMP_BY_STATE.get(target_state)
         if timestamp_field is not None:
@@ -1200,6 +1215,7 @@ class FlowRunRepository:
         allowed_source_states: Sequence[FlowRunReviewCheckpointState],
         target_state: FlowRunReviewCheckpointState,
         decided_by_user_id: UUID | None = None,
+        decided_by_service_id: UUID | None = None,
         decided_by_principal_type: PrincipalType | None = None,
         resume_idempotency_key: str | None = None,
     ) -> FlowRunReviewCheckpoint | None:
@@ -1213,6 +1229,8 @@ class FlowRunRepository:
             values[timestamp_field] = now_utc
         if decided_by_user_id is not None:
             values["decided_by_user_id"] = decided_by_user_id
+        if decided_by_service_id is not None:
+            values["decided_by_service_id"] = decided_by_service_id
         if decided_by_principal_type is not None:
             values["decided_by_principal_type"] = decided_by_principal_type.value
         if resume_idempotency_key is not None:
@@ -1265,7 +1283,7 @@ class FlowRunRepository:
         reason: str,
         input_payload_json: JsonObject | None,
         step_inputs_json: JsonObject | None,
-        requested_by_user_id: UUID,
+        requested_by_principal: FlowPrincipal,
         invalidated_steps: Sequence[RerunInvalidatedStep],
     ) -> FlowRunRerunCommandResult:
         existing_operation = await self._get_rerun_operation_row(
@@ -1395,8 +1413,9 @@ class FlowRunRepository:
                 reason=reason,
                 input_payload_json=input_payload_json,
                 step_inputs_json=step_inputs_json,
-                requested_by_principal_type=PrincipalType.USER.value,
-                requested_by_user_id=requested_by_user_id,
+                requested_by_principal_type=requested_by_principal.principal_type.value,
+                requested_by_user_id=requested_by_principal.principal_user_id,
+                requested_by_service_id=requested_by_principal.principal_service_id,
                 failure_code=None,
                 failure_message=None,
                 started_at=None,
@@ -1512,9 +1531,9 @@ class FlowRunRepository:
         )
         if principal.principal_user_id is not None:
             stmt = stmt.where(FlowRuns.principal_user_id == principal.principal_user_id)
-        if principal.principal_api_key_id is not None:
+        if principal.principal_service_id is not None:
             stmt = stmt.where(
-                FlowRuns.principal_api_key_id == principal.principal_api_key_id
+                FlowRuns.principal_service_id == principal.principal_service_id
             )
         row = await self.session.scalar(stmt)
         if row is None:
@@ -1541,7 +1560,7 @@ class FlowRunRepository:
         tenant_id: UUID,
         flow_id: UUID | None = None,
         principal_user_id: UUID | None = None,
-        principal_api_key_id: UUID | None = None,
+        principal_service_id: UUID | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[FlowRun]:
@@ -1554,8 +1573,8 @@ class FlowRunRepository:
             stmt = stmt.where(FlowRuns.flow_id == flow_id)
         if principal_user_id is not None:
             stmt = stmt.where(FlowRuns.principal_user_id == principal_user_id)
-        if principal_api_key_id is not None:
-            stmt = stmt.where(FlowRuns.principal_api_key_id == principal_api_key_id)
+        if principal_service_id is not None:
+            stmt = stmt.where(FlowRuns.principal_service_id == principal_service_id)
         if offset is not None:
             stmt = stmt.offset(offset)
         if limit is not None:

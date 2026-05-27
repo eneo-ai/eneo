@@ -13,6 +13,9 @@ from intric.flows.api.flow_models import (
     FlowRunEvidenceExportResponse,
     FlowRunEvidenceResponse,
 )
+from intric.flows.api.flow_service_principal_actor_read_model import (
+    enrich_evidence_service_principal_summaries,
+)
 from intric.flows.api.flow_trace_audit import (
     build_flow_trace_error_payload,
     log_flow_trace_audit_or_deny,
@@ -135,7 +138,12 @@ async def get_flow_run_evidence_alias(
     )
     if audit_failure is not None:
         return audit_failure
-    return FlowRunEvidenceResponse.model_validate(evidence.to_dict())
+    payload = await enrich_evidence_service_principal_summaries(
+        api_key_repo=container.api_key_v2_repo(),
+        tenant_id=user.tenant_id,
+        payload=evidence.to_dict(),
+    )
+    return FlowRunEvidenceResponse.model_validate(payload)
 
 
 @router.get(

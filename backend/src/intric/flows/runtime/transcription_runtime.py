@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
-from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
+from intric.flows.runtime.flow_run_actor import FlowRunActor
 
 from .transcription import resolve_and_transcribe_audio_for_step
 
@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from intric.flows.domain.flow import FlowRun
     from intric.flows.infrastructure.flow_run_repo import FlowRunRepository
     from intric.spaces.space_repo import SpaceRepository
-    from intric.users.user import UserInDB
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +61,7 @@ class AudioRuntimeDeps:
     space_repo: "SpaceRepository"
     flow_run_repo: "FlowRunRepository"
     audit_service: "AuditService | None"
-    actor: "UserInDB"
+    actor: FlowRunActor
 
 
 def apply_transcription_to_context(*, context: dict[str, Any], transcript: str) -> None:
@@ -103,7 +102,7 @@ def build_near_limit_message(
 async def log_audio_transcribed_audit(
     *,
     audit_service: "AuditService | None",
-    actor: "UserInDB",
+    actor: FlowRunActor,
     run: "FlowRun",
     step_order: int,
     step_id: UUID,
@@ -112,15 +111,17 @@ async def log_audio_transcribed_audit(
     if audit_service is None:
         return
     try:
+        actor_fields = actor.audit_actor_fields()
         await audit_service.log_async(
             tenant_id=run.tenant_id,
-            actor_id=actor.id,
+            actor_id=actor_fields["actor_id"],
+            actor_type=actor_fields["actor_type"],
+            actor_api_key_id=actor_fields["actor_api_key_id"],
             action=ActionType.FLOW_RUN_AUDIO_TRANSCRIBED,
             entity_type=EntityType.FLOW_RUN,
             entity_id=run.id,
             description=f"Flow step {step_order} transcribed audio input.",
-            metadata=AuditMetadata.standard(
-                actor=actor,
+            metadata=actor.audit_metadata(
                 target=run,
                 extra={
                     "flow_id": str(run.flow_id),
@@ -129,7 +130,11 @@ async def log_audio_transcribed_audit(
                     "file_ids": metadata.get("file_ids"),
                     "model": metadata.get("model"),
                     "language": metadata.get("language"),
-                    "text_length": len(str(run.input_payload_json.get(FLOW_INPUT_TRANSCRIPTION_KEY, "")))
+                    "text_length": len(
+                        str(
+                            run.input_payload_json.get(FLOW_INPUT_TRANSCRIPTION_KEY, "")
+                        )
+                    )
                     if isinstance(run.input_payload_json, dict)
                     else 0,
                     "elapsed_ms": metadata.get("elapsed_ms"),
@@ -171,7 +176,9 @@ async def resolve_transcribe_and_attach_audio_input(
         run=request.run,
         transcript=transcription_result.text,
     )
-    apply_transcription_to_context(context=request.context, transcript=transcription_result.text)
+    apply_transcription_to_context(
+        context=request.context, transcript=transcription_result.text
+    )
     await log_audio_transcribed_audit(
         audit_service=deps.audit_service,
         actor=deps.actor,

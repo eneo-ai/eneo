@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 from intric.authentication.auth_models import (
+    ApiKeyPermission,
     ResourcePermissionLevel,
     ResourcePermissions,
 )
@@ -30,7 +31,6 @@ def _run(user, flow_id) -> FlowRun:
         flow_version=1,
         principal_type=PrincipalType.USER.value,
         principal_user_id=user.id,
-        principal_api_key_id=None,
         tenant_id=user.tenant_id,
         trace_id=uuid4(),
         status=FlowRunStatus.COMPLETED,
@@ -49,6 +49,8 @@ def _service_key_user(user):
             "active_api_key": SimpleNamespace(
                 id=uuid4(),
                 ownership="service",
+                service_principal_id=uuid4(),
+                permission=ApiKeyPermission.WRITE,
                 resource_permissions=None,
             ),
         }
@@ -203,7 +205,9 @@ async def test_service_key_access_requires_matching_run_principal(user):
             "user_id": None,
             "principal_type": PrincipalType.SERVICE_KEY.value,
             "principal_user_id": None,
-            "principal_api_key_id": uuid4(),
+            "principal_service_id": uuid4(),
+            "created_by_api_key_id": uuid4(),
+            "runtime_service_permission": ApiKeyPermission.WRITE,
         }
     )
     flow_run_repo = AsyncMock()
@@ -233,7 +237,9 @@ async def test_service_key_evidence_view_uses_key_capability(user):
             "user_id": None,
             "principal_type": PrincipalType.SERVICE_KEY.value,
             "principal_user_id": None,
-            "principal_api_key_id": service_user.active_api_key.id,
+            "principal_service_id": service_user.active_api_key.service_principal_id,
+            "created_by_api_key_id": service_user.active_api_key.id,
+            "runtime_service_permission": ApiKeyPermission.WRITE,
         }
     )
     flow_run_repo = AsyncMock()

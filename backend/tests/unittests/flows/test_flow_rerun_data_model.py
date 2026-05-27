@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from uuid import uuid4
+
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import CheckConstraint, Index, UniqueConstraint
 
+from intric.authentication.auth_models import FlowServicePrincipalActorPublic
+from intric.authentication.principal_types import PrincipalType
 from intric.database.tables.flow_tables import (
     FLOW_RUN_RERUN_INVALIDATION_ROLE_VALUES,
     FLOW_RUN_RERUN_OPERATION_STATUS_VALUES,
@@ -11,6 +18,7 @@ from intric.database.tables.flow_tables import (
     FlowStepAttempts,
     FlowStepResults,
 )
+from intric.flows.api.flow_models import FlowRunRerunOperationPublic
 from intric.flows.enums import (
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
@@ -52,6 +60,35 @@ def _index_by_name(table: object, index_name: str) -> Index:
     raise AssertionError(f"Index {index_name} was not found.")
 
 
+def _service_principal_actor() -> FlowServicePrincipalActorPublic:
+    return FlowServicePrincipalActorPublic(
+        id=uuid4(),
+        display_name="Runtime service principal",
+    )
+
+
+def _rerun_operation_public_payload() -> dict[str, object]:
+    now = datetime.now(timezone.utc)
+    return {
+        "id": uuid4(),
+        "tenant_id": uuid4(),
+        "flow_id": uuid4(),
+        "flow_run_id": uuid4(),
+        "rerun_step_id": uuid4(),
+        "rerun_step_order": 1,
+        "root_attempt_no": 2,
+        "status": FlowRunRerunOperationStatus.QUEUED,
+        "request_fingerprint": "fingerprint",
+        "expected_run_revision": 1,
+        "accepted_run_revision": 1,
+        "reason": "Refresh output",
+        "requested_by_principal_type": PrincipalType.SERVICE_KEY,
+        "requested_by_service_principal": _service_principal_actor(),
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
 def test_rerun_status_and_role_values_are_canonical_enum_values():
     assert FLOW_RUN_RERUN_OPERATION_STATUS_VALUES == tuple(
         item.value for item in FlowRunRerunOperationStatus
@@ -59,6 +96,32 @@ def test_rerun_status_and_role_values_are_canonical_enum_values():
     assert FLOW_RUN_RERUN_INVALIDATION_ROLE_VALUES == tuple(
         item.value for item in FlowRunRerunInvalidationRole
     )
+
+
+def test_rerun_operation_public_accepts_service_principal_actor_shape():
+    operation = FlowRunRerunOperationPublic.model_validate(
+        _rerun_operation_public_payload()
+    )
+
+    assert operation.requested_by_principal_type == PrincipalType.SERVICE_KEY
+    assert operation.requested_by_service_principal is not None
+    assert operation.requested_by_user_id is None
+
+
+def test_rerun_operation_public_rejects_service_principal_without_summary():
+    payload = _rerun_operation_public_payload()
+    payload["requested_by_service_principal"] = None
+
+    with pytest.raises(ValidationError, match="requested_by service principal"):
+        FlowRunRerunOperationPublic.model_validate(payload)
+
+
+def test_rerun_operation_public_rejects_mixed_requester_actor_shape():
+    payload = _rerun_operation_public_payload()
+    payload["requested_by_user_id"] = uuid4()
+
+    with pytest.raises(ValidationError, match="requested_by service principal"):
+        FlowRunRerunOperationPublic.model_validate(payload)
 
 
 def test_run_revision_and_current_attempt_projection_columns_exist():
@@ -85,6 +148,7 @@ def test_rerun_operation_table_owns_request_identity_and_status():
         "reason",
         "requested_by_principal_type",
         "requested_by_user_id",
+        "requested_by_service_id",
     }.issubset(FlowRunRerunOperations.__table__.columns.keys())
     assert _unique_columns(
         FlowRunRerunOperations,
@@ -93,10 +157,12 @@ def test_rerun_operation_table_owns_request_identity_and_status():
     assert "ck_flow_run_rerun_operations_status" in _constraint_names(
         FlowRunRerunOperations
     )
-    assert "requested_by_principal_type = 'user'" in _check_constraint_sql(
+    requester_constraint = _check_constraint_sql(
         FlowRunRerunOperations,
-        "ck_flow_run_rerun_operations_user_principal",
+        "ck_flow_run_rerun_operations_requester_principal",
     )
+    assert "requested_by_principal_type = 'user'" in requester_constraint
+    assert "requested_by_service_id IS NOT NULL" in requester_constraint
     assert FlowRunRerunOperations.__table__.columns["failure_code"].type.length == 64
     active_index = _index_by_name(
         FlowRunRerunOperations,

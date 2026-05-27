@@ -43,6 +43,10 @@ from intric.flows.api.flow_models import (
     FlowRunStepRerunResponse,
     flow_run_status_capabilities_public,
 )
+from intric.flows.api.flow_service_principal_actor_read_model import (
+    enrich_review_checkpoint_service_principal_summaries,
+)
+from intric.flows.domain.flow import FlowRunReviewCheckpoint
 from intric.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.main.container.container import Container
@@ -182,10 +186,9 @@ replay of the same rerun request. Use the response `status` to track the rerun o
 lifecycle. On replay, the nested `run` is the current persisted run state, so
 `run.revision` can be newer than the submitted `expected_run_revision`.
 
-Rerun is a run lifecycle mutation and currently requires a user principal with flow
-management access. Service-key principals can edit and resume human-review checkpoints
-for their own runs, but rerun operations are still persisted against a human actor in
-this API version.
+Rerun is a run lifecycle mutation. Human callers follow the existing flow management
+policy; service-key principals may rerun only their own runs under stable service
+principal ownership.
 
 """
     + _FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE
@@ -694,7 +697,9 @@ async def get_active_flow_run_review_checkpoint(
     )
     if checkpoint is None:
         return None
-    return FlowAssembler().to_review_checkpoint_public(checkpoint)
+    return await _to_review_checkpoint_public(
+        container=container, checkpoint=checkpoint
+    )
 
 
 @router.patch(
@@ -790,7 +795,9 @@ async def edit_flow_run_review_checkpoint(
                 current_payload_json=review_in.current_payload_json,
             )
         )
-    return FlowAssembler().to_review_checkpoint_public(checkpoint)
+    return await _to_review_checkpoint_public(
+        container=container, checkpoint=checkpoint
+    )
 
 
 @router.post(
@@ -863,7 +870,9 @@ async def approve_flow_run_review_checkpoint(
             checkpoint_id=checkpoint_id,
             expected_checkpoint_revision=review_in.expected_checkpoint_revision,
         )
-    return FlowAssembler().to_review_checkpoint_public(checkpoint)
+    return await _to_review_checkpoint_public(
+        container=container, checkpoint=checkpoint
+    )
 
 
 @router.post(
@@ -937,7 +946,9 @@ async def reject_flow_run_review_checkpoint(
             expected_checkpoint_revision=review_in.expected_checkpoint_revision,
             reason=review_in.reason,
         )
-    return FlowAssembler().to_review_checkpoint_public(checkpoint)
+    return await _to_review_checkpoint_public(
+        container=container, checkpoint=checkpoint
+    )
 
 
 @router.post(
@@ -1029,9 +1040,24 @@ async def resume_flow_run_review_checkpoint(
             common.dispatch_flow_run_recoverably_after_commit,
             request=dispatch_request,
         )
-    return FlowAssembler().to_review_checkpoint_resume_response(
-        checkpoint=result.checkpoint,
-        run=result.run,
+    return FlowRunReviewCheckpointResumeResponse(
+        checkpoint=await _to_review_checkpoint_public(
+            container=container,
+            checkpoint=result.checkpoint,
+        ),
+        run=FlowAssembler().to_run_public(result.run),
+    )
+
+
+async def _to_review_checkpoint_public(
+    *,
+    container: Container,
+    checkpoint: FlowRunReviewCheckpoint,
+) -> FlowRunReviewCheckpointPublic:
+    return await enrich_review_checkpoint_service_principal_summaries(
+        api_key_repo=container.api_key_v2_repo(),
+        tenant_id=container.user().tenant_id,
+        checkpoint=checkpoint,
     )
 
 

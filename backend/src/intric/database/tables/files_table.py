@@ -1,7 +1,8 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Text
+import sqlalchemy as sa
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Text
 from sqlalchemy.dialects.postgresql import BYTEA
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,8 +28,34 @@ class Files(BasePublic):
         ForeignKey(Users.id, ondelete="RESTRICT"),
         nullable=True,
     )
-    owner_api_key_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey("api_keys_v2.id", ondelete="RESTRICT"),
+    owner_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("service_principals.id", ondelete="RESTRICT"),
         nullable=True,
     )
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
+
+    __table_args__ = (
+        CheckConstraint(
+            "owner_type IN ('user','service_key')",
+            name="ck_files_owner_type",
+        ),
+        CheckConstraint(
+            "("
+            "owner_type = 'user' "
+            "AND owner_user_id IS NOT NULL "
+            "AND owner_service_id IS NULL"
+            ") OR ("
+            "owner_type = 'service_key' "
+            "AND owner_user_id IS NULL "
+            "AND owner_service_id IS NOT NULL"
+            ")",
+            name="ck_files_owner_identity",
+        ),
+        Index(
+            "ix_files_service_owner_created_at",
+            "tenant_id",
+            "owner_service_id",
+            "created_at",
+            postgresql_where=sa.text("owner_type = 'service_key'"),
+        ),
+    )

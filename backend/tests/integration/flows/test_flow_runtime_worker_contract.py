@@ -185,10 +185,6 @@ async def _create_runtime_worker_context(
         ),
         tenant_id=admin_user.tenant_id,
     )
-    flow = await flow_repo.update(
-        flow=flow.model_copy(update={"published_version": 1}),
-        tenant_id=admin_user.tenant_id,
-    )
     runtime_assistant = _RuntimeAssistant(
         assistant_id=assistant.id,
         model_id=model.id,
@@ -227,6 +223,10 @@ async def _create_runtime_worker_context(
         version=1,
         definition_checksum=stable_hash(definition_json),
         definition_json=definition_json,
+        tenant_id=admin_user.tenant_id,
+    )
+    flow = await flow_repo.update(
+        flow=flow.model_copy(update={"published_version": 1}),
         tenant_id=admin_user.tenant_id,
     )
     run = await container.flow_run_service().create_run(
@@ -466,8 +466,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
             ),
             tenant_id=admin_user.tenant_id,
         )
-        flow = flow.model_copy(update={"published_version": 1})
-        flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
         run_correlation_id = f"runtime-worker-contract-{uuid4()}"
         runtime_assistant = _RuntimeAssistant(
             assistant_id=assistant.id,
@@ -507,6 +505,10 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
             version=1,
             definition_checksum=stable_hash(definition_json),
             definition_json=definition_json,
+            tenant_id=admin_user.tenant_id,
+        )
+        flow = await flow_repo.update(
+            flow=flow.model_copy(update={"published_version": 1}),
             tenant_id=admin_user.tenant_id,
         )
 

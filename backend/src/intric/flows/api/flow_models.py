@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any, Literal, cast
+from typing import Any, Literal, Self, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.config import JsonDict
 
+from intric.authentication.auth_models import FlowServicePrincipalActorPublic
 from intric.authentication.principal_types import PrincipalType
 from intric.flows.enums import (
     FLOW_RUN_STATUS_CAPABILITIES,
@@ -64,6 +65,37 @@ from intric.flows.flow_run_evidence_export_summary import EvidenceExportSummary
 from intric.flows.flow_run_step_result_file import FlowRunStepResultFile
 from intric.main.exceptions import BadRequestException
 from intric.main.models import NOT_PROVIDED, NotProvided, partial_model
+
+
+def _validate_public_principal_actor_shape(
+    *,
+    label: str,
+    principal_type: PrincipalType | None,
+    user_id: UUID | None,
+    service_principal: FlowServicePrincipalActorPublic | None,
+    required: bool,
+) -> None:
+    if principal_type is None:
+        if required or user_id is not None or service_principal is not None:
+            raise ValueError(f"{label} principal type is required.")
+        return
+
+    if principal_type == PrincipalType.USER:
+        if user_id is None or service_principal is not None:
+            raise ValueError(
+                f"{label} user principal requires user id and no service principal."
+            )
+        return
+
+    if principal_type == PrincipalType.SERVICE_KEY:
+        if user_id is not None or service_principal is None:
+            raise ValueError(
+                f"{label} service principal requires service principal and no user id."
+            )
+        return
+
+    raise ValueError(f"{label} principal type is unsupported.")
+
 
 FLOW_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
     "id": "00000000-0000-0000-0000-000000000101",
@@ -305,8 +337,10 @@ FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE: dict[str, Any] = {
     },
     "next_step_ids": ["00000000-0000-0000-0000-000000000102"],
     "requester_user_id": "00000000-0000-0000-0000-000000000030",
+    "requester_service_principal": None,
     "requester_principal_type": "user",
     "decided_by_user_id": None,
+    "decided_by_service_principal": None,
     "decided_by_principal_type": None,
     "edited_at": None,
     "approved_at": None,
@@ -355,6 +389,7 @@ FLOW_RUN_REVIEW_CHECKPOINT_EDITED_RESPONSE_EXAMPLE: dict[str, Any] = {
     "revision": 2,
     "current_payload_json": {"text": "Edited answer."},
     "decided_by_user_id": "00000000-0000-0000-0000-000000000030",
+    "decided_by_service_principal": None,
     "decided_by_principal_type": "user",
     "edited_at": "2026-03-17T10:06:30Z",
 }
@@ -1022,8 +1057,10 @@ class FlowRunReviewCheckpointPublic(BaseModel):
     )
     next_step_ids: list[UUID] | None = None
     requester_user_id: UUID | None = None
+    requester_service_principal: FlowServicePrincipalActorPublic | None = None
     requester_principal_type: PrincipalType
     decided_by_user_id: UUID | None = None
+    decided_by_service_principal: FlowServicePrincipalActorPublic | None = None
     decided_by_principal_type: PrincipalType | None = None
     edited_at: datetime | None = None
     approved_at: datetime | None = None
@@ -1053,6 +1090,24 @@ class FlowRunReviewCheckpointPublic(BaseModel):
     )
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def validate_principal_actors(self) -> Self:
+        _validate_public_principal_actor_shape(
+            label="requester",
+            principal_type=self.requester_principal_type,
+            user_id=self.requester_user_id,
+            service_principal=self.requester_service_principal,
+            required=True,
+        )
+        _validate_public_principal_actor_shape(
+            label="decider",
+            principal_type=self.decided_by_principal_type,
+            user_id=self.decided_by_user_id,
+            service_principal=self.decided_by_service_principal,
+            required=False,
+        )
+        return self
 
 
 class FlowRunReviewCheckpointEditRequest(BaseModel):
@@ -1704,13 +1759,25 @@ class FlowRunRerunOperationPublic(BaseModel):
     input_payload_json: dict[str, Any] | None = None
     step_inputs_json: dict[str, Any] | None = None
     requested_by_principal_type: PrincipalType
-    requested_by_user_id: UUID
+    requested_by_user_id: UUID | None = None
+    requested_by_service_principal: FlowServicePrincipalActorPublic | None = None
     failure_code: str | None = None
     failure_message: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def validate_requested_by_actor(self) -> Self:
+        _validate_public_principal_actor_shape(
+            label="requested_by",
+            principal_type=self.requested_by_principal_type,
+            user_id=self.requested_by_user_id,
+            service_principal=self.requested_by_service_principal,
+            required=True,
+        )
+        return self
 
 
 class FlowRunRerunInvalidatedStepPublic(BaseModel):
@@ -1806,8 +1873,10 @@ class FlowRunReviewCheckpointEvidencePublic(BaseModel):
     resume_key_present: bool
     # Evidence is tenant/run-authorized, so reviewer IDs follow run ownership exposure.
     requester_user_id: UUID | None = None
+    requester_service_principal: FlowServicePrincipalActorPublic | None = None
     requester_principal_type: PrincipalType
     decided_by_user_id: UUID | None = None
+    decided_by_service_principal: FlowServicePrincipalActorPublic | None = None
     decided_by_principal_type: PrincipalType | None = None
     edited_at: datetime | None = None
     approved_at: datetime | None = None
@@ -1818,6 +1887,24 @@ class FlowRunReviewCheckpointEvidencePublic(BaseModel):
     expired_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def validate_principal_actors(self) -> Self:
+        _validate_public_principal_actor_shape(
+            label="requester",
+            principal_type=self.requester_principal_type,
+            user_id=self.requester_user_id,
+            service_principal=self.requester_service_principal,
+            required=True,
+        )
+        _validate_public_principal_actor_shape(
+            label="decider",
+            principal_type=self.decided_by_principal_type,
+            user_id=self.decided_by_user_id,
+            service_principal=self.decided_by_service_principal,
+            required=False,
+        )
+        return self
 
 
 class FlowRunEvidenceResponse(BaseModel):
