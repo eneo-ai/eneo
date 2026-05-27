@@ -5,7 +5,7 @@ goal:
   slug: "flows-clean-architecture-2026-05-25"
   kind: open_ended
   tranche: "Reconfirm current source evidence, implement the first safe verified Flow architecture slice, verify it, and audit before continuing toward canonical runtime ownership."
-  status: active
+  status: blocked
 
 rules:
   pm_owns_state: true
@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T112
+active_task: null
 
 tasks:
   - id: T001
@@ -11775,7 +11775,7 @@ tasks:
   - id: T112
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Audit the remaining board after T111 and choose the next safe task, or record that only explicit product/data-decision blockers remain."
     inputs:
@@ -11801,7 +11801,81 @@ tasks:
       - "Watchdog reports a halt-worthy blocker."
       - "All remaining work is blocked by human product/data decisions."
       - "Choosing a Worker would require files outside a small reviewable scope without a preceding Scout/Judge."
-    receipt: null
+    receipt:
+      completed_at: "2026-05-27T09:19:00+02:00"
+      result: blocked_by_owner_decisions
+      decision: "Do not activate another Worker. T111 removed the last source/data-preflighted compatibility cleanup candidate identified by the previous final audit. All remaining non-complete work is blocked by explicit human product/data/UX decisions."
+      summary: "T112 audited the board after the T111 commit. The board now has no queued or active safe implementation task. T009/T010/T011 remain product/data-decision blocked, T016 remains product/UX/design blocked/deferred, and T041 is an older completed Scout with nonstandard `complete` status rather than an actionable Worker. The goal cannot honestly claim the strict 9/10 floor while these decisions remain unresolved, and it should not invent implementation policy for retention, service-key review/rerun, or frontend conflict behavior."
+      task_inventory_before_receipt:
+        done: 110
+        blocked: 4
+        complete: 1
+        active: 1
+      remaining_blockers:
+        - task_ids:
+            - T009
+            - T010
+          decision_id: retention_model
+          owner: product_data_owner
+          decision_needed: "Choose retention windows, purge behavior, artifact/evidence/API behavior after purge, and whether rows or only content are removed."
+        - task_ids:
+            - T009
+            - T011
+          decision_id: service_key_identity_model
+          owner: product_data_owner
+          decision_needed: "Choose stable service-key principal representation, audit attribution, evidence attribution, and DB/API identity shape."
+        - task_ids:
+            - T009
+            - T011
+          decision_id: service_key_review_resume_rerun_policy
+          owner: product_data_owner
+          decision_needed: "Decide whether service-key principals may review, resume, or rerun own runs or elevated runs, and how those actions are authorized and audited."
+        - task_ids:
+            - T016
+          decision_id: form_schema_conflict_semantics
+          owner: product_ux_owner
+          decision_needed: "Decide whether local dirty form-schema edits merge, overwrite, warn, or discard when persisted metadata changes."
+        - task_ids:
+            - T016
+          decision_id: runtime_upload_audio_side_effect_owner
+          owner: product_ux_design_owner
+          decision_needed: "Approve one browser-side owner for upload/audio persistence side effects before moving behavior with tests."
+      final_score_floor:
+        current_floor: 8
+        target_floor: 9
+        reason_not_9: "Retention, service-key identity/review/rerun, and frontend product/UX conflict semantics remain blocked by owner decisions; the goal board must not implement those from assumptions."
+      commands:
+        - cmd: "git status --short --branch"
+          status: pass
+          output: "feature/refactor-flows-flowai ahead 78; only unrelated dirty/untracked files remained after T111 commit."
+        - cmd: "git log --oneline -5"
+          status: pass
+          output: "HEAD e31df46dd fix(flows-api): require review checkpoint snapshots."
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1; status=ok; blockers=[]; stale active_task T039 advisory only."
+        - cmd: "ruby -ryaml -e '<print active task and remaining non-done tasks>' docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+          status: pass
+          output: "Remaining before T112 receipt: T009 blocked, T010 blocked, T011 blocked, T016 blocked, T041 complete, T112 active."
+        - cmd: "ruby -ryaml -e '<print blocked reasons for T009/T010/T011/T016/T041/T901/T902>' docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+          status: pass
+          output: "T009/T010/T011 need human product/data decisions; T016 is blocked/deferred by product/UX/design gates; T901/T902 are done; T041 is historical complete."
+        - cmd: "rg -n 'Open Decisions|known open|compatibility|blocked|service-key|retention|T016|frontend state|webhook' docs/flows/architecture.md docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+          status: pass
+          output: "Architecture doc and goal file document the remaining retention, service-key, frontend conflict, raw evidence, and open-decision gates."
+      review_tier: "Local validation only. T112 is a read-only Judge/state transition with no source/API/data/runtime implementation."
+      consolidation_effect:
+        reused_existing_owner: "Goal board blocked-task receipts, T902 final audit, T111 receipt, and docs/flows/architecture.md open-decision map."
+        logic_moved_from: "N/A; Judge only."
+        logic_deleted: "N/A; Judge only."
+        duplicate_path_removed: "No source path removed in T112; T111 already removed the review-checkpoint fallback candidate."
+        new_code_added: "No source code."
+        why_existing_owners_were_insufficient: "Existing owners are sufficient; the board needed a truthful blocked disposition after the last safe cleanup was committed."
+        guard_preventing_duplicate_logic_from_returning: "No new guard; T111's tests guard the last cleanup. Remaining tasks require owner decisions before implementation."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+      naming_gate: "No new Flow source names."
+      next_task: null
 
 checks:
   dirty_fingerprint: unknown
