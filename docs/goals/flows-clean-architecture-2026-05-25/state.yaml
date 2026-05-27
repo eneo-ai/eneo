@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T902
+active_task: T109
 
 tasks:
   - id: T001
@@ -11118,7 +11118,7 @@ tasks:
   - id: T902
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Run the final PM/Judge audit after T901 and decide whether the goal can complete or must remain blocked by product/data decisions."
     inputs:
@@ -11140,6 +11140,183 @@ tasks:
     stop_if:
       - "Any queued non-blocked implementation task remains."
       - "A product/data decision needed for T009/T010/T011 is absent."
+    receipt:
+      completed_at: "2026-05-27T02:00:00+02:00"
+      result: needs_more_safe_scout
+      decision: "Do not mark the goal complete or blocked yet. Activate T109 because the final maintainer architecture doc identifies a source/data-preflighted compatibility path that is not product-decision gated."
+      summary: "T902 attempted the final PM/Judge audit after T901. The strict 9/10 floor cannot be claimed from the current scorecard, and T009/T010/T011 remain product/data-decision blocked. However, Claude identified a valid local work candidate in docs/flows/architecture.md: the review-checkpoint legacy snapshot fallback has a deletion trigger based on source/data preflight, not owner product decision. With no production Flow users, the default future posture should be deletion/consolidation once current source and data prove the fallback unnecessary. Therefore the honest next move is a read-only Scout, not a final blocked goal state."
+      scorecard_result:
+        current_floor: 7
+        target_floor: 9
+        cannot_mark_complete: true
+        pinned_dimensions:
+          single_source_of_truth: "7; retention, service-key identity/review/rerun, and remaining compatibility paths are not fully closed."
+          data_integrity: "7; retention model and service-key principal/audit matrix remain product/data-decision gated."
+          runtime_reliability: "7; retention and service-key review/rerun behavior are not fully decided."
+      final_blocked_audit_disposition: "deferred"
+      product_data_decisions_still_needed:
+        - decision_id: retention_model
+          owner: product_data_owner
+          blocking_tasks:
+            - T009
+            - T010
+          unblocks_dimensions:
+            - data_integrity
+            - runtime_reliability
+            - single_source_of_truth
+          decision_needed: "Choose retention windows, purge behavior, artifact/evidence/API behavior after purge, and whether rows or only content are removed."
+        - decision_id: service_key_identity_model
+          owner: product_data_owner
+          blocking_tasks:
+            - T009
+            - T011
+          unblocks_dimensions:
+            - data_integrity
+            - api_consumer_dx
+            - api_maintainer_dx
+            - single_source_of_truth
+          decision_needed: "Choose stable service-key principal representation, audit attribution, evidence attribution, and DB/API identity shape."
+        - decision_id: service_key_review_resume_rerun_policy
+          owner: product_data_owner
+          blocking_tasks:
+            - T009
+            - T011
+          unblocks_dimensions:
+            - api_consumer_dx
+            - runtime_reliability
+            - single_source_of_truth
+          decision_needed: "Decide whether service-key principals may review, resume, or rerun own runs or elevated runs, and how those actions are authorized and audited."
+        - decision_id: form_schema_conflict_semantics
+          owner: product_ux_owner
+          blocking_tasks:
+            - T016
+          unblocks_dimensions:
+            - maintainability
+            - single_source_of_truth
+            - human_reviewability
+          decision_needed: "Decide whether local dirty form-schema edits merge, overwrite, warn, or discard when persisted metadata changes."
+        - decision_id: runtime_upload_audio_side_effect_owner
+          owner: frontend_architecture_owner
+          blocking_tasks:
+            - T016
+          unblocks_dimensions:
+            - maintainability
+            - separation_of_concerns
+            - testability
+          decision_needed: "Approve one browser-side owner for upload/audio persistence side effects, then move behavior with tests instead of copying it."
+        - decision_id: evidence_raw_export_policy
+          owner: product_security_owner
+          blocking_tasks: []
+          unblocks_dimensions:
+            - api_consumer_dx
+            - data_integrity
+          decision_needed: "Decide whether raw evidence export remains, narrows, or is removed before public launch."
+      floor_ladder_reconciliation:
+        floor_6: "Satisfied by earlier receipts: normal-path bugs fixed, Flow API errors normalized, and reviewable focused tests added."
+        floor_7: "Satisfied by earlier receipts: published runtime contract is canonical enough for current API/SDK use and the frontend no longer owns duplicate fallback shapes for the closed slices."
+        floor_8: "Partially satisfied. Webhook delivery, step identity, runtime file lifecycle, and service-key runtime projection have been improved, but service-key review/rerun identity and retention remain blocked."
+        floor_9: "Not satisfied. Retention, service-key identity/review/rerun, remaining compatibility cleanup, and product/UX-gated frontend semantics prevent a defensible strict 9/10 floor."
+      compatibility_path_disposition:
+        runtime_retention_policy: "Blocked by retention_model owner decision."
+        service_key_identity_for_review_rerun: "Blocked by service_key_identity_model and service_key_review_resume_rerun_policy owner decisions."
+        form_schema_dirty_local_edit_conflict_behavior: "Blocked by product/UX decision."
+        browser_upload_audio_side_effect_ownership: "Needs frontend design gate before moving side effects."
+        review_checkpoint_legacy_snapshot_fallback: "Not product-decision gated. Activate T109 Scout to preflight source, current DB data, generated-client/frontend callers, and tests before any deletion Worker."
+        evidence_export_raw_detail_policy: "Blocked by product/security decision."
+      no_production_users_posture: "No production Flow users means future Workers should prefer clean deletion/consolidation over compatibility once source/data/caller preflight is clean. It does not remove the need for Scout evidence before deleting behavior."
+      commands:
+        - cmd: "ruby -rjson -e 'p=\"/Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json\"; if File.exist?(p); data=JSON.parse(File.read(p)); halt=%w[active_task_is_blocked staged_outside_allowed_files staged_untracked_file]; blockers=Array(data[\"blockers\"]).select{|b| halt.include?(b[\"kind\"])}; puts \"schema_version=#{data[\"schema_version\"].inspect}\"; puts \"status=#{data[\"status\"].inspect}\"; puts \"halt_blockers=#{blockers.inspect}\"; else puts \"watchdog_missing\"; end'"
+          status: pass
+          output: "schema_version=1; status=ok; halt_blockers=[]"
+        - cmd: "git status --short --branch"
+          status: pass
+          output: "On feature/refactor-flows-flowai, ahead 74 before this receipt. Dirty/untracked files are unrelated pre-existing worktree files; no staged files."
+        - cmd: "ruby -e 'require \"yaml\"; s=YAML.load_file(\"docs/goals/flows-clean-architecture-2026-05-25/state.yaml\"); puts \"goal.status=#{s.dig(\"goal\",\"status\")}\"; puts \"active_task=#{s[\"active_task\"].inspect}\"; tasks=s[\"tasks\"]||[]; puts tasks.group_by{|t| t[\"status\"]}.transform_values(&:size).inspect; tasks.select{|t| %w[T902 T901 T108 T016 T009 T010 T011].include?(t[\"id\"])}.each{|t| puts \"--- #{t[\"id\"]} #{t[\"status\"]}\"; puts \"objective=#{t[\"objective\"]}\"; puts \"blocked_reason=#{t[\"blocked_reason\"].inspect}\"; puts \"next_task=#{t.dig(\"receipt\",\"next_task\").inspect}\" }'"
+          status: pass
+          output: "goal.status=active; active_task=T902; status groups before this receipt: done=106, blocked=4, complete=1, active=1."
+        - cmd: "nl -ba docs/flows/architecture.md | sed -n '365,378p'"
+          status: pass
+          output: "Architecture doc lists review-checkpoint legacy snapshot fallback with source/data preflight deletion trigger."
+        - cmd: "rg -n 'step_snapshot_available|legacy checkpoints|review checkpoint' backend/src/intric/flows backend/tests/unittests/flows backend/tests/integration/flows frontend/packages docs/flows/architecture.md"
+          status: pass
+          output: "Confirmed source/API/generated-client/test references exist and need T109 Scout classification."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t902-final-audit --phase review --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: fail
+          output: "GREEN_LIGHT no; MIN_SCORE 7. Valid blocker: final blocked disposition omitted the review-checkpoint fallback Scout candidate."
+        - cmd: "ruby -e 'require \"yaml\"; s=YAML.load_file(\"docs/goals/flows-clean-architecture-2026-05-25/state.yaml\"); puts \"goal.status=#{s.dig(\"goal\",\"status\")}\"; puts \"active_task=#{s[\"active_task\"].inspect}\"; tasks=s[\"tasks\"]||[]; puts tasks.group_by{|t| t[\"status\"]}.transform_values(&:size).inspect; %w[T902 T109].each{|id| t=tasks.find{|x| x[\"id\"]==id}; puts \"#{id}=#{t&&t.slice(\"id\",\"status\",\"objective\")}\"}; raise \"bad active\" unless s[\"active_task\"]==\"T109\"; raise \"T902 not done\" unless tasks.find{|t| t[\"id\"]==\"T902\"}[\"status\"]==\"done\"; raise \"T109 not active\" unless tasks.find{|t| t[\"id\"]==\"T109\"}[\"status\"]==\"active\"'"
+          status: pass
+          output: "active_task=T109; status groups after receipt: done=107, blocked=4, complete=1, active=1."
+        - cmd: "git diff --check -- docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+          status: pass
+          output: "No whitespace errors."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py -q"
+          status: pass
+          output: "14 passed in 3.67s"
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t902-final-audit --phase review --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8. Artifact: .codex/artifacts/claude-peer-loop-t902-flow-final-pm-judge-audit-revision-20260527T005304Z.md"
+      peer_review:
+        claude_iteration_1: ".codex/artifacts/claude-peer-loop-t902-flow-final-pm-judge-audit-20260527T004636Z.md"
+        claude_iteration_2: ".codex/artifacts/claude-peer-loop-t902-flow-final-pm-judge-audit-revision-20260527T005304Z.md"
+        verdict: "green after iteration 2"
+        valid_concerns_addressed:
+          - "Accepted the review-checkpoint legacy snapshot fallback as a valid local Scout candidate rather than marking the whole goal blocked."
+          - "Lifted owner-facing product/data/UX/security decisions into the T902 receipt."
+          - "Recorded floor ladder reconciliation and per-compatibility-path disposition."
+        disagreements: "None on the blocking point. T109 will verify source/data/caller/test evidence before any deletion or API/schema Worker."
+        antigravity: "Not run. T902 is a board-only audit and Claude found a concrete valid blocker; the next work is read-only Scout evidence."
+      consolidation_effect:
+        reused_existing_owner: "Goal scorecard, blocked T009/T010/T011/T016 tasks, and docs/flows/architecture.md Known Open Decisions And Compatibility Paths."
+        logic_moved_from: "N/A; board-only Judge receipt."
+        logic_deleted: "N/A; board-only Judge receipt."
+        duplicate_path_removed: "N/A; T109 will scout a candidate duplicate/compatibility path."
+        new_code_added: "No source code."
+        why_existing_owners_were_insufficient: "Existing owners were sufficient; the board needed a correct transition to Scout instead of premature final blocked status."
+        guard_preventing_duplicate_logic_from_returning: "T109 must identify source/data/caller/test evidence and propose guards before any Worker."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+      naming_gate: "No new source names. T109 uses a domain-specific task name that would fit the architecture doc compatibility-path table."
+      next_task: T109
+
+  - id: T109
+    type: scout
+    assignee: Scout
+    status: active
+    reasoning_hint: high
+    objective: "Preflight the review-checkpoint legacy snapshot fallback and decide whether it can move to Judge/Worker deletion or must remain temporarily."
+    inputs:
+      - "docs/flows/architecture.md Known Open Decisions And Compatibility Paths row for Review checkpoint legacy snapshot fallback."
+      - "backend/src/intric/flows/domain/flow.py"
+      - "backend/src/intric/flows/api/flow_models.py"
+      - "backend/src/intric/flows/api/flow_assembler.py"
+      - "backend/src/intric/flows/api/flow_run_execution_router.py"
+      - "backend/src/intric/flows/flow_run_evidence_bundle.py"
+      - "backend/src/intric/flows/flow_run_export_json.py, to classify whether review-checkpoint export summaries carry related snapshot/fallback semantics even though this file does not directly expose step_snapshot_available."
+      - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+      - "backend/tests/unittests/flows"
+      - "backend/tests/integration/flows"
+      - "frontend/packages/intric-js/src"
+      - "Current local Postgres catalog/data through read-only queries."
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only Scout except for the state receipt."
+      - "No source edits, test edits, migrations, frontend edits, generated-client edits, deletion, or docs/flows edits."
+      - "Do not change public API schema or remove step_snapshot_available in T109."
+      - "Do not activate retention, service-key identity/review/rerun, raw evidence export, frontend form-schema conflict behavior, browser upload/audio side-effect moves, schema migrations, webhook outbox, or Flow AI Builder cleanup."
+      - "No production Flow users means deletion can be preferred after clean evidence, but Scout must still verify current source, current DB data, generated-client/frontend callers, and tests."
+    expected_output:
+      - "Inventory of every review-checkpoint snapshot fallback surface: domain property, API schemas, assembler mapping, evidence/export serialization, generated-client types, frontend/doc callers, and tests."
+      - "Read-only DB evidence: current flow_run_review_checkpoints row count, rows where review_mode or output_type is null, rows where step_label/output_contract_json are null, and whether any current data requires step_snapshot_available=false."
+      - "Test classification: tests that protect normal snapshot behavior, tests that only protect legacy/compatibility behavior, and tests required if deletion is approved."
+      - "Recommendation classified as delete_now, merge_or_consolidate, needs_preflight, keep_temporarily, or blocked_product_decision."
+      - "If deletion/consolidation is safe: add a Judge task with exact allowed_files, FastAPI/OpenAPI/generated-client impact, verification commands, rollback notes, stop_if conditions, review tier, consolidation effect, and naming-gate answer."
+      - "If not safe: record the exact source/data/caller evidence and whether the goal can then become blocked on owner decisions."
+    stop_if:
+      - "Any source or test edit is needed to answer the Scout questions."
+      - "The DB is unavailable and current-data evidence cannot be collected."
+      - "A current frontend/generated-client/API caller depends on step_snapshot_available=false semantics in a way that requires product/API version decision."
+      - "Deletion would require a migration or generated-client/API change beyond a small reviewable Worker."
     receipt: null
 
 checks:
