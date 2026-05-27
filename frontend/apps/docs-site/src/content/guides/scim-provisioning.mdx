@@ -153,6 +153,45 @@ For Group mappings, the defaults also work. Members are referenced by their `ext
 
 ---
 
+## Sign-in prerequisites when paired with OIDC
+
+SCIM provisions users into Eneo, but users still need to **sign in** through OIDC. Eneo matches a signing-in user to their SCIM-provisioned row by **email** — specifically, the `email` claim in the ID token issued by your identity provider.
+
+Azure Entra ID derives the `email` claim from the user's `mail` attribute. If `mail` is empty on the directory record, the ID token arrives **without an `email` claim** and Eneo rejects the sign-in:
+
+```
+401 Unauthorized
+{ "detail": "Email claim not found in ID token" }
+```
+
+This is a common gotcha because the `mail` attribute is often empty:
+
+- **CSV-imported users** typically have only `userPrincipalName` set — the bulk-import template rarely populates `mail`
+- **Guest users (B2B invitees)** have `mail` empty in the resource tenant until set manually
+- **Users created interactively in the Azure portal** usually have `mail` populated correctly
+
+### Checklist before the first sign-in
+
+1. The user has `mail` populated in Azure (**Microsoft Entra ID → Users → [user] → Contact info → Mail**)
+2. The App Registration has `email` configured as an **optional claim** for ID tokens (**App registrations → [app] → Token configuration → Add optional claim → ID → email**)
+3. The Microsoft Graph **email** delegated permission is granted on the App Registration
+
+### Bulk-fix missing `mail` attributes
+
+To populate `mail = userPrincipalName` for every user in the tenant currently missing `mail`:
+
+```powershell
+Connect-MgGraph -Scopes "User.ReadWrite.All"
+
+Get-MgUser -All -Filter "Mail eq null" | ForEach-Object {
+    Update-MgUser -UserId $_.Id -Mail $_.UserPrincipalName
+}
+```
+
+Test on a single user before running against the whole tenant. After the bulk update, trigger a SCIM resync from Entra (**Enterprise applications → [app] → Provisioning → Provision on demand**) so Eneo's `users.email` column reflects the updated values.
+
+---
+
 ## How Eneo handles existing users
 
 When you connect SCIM to an Eneo tenant that already has users (for example, from prior JIT provisioning), Eneo reconciles them automatically rather than creating duplicates.
@@ -278,6 +317,15 @@ A 409 typically means one of:
 - The `externalId` collides with an existing user
 
 Check the `detail` field in the SCIM error response to determine the cause. Reconciliation only runs when the existing user has no `externalId` set — if a different IdP previously set one, it must be cleared first.
+
+### OIDC sign-in fails with "Email claim not found in ID token"
+
+Azure omits the `email` claim from the ID token if either:
+
+- The signing-in user has no `mail` attribute set in the directory, or
+- The App Registration is not configured to include `email` as an optional claim
+
+See [Sign-in prerequisites when paired with OIDC](#sign-in-prerequisites-when-paired-with-oidc) for the full checklist and a PowerShell snippet to bulk-fix missing `mail` attributes.
 
 ### Users are not deactivated when removed from Entra
 
