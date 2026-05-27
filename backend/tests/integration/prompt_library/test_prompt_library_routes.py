@@ -10,7 +10,7 @@ from intric.users.user import UserAdd, UserState
 
 
 @pytest.fixture
-async def admin_token(db_container):
+async def admin_token(db_container, patch_auth_service_jwt):
     async with db_container() as container:
         user_repo = container.user_repo()
         user = await user_repo.get_user_by_email("test@example.com")
@@ -34,7 +34,7 @@ async def regular_user(db_container):
 
 
 @pytest.fixture
-async def regular_user_token(db_container, regular_user):
+async def regular_user_token(db_container, regular_user, patch_auth_service_jwt):
     async with db_container() as container:
         auth_service = container.auth_service()
         return auth_service.create_access_token_for_user(regular_user)
