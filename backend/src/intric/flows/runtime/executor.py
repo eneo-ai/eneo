@@ -43,6 +43,7 @@ from intric.flows.enums import (
     FlowRunRerunInvalidationRole,
     is_terminal_flow_run_status,
 )
+from intric.flows.flow_review_policy import FlowStepReviewPolicy
 from intric.flows.flow_run_error import FlowRunError, FlowRunErrorDetails
 from intric.flows.flow_run_provenance import (
     AttemptStartProvenance,
@@ -855,13 +856,15 @@ class FlowRunExecutor:
 
             state.append_completed(step_result)
 
-            if step.review_policy is not None:
+            review_policy = step.review_policy
+            if review_policy is not None:
                 return await self._open_review_checkpoint_for_completed_step(
                     run_id=run_id,
                     flow_id=flow_id,
                     tenant_id=tenant_id,
                     steps=steps,
                     step=step,
+                    review_policy=review_policy,
                     attempt_no=attempt_no,
                 )
 
@@ -1482,6 +1485,7 @@ class FlowRunExecutor:
         tenant_id: UUID,
         steps: list[RuntimeStep],
         step: RuntimeStep,
+        review_policy: FlowStepReviewPolicy,
         attempt_no: int,
     ) -> dict[str, Any]:
         try:
@@ -1498,14 +1502,10 @@ class FlowRunExecutor:
                     reviewed_step=step,
                 ),
                 step_label=step.user_description,
-                review_mode=step.review_policy.mode if step.review_policy else None,
+                review_mode=review_policy.mode,
                 output_type=FlowOutputType(step.output_type),
                 output_contract_json=step.output_contract,
-                review_expires_after_seconds=(
-                    step.review_policy.expires_after_seconds
-                    if step.review_policy is not None
-                    else None
-                ),
+                review_expires_after_seconds=review_policy.expires_after_seconds,
             )
         except FlowReviewCheckpointRunNotRunningError:
             await self._rollback()

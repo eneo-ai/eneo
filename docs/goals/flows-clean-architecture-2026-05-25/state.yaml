@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T111
+active_task: T112
 
 tasks:
   - id: T001
@@ -11617,7 +11617,7 @@ tasks:
   - id: T111
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "fix(flows-api): require review checkpoint snapshots"
     inputs:
@@ -11672,6 +11672,135 @@ tasks:
       - "Implementation needs API version/product decision."
       - "Migration expands beyond NOT NULL/check-constraint enforcement."
       - "Required verification cannot run due environment failure; record blocked_environment instead of guessing."
+    receipt:
+      completed_at: "2026-05-27T09:11:04+02:00"
+      result: done
+      summary: "Deleted the review-checkpoint legacy snapshot fallback end-to-end. Review checkpoints now require review_mode and output_type through DB constraints, SQLAlchemy table metadata, repository signatures, the domain model, public API schemas, evidence export, generated client types, and frontend fixtures. step_snapshot_available is no longer a public/source concept."
+      implementation:
+        - "Added backend/alembic/versions/20260527_flow_review_checkpoint_snapshot_required.py with dirty-row preflight, NOT NULL upgrade, strict review_mode/output_type checks, and downgrade back to nullable/NULL-allowing checks."
+        - "Deepened existing FlowRunReviewCheckpoint, FlowRunRepository, FlowRunExecutor, Flow API model/assembler/router-doc, and evidence bundle owners instead of creating a new compatibility adapter."
+        - "Updated generated frontend schema and Flow review fixtures to the required snapshot contract."
+        - "Removed docs/flows/architecture.md listing of the fallback as a live compatibility path."
+      peer_review:
+        claude_artifact: ".codex/artifacts/claude-peer-loop-t111-require-review-checkpoint-snapshots-implementation-review-20260527T070324Z.md"
+        claude_verdict: "green; GREEN_LIGHT yes; MIN_SCORE 9"
+        antigravity_artifact: ".codex/artifacts/antigravity-peer-loop-t111-review-checkpoint-snapshots-antigravity-synthesis-20260527T070622Z.md"
+        antigravity_verdict: "green; GREEN_LIGHT yes; MIN_SCORE 9"
+        valid_concerns_verified:
+          - "Direct PostgreSQL SET NOT NULL lock/scan concern verified at backend/alembic/versions/20260527_flow_review_checkpoint_snapshot_required.py:52 and :58; accepted because current Flow has no production users and DB preflight is clean."
+          - "Hardcoded migration enum values verified at backend/alembic/versions/20260527_flow_review_checkpoint_snapshot_required.py:23-24; accepted because Alembic migrations must not import evolving runtime enums."
+          - "Runtime SQLAlchemy check constraints derive from current enum values at backend/src/intric/database/tables/flow_tables.py:1223-1229; future enum additions need a migration to update DB checks."
+          - "Broad migration preflight exception assertion verified at backend/tests/integration/migrations/test_flow_review_checkpoint_snapshot_required.py:252; accepted as non-blocking because the asserted message is specific and driver wrapping varies."
+        disagreements:
+          - "Did not add an enum warning comment in backend/src/intric/flows/enums.py because it is outside T111 allowed_files and comments there would duplicate a general migration discipline rule. Recorded the check-constraint sync caveat in this receipt instead."
+      commands:
+        - cmd: "Focused model/OpenAPI tests before implementation"
+          status: fail_expected
+          output: "Failed because step_snapshot_available still existed and missing review_mode/output_type were accepted."
+        - cmd: "Migration test before implementation"
+          status: fail_expected
+          output: "Failed because backend/alembic/versions/20260527_flow_review_checkpoint_snapshot_required.py did not exist yet."
+        - cmd: "if [ -f /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json ]; then cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json; fi"
+          status: pass
+          output: "schema_version=1; status=ok; blockers=[]; stale watchdog active_task T039 advisory only."
+        - cmd: "docker start eneo-41ae93-db-1 && docker exec eneo-41ae93-db-1 pg_isready -U postgres -d postgres"
+          status: pass
+          output: "Postgres accepted connections after startup wait."
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -At -c \"select count(*) from flow_run_review_checkpoints where review_mode is null or output_type is null;\""
+          status: pass
+          output: "0"
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -At -c \"select column_name || '=' || is_nullable from information_schema.columns where table_name='flow_run_review_checkpoints' and column_name in ('review_mode','output_type') order by column_name;\""
+          status: pass
+          output: "output_type=NO; review_mode=NO"
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t111-review-checkpoint-snapshot-required-final --phase commit-gate --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 9."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t111-review-checkpoint-snapshot-required-synthesis --phase synthesis --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 9."
+        - cmd: "rg -n 'step_snapshot_available' backend/src frontend/packages/intric-js/src frontend/apps/web/src"
+          status: pass
+          output: "No source/frontend hits."
+        - cmd: "cd backend && uv run pytest -m migration_isolation tests/integration/migrations/test_flow_review_checkpoint_snapshot_required.py -q"
+          status: pass
+          output: "4 passed."
+        - cmd: "cd backend && uv run pytest tests/unit/test_flow_openapi_contract.py tests/unittests/flows/test_flow_models.py tests/unittests/flows/test_flow_router.py tests/unittests/flows/test_flow_run_evidence.py tests/unittests/flows/test_flow_run_review_checkpoint_service.py tests/unittests/flows/test_flow_executor_runtime.py tests/integration/flows/test_flow_consumer_api_contract.py tests/integration/flows/test_flow_evidence_api_contracts.py tests/integration/flows/test_flow_review_pause_worker_contract.py tests/integration/flows/test_flow_run_review_checkpoint_repository.py -q"
+          status: pass
+          output: "267 passed, 16 unrelated warnings."
+        - cmd: "cd backend && uv run pyright src/intric/flows/api/flow_models.py src/intric/flows/domain/flow.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/runtime/executor.py src/intric/flows/api/flow_assembler.py src/intric/flows/flow_run_evidence_bundle.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations."
+        - cmd: "cd backend && uv run ruff format --check <T111 backend source/test files>"
+          status: pass
+          output: "18 files already formatted."
+        - cmd: "cd backend && uv run ruff check <T111 backend source/test files>"
+          status: pass
+          output: "All checks passed."
+        - cmd: "cd frontend/packages/intric-js && bun run check"
+          status: pass
+          output: "Generated-client type smoke passed."
+        - cmd: "cd frontend/apps/web && bun run test:unit -- src/lib/features/flows/components/FlowRunReviewCheckpointPanel.test.ts"
+          status: pass
+          output: "13 passed."
+        - cmd: "git diff --check"
+          status: pass
+          output: "No whitespace errors."
+        - cmd: "cd backend && uv run alembic upgrade head && cd backend && uv run alembic current"
+          status: pass
+          output: "Local DB upgraded to 20260527_review_ckpt_snapshot (head)."
+        - cmd: "cd backend && uv run alembic check"
+          status: fail_unrelated
+          output: "Failed on broad pre-existing autogenerate drift across unrelated tables/indexes/comments; not a T111 checkpoint-schema drift."
+        - cmd: "cd frontend && NODE_ENV=production FORCE_COLOR=1 bun run --filter @intric/web check"
+          status: fail_unrelated
+          output: "Existing unrelated svelte-check diagnostics in frontend/packages/intric-js/src/client/stream.js and frontend/apps/web/src/lib/features/api-keys/ExtendExpirationDialog.svelte."
+      consolidation_effect:
+        reused_existing_owner: "FlowRunReviewCheckpoint domain/public/evidence schemas, FlowRunRepository review-checkpoint persistence, FlowRunExecutor review opening, SQLAlchemy table/migration owner, FlowAssembler, FlowRunEvidenceService bundle serialization, generated API types, and Flow review panel fixture."
+        logic_moved_from: "Executor review opening now narrows step.review_policy once and passes the typed FlowStepReviewPolicy into the checkpoint-opening helper."
+        logic_deleted: "Deleted step_snapshot_available from domain, API examples/schemas, assembler mapping, evidence export, generated client, OpenAPI endpoint docs, and compatibility-only test assertions."
+        duplicate_path_removed: "Removed the four-layer nullable snapshot availability path across DB/repo/domain/API/generated client."
+        new_code_added: "One Alembic migration plus migration tests to enforce and verify the required snapshot invariant."
+        why_existing_owners_were_insufficient: "Existing owners were sufficient but encoded an obsolete optional/legacy path; the Worker deepened those owners instead of creating new ones."
+        guard_preventing_duplicate_logic_from_returning: "Domain validation test, OpenAPI required/absence assertions, migration upgrade/downgrade/dirty-row tests, generated-client type smoke, Flow panel fixture, evidence tests, and source grep for step_snapshot_available."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+      naming_gate: "New migration and test names are domain-specific around review-checkpoint snapshots; no helper/manager/processor/generic owner names were introduced. The names are suitable for docs/flows/architecture.md and the final where-to-change-X table."
+      stop_rules_checked:
+        - "Watchdog had no halt-worthy blockers."
+        - "DB preflight found zero rows missing review_mode/output_type."
+        - "No API version/product decision was needed because Flow has no production users and no current frontend/source caller depends on step_snapshot_available=false."
+        - "Generated-client updates stayed within approved generated/type fixture files."
+      next_task: T112
+
+  - id: T112
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: medium
+    objective: "Audit the remaining board after T111 and choose the next safe task, or record that only explicit product/data-decision blockers remain."
+    inputs:
+      - "T111 receipt and commit."
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/flows/architecture.md"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Judge/read-only except state.yaml receipt and task activation."
+      - "Do not edit source, tests, migrations, frontend files, generated client files, or docs/flows/architecture.md."
+      - "Do not activate T009/T010/T011 or any retention/service-key/product-data task unless state.yaml records the required human decision."
+      - "Do not activate T016 if its board status remains blocked."
+      - "If no safe implementation task remains, record the exact blockers and whether a PM/Judge audit or human product/data decision is next."
+      - "Check the watchdog before task transition."
+    expected_output:
+      - "Current task inventory by status."
+      - "Decision: next safe Worker/Judge/Scout or explicit blocked-board receipt."
+      - "Exact allowed_files and verification commands if a Worker is chosen."
+      - "No broadening into Flow AI Builder or blocked product/data work."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "All remaining work is blocked by human product/data decisions."
+      - "Choosing a Worker would require files outside a small reviewable scope without a preceding Scout/Judge."
     receipt: null
 
 checks:

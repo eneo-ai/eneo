@@ -299,7 +299,6 @@ FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE: dict[str, Any] = {
     "step_label": "Review draft answer",
     "review_mode": "edit",
     "output_type": "json",
-    "step_snapshot_available": True,
     "output_contract": {
         "type": "object",
         "properties": {"text": {"type": "string"}},
@@ -1005,38 +1004,20 @@ class FlowRunReviewCheckpointPublic(BaseModel):
     step_label: str | None = Field(
         default=None,
         description=(
-            "Immutable snapshot of the reviewed step label. Null when the step had "
-            "no label or for legacy checkpoints created before step snapshots."
+            "Immutable snapshot of the reviewed step label. Null when the step had no label."
         ),
     )
-    review_mode: FlowStepReviewMode | None = Field(
-        default=None,
-        description=(
-            "Immutable snapshot of the reviewed step's review mode. Null only for "
-            "legacy checkpoints created before step snapshots."
-        ),
+    review_mode: FlowStepReviewMode = Field(
+        description="Immutable snapshot of the reviewed step's review mode.",
     )
-    output_type: FlowOutputType | None = Field(
-        default=None,
-        description=(
-            "Immutable snapshot of the reviewed step's output type. Null only for "
-            "legacy checkpoints created before step snapshots."
-        ),
-    )
-    step_snapshot_available: bool = Field(
-        default=False,
-        description=(
-            "True when this checkpoint includes immutable step metadata needed by "
-            "external review UIs. False only for legacy checkpoints created before "
-            "step snapshots were persisted."
-        ),
+    output_type: FlowOutputType = Field(
+        description="Immutable snapshot of the reviewed step's output type.",
     )
     output_contract: dict[str, Any] | None = Field(
         default=None,
         description=(
             "Immutable snapshot of the reviewed step's output contract. Null means "
-            "the step had no output contract, or this is a legacy checkpoint where "
-            "`step_snapshot_available` is false."
+            "the step had no output contract."
         ),
     )
     next_step_ids: list[UUID] | None = None
@@ -1804,38 +1785,20 @@ class FlowRunReviewCheckpointEvidencePublic(BaseModel):
     step_label: str | None = Field(
         default=None,
         description=(
-            "Immutable snapshot of the reviewed step label. Null when the step had "
-            "no label or for legacy checkpoints created before step snapshots."
+            "Immutable snapshot of the reviewed step label. Null when the step had no label."
         ),
     )
-    review_mode: FlowStepReviewMode | None = Field(
-        default=None,
-        description=(
-            "Immutable snapshot of the reviewed step's review mode. Null only for "
-            "legacy checkpoints created before step snapshots."
-        ),
+    review_mode: FlowStepReviewMode = Field(
+        description="Immutable snapshot of the reviewed step's review mode.",
     )
-    output_type: FlowOutputType | None = Field(
-        default=None,
-        description=(
-            "Immutable snapshot of the reviewed step's output type. Null only for "
-            "legacy checkpoints created before step snapshots."
-        ),
-    )
-    step_snapshot_available: bool = Field(
-        default=False,
-        description=(
-            "True when this checkpoint includes immutable step metadata needed by "
-            "external review UIs. False only for legacy checkpoints created before "
-            "step snapshots were persisted."
-        ),
+    output_type: FlowOutputType = Field(
+        description="Immutable snapshot of the reviewed step's output type.",
     )
     output_contract: dict[str, Any] | None = Field(
         default=None,
         description=(
             "Immutable snapshot of the reviewed step's output contract. Null means "
-            "the step had no output contract, or this is a legacy checkpoint where "
-            "`step_snapshot_available` is false."
+            "the step had no output contract."
         ),
     )
     decision: Literal["approved", "rejected", "cancelled"] | None = None

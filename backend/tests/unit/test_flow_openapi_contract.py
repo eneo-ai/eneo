@@ -995,7 +995,6 @@ def test_openapi_flow_review_checkpoint_schema_is_public_contract(
         "step_label",
         "review_mode",
         "output_type",
-        "step_snapshot_available",
         "output_contract",
         "next_step_ids",
         "requester_user_id",
@@ -1012,7 +1011,9 @@ def test_openapi_flow_review_checkpoint_schema_is_public_contract(
         "created_at",
         "updated_at",
     } <= set(properties)
+    assert "step_snapshot_available" not in properties
     assert "resume_idempotency_key" not in properties
+    assert {"review_mode", "output_type"} <= set(schema.get("required", []))
 
 
 def test_openapi_flow_review_checkpoint_schema_documents_consumer_snapshot(
@@ -1025,13 +1026,11 @@ def test_openapi_flow_review_checkpoint_schema_documents_consumer_snapshot(
     )
     properties = schema.get("properties", {})
 
-    snapshot_available = properties.get("step_snapshot_available", {})
     output_contract = properties.get("output_contract", {})
     expires_at = properties.get("expires_at", {})
-    assert snapshot_available.get("type") == "boolean"
-    assert "external review UIs" in snapshot_available.get("description", "")
-    assert "legacy checkpoints" in snapshot_available.get("description", "")
-    assert "step_snapshot_available" in output_contract.get("description", "")
+    assert "step_snapshot_available" not in properties
+    assert "step_snapshot_available" not in output_contract.get("description", "")
+    assert "legacy checkpoint" not in output_contract.get("description", "")
     assert "output contract" in output_contract.get("description", "").lower()
     assert "submission deadline" in expires_at.get("description", "")
     assert "background reconciler" in expires_at.get("description", "")
@@ -1271,7 +1270,8 @@ def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(
     rerun_description = rerun_operation.get("description", "")
 
     assert "status` is `awaiting_review`" in active_description
-    assert "step_snapshot_available" in active_description
+    assert "step_snapshot_available" not in active_description
+    assert "legacy checkpoint" not in active_description
     assert "without reading the mutable flow draft" in active_description
     assert "service-owned `sk_` key" in active_description
     assert "resource_permissions.flows = write" in active_description

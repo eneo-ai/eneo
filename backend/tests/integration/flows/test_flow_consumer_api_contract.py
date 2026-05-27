@@ -866,7 +866,7 @@ async def test_flow_service_key_can_drive_human_review_runtime_paths(
     assert run_response.status_code == 201, run_response.text
     run = run_response.json()
     assert run["principal_type"] == "service_key"
-    assert run["user_id"] is None
+    assert "user_id" not in run
 
     immediate_poll_response = await client.get(
         _runtime_path(runtime_paths["get_run_template"], run_id=run["id"]),

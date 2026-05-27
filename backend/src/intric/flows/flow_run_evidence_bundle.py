@@ -307,7 +307,6 @@ def _dump_review_checkpoint_record(item: FlowRunReviewCheckpoint) -> dict[str, A
         mode="json", exclude=_REVIEW_CHECKPOINT_FIELDS_EXCLUDED_FROM_EXPORT
     )
     dumped["decision"] = _review_checkpoint_decision(item)
-    dumped["step_snapshot_available"] = item.step_snapshot_available
     dumped["output_contract"] = item.output_contract_json
     dumped["next_step_ids"] = (
         [str(step_id) for step_id in item.next_step_ids_json]

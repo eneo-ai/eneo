@@ -239,7 +239,7 @@ def test_review_checkpoint_public_exposes_render_contract() -> None:
     assert public.step_label == "Review transcription"
     assert public.review_mode == FlowStepReviewMode.EDIT
     assert public.output_type == FlowOutputType.JSON
-    assert public.step_snapshot_available is True
+    assert not hasattr(public, "step_snapshot_available")
     assert public.output_contract == {
         "type": "object",
         "properties": {"transcription": {"type": "string"}},
@@ -247,35 +247,40 @@ def test_review_checkpoint_public_exposes_render_contract() -> None:
     assert not hasattr(public, "output_contract_json")
 
 
-def test_legacy_review_checkpoint_public_marks_missing_step_snapshot() -> None:
+def _review_checkpoint_payload() -> dict[str, object]:
     now = datetime(2026, 3, 17, 10, 5, tzinfo=timezone.utc)
-    checkpoint = FlowRunReviewCheckpoint(
-        id=uuid4(),
-        tenant_id=uuid4(),
-        flow_id=uuid4(),
-        flow_run_id=uuid4(),
-        step_id=uuid4(),
-        step_order=1,
-        attempt_no=1,
-        state=FlowRunReviewCheckpointState.AWAITING_REVIEW,
-        revision=1,
-        schema_version=1,
-        original_payload_json={"text": "draft"},
-        current_payload_json={"text": "draft"},
-        requester_principal_type=PrincipalType.USER,
-        requester_user_id=uuid4(),
-        next_step_ids_json=[],
-        created_at=now,
-        updated_at=now,
-    )
+    return {
+        "id": uuid4(),
+        "tenant_id": uuid4(),
+        "flow_id": uuid4(),
+        "flow_run_id": uuid4(),
+        "step_id": uuid4(),
+        "step_order": 1,
+        "attempt_no": 1,
+        "state": FlowRunReviewCheckpointState.AWAITING_REVIEW,
+        "revision": 1,
+        "schema_version": 1,
+        "original_payload_json": {"text": "draft"},
+        "current_payload_json": {"text": "draft"},
+        "step_label": "Review transcription",
+        "review_mode": FlowStepReviewMode.EDIT,
+        "output_type": FlowOutputType.JSON,
+        "output_contract_json": None,
+        "requester_principal_type": PrincipalType.USER,
+        "requester_user_id": uuid4(),
+        "next_step_ids_json": [],
+        "created_at": now,
+        "updated_at": now,
+    }
 
-    public = FlowAssembler().to_review_checkpoint_public(checkpoint)
 
-    assert public.step_snapshot_available is False
-    assert public.step_label is None
-    assert public.review_mode is None
-    assert public.output_type is None
-    assert public.output_contract is None
+@pytest.mark.parametrize("missing_field", ["review_mode", "output_type"])
+def test_review_checkpoint_requires_step_snapshot_fields(missing_field: str) -> None:
+    payload = _review_checkpoint_payload()
+    del payload[missing_field]
+
+    with pytest.raises(ValidationError):
+        FlowRunReviewCheckpoint.model_validate(payload)
 
 
 def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
@@ -425,7 +430,6 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                     "step_label": "Review summary",
                     "review_mode": "edit",
                     "output_type": "json",
-                    "step_snapshot_available": True,
                     "output_contract": review_checkpoint_contract,
                     "decision": None,
                     "next_step_ids": [],
@@ -578,7 +582,7 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
     assert response.review_checkpoints[0].step_label == "Review summary"
     assert response.review_checkpoints[0].review_mode == FlowStepReviewMode.EDIT
     assert response.review_checkpoints[0].output_type == FlowOutputType.JSON
-    assert response.review_checkpoints[0].step_snapshot_available is True
+    assert not hasattr(response.review_checkpoints[0], "step_snapshot_available")
     assert response.review_checkpoints[0].output_contract == review_checkpoint_contract
     assert isinstance(response.debug_export.steps[0].attempts[0], FlowRunDebugAttempt)
     assert response.debug_export.steps[0].attempts[0].response_model == "gpt-4.1-mini"

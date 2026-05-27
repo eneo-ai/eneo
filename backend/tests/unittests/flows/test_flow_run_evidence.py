@@ -17,6 +17,7 @@ from intric.flows.domain.flow import (
     FlowRunReviewCheckpoint,
 )
 from intric.flows.enums import (
+    FlowOutputType,
     FlowRunRerunInvalidationRole,
     FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
@@ -39,6 +40,7 @@ from intric.flows.flow_retention_tombstone import (
     GeneratedArtifactRetentionCounts,
     RunDebugAttemptRetentionCounts,
 )
+from intric.flows.flow_review_policy import FlowStepReviewMode
 from intric.flows.flow_run_evidence import (
     build_debug_export,
     normalize_debug_step,
@@ -240,6 +242,9 @@ def _review_checkpoint_for_run(
         schema_version=1,
         original_payload_json=original_payload_json or {"text": "Original"},
         current_payload_json=current_payload_json or {"text": "Reviewed"},
+        step_label="Review step",
+        review_mode=FlowStepReviewMode.EDIT,
+        output_type=FlowOutputType.JSON,
         requester_user_id=requester_user_id,
         requester_principal_type=PrincipalType.USER,
         decided_by_user_id=requester_user_id,

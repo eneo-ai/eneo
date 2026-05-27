@@ -203,12 +203,9 @@ Consumer sequence for human-in-the-loop apps:
 2. Call this endpoint and render the returned `current_payload_json`.
 3. Use `step_label`, `review_mode`, `output_type`, and `output_contract` to choose the
    review UI without reading the mutable flow draft.
-4. When `step_snapshot_available` is `false`, the checkpoint is from older runtime data;
-   render a generic JSON/text review UI and avoid depending on step metadata.
 
 `output_contract` is the reviewed step's JSON Schema-style output contract when one exists.
-It may be `null` for unstructured text/document steps even when `step_snapshot_available`
-is `true`.
+It may be `null` for unstructured text/document steps.
 
 Treat `expires_at` as the review submission deadline. Edit, approve, or reject requests
 after this timestamp return `400` with code `flow_review_expired`; this endpoint may

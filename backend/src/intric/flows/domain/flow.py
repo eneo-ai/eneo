@@ -332,20 +332,17 @@ class FlowRunReviewCheckpoint(BaseModel):
         default=None,
         description="Snapshot of the reviewed step's user-facing label.",
     )
-    review_mode: FlowStepReviewMode | None = Field(
-        default=None,
+    review_mode: FlowStepReviewMode = Field(
         description="Snapshot of the review mode configured on the reviewed step.",
     )
-    output_type: FlowOutputType | None = Field(
-        default=None,
+    output_type: FlowOutputType = Field(
         description="Snapshot of the reviewed step's output type.",
     )
     output_contract_json: JsonObject | None = Field(
         default=None,
         description=(
             "Snapshot of FlowStep.output_contract at checkpoint creation. "
-            "Null means the reviewed step had no output contract, or this is a "
-            "legacy checkpoint created before step snapshots were persisted."
+            "Null means the reviewed step had no output contract."
         ),
     )
     requester_user_id: UUID | None = None
@@ -363,7 +360,3 @@ class FlowRunReviewCheckpoint(BaseModel):
     expired_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
-
-    @property
-    def step_snapshot_available(self) -> bool:
-        return self.review_mode is not None and self.output_type is not None

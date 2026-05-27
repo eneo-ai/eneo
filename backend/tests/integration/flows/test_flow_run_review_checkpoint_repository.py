@@ -238,6 +238,8 @@ async def _create_checkpoint(
         current_payload_json={"answer": "draft"},
         requester_principal_type=PrincipalType.USER,
         requester_user_id=requester_user_id,
+        review_mode=FlowStepReviewMode.VIEW,
+        output_type=FlowOutputType.JSON,
         next_step_ids=(second_step_id,),
     )
 
@@ -365,6 +367,8 @@ async def test_service_key_run_can_open_review_checkpoint_without_user_requester
             current_payload_json={"answer": "draft"},
             requester_principal_type=PrincipalType.SERVICE_KEY,
             requester_user_id=None,
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
             next_step_ids=(scenario.step_ids[1],),
         )
 
@@ -409,6 +413,8 @@ async def test_review_checkpoint_allows_one_active_checkpoint_per_run(
                 current_payload_json={"next": "draft"},
                 requester_principal_type=PrincipalType.USER,
                 requester_user_id=admin_user.id,
+                review_mode=FlowStepReviewMode.VIEW,
+                output_type=FlowOutputType.TEXT,
             )
 
 
@@ -496,6 +502,8 @@ async def test_list_review_checkpoints_for_run_orders_by_step_and_attempt(
             current_payload_json={"answer": "second"},
             requester_principal_type=PrincipalType.USER,
             requester_user_id=admin_user.id,
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.TEXT,
             next_step_ids=(),
         )
         await repo.transition_review_checkpoint_state(
@@ -518,6 +526,8 @@ async def test_list_review_checkpoints_for_run_orders_by_step_and_attempt(
             current_payload_json={"answer": "first rerun"},
             requester_principal_type=PrincipalType.USER,
             requester_user_id=admin_user.id,
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
             next_step_ids=(second_step_id,),
         )
         await repo.transition_review_checkpoint_state(
@@ -540,6 +550,8 @@ async def test_list_review_checkpoints_for_run_orders_by_step_and_attempt(
             current_payload_json={"answer": "first"},
             requester_principal_type=PrincipalType.USER,
             requester_user_id=admin_user.id,
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
             next_step_ids=(second_step_id,),
         )
 
@@ -667,6 +679,8 @@ async def test_open_review_checkpoint_replays_existing_attempt_without_second_ou
             attempt_no=1,
             requester_principal=FlowPrincipal.from_user(admin_user),
             next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
         )
         replayed = await repo.open_review_checkpoint_for_completed_step(
             tenant_id=scenario.tenant_id,
@@ -677,6 +691,8 @@ async def test_open_review_checkpoint_replays_existing_attempt_without_second_ou
             attempt_no=1,
             requester_principal=FlowPrincipal.from_user(admin_user),
             next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
         )
         outbox_count = await session.scalar(
             sa.select(sa.func.count())
@@ -724,6 +740,8 @@ async def test_review_checkpoint_custom_expiry_is_not_extended_by_edit(
             attempt_no=1,
             requester_principal=FlowPrincipal.from_user(admin_user),
             next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
             review_expires_after_seconds=120,
         )
         edited = await repo.edit_review_checkpoint_payload(
@@ -780,6 +798,8 @@ async def test_edit_review_checkpoint_updates_projection_without_execution_hash(
             attempt_no=1,
             requester_principal=FlowPrincipal.from_user(admin_user),
             next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
         )
 
         edited = await repo.edit_review_checkpoint_payload(
@@ -879,6 +899,8 @@ async def test_resume_review_checkpoint_requeues_run_and_replays_idempotently(
             attempt_no=1,
             requester_principal=FlowPrincipal.from_user(admin_user),
             next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
         )
         approved = await repo.approve_review_checkpoint(
             checkpoint_id=opened.checkpoint.id,
@@ -980,6 +1002,8 @@ async def test_open_review_checkpoint_requires_running_run_and_completed_step(
                 attempt_no=1,
                 requester_principal=FlowPrincipal.from_user(admin_user),
                 next_step_ids=(scenario.step_ids[1],),
+                review_mode=FlowStepReviewMode.VIEW,
+                output_type=FlowOutputType.JSON,
             )
 
         await repo.mark_running_if_claimable(
@@ -996,6 +1020,8 @@ async def test_open_review_checkpoint_requires_running_run_and_completed_step(
                 attempt_no=1,
                 requester_principal=FlowPrincipal.from_user(admin_user),
                 next_step_ids=(scenario.step_ids[1],),
+                review_mode=FlowStepReviewMode.VIEW,
+                output_type=FlowOutputType.JSON,
             )
 
     assert queued_exc.value.code == "flow_review_checkpoint_run_not_running"
@@ -1173,6 +1199,8 @@ async def test_awaiting_review_run_cancels_active_checkpoint_by_terminalizer(
             attempt_no=1,
             requester_principal=FlowPrincipal.from_user(admin_user),
             next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
         )
 
         result = await FlowRunTerminalizer(
@@ -1261,6 +1289,8 @@ async def test_reconcile_expired_review_checkpoint_cancels_run_with_audit_trail(
             attempt_no=1,
             requester_principal=FlowPrincipal.from_user(admin_user),
             next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
         )
         await _expire_checkpoint_clock(
             session=session,
@@ -1385,6 +1415,8 @@ async def test_review_expiry_task_commits_checkpoint_and_run_from_fresh_session(
             attempt_no=1,
             requester_principal=FlowPrincipal.from_user(admin_user),
             next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
         )
         await _expire_checkpoint_clock(
             session=session,
@@ -1464,6 +1496,8 @@ async def test_reconcile_expired_review_checkpoint_ignores_approved_checkpoint(
             attempt_no=1,
             requester_principal=FlowPrincipal.from_user(admin_user),
             next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
         )
         approved = await repo.approve_review_checkpoint(
             checkpoint_id=opened.checkpoint.id,
@@ -1526,6 +1560,8 @@ async def test_approved_review_checkpoint_can_resume_after_expiry_time(
             attempt_no=1,
             requester_principal=FlowPrincipal.from_user(admin_user),
             next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
         )
         approved = await repo.approve_review_checkpoint(
             checkpoint_id=opened.checkpoint.id,
@@ -1588,6 +1624,8 @@ async def test_review_checkpoint_edit_after_expiry_returns_expired_error(
             attempt_no=1,
             requester_principal=FlowPrincipal.from_user(admin_user),
             next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
         )
         await _expire_checkpoint_clock(
             session=session,
@@ -1648,6 +1686,8 @@ async def test_reject_review_checkpoint_does_not_add_cancelled_checkpoint_outbox
             attempt_no=1,
             requester_principal=FlowPrincipal.from_user(admin_user),
             next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
         )
 
         rejected = await repo.reject_review_checkpoint(

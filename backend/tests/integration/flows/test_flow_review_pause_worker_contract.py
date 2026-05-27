@@ -263,10 +263,6 @@ async def _create_review_pause_runtime_context(
         ),
         tenant_id=admin_user.tenant_id,
     )
-    flow = await flow_repo.update(
-        flow=flow.model_copy(update={"published_version": 1}),
-        tenant_id=admin_user.tenant_id,
-    )
     assert flow.id is not None
     first_step = flow.steps[0]
     assert first_step.id is not None
@@ -300,6 +296,10 @@ async def _create_review_pause_runtime_context(
         version=1,
         definition_checksum=stable_hash(definition_json),
         definition_json=definition_json,
+        tenant_id=admin_user.tenant_id,
+    )
+    flow = await flow_repo.update(
+        flow=flow.model_copy(update={"published_version": 1}),
         tenant_id=admin_user.tenant_id,
     )
     run = await container.flow_run_service().create_run(
@@ -734,11 +734,9 @@ async def test_review_checkpoint_snapshot_is_enough_to_render_consumer_review_ui
             retry_count=0,
         )
         review_service = context.container.flow_run_review_checkpoint_service()
-        checkpoint = (
-            await review_service.get_active_review_checkpoint(
-                flow_id=context.flow_id,
-                run_id=context.run_id,
-            )
+        checkpoint = await review_service.get_active_review_checkpoint(
+            flow_id=context.flow_id,
+            run_id=context.run_id,
         )
         assert checkpoint is not None
 
@@ -751,11 +749,9 @@ async def test_review_checkpoint_snapshot_is_enough_to_render_consumer_review_ui
             )
         )
 
-        unchanged_checkpoint = (
-            await review_service.get_active_review_checkpoint(
-                flow_id=context.flow_id,
-                run_id=context.run_id,
-            )
+        unchanged_checkpoint = await review_service.get_active_review_checkpoint(
+            flow_id=context.flow_id,
+            run_id=context.run_id,
         )
 
     assert pause_result == {"status": FlowRunStatus.AWAITING_REVIEW.value}
@@ -765,7 +761,7 @@ async def test_review_checkpoint_snapshot_is_enough_to_render_consumer_review_ui
     assert public.step_label == "Draft answer for review"
     assert public.review_mode == FlowStepReviewMode.VIEW
     assert public.output_type == FlowOutputType.JSON
-    assert public.step_snapshot_available is True
+    assert not hasattr(public, "step_snapshot_available")
     assert public.output_contract == output_contract
     assert public.current_payload_json == {
         "text": '{"summary":"This answer needs review."}',

@@ -1141,8 +1141,8 @@ class FlowRunReviewCheckpoints(BasePublic):
         nullable=True,
     )
     step_label: Mapped[Optional[str]] = mapped_column(sa.Text(), nullable=True)
-    review_mode: Mapped[Optional[str]] = mapped_column(sa.String(16), nullable=True)
-    output_type: Mapped[Optional[str]] = mapped_column(sa.String(32), nullable=True)
+    review_mode: Mapped[str] = mapped_column(sa.String(16), nullable=False)
+    output_type: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     output_contract_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
         JSONB,
         nullable=True,
@@ -1221,13 +1221,11 @@ class FlowRunReviewCheckpoints(BasePublic):
             name="ck_flow_run_review_checkpoints_schema_version",
         ),
         CheckConstraint(
-            "review_mode IS NULL "
-            f"OR review_mode IN ({_check_values(FLOW_STEP_REVIEW_MODE_VALUES)})",
+            f"review_mode IN ({_check_values(FLOW_STEP_REVIEW_MODE_VALUES)})",
             name="ck_flow_run_review_checkpoints_review_mode",
         ),
         CheckConstraint(
-            "output_type IS NULL "
-            f"OR output_type IN ({_check_values(FLOW_STEP_OUTPUT_TYPE_VALUES)})",
+            f"output_type IN ({_check_values(FLOW_STEP_OUTPUT_TYPE_VALUES)})",
             name="ck_flow_run_review_checkpoints_output_type",
         ),
         CheckConstraint(

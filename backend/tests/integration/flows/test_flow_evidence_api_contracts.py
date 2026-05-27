@@ -815,7 +815,7 @@ async def test_flow_run_evidence_endpoint_includes_review_checkpoint_lineage(
     assert checkpoint["step_label"] == "Summarize the case"
     assert checkpoint["review_mode"] == "edit"
     assert checkpoint["output_type"] == "json"
-    assert checkpoint["step_snapshot_available"] is True
+    assert "step_snapshot_available" not in checkpoint
     assert checkpoint["output_contract"] == {"type": "object"}
     assert "output_contract_json" not in checkpoint
     assert checkpoint["original_payload_json"]["summary"] == "Looks good"
@@ -977,7 +977,7 @@ async def test_flow_run_evidence_export_preserves_review_checkpoint_lineage(
     assert raw_checkpoint["step_label"] == "Summarize the case"
     assert raw_checkpoint["review_mode"] == "edit"
     assert raw_checkpoint["output_type"] == "json"
-    assert raw_checkpoint["step_snapshot_available"] is True
+    assert "step_snapshot_available" not in raw_checkpoint
     assert raw_checkpoint["output_contract"] == {"type": "object"}
     assert "output_contract_json" not in raw_checkpoint
     assert raw_checkpoint["resume_key_present"] is True

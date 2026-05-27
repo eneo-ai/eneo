@@ -13,10 +13,12 @@ from intric.flows.application.flow_run_review_checkpoint_service import (
 )
 from intric.flows.domain.flow import FlowRunReviewCheckpoint
 from intric.flows.enums import (
+    FlowOutputType,
     FlowRunLifecycleSource,
     FlowRunReviewCheckpointState,
 )
 from intric.flows.flow import FlowRun, FlowRunStatus
+from intric.flows.flow_review_policy import FlowStepReviewMode
 from intric.flows.infrastructure.flow_run_repo import (
     FlowRunReviewCheckpointResumeResult,
 )
@@ -82,6 +84,9 @@ def _review_checkpoint(
         schema_version=1,
         original_payload_json={"text": "Draft"},
         current_payload_json={"text": "Draft"},
+        step_label="Review step",
+        review_mode=FlowStepReviewMode.EDIT,
+        output_type=FlowOutputType.JSON,
         output_contract_json=output_contract_json,
         requester_user_id=user.id,
         requester_principal_type=PrincipalType.USER,

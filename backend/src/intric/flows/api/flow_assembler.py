@@ -194,7 +194,6 @@ class FlowAssembler:
             {
                 **checkpoint.model_dump(),
                 "next_step_ids": checkpoint.next_step_ids_json,
-                "step_snapshot_available": checkpoint.step_snapshot_available,
                 "output_contract": checkpoint.output_contract_json,
             }
         )
