@@ -5,7 +5,7 @@ Covers:
 - 2B: List filtering regressions (assistants, spaces)
 - 2B: Prompt scope checks
 - 2C: Create-body scope mismatch (POST /assistants/)
-- 2D: Files behavior contract (GET/POST allowed, DELETE blocked)
+- 2D: Files behavior contract (GET/POST allowed, user-owned DELETE allowed)
 
 These tests hit real endpoints through httpx ASGI transport with a real database.
 Scope enforcement defaults to True (env flag + feature flag fail-closed).
@@ -13,9 +13,13 @@ Scope enforcement defaults to True (env flag + feature flag fail-closed).
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
+
+from intric.files.file_models import FileCreate, FileType
+from intric.users.user import UserAdd, UserState
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -182,6 +186,8 @@ async def _create_api_key(
     scope_type: str = "tenant",
     scope_id: str | None = None,
     permission: str = "read",
+    ownership: str = "user",
+    expires_at: str | None = None,
 ) -> str:
     """Create an sk_ API key and return the secret."""
     body: dict = {
@@ -189,9 +195,12 @@ async def _create_api_key(
         "key_type": "sk_",
         "permission": permission,
         "scope_type": scope_type,
+        "ownership": ownership,
     }
     if scope_id is not None:
         body["scope_id"] = scope_id
+    if expires_at is not None:
+        body["expires_at"] = expires_at
     resp = await client.post(
         "/api/v1/api-keys",
         json=body,
@@ -199,6 +208,46 @@ async def _create_api_key(
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["secret"]
+
+
+def _expires_in(days: int = 7) -> str:
+    return (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+
+
+async def _create_user(db_container, *, tenant_id: UUID):
+    async with db_container() as container:
+        user_repo = container.user_repo()
+        return await user_repo.add(
+            UserAdd(
+                email=f"file-scope-user-{uuid4().hex[:8]}@example.com",
+                username=f"file_scope_user_{uuid4().hex[:8]}",
+                state=UserState.ACTIVE,
+                tenant_id=tenant_id,
+            )
+        )
+
+
+async def _create_user_owned_file(
+    db_container,
+    *,
+    user_id: UUID,
+    tenant_id: UUID,
+) -> str:
+    async with db_container() as container:
+        repo = container.file_repo()
+        file = await repo.add(
+            FileCreate(
+                name=f"owned-{uuid4().hex[:8]}.txt",
+                checksum=uuid4().hex,
+                size=13,
+                mimetype="text/plain",
+                file_type=FileType.TEXT,
+                text="owned content",
+                user_id=user_id,
+                tenant_id=tenant_id,
+            )
+        )
+    return str(file.id)
 
 
 async def _create_file_scoped_key(
@@ -730,11 +779,13 @@ async def test_space_scoped_key_get_files_allowed(client, bearer_token):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_space_scoped_key_delete_files_denied_403(api_client, bearer_token):
-    """Space-scoped key DELETE /files/{id} → 403 insufficient_scope.
+async def test_space_scoped_user_key_delete_owned_file_allowed(
+    api_client, bearer_token
+):
+    """Space-scoped user key can delete files owned by the key owner.
 
-    Files are user-scoped; DELETE is blocked for non-tenant keys because
-    files may be attached to conversations across multiple spaces.
+    Files are user-scoped. A user-owned scoped key with admin file permission
+    reaches FileService, where delete_by_owner prevents cross-user deletion.
     """
     space = await _create_space(api_client, token=bearer_token)
     key = await _create_api_key(
@@ -745,16 +796,110 @@ async def test_space_scoped_key_delete_files_denied_403(api_client, bearer_token
         permission="admin",
     )
 
-    # Use a random UUID — the scope check fires BEFORE the file lookup
+    upload_resp = await api_client.post(
+        "/api/v1/files/",
+        files={"upload_file": ("cleanup.txt", b"temporary", "text/plain")},
+        headers={"X-API-Key": key},
+    )
+    assert upload_resp.status_code in (200, 201), upload_resp.text
+    file_id = upload_resp.json()["id"]
+
+    resp = await api_client.delete(
+        f"/api/v1/files/{file_id}/",
+        headers={"X-API-Key": key},
+    )
+    assert resp.status_code == 204, resp.text
+
+    get_resp = await api_client.get(
+        f"/api/v1/files/{file_id}/",
+        headers={"X-API-Key": key},
+    )
+    assert get_resp.status_code == 404, get_resp.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_service_key_delete_files_denied_with_clear_error(
+    api_client, bearer_token
+):
+    """Service keys cannot delete user-owned files, even with admin permission."""
+    space = await _create_space(api_client, token=bearer_token)
+    key = await _create_api_key(
+        api_client,
+        token=bearer_token,
+        scope_type="space",
+        scope_id=space,
+        permission="admin",
+        ownership="service",
+        expires_at=_expires_in(),
+    )
+
     resp = await api_client.delete(
         f"/api/v1/files/{uuid4()}/",
         headers={"X-API-Key": key},
     )
-    assert resp.status_code == 403, f"Expected 403, got {resp.status_code}: {resp.text}"
-    body = resp.json()
-    detail = body.get("detail", body)
-    assert detail["code"] == "insufficient_scope"
-    assert "tenant-scoped" in detail["message"]
+    assert resp.status_code == 403, resp.text
+    assert _error_code_from_response(resp) == "service_key_cannot_delete_files"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_service_key_upload_files_denied_with_creation_gate_code(
+    api_client, bearer_token
+):
+    """Service keys cannot upload user-owned files; the API returns a clear 403."""
+    space = await _create_space(api_client, token=bearer_token)
+    key = await _create_api_key(
+        api_client,
+        token=bearer_token,
+        scope_type="space",
+        scope_id=space,
+        permission="admin",
+        ownership="service",
+        expires_at=_expires_in(),
+    )
+
+    resp = await api_client.post(
+        "/api/v1/files/",
+        files={"upload_file": ("service-upload.txt", b"temporary", "text/plain")},
+        headers={"X-API-Key": key},
+    )
+
+    assert resp.status_code == 403, resp.text
+    assert _error_code_from_response(resp) == "service_key_cannot_create_resources"
+    assert "supported endpoints" in resp.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_space_scoped_user_key_cannot_delete_another_users_file(
+    api_client, bearer_token, default_user, db_container
+):
+    """Scoped user keys must not delete files owned by another tenant user."""
+    other_user = await _create_user(db_container, tenant_id=default_user.tenant_id)
+    file_id = await _create_user_owned_file(
+        db_container,
+        user_id=other_user.id,
+        tenant_id=default_user.tenant_id,
+    )
+    space = await _create_space(api_client, token=bearer_token)
+    key = await _create_api_key(
+        api_client,
+        token=bearer_token,
+        scope_type="space",
+        scope_id=space,
+        permission="admin",
+    )
+
+    resp = await api_client.delete(
+        f"/api/v1/files/{file_id}/",
+        headers={"X-API-Key": key},
+    )
+    assert resp.status_code == 404, resp.text
+
+    async with db_container() as container:
+        file = await container.file_repo().get_by_id(file_id=UUID(file_id))
+    assert file.user_id == other_user.id
 
 
 # ---------------------------------------------------------------------------
@@ -907,10 +1052,10 @@ async def test_non_space_scoped_keys_get_file_by_id_allowed(
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope_type", ["assistant", "app"])
-async def test_non_space_scoped_keys_delete_files_denied_403(
+async def test_assistant_app_scoped_user_keys_delete_owned_file_allowed(
     api_client, bearer_token, scope_type
 ):
-    """Assistant/app scoped keys remain blocked on DELETE /files/{id}/."""
+    """Assistant/app scoped user keys can delete owned files with admin permission."""
     key = await _create_file_scoped_key(
         api_client,
         token=bearer_token,
@@ -918,12 +1063,19 @@ async def test_non_space_scoped_keys_delete_files_denied_403(
         permission="admin",
     )
 
-    resp = await api_client.delete(
-        f"/api/v1/files/{uuid4()}/",
+    upload_resp = await api_client.post(
+        "/api/v1/files/",
+        files={"upload_file": ("scoped-cleanup.txt", b"temporary", "text/plain")},
         headers={"X-API-Key": key},
     )
-    assert resp.status_code == 403, resp.text
-    assert _error_code_from_response(resp) == "insufficient_scope", resp.text
+    assert upload_resp.status_code in (200, 201), upload_resp.text
+    file_id = upload_resp.json()["id"]
+
+    resp = await api_client.delete(
+        f"/api/v1/files/{file_id}/",
+        headers={"X-API-Key": key},
+    )
+    assert resp.status_code == 204, resp.text
 
 
 @pytest.mark.integration

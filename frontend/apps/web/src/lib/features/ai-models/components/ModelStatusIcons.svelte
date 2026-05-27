@@ -86,7 +86,7 @@
   };
 </script>
 
-<div class="flex items-center gap-2" role="list" aria-label="Model capabilities">
+<div class="flex items-center gap-2" role="list" aria-label={m.model_capabilities_label()}>
   {#each icons as icon (icon.icon)}
     <Tooltip text={icon.tooltip} asFragment let:trigger>
       {@const tooltipTrigger = trigger[0]}

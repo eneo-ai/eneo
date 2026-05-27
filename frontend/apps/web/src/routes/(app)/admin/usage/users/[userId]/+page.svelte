@@ -258,7 +258,7 @@
 </script>
 
 <svelte:head>
-  <title>User Token Usage - {user?.username || "Loading..."}</title>
+  <title>{m.usage_user_token_page_title({ username: user?.username || m.loading() })}</title>
 </svelte:head>
 
 <Page.Root>
@@ -270,7 +270,7 @@
           onclick={() => history.back()}
           class="text-muted hover:text-primary"
         >
-          ← Usage
+          {m.usage_back_to_usage()}
         </Button>
         <span class="text-muted">/</span>
         <h1 class="text-primary text-[1.45rem] font-extrabold">
@@ -288,9 +288,9 @@
     {#if user}
       <!-- User Overview Statistics -->
       <Settings.Page>
-        <Settings.Group title="Overview">
+        <Settings.Group title={m.overview()}>
           <Settings.Row
-            title="User Information"
+            title={m.usage_user_information()}
             description="Profile and usage activity for {user.username}."
           >
             <div class="flex items-center gap-4">
@@ -322,7 +322,7 @@
           </Settings.Row>
 
           <Settings.Row
-            title="Token Usage Summary"
+            title={m.usage_token_usage_summary()}
             description="Total tokens consumed by {user.username} in the selected period."
           >
             <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
@@ -330,34 +330,36 @@
                 <div class="text-primary text-2xl font-bold">
                   {formatNumber(user.total_tokens, "compact", 1)}
                 </div>
-                <div class="text-muted text-sm">Total Tokens</div>
+                <div class="text-muted text-sm">{m.usage_total_tokens()}</div>
               </div>
               <div class="text-center">
                 <div class="text-success text-2xl font-bold">
                   {formatNumber(user.total_input_tokens, "compact", 1)}
                 </div>
-                <div class="text-muted text-sm">Input Tokens</div>
+                <div class="text-muted text-sm">{m.usage_input_tokens()}</div>
                 <div class="text-muted mt-1 text-xs">
-                  {formatPercent(user.total_input_tokens / user.total_tokens)} of total
+                  {formatPercent(user.total_input_tokens / user.total_tokens)}
+                  {m.usage_of_total()}
                 </div>
               </div>
               <div class="text-center">
                 <div class="text-warning text-2xl font-bold">
                   {formatNumber(user.total_output_tokens, "compact", 1)}
                 </div>
-                <div class="text-muted text-sm">Output Tokens</div>
+                <div class="text-muted text-sm">{m.usage_output_tokens()}</div>
                 <div class="text-muted mt-1 text-xs">
-                  {formatPercent(user.total_output_tokens / user.total_tokens)} of total
+                  {formatPercent(user.total_output_tokens / user.total_tokens)}
+                  {m.usage_of_total()}
                 </div>
               </div>
               <div class="text-center">
                 <div class="text-info text-2xl font-bold">
                   {formatNumber(user.total_requests)}
                 </div>
-                <div class="text-muted text-sm">Total Requests</div>
+                <div class="text-muted text-sm">{m.usage_total_requests()}</div>
                 <div class="text-muted mt-1 text-xs">
                   {formatNumber(user.total_tokens / Math.max(user.total_requests, 1), "compact", 1)}
-                  tokens avg/request
+                  {m.usage_tokens_avg_per_request()}
                 </div>
               </div>
             </div>
@@ -365,7 +367,7 @@
 
           {#if modelBreakdown && modelBreakdown.models && modelBreakdown.models.length > 0 && modelsByProvider.length > 0}
             <Settings.Row
-              title="Usage by Organization"
+              title={m.usage_by_organization()}
               description="See how token usage is distributed across different AI model providers."
             >
               <div class="flex flex-col gap-4">
@@ -400,17 +402,17 @@
           {/if}
         </Settings.Group>
 
-        <Settings.Group title="Details">
+        <Settings.Group title={m.details()}>
           {#if isLoadingBreakdown}
-            <Settings.Row title="Loading..." description="Loading detailed model breakdown...">
+            <Settings.Row title={m.loading()} description="Loading detailed model breakdown...">
               <div class="text-muted flex items-center gap-2">
                 <div class="h-4 w-4 animate-spin rounded-full border-b-2 border-current"></div>
-                <span>Loading model breakdown...</span>
+                <span>{m.usage_loading_model_breakdown()}</span>
               </div>
             </Settings.Row>
           {:else if breakdownError}
             <Settings.Row
-              title="Error Loading Model Breakdown"
+              title={m.usage_error_loading_model_breakdown()}
               description="Failed to load model usage details."
             >
               <div class="text-center">
@@ -419,7 +421,7 @@
             </Settings.Row>
           {:else if modelBreakdown && modelBreakdown.models && modelBreakdown.models.length > 0}
             <Settings.Row
-              title="Top Models"
+              title={m.usage_top_models()}
               description="Most frequently used AI models by this user."
             >
               <div class="space-y-4">
@@ -437,7 +439,8 @@
                           {formatNumber(model.total_token_usage, "compact", 1)}
                         </p>
                         <p class="text-muted text-xs">
-                          {formatNumber(model.request_count)} requests
+                          {formatNumber(model.request_count)}
+                          {m.usage_requests_label()}
                         </p>
                       </div>
                     </div>
@@ -461,7 +464,7 @@
             </Settings.Row>
 
             <Settings.Row
-              title="Complete Model Breakdown"
+              title={m.usage_complete_model_breakdown()}
               description="Detailed usage statistics for all models used by this user."
               fullWidth
             >
@@ -469,8 +472,8 @@
             </Settings.Row>
           {:else}
             <Settings.Row
-              title="No Model Usage"
-              description="This user has not used any AI models in the selected period."
+              title={m.usage_no_model_usage()}
+              description={m.usage_no_model_usage_description()}
             >
               <div class="py-8 text-center">
                 <div
@@ -490,9 +493,9 @@
                     />
                   </svg>
                 </div>
-                <h3 class="text-primary mb-2 text-lg font-medium">No Model Usage</h3>
+                <h3 class="text-primary mb-2 text-lg font-medium">{m.usage_no_model_usage()}</h3>
                 <p class="text-muted">
-                  This user has not used any AI models in the selected period.
+                  {m.usage_no_model_usage_description()}
                 </p>
               </div>
             </Settings.Row>
@@ -503,7 +506,7 @@
       <div class="bg-secondary/30 border-default rounded-lg border p-8">
         <div class="text-muted flex items-center justify-center gap-2">
           <div class="h-4 w-4 animate-spin rounded-full border-b-2 border-current"></div>
-          <span>Loading user information...</span>
+          <span>{m.usage_loading_user_information()}</span>
         </div>
       </div>
     {:else if userError}
@@ -527,8 +530,8 @@
               />
             </svg>
           </div>
-          <h3 class="text-primary mb-2 text-lg font-medium">User Not Found</h3>
-          <p class="text-muted">The requested user could not be found in the current date range.</p>
+          <h3 class="text-primary mb-2 text-lg font-medium">{m.usage_user_not_found()}</h3>
+          <p class="text-muted">{m.usage_user_not_found_description()}</p>
         </div>
       </div>
     {/if}

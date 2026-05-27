@@ -195,7 +195,7 @@
                 size="icon-xs"
                 onclick={() => removeTag(tag)}
                 class="hover:bg-negative-default/10 hover:text-negative-stronger text-muted size-4 rounded p-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
-                aria-label="Remove {tag}"
+                aria-label={m.apikey_remove_tag({ tag })}
               >
                 <X />
               </Button>
@@ -225,7 +225,7 @@
           size="icon-sm"
           onclick={addTag}
           class="text-muted hover:bg-accent-default/10 hover:text-accent-default"
-          aria-label="Add tag"
+          aria-label={m.apikey_add_tag()}
         >
           <Plus />
         </Button>

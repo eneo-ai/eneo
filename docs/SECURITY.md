@@ -57,6 +57,13 @@ The repository uses GitHub security features and CI to prevent regressions:
   languages and query suites are versioned with the code. It scans Python,
   JavaScript/TypeScript, and GitHub Actions workflows on pushes and pull
   requests to `develop`, plus a weekly scheduled scan.
+- Release SBOMs are generated from the published backend and frontend container
+  image digests and attached to GitHub Releases as CycloneDX JSON, SPDX JSON,
+  and human-readable table files. These assets provide dependency transparency
+  for each release; their authenticity currently relies on GitHub-managed
+  release asset storage and the image digests recorded in the SBOM bundle.
+  `SBOM-SHA256SUMS.txt` covers the SBOM files; container image integrity is
+  verified through the GHCR image digests recorded in `IMAGE-DIGESTS.txt`.
 - Secret scanning and push protection should remain enabled for provider keys,
   tokens, credentials, and other repository secrets.
 - The normal `CI` gate validates frozen backend and frontend installs before

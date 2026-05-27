@@ -103,7 +103,7 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai - {tenant.display_name}</title>
+  <title>Eneo.ai – {tenant.display_name}</title>
 </svelte:head>
 
 <Page.Root>

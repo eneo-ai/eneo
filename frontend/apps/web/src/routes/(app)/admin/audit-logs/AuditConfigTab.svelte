@@ -433,7 +433,7 @@
               <p class="text-default text-sm font-semibold">
                 {m.audit_config_unsaved_changes()}
               </p>
-              <p class="text-muted mt-0.5 text-xs">Ändringar träder i kraft omedelbart</p>
+              <p class="text-muted mt-0.5 text-xs">{m.audit_changes_immediate()}</p>
             </div>
           </div>
           <div class="flex items-center gap-2">

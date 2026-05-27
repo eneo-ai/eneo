@@ -1,5 +1,7 @@
+import unicodedata
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional, cast
+from urllib.parse import unquote
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -1518,9 +1520,13 @@ class SharePointContentService:
                 parent_ref.get("path", "")
             )
 
-            # Item is in scope if its parent path starts with or equals the folder path
-            normalized_scope = scope_folder_path.rstrip("/")
-            normalized_parent = relative_path.rstrip("/")
+            # Item is in scope if its parent path starts with or equals the folder
+            # path. SharePoint paths are case-insensitive and may arrive
+            # percent-encoded (e.g. "%20", encoded å/ä/ö), so normalize both sides
+            # before comparing — otherwise folders with spaces or non-ASCII names
+            # silently fail the scope check and never get indexed.
+            normalized_scope = self._normalize_path(scope_folder_path)
+            normalized_parent = self._normalize_path(relative_path)
             if normalized_scope and (
                 normalized_parent == normalized_scope
                 or normalized_parent.startswith(normalized_scope + "/")
@@ -1528,6 +1534,19 @@ class SharePointContentService:
                 return True
 
         return False
+
+    @staticmethod
+    def _normalize_path(path: str) -> str:
+        """Normalize a SharePoint path for case- and encoding-insensitive comparison.
+
+        URL-decodes percent-encoding, normalizes Unicode to NFC (so å/ä/ö in NFC
+        vs NFD forms compare equal), strips a trailing slash, and casefolds.
+        """
+        if not path:
+            return ""
+        decoded = unquote(path)
+        nfc = unicodedata.normalize("NFC", decoded)
+        return nfc.rstrip("/").casefold()
 
     @staticmethod
     def _extract_relative_graph_path(parent_path: str) -> str:

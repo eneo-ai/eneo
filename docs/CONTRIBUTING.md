@@ -50,6 +50,9 @@ cd backend && uv run arq src.intric.worker.arq.WorkerSettings  # Terminal 3
 # Create feature branch
 git checkout -b feature/your-feature-name
 
+# Install local hooks once per clone
+pre-commit install --install-hooks --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
+
 # Make changes and test
 # ... your development work ...
 
@@ -64,6 +67,11 @@ git commit -m "feat: add your feature description"
 # Push and create pull request
 git push origin feature/your-feature-name
 ```
+
+For a WIP push or a CI rerun on a feature branch where local hooks are not
+useful, use `git push --no-verify`. Do not use it to bypass a real failure before
+opening or merging a PR, and do not use it for protected branches such as
+`develop` or `main`.
 
 ---
 

@@ -266,7 +266,7 @@
                 class="bg-subtle border-default rounded-md border px-2 py-1 font-mono text-xs shadow-sm"
                 >Enter</kbd
               >
-              <span class="text-muted/80 ml-1">to submit</span>
+              <span class="text-muted/80 ml-1">{m.audit_keyboard_to_submit()}</span>
             </span>
             <div class="flex items-center gap-3">
               <Button
