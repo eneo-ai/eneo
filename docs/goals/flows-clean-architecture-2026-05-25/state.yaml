@@ -128,7 +128,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T131
+active_task: T133
 
 tasks:
   - id: T001
@@ -14199,7 +14199,7 @@ tasks:
   - id: T131
     type: scout
     assignee: Scout
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Read-only retention lifecycle preflight for T010: map the clean Flow runtime file-content owner model before any migration or retention Worker."
     inputs:
@@ -14231,6 +14231,354 @@ tasks:
       - "Source evidence shows the correct model requires product decisions beyond the provided retention decisions."
       - "A safe Worker cannot be scoped without schema/data preflight or reviewer gates."
       - "The only apparent fix is making DataRetentionService null shared Files content directly."
+    receipt:
+      result: done
+      completed_at: "2026-05-27T19:24:00+02:00"
+      summary: "Read-only preflight found that Flow runtime file content does not yet have a clean lifecycle owner. Runtime uploads and generated artifacts are shared Files rows referenced by Flow xref tables; artifact availability is inferred from Files.blob/text; audio transcription can mutate shared Files.transcription; DataRetentionService now only prunes debug evidence and keeps generated-artifact counters at zero after T128. The next step must be a Judge that chooses a clean run-private/copy-promote lifecycle model before any retention Worker."
+      architecture_challenge:
+        correct_model_if_designed_today: "Flow runtime file content should be run-scoped and lifecycle-aware. Shared Files may remain the byte store, but Flow runtime must own its input/artifact lifecycle state through Flow runtime rows or an explicit run-file content owner. Runtime inputs need copy/promote isolation before purge; generated artifacts are run-private; transcript text must be run-owned evidence or an explicit cache artifact; evidence/API projection should read lifecycle/tombstone state instead of peeking at Files.blob/text."
+        current_model: "Files stores text/blob/transcription and principal ownership. FlowRunStepInputFiles and FlowRunStepResultFiles link runs to Files rows. FlowRunEvidenceService and flow_run_export_json project result files. DataRetentionService cleans debug evidence only. FlowRetentionPolicy exposes source_audio/transcript_text/generated_artifact fields, but only run_debug_evidence is scheduled. FlowRetentionTombstone can represent run_debug_evidence and generated_artifact, not source_audio/transcript_text."
+        current_model_wrong_or_incomplete: "Wrong for content lifecycle, not merely incomplete: direct mutation of shared/principal-owned Files content cannot express per-run retention safely, and availability derived from blob/text conflates storage state with Flow lifecycle state."
+        refactor_replace_needed: true
+        why_not_improve_existing_path: "Making DataRetentionService null shared Files.blob/text/transcription would polish the wrong abstraction and can break reused uploads, transcription cache semantics, evidence projection, and service-principal ownership after API-key rotation."
+        canonical_owner: "To be chosen by T132: deepen existing Flow runtime file reference/evidence/retention owners unless source proves a narrow domain-specific Flow runtime file lifecycle owner is required. Do not create a generic Files lifecycle manager."
+        existing_code_to_reuse_move_merge_delete:
+          - "Reuse FlowRunStepInputFiles and FlowRunStepResultFiles as the current run/file reference truth."
+          - "Reuse DataRetentionService as the retention scheduler/executor only after lifecycle ownership is explicit."
+          - "Reuse FlowRunEvidenceService and flow_run_export_json for API/evidence projection."
+          - "Move generated artifact availability away from Files.blob/text peeking when lifecycle state exists."
+          - "Delete or narrow dead generated_artifact/source_audio/transcript_text policy branches only after T132 chooses the model."
+        compatibility_paths_to_delete:
+          - "Eventually delete direct artifact availability derived only from Files.blob/text."
+          - "Eventually delete stable-zero generated_artifact worker counters if the lifecycle model exposes better typed results, or wire them to real lifecycle work."
+          - "Do not preserve unshipped direct Files content nulling behavior."
+        tests_to_delete_or_replace:
+          - "Replace tests that protect DataRetentionService direct Files content nulling; T128 already guards against it."
+          - "Keep content-preservation tests until run-private lifecycle tests replace them."
+        migration_data_preflight_needed:
+          - "Apply or account for the pending service-principal runtime ownership migration before validating service-owned Flow file lifecycle rows; live DB is at 20260527_service_principals while source expects owner_service_id/principal_service_id."
+          - "Preflight shared/reused Files references, run-private copy/promote candidates, transcript cache rows, generated artifact orphan windows, terminal-run age windows, and retention indexes before any migration."
+        smallest_reviewable_slice: "T132 Judge should choose either a schema/design Worker for explicit Flow runtime file lifecycle state, or a smaller source Worker only if it can reduce wrong lifecycle logic without purging content."
+      source_inventory:
+        runtime_uploads: "FlowFileUploadService saves uploads through FileService.save_file, which writes shared Files rows with principal owner fields; FlowRunService/FlowRunRepository persist FlowRunStepInputFiles link rows at run creation."
+        generated_artifacts: "output_runtime.py persists rendered artifact bytes as Files rows with runtime principal owner fields; FlowRepository.replace_step_result_file_rows links those files through FlowRunStepResultFiles."
+        source_audio_and_transcripts: "step_input_resolution.py loads runtime files by principal and calls transcription_runtime.py for audio; Transcriber writes auto-language cached transcripts back to Files.transcription."
+        evidence_and_api_projection: "FlowRunEvidenceService authorizes artifacts through result-file rows and FileRepository; FlowRunRepository maps availability to available/content_purged from Files.blob/text; flow_run_export_json summarizes availability and retention tombstones."
+        retention_mutation_paths: "DataRetentionService.cleanup_old_flow_runtime_data currently schedules only run_debug_evidence cleanup. rg found no DataRetentionService update(Files) blob/text/transcription nulling and no source_audio/transcript_text/generated_artifact retention_for_class scheduling."
+      db_preflight:
+        catalog:
+          - "Live alembic_version: 20260527_service_principals."
+          - "Live files table still has owner_api_key_id and lacks owner_service_id, while source files_table.py expects owner_service_id."
+          - "Live flow_runs still has principal_api_key_id and lacks principal_service_id, while source flow_tables.py expects principal_service_id."
+          - "Flow input/result xref FKs to files use ON DELETE RESTRICT; run/tenant/flow composite FKs exist for normal Flow correctness."
+        row_counts:
+          - "files: 170 rows; blob present 136; text present 34; transcription present 54; service_key owned 8 by exact owner_api_key_id in live DB."
+          - "flow_run_step_input_files: 61 rows, 61 distinct files, 0 orphan file links, 0 files reused across runs."
+          - "flow_run_step_result_files: 46 rows, 46 distinct files, all source=declared_artifact, 0 orphan file links, 0 missing content."
+          - "Flow-referenced content: input references hold about 638 MB blobs and 500 kB transcript text; result references hold about 1696 kB blobs."
+          - "Terminal runs older than 90 days: 0. Terminal runs older than 1 day: 81."
+        query_shape:
+          - "DataRetentionService terminal-run scan uses status plus coalesce(finished_at, created_at), currently seq-scans 81 local rows in about 0.23 ms."
+          - "No new index is justified by local row count, but a production migration should consider a partial expression index for terminal retention scans only if row counts/EXPLAIN prove need."
+        exact_read_only_commands:
+          - "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -At -c 'select version_num from alembic_version order by version_num;'"
+          - "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -A -F $'\\t' -c '<catalog columns/constraints/indexes for files, flow_runs, flow_run_step_input_files, flow_run_step_result_files, flow_step_results, flow_step_attempts>'"
+          - "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -A -F $'\\t' -c '<files/input/result row count and byte-size queries>'"
+          - "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -c '<EXPLAIN ANALYZE BUFFERS retention terminal-run and candidate input/result file queries>'"
+      classifications:
+        delete_now:
+          - "None in T131; read-only Scout found no safe deletion without T132 ownership decision."
+        merge_or_consolidate:
+          - "Consolidate artifact availability under lifecycle/evidence projection instead of direct Files.blob/text state after lifecycle state exists."
+          - "Consolidate source_audio/transcript_text/generated_artifact policy branches with tombstone/lifecycle state or delete unsupported branches."
+        needs_preflight:
+          - "Run-private/copy-promote model for runtime uploaded input files."
+          - "Transcript cache isolation from shared Files.transcription."
+          - "Generated artifact orphan reconciliation between file creation and result-file xref insertion."
+          - "Service-principal runtime ownership migration state before service-key file retention validation."
+          - "Default 90-day policy representation, admin purge semantics, and API tombstone projection."
+        keep_temporarily:
+          - "DataRetentionService debug evidence cleanup."
+          - "Generated-artifact zero result keys in data_retention_worker."
+          - "FlowRetentionPolicy source_audio/transcript_text/generated_artifact fields until T132 chooses delete/narrow/implement."
+          - "Artifact availability inferred from Files.blob/text until lifecycle state replaces it."
+      commands:
+        - cmd: "ruby -rjson -e '<read watchdog>' /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1; status=ok; halt_blockers empty."
+        - cmd: "sed -n '1,220p' /Users/ccimen/.codex/skills/complexity-optimizer/SKILL.md"
+          status: pass
+        - cmd: "sed -n '1,220p' /Users/ccimen/.agents/skills/supabase-postgres-best-practices/SKILL.md and references/query-missing-indexes.md references/query-partial-indexes.md"
+          status: pass
+        - cmd: "sed -n '1,220p' /Users/ccimen/.agents/skills/sqlalchemy-alembic-expert-best-practices-code-review/SKILL.md and rules/only-concurrent-indexes.md rules/split-foreign-key.md"
+          status: pass
+        - cmd: "nl/rg source reads for Files table/service/repo, Flow upload/input/result references, output persistence, transcription, evidence, retention policy/tombstones, DataRetentionService, and docs/flows/architecture.md"
+          status: pass
+        - cmd: "docker ps and pg_isready for eneo-41ae93-db-1"
+          status: pass
+          output: "DB container up; pg_isready accepting connections."
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -At -c 'select version_num from alembic_version order by version_num;'"
+          status: pass
+          output: "20260527_service_principals"
+        - cmd: "DB catalog queries for columns, constraints, and indexes on files/flow runtime tables"
+          status: pass
+          output: "Current DB still has exact-key owner columns; Flow xref tables have file/run/tenant FKs and file RESTRICT."
+        - cmd: "DB row-count and byte-size queries for files and Flow input/result xrefs"
+          status: pass
+          output: "170 files; 107 Flow-referenced files; 638 MB input blobs; 1696 kB result blobs; no orphan Flow file links."
+        - cmd: "EXPLAIN (ANALYZE, BUFFERS) for terminal-run retention scan and candidate 90-day input/result file queries"
+          status: pass
+          output: "Local scans are sub-ms on tiny data; no local index need proven."
+        - cmd: "rg -n '<direct Files content nulling or source_audio/transcript_text/generated_artifact scheduling patterns>' backend/src/intric/data_retention backend/src/intric/flows -g '*.py'"
+          status: pass
+          output: "No matches for direct Files content nulling or retention scheduling outside debug evidence."
+      reviewer_results:
+        claude: "not_run; T131 was read-only Scout. Any schema/file-lifecycle Worker proposed by T132 must run full Claude plan and commit gates."
+        antigravity: "not_run; T131 was read-only Scout. Any retention/schema/file-lifecycle Worker proposed by T132 must run Antigravity data-integrity review."
+      consolidation_effect:
+        reused_existing_owner: "Mapped existing Files, Flow xref, DataRetentionService, FlowRetentionPolicy, FlowRetentionTombstone, FlowRunEvidenceService, and export owners."
+        logic_moved_from: "None; read-only Scout."
+        logic_deleted: "None; read-only Scout."
+        duplicate_path_removed: "None yet; T131 prevents reintroducing a direct Files content-nulling path."
+        new_code_added: "No source/test/migration code. Only this board receipt."
+        why_existing_owners_were_insufficient: "Existing owners do not represent run-private content lifetime, transcript isolation, generated-artifact orphan reconciliation, or lifecycle-derived availability."
+        guard_test_preventing_duplicate_logic_from_returning: "T132 must require guards against direct Files content nulling, lifecycle bypass, and duplicate availability truth before approving a Worker."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "No runtime logic added."
+      non_flow_scope:
+        - file: "backend/src/intric/files/file_service.py"
+          canonical_owner_role: "Shared file persistence/access owner used by Flow runtime uploads."
+          why_flow_requires_this_change: "Only a future Worker may touch it if T132 proves Flow runtime needs copy/promote isolation at the shared file boundary."
+          deliberately_not_changed: "Assistant/app/question file lifecycle, generic Files retention, and unrelated file APIs."
+        - file: "backend/src/intric/files/transcriber.py"
+          canonical_owner_role: "Shared audio transcription/cache owner."
+          why_flow_requires_this_change: "Flow audio runtime currently uses it and it mutates Files.transcription, which affects retention ownership."
+          deliberately_not_changed: "Generic transcription behavior and non-Flow cache policy."
+        - file: "backend/src/intric/data_retention/infrastructure/data_retention_service.py"
+          canonical_owner_role: "Shared retention executor containing Flow runtime debug cleanup."
+          why_flow_requires_this_change: "It is the existing owner that would execute any approved Flow retention lifecycle work."
+          deliberately_not_changed: "Question/app/session retention and generic data-retention redesign."
+      next_task: T132
+
+  - id: T132
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the smallest safe Flow runtime file-content lifecycle Worker after T131, or block with evidence if the clean model is not yet sliceable."
+    inputs:
+      - "T131 receipt and read-only DB/source evidence."
+      - "T010 blocked receipt and owner retention decisions."
+      - "T126/T127/T128 retention safety-fence receipts."
+      - "backend/src/intric/flows/runtime"
+      - "backend/src/intric/flows/application"
+      - "backend/src/intric/flows/infrastructure"
+      - "backend/src/intric/files"
+      - "backend/src/intric/data_retention"
+      - "backend/src/intric/database/tables"
+      - "backend/alembic/versions"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only Judge: no source edits, test edits, migrations, generated-client edits, frontend edits, or docs/flows/architecture.md edits."
+      - "Check watchdog before task transition and before any later Worker implementation."
+      - "Include the Architecture challenge section before approving any Worker."
+      - "Do not assume the current shared Files model is correct; challenge whether the schema encodes the right Flow runtime lifecycle invariant."
+      - "Prefer schema/data-model fixes over DataRetentionService workarounds when the schema encodes the wrong invariant."
+      - "Do not approve direct Files.blob/text/transcription nulling for shared/principal-owned files."
+      - "Do not create a generic Files lifecycle manager, helper, processor, service locator, or one-implementation abstraction."
+      - "If approving schema/migration work, require complexity-optimizer, supabase-postgres-best-practices, sqlalchemy-alembic review, full Claude gates, and Antigravity data-integrity review with --timeout-seconds 1200."
+      - "Account for live DB/source drift around service-principal ownership before using local service-key row evidence as proof."
+      - "Do not bundle retention implementation with frontend conflict UI, service-key policy work, webhook outbox, or Flow AI Builder."
+    expected_output:
+      - "Architecture challenge for the chosen Worker or blocking decision."
+      - "One chosen next action: schema/design Worker, source-only consolidation Worker, another Scout, or blocked."
+      - "If a Worker is approved: exact allowed_files, non-Flow scope table, migration/preflight evidence, rollback/recovery notes, red tests, verification commands, reviewer gates, stop_if conditions, and consolidation effect."
+      - "Explicit decision on run-private/copy-promote uploads, generated-artifact lifecycle state, transcript cache isolation, lifecycle-derived artifact availability, and default 90-day policy representation."
+      - "Classify T131 findings as delete_now, merge_or_consolidate, needs_preflight, or keep_temporarily."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "No canonical Flow runtime file-content owner can be named."
+      - "The only safe-looking Worker is direct mutation of shared Files content."
+      - "A Worker would require product/data decisions beyond the provided retention decisions."
+      - "The needed schema/data preflight cannot be run because the local DB migration state is incompatible with source."
+      - "The Worker would broaden into assistant/app/question file lifecycle, generic Files retention, service-key policy, frontend UI, or Flow AI Builder."
+    receipt:
+      result: done
+      completed_at: "2026-05-27T19:22:00+02:00"
+      summary: "T132 chose transcript isolation as the smallest safe next Worker. It rejects schema/lifecycle-first work for now because live DB is behind the service-principal runtime ownership migration and lifecycle-on-xref-tables is the wrong content owner. T133 must stop Flow runtime from using shared Files.transcription as cache truth while preserving non-Flow transcriber cache behavior, keeping Flow transcripts run-owned in flow_runs.input_payload_json and step/evidence payloads."
+      chosen_next_task: T133
+      architecture_challenge:
+        correct_model_if_designed_today: "Shared Files owns immutable principal-uploaded bytes/metadata. Flow runtime owns run-private content lifetime for transcripts, generated artifacts, and debug content. Flow xref tables remain reference truth, not content lifecycle truth. Retention purges content through a Flow-owned lifecycle state machine and emits API/evidence tombstones from that state."
+        current_model: "Flow runtime loads shared File rows and Transcriber can read/write Files.transcription, while Flow also persists transcript text to flow_runs.input_payload_json. Generated artifacts and runtime inputs still use shared Files rows plus Flow xref rows."
+        current_model_wrong_or_incomplete: "Wrong for transcript lifetime: Flow retention cannot be correct while Flow can read or write transcript text through shared Files.transcription."
+        refactor_replace_needed: true
+        why_not_just_improve_existing_path: "Improving the shared cache path would preserve the wrong owner. The correct first step is to remove Flow's dependency on that shared cache before adding lifecycle schema."
+        canonical_owner: "For T133, Flow runtime transcript text is owned by flow_runs.input_payload_json plus step input/evidence payloads; Transcriber remains the shared transcription engine and shared file cache owner for non-Flow callers."
+        existing_code_to_reuse_move_merge_delete:
+          - "Reuse Transcriber as the engine with one explicit cache-persistence boundary parameter."
+          - "Reuse resolve_and_transcribe_audio_for_step/transcribe_audio_input as the Flow runtime call site."
+          - "Delete Flow runtime's cached_files_count read from file.transcription."
+          - "Keep Flow evidence/frontend metadata fields used_cache and cached_files_count, but pin them to False/0 under isolation."
+        compatibility_paths_to_delete:
+          - "Delete Flow's shared Files.transcription cache read/write path."
+          - "Do not delete or mutate historical Files.transcription rows in T133."
+        tests_to_delete_or_replace:
+          - "Do not delete existing default cache tests. Add or verify them for non-Flow behavior."
+          - "Add Flow runtime tests/guard so cache read/write cannot return."
+        migration_data_preflight_needed: "No migration in T133. Future schema Worker requires applying/preflighting service-principal runtime ownership, row counts/EXPLAIN, copy/promote semantics, generated-artifact orphan reconciliation, default 90-day/admin purge/API tombstone design, concurrent indexes where needed, NOT VALID constraints where applicable, rollback/recovery notes, and Claude plus Antigravity migration review."
+        smallest_reviewable_slice: "T133: add keyword-only Transcriber cache boundary, use it from Flow runtime with False, delete Flow cached_transcription metric reads, pin metadata False/0, and add tests/architecture guard."
+      approved_worker:
+        id: T133
+        objective: "Keep Flow audio transcripts run-owned by bypassing shared Files.transcription cache reads and writes in Flow runtime audio transcription, while preserving non-Flow transcriber cache behavior."
+        allowed_files:
+          - "backend/src/intric/files/transcriber.py"
+          - "backend/src/intric/flows/runtime/transcription.py"
+          - "backend/tests/unittests/files/test_transcriber.py"
+          - "backend/tests/unittests/flows/test_flow_transcription.py"
+          - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+          - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+        required_changes:
+          - "Add keyword-only Transcriber.transcribe(..., persist_cache_to_file: bool = True)."
+          - "When persist_cache_to_file is False, bypass both auto-language cache reads and cache writes: do not return file.transcription, do not mutate file.transcription, do not call file_repo.update(file), and still run the adapter path."
+          - "Call Transcriber.transcribe(..., persist_cache_to_file=False) from Flow runtime audio transcription."
+          - "Delete Flow runtime's cached file.transcription read and always emit used_cache=False and cached_files_count=0 in FlowTranscriptionResult metadata."
+          - "Keep the used_cache/cached_files_count fields; do not remove them from Flow metadata, audit, evidence, API, or frontend in T133."
+          - "Preserve apps/apps/app.py default cache behavior by relying on the default True value; do not edit app runtime."
+          - "Add an AST architecture guard over every Python file under backend/src/intric/flows, including flows/ai_builder, that fails when any transcriber.transcribe(...) call omits persist_cache_to_file=False or hides it behind **kwargs."
+          - "Guard positive self-test must exercise a flagged offending call, a compliant call, and an un-analyzable **kwargs call."
+          - "Verify task timeout context: Flow task timeout is get_settings().flow_task_timeout_seconds and defaults to 3600 seconds; document the intentional re-transcription cost in the receipt."
+        red_tests:
+          - "test_transcriber_auto_language_with_persist_cache_to_file_false_bypasses_cache_read_and_write"
+          - "Existing or new default-cache test proves persist_cache_to_file=True still serves cached transcripts and preserves non-Flow behavior."
+          - "Flow runtime unit proves transcribe_audio_input or resolve_and_transcribe_audio_for_step calls Transcriber.transcribe with persist_cache_to_file=False."
+          - "Flow runtime unit proves stale file.transcription is not read as cache truth and FlowTranscriptionResult.to_metadata() emits used_cache=False and cached_files_count=0."
+          - "Existing resolve_transcribe_and_attach_audio_input regression continues proving flow_runs.input_payload_json[FLOW_INPUT_TRANSCRIPTION_KEY] and context receive transcript text."
+          - "Architecture guard and positive self-test prevent Flow transcriber calls without explicit persist_cache_to_file=False and prevent **kwargs bypass."
+        stop_if:
+          - "Watchdog reports a halt-worthy blocker before implementation or before commit."
+          - "Implementation needs files outside allowed_files."
+          - "Implementation requires migrations, DB data changes, DataRetentionService changes, frontend/API/generated-client changes, default-90/admin purge/API tombstone behavior, generated artifact lifecycle changes, or Flow AI Builder behavior changes."
+          - "Strict pyright would require Any, dict[str, Any], cast(Any), pyright ignores, or weakening Transcriber typing."
+          - "The only workable implementation introduces FlowTranscriber, TranscriberOptions, TranscriptCacheManager, strategy classes, mode strings, generic cache helpers, managers, processors, or service locators."
+          - "Tests show a backend public contract depends on used_cache=True semantics for Flow audio."
+        verification_commands:
+          - "cd backend && uv run ruff format src/intric/files/transcriber.py src/intric/flows/runtime/transcription.py tests/unittests/files/test_transcriber.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_flow_architecture_guards.py"
+          - "cd backend && uv run ruff check src/intric/files/transcriber.py src/intric/flows/runtime/transcription.py tests/unittests/files/test_transcriber.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_flow_architecture_guards.py"
+          - "cd backend && uv run ruff format --check src/intric/files/transcriber.py src/intric/flows/runtime/transcription.py tests/unittests/files/test_transcriber.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_flow_architecture_guards.py"
+          - "cd backend && uv run pytest tests/unittests/files/test_transcriber.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_flow_architecture_guards.py -q"
+          - "cd backend && uv run pyright src/intric/files/transcriber.py src/intric/flows/runtime/transcription.py tests/unittests/files/test_transcriber.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_flow_architecture_guards.py"
+          - "rg -n 'TranscriberOptions|TranscriptCacheManager|FlowTranscriber|cache_manager|processor|manager|cast\\(Any|dict\\[str, Any\\]|pyright: ignore' backend/src/intric/files/transcriber.py backend/src/intric/flows/runtime/transcription.py backend/tests/unittests/files/test_transcriber.py backend/tests/unittests/flows/test_flow_transcription.py backend/tests/unittests/flows/test_flow_architecture_guards.py"
+          - "rg -n '\\.transcribe\\(' backend/src/intric/flows -g '*.py'"
+          - "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -F $'\\t' -A -c '<count Flow input files with populated Files.transcription before and after T133 tests; expect unchanged>'"
+          - "git diff --check"
+        reviewer_gates:
+          claude_plan_gate: "required before implementation; --timeout-seconds 1200"
+          claude_commit_gate: "required after implementation; --timeout-seconds 1200; --require-green --required-min-score 8"
+          antigravity_data_integrity_review: "required after Claude plan or implementation gate; --timeout-seconds 1200; verify historical Flow Files.transcription rows are untouched."
+      rejected_paths:
+        schema_lifecycle_first: "Rejected for this task. Live DB is behind the service-principal runtime ownership migration, and lifecycle-on-xref-tables is the wrong content owner. Future schema work needs a dedicated content-owner Judge."
+        direct_files_content_nulling: "Rejected. Shared Files content cannot be retention-purged directly."
+        generic_transcription_abstraction: "Rejected. A single keyword-only boundary parameter is enough for this slice."
+        metric_removal: "Rejected. Frontend evidence and audit metadata consume used_cache/cached_files_count; T133 must keep fields as False/0."
+      reviewer_results:
+        claude:
+          first_artifact: ".codex/artifacts/claude-peer-loop-t132-flow-runtime-file-content-lifecycle-judge-20260527T190756Z.md"
+          first_verdict: "changes_required; rejected lifecycle-on-xref-table framing and required transcript-isolation contract."
+          second_artifact: ".codex/artifacts/claude-peer-loop-t132-flow-runtime-file-content-lifecycle-judge-verification-20260527T191247Z.md"
+          second_verdict: "changes_required; required pinning used_cache/cached_files_count behavior."
+          final_artifact: ".codex/artifacts/claude-peer-loop-t132-flow-runtime-file-content-lifecycle-judge-final-verification-20260527T191500Z.md"
+          final_verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t132-flow-runtime-file-content-lifecycle-judge-antigravity-synthesis-20260527T191646Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+          concerns_added:
+            - "AST guard must fail on **kwargs transcriber calls."
+            - "Receipt must acknowledge intentional re-transcription cost and Flow task timeout context."
+      verification_evidence:
+        - "Only backend Transcriber.transcribe callers are apps/apps/app.py:295 and flows/runtime/transcription.py:239; worker/upload_tasks.py uses transcribe_from_filepath."
+        - "46 of 54 live Files.transcription rows are Flow input references, so Flow must bypass both shared cache reads and writes."
+        - "Frontend FlowRunEvidenceStepCard.svelte and FlowRunEvidence.svelte consume used_cache/cached_files_count, so T133 must not remove those fields."
+        - "Flow task timeout is enforced through future.result(timeout=get_settings().flow_task_timeout_seconds), defaulting to 3600 seconds."
+      commands:
+        - cmd: "ruby -rjson -e '<read watchdog>' /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1; status=ok; halt_blockers empty."
+        - cmd: "rg/nl reads for Transcriber callers, Flow transcription runtime, Flow evidence/frontend metadata consumers, transcriber tests, Flow architecture guards, service-principal ownership migration, and Flow task timeout config"
+          status: pass
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -F $'\\t' -A -c '<files.transcription breakdown by Flow reference bucket>'"
+          status: pass
+          output: "flow_input_ref audio service_key=4 rows/10kB; flow_input_ref audio user=42 rows/490kB; not_flow_ref audio user=8 rows/20kB."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t132-file-lifecycle-judge --phase plan --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: changes_required
+          output: "GREEN_LIGHT no; MIN_SCORE 6."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t132-file-lifecycle-judge --phase verification --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: changes_required
+          output: "GREEN_LIGHT no; MIN_SCORE 7."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t132-file-lifecycle-judge --phase verification --iteration 3 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t132-file-lifecycle-judge-synthesis --phase synthesis --iteration 1 --spend-mode auto --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8."
+        - cmd: "ruby -ryaml -e 'YAML.load_file(\"docs/goals/flows-clean-architecture-2026-05-25/state.yaml\")'"
+          status: pass
+          output: "yaml ok before final T132 patch."
+      consolidation_effect:
+        reused_existing_owner: "Transcriber remains the engine/cache owner for non-Flow; Flow runtime transcription remains the Flow transcript orchestration owner; flow_runs.input_payload_json/evidence payloads remain Flow transcript truth."
+        logic_moved_from: "No source logic moved in T132; T133 will move Flow away from shared Files.transcription cache truth."
+        logic_deleted: "None in T132; T133 must delete Flow cached_transcription reads."
+        duplicate_path_removed: "Approved removal of the duplicate Flow transcript truth path through shared Files.transcription."
+        new_code_added: "No source/test code in T132; only board receipt. T133 may add one keyword-only parameter and tests/guards."
+        why_existing_owners_were_insufficient: "Existing owners are sufficient for this first slice if Transcriber exposes a narrow cache boundary; full lifecycle schema remains deferred."
+        guard_test_preventing_duplicate_logic_from_returning: "T133 architecture guard over backend/src/intric/flows for transcriber.transcribe calls."
+        net_flow_logic_surface_area: "reduced after T133"
+        if_increased_why: "T133 adds tests/guards but removes a wrong runtime data path."
+      next_task: T133
+
+  - id: T133
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Keep Flow audio transcripts run-owned by bypassing shared Files.transcription cache reads and writes in Flow runtime audio transcription."
+    inputs:
+      - "T132 receipt."
+      - "Claude T132 final green artifact."
+      - "Antigravity T132 green artifact."
+      - "backend/src/intric/files/transcriber.py"
+      - "backend/src/intric/flows/runtime/transcription.py"
+      - "backend/tests/unittests/files/test_transcriber.py"
+      - "backend/tests/unittests/flows/test_flow_transcription.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+    allowed_files:
+      - "backend/src/intric/files/transcriber.py"
+      - "backend/src/intric/flows/runtime/transcription.py"
+      - "backend/tests/unittests/files/test_transcriber.py"
+      - "backend/tests/unittests/flows/test_flow_transcription.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Check watchdog before implementation and before commit."
+      - "Run Claude plan gate before implementation and Claude commit gate after implementation with --timeout-seconds 1200."
+      - "Run Antigravity data-integrity review with --timeout-seconds 1200 because this touches Flow retention/file-lifecycle semantics."
+      - "No migrations, DB writes, DataRetentionService changes, frontend/API/generated-client changes, default retention windows, admin purge, API tombstones, generated artifact lifecycle, service-key policy changes, or Flow AI Builder behavior changes."
+      - "Do not touch apps/apps/app.py; preserve default non-Flow transcriber cache behavior through the new default parameter."
+      - "Do not create FlowTranscriber, TranscriberOptions, TranscriptCacheManager, strategy classes, generic cache helpers, mode strings, managers, processors, service locators, or one-implementation abstractions."
+      - "Keep used_cache/cached_files_count metadata fields and emit False/0 for Flow audio under isolation."
+      - "Do not purge or mutate historical Files.transcription rows."
+    expected_output:
+      - "Keyword-only Transcriber cache boundary with default True."
+      - "Flow runtime passes persist_cache_to_file=False and no longer reads file.transcription for cache metrics."
+      - "Focused tests and AST guard proving Flow cannot use shared Files.transcription cache truth."
+      - "Receipt with architecture challenge, consolidation effect, non-Flow scope table, reviewer verdicts, DB historical-row check, validation commands, and next task activation."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "Implementation requires files outside allowed_files."
+      - "Implementation requires schema/API/frontend/generated-client/DataRetentionService changes or retention purge behavior."
+      - "Strict typing cannot be preserved without Any/dict[str, Any]/cast(Any)/pyright ignores."
+      - "The architecture guard cannot be AST-based or cannot reject **kwargs bypasses."
+      - "Tests reveal non-Flow app behavior depends on a different Transcriber call shape than default True can preserve."
     receipt: null
 
 checks:
