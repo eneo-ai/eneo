@@ -1,7 +1,11 @@
 """add scim schema: external_id on users and user_groups, scim_token_hash on tenants
 
+Re-parented onto develop's latest migration (20260501_backfill_model_costs)
+after develop restructured its history into a linear chain from 202605061100.
+Keeping SCIM as the tip of the chain so `alembic upgrade head` runs cleanly.
+
 Revision ID: 202605261000
-Revises: 202605061100
+Revises: 20260501_backfill_model_costs
 Create Date: 2026-05-26
 """
 
@@ -9,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = '202605261000'
-down_revision = '202605061100'
+down_revision = '20260501_backfill_model_costs'
 branch_labels = None
 depends_on = None
 
