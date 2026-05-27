@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T116
+active_task: T117
 
 tasks:
   - id: T001
@@ -12261,7 +12261,7 @@ tasks:
   - id: T116
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: xhigh
     objective: "After T115, approve the smallest safe Worker to move Flow/Files runtime ownership from exact api_keys_v2 ids to stable service-principal ids."
     inputs:
@@ -12307,6 +12307,113 @@ tasks:
       - "T116 would require retention implementation, frontend UI, webhook outbox, Flow AI Builder behavior, or broad actor/user-domain refactor."
       - "The Worker cannot delete or replace exact-key runtime ownership without preserving a documented temporary path and deletion trigger."
       - "Public API shape for service-principal review/rerun identity requires a product/API decision not already recorded in T009."
+    receipt:
+      completed_at: "2026-05-27T10:54:22Z"
+      result: done
+      decision: "Do not approve a Flow/Files ownership migration Worker yet. Activate T117 as a read-only Scout for service-principal runtime identity and policy-source design."
+      summary: "After T115, T116 found that stable DB ownership is not the only blocker. Flow runtime, dispatch, webhook audit, SpaceActor, synthetic service-key user construction, and evidence policy still depend on `UserInDB.active_api_key` and exact `api_keys_v2.id`. A Worker that only replaces `principal_api_key_id`/`owner_api_key_id` with service-principal columns would leave queued/recovered runs dependent on exact credential rows and would not deliver the service-principal reliability goal."
+      artifacts:
+        initial_brief: ".codex/artifacts/t116-flow-files-service-principal-ownership-judge-brief.md"
+        revised_decision: ".codex/artifacts/t116-flow-files-service-principal-ownership-judge-revised.md"
+        claude: ".codex/artifacts/claude-peer-loop-t116-flow-files-service-principal-ownership-judge-20260527T105110Z.md"
+        antigravity: ".codex/artifacts/antigravity-peer-loop-t116-service-principal-runtime-identity-synthesis-20260527T105352Z.md"
+      key_evidence:
+        - "`backend/src/intric/flows/principal.py` still treats service-key Flow principals as exact `principal_api_key_id` owners and matches runs by exact key."
+        - "`backend/src/intric/flows/runtime/tasks.py` and `backend/src/intric/flows/runtime/flow_webhook_delivery.py` refetch exact API key rows to rebuild synthetic service users."
+        - "`backend/src/intric/authentication/service_key_user.py`, `backend/src/intric/users/user_service.py`, and `backend/src/intric/actors/actors/space_actor.py` derive runtime service-key roles from concrete key scope/permission."
+        - "`backend/src/intric/flows/flow_evidence_policy.py` derives service-key evidence capability from concrete key resource permissions."
+        - "`backend/src/intric/database/tables/flow_tables.py` makes rerun requesters user-only through NOT NULL user id and check constraints."
+      db_evidence:
+        - "Local DB is at `20260527_service_principals`; 3 service-owned API keys all have service principals."
+        - "Service-key Flow rows can currently map through `api_keys_v2.service_principal_id`: 4 Flow runs and 8 files, 0 missing joined service principal."
+        - "3 requester and 3 decider review-checkpoint service-key rows have null user actor columns and no stable service-principal actor columns."
+        - "0 rerun operations exist; current schema still rejects service-key rerun requesters."
+      reviewer_results:
+        claude:
+          verdict: "GREEN_LIGHT no; MIN_SCORE 6"
+          valid_findings:
+            - "Runtime identity design is unwritten; Option A Worker would force load-bearing decisions mid-implementation."
+            - "Rerun schema relaxation must be specified before migration."
+            - "Permission/resource-permission source for runtime is undecided."
+            - "`UserInDB.active_api_key` typing/read-site migration is unmade."
+        antigravity:
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8 for activating T117 Scout"
+          valid_findings:
+            - "Scout must include TOCTOU analysis: frozen run policy without current service-principal state check would execute disabled principals."
+            - "Scout should compare service-principal permission columns versus run-frozen policy snapshot, with service-principal lifecycle checked at execution time."
+            - "No migration Worker is safe until runtime identity, rerun schema, and credential-rotation tests are specified."
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1; status=ok; halt-worthy blockers=[]"
+        - cmd: "rg -n 'principal_api_key_id|owner_api_key_id|requester_user_id|decided_by_user_id|requested_by_user_id|requested_by_principal_type|actor_api_key_id|service_principal_id|owner_service_id|principal_service_id|requester_service|decided_by_service|requested_by_service' backend/src/intric/flows backend/src/intric/files backend/src/intric/database/tables backend/tests -g '*.py'"
+          status: pass
+          output: "Mapped exact-key owner/read sites and current service-principal boundary."
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres <T116 post-T115 service-principal ownership counts>"
+          status: pass
+          output: "service_principals=3; service keys missing principal=0; service Flow runs=4; service files=8; joined service principal missing=0."
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres <T116 constraint/index catalog SQL>"
+          status: pass
+          output: "Confirmed current exact-key flow_runs/files constraints and user-only rerun check."
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres <T116 current ownership EXPLAIN SQL>"
+          status: pass
+          output: "Current idempotency lookup uses exact-key unique index; current service-key run/file owner list paths seq-scan locally due tiny tables."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t116-flow-files-service-principal-ownership --phase plan --iteration 1 --timeout-seconds 1200 ..."
+          status: fail_review
+          output: "GREEN_LIGHT no; MIN_SCORE 6; recommended Scout before Worker."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t116-service-principal-runtime-synthesis --phase synthesis --iteration 1 --spend-mode auto --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8 for activating read-only T117 Scout."
+      consolidation_effect:
+        reused_existing_owner: "`FlowPrincipal`, FlowRunService/Repository/AccessPolicy, FileService/Repository, runtime dispatch/tasks, service-key synthetic-user builder, SpaceActor, and evidence policy were verified as the existing owners/read sites to deepen or replace deliberately."
+        logic_moved_from: "N/A; Judge only."
+        logic_deleted: "N/A; Judge only."
+        duplicate_path_removed: "None yet; T117 must design how to remove exact-key runtime ownership without leaving exact-key execution dependency."
+        new_code_added: "No source code; two local review artifacts."
+        why_existing_owners_were_insufficient: "Existing owners are sufficient places to deepen, but their current contracts assume concrete API-key credentials as both owner and execution context."
+        guard_preventing_duplicate_logic_from_returning: "T117 must specify runtime identity, policy source, schema lifecycle, and tests before any Worker can replace the T115 boundary guard."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+      naming_gate: "T117 must choose domain-specific names that make the architecture axis clear: runtime identity, service-principal owner, audit credential, run-frozen policy, review requester, and rerun requester."
+      next_task: T117
+
+  - id: T117
+    type: scout
+    assignee: Scout
+    status: active
+    reasoning_hint: xhigh
+    objective: "Preflight service-principal runtime execution identity and policy-source design before any Flow/Files ownership migration Worker."
+    inputs:
+      - "T116 receipt"
+      - "T115 service-principal implementation"
+      - "T113 service-principal/files ownership preflight"
+      - "T009 owner decisions"
+      - "backend/src/intric/flows"
+      - "backend/src/intric/files"
+      - "backend/src/intric/authentication"
+      - "backend/src/intric/users"
+      - "backend/src/intric/actors/actors/space_actor.py"
+      - "backend/src/intric/database/tables"
+      - "backend/tests"
+    constraints:
+      - "Read-only: no source edits, no test edits, no migrations, no generated-client edits, no frontend edits, no docs/flows/architecture.md edits."
+      - "Do not approve or implement a Worker; T117 must feed a later Judge."
+      - "Do not introduce a broad actor/user-domain refactor, fake API-key credential, generic runtime context framework, helper/manager, plugin system, or compatibility fallback."
+      - "Do not bundle retention, frontend UI, webhook outbox redesign, Flow AI Builder, or schema edits."
+      - "Use source/DB evidence and exact file:line citations."
+    expected_output:
+      - "Runtime identity design options with recommendation: exact type(s), canonical owner, and read-site migration map."
+      - "Policy-source decision: credential permission/resource_permissions request-boundary only, service_principal columns, or run-frozen typed policy fields; include TOCTOU service-principal state check."
+      - "Exact schema sketch for future Worker: flow_runs, files, review checkpoints, rerun operations, FKs, check constraints, indexes, downgrade/rollback notes."
+      - "Exact public API/OpenAPI/generated-client impact for service-principal review/rerun actor fields, or evidence that public shape can stay unchanged."
+      - "Behavior test list proving credential rotation survives queued runs, service-principal disable fails closed, same-principal rotated keys read prior runs/files, cross-principal access is denied, service-key review/resume/rerun policy works, and exact credential ids do not leak publicly."
+      - "Recommended next Judge/Worker split with allowed_files, stop_if conditions, verification commands, and consolidation effect."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "Runtime identity cannot decouple from exact credential rows without fake API-key credentials or a broad actor/user-domain refactor."
+      - "Public API service-principal actor shape requires a product/API decision beyond T009."
+      - "Evidence shows retention, frontend, webhook outbox redesign, or Flow AI Builder must be bundled."
+      - "DB/catalog evidence is unavailable for schema/index decisions."
     receipt: null
 
 checks:
