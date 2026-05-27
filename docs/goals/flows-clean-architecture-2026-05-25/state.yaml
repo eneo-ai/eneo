@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T117
+active_task: T119
 
 tasks:
   - id: T001
@@ -12380,7 +12380,7 @@ tasks:
   - id: T117
     type: scout
     assignee: Scout
-    status: active
+    status: done
     reasoning_hint: xhigh
     objective: "Preflight service-principal runtime execution identity and policy-source design before any Flow/Files ownership migration Worker."
     inputs:
@@ -12414,6 +12414,238 @@ tasks:
       - "Public API service-principal actor shape requires a product/API decision beyond T009."
       - "Evidence shows retention, frontend, webhook outbox redesign, or Flow AI Builder must be bundled."
       - "DB/catalog evidence is unavailable for schema/index decisions."
+    receipt:
+      completed_at: "2026-05-27T11:47:00+02:00"
+      result: done
+      summary: "Read-only Scout completed the service-principal runtime identity decision before any Flow/Files ownership migration. T117 rejects exact API-key rows as runtime owners, rejects `UserInDB.active_service_principal`/fake credentials, and recommends `FlowPrincipal` for persisted owner identity plus a Flow-scoped `FlowRunActor` for runtime execution/audit. API-key scope/permission/resource_permissions stay request-time; queued runtime uses stable `service_principal_id`, current service-principal state, and a typed `ApiKeyPermission` runtime permission snapshot. After Claude and Antigravity review, T117 also rejects splitting run/file ownership from review checkpoint/rerun identity and public schema realignment; the next Judge should approve one cohesive Worker if it can stay bounded."
+      artifact: ".codex/artifacts/t117-service-principal-runtime-identity-scout.md"
+      evidence:
+        - "Runtime worker currently refetches exact `principal_api_key_id` and builds a synthetic service-key user."
+        - "Runtime execution constructs review checkpoints through `requester_principal=self.principal`; the repository stores `requester_user_id=requester_principal.principal_user_id`, which is null for service-key principals."
+        - "Review checkpoint table has user actor columns but no service-principal actor columns."
+        - "`FlowRunRerunOperationPublic.requested_by_user_id` is required, so rerun public schema must change when service-principal actors are supported."
+        - "`flow_evidence_policy` resource-permission reader is current HTTP/API service path, not current queued runtime; do not freeze fine-grained resource permissions in the first Worker unless new source evidence appears."
+      decisions:
+        runtime_actor: "Use a Flow-scoped `FlowRunActor`, not fake `ApiKeyV2InDB`, not `UserInDB.active_service_principal`, and not a generic actor framework."
+        request_policy: "Enforce service-key scope, permission, resource_permissions, and endpoint policy at HTTP request time; service principals do not inherit creator user roles."
+        runtime_policy: "Persist stable `principal_service_id`/`owner_service_id`, current service-principal state check, and typed `runtime_service_permission: ApiKeyPermission`; exact key id is audit lineage only."
+        public_api: "Expose stable service-principal actor summaries with id/display name where review/rerun actors need them; never expose exact credential ids, key suffixes, secrets, scope, or state."
+        next_worker_boundary: "One cohesive migration/API/runtime Worker across `flow_runs`, `files`, `flow_run_review_checkpoints`, `flow_run_rerun_operations`, runtime audit, public review/rerun models, and generated client. Do not split review/rerun identity from run/file ownership."
+      commands:
+        - cmd: "git status --short --branch"
+          status: pass
+          output: "On feature/refactor-flows-flowai; unrelated dirty/untracked files preserved."
+        - cmd: "python3 watchdog read"
+          status: pass
+          output: "schema_version=1; status=ok; blockers=[]"
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql ... service-principal Flow/File count preflight"
+          status: pass
+          output: "service_principals=3; service keys missing principal=0; service runs=4; service files=8; joined service principal missing=0; service review checkpoints=3; service rerun rows=0."
+        - cmd: "rg/nl source evidence for active_api_key readers, FlowPrincipal, FlowRunAccessPolicy/evidence policy, review checkpoint, rerun models, runtime executor, files, DB tables, frontend generated types"
+          status: pass
+          output: "Evidence captured in T117 artifact."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t117-service-principal-runtime-scout --phase review --iteration 1 --timeout-seconds 1200 ..."
+          status: changes_required
+          output: "Valid blockers on active-key reader classification, predicate decision, split, typing, tests, and downgrade contract."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t117-service-principal-runtime-scout --phase review --iteration 2 --timeout-seconds 1200 ..."
+          status: green
+          output: "GREEN_LIGHT yes for FlowRunActor boundary before Antigravity challenged split."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t117-service-principal-runtime-scout-synthesis --phase synthesis --iteration 1 --timeout-seconds 1200 --spend-mode auto ..."
+          status: changes_required
+          output: "Valid blocker against splitting run/file ownership from review/rerun/public schema identity."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t117-service-principal-runtime-scout --phase review --iteration 3 --timeout-seconds 1200 ..."
+          status: green
+          output: "GREEN_LIGHT yes; accepted cohesive Worker boundary."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t117-service-principal-runtime-scout-synthesis --phase synthesis --iteration 2 --timeout-seconds 1200 --spend-mode auto ..."
+          status: green
+          output: "GREEN_LIGHT yes; no Scout-level blockers remain."
+      consolidation_effect:
+        reused_existing_owner: "`FlowPrincipal`, FlowRunService/Repository, FileService/Repository, runtime task/dispatch/audit owners, review checkpoint/rerun repositories, and public Flow API model assemblers were mapped as owners to deepen."
+        logic_moved_from: "N/A; Scout only. Future Worker must move exact-key owner logic to stable service-principal owner/requester paths."
+        logic_deleted: "N/A; Scout only. Future Worker must delete credential-as-owner paths and user-only service-key review/rerun actor gaps."
+        duplicate_path_removed: "None yet; T118 must approve a Worker that removes duplicate exact-key ownership paths in one cohesive tranche."
+        new_code_added: "No source code; local Scout/review artifacts only."
+        why_existing_owners_were_insufficient: "Current owners conflate exact credentials with stable principals, pass synthetic users into runtime audit, drop service-key checkpoint identity, and cannot represent service-principal rerun actors."
+        guard_preventing_duplicate_logic_from_returning: "T117 requires `test_flow_service_principal_owner_guard`, migration isolation, API/OpenAPI/generated-client tests, FlowRunActor unit tests, and cross-principal runtime/file/review/rerun behavior tests."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+      naming_gate: "`FlowRunActor`, `principal_service_id`, `owner_service_id`, `runtime_service_permission`, `created_by_api_key_id`, and `FlowServicePrincipalActorPublic` are domain-specific names suitable for the final maintainer map."
+      next_task: T118
+
+  - id: T118
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: xhigh
+    objective: "Approve the smallest cohesive Worker for service-principal Flow runtime ownership after T117, without splitting review/rerun identity or public schema realignment from run/file ownership."
+    inputs:
+      - "T117 receipt and artifact"
+      - ".codex/artifacts/t117-service-principal-runtime-identity-scout.md"
+      - ".codex/artifacts/claude-peer-loop-t117-service-principal-runtime-identity-scout-iteration-3-20260527T114446Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t117-service-principal-runtime-identity-synthesis-iteration-2-20260527T114612Z.md"
+      - "backend/src/intric/flows"
+      - "backend/src/intric/files"
+      - "backend/src/intric/authentication"
+      - "backend/src/intric/database/tables"
+      - "frontend/packages/intric-js"
+    constraints:
+      - "Read-only Judge: no source edits, no test edits, no migrations, no generated-client edits, no frontend behavior edits, no docs/flows/architecture.md edits."
+      - "Must not approve a split that moves `flow_runs`/`files` to service-principal ownership while leaving review checkpoints or rerun operations on user-only/exact-key-inferred identity."
+      - "Must not approve fake API-key credentials, `UserInDB.active_service_principal`, broad actor/user-domain refactor, generic runtime context framework, helper/manager, plugin system, or compatibility fallback."
+      - "Must keep retention, frontend conflict UI, webhook outbox redesign, Flow AI Builder, and unrelated actor refactors out of the Worker."
+      - "Must check watchdog before activating any Worker."
+    expected_output:
+      - "Exact Worker allowed_files, including migration, runtime actor, Flow/File repositories/services, review/rerun persistence, API models, generated client, and focused tests."
+      - "Ordered commit sequence inside one cohesive PR, so reviewability improves without preserving duplicate ownership paths between PRs."
+      - "Migration/preflight plan: DB counts, backfill fail conditions, FKs, CHECK constraints, indexes, downgrade contract, EXPLAIN commands, and rollback notes."
+      - "Exact public API/generated-client shape for `FlowServicePrincipalActorPublic`, nullable user actor fields, and no credential-id leakage."
+      - "Behavior tests and verification commands, including FlowRunActor unit tests, Pydantic round-trip tests, OpenAPI/generated-client validation, migration isolation, cross-principal isolation, disabled-principal runtime failure, and architecture guard."
+      - "Stop_if conditions and consolidation effect."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "Worker cannot remove duplicate exact-key runtime owner paths in one cohesive tranche."
+      - "OpenAPI/nullability changes require user-facing frontend behavior beyond generated types/fixtures."
+      - "Audit metadata bridge requires broad platform actor refactor instead of a Flow-scoped `FlowRunActor` boundary."
+      - "DB preflight finds rows that cannot backfill through `api_keys_v2.service_principal_id`."
+      - "Implementation would require retention, frontend conflict UI, webhook outbox redesign, Flow AI Builder, or unrelated actor refactor."
+    receipt:
+      result: done
+      completed_at: "2026-05-27T12:36:00Z"
+      summary:
+        - "Read-only Judge approved one cohesive service-principal runtime ownership Worker instead of splitting runs/files from review/rerun identity."
+        - "Revised the Worker brief after reviewer blockers: old exact-key owner columns must be dropped in the same tranche; exact credentials become audit lineage only; Flow runtime audit bridge stays localized; `FlowRunActor` must own active-state and typed permission behavior; effective Flow resource permission comes from the auth owner; file service-principal owner queries must be tenant-aligned."
+        - "Service-principal work remains justified as a long-term Flow runtime/API reliability repair, not service-key polish: queued execution, file ownership, review checkpoint identity, rerun persistence, and idempotency all currently depend on transient exact credentials."
+      evidence:
+        - "Current `FlowPrincipal` uses `principal_api_key_id` as service-key identity and audit source."
+        - "Current `flow_api_common.audit_actor_kwargs()` depends on `FlowPrincipal.audit_actor_fields()`, so the Worker must preserve HTTP audit lineage while removing exact-key ownership."
+        - "Current rerun table has non-null `requested_by_user_id` and user-only check constraint."
+        - "Current `FlowRunRepository.queue_rerun_operation` hardcodes `PrincipalType.USER.value` for rerun requester persistence."
+        - "Current `FileRepository` service owner lookups lack tenant filtering while the approved service-principal index requires tenant-aligned query shape."
+      commands:
+        - command: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          notes: "schema_version=1, status=ok, blockers=[]"
+        - command: "nl -ba backend/src/intric/flows/principal.py | sed -n '1,130p'"
+          status: pass
+          notes: "Verified current exact-key service principal shape and audit fields."
+        - command: "nl -ba backend/src/intric/flows/api/flow_api_common.py | sed -n '90,125p'"
+          status: pass
+          notes: "Verified HTTP audit helper depends on `FlowPrincipal.audit_actor_fields()`."
+        - command: "nl -ba backend/src/intric/database/tables/flow_tables.py | sed -n '660,705p' && nl -ba backend/src/intric/database/tables/flow_tables.py | sed -n '810,860p'"
+          status: pass
+          notes: "Verified exact-key idempotency index and rerun user-only schema constraint."
+        - command: "nl -ba backend/src/intric/files/file_repo.py | sed -n '1,140p'"
+          status: pass
+          notes: "Verified owner lookups currently lack tenant filtering."
+        - command: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t118-cohesive-service-principal-runtime-ownership-judge-final --phase verification --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: green
+          notes: "GREEN_LIGHT yes, MIN_SCORE 8 after revision."
+        - command: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t118-service-principal-runtime-ownership-final-synthesis --phase synthesis --iteration 1 --timeout-seconds 1200 ..."
+          status: green
+          notes: "GREEN_LIGHT yes, MIN_SCORE 8; explicitly recommended proceeding rather than parking T118."
+      artifacts:
+        - ".codex/artifacts/t118-service-principal-runtime-ownership-judge.md"
+        - ".codex/artifacts/claude-peer-loop-t118-cohesive-service-principal-runtime-ownership-judge-final-verification-iteration-2-20260527T123324Z.md"
+        - ".codex/artifacts/antigravity-peer-loop-t118-service-principal-runtime-ownership-final-synthesis-20260527T123522Z.md"
+      consolidation_effect:
+        reused_existing_owner: "`FlowPrincipal`, Flow run services/repository, File services/repository, runtime task/dispatch/audit owners, review/rerun repositories, public Flow API model assemblers, and the auth resource-permission checker owner."
+        logic_moved_from: "N/A; Judge only. T119 must move exact-key owner/idempotency/file/review/rerun paths to stable service-principal owner/requester paths and exact credential lineage to audit-only fields."
+        logic_deleted: "N/A; Judge only. T119 must delete `flow_runs.principal_api_key_id`, `files.owner_api_key_id`, credential-as-owner semantics, fake runtime credential reconstruction, and user-only service-key rerun/checkpoint identity loss."
+        duplicate_path_removed: "None yet; T119 must remove `api_keys_v2.id` as runtime owner in one cohesive tranche."
+        new_code_added: "No source code; read-only Judge artifact and board receipt only."
+        why_existing_owners_were_insufficient: "Current owners cannot express stable service-principal ownership, runtime actor state, public service-principal actors, or rerun/checkpoint service identity without conflating credentials and principals."
+        guard_preventing_duplicate_logic_from_returning: "T119 must add the architecture guard, migration/schema drop checks, behavior tests, OpenAPI/generated-client checks, and idempotency/cross-principal tests approved in the brief."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+      naming_gate: "Approved names are domain-specific and architecture-axis clear: `FlowRunActor`, `principal_service_id`, `owner_service_id`, `runtime_service_permission`, `created_by_api_key_id`, and `FlowServicePrincipalActorPublic`."
+      next_task: T119
+
+  - id: T119
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: xhigh
+    objective: "Implement cohesive service-principal Flow runtime ownership: stable service-principal ownership for runs/files/review/rerun, exact credentials as audit lineage only, and no split/compatibility path."
+    inputs:
+      - "T117 receipt and artifact"
+      - "T118 receipt and artifact"
+      - ".codex/artifacts/t118-service-principal-runtime-ownership-judge.md"
+      - ".codex/artifacts/claude-peer-loop-t118-cohesive-service-principal-runtime-ownership-judge-final-verification-iteration-2-20260527T123324Z.md"
+      - ".codex/artifacts/antigravity-peer-loop-t118-service-principal-runtime-ownership-final-synthesis-20260527T123522Z.md"
+    allowed_files:
+      - "backend/alembic/versions/*flow_service_principal_runtime_ownership*.py"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/src/intric/database/tables/files_table.py"
+      - "backend/src/intric/flows/principal.py"
+      - "backend/src/intric/flows/runtime/flow_run_actor.py"
+      - "backend/src/intric/flows/flow_run_dispatch_request.py"
+      - "backend/src/intric/flows/runtime/tasks.py"
+      - "backend/src/intric/flows/runtime/executor.py"
+      - "backend/src/intric/flows/runtime/input_files.py"
+      - "backend/src/intric/flows/runtime/flow_webhook_delivery.py"
+      - "backend/src/intric/flows/runtime/http_audit.py"
+      - "backend/src/intric/flows/runtime/transcription_runtime.py"
+      - "backend/src/intric/flows/runtime/step_input_resolution.py"
+      - "backend/src/intric/flows/runtime/output_runtime.py"
+      - "backend/src/intric/flows/runtime/template_fill_runtime.py"
+      - "backend/src/intric/flows/flow_run_step_inputs.py"
+      - "backend/src/intric/flows/flow_run_rerun_request.py"
+      - "backend/src/intric/flows/flow_access_policy.py"
+      - "backend/src/intric/flows/application/flow_run_service.py"
+      - "backend/src/intric/flows/application/flow_run_access_policy.py"
+      - "backend/src/intric/flows/application/flow_run_rerun_service.py"
+      - "backend/src/intric/flows/application/flow_run_terminalization.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+      - "backend/src/intric/flows/domain/flow.py"
+      - "backend/src/intric/flows/api/flow_models.py"
+      - "backend/src/intric/flows/api/flow_run_execution_router.py"
+      - "backend/src/intric/authentication/auth_models.py"
+      - "backend/src/intric/authentication/api_key_resolver.py"
+      - "backend/src/intric/authentication/service_key_user.py"
+      - "backend/src/intric/files/file_models.py"
+      - "backend/src/intric/files/file_service.py"
+      - "backend/src/intric/files/file_repo.py"
+      - "frontend/packages/intric-js/src/types/schema.d.ts"
+      - "frontend/packages/intric-js/src/types/flow-resource-aliases.types.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowRunReviewCheckpointPanel.test.ts"
+      - "backend/tests/unit/test_service_principal_identity_boundaries.py"
+      - "backend/tests/unit/test_flow_openapi_contract.py"
+      - "backend/tests/unit/test_api_key_openapi_contract.py"
+      - "backend/tests/unittests/flows/test_flow_run_actor.py"
+      - "backend/tests/unittests/flows/test_flow_run_service.py"
+      - "backend/tests/unittests/flows/test_flow_run_access_policy.py"
+      - "backend/tests/unittests/flows/test_flow_run_execution_router.py"
+      - "backend/tests/unittests/flows/test_flow_run_rerun_service.py"
+      - "backend/tests/unittests/flows/test_flow_review_checkpoint_data_model.py"
+      - "backend/tests/unittests/flows/test_flow_rerun_data_model.py"
+      - "backend/tests/unittests/files/test_file_service.py"
+      - "backend/tests/unit/test_file_service.py"
+      - "backend/tests/integration/flows/test_flow_runtime_worker_contract.py"
+      - "backend/tests/integration/flows/test_flow_run_repository.py"
+      - "backend/tests/integration/flows/test_flow_run_review_checkpoint_repository.py"
+      - "backend/tests/integration/flows/test_flow_run_rerun_repository.py"
+      - "backend/tests/integration/migrations/test_flow_service_principal_runtime_ownership_migration.py"
+    constraints:
+      - "Before source edits, re-check watchdog and run the T119 DB/catalog/idempotency/rerun preflight queries from the T118 artifact."
+      - "Follow the T118 ordered sequence; use small commits after coherent verified slices."
+      - "Do not preserve `flow_runs.principal_api_key_id` or `files.owner_api_key_id` as compatibility paths; exact credential ids are audit lineage only."
+      - "Do not edit `backend/src/intric/audit/application/audit_metadata.py`; keep the audit bridge localized to Flow."
+      - "Do not add fake `ApiKeyV2InDB`, `UserInDB.active_service_principal`, broad actor refactor, generic runtime context, helper/manager, plugin system, or compatibility fallback."
+      - "Do not implement retention, frontend conflict UI, webhook outbox redesign, Flow AI Builder, or unrelated actor refactor."
+    expected_output:
+      - "Migration/schema changes with safe index/constraint sequencing, backfill fail-fast checks, old exact-key owner columns dropped, and downgrade contract."
+      - "`FlowPrincipal` and `FlowRunActor` typed boundary changes with effective Flow permission snapshot and active service-principal runtime check."
+      - "FlowRun/File repositories and services using stable service-principal owner ids; exact key ids only in audit lineage."
+      - "Review checkpoint and rerun service-principal persistence and public actor summaries, including deletion of hardcoded rerun `PrincipalType.USER.value`."
+      - "OpenAPI/generated-client changes with no exact credential-id leakage."
+      - "Architecture guard, migration isolation, behavior, public contract, generated-client, ruff, pyright, and DB verification commands recorded."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "Any required file falls outside allowed_files."
+      - "DB preflight finds rows that cannot backfill or service-principal idempotency collisions."
+      - "Same-Worker deletion of old exact-key owner columns is not feasible."
+      - "Implementation needs global audit metadata refactor, retention, frontend behavior, webhook outbox redesign, Flow AI Builder, or unrelated actor work."
+      - "Worker cannot keep service-principal file owner queries tenant-aligned with the approved index."
     receipt: null
 
 checks:
