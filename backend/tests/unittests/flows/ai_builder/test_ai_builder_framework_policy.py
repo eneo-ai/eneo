@@ -126,6 +126,101 @@ def test_resolve_output_intent_keeps_pdf_files_as_input_when_output_is_absent() 
     assert output.terminal_output is None
 
 
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Skapa ett flöde som ska få ett worddokument uppladdat som input.",
+        "Skapa ett flöde som ska få ett Word-dokument uppladdat som input.",
+        "Skapa ett flöde som ska få ett word dokument uppladdat som input.",
+        "Skapa ett flöde som ska få en wordfil uppladdad som input.",
+        "Skapa ett flöde som ska få ett pdfdokument uppladdat som input.",
+        "Skapa ett flöde som ska få en pdffil uppladdad som input.",
+    ],
+)
+def test_resolve_output_intent_keeps_swedish_artifact_uploads_as_input_only(
+    prompt: str,
+) -> None:
+    output = resolve_output_intent(prompt, {})
+
+    assert output.terminal_output is None
+    assert output.docx_output_mode is None
+    assert output.pdf_generation_mode is None
+
+
+@pytest.mark.parametrize(
+    ("prompt", "terminal_output", "docx_mode", "pdf_mode"),
+    [
+        (
+            "Användaren laddar upp ett underlag. I slutändan skapas ett worddokument som output.",
+            "docx_document",
+            "generated_docx",
+            None,
+        ),
+        (
+            "Användaren laddar upp ett underlag. I slutändan skapas en wordfil som output.",
+            "docx_document",
+            "generated_docx",
+            None,
+        ),
+        (
+            "Användaren laddar upp ett underlag. I slutändan skapas ett docxdokument som output.",
+            "docx_document",
+            "generated_docx",
+            None,
+        ),
+        (
+            "Användaren laddar upp ett underlag. Slutresultatet ska vara ett pdfdokument.",
+            "pdf_document",
+            None,
+            "generated_pdf",
+        ),
+        (
+            "Användaren laddar upp ett underlag. Slutresultatet ska vara en pdffil.",
+            "pdf_document",
+            None,
+            "generated_pdf",
+        ),
+        (
+            "Användaren laddar upp ett underlag. I slutändan skapas en pdfrapport som output.",
+            "pdf_document",
+            None,
+            "generated_pdf",
+        ),
+    ],
+)
+def test_resolve_output_intent_detects_swedish_artifact_output_compounds(
+    prompt: str,
+    terminal_output: str,
+    docx_mode: str | None,
+    pdf_mode: str | None,
+) -> None:
+    output = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert output.terminal_output == terminal_output
+    assert output.docx_output_mode == docx_mode
+    assert output.pdf_generation_mode == pdf_mode
+
+
+def test_resolve_output_intent_handles_exact_swedish_word_input_and_output_prompt() -> (
+    None
+):
+    prompt = (
+        "Skapa ett flöde som ska få ett worddokument uppladdat som input, "
+        "därefter ska detta dokument analyseras. När alla steg är klara så "
+        "ska det i slutändan skapas ett worddokument som output."
+    )
+
+    output = resolve_output_intent(
+        prompt, extract_answer_signals([{"role": "user", "content": prompt}])
+    )
+
+    assert output.terminal_output == "docx_document"
+    assert output.docx_output_mode == "generated_docx"
+    assert output.pdf_generation_mode is None
+
+
 def test_resolve_output_intent_keeps_singular_pdf_file_output_wording() -> None:
     output = resolve_output_intent("utdatat ska vara pdf fil", {})
 
@@ -1490,6 +1585,7 @@ def test_explicit_terminal_structured_json_survives_intermediate_json_mentions()
             "Slutresultatet ska vara strikt JSON med klassificeringar; "
             "Word-dokument behövs inte."
         ),
+        "Leverera jsonfilen som slutresultat.",
         (
             "Analyze the procurement documents and return strict JSON with "
             "ranked suppliers and missing information."

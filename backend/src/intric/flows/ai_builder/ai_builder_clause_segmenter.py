@@ -313,6 +313,13 @@ def _collect_role_anchors(text: str) -> list[_RoleAnchor]:
     for role, markers in role_entries:
         for marker in markers:
             for start, end in _find_phrase_spans(text, marker):
+                if role == "output" and _looks_like_non_output_anchor(
+                    text,
+                    marker=marker,
+                    start=start,
+                    end=end,
+                ):
+                    continue
                 candidates.append(_RoleAnchor(role=role, start=start, end=end))
 
     candidates.sort(key=lambda anchor: (anchor.start, -(anchor.end - anchor.start)))
@@ -322,6 +329,53 @@ def _collect_role_anchors(text: str) -> list[_RoleAnchor]:
             continue
         anchors.append(candidate)
     return anchors
+
+
+_FLOW_CREATION_OUTPUT_ANCHOR_PHRASES: tuple[str, ...] = (
+    "skapa flöde",
+    "skapa ett flöde",
+    "skapa en flöde",
+    "skapa flow",
+    "skapa ett flow",
+    "skapa en flow",
+)
+_RECEIVE_AS_INPUT_OUTPUT_ANCHORS: frozenset[str] = frozenset(
+    {
+        "få en",
+        "få ett",
+        "får en",
+        "får ett",
+    }
+)
+_FOLLOWING_INPUT_SCOPE_MARKERS: tuple[str, ...] = (
+    "uppladdad",
+    "uppladdat",
+    "uppladdade",
+    "som input",
+    "som indata",
+    "input",
+    "indata",
+)
+# Keep this symmetric with the output lead-in lookbehind window.
+_FOLLOWING_INPUT_SCOPE_WINDOW = 80
+
+
+def _looks_like_non_output_anchor(
+    text: str,
+    *,
+    marker: str,
+    start: int,
+    end: int,
+) -> bool:
+    if any(
+        text.startswith(phrase, start)
+        for phrase in _FLOW_CREATION_OUTPUT_ANCHOR_PHRASES
+    ):
+        return True
+    if marker in _RECEIVE_AS_INPUT_OUTPUT_ANCHORS:
+        following = text[end : end + _FOLLOWING_INPUT_SCOPE_WINDOW]
+        return contains_any_phrase(following, _FOLLOWING_INPUT_SCOPE_MARKERS)
+    return False
 
 
 def _find_phrase_spans(text: str, phrase: str) -> list[tuple[int, int]]:

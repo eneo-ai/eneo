@@ -123,6 +123,62 @@ def test_runtime_input_field_extraction_accepts_swedish_source_derived_paraphras
     assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
 
 
+def test_runtime_input_field_extraction_treats_document_headings_as_source_derived() -> (
+    None
+):
+    text = (
+        "Rapportens rubriker ska hämtas från dokumentet och varje avsnitt "
+        "ska baseras på worddokumentet."
+    )
+
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
+
+
+def test_runtime_input_field_extraction_ignores_swedish_document_section_template() -> (
+    None
+):
+    text = (
+        "Skapa ett flöde som ska få ett worddokument uppladdat som input. "
+        "Varje rubrik och text skall skrivas utifrån det ursprungliga "
+        "dokumentet som helhet varje gång. Rubrik: Resursåtgång i form av "
+        "tidsuppskattning och personella resurser. Ange i nedan tabell vilka "
+        "roller/kompetenser du bedömer kommer behövas för att genomföra "
+        "lösningsförslaget. Rubrik: Ekonomisk nytta och kostnader. Om en "
+        "nyttokalkyl EJ upprättas ska istället följande anges i detta "
+        "avsnitt: Ange beräknad totalkostnad för genomförandet av "
+        "lösningsförslaget. Summera kostnaderna för de resurser som listas i "
+        "avsnitt 2.1, samt ange och lägg till eventuella övriga kostnader."
+    )
+
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) == NO_EXTRA_RUNTIME_METADATA
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        (
+            "Rubrik: Resursåtgång i form av tidsuppskattning och personella "
+            "resurser. Ange i nedan tabell vilka roller/kompetenser som behövs."
+        ),
+        (
+            "I sådana fall räcker det att fylla i kostnader i avsnitt, samt "
+            "beskriva den kvalitativa nyttan i avsnitt."
+        ),
+        (
+            "Om en nyttokalkyl EJ upprättas ska istället följande anges i "
+            "detta avsnitt: Ange beräknad totalkostnad för genomförandet."
+        ),
+    ],
+)
+def test_runtime_input_field_extraction_ignores_report_template_imperatives(
+    text: str,
+) -> None:
+    assert extract_runtime_input_field_hints(text) == ()
+    assert infer_runtime_metadata_slot(text) is None
+
+
 def test_runtime_input_field_extraction_preserves_runtime_fields_with_source_report_fields() -> (
     None
 ):
@@ -270,6 +326,18 @@ def test_runtime_input_field_extraction_understands_english_user_metadata() -> N
         ("role", "role"),
         ("salary", "salary"),
     ]
+
+
+def test_runtime_input_field_extraction_accepts_uppercase_english_i_actor() -> None:
+    text = "I will provide name and salary before the recording is processed."
+
+    hints = extract_runtime_input_field_hints(text)
+
+    assert [(hint.variable_name, hint.label) for hint in hints] == [
+        ("name", "name"),
+        ("salary", "salary"),
+    ]
+    assert infer_runtime_metadata_slot(text) == DETAILED_CASE_METADATA
 
 
 @pytest.mark.parametrize(

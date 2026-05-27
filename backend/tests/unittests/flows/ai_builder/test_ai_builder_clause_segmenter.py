@@ -70,6 +70,29 @@ def test_role_scoped_text_keeps_explicit_output_anchor_with_terminal_artifact() 
     assert "skapar en docx i slutet" in scoped.output_text
 
 
+def test_role_scoped_text_keeps_compact_word_upload_as_input() -> None:
+    scoped = build_role_scoped_text(
+        "Skapa ett flöde som ska få ett worddokument uppladdat som input."
+    )
+
+    assert scoped.output_text == ""
+    assert "word dokument" in scoped.neutral_text
+    assert "uppladdat som input" in scoped.input_text
+
+
+def test_role_scoped_text_splits_compact_word_terminal_output_after_input() -> None:
+    scoped = build_role_scoped_text(
+        (
+            "Skapa ett flöde som ska få ett worddokument uppladdat som input. "
+            "När alla steg är klara så ska det i slutändan skapas ett "
+            "worddokument som output."
+        )
+    )
+
+    assert "uppladdat som input" in scoped.input_text
+    assert "i slutändan skapas ett word dokument som output" in scoped.output_text
+
+
 def test_role_scoped_text_separates_pdf_output_from_text_summary_content() -> None:
     scoped = build_role_scoped_text(
         "Bygg ett flöde som skapar en PDF-rapport som innehåller en kort textsammanfattning på svenska."

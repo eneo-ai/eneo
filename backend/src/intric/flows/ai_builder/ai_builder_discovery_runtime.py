@@ -154,7 +154,7 @@ async def build_runtime_discovery_context(
     prompt_hash = slot_classification_prompt_hash(
         text=text,
         ui_language=ui_language,
-        slot_names=allowed_values.keys(),
+        allowed_slot_values=allowed_values,
     )
     merge_llm_resolved_slots(state, result, prompt_hash=prompt_hash)
     apply_policy_defaults_from_resolved_slots(state, freeform_text=text)

@@ -218,6 +218,28 @@ def test_resolve_input_intent_uses_role_scoped_input_clause_for_uploaded_pdf() -
     assert intent.audio_requested is False
 
 
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Skapa ett flöde som ska få ett worddokument uppladdat som input.",
+        "Skapa ett flöde som ska få ett Word-dokument uppladdat som input.",
+        "Skapa ett flöde som ska få en wordfil uppladdad som input.",
+        "Ladda upp ett pdfdokument vid körning.",
+        "Ladda upp en pdffil vid körning.",
+        "Ladda upp ett docxdokument vid körning.",
+    ],
+)
+def test_resolve_input_intent_treats_swedish_artifact_compounds_as_documents(
+    prompt: str,
+) -> None:
+    intent = resolve_input_intent(prompt, {})
+
+    assert intent.primary_runtime_input == "documents"
+    assert intent.document_runtime_input_requested is True
+    assert intent.audio_requested is False
+    assert intent.needs_architecture_clarification is False
+
+
 def test_resolve_input_intent_treats_uploaded_underlagsfiler_as_documents() -> None:
     intent = resolve_input_intent(
         (

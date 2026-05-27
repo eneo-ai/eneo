@@ -128,29 +128,34 @@ _ENGLISH_USER_FIELD_ACTION_LEMMAS: tuple[str, ...] = (
     "supply",
     "type in",
 )
+_ENGLISH_USER_FIELD_ACTION_PHRASES: tuple[str, ...] = tuple(
+    form
+    for phrase in _ENGLISH_USER_FIELD_ACTION_LEMMAS
+    for form in _english_action_phrase_forms(phrase)
+)
 _USER_FIELD_ACTION_PHRASES: tuple[str, ...] = (
     *_SWEDISH_USER_FIELD_ACTION_PHRASES,
-    *(
-        form
-        for phrase in _ENGLISH_USER_FIELD_ACTION_LEMMAS
-        for form in _english_action_phrase_forms(phrase)
-    ),
+    *_ENGLISH_USER_FIELD_ACTION_PHRASES,
 )
-_USER_FIELD_ACTOR_TOKENS = frozenset(
+_SWEDISH_USER_FIELD_ACTOR_TOKENS = frozenset(
     {
         "anvandaren",
         "användaren",
         "anvandare",
         "användare",
+        "vi",
+        "jag",
+        "du",
+        "man",
+    }
+)
+_ENGLISH_USER_FIELD_ACTOR_TOKENS = frozenset(
+    {
         "user",
         "users",
-        "vi",
         "we",
-        "jag",
         "i",
-        "du",
         "you",
-        "man",
         "they",
     }
 )
@@ -256,10 +261,23 @@ _POST_TRIGGER_NEGATABLE_ABSENCE_PREDICATE_TOKENS = frozenset(
     }
 )
 _SOURCE_DERIVED_FIELD_MARKERS: tuple[str, ...] = (
+    "avsnitt",
+    "dokumentavsnitt",
+    "dokumentsektioner",
+    "dokumentets avsnitt",
+    "dokumentets rubriker",
     "rapportfält",
     "rapportfalt",
+    "rapportavsnitt",
+    "rapportens avsnitt",
     "rapportens fält",
     "rapportens falt",
+    "rapportens rubriker",
+    "rapportsektioner",
+    "rubrik",
+    "rubriker",
+    "sektion",
+    "sektioner",
     "fält i rapporten",
     "falt i rapporten",
     "metadatafält i rapporten",
@@ -311,6 +329,17 @@ _SOURCE_MATERIAL_MARKERS: tuple[str, ...] = (
     "transkriberingen",
     "transkriptionen",
     "underlaget",
+    "dokumentet",
+    "dokument",
+    "worddokumentet",
+    "worddokument",
+    "word document",
+    "uploaded document",
+    "uploaded documents",
+    "source document",
+    "source documents",
+    "filen",
+    "file",
     "audio",
     "recording",
     "source material",
@@ -565,17 +594,33 @@ def _user_field_action_end_char_indexes(text: str) -> tuple[int, ...]:
     token_spans = _normalized_token_spans(text)
     tokens = [token for token, _, _ in token_spans]
     indexes: set[int] = set()
-    for phrase in _USER_FIELD_ACTION_PHRASES:
-        phrase_tokens = normalize_discovery_text(phrase).split()
-        if not phrase_tokens:
-            continue
-        for start_index in _find_token_sequence_indexes(tokens, phrase_tokens):
-            if not _has_user_actor_before_action(tokens, start_index):
+    phrase_groups = (
+        (
+            _SWEDISH_USER_FIELD_ACTION_PHRASES,
+            _SWEDISH_USER_FIELD_ACTOR_TOKENS,
+        ),
+        (
+            _ENGLISH_USER_FIELD_ACTION_PHRASES,
+            _ENGLISH_USER_FIELD_ACTOR_TOKENS,
+        ),
+    )
+    for phrases, actor_tokens in phrase_groups:
+        for phrase in phrases:
+            phrase_tokens = normalize_discovery_text(phrase).split()
+            if not phrase_tokens:
                 continue
-            if _user_field_action_is_negated(tokens, start_index):
-                continue
-            end_index = start_index + len(phrase_tokens) - 1
-            indexes.add(token_spans[end_index][2])
+            for start_index in _find_token_sequence_indexes(tokens, phrase_tokens):
+                if not _has_user_actor_before_action(
+                    text,
+                    token_spans,
+                    start_index,
+                    allowed_actors=actor_tokens,
+                ):
+                    continue
+                if _user_field_action_is_negated(tokens, start_index):
+                    continue
+                end_index = start_index + len(phrase_tokens) - 1
+                indexes.add(token_spans[end_index][2])
     return tuple(sorted(indexes))
 
 
@@ -587,22 +632,47 @@ def _user_field_action_is_negated(
     return any(token in _NEGATION_TOKENS for token in before)
 
 
-def _has_user_actor_before_action(tokens: list[str], action_start_index: int) -> bool:
-    before = tokens[max(0, action_start_index - 8) : action_start_index]
-    if not any(token in _USER_FIELD_ACTOR_TOKENS for token in before):
+def _has_user_actor_before_action(
+    text: str,
+    token_spans: tuple[tuple[str, int, int], ...],
+    action_start_index: int,
+    *,
+    allowed_actors: frozenset[str],
+) -> bool:
+    action_start_char = token_spans[action_start_index][1]
+    clause_start = _last_clause_boundary_end(text, action_start_char)
+    before_indexes = range(max(0, action_start_index - 8), action_start_index)
+    actor_indexes = [
+        index
+        for index in before_indexes
+        if token_spans[index][1] >= clause_start
+        and _is_allowed_user_actor(text, token_spans[index], allowed_actors)
+    ]
+    if not actor_indexes:
         return False
-    last_actor_index = max(
-        index for index, token in enumerate(before) if token in _USER_FIELD_ACTOR_TOKENS
-    )
+    last_actor_index = max(actor_indexes)
     last_non_user_index = max(
         (
             index
-            for index, token in enumerate(before)
-            if token in _NON_USER_ACTOR_TOKENS
+            for index in before_indexes
+            if token_spans[index][1] >= clause_start
+            and token_spans[index][0] in _NON_USER_ACTOR_TOKENS
         ),
         default=-1,
     )
     return last_actor_index > last_non_user_index
+
+
+def _is_allowed_user_actor(
+    text: str,
+    token_span: tuple[str, int, int],
+    allowed_actors: frozenset[str],
+) -> bool:
+    """Keep English first-person `I` from matching Swedish lowercase `i`."""
+    token, start, end = token_span
+    if token == "i":
+        return "i" in allowed_actors and text[start:end] == "I"
+    return token in allowed_actors
 
 
 def _trigger_end_char_indexes(text: str) -> tuple[int, ...]:

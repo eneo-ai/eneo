@@ -714,6 +714,62 @@ def test_does_not_flag_form_fields_for_output_only_heading_requirements() -> Non
     assert feedback is None
 
 
+def test_does_not_flag_form_fields_for_swedish_source_document_sections() -> None:
+    conversation = [
+        {
+            "role": "user",
+            "content": (
+                "Skapa ett flöde som ska få ett worddokument uppladdat som input. "
+                "Därefter ska detta dokument analyseras för att skriva olika "
+                "rubriker och underliggande texter, där varje rubrik och text "
+                "skall skrivas utifrån det ursprungliga dokumentet som helhet "
+                "varje gång. Rubrik: Resursåtgång i form av tidsuppskattning "
+                "och personella resurser. Ange i nedan tabell vilka roller och "
+                "kompetenser som behövs. Rubrik: Ekonomisk nytta och kostnader. "
+                "Om en nyttokalkyl EJ upprättas ska istället följande anges i "
+                "detta avsnitt: Ange beräknad totalkostnad för genomförandet av "
+                "lösningsförslaget. När alla steg är klara så ska det i "
+                "slutändan skapas ett worddokument som output."
+            ),
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Utvecklingsärende",
+        steps=[
+            _step(
+                "step_extract",
+                "Extrahera utvecklingsärende",
+                "Extrahera rubriker och underlag från det uppladdade dokumentet.",
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "required": ["sections"],
+                    "properties": {
+                        "sections": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                        }
+                    },
+                    "additionalProperties": False,
+                },
+            ),
+            _step(
+                "step_docx",
+                "Skapa Word-dokument",
+                "Skapa slutligt Word-dokument från extraherade sektioner.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+    )
+
+    feedback = build_conversation_aware_quality_feedback(conversation, spec)
+
+    assert feedback is None
+
+
 def test_does_not_flag_sectioned_rubric_intake_when_form_fields_are_present() -> None:
     conversation = [
         {

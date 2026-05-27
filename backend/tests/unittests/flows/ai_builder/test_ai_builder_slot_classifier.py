@@ -108,20 +108,29 @@ def test_prompt_hash_uses_sorted_names_and_stable_json_serialization() -> None:
     prompt_hash = slot_classification_prompt_hash(
         text=text,
         ui_language="sv",
-        slot_names=("terminal_output", "primary_runtime_input"),
+        allowed_slot_values={
+            "terminal_output": {"pdf_document", "structured_text"},
+            "primary_runtime_input": {"audio", "documents"},
+        },
     )
 
     assert prompt_hash == slot_classification_prompt_hash(
         text=text,
         ui_language="sv",
-        slot_names=("primary_runtime_input", "terminal_output"),
+        allowed_slot_values={
+            "primary_runtime_input": {"documents", "audio"},
+            "terminal_output": {"structured_text", "pdf_document"},
+        },
     )
     assert (
         prompt_hash
         == classifier.hashlib.sha256(
             json.dumps(
                 {
-                    "slot_names": ["primary_runtime_input", "terminal_output"],
+                    "allowed_slot_values": {
+                        "primary_runtime_input": ["audio", "documents"],
+                        "terminal_output": ["pdf_document", "structured_text"],
+                    },
                     "text": text,
                     "ui_language": "sv",
                 },
@@ -130,6 +139,24 @@ def test_prompt_hash_uses_sorted_names_and_stable_json_serialization() -> None:
             ).encode("utf-8")
         ).hexdigest()
     )
+
+
+def test_prompt_hash_changes_when_allowed_slot_values_change() -> None:
+    base_hash = slot_classification_prompt_hash(
+        text="Sammanfatta ärendet",
+        ui_language="sv",
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+    )
+
+    changed_hash = slot_classification_prompt_hash(
+        text="Sammanfatta ärendet",
+        ui_language="sv",
+        allowed_slot_values={
+            "terminal_output": {"pdf_document", "structured_text"}
+        },
+    )
+
+    assert changed_hash != base_hash
 
 
 @pytest.mark.asyncio

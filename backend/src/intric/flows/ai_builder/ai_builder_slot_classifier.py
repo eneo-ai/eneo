@@ -55,7 +55,7 @@ async def classify_slots(
     cache_key = slot_classification_prompt_hash(
         text=text,
         ui_language=ui_language,
-        slot_names=slot_names,
+        allowed_slot_values=slot_values,
     )
     cached = _SLOT_CLASSIFICATION_CACHE.get(cache_key)
     if cached is not None:
@@ -208,13 +208,13 @@ def slot_classification_prompt_hash(
     *,
     text: str,
     ui_language: str | None,
-    slot_names: Iterable[str],
+    allowed_slot_values: Mapping[str, Collection[str]],
 ) -> str:
     return hashlib.sha256(
         _classification_cache_payload(
             text=text,
             ui_language=ui_language,
-            slot_names=slot_names,
+            allowed_slot_values=allowed_slot_values,
         ).encode("utf-8")
     ).hexdigest()
 
@@ -284,13 +284,17 @@ def _classification_cache_payload(
     *,
     text: str,
     ui_language: str | None,
-    slot_names: Iterable[str],
+    allowed_slot_values: Mapping[str, Collection[str]],
 ) -> str:
+    normalized_values = _normalize_allowed_slot_values(allowed_slot_values)
     return json.dumps(
         {
+            "allowed_slot_values": {
+                slot_name: sorted(values)
+                for slot_name, values in sorted(normalized_values.items())
+            },
             "text": text,
             "ui_language": ui_language,
-            "slot_names": sorted(slot_names),
         },
         ensure_ascii=False,
         sort_keys=True,

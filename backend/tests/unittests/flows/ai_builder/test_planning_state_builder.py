@@ -595,6 +595,50 @@ class TestRuntimeMetadataClassificationBoundaries:
         assert slot.source == "heuristic"
         assert slot.confidence == "high"
 
+    def test_classifier_cannot_override_source_derived_document_sections(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Skapa ett flöde som ska få ett worddokument uppladdat "
+                        "som input. Varje rubrik och text skall skrivas utifrån "
+                        "det ursprungliga dokumentet som helhet varje gång. "
+                        "Rubrik: Resursåtgång i form av tidsuppskattning och "
+                        "personella resurser. Ange i nedan tabell vilka "
+                        "roller/kompetenser som behövs. Rubrik: Ekonomisk "
+                        "nytta och kostnader. Ange beräknad totalkostnad för "
+                        "genomförandet av lösningsförslaget. När alla steg är "
+                        "klara så ska det i slutändan skapas ett "
+                        "worddokument som output."
+                    ),
+                )
+            ]
+        )
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(
+                    _classified(
+                        "runtime_metadata_fields",
+                        "detailed_case_metadata",
+                        "high",
+                    ),
+                )
+            ),
+            prompt_hash="b" * 64,
+        )
+
+        slot = state.resolved_slots["runtime_metadata_fields"]
+        assert slot.value == "no_extra_metadata"
+        assert slot.source == "heuristic"
+        assert slot.confidence == "high"
+        assert state.resolved_slots["terminal_output"].value == "docx_document"
+        assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
+
     def test_real_runtime_fields_still_resolve_as_metadata_inputs(
         self,
     ) -> None:

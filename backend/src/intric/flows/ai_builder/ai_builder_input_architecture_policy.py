@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 from intric.flows.ai_builder.ai_builder_clause_segmenter import (
     build_role_scoped_text,
@@ -15,6 +15,7 @@ from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     normalize_discovery_text,
 )
 from intric.flows.flow_authoring_spec import (
+    AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
     InputType,
@@ -246,6 +247,14 @@ def resolve_input_intent(
 
     audio_requested = _audio_requested(answer_signals, defaults, input_text)
     document_requested = _document_requested(answer_signals, defaults, input_text)
+    if (
+        not audio_requested
+        and inferred_primary == "unknown"
+        and scoped_text.input_text
+        and _document_requested(answer_signals, defaults, scoped_text.full_text)
+    ):
+        document_requested = True
+        inferred_primary = "documents"
 
     if explicit_primary != "unknown":
         primary = explicit_primary
@@ -349,7 +358,9 @@ def uses_pseudo_transcription_without_audio_step(spec: FlowDraftSpecCore) -> boo
         return False
 
     for step in spec.steps:
-        instructions = step.assistant_spec.instructions.casefold()
+        # Pyright treats this Pydantic member as Unknown in isolated file checks.
+        assistant_spec = cast(AssistantSpec, getattr(step, "assistant_spec"))
+        instructions = assistant_spec.instructions.casefold()
         if _contains_any(
             instructions, ("transkrib", "transcrib", "samtal", "discussion")
         ):

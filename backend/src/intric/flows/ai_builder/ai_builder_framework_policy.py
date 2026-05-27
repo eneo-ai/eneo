@@ -699,7 +699,7 @@ def _resolve_direct_output_choice(
     role_scoped_text = (
         scoped_text.replacement_target_text
         or scoped_text.output_text
-        or scoped_text.neutral_text
+        or (scoped_text.neutral_text if not scoped_text.input_text else "")
     )
     fallback_text = scoped_text.full_text
     if "docx_document" in output_values:
@@ -869,6 +869,11 @@ def _looks_like_final_json_output(text: str) -> bool:
             "slutresultat json",
             "slutresultat strikt json",
             "slutresultatet ska vara json",
+            "json fil som slutresultat",
+            "json fil som output",
+            "json fil som utdata",
+            "leverera json fil",
+            "skapa json fil",
             "final output should be structured json",
             "final output should be strict json",
             "final output json",

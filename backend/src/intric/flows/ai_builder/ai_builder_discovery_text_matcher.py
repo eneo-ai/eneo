@@ -4,11 +4,55 @@ import re
 from collections.abc import Iterable
 
 _NON_WORD_RE = re.compile(r"[^\w]+", re.UNICODE)
+_SWEDISH_ARTIFACT_COMPOUND_PREFIXES: tuple[str, ...] = (
+    "docx",
+    "word",
+    "pdf",
+    "json",
+)
+# Covers the common Swedish artifact noun forms users compound with Word/PDF/JSON.
+# Possessive forms are left unsplit until a real prompt needs them.
+_SWEDISH_ARTIFACT_COMPOUND_SUFFIX_CANONICALS: tuple[tuple[str, str], ...] = (
+    ("dokumentets", "dokument"),
+    ("dokumentet", "dokument"),
+    ("dokumenten", "dokument"),
+    ("dokument", "dokument"),
+    ("rapporterna", "rapport"),
+    ("rapporten", "rapport"),
+    ("rapporter", "rapport"),
+    ("rapport", "rapport"),
+    ("mallarna", "mall"),
+    ("mallen", "mall"),
+    ("mallar", "mall"),
+    ("mall", "mall"),
+    ("filerna", "fil"),
+    ("filen", "fil"),
+    ("filer", "fil"),
+    ("fil", "fil"),
+)
 
 
 def normalize_discovery_text(value: str) -> str:
     collapsed = _NON_WORD_RE.sub(" ", value.casefold()).strip()
-    return " ".join(collapsed.split())
+    tokens = [
+        split_token
+        for token in collapsed.split()
+        for split_token in _split_swedish_artifact_compound(token)
+    ]
+    return " ".join(tokens)
+
+
+def _split_swedish_artifact_compound(token: str) -> tuple[str, ...]:
+    for prefix in _SWEDISH_ARTIFACT_COMPOUND_PREFIXES:
+        if not token.startswith(prefix):
+            continue
+        suffix = token[len(prefix) :]
+        for suffix_candidate, canonical_suffix in (
+            _SWEDISH_ARTIFACT_COMPOUND_SUFFIX_CANONICALS
+        ):
+            if suffix == suffix_candidate:
+                return (prefix, canonical_suffix)
+    return (token,)
 
 
 def contains_phrase(text: str, phrase: str) -> bool:

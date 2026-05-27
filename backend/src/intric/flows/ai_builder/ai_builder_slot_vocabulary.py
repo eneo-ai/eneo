@@ -25,6 +25,8 @@ KNOWN_REQUIREMENT_SLOT_NAMES: frozenset[str] = frozenset(
 
 NON_LLM_RESOLVABLE_SLOT_NAMES: frozenset[str] = frozenset(
     {
+        # Output generation modes are derived after terminal_output is known,
+        # so the model resolves the artifact and policy chooses the mode.
         "docx_output_mode",
         "pdf_generation_mode",
     }
