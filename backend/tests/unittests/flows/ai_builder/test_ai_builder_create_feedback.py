@@ -174,6 +174,25 @@ def test_format_create_critic_feedback_translates_simple_text_transform_restrain
         assert token not in feedback
 
 
+def test_format_create_critic_feedback_translates_section_underlag_issue() -> None:
+    feedback = format_create_critic_feedback(
+        (
+            CriticIssue(
+                id="section_text_steps_must_reference_source_json_fields",
+                kind="semantic",
+                remediation="Raw remediation.",
+            ),
+        )
+    )
+
+    assert feedback is not None
+    assert "varje avsnittssteg" in feedback.casefold()
+    assert "namngivna fält" in feedback.casefold()
+    assert "relevant underlag" in feedback.casefold()
+    for token in _CREATE_FEEDBACK_MECHANICS_TOKENS:
+        assert token not in feedback
+
+
 def test_create_critic_feedback_covers_every_semantic_invariant() -> None:
     semantic_ids = {
         invariant.id for invariant in CRITIC_INVARIANTS if invariant.kind == "semantic"

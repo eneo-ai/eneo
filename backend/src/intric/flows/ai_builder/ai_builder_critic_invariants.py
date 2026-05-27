@@ -938,6 +938,24 @@ def _composer_question_targets_prior_structured_field(
     `output.structured.<a>.<b>...` paths. Future or current-step
     references and parse errors do not count as targeted underlag.
     """
+    return any(
+        _composer_question_targets_prior_structured_step(
+            spec=spec,
+            composer_index=composer_index,
+            structured_step_index=structured_step_index,
+        )
+        for structured_step_index in range(composer_index)
+    )
+
+
+def _composer_question_targets_prior_structured_step(
+    *,
+    spec: FlowDraftSpecCore,
+    composer_index: int,
+    structured_step_index: int,
+) -> bool:
+    if structured_step_index >= composer_index:
+        return False
     composer = spec.steps[composer_index]
     if composer.input_bindings is None:
         return False
@@ -954,9 +972,8 @@ def _composer_question_targets_prior_structured_field(
     return any(
         reference.kind is TemplateReferenceKind.STEP
         and reference.path_error_code is None
-        and reference.step_order is not None
-        and reference.step_order < composer_index
-        and reference.structured_path
+        and reference.step_order == structured_step_index
+        and bool(reference.structured_path)
         for reference in references
     )
 
@@ -1016,6 +1033,87 @@ _PREFER_TARGETED_UNDERLAG_OVER_ALL_PREVIOUS_STEPS = CriticInvariant(
         "dem i `input_bindings.question` via `{{ step_<ref>.output.structured.<fält> }}`. "
         "Eventuella DOCX/PDF-renderingar i slutet förblir orörda — regeln gäller bara "
         "det komponerande textsteget."
+    ),
+)
+
+
+def _section_text_steps_must_reference_source_json_fields_evidence(
+    context: CriticContext,
+) -> bool:
+    """Fire when one structured source extraction feeds multiple section
+    writers, but at least two writers do not explicitly target that JSON.
+
+    This protects the create-mode shape where the planner asks for one
+    document-wide extraction and then many section-writing steps. Each
+    writer can remain a `previous_step` text composer, but its effective
+    underlag must include the source JSON fields it needs; otherwise only
+    the first writer sees the structured extraction and later writers drift
+    into previous-section-only input.
+    """
+    if context.aggregation_intent in {"aggregate", "compare"}:
+        return False
+
+    spec = context.spec
+    json_contract_indexes = [
+        index
+        for index, step in enumerate(spec.steps)
+        if not _is_renderer_step(step)
+        and step.output_type == OutputType.JSON
+        and step.output_contract is not None
+    ]
+    for json_index in json_contract_indexes:
+        downstream_indexes: list[int] = []
+        missing_indexes: list[int] = []
+        for composer_index, step in enumerate(
+            spec.steps[json_index + 1 :],
+            start=json_index + 1,
+        ):
+            if _is_renderer_step(step):
+                continue
+            if step.output_type != OutputType.TEXT:
+                continue
+            if step.input_source != InputSource.PREVIOUS_STEP:
+                continue
+            prior_json_indexes = [
+                candidate_index
+                for candidate_index in json_contract_indexes
+                if candidate_index < composer_index
+            ]
+            if prior_json_indexes != [json_index]:
+                continue
+            downstream_indexes.append(composer_index)
+            if not _composer_question_targets_prior_structured_step(
+                spec=spec,
+                composer_index=composer_index,
+                structured_step_index=json_index,
+            ):
+                missing_indexes.append(composer_index)
+
+        if len(downstream_indexes) >= 2 and len(missing_indexes) >= 2:
+            return True
+    return False
+
+
+_SECTION_TEXT_STEPS_MUST_REFERENCE_SOURCE_JSON_FIELDS = CriticInvariant(
+    id="section_text_steps_must_reference_source_json_fields",
+    kind="semantic",
+    description=(
+        "When one structured JSON extraction feeds several downstream text "
+        "section writers, each writer should reference that extraction via "
+        "`input_bindings.question` using explicit "
+        "`{{ step_<ref>.output.structured.<field> }}` selectors. Otherwise "
+        "later writers receive only the previous section text and silently "
+        "drop the document-wide structured underlag."
+    ),
+    evidence=_section_text_steps_must_reference_source_json_fields_evidence,
+    remediation=(
+        "Ett JSON-extraktionssteg följs av flera textsteg som skriver olika "
+        "avsnitt, men flera av textstegen refererar inte JSON-underlaget i "
+        "`input_bindings.question`. Låt varje avsnittssteg deklarera de "
+        "relevanta `uses_previous_fields` från extraktionen och referera dem "
+        "med `{{ step_<ref>.output.structured.<fält> }}`. Då får varje rubrik "
+        "det strukturerade underlag den behöver i stället för att bara läsa "
+        "föregående avsnitts text."
     ),
 )
 
@@ -1454,6 +1552,7 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _MCP_SELECTION_REQUIRES_SEMANTIC_SUPPORT,
     _JSON_INPUT_REJECTS_ALL_PREVIOUS_STEPS_SOURCE,
     _PREFER_TARGETED_UNDERLAG_OVER_ALL_PREVIOUS_STEPS,
+    _SECTION_TEXT_STEPS_MUST_REFERENCE_SOURCE_JSON_FIELDS,
     _REDUNDANT_TERMINAL_JSON_FORMAT_TAIL_AFTER_FINAL_TEXT_COMPOSER,
     _FINAL_TEXT_STEP_MUST_REFERENCE_RELEVANT_STRUCTURED_OUTPUTS,
     _FORM_FIELDS_DECLARED_MUST_BE_REFERENCED,

@@ -5636,11 +5636,599 @@ def test_auto_bind_targeted_underlag_skips_previous_step_composer_with_single_js
     assert composer.uses_previous_fields == []
 
 
+def test_auto_bind_targeted_underlag_routes_single_json_source_to_section_writers() -> (
+    None
+):
+    from intric.flows.ai_builder.ai_builder_create_dataflow import (
+        auto_bind_targeted_underlag_for_text_composer,
+    )
+
+    extraction_fields = [
+        _field(
+            "tidplan",
+            "string",
+            description="Planerad tidplan och viktiga datum.",
+        ),
+        _field(
+            "malgrupper",
+            "array",
+            description="Berörda målgrupper och behovsgrupper.",
+        ),
+        _field(
+            "resursbehov",
+            "string",
+            description="Roller, kompetenser, timmar och kostnader.",
+        ),
+        _field(
+            "nyttobedomning",
+            "string",
+            description="Direkt ekonomisk nytta, kostnader och nyttokvot.",
+        ),
+        _field(
+            "kvalitativa_nyttor",
+            "string",
+            description="Kvalitativa nyttor för verksamhet och medborgare.",
+        ),
+        _field(
+            "losningsinriktning",
+            "string",
+            description="Lösningsförslag och önskat nyläge.",
+        ),
+        _field(
+            "nulage_och_problem",
+            "string",
+            description="Nuläge, problembeskrivning och behov av förändring.",
+        ),
+        _field(
+            "finansieringsmojligheter",
+            "string",
+            description="Möjliga finansieringskällor och budgetar.",
+        ),
+        _field(
+            "ansvarig_nyttorealisering",
+            "string",
+            description="Person eller roll som ansvarar för nyttorealisering.",
+        ),
+        _field(
+            "sammanfattning_av_underlag",
+            "string",
+            description="Sammanfattning av dokumentunderlaget som helhet.",
+        ),
+    ]
+    steps_before = [
+        NewStepDraft(
+            name="Läs underlag",
+            instructions="Läs hela Word-dokumentet.",
+            input_source="flow_input",
+            input_type="document",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Extrahera centrala fakta ur underlaget",
+            instructions="Extrahera återanvändbara fält för alla avsnitt.",
+            input_source="previous_step",
+            input_type="text",
+            output_type="json",
+            output_fields=extraction_fields,
+        ),
+        NewStepDraft(
+            name="Skriv Problem och nuläge",
+            instructions="Beskriv nuläge, målgrupp, problem och förändringsbehov.",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Skriv Lösningsförslag och nyläge",
+            instructions="Beskriv lösningsförslag och önskat nyläge.",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Skriv Resursåtgång",
+            instructions="Ange roller, kompetenser, timmar och kostnader.",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Skriv Planerad tidplan",
+            instructions="Skriv den tänkta tidplanen.",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Skriv Finansiering",
+            instructions="Beskriv hur kostnaderna föreslås finansieras.",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Skriv Ansvarig för nyttorealisering",
+            instructions="Ange ansvarig person eller roll.",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+        NewStepDraft(
+            name="Skriv oklar specialrubrik",
+            instructions="Skriv ett kort avsnitt utan tydlig semantisk koppling.",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+    ]
+
+    result = auto_bind_targeted_underlag_for_text_composer(
+        _draft_with_steps(steps_before),
+        aggregation_intent="linear",
+    )
+
+    refs_by_step = {
+        step.name: {ref.field_path for ref in step.uses_previous_fields}
+        for step in result
+    }
+    assert "nulage_och_problem" in refs_by_step["Skriv Problem och nuläge"]
+    assert "losningsinriktning" in refs_by_step[
+        "Skriv Lösningsförslag och nyläge"
+    ]
+    assert "resursbehov" in refs_by_step["Skriv Resursåtgång"]
+    assert "tidplan" in refs_by_step["Skriv Planerad tidplan"]
+    assert "finansieringsmojligheter" in refs_by_step["Skriv Finansiering"]
+    assert "ansvarig_nyttorealisering" in refs_by_step[
+        "Skriv Ansvarig för nyttorealisering"
+    ]
+    assert refs_by_step["Skriv oklar specialrubrik"] == {
+        "sammanfattning_av_underlag"
+    }, "unmatched section writers should not all reuse the first declared fields"
+    for step in result[2:]:
+        assert {ref.from_step for ref in step.uses_previous_fields} == {2}
+        assert step.uses_previous_outputs == []
+
+
+def test_compile_create_draft_section_writers_use_json_schema_as_underlag() -> None:
+    draft = FlowCreateDraft(
+        flow_name="Utvecklingsärende från Word",
+        plan_rationale="Skapar ett Word-dokument med flera avsnitt.",
+        steps=[
+            CreateStepDraft(
+                name="Läs underlag",
+                instructions="Läs hela Word-dokumentet.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.TEXT,
+                runtime_upload=True,
+            ),
+            CreateStepDraft(
+                name="Extrahera centrala fakta ur underlaget",
+                instructions="Extrahera återanvändbara fält för alla avsnitt.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.JSON,
+                output_fields=[
+                    _field(
+                        "nulage_och_problem",
+                        "string",
+                        description="Nuläge, problem och behov av förändring.",
+                    ),
+                    _field(
+                        "losningsinriktning",
+                        "string",
+                        description="Lösningsförslag och nyläge.",
+                    ),
+                    _field(
+                        "sammanfattning_av_underlag",
+                        "string",
+                        description="Sammanfattning av dokumentunderlaget.",
+                    ),
+                ],
+            ),
+            CreateStepDraft(
+                name="Skriv Problem och nuläge",
+                instructions="Beskriv nuläge och problem.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+            CreateStepDraft(
+                name="Skriv Lösningsförslag och nyläge",
+                instructions="Beskriv lösningsförslag och nyläge.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+            CreateStepDraft(
+                name="Skriv Plan för nyttorealisering",
+                instructions="Skriv plan för nyttorealisering.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+
+    spec = compile_create_draft(draft)
+
+    extraction = spec.steps[1]
+    assert extraction.output_type == OutputType.JSON
+    assert extraction.output_contract is not None
+    assert set(extraction.output_contract["properties"]) == {
+        "nulage_och_problem",
+        "losningsinriktning",
+        "sammanfattning_av_underlag",
+    }
+
+    problem_step, solution_step, benefit_plan_step = spec.steps[2:5]
+    assert problem_step.input_type == InputType.TEXT
+    assert problem_step.input_contract is None
+    assert problem_step.input_bindings is not None
+    assert "step_b.output.structured.nulage_och_problem" in problem_step.input_bindings[
+        "question"
+    ]
+
+    assert solution_step.input_type == InputType.TEXT
+    assert solution_step.input_contract is None
+    assert solution_step.input_bindings is not None
+    assert "step_b.output.structured.losningsinriktning" in solution_step.input_bindings[
+        "question"
+    ]
+
+    assert benefit_plan_step.input_type == InputType.TEXT
+    assert benefit_plan_step.input_contract is None
+    assert benefit_plan_step.input_bindings is not None
+    assert "step_b.output.structured.sammanfattning_av_underlag" in (
+        benefit_plan_step.input_bindings["question"]
+    )
+
+
+def test_compile_create_draft_broad_document_composers_use_full_json_schema() -> None:
+    extraction_fields = [
+        _field(name, "string", description=description)
+        for name, description in [
+            ("syfte", "Syfte och behov."),
+            ("nulage", "Nuläge, problem och behovsgrupp."),
+            ("losningsforslag", "Lösningsförslag och nyläge."),
+            ("resursbehov", "Roller, kompetenser, timmar och kostnader."),
+            ("tidplan", "Planerad tidplan."),
+            ("nytta_och_kostnader", "Ekonomisk nytta och kostnader."),
+            ("nyttor", "Kvalitativa nyttor och målgrupper."),
+            ("finansiering", "Föreslagen finansiering."),
+            ("ansvar", "Ansvarig för nyttorealisering."),
+            ("komplexitet", "Förändringens komplexitet."),
+            ("nyttorealisering", "Plan för nyttorealisering."),
+        ]
+    ]
+    draft = FlowCreateDraft(
+        flow_name="Dokument till verksamhetsunderlag",
+        plan_rationale="Skriver flera rubriker i ett Word-dokument.",
+        steps=[
+            CreateStepDraft(
+                name="Extrahera centrala fakta",
+                instructions="Extrahera återanvändbara fält för hela dokumentet.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+                runtime_upload=True,
+                output_fields=extraction_fields,
+            ),
+            CreateStepDraft(
+                name="Skriv verksamhetsavsnitt",
+                instructions=(
+                    "Skriv alla avsnitt och alla rubriker som användaren "
+                    "efterfrågade i verksamhetsunderlaget."
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+            CreateStepDraft(
+                name="Sammanställ slutligt Word-dokument",
+                instructions="Sammanställ slutligt Word-dokument.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+            CreateStepDraft(
+                name="Skapa DOCX",
+                instructions="Skapa DOCX från föregående text.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+    )
+
+    spec = compile_create_draft(draft)
+
+    expected_selectors = {
+        f"step_a.output.structured.{field.name}" for field in extraction_fields
+    }
+    section_writer_question = spec.steps[1].input_bindings["question"]
+    final_composer_question = spec.steps[2].input_bindings["question"]
+    assert expected_selectors.issubset(set(section_writer_question.split()))
+    assert expected_selectors.issubset(set(final_composer_question.split()))
+    assert "{{ step_b.output.text }}" in final_composer_question
+    assert spec.steps[0].output_contract is not None
+    assert set(spec.steps[0].output_contract["properties"]) == {
+        field.name for field in extraction_fields
+    }
+    for composer in spec.steps[1:3]:
+        assert composer.input_type == InputType.TEXT
+        assert composer.input_contract is None
+    assert spec.steps[3].input_bindings is None
+
+
+def test_compile_create_draft_section_writers_do_not_duplicate_full_json_schema() -> (
+    None
+):
+    extraction_fields = [
+        _field(name, "string", description=description)
+        for name, description in [
+            ("syfte", "Syfte och behov."),
+            ("nulage", "Nuläge, problem och behovsgrupp."),
+            ("losningsforslag", "Lösningsförslag och nyläge."),
+            ("resurser", "Roller, kompetenser, timmar och kostnader."),
+            ("tidplan", "Planerad tidplan."),
+            ("kostnader", "Ekonomisk nytta och kostnader."),
+            ("nyttor", "Kvalitativa nyttor och målgrupper."),
+            ("finansiering", "Föreslagen finansiering."),
+            ("komplexitet", "Förändringens komplexitet."),
+            ("nyttorealisering", "Plan för nyttorealisering."),
+        ]
+    ]
+    draft = FlowCreateDraft(
+        flow_name="Analys och utkast till verksamhetsunderlag",
+        plan_rationale="Skriver flera avsnitt från samma Word-underlag.",
+        steps=[
+            CreateStepDraft(
+                name="Extrahera centrala fakta",
+                instructions="Extrahera återanvändbara fält för hela dokumentet.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+                runtime_upload=True,
+                output_fields=extraction_fields,
+            ),
+            CreateStepDraft(
+                name="Skriv problem och lösningsförslag",
+                instructions=(
+                    "Skriv avsnittet utifrån hela det ursprungliga dokumentet. "
+                    "Beskriv nuläge, problem, behov och lösningsförslag."
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+            CreateStepDraft(
+                name="Beskriv resurser och tidplan",
+                instructions=(
+                    "Skriv avsnittet utifrån hela det ursprungliga dokumentet. "
+                    "Ange resurser, roller, kostnader och planerad tidplan."
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+            CreateStepDraft(
+                name="Förbered DOCX-innehåll",
+                instructions="Sammanställ slutligt Word-dokument.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+
+    spec = compile_create_draft(draft)
+
+    first_writer_question = spec.steps[1].input_bindings["question"]
+    second_writer_question = spec.steps[2].input_bindings["question"]
+    final_question = spec.steps[3].input_bindings["question"]
+
+    assert "step_a.output.structured.nulage" in first_writer_question
+    assert "step_a.output.structured.losningsforslag" in first_writer_question
+    assert "step_a.output.structured.tidplan" not in first_writer_question
+    assert "step_a.output.structured.finansiering" not in first_writer_question
+
+    assert "step_a.output.structured.resurser" in second_writer_question
+    assert "step_a.output.structured.tidplan" in second_writer_question
+    assert "step_a.output.structured.kostnader" in second_writer_question
+    assert "step_a.output.structured.losningsforslag" not in second_writer_question
+
+    expected_final_selectors = {
+        f"step_a.output.structured.{field.name}" for field in extraction_fields
+    }
+    assert expected_final_selectors.issubset(set(final_question.split()))
+    assert "{{ step_b.output.text }}" in final_question
+    assert "{{ step_c.output.text }}" in final_question
+
+
+def test_compile_create_draft_section_writers_ignore_passing_broad_markers() -> (
+    None
+):
+    extraction_fields = [
+        _field("nulage", "string", description="Nuläge, problem och behov."),
+        _field(
+            "losningsforslag",
+            "string",
+            description="Lösningsförslag och nyläge.",
+        ),
+        _field("tidplan", "string", description="Planerad tidplan."),
+        _field("finansiering", "string", description="Föreslagen finansiering."),
+    ]
+    draft = FlowCreateDraft(
+        flow_name="Verksamhetsunderlag",
+        plan_rationale="Skriver avsnitt och exporterar senare till DOCX.",
+        steps=[
+            CreateStepDraft(
+                name="Extrahera centrala fakta",
+                instructions="Extrahera återanvändbara fält.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+                runtime_upload=True,
+                output_fields=extraction_fields,
+            ),
+            CreateStepDraft(
+                name="Skriv nuläge",
+                instructions=(
+                    "Beskriv nuläge och problem. Dokumentet exporteras till "
+                    "DOCX senare."
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+            CreateStepDraft(
+                name="Skriv lösningsförslag",
+                instructions=(
+                    "Beskriv lösningsförslag och nyläge. Slutlig granskning "
+                    "sker i ett senare steg."
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+            CreateStepDraft(
+                name="Förbered DOCX-innehåll",
+                instructions="Sammanställ slutligt Word-dokument.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+
+    spec = compile_create_draft(draft)
+
+    nulage_question = spec.steps[1].input_bindings["question"]
+    solution_question = spec.steps[2].input_bindings["question"]
+    final_question = spec.steps[3].input_bindings["question"]
+    all_selectors = {
+        f"step_a.output.structured.{field.name}" for field in extraction_fields
+    }
+
+    assert "step_a.output.structured.nulage" in nulage_question
+    assert not all_selectors.issubset(set(nulage_question.split()))
+    assert "step_a.output.structured.losningsforslag" in solution_question
+    assert not all_selectors.issubset(set(solution_question.split()))
+    assert all_selectors.issubset(set(final_question.split()))
+
+
+def test_compile_create_draft_unmatched_section_writer_uses_source_floor() -> None:
+    draft = FlowCreateDraft(
+        flow_name="Verksamhetsunderlag",
+        plan_rationale="Skriver flera avsnitt från ett dokument.",
+        steps=[
+            CreateStepDraft(
+                name="Extrahera centrala fakta",
+                instructions="Extrahera återanvändbara fält.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+                runtime_upload=True,
+                output_fields=[
+                    _field("syfte", "string", description="Syfte och behov."),
+                    _field("tidplan", "string", description="Planerad tidplan."),
+                ],
+            ),
+            CreateStepDraft(
+                name="Skriv oklar specialrubrik",
+                instructions="Skriv ett kort avsnitt utan tydlig koppling.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+            CreateStepDraft(
+                name="Skriv ännu en specialrubrik",
+                instructions="Skriv ett annat kort avsnitt utan tydlig koppling.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+
+    spec = compile_create_draft(draft)
+
+    first_question = spec.steps[1].input_bindings["question"]
+    second_question = spec.steps[2].input_bindings["question"]
+    assert "step_a.output.structured.syfte" in first_question
+    assert "step_a.output.structured.syfte" in second_question
+    assert "step_a.output.structured.tidplan" not in first_question
+    assert "step_a.output.structured.tidplan" not in second_question
+
+
+def test_compile_create_draft_underlag_matching_handles_swedish_inflections() -> None:
+    draft = FlowCreateDraft(
+        flow_name="Verksamhetsunderlag",
+        plan_rationale="Skriver avsnitt från ett dokument.",
+        steps=[
+            CreateStepDraft(
+                name="Extrahera centrala fakta",
+                instructions="Extrahera återanvändbara fält.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+                runtime_upload=True,
+                output_fields=[
+                    _field("syfte", "string", description="Syfte och behov."),
+                    _field("tidplan", "string", description="Planerad tidplan."),
+                    _field(
+                        "resursbehov",
+                        "string",
+                        description="Roller och resursbehov.",
+                    ),
+                    _field(
+                        "losningsforslag",
+                        "string",
+                        description="Lösningsförslag och nyläge.",
+                    ),
+                ],
+            ),
+            CreateStepDraft(
+                name="Utarbeta tidsplanen",
+                instructions="Skriv avsnittet om den planerade tidsplanen.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+            CreateStepDraft(
+                name="Beskriv resursbehovet",
+                instructions="Beskriv resurserna och resursbehovet.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+            CreateStepDraft(
+                name="Beskriv lösningsförslaget",
+                instructions="Beskriv lösningsförslaget och nyläget.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+        ],
+    )
+
+    spec = compile_create_draft(draft)
+
+    timeline_question = spec.steps[1].input_bindings["question"]
+    resources_question = spec.steps[2].input_bindings["question"]
+    solution_question = spec.steps[3].input_bindings["question"]
+    assert "step_a.output.structured.tidplan" in timeline_question
+    assert "step_a.output.structured.syfte" not in timeline_question
+    assert "step_a.output.structured.resursbehov" in resources_question
+    assert "step_a.output.structured.losningsforslag" in solution_question
+
+
 def test_targeted_underlag_predicate_binds_single_json_prior_with_primary_source_ref() -> (
     None
 ):
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        _should_bind_targeted_underlag,
+        _targeted_underlag_binding_mode,
     )
     from intric.flows.ai_builder.ai_builder_new_step_models import PreviousOutputRef
 
@@ -5671,20 +6259,20 @@ def test_targeted_underlag_predicate_binds_single_json_prior_with_primary_source
         ),
     ]
 
-    assert _should_bind_targeted_underlag(
+    assert _targeted_underlag_binding_mode(
         steps=steps,
         composer_index=2,
         all_previous_candidate_indexes=set(),
         primary_source_ref=source_ref,
         aggregation_intent="linear",
-    )
+    ) != "skip"
 
 
 def test_targeted_underlag_predicate_skips_single_json_prior_without_primary_source_ref() -> (
     None
 ):
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        _should_bind_targeted_underlag,
+        _targeted_underlag_binding_mode,
     )
 
     steps = [
@@ -5705,18 +6293,18 @@ def test_targeted_underlag_predicate_skips_single_json_prior_without_primary_sou
         ),
     ]
 
-    assert not _should_bind_targeted_underlag(
+    assert _targeted_underlag_binding_mode(
         steps=steps,
         composer_index=1,
         all_previous_candidate_indexes=set(),
         primary_source_ref=None,
         aggregation_intent="linear",
-    )
+    ) == "skip"
 
 
 def test_targeted_underlag_predicate_binds_two_json_priors_without_source_ref() -> None:
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        _should_bind_targeted_underlag,
+        _targeted_underlag_binding_mode,
     )
 
     steps = [
@@ -5745,18 +6333,18 @@ def test_targeted_underlag_predicate_binds_two_json_priors_without_source_ref() 
         ),
     ]
 
-    assert _should_bind_targeted_underlag(
+    assert _targeted_underlag_binding_mode(
         steps=steps,
         composer_index=2,
         all_previous_candidate_indexes=set(),
         primary_source_ref=None,
         aggregation_intent="linear",
-    )
+    ) != "skip"
 
 
 def test_targeted_underlag_predicate_skips_prebound_composer() -> None:
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        _should_bind_targeted_underlag,
+        _targeted_underlag_binding_mode,
     )
     from intric.flows.ai_builder.ai_builder_new_step_models import PreviousFieldRef
 
@@ -5789,18 +6377,18 @@ def test_targeted_underlag_predicate_skips_prebound_composer() -> None:
         ),
     ]
 
-    assert not _should_bind_targeted_underlag(
+    assert _targeted_underlag_binding_mode(
         steps=steps,
         composer_index=2,
         all_previous_candidate_indexes={2},
         primary_source_ref=None,
         aggregation_intent="linear",
-    )
+    ) == "skip"
 
 
 def test_targeted_underlag_predicate_skips_renderer() -> None:
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        _should_bind_targeted_underlag,
+        _targeted_underlag_binding_mode,
     )
 
     steps = [
@@ -5821,13 +6409,13 @@ def test_targeted_underlag_predicate_skips_renderer() -> None:
         ),
     ]
 
-    assert not _should_bind_targeted_underlag(
+    assert _targeted_underlag_binding_mode(
         steps=steps,
         composer_index=1,
         all_previous_candidate_indexes={1},
         primary_source_ref=None,
         aggregation_intent="linear",
-    )
+    ) == "skip"
 
 
 @pytest.mark.parametrize("intent", ["aggregate", "compare"])
@@ -5835,7 +6423,7 @@ def test_targeted_underlag_predicate_skips_aggregate_and_compare_intents(
     intent: AggregationIntent,
 ) -> None:
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
-        _should_bind_targeted_underlag,
+        _targeted_underlag_binding_mode,
     )
 
     steps = [
@@ -5864,13 +6452,13 @@ def test_targeted_underlag_predicate_skips_aggregate_and_compare_intents(
         ),
     ]
 
-    assert not _should_bind_targeted_underlag(
+    assert _targeted_underlag_binding_mode(
         steps=steps,
         composer_index=2,
         all_previous_candidate_indexes={2},
         primary_source_ref=None,
         aggregation_intent=intent,
-    )
+    ) == "skip"
 
 
 def test_auto_bind_is_idempotent_for_all_previous_steps_composer() -> None:

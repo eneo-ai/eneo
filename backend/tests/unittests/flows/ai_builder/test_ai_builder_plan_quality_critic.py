@@ -64,6 +64,7 @@ EXPECTED_CRITIC_INVARIANT_KINDS = {
     "mcp_selection_requires_semantic_support": "semantic",
     "json_input_rejects_all_previous_steps_source": "architecture",
     "prefer_targeted_underlag_over_all_previous_steps": "semantic",
+    "section_text_steps_must_reference_source_json_fields": "semantic",
     "redundant_terminal_json_format_tail_after_final_text_composer": "semantic",
     "final_text_step_must_reference_relevant_structured_outputs": "semantic",
     "form_fields_declared_must_be_referenced": "semantic",
@@ -2898,6 +2899,9 @@ class TestPreferTargetedUnderlagInvariant:
 _FINAL_TEXT_STEP_INVARIANT_ID = (
     "final_text_step_must_reference_relevant_structured_outputs"
 )
+_SECTION_TEXT_STEPS_INVARIANT_ID = (
+    "section_text_steps_must_reference_source_json_fields"
+)
 _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID = (
     "redundant_terminal_json_format_tail_after_final_text_composer"
 )
@@ -2996,6 +3000,201 @@ def _quality_chain_with_redundant_terminal_json_tail(
             )
         )
     return FlowDraftSpecCore(flow_name="Kvalitetskedja", steps=steps)
+
+
+class TestSectionTextStepsReferenceSourceJsonFields:
+    def test_invariant_is_registered(self) -> None:
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CRITIC_INVARIANTS,
+            CriticInvariant,
+        )
+
+        ids = [inv.id for inv in CRITIC_INVARIANTS]
+        assert _SECTION_TEXT_STEPS_INVARIANT_ID in ids
+        inv = next(
+            item
+            for item in CRITIC_INVARIANTS
+            if item.id == _SECTION_TEXT_STEPS_INVARIANT_ID
+        )
+        assert isinstance(inv, CriticInvariant)
+        assert callable(inv.evidence)
+        assert "output.structured" in inv.remediation
+
+    def test_fires_when_one_json_extraction_is_dropped_by_section_writers(
+        self,
+    ) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Utvecklingsärende",
+            steps=[
+                _step(
+                    "step_a",
+                    "Läs dokument",
+                    "Läs dokumentet.",
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_b",
+                    "Extrahera centrala fakta",
+                    "Extrahera återanvändbara fält.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {
+                            "nulage_och_problem": {"type": "string"},
+                            "losningsinriktning": {"type": "string"},
+                        },
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Skriv Problem och nuläge",
+                    "Skriv avsnittet.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": (
+                            "Problem: "
+                            "{{ step_b.output.structured.nulage_och_problem }}"
+                        )
+                    },
+                ),
+                _step(
+                    "step_d",
+                    "Skriv Lösningsförslag och nyläge",
+                    "Skriv avsnittet.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_e",
+                    "Skriv Finansiering",
+                    "Skriv avsnittet.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(
+            issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues
+        )
+
+    def test_silent_when_section_writers_target_source_json(
+        self,
+    ) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Utvecklingsärende",
+            steps=[
+                _step(
+                    "step_a",
+                    "Läs dokument",
+                    "Läs dokumentet.",
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_b",
+                    "Extrahera centrala fakta",
+                    "Extrahera återanvändbara fält.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {
+                            "nulage_och_problem": {"type": "string"},
+                            "losningsinriktning": {"type": "string"},
+                        },
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Skriv Problem och nuläge",
+                    "Skriv avsnittet.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": (
+                            "Problem: "
+                            "{{ step_b.output.structured.nulage_och_problem }}"
+                        )
+                    },
+                ),
+                _step(
+                    "step_d",
+                    "Skriv Lösningsförslag och nyläge",
+                    "Skriv avsnittet.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": (
+                            "Lösning: "
+                            "{{ step_b.output.structured.losningsinriktning }}"
+                        )
+                    },
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(
+            issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues
+        )
+
+    def test_silent_on_writer_then_critique_chain(
+        self,
+    ) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Kort kvalitetskedja",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extrahera centrala fakta",
+                    "Extrahera återanvändbara fält.",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {
+                            "sammanfattning": {"type": "string"},
+                        },
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Skriv utkast",
+                    "Skriv utkastet från fakta.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": (
+                            "Fakta: {{ step_a.output.structured.sammanfattning }}"
+                        )
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Granska utkast",
+                    "Granska föregående utkast.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(
+            issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues
+        )
 
 
 class TestRedundantTerminalJsonFormatTailAfterFinalTextComposer:
@@ -4110,6 +4309,7 @@ class TestCriticInvariantRegistry:
             "mcp_selection_requires_semantic_support",
             "json_input_rejects_all_previous_steps_source",
             "prefer_targeted_underlag_over_all_previous_steps",
+            "section_text_steps_must_reference_source_json_fields",
             "redundant_terminal_json_format_tail_after_final_text_composer",
             "final_text_step_must_reference_relevant_structured_outputs",
             "form_fields_declared_must_be_referenced",
