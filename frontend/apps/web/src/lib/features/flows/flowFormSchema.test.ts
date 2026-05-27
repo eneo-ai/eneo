@@ -11,6 +11,7 @@ import {
   getSuggestedFlowFormFieldRuntimeKey,
   getFlowFormSchemaFields,
   getFlowFormSchemaMetadata,
+  getFlowFormSchemaSignature,
   getFlowFormStats,
   isFlowFormFieldNameUsableAsVariable,
   normalizeFlowFormFieldType,
@@ -197,5 +198,53 @@ describe("flowFormSchema", () => {
     expect(getFlowFormSchemaFields(metadata)).toEqual(metadata.form_schema.fields);
     expect(getFlowFormSchemaMetadata({ form_schema: { fields: "invalid" } })).toBeUndefined();
     expect(getFlowFormSchemaFields(null)).toEqual([]);
+  });
+
+  it("builds a stable signature from normalized persisted field meaning", () => {
+    const fields = [
+      { name: " title ", label: null, type: "email", required: true, order: 2 },
+      { name: "choice", type: "select", options: [" A ", "", "B"], order: 1 }
+    ];
+
+    const first = getFlowFormSchemaSignature(fields);
+    const roundTripped = getFlowFormSchemaSignature(
+      normalizeFlowFormFields(toPersistedFlowFormFields(normalizeFlowFormFields(fields)))
+    );
+
+    expect(first).toBe(roundTripped);
+  });
+
+  it("treats equivalent labels and option whitespace as the same signature", () => {
+    expect(
+      getFlowFormSchemaSignature([
+        { name: "case_id", label: null, type: "text", required: false, order: 1 },
+        { name: "status", type: "select", options: [" New ", "Closed"], order: 2 }
+      ])
+    ).toBe(
+      getFlowFormSchemaSignature([
+        { name: "case_id", label: "case_id", type: "text", required: false, order: 1 },
+        { name: "status", type: "select", options: ["New", "Closed"], order: 2 }
+      ])
+    );
+  });
+
+  it("changes signature when field meaning changes", () => {
+    const base = getFlowFormSchemaSignature([
+      { name: "case_id", type: "text", required: false, order: 1 },
+      { name: "status", type: "select", options: ["New", "Closed"], order: 2 }
+    ]);
+
+    expect(getFlowFormSchemaSignature([{ name: "case", type: "text", order: 1 }])).not.toBe(base);
+    expect(getFlowFormSchemaSignature([{ name: "case_id", type: "number", order: 1 }])).not.toBe(
+      base
+    );
+    expect(
+      getFlowFormSchemaSignature([{ name: "case_id", type: "text", required: true, order: 1 }])
+    ).not.toBe(base);
+    expect(
+      getFlowFormSchemaSignature([
+        { name: "status", type: "select", options: ["Closed", "New"], order: 1 }
+      ])
+    ).not.toBe(base);
   });
 });

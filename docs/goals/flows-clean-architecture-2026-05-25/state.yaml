@@ -42,8 +42,25 @@ rules:
   new_code_requires_owner_insufficiency_reason: true
   reuse_through_typed_owners_not_generic_helpers: true
   worker_consolidation_effect_required: true
+  architecture_challenge_required_for_non_trivial_flow_tasks: true
+  do_not_assume_current_flow_model_is_correct: true
+  prefer_clean_unshipped_flow_model_over_compatibility: true
+  replace_wrong_flow_model_instead_of_polishing_bad_abstraction: true
+  schema_invariant_fixes_preferred_over_application_workarounds: true
 
 worker_receipt_requirements:
+  architecture_challenge:
+    - "Correct model if designed today"
+    - "Current model"
+    - "Is current model wrong or only incomplete?"
+    - "Refactor/replace needed? yes/no"
+    - "Why not just improve the existing path"
+    - "Canonical owner"
+    - "Existing code to reuse/move/merge/delete"
+    - "Compatibility paths to delete"
+    - "Tests that should be deleted/replaced"
+    - "Migration/data preflight needed"
+    - "Smallest reviewable slice"
   consolidation_effect:
     - "Reused existing owner"
     - "Logic moved from"
@@ -111,7 +128,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T129
+active_task: T131
 
 tasks:
   - id: T001
@@ -2438,7 +2455,7 @@ tasks:
   - id: T016
     type: worker
     assignee: Worker
-    status: queued
+    status: done
     reasoning_hint: medium
     objective: "Clean Flow frontend state ownership for form schema, step list identity/order, run dialog upload/recording state, and generated type usage."
     allowed_files: []
@@ -2447,7 +2464,7 @@ tasks:
       - "Backend contract shape is not yet stable."
       - "No read-only Judge has narrowed the frontend Worker after the recorded owner decision."
     receipt:
-      result: blocked_deferred
+      result: done
       completed_by_subtasks:
         - id: T087
           summary: "Centralized draft step-list move/remove ownership in FlowEditor."
@@ -2459,16 +2476,18 @@ tasks:
           summary: "Confirmed form-schema conflict semantics are product/UX-gated and identified the safe RecordingSession consolidation candidate."
         - id: T107
           summary: "Deleted the unused RecordingSession upload/persistence/resume path and narrowed RecordingSession to lifecycle/retry ownership."
-      summary: "T016 has no remaining source-backed safe Worker before final docs. Step-list identity/order, generated-contract fixture usage, launch input ownership, wizard/progress projection, and the RecordingSession duplicate path are resolved or have clear owners. Remaining form-schema dirty-edit conflict semantics need a product/UX decision, and moving browser upload/audio side effects needs a dedicated design gate with behavior tests. Because Flow proper has no production users, this is not legacy preservation; it is a current-product semantics gate."
+        - id: T130
+          summary: "Resolved product-decided form-schema dirty-edit conflicts inside the existing Flow form-schema owners."
+      summary: "T016 is closed. Step-list identity/order, generated-contract fixture usage, form-schema dirty-edit conflict behavior, launch input ownership, wizard/progress projection, and the RecordingSession duplicate path are resolved or have clear owners. Browser upload/audio side effects remain deliberately owned by FlowRunDialog/Flow-run submission per the T009 owner decision; extract a narrow submission controller only if future source evidence shows the dialog has become too large."
       remaining_blockers:
         form_schema_conflict_semantics:
           owner_now: "flowFormSchema owns persisted shape; FlowEditor owns metadata writes; FlowFormSchemaEditor owns transient local edit buffer."
-          blocked_by: "Resolved by T009 owner decision: warn and ask the user to keep local edits or reload the server version."
-          next_safe_step: "Run a read-only frontend Judge later; do not bundle this UI behavior into service-principal migration work."
+          blocked_by: "Resolved by T009 owner decision and implemented by T130: warn and ask the user to keep local edits or reload the saved version."
+          next_safe_step: "No further T016 work unless source evidence proves duplicate form-schema state ownership has returned."
         runtime_file_upload_and_audio_side_effects:
           owner_now: "FlowRunFileInputState owns runtime file state; flowRunWizard owns blockers; FlowRunDialog owns browser picker/drop/audio/SDK side effects; flowRunRecordingSession owns recording ledger persistence."
           blocked_by: "Resolved by T009 owner decision: FlowRunDialog / Flow-run submission owner handles upload and persistence; RecordingSession stays lifecycle-only."
-          next_safe_step: "Keep as a separate frontend task; use a narrow Flow-run submission controller only if FlowRunDialog becomes too large."
+          next_safe_step: "Keep current owner; use a narrow Flow-run submission controller only if future source evidence shows FlowRunDialog has become too large."
         unrelated_frontend_check_errors:
           owner_now: "intric-js stream client and API-key dialog, outside Flows proper."
           blocked_by: "Out of scope for the Flows clean architecture goal."
@@ -2478,9 +2497,9 @@ tasks:
         logic_moved_from: "Draft step-list reorder/remove intent was centralized earlier in FlowEditor."
         logic_deleted: "The unused RecordingSession upload/persistence/resume path was deleted in T107."
         duplicate_path_removed: "RecordingSession no longer duplicates FlowRunDialog plus flowRunRecordingSession persistence/upload responsibility."
-        new_code_added: "No new T016 source code outside approved subtasks."
-        why_existing_owners_were_insufficient: "They are sufficient for the safe parts. Remaining changes need product/UX/design decisions, not speculative new owners."
-        guard_preventing_duplicate_logic_from_returning: "T107 rg guards and lifecycle tests; existing FlowEditor, flowRunWizard, FlowRunFileInputState, flowRunProgress, and generated-contract tests."
+        new_code_added: "T130 added a form-schema signature helper, local conflict warning/actions, focused component harness/tests, and localized copy."
+        why_existing_owners_were_insufficient: "The existing owners were sufficient but needed deeper baseline/equivalence behavior for form-schema dirty edits."
+        guard_preventing_duplicate_logic_from_returning: "T107 rg guards and lifecycle tests; T130 form-schema signature/unit tests and component tests; existing FlowEditor, flowRunWizard, FlowRunFileInputState, flowRunProgress, and generated-contract tests."
         net_flow_logic_surface_area: "reduced"
         if_increased_why: "N/A"
       naming_gate: "No new broad names. Current owner names are domain-specific enough for the final docs/flows/architecture.md where-to-change-X table."
@@ -13887,7 +13906,7 @@ tasks:
   - id: T129
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: medium
     objective: "Read-only frontend Judge: narrow the next safe T016 Flow frontend state ownership slice after the owner decisions."
     inputs:
@@ -13916,6 +13935,302 @@ tasks:
       - "The proposed Worker requires backend/API/schema changes not already reviewed."
       - "The proposed Worker would create a generic upload manager, generic state manager, or duplicate generated contract shape."
       - "The proposed Worker broadens into non-Flow frontend hygiene or Flow AI Builder."
+    receipt:
+      result: done
+      completed_at: "2026-05-27T20:19:00+02:00"
+      decision: "activate_t130_form_schema_conflict_worker"
+      summary: "T129 approved one narrow frontend Worker after the T009 owner decisions: resolve dirty-edit form-schema conflicts explicitly inside the existing Flow form-schema owners. The source-backed upload/audio duplicate path remains resolved after T107 and is not reopened. T130 is an owner-deepening UX/data-loss-prevention slice, not a deletion Worker; it is allowed only because it keeps FlowEditor as the sole metadata writer and pins form-schema equivalence in flowFormSchema."
+      source_evidence:
+        - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml:2179-2181 records the form-schema conflict and browser upload/audio owner decisions."
+        - "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte:56-73 derives form_schema from $update.metadata_json, keeps a local field buffer, and suppresses store resync while localDirty is true."
+        - "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte:107-114 writes form-schema changes through FlowEditor.replaceFormSchemaFields."
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts:510-520 owns metadata_json writes for form_schema through buildFlowFormSchemaMetadata and toPersistedFlowFormFields."
+        - "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts:73-134 owns field normalization and form_schema metadata parsing."
+        - "frontend/apps/web/src/lib/core/editing/ResourceEditor.ts:39-48,71-76,123-128 separates persisted resource, editable update, save response reconciliation, and full resource replacement."
+        - "FlowRunDialog/FlowRunFileInputState/flowRunRecordingSession/RecordingSession currently match the upload/audio owner decision after T107; no source-backed upload/audio Worker is approved by T129."
+      architecture_challenge:
+        correct_model_if_designed_today: "Draft Flow form schema has one persisted write owner, FlowEditor.replaceFormSchemaFields; one equivalence/normalization owner, flowFormSchema; and one transient local interaction owner, FlowFormSchemaEditor."
+        current_model: "Those owners already exist, but FlowFormSchemaEditor has only a localDirty boolean and no explicit baseline/equivalence concept, so a store/server form_schema change can be hidden while local dirty edits remain."
+        is_current_model_wrong_or_incomplete: "Incomplete, not fundamentally wrong."
+        refactor_replace_needed: "yes, narrow owner deepening"
+        why_not_just_improve_existing_path: "The existing path is being deepened, but the improvement must be a named domain invariant with one equivalence owner and one metadata writer, not another sync effect or generic state helper."
+        canonical_owner: "flowFormSchema for signatures/equivalence; FlowFormSchemaEditor for local buffer/conflict prompt/actions; FlowEditor.replaceFormSchemaFields for writes."
+        existing_code_to_reuse_move_merge_delete: "Reuse normalizeFlowFormFields, toPersistedFlowFormFields, buildFlowFormSchemaMetadata, FlowEditor context, and the existing form editor component. No code move or source deletion is approved in T130."
+        compatibility_paths_to_delete: "None in this slice; there is no duplicate form-schema owner to delete."
+        tests_to_delete_or_replace: "None. Add focused unit/component tests; do not remove existing tests."
+        migration_data_preflight_needed: "None. Frontend-only state behavior; no backend/API/generated-client change."
+        smallest_reviewable_slice: "Add a domain-specific form-schema signature helper and local conflict prompt/actions with focused tests."
+      approved_worker:
+        id: T130
+        objective: "fix(flows-ui): resolve form schema dirty-edit conflicts explicitly"
+        allowed_files:
+          - "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte"
+          - "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.test.ts"
+          - "frontend/apps/web/src/lib/features/flows/components/test-harnesses/FlowFormSchemaEditorHarness.svelte"
+          - "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts"
+          - "frontend/apps/web/src/lib/features/flows/flowFormSchema.test.ts"
+          - "frontend/apps/web/messages/en.json"
+          - "frontend/apps/web/messages/sv.json"
+          - "frontend/apps/web/src/lib/paraglide/**"
+          - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+        required_semantics:
+          - "Add a narrow flowFormSchema signature/equivalence helper, not a generic deep-diff helper."
+          - "FlowFormSchemaEditor owns the local dirty baseline sourced from the $update.metadata_json form_schema signature because $update is the store this component renders."
+          - "Capture/reconcile the baseline at initial normalize-from-store, successful persistable local write-through, Keep local edits, and Reload server version."
+          - "Conflict appears only when localDirty is true, the store signature differs from the last reconciled baseline, and meaningful local-buffer content differs from the store signature."
+          - "Do not show a conflict for an untouched blank field added locally and never typed into; implement an explicit meaningful-local-content check because normalizeFlowFormFields keeps empty-name fields."
+          - "Keep local edits accepts the latest store signature as baseline and writes through FlowEditor.replaceFormSchemaFields when the buffer is persistable."
+          - "Reload server version discards the local buffer, clears localDirty, and normalizes from the latest store/update fields."
+          - "Use an inline localized warning inside the existing form editor area, not a global toast or modal."
+          - "If rename rewrite behavior is touched or affected, keep the banner stable while rewriteInputFieldVariableReferences is in flight and cover it with a test."
+        verify:
+          - "cd frontend/apps/web && bun run test:unit -- --run src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/components/FlowFormSchemaEditor.test.ts"
+          - "cd frontend/apps/web && bun run i18n:compile"
+          - "cd frontend/apps/web && bunx prettier --write <changed files>"
+          - "cd frontend/apps/web && bunx prettier --check <changed files>"
+          - "cd frontend/apps/web && bunx eslint <changed files>"
+          - "cd frontend/apps/web && bun run check"
+          - "rg -n 'as any|@ts-ignore|manager|processor|generic|Flow AI Builder|ai-builder' <changed source/test files>"
+          - "git diff --cached --name-only"
+        stop_if:
+          - "Watchdog reports a halt-worthy blocker before Worker implementation or commit."
+          - "Implementation requires backend/API/schema/generated-client changes."
+          - "Implementation requires FlowEditor.ts or ResourceEditor changes to compute conflicts; return to Judge with evidence instead of silently expanding."
+          - "Implementation silently switches the conflict baseline from $update to $resource without a revised Judge decision."
+          - "Implementation creates a new generic state manager, controller, helper, or second metadata writer."
+          - "The UI solution becomes a modal/toast/global notification instead of local conflict resolution in the form editor."
+          - "Generated Paraglide diff contains changes not explainable by new message keys."
+          - "The slice starts upload/audio extraction, Flow AI Builder cleanup, or non-Flow frontend hygiene."
+        t016_disposition_after_success: "Mark T016 done/closed for frontend state ownership; upload/audio extraction remains deferred unless a future source-backed design gate proves FlowRunDialog is no longer a clear owner."
+        review_tier: "Claude-only plan gate already green; run Claude implementation gate after diff. Antigravity only if Claude and Codex disagree or the slice expands into API/data/runtime."
+      reviewer_results:
+        claude:
+          first_artifact: ".codex/artifacts/claude-peer-loop-t129-frontend-state-judge-20260527T181433Z.md"
+          first_verdict: "changes_required"
+          first_min_score: 6
+          valid_concerns_addressed:
+            - "Pinned local conflict baseline ownership and reconciliation moments."
+            - "Made component harness required instead of optional."
+            - "Removed FlowEditor.test from validation and made FlowEditor/ResourceEditor expansion a stop condition."
+            - "Cited the T009 owner decision at state.yaml:2179-2181."
+            - "Declared net Flow logic surface area increased and justified the increase."
+            - "Constrained generated Paraglide diffs and staging hygiene."
+          revised_artifact: ".codex/artifacts/claude-peer-loop-t129-frontend-state-judge-revised-20260527T181833Z.md"
+          revised_verdict: "green"
+          revised_green_light: true
+          revised_min_score: 8
+          remaining_implementation_notes:
+            - "Make meaningful-local-content explicit because normalizeFlowFormFields does not filter empty-name fields."
+            - "Keep baseline capture deterministic at mount, successful write-through, keep, and reload."
+            - "If rename rewrite is affected, cover banner stability while rewriteInputFieldVariableReferences is in flight."
+      non_flow_scope: []
+      consolidation_effect:
+        reused_existing_owner: "FlowFormSchemaEditor, FlowEditor.replaceFormSchemaFields, and flowFormSchema."
+        logic_moved_from: "None expected."
+        logic_deleted: "None expected."
+        duplicate_path_removed: "None; T130 is owner deepening, not duplicate-path deletion."
+        new_code_added: "Signature helper, local conflict prompt/actions, component harness/tests, and localized copy."
+        why_existing_owners_were_insufficient: "Existing owners lacked an explicit baseline/equivalence concept for dirty local form-schema edits when the store changes underneath them."
+        guard_test_preventing_duplicate_logic_from_returning: "Component tests must assert form-schema writes happen only through FlowEditor.replaceFormSchemaFields; unit tests pin the single signature helper."
+        net_flow_logic_surface_area: "increased"
+        if_increased_why: "The increase implements a product-decided conflict/data-loss prevention behavior while preserving one writer and one equivalence owner."
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1; status=ok; blockers empty."
+        - cmd: "rg/nl source reads for FlowFormSchemaEditor, FlowEditor, flowFormSchema, ResourceEditor, FlowRunDialog, FlowRunFileInputState, flowRunRecordingSession, RecordingSession, T009/T108 receipts"
+          status: pass
+          output: "Confirmed form-schema conflict is the only source-backed frontend Worker after owner decisions; upload/audio remains current-owner-valid."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t129-frontend-judge --phase plan --iteration 1 --timeout-seconds 1200 ..."
+          status: changes_required
+          output: "GREEN_LIGHT no; MIN_SCORE 6; blockers around baseline ownership, test scope, owner-decision citation, component harness, and honest logic-surface accounting."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t129-frontend-judge --phase verification --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8."
+      next_task: T130
+
+  - id: T130
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "fix(flows-ui): resolve form schema dirty-edit conflicts explicitly"
+    inputs:
+      - "T009 owner decision at docs/goals/flows-clean-architecture-2026-05-25/state.yaml:2179-2181."
+      - "T129 receipt and Claude artifacts."
+      - "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte"
+      - "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts"
+      - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts"
+      - "frontend/apps/web/src/lib/core/editing/ResourceEditor.ts"
+    allowed_files:
+      - "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/test-harnesses/FlowFormSchemaEditorHarness.svelte"
+      - "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts"
+      - "frontend/apps/web/src/lib/features/flows/flowFormSchema.test.ts"
+      - "frontend/apps/web/messages/en.json"
+      - "frontend/apps/web/messages/sv.json"
+      - "frontend/apps/web/src/lib/paraglide/**"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Before implementation and before commit, check the watchdog blocker file."
+      - "Use the impeccable skill before source edits because this changes visible UI; keep the design restrained and local to the form editor."
+      - "Use existing owners only: flowFormSchema for signatures/equivalence, FlowFormSchemaEditor for local buffer/conflict UI, and FlowEditor.replaceFormSchemaFields for writes."
+      - "Do not create generic helpers, managers, processors, controllers, service locators, or a second metadata writer."
+      - "Do not touch backend/API/schema/generated client, FlowEditor.ts, ResourceEditor.ts, upload/audio extraction, Flow AI Builder, or non-Flow frontend hygiene."
+      - "Generated Paraglide changes are allowed only when explainable by new message keys."
+    expected_output:
+      - "A typed form-schema signature helper with unit tests."
+      - "A local FlowFormSchemaEditor warning with Keep local edits and Reload server version actions."
+      - "Component behavior tests through a narrow test harness."
+      - "Receipt with architecture challenge, consolidation effect, reviewer verdict, validation commands, i18n/generated-file scope, and T016 disposition."
+    verify:
+      - "cd frontend/apps/web && bun run test:unit -- --run src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/components/FlowFormSchemaEditor.test.ts"
+      - "cd frontend/apps/web && bun run i18n:compile"
+      - "cd frontend/apps/web && bunx prettier --write <changed files>"
+      - "cd frontend/apps/web && bunx prettier --check <changed files>"
+      - "cd frontend/apps/web && bunx eslint <changed files>"
+      - "cd frontend/apps/web && bun run check"
+      - "rg -n 'as any|@ts-ignore|manager|processor|generic|Flow AI Builder|ai-builder' <changed source/test files>"
+      - "git diff --cached --name-only"
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "Implementation requires files outside allowed_files."
+      - "Implementation requires backend/API/schema/generated-client changes."
+      - "Implementation requires FlowEditor.ts or ResourceEditor.ts changes to compute conflicts; return to Judge with source evidence."
+      - "Implementation silently switches the conflict baseline from $update to $resource without revised Judge approval."
+      - "The UI becomes a modal, global toast, or broad redesign instead of an inline form-editor warning."
+      - "Generated Paraglide diff contains changes not explainable by new message keys."
+      - "Tests cannot prove keep/reload behavior without internal-only assertions."
+    receipt:
+      result: done
+      completed_at: "2026-05-27T20:47:13+02:00"
+      summary: "Resolved draft Flow form-schema dirty-edit conflicts inside existing owners. flowFormSchema now owns the semantic form-schema signature, FlowFormSchemaEditor owns local buffer conflict detection and the inline keep/reload UI, and FlowEditor.replaceFormSchemaFields remains the only metadata writer."
+      architecture_challenge:
+        correct_model_if_designed_today: "Draft Flow form schema has one persisted write owner, FlowEditor.replaceFormSchemaFields; one equivalence/normalization owner, flowFormSchema; and one transient local interaction owner, FlowFormSchemaEditor."
+        current_model: "Those owners existed, but FlowFormSchemaEditor had only localDirty and no explicit baseline/equivalence concept, so a store form_schema change could be hidden while local edits remained."
+        is_current_model_wrong_or_incomplete: "Incomplete, not fundamentally wrong."
+        refactor_replace_needed: "yes, narrow owner deepening"
+        why_not_just_improve_existing_path: "The change pins a named form-schema signature owner and local conflict actions instead of adding a second metadata writer, generic state manager, or duplicate contract shape."
+        canonical_owner: "flowFormSchema for signatures/equivalence; FlowFormSchemaEditor for local buffer/conflict prompt/actions; FlowEditor.replaceFormSchemaFields for writes."
+        existing_code_to_reuse_move_merge_delete: "Reused normalizeFlowFormFields, toPersistedFlowFormFields, FlowEditor context, and the existing form editor component."
+        compatibility_paths_to_delete: "None in this slice; there was no duplicate form-schema owner to delete."
+        tests_to_delete_or_replace: "None."
+        migration_data_preflight_needed: "None; frontend-only state behavior."
+        smallest_reviewable_slice: "Signature helper plus inline local conflict warning/actions and focused tests."
+      implementation:
+        - "Added getFlowFormSchemaSignature in flowFormSchema.ts and unit tests for semantic stability/equivalence/change detection."
+        - "Added local store-signature baseline tracking in FlowFormSchemaEditor without changing FlowEditor or ResourceEditor."
+        - "Added inline localized warning with Reload saved version and Keep my edits actions."
+        - "Derived meaningful local edit state from the signature where the dirty session started so blank add/remove edits do not produce false conflicts."
+        - "Added a narrow Svelte harness and component tests for clean store sync, meaningful conflict, keep local, reload saved, blank untouched field, and blank add/remove."
+      consolidation_effect:
+        reused_existing_owner: "FlowFormSchemaEditor, FlowEditor.replaceFormSchemaFields, and flowFormSchema."
+        logic_moved_from: "None."
+        logic_deleted: "None."
+        duplicate_path_removed: "None; T130 deepened current owners and avoided a parallel form-schema writer."
+        new_code_added: "Form-schema signature helper, local conflict state/actions, component harness/tests, and localized copy."
+        why_existing_owners_were_insufficient: "Existing owners lacked an explicit baseline/equivalence concept for dirty local form-schema edits when the store changes underneath them."
+        guard_test_preventing_duplicate_logic_from_returning: "Unit tests pin the single signature helper; component tests verify conflict/keep/reload behavior through FlowEditor writes."
+        net_flow_logic_surface_area: "increased"
+        if_increased_why: "The increase implements product-decided data-loss prevention while preserving one writer and one equivalence owner."
+      non_flow_scope:
+        - file: "frontend/apps/web/messages/en.json"
+          canonical_owner_role: "Localized English UI copy for the Flow form-schema conflict prompt."
+          why_flow_requires_this_change: "The visible Flow editor warning needs localized text."
+          deliberately_not_changed: "No unrelated i18n keys or generated-client text."
+        - file: "frontend/apps/web/messages/sv.json"
+          canonical_owner_role: "Localized Swedish UI copy for the Flow form-schema conflict prompt."
+          why_flow_requires_this_change: "The visible Flow editor warning needs localized text."
+          deliberately_not_changed: "No unrelated i18n keys or generated-client text."
+      reviewer_results:
+        claude:
+          plan_artifact: ".codex/artifacts/claude-peer-loop-t129-frontend-state-judge-revised-20260527T181833Z.md"
+          implementation_artifact: ".codex/artifacts/claude-peer-loop-t130-form-schema-conflict-implementation-review-20260527T184130Z.md"
+          followup_artifact: ".codex/artifacts/claude-peer-loop-t130-form-schema-conflict-implementation-follow-up-20260527T184557Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+          valid_concerns_addressed:
+            - "Replaced sticky meaningful-edit tracking with a signature-derived dirty-session baseline."
+            - "Added a regression test for blank add/remove before a store update."
+          deferred_non_blocking_items:
+            - "Consider extracting the dense reconciliation effect into a pure typed helper in a future refactor."
+            - "Consider adding an autosave-driven regression test if this path changes again."
+        antigravity: "Not run; T130 is medium-risk frontend state ownership and Claude was green with no unresolved dispute or API/data/runtime boundary change."
+      t016_disposition: "Marked T016 done/closed. Form-schema conflict behavior is now implemented, step-list/generated-contract/RecordingSession slices were already resolved, and upload/audio ownership remains with FlowRunDialog unless future source evidence justifies a narrow Flow-run submission controller."
+      commands:
+        - cmd: "ruby -rjson -e '<watchdog halt blocker check>' /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1; status=ok; halt_blockers=[]"
+        - cmd: "node /Users/ccimen/.agents/skills/impeccable/scripts/load-context.mjs"
+          status: pass
+          output: "PRODUCT.md loaded; DESIGN.md absent; proceeded with existing component vocabulary."
+        - cmd: "cd frontend/apps/web && bun run test:unit -- --run src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/components/FlowFormSchemaEditor.test.ts"
+          status: pass
+          output: "23 passed."
+        - cmd: "cd frontend/apps/web && bun run i18n:compile"
+          status: pass
+          output: "Paraglide compile succeeded; no tracked generated Paraglide diff."
+        - cmd: "cd frontend/apps/web && bunx prettier --check messages/en.json messages/sv.json src/lib/features/flows/flowFormSchema.ts src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/components/FlowFormSchemaEditor.svelte src/lib/features/flows/components/FlowFormSchemaEditor.test.ts src/lib/features/flows/components/test-harnesses/FlowFormSchemaEditorHarness.svelte"
+          status: pass
+        - cmd: "cd frontend/apps/web && bunx prettier --check ../../../docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+          status: fail_expected
+          output: "Existing board file is not Prettier-normalized; writing it rewrote historical receipt command quoting, so that churn was reverted."
+        - cmd: "ruby -ryaml -e 'YAML.load_file(\"docs/goals/flows-clean-architecture-2026-05-25/state.yaml\")'"
+          status: pass
+          output: "yaml ok"
+        - cmd: "cd frontend/apps/web && bunx eslint src/lib/features/flows/flowFormSchema.ts src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/components/FlowFormSchemaEditor.svelte src/lib/features/flows/components/FlowFormSchemaEditor.test.ts src/lib/features/flows/components/test-harnesses/FlowFormSchemaEditorHarness.svelte"
+          status: pass
+        - cmd: "cd frontend/apps/web && bunx eslint messages/en.json messages/sv.json src/lib/features/flows/flowFormSchema.ts src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/components/FlowFormSchemaEditor.svelte src/lib/features/flows/components/FlowFormSchemaEditor.test.ts src/lib/features/flows/components/test-harnesses/FlowFormSchemaEditorHarness.svelte"
+          status: pass_with_warnings
+          output: "0 errors; JSON message files are ignored by ESLint config."
+        - cmd: "cd frontend/apps/web && bunx svelte-check --workspace . --no-tsconfig --threshold error --diagnostic-sources svelte,css --ignore \".svelte-kit,build,dist,node_modules\""
+          status: pass
+          output: "0 errors; 1 existing warning."
+        - cmd: "cd frontend/apps/web && bun run check"
+          status: fail_unrelated
+          output: "Existing errors in frontend/packages/intric-js/src/client/stream.js implicit any parameters and existing api-keys ExtendExpirationDialog warning; no changed-file diagnostics."
+        - cmd: "rg -n 'as any|@ts-ignore|manager|processor|generic|Flow AI Builder|ai-builder' <changed Flow source/test files>"
+          status: pass
+          output: "No matches."
+        - cmd: "git diff --check -- <T130 allowed files>"
+          status: pass
+      next_task: T131
+
+  - id: T131
+    type: scout
+    assignee: Scout
+    status: active
+    reasoning_hint: high
+    objective: "Read-only retention lifecycle preflight for T010: map the clean Flow runtime file-content owner model before any migration or retention Worker."
+    inputs:
+      - "T010 blocked receipt and unblock trigger."
+      - "T126/T127/T128 retention safety-fence receipts."
+      - "User retention decisions: preserve metadata, delete blobs/content only, default 90 days, admin purge, API tombstones."
+      - "docs/flows/architecture.md"
+      - "backend/src/intric/flows"
+      - "backend/src/intric/files"
+      - "backend/src/intric/data_retention"
+      - "backend/src/intric/database/tables"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only Scout: no source edits, test edits, migrations, generated-client edits, or docs/flows/architecture.md edits."
+      - "Use complexity-optimizer, supabase-postgres-best-practices, and sqlalchemy-alembic-expert-best-practices-code-review before proposing any schema/index/migration Worker."
+      - "Do not implement retention, tombstones, copy-on-write, purge endpoints, API model changes, or schema migrations in T131."
+      - "Do not null shared Files content from DataRetentionService; first prove the correct run-private/copy-on-write owner model."
+      - "Do not broaden into assistant/app/question file lifecycle, generic retention redesign, or Flow AI Builder."
+      - "If a Worker is proposed later, require full Claude and Antigravity review gates because retention can touch schema/data/file lifecycle."
+    expected_output:
+      - "Architecture challenge for the correct file-content lifecycle model designed today."
+      - "Inventory of current Flow runtime uploaded/generated/source-audio/transcript/evidence/artifact file ownership and every shared Files/DataRetentionService mutation path."
+      - "DB/catalog/data preflight needs and exact read-only commands for row counts, owner fields, nullable content, and candidate tombstone data shape."
+      - "Classify findings as delete_now, merge_or_consolidate, needs_preflight, or keep_temporarily."
+      - "If safe, propose the smallest next Judge/Worker with exact allowed_files, migration/preflight evidence, rollback notes, verification commands, stop_if conditions, and consolidation effect."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "Source evidence shows the correct model requires product decisions beyond the provided retention decisions."
+      - "A safe Worker cannot be scoped without schema/data preflight or reviewer gates."
+      - "The only apparent fix is making DataRetentionService null shared Files content directly."
     receipt: null
 
 checks:

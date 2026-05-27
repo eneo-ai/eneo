@@ -111,6 +111,19 @@ export function toPersistedFlowFormFields(fields: FlowFormField[]): FlowFormFiel
   });
 }
 
+export function getFlowFormSchemaSignature(fields: ReadonlyArray<FlowFormFieldInput>): string {
+  return JSON.stringify(
+    toPersistedFlowFormFields(normalizeFlowFormFields(fields)).map((field) => [
+      field.order,
+      field.name,
+      field.label ?? "",
+      field.type,
+      Boolean(field.required),
+      field.options ?? []
+    ])
+  );
+}
+
 export function buildFlowFormSchemaMetadata(
   metadata: Record<string, unknown> | null | undefined,
   fields: FlowFormField[]
