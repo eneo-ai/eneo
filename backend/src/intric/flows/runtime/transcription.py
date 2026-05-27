@@ -221,25 +221,16 @@ async def transcribe_audio_input(
 
     transcription_started = time.monotonic()
     provider_language = to_provider_language(language)
-    cache_eligible = provider_language is None
     text_blocks: list[str] = []
     block_segments: list[tuple[str, int, datetime] | None] = []
-    cached_files_count = 0
 
     for file in files:
-        has_cached_transcription = bool(
-            cache_eligible
-            and isinstance(getattr(file, "transcription", None), str)
-            and str(getattr(file, "transcription", "")).strip()
-        )
-        if has_cached_transcription:
-            cached_files_count += 1
-
         try:
             block_text = await transcriber.transcribe(
                 file,
                 transcription_model,
                 language=provider_language,
+                persist_cache_to_file=False,
             )
         except TypedIOValidationException:
             raise
@@ -289,8 +280,8 @@ async def transcribe_audio_input(
         estimated_tokens=estimated_tokens,
         elapsed_ms=elapsed_ms,
         files_count=len(files),
-        used_cache=cached_files_count == len(files),
-        cached_files_count=cached_files_count,
+        used_cache=False,
+        cached_files_count=0,
         near_inline_limit=near_inline_limit,
     )
 

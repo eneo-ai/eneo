@@ -40,6 +40,10 @@ GENERATED_ARTIFACT_RETENTION_GUARD_MESSAGE = (
     "Data retention must not schedule generated-artifact cleanup work while no "
     "run-private Flow file lifecycle owner exists."
 )
+FLOW_TRANSCRIBE_CACHE_GUARD_MESSAGE = (
+    "Flow runtime owns transcript content through run/step/evidence payloads, "
+    "not the shared Files.transcription cache."
+)
 
 _OUTPUT_AXIS_ENUMS = {
     "output_mode": "FlowOutputMode",
@@ -159,6 +163,14 @@ def _flow_non_api_python_files() -> list[Path]:
         for path in FLOW_SOURCE_ROOT.rglob("*.py")
         if "__pycache__" not in path.parts
         and path.relative_to(FLOW_SOURCE_ROOT).parts[0] not in FLOW_API_PACKAGES
+    ]
+
+
+def _flow_python_files() -> list[Path]:
+    return [
+        path
+        for path in FLOW_SOURCE_ROOT.rglob("*.py")
+        if "__pycache__" not in path.parts
     ]
 
 
@@ -329,6 +341,47 @@ def _format_generated_artifact_retention_guard_failure(offenders: list[str]) -> 
         + " Offenders: "
         + ", ".join(offenders)
     )
+
+
+def _false_literal(node: ast.AST) -> bool:
+    return isinstance(node, ast.Constant) and node.value is False
+
+
+def _flow_transcribe_cache_bypass_offenders(
+    tree: ast.AST, *, relative_path: str
+) -> list[str]:
+    """Catches direct .transcribe(...); aliases and wrappers are forbidden by convention."""
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if (
+            not isinstance(node, ast.Call)
+            or not isinstance(node.func, ast.Attribute)
+            or node.func.attr != "transcribe"
+        ):
+            continue
+
+        has_cache_bypass = False
+        for keyword in node.keywords:
+            if keyword.arg is None:
+                offenders.append(f"{relative_path}:{node.lineno}:kwargs-bypass")
+                continue
+            if keyword.arg != "persist_cache_to_file":
+                continue
+            has_cache_bypass = True
+            if not _false_literal(keyword.value):
+                offenders.append(
+                    f"{relative_path}:{node.lineno}:persist_cache_to_file-not-false"
+                )
+
+        if not has_cache_bypass:
+            offenders.append(
+                f"{relative_path}:{node.lineno}:missing-persist_cache_to_file-false"
+            )
+    return offenders
+
+
+def _format_flow_transcribe_cache_guard_failure(offenders: list[str]) -> str:
+    return FLOW_TRANSCRIBE_CACHE_GUARD_MESSAGE + " Offenders: " + ", ".join(offenders)
 
 
 def _is_container_provider_call(node: ast.AST) -> bool:
@@ -845,6 +898,20 @@ def test_data_retention_does_not_schedule_generated_artifact_cleanup():
     )
 
 
+def test_flow_transcribe_calls_bypass_shared_file_transcription_cache():
+    offenders: list[str] = []
+    for path in _flow_python_files():
+        tree = ast.parse(path.read_text(), filename=str(path))
+        offenders.extend(
+            _flow_transcribe_cache_bypass_offenders(
+                tree,
+                relative_path=path.relative_to(FLOW_SOURCE_ROOT).as_posix(),
+            )
+        )
+
+    assert offenders == [], _format_flow_transcribe_cache_guard_failure(offenders)
+
+
 def test_generated_artifact_retention_guard_reports_forbidden_scheduler():
     tree = ast.parse(
         "class Cleanup:\n"
@@ -888,6 +955,34 @@ def test_files_content_nulling_guard_reports_forbidden_update():
     assert "run-private file lifecycle ownership" in message
     assert "T124" not in message
     assert "file lifecycle" in message
+
+
+def test_flow_transcribe_cache_guard_reports_missing_kwargs_and_true_values():
+    tree = ast.parse(
+        "async def ok(transcriber, file, model):\n"
+        "    await transcriber.transcribe(file, model, persist_cache_to_file=False)\n"
+        "    await transcriber.transcribe_from_filepath('input.wav')\n"
+        "async def missing(transcriber, file, model):\n"
+        "    await transcriber.transcribe(file, model)\n"
+        "async def true_value(transcriber, file, model):\n"
+        "    await transcriber.transcribe(file, model, persist_cache_to_file=True)\n"
+        "async def hidden(transcriber, file, model, kwargs):\n"
+        "    await transcriber.transcribe(file, model, persist_cache_to_file=False, **kwargs)\n"
+    )
+
+    offenders = _flow_transcribe_cache_bypass_offenders(
+        tree,
+        relative_path="sample.py",
+    )
+    message = _format_flow_transcribe_cache_guard_failure(offenders)
+
+    assert offenders == [
+        "sample.py:5:missing-persist_cache_to_file-false",
+        "sample.py:7:persist_cache_to_file-not-false",
+        "sample.py:9:kwargs-bypass",
+    ]
+    assert "transcribe_from_filepath" not in message
+    assert "Files.transcription cache" in message
 
 
 def test_flow_celery_task_provider_wiring_is_not_erased_to_any():

@@ -55,15 +55,16 @@ class Transcriber:
         transcription_model: "TranscriptionModel",
         *,
         language: str | None = None,
+        persist_cache_to_file: bool = True,
     ) -> str:
         mimetype: str = file.mimetype or ""
         if file.blob is None or not AudioMimeTypes.has_value(mimetype):
             raise ValueError("File needs to be an audio file")
 
-        # Cached transcription is only safe when language is auto-detected.
-        # Explicit language requests must bypass cache to avoid serving stale
-        # transcriptions produced with a different language setting.
-        if language is None and file.transcription:
+        file_cache_enabled = persist_cache_to_file and language is None
+        # Cached transcription is only safe when language is auto-detected and
+        # the caller has chosen the shared Files.transcription cache owner.
+        if file_cache_enabled and file.transcription:
             return file.transcription
 
         temp_file_path: Path | None = None
@@ -78,10 +79,10 @@ class Transcriber:
                 language=language,
             )
 
-            if language is None:
+            if file_cache_enabled:
                 file.transcription = result
 
-            if language is None and self.file_repo:
+            if file_cache_enabled and self.file_repo:
                 await self.file_repo.update(file)
         finally:
             if temp_file_path is not None:

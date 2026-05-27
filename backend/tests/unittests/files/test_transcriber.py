@@ -51,6 +51,33 @@ async def test_transcriber_bypasses_cache_for_explicit_language():
 
 
 @pytest.mark.asyncio
+async def test_transcriber_auto_language_can_bypass_file_cache():
+    file_repo = AsyncMock()
+    transcriber = Transcriber(file_repo=file_repo)
+    transcriber.transcribe_from_filepath = AsyncMock(return_value="fresh-transcript")
+
+    file = SimpleNamespace(
+        blob=b"audio-bytes",
+        mimetype="audio/wav",
+        transcription="cached-transcript",
+    )
+    model = SimpleNamespace(name="whisper-1")
+
+    result = await transcriber.transcribe(
+        file,
+        model,
+        language=None,
+        persist_cache_to_file=False,
+    )
+
+    assert result == "fresh-transcript"
+    assert file.transcription == "cached-transcript"
+    transcriber.transcribe_from_filepath.assert_awaited_once()
+    assert transcriber.transcribe_from_filepath.await_args.kwargs["language"] is None
+    file_repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_transcriber_explicit_language_does_not_fill_auto_cache():
     file_repo = AsyncMock()
     transcriber = Transcriber(file_repo=file_repo)

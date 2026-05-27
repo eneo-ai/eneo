@@ -17,6 +17,7 @@ from intric.flows.runtime.executor import (
     RunExecutionState,
     RuntimeStep,
 )
+from intric.flows.runtime.flow_run_actor import FlowRunActor
 from intric.flows.runtime.transcription import FlowTranscriptionResult
 from intric.flows.runtime.transcription_runtime import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
@@ -154,7 +155,14 @@ async def test_audio_resolve_transcribes_in_request_order_and_persists_transcrip
         return_value=_SpaceStub(models=[model], default_model=model)
     )
 
-    async def _tx(file_obj, transcription_model, *, language=None):
+    async def _tx(
+        file_obj,
+        transcription_model,
+        *,
+        language=None,
+        persist_cache_to_file,
+    ):
+        assert persist_cache_to_file is False
         return f"tx:{file_obj.name}:{language or 'auto'}"
 
     transcriber.transcribe = AsyncMock(side_effect=_tx)
@@ -178,6 +186,10 @@ async def test_audio_resolve_transcribes_in_request_order_and_persists_transcrip
         call.args[0].name for call in transcriber.transcribe.await_args_list
     ]
     assert ordered_names == ["b.wav", "a.wav"]
+    assert [
+        call.kwargs["persist_cache_to_file"]
+        for call in transcriber.transcribe.await_args_list
+    ] == [False, False]
     assert run.input_payload_json["transkribering"] == resolved.text
     assert context["flow_input"]["transkribering"] == resolved.text
     assert resolved.text.startswith("tx:b.wav:sv")
@@ -225,6 +237,68 @@ async def test_audio_resolve_passes_no_language_for_auto(user):
     )
 
     assert transcriber.transcribe.await_args.kwargs["language"] is None
+    assert transcriber.transcribe.await_args.kwargs["persist_cache_to_file"] is False
+
+
+@pytest.mark.asyncio
+async def test_audio_resolve_ignores_shared_file_transcription_cache(user):
+    executor, _, space_repo, file_repo, transcriber = _build_executor(user)
+    file_id = uuid4()
+    run = _run(user=user, payload={"file_ids": [str(file_id)]})
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+    step = _runtime_step()
+
+    file_1 = SimpleNamespace(
+        id=file_id,
+        name="cached.wav",
+        mimetype="audio/wav",
+        transcription="stale shared transcript",
+    )
+    file_repo.get_list_by_id_for_owner = AsyncMock(return_value=[file_1])
+
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.get_space_by_assistant = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+
+    async def _tx(
+        file_obj,
+        transcription_model,
+        *,
+        language=None,
+        persist_cache_to_file,
+    ):
+        assert file_obj is file_1
+        assert transcription_model is model
+        assert language is None
+        assert persist_cache_to_file is False
+        return "fresh flow transcript"
+
+    transcriber.transcribe = AsyncMock(side_effect=_tx)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_model": {"id": str(model.id)},
+                "transcription_language": "auto",
+            }
+        },
+    )
+
+    assert resolved.text == "fresh flow transcript"
+    assert file_1.transcription == "stale shared transcript"
+    assert run.input_payload_json["transkribering"] == "fresh flow transcript"
+    assert resolved.transcription_metadata is not None
+    assert resolved.transcription_metadata["used_cache"] is False
+    assert resolved.transcription_metadata["cached_files_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -432,7 +506,14 @@ async def test_audio_resolve_multifile_near_cap_keeps_request_order(user):
         return_value=_SpaceStub(models=[model], default_model=model)
     )
 
-    async def _tx(file_obj, transcription_model, *, language=None):
+    async def _tx(
+        file_obj,
+        transcription_model,
+        *,
+        language=None,
+        persist_cache_to_file,
+    ):
+        assert persist_cache_to_file is False
         if file_obj.name == "b.wav":
             return "b" * 40
         return "a" * 43
@@ -601,7 +682,7 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
         space_repo=space_repo,
         flow_run_repo=flow_run_repo,
         audit_service=audit_service,
-        actor=user,
+        actor=FlowRunActor.from_user(user=user),
     )
 
     result = await resolve_transcribe_and_attach_audio_input(
@@ -670,7 +751,7 @@ async def test_resolve_transcribe_attach_swallow_audit_errors(user, monkeypatch)
         space_repo=AsyncMock(),
         flow_run_repo=flow_run_repo,
         audit_service=audit_service,
-        actor=user,
+        actor=FlowRunActor.from_user(user=user),
     )
 
     result = await resolve_transcribe_and_attach_audio_input(

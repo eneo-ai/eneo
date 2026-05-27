@@ -128,7 +128,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T133
+active_task: T134
 
 tasks:
   - id: T001
@@ -14539,7 +14539,7 @@ tasks:
   - id: T133
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Keep Flow audio transcripts run-owned by bypassing shared Files.transcription cache reads and writes in Flow runtime audio transcription."
     inputs:
@@ -14579,6 +14579,166 @@ tasks:
       - "Strict typing cannot be preserved without Any/dict[str, Any]/cast(Any)/pyright ignores."
       - "The architecture guard cannot be AST-based or cannot reject **kwargs bypasses."
       - "Tests reveal non-Flow app behavior depends on a different Transcriber call shape than default True can preserve."
+    receipt:
+      completed_at: "2026-05-27T19:45:00+02:00"
+      summary: "Flow runtime audio transcription now bypasses the shared Files.transcription cache for both reads and writes. Transcriber keeps the existing non-Flow default cache behavior, while Flow passes persist_cache_to_file=False, no longer scans file.transcription for cache metrics, and reports used_cache=False/cached_files_count=0 because Flow transcript truth is run-owned."
+      architecture_challenge:
+        correct_model_if_designed_today: "Shared Files owns immutable uploaded bytes and non-Flow cache metadata; Flow runtime owns run-private transcript text in run/step/evidence payloads until a future run-private lifecycle table exists."
+        current_model: "Transcriber read/wrote Files.transcription and Flow also persisted the transcript to flow_runs.input_payload_json."
+        current_model_wrong_or_incomplete: "Wrong for Flow runtime transcript ownership; improving the shared cache would preserve a second owner."
+        refactor_replace_needed: "yes"
+        why_not_just_improve_existing_path: "Keeping Flow on Files.transcription would keep retention, evidence, and rerun semantics coupled to principal-owned shared file metadata."
+        canonical_owner: "Flow runtime transcription owns Flow transcript truth; Transcriber remains the shared transcription engine and non-Flow cache owner."
+        existing_code_to_reuse_move_merge_delete:
+          - "Reused Transcriber.transcribe and made cache persistence an explicit keyword-only boundary."
+          - "Deleted Flow cached_files_count scan of file.transcription."
+          - "Kept FlowRunActor fixture ownership in audit tests instead of passing bare UserInDB."
+        compatibility_paths_to_delete:
+          - "Deleted Flow runtime use of Files.transcription as cache truth through Transcriber."
+        tests_to_delete_or_replace: "None in this slice."
+        migration_data_preflight_needed: "No migration for T133; historical Files.transcription rows are intentionally untouched."
+        smallest_reviewable_slice: "One transcriber kwarg, one Flow call-site change, metadata pinning, focused tests, and an AST guard."
+      consolidation_effect:
+        reused_existing_owner: "Transcriber for transcription execution; Flow runtime transcription for Flow transcript ownership; test_flow_architecture_guards.py for architecture invariants."
+        logic_moved_from: "No code moved; Flow no longer delegates transcript cache truth to shared Files.transcription."
+        logic_deleted: "Removed Flow file.transcription cache eligibility/counting branch."
+        duplicate_path_removed: "Flow shared transcript cache read/write path removed for runtime audio transcription."
+        new_code_added: "Keyword-only persist_cache_to_file boundary plus tests/guard; no new wrapper/service/module."
+        why_existing_owners_were_insufficient: "Existing Transcriber owner was sufficient after deepening its cache boundary; no new owner was needed."
+        guard_test_preventing_duplicate_logic_from_returning: "test_flow_transcribe_calls_bypass_shared_file_transcription_cache scans all backend/src/intric/flows/**/*.py direct .transcribe(...) calls and rejects missing persist_cache_to_file=False, True values, and **kwargs."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+      non_flow_scope:
+        - file: "backend/src/intric/files/transcriber.py"
+          canonical_owner_role: "Shared transcription engine and non-Flow Files.transcription cache owner."
+          why_flow_requires_this_change: "Flow runtime needs a typed way to bypass shared file cache reads/writes without creating a Flow-specific wrapper."
+          deliberately_not_changed: "apps/apps/app.py and upload worker default cache behavior."
+      reviewer_results:
+        claude_plan:
+          artifact: ".codex/artifacts/claude-peer-loop-t133-flow-transcript-isolation-plan-20260527T192432Z.md"
+          verdict: "green"
+          min_score: 8
+          concerns_addressed:
+            - "Asserted file.transcription is not mutated when cache persistence is disabled."
+            - "Exact-match AST guard does not flag transcribe_from_filepath."
+            - "Guard rejects **kwargs bypass."
+        claude_commit:
+          artifact: ".codex/artifacts/claude-peer-loop-t133-flow-transcript-isolation-implementation-review-20260527T193554Z.md"
+          verdict: "green"
+          min_score: 8
+          valid_concerns_addressed:
+            - "Tightened guard docstring to clarify direct-call scope and alias/wrapper convention."
+          disagreements: "None blocking."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t133-flow-transcript-isolation-antigravity-data-integrity-review-20260527T193852Z.md"
+          verdict: "green"
+          min_score: 8
+          valid_concerns_addressed: []
+          disagreements: "Constructor-level Transcriber cache policy could be cleaner later, but it would require container/tasks changes outside T133 allowed_files and was not needed to commit this source-only slice."
+      decisions_and_followups:
+        - "AI Builder attachment context still reads file.transcription for authoring attachment text. This is out of scope for T133 and is not a runtime leak; execution-only Flow transcripts should not appear through shared file metadata."
+        - "Historical Flow input Files.transcription rows remain: 47 rows / 503 kB before and after. T133 does not purge content."
+        - "Flow used_cache/cached_files_count now mean shared file cache was not used: always False/0 for Flow audio under this model."
+        - "Repeated runs with the same audio file now pay repeated transcription adapter cost until a future run-private transcript cache/lifecycle owner is designed."
+      commands:
+        - cmd: "ruby -rjson -e '<watchdog halt blocker check>' /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1 status=ok halt_blockers=[]"
+        - cmd: "docker exec -i eneo-41ae93-db-1 psql -U postgres -d postgres -v ON_ERROR_STOP=1 -F $'\\t' -A -c '<count Flow input files with populated Files.transcription>'"
+          status: pass
+          output: "before=47 rows / 503 kB; after=47 rows / 503 kB"
+        - cmd: "cd backend && uv run ruff format src/intric/files/transcriber.py src/intric/flows/runtime/transcription.py tests/unittests/files/test_transcriber.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_flow_architecture_guards.py"
+          status: pass
+          output: "5 files left unchanged."
+        - cmd: "cd backend && uv run pytest tests/unittests/files/test_transcriber.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_flow_architecture_guards.py -q"
+          status: fail_then_fixed
+          output: "Initial run failed because two existing audit tests passed bare UserInDB where runtime expects FlowRunActor; fixed fixture in allowed test file."
+        - cmd: "cd backend && uv run pytest tests/unittests/files/test_transcriber.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_flow_architecture_guards.py -q"
+          status: pass
+          output: "42 passed, 1 unrelated Pydantic warning."
+        - cmd: "cd backend && uv run ruff check src/intric/files/transcriber.py src/intric/flows/runtime/transcription.py tests/unittests/files/test_transcriber.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_flow_architecture_guards.py"
+          status: fail_then_fixed
+          output: "Initial import ordering failure after adding FlowRunActor import; fixed and reran."
+        - cmd: "cd backend && uv run ruff check src/intric/files/transcriber.py src/intric/flows/runtime/transcription.py tests/unittests/files/test_transcriber.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_flow_architecture_guards.py"
+          status: pass
+          output: "All checks passed."
+        - cmd: "cd backend && uv run ruff format --check src/intric/files/transcriber.py src/intric/flows/runtime/transcription.py tests/unittests/files/test_transcriber.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_flow_architecture_guards.py"
+          status: pass
+          output: "5 files already formatted."
+        - cmd: "cd backend && uv run pyright src/intric/files/transcriber.py src/intric/flows/runtime/transcription.py tests/unittests/files/test_transcriber.py tests/unittests/flows/test_flow_transcription.py tests/unittests/flows/test_flow_architecture_guards.py"
+          status: pass
+          output: "0 errors, 0 warnings, 0 informations."
+        - cmd: "git diff --unified=0 -- <T133 files> | rg '^\\+.*(TranscriberOptions|FlowTranscriber|TranscriptionManager|transcription_manager|\\bgeneric\\b|\\bhelper\\b|\\bmanager\\b|\\bprocessor\\b|one-implementation|\\bplugin\\b|\\bport\\b)'"
+          status: pass
+          output: "No added anti-abstraction matches after tightening word boundaries."
+        - cmd: "rg -n '\\.transcribe\\(' backend/src/intric/flows -g '*.py'"
+          status: pass
+          output: "Only backend/src/intric/flows/runtime/transcription.py; call passes persist_cache_to_file=False."
+        - cmd: "rg -n '\\.transcribe\\(' backend/src/intric -g '*.py'"
+          status: pass
+          output: "Only apps/apps/app.py and flows/runtime/transcription.py."
+        - cmd: "rg -n 'T133|/tmp/t133|persist_cache_to_file_NEXT' backend/src/intric backend/tests"
+          status: pass
+          output: "No planning markers leaked."
+        - cmd: "cd backend && uv run pytest tests/unittests/flows/test_flow_architecture_guards.py::test_flow_transcribe_calls_bypass_shared_file_transcription_cache -q"
+          status: pass
+          output: "1 passed in 1.41s."
+        - cmd: "git diff --check -- <T133 files>"
+          status: pass
+          output: "No whitespace errors."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t133-transcript-isolation --phase plan --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: green
+          output: "GREEN_LIGHT yes; MIN_SCORE 8."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t133-transcript-isolation --phase commit-gate --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: green
+          output: "GREEN_LIGHT yes; MIN_SCORE 8."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t133-transcript-isolation-data-integrity --phase synthesis --iteration 1 --require-green --required-min-score 8 --timeout-seconds 1200 --spend-mode auto ..."
+          status: green
+          output: "GREEN_LIGHT yes; MIN_SCORE 8."
+      architecture_doc_readiness:
+        owner_map_notes:
+          - "Transcriber: shared engine and non-Flow file-cache owner."
+          - "Flow runtime transcription: run-owned transcript text and evidence metadata owner."
+          - "Files.transcription: not a Flow runtime transcript owner."
+        where_to_change_x_notes:
+          - "Change Flow audio transcript run behavior in backend/src/intric/flows/runtime/transcription.py."
+          - "Change shared non-Flow file transcription cache behavior in backend/src/intric/files/transcriber.py."
+          - "Change the invariant guard in backend/tests/unittests/flows/test_flow_architecture_guards.py."
+        naming_gate: "No new module/class/type/status/file names; new persist_cache_to_file kwarg is domain-specific enough for the owner map."
+      next_task: T134
+
+  - id: T134
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Choose the next smallest safe Flow runtime file-lifecycle/retention slice after transcript isolation, or keep T010 blocked with evidence."
+    inputs:
+      - "T010 blocked task."
+      - "T131 retention lifecycle preflight."
+      - "T132 transcript isolation Judge."
+      - "T133 transcript isolation Worker receipt."
+      - "Current source and DB state."
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only Judge; no source, test, migration, generated-client, frontend, or docs/flows/architecture.md edits."
+      - "Check watchdog before the task transition and before activating any Worker."
+      - "Apply the Architecture challenge section: do not assume the current implementation is correct."
+      - "Prefer the clean unshipped Flow model over compatibility; delete or replace wrong concepts instead of wrapping them."
+      - "If the next correct slice is schema/data-model work, run DB catalog/preflight and require complexity-optimizer, supabase-postgres-best-practices, sqlalchemy-alembic review, Claude plan gate, and Antigravity migration/data-integrity review before implementation."
+      - "Do not auto-start migrations, retention purge, admin purge, API tombstones, generated artifact lifecycle, service-key policy, or frontend work from this Judge."
+      - "T010 remains blocked unless this Judge records exact source/DB evidence, allowed_files, stop_if rules, rollback notes, and validation commands for a Worker."
+    expected_output:
+      - "Decision: activate a small Worker, activate a Scout/preflight, or keep T010 blocked."
+      - "Architecture challenge for the proposed next slice."
+      - "Consolidation effect for any proposed Worker."
+      - "Exact allowed_files, verification commands, peer-review requirements, DB preflight needs, rollback/recovery notes, and stop_if conditions."
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "The next correct model requires product/data decisions not yet represented in state.yaml."
+      - "The required schema/data preflight cannot be run against the current Docker/Postgres environment."
+      - "A proposed Worker would need files outside the exact allowed_files list."
     receipt: null
 
 checks:
