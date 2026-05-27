@@ -128,7 +128,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T138
+active_task: T139
 
 tasks:
   - id: T001
@@ -15302,7 +15302,7 @@ tasks:
   - id: T138
     type: judge
     assignee: Judge
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Choose the first implementation slice for the Flow runtime file snapshot/content owner."
     inputs:
@@ -15343,6 +15343,182 @@ tasks:
       - "The proposed slice preserves principal Files as runtime lifecycle truth without a run-private proof."
       - "The proposed slice creates a third source of truth instead of collapsing input_payload_json/xref/snapshot ownership."
       - "A schema Worker lacks exact downgrade/rollback, tenant isolation, index, and peer-review gates."
+    receipt:
+      completed_at: "2026-05-27T23:40:00+02:00"
+      result: done
+      decision: approve_worker
+      note: "docs/goals/flows-clean-architecture-2026-05-25/notes/t138-flow-runtime-file-snapshot-judge.md"
+      approved_next_task: T139
+      summary: "T138 chose runtime input snapshots first. The clean model treats public Flow uploads as staging only, then copies/promotes submitted runtime input bytes into Flow-owned run-private snapshots at run creation/rerun. FlowRunStepInputFiles remains the run/step/attempt relationship owner and points at runtime_file_snapshot_id; runtime execution must read current-attempt xrefs and snapshots, not run.input_payload_json or principal FileRepository reads. Generated artifacts, retention purge, tombstones, API/frontend changes, and DataRetentionService wiring remain deferred."
+      architecture_challenge:
+        correct_model_if_designed_today: "Runtime uploads are staging inputs until run creation/rerun acceptance; Flow runtime owns immutable run-private file snapshots; xrefs own step/run/attempt relationships."
+        current_model: "Uploaded/runtime bytes live in principal-owned Files; run.input_payload_json and FlowRunStepInputFiles both contain IDs; runtime reads JSON IDs and principal Files; rerun step_inputs_json lacks a typed runtime file-binding owner."
+        current_model_wrong_or_incomplete: "Wrong for runtime input bytes because execution and retention depend on mutable/shared principal Files and duplicate ID paths."
+        refactor_replace_needed: "yes"
+        why_not_just_improve_existing_path: "Extending DataRetentionService, adding xref flags, or adding Files(scope, flow_run_id) would preserve the wrong shared Files lifecycle owner or broaden Flow lifecycle semantics into generic Files."
+        canonical_owner: "FlowRunFileSnapshot owns run-private content; FlowRunStepInputFiles owns relationship/order; FlowRunService and FlowRunRerunService own create/rerun validation; FlowRunRepository owns persistence and attempt-start cloning; runtime consumes ordered snapshots."
+        existing_code_to_reuse_move_merge_delete:
+          - "Reuse FlowFileUploadService/FileService upload staging and validation."
+          - "Reuse FlowRunStepInputFiles as relationship owner."
+          - "Move runtime input loading away from RuntimeInputFileRepository.get_list_by_id_for_owner and run.input_payload_json."
+          - "Delete or replace the principal-file RuntimeInputFileRepository boundary without adding a new one-implementation protocol."
+        compatibility_paths_to_delete:
+          - "Runtime input execution path that treats run.input_payload_json.file_ids as byte truth."
+          - "Principal FileRepository.get_list_by_id_for_owner as runtime input read path."
+        tests_to_delete_or_replace: "Replace tests that assume runtime file bytes are loaded from request JSON/principal Files with snapshot-based tests; keep retention/generated-artifact fences until their Workers land."
+        migration_data_preflight_needed: "Yes: new snapshot table, xref file_id replacement, tenant/run FKs, partial unique dedup index, content check, source-file ON DELETE SET NULL, backfill, self-healing downgrade, index/query/lock strategy."
+        smallest_reviewable_slice: "T139 Worker: runtime input snapshots only; no retention purge, no generated artifact snapshots, no API/frontend changes."
+      owner_decision:
+        selected: "runtime_input_snapshots_first"
+        rejected:
+          deepen_xrefs_with_content: "Would make relationship rows own bytes and duplicate content per binding."
+          files_scope_flow_run_id: "Would push Flow lifecycle state into shared Files and broaden non-Flow file semantics."
+          data_retention_only: "Retention is an executor, not lifecycle truth."
+          generated_artifacts_first: "Deferred because generated artifacts have a separate orphan-window/write-order problem."
+      worker_contract:
+        snapshot_table: "flow_run_file_snapshots with snapshot_kind typed/constrained to runtime_input in T139."
+        dedup: "One runtime-input snapshot per (flow_run_id, source_file_id) enforced by partial unique index where source_file_id IS NOT NULL and snapshot_kind='runtime_input'."
+        xref_shape: "FlowRunStepInputFiles replaces ambiguous file_id with required runtime_file_snapshot_id and does not duplicate source_file_id."
+        source_file_delete: "Snapshot source_file_id is nullable ON DELETE SET NULL; runtime continues from snapshot bytes after staging File deletion."
+        audio_contract: "Do not cache audio transcript on snapshot/source Files in T139; current audio path uses persist_cache_to_file=False and stores derived transcript projection separately."
+        rerun_contract: "Root rerun inputs are snapshotted at acceptance; downstream rerun xref cloning belongs at FlowRunRepository.create_or_get_attempt_started where attempt_no is concrete."
+        downgrade_contract: "Downgrade reuses surviving source Files; reconstructs one replacement Files row per snapshot whose source was deleted using snapshot bytes/metadata and flow_runs principal identity; fails loud only for corrupt snapshots/owner mismatches."
+      reviewer_results:
+        claude:
+          final_artifact: ".codex/artifacts/claude-peer-loop-t138-flow-runtime-input-snapshot-worker-brief-after-antigravity-20260527T213459Z.md"
+          prior_artifacts:
+            - ".codex/artifacts/claude-peer-loop-t138-flow-runtime-input-snapshot-worker-brief-20260527T211003Z.md"
+            - ".codex/artifacts/claude-peer-loop-t138-flow-runtime-input-snapshot-worker-brief-revision-20260527T212048Z.md"
+            - ".codex/artifacts/claude-peer-loop-t138-flow-runtime-input-snapshot-worker-brief-final-revision-20260527T212909Z.md"
+          verdict: "green"
+          min_score: 8
+          valid_concerns_addressed:
+            - "Pinned audio no-file-cache contract."
+            - "Added partial unique schema dedup."
+            - "Removed xref source_file_id duplication."
+            - "Required typed snapshot_kind."
+            - "Added rerun/downstream/audio/concurrency/migration red tests."
+            - "Accepted self-healing downgrade and attempt-start downstream cloning after source verification."
+        antigravity:
+          artifact: ".codex/artifacts/antigravity-peer-loop-t138-flow-runtime-input-snapshot-antigravity-synthesis-20260527T213128Z.md"
+          verdict: "green"
+          min_score: 9
+          valid_concerns_addressed:
+            - "Self-healing downgrade should reconstruct Files rows from snapshots when source staging files are gone."
+            - "Downstream rerun xref cloning should happen at create_or_get_attempt_started, not rerun acceptance."
+      commands:
+        - cmd: "git status --short --branch && git log --oneline --decorate --max-count=14 && git log --oneline origin/feature/refactor-flows-flowai..HEAD --max-count=30"
+          status: pass
+          output: "Branch feature/refactor-flows-flowai; HEAD equals origin/feature/refactor-flows-flowai at inspection; unrelated dirty/untracked files preserved."
+        - cmd: "jq -c '{schema_version,status,active_task,blockers}' /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1 status=ok blockers=[]; stale watchdog active_task T039 advisory."
+        - cmd: "sed AGENTS.md and docs/engineering/maintainability-standards.md, testing-standard.md, comment-and-readability-standard.md"
+          status: pass
+        - cmd: "sed skill files: karpathy-guidelines, complexity-optimizer, supabase-postgres-best-practices, sqlalchemy-alembic-expert-best-practices-code-review, claude-peer-loop, antigravity-peer-loop"
+          status: pass
+        - cmd: "source verification for audio transcription, FlowRuns/Files principal identity, FlowRunStepInputFiles schema, runtime input JSON read path, and create_or_get_attempt_started"
+          status: pass
+          output: "Verified persist_cache_to_file=False, flow_runs principal fields match files owner fields, current xrefs use file_id, runtime reads run.input_payload_json, and attempt-start has concrete attempt_no."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t138-runtime-input-snapshot-judge --phase verification --iteration 3 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8."
+        - cmd: "/Users/ccimen/.agents/skills/antigravity-peer-loop/scripts/antigravity_peer_loop.py --session flows-clean-architecture-t138-runtime-input-snapshot-synthesis --phase synthesis --iteration 1 --spend-mode auto --skepticism blocking ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 9."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t138-runtime-input-snapshot-judge --phase verification --iteration 4 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8 after Antigravity downgrade/rerun revisions."
+      consolidation_effect:
+        reused_existing_owner: "FlowFileUploadService/FileService staging, FlowRunStepInputFiles relationship ordering, FlowRunRepository persistence/attempt lifecycle."
+        logic_moved_from: "Planned move from principal FileRepository plus run.input_payload_json runtime ID loading to Flow run snapshots."
+        logic_deleted: "Planned deletion/replacement of RuntimeInputFileRepository principal-file runtime read path."
+        duplicate_path_removed: "T139 must collapse run.input_payload_json/xref/snapshot duplication by making snapshots+xrefs byte truth and JSON audit-only."
+        new_code_added: "No source/test/runtime code; added T138 Judge note and board receipt only."
+        why_existing_owners_were_insufficient: "Files owns shared/principal bytes and xrefs own relationships only; neither currently owns run-private runtime byte lifetime."
+        guard_test_preventing_duplicate_logic_from_returning: "T139 must add AST/import guards against FileRepository/request-JSON runtime byte loading plus behavior tests for source-file deletion, rerun, dedup, audio contract, and migration downgrade."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "No runtime logic added by T138."
+      next_task: T139
+
+  - id: T139
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: high
+    objective: "Introduce Flow-owned runtime input file snapshots and make Flow runtime input execution read from those snapshots instead of mutable principal Files rows or JSON file IDs."
+    allowed_files:
+      - "backend/alembic/versions/20260527_flow_runtime_file_snapshots.py"
+      - "backend/src/intric/database/tables/flow_tables.py"
+      - "backend/src/intric/flows/flow_run_file_snapshot.py"
+      - "backend/src/intric/flows/flow_run_step_inputs.py"
+      - "backend/src/intric/flows/application/flow_run_service.py"
+      - "backend/src/intric/flows/application/flow_run_rerun_service.py"
+      - "backend/src/intric/flows/infrastructure/flow_run_repo.py"
+      - "backend/src/intric/flows/runtime/input_files.py"
+      - "backend/src/intric/flows/runtime/step_input_resolution.py"
+      - "backend/src/intric/flows/runtime/transcription_runtime.py"
+      - "backend/src/intric/flows/runtime/models.py"
+      - "backend/src/intric/flows/runtime/executor.py"
+      - "backend/tests/integration/migrations/test_flow_runtime_file_snapshot_migration.py"
+      - "backend/tests/integration/flows/test_flow_run_repository.py"
+      - "backend/tests/integration/flows/test_flow_step_file_mapping_contract.py"
+      - "backend/tests/unittests/flows/test_flow_run_service.py"
+      - "backend/tests/unittests/flows/test_flow_run_rerun_service.py"
+      - "backend/tests/unittests/flows/test_flow_run_input_payload.py"
+      - "backend/tests/unittests/flows/test_flow_executor_runtime.py"
+      - "backend/tests/unittests/flows/test_flow_architecture_guards.py"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Check watchdog before implementation and before commit."
+      - "Follow T138 note exactly; do not broaden into generated artifacts, retention purge/tombstones, API/frontend/generated-client changes, DataRetentionService, generic Files redesign, Flow AI Builder, service-key review/rerun policy, or webhook outbox."
+      - "Use complexity-optimizer, supabase-postgres-best-practices, and sqlalchemy-alembic-expert-best-practices-code-review for query/schema/index/migration decisions."
+      - "Add failing behavior/schema/migration tests first where practical."
+      - "Run Claude plan gate already satisfied by T138; run Claude commit gate and Antigravity data-integrity/migration review after implementation before commit."
+      - "Do not add generic helpers/managers/controllers, plugin systems, one-implementation protocols, or tutorial comments."
+      - "No source/test/runtime edits outside allowed_files."
+    architecture_challenge:
+      correct_model_if_designed_today: "Runtime uploads are staging; Flow run snapshots own immutable run-private runtime input bytes; xrefs own step/run/attempt relationships."
+      current_model: "Runtime reads submitted file IDs from run.input_payload_json and principal Files through RuntimeInputFileRepository/FileRepository; xrefs are a parallel projection."
+      current_model_wrong_or_incomplete: "Wrong; runtime byte truth depends on mutable/shared principal Files and duplicate ID paths."
+      refactor_replace_needed: "yes"
+      why_not_just_improve_existing_path: "Application workarounds around principal Files would preserve the wrong lifecycle owner; schema must encode run-private byte ownership."
+      canonical_owner: "FlowRunFileSnapshot for content; FlowRunStepInputFiles for relationship; FlowRunRepository for persistence and attempt-start cloning."
+      existing_code_to_reuse_move_merge_delete:
+        - "Reuse upload validation/staging."
+        - "Reuse xrefs for relationship/order."
+        - "Move runtime input loading to snapshot lookup."
+        - "Delete/replace RuntimeInputFileRepository principal-file read boundary."
+      compatibility_paths_to_delete:
+        - "Runtime input loading from run.input_payload_json file_ids."
+        - "Runtime input loading from principal FileRepository.get_list_by_id_for_owner."
+      tests_to_delete_or_replace: "Replace any tests that protect JSON/principal-file runtime byte loading with snapshot behavior tests; do not remove retention/generated-artifact fences yet."
+      migration_data_preflight_needed: "Yes; T139 is a schema/runtime Worker."
+      smallest_reviewable_slice: "Runtime input snapshots only."
+    verify:
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_run_rerun_service.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_architecture_guards.py tests/integration/flows/test_flow_run_repository.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/integration/migrations/test_flow_runtime_file_snapshot_migration.py -q"
+      - "cd backend && uv run ruff check src/intric/database/tables/flow_tables.py src/intric/flows/flow_run_file_snapshot.py src/intric/flows/flow_run_step_inputs.py src/intric/flows/application/flow_run_service.py src/intric/flows/application/flow_run_rerun_service.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/runtime/input_files.py src/intric/flows/runtime/step_input_resolution.py src/intric/flows/runtime/transcription_runtime.py src/intric/flows/runtime/models.py src/intric/flows/runtime/executor.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_run_rerun_service.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_architecture_guards.py tests/integration/flows/test_flow_run_repository.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/integration/migrations/test_flow_runtime_file_snapshot_migration.py"
+      - "cd backend && uv run ruff format --check <same allowed source/test files>"
+      - "cd backend && uv run pyright src/intric/database/tables/flow_tables.py src/intric/flows/flow_run_file_snapshot.py src/intric/flows/flow_run_step_inputs.py src/intric/flows/application/flow_run_service.py src/intric/flows/application/flow_run_rerun_service.py src/intric/flows/infrastructure/flow_run_repo.py src/intric/flows/runtime/input_files.py src/intric/flows/runtime/step_input_resolution.py src/intric/flows/runtime/transcription_runtime.py src/intric/flows/runtime/models.py src/intric/flows/runtime/executor.py tests/unittests/flows/test_flow_run_service.py tests/unittests/flows/test_flow_run_rerun_service.py tests/unittests/flows/test_flow_run_input_payload.py tests/unittests/flows/test_flow_executor_runtime.py tests/unittests/flows/test_flow_architecture_guards.py tests/integration/flows/test_flow_run_repository.py tests/integration/flows/test_flow_step_file_mapping_contract.py tests/integration/migrations/test_flow_runtime_file_snapshot_migration.py"
+      - "cd backend && uv run alembic heads"
+      - "cd backend && uv run alembic upgrade head"
+      - "cd backend && uv run pytest tests/unittests/flows/test_flow_executor_runtime.py::test_runtime_input_snapshot_survives_source_file_delete -q"
+      - "git diff --check"
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "Any required change touches FastAPI routers/API schemas/generated client/frontend/DataRetentionService/generated-artifact output paths/Flow AI Builder/generic Files service beyond source reading."
+      - "Runtime execution still reads principal Files by request JSON file IDs after snapshots exist."
+      - "Rerun file-input behavior cannot be made single-owner and current-attempt based inside the allowed lifecycle files."
+      - "The migration cannot preserve or reconstruct downgrade rows when flow_run_file_snapshots.source_file_id is missing."
+      - "The schema creates two independent lifecycle truths."
+      - "The implementation adds content_state, purge/tombstone behavior, or generated-artifact snapshot behavior."
+      - "Tests require Any, pyright ignores, as any, or mock-only behavior that does not prove the runtime failure."
+      - "The patch exceeds 20 files or 800 LOC excluding migration SQL/DDL and board receipt."
+      - "A needed fix requires more than one new source module or introduces generic helper/manager/controller/protocol abstractions."
+    expected_output:
+      - "Migration/schema/domain/runtime implementation that satisfies the T138 Worker brief."
+      - "Behavior-focused red/green tests for create, runtime read path, dedup, source-file deletion, rerun root/downstream, audio no-cache contract, migration upgrade/downgrade, and architecture guard."
+      - "Receipt with non-Flow touched-file table, consolidation effect, reviewer verdicts, commands, migration/index/downgrade notes, and next task."
     receipt: null
 
 checks:
