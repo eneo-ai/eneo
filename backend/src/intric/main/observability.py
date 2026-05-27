@@ -58,15 +58,18 @@ def redact_url_query(url: str) -> str:
     redacted = [
         (k, "[REDACTED]" if _SENSITIVE_PARAM_RE.match(k) else v) for k, v in params
     ]
-    return base + "?" + urlencode(redacted)
+    # safe="[]" keeps the [REDACTED] sentinel human-readable; without it
+    # urlencode percent-encodes the brackets to %5B...%5D.
+    return base + "?" + urlencode(redacted, safe="[]")
 
 
 def _redact_span_url_attrs(span: Any) -> None:
     """Redact sensitive query params from all URL-bearing span attributes."""
     if not span or not span.is_recording():
         return
+    attributes: dict[str, Any] = span.attributes or {}
     for attr_key in ("url.full", "http.url", "http.target"):
-        val = (span.attributes or {}).get(attr_key)
+        val = attributes.get(attr_key)
         if val and isinstance(val, str) and "?" in val:
             span.set_attribute(attr_key, redact_url_query(val))
 
@@ -93,10 +96,11 @@ def _server_request_hook(span: Any, scope: dict[str, Any]) -> None:
                 (k, "[REDACTED]" if _SENSITIVE_PARAM_RE.match(k) else v)
                 for k, v in params
             ]
-            span.set_attribute("url.query", urlencode(redacted))
+            span.set_attribute("url.query", urlencode(redacted, safe="[]"))
 
     # Redact any sensitive header attributes that the instrumentation may have set
-    for attr_key in list((span.attributes or {}).keys()):
+    header_attrs: dict[str, Any] = span.attributes or {}
+    for attr_key in list(header_attrs.keys()):
         if any(h in attr_key.lower() for h in _SENSITIVE_HEADERS):
             span.set_attribute(attr_key, "[REDACTED]")
 
@@ -156,10 +160,12 @@ def init_observability() -> None:
     from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
     from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
     from opentelemetry.instrumentation.redis import RedisInstrumentor
-    from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+    from opentelemetry.instrumentation.sqlalchemy import (  # pyright: ignore[reportMissingTypeStubs]  # opentelemetry-instrumentation-sqlalchemy ships without type stubs
+        SQLAlchemyInstrumentor,
+    )
 
     SQLAlchemyInstrumentor().instrument()
-    RedisInstrumentor().instrument()
+    RedisInstrumentor().instrument()  # pyright: ignore[reportUnknownMemberType]  # opentelemetry-instrumentation-redis instrument() is untyped
     HTTPXClientInstrumentor().instrument(request_hook=_httpx_request_hook)
     AioHttpClientInstrumentor().instrument(request_hook=_aiohttp_request_hook)
 
@@ -172,7 +178,9 @@ def instrument_fastapi(app: Any) -> None:
     Must be called after init_observability() and after the FastAPI app is
     created. Adds the OTEL middleware and wires the redaction hook.
     """
-    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.instrumentation.fastapi import (  # pyright: ignore[reportMissingTypeStubs]  # opentelemetry-instrumentation-fastapi ships without type stubs
+        FastAPIInstrumentor,
+    )
 
     FastAPIInstrumentor.instrument_app(
         app,

@@ -11,7 +11,6 @@ Severity convention: Python logging names (WARNING, CRITICAL) throughout.
 
 from __future__ import annotations
 
-import types
 from unittest.mock import MagicMock
 
 import pytest
@@ -33,7 +32,10 @@ from intric.main.observability import (
 )
 from intric.main.request_context import clear_request_context
 from intric.server.middleware.request_context import RequestContextMiddleware
-from intric.server.middleware.trace_id import TraceIdResponseMiddleware, _current_trace_id
+from intric.server.middleware.trace_id import (
+    TraceIdResponseMiddleware,
+    current_trace_id,
+)
 
 
 @pytest.fixture()
@@ -73,7 +75,7 @@ def _build_app():
 
 
 def test_current_trace_id_returns_none_without_span():
-    assert _current_trace_id() is None
+    assert current_trace_id() is None
 
 
 def test_current_trace_id_returns_32_hex_chars_with_active_span(in_memory_tracer):
@@ -81,7 +83,7 @@ def test_current_trace_id_returns_32_hex_chars_with_active_span(in_memory_tracer
     tracer = provider.get_tracer("test")
 
     with tracer.start_as_current_span("root"):
-        result = _current_trace_id()
+        result = current_trace_id()
 
     assert result is not None
     assert len(result) == 32
@@ -97,7 +99,7 @@ _FAKE_TRACE = "aabbccdd11223344aabbccdd11223344"
 
 def test_x_trace_id_set_in_response(monkeypatch):
     monkeypatch.setattr(
-        "intric.server.middleware.trace_id._current_trace_id",
+        "intric.server.middleware.trace_id.current_trace_id",
         lambda: _FAKE_TRACE,
     )
     app = _build_app()
@@ -110,7 +112,7 @@ def test_x_trace_id_set_in_response(monkeypatch):
 
 def test_x_correlation_id_mirrors_trace_id(monkeypatch):
     monkeypatch.setattr(
-        "intric.server.middleware.trace_id._current_trace_id",
+        "intric.server.middleware.trace_id.current_trace_id",
         lambda: _FAKE_TRACE,
     )
     app = _build_app()

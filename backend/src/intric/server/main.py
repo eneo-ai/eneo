@@ -23,7 +23,10 @@ from intric.server.dependencies.lifespan import lifespan as app_lifespan
 from intric.server.exception_handlers import add_exception_handlers
 from intric.server.middleware.cors import CORSMiddleware
 from intric.server.middleware.request_context import RequestContextMiddleware
-from intric.server.middleware.trace_id import TraceIdResponseMiddleware, _current_trace_id
+from intric.server.middleware.trace_id import (
+    TraceIdResponseMiddleware,
+    current_trace_id,
+)
 from intric.server.models.api import VersionResponse
 from intric.server.routers import router as api_router
 
@@ -391,7 +394,7 @@ def get_application():
         response = JSONResponse(status_code=500, content=error_content)
 
         # Attach trace_id so the client can correlate the error with backend logs
-        trace_id = _current_trace_id()
+        trace_id = current_trace_id()
         if trace_id:
             response.headers["X-Trace-Id"] = trace_id
             response.headers["X-Correlation-ID"] = trace_id
@@ -470,7 +473,7 @@ def get_application():
         response = JSONResponse(status_code=500, content=error_content)
 
         # Attach trace_id so the client can correlate the error with backend logs
-        trace_id = _current_trace_id()
+        trace_id = current_trace_id()
         if trace_id:
             response.headers["X-Trace-Id"] = trace_id
             response.headers["X-Correlation-ID"] = trace_id

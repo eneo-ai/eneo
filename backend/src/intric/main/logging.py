@@ -19,7 +19,9 @@ _RESOURCE: dict[str, str] = {
     "service.version": os.getenv("OTEL_SERVICE_VERSION", "unknown"),
     # OTel semantic conventions ≥1.24: deployment.environment.name
     # Configured via OTEL_DEPLOYMENT_ENVIRONMENT env var.
-    "deployment.environment.name": os.getenv("OTEL_DEPLOYMENT_ENVIRONMENT", "production"),
+    "deployment.environment.name": os.getenv(
+        "OTEL_DEPLOYMENT_ENVIRONMENT", "production"
+    ),
 }
 
 # OTel Logs Data Model severity_number mapping
@@ -111,9 +113,15 @@ class OTELJSONFormatter(logging.Formatter):
         # Inject trace correlation from the active OTEL span
         log.update(_get_span_context())
 
-        # Build attributes from per-request context stored in contextvars
+        # Build attributes from per-request context stored in contextvars.
+        # trace_id is a top-level field (see _TOP_LEVEL_CONTEXT_KEYS) and is kept
+        # out of attributes; fall back to the context value when no active span
+        # produced one so the id is never silently dropped.
+        context = get_request_context()
+        if "trace_id" not in log and context.get("trace_id"):
+            log["trace_id"] = context["trace_id"]
         attributes: dict[str, Any] = {}
-        for key, value in get_request_context().items():
+        for key, value in context.items():
             if value is not None and key not in _TOP_LEVEL_CONTEXT_KEYS:
                 attributes[key] = value
 

@@ -18,7 +18,7 @@ from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 
-def _current_trace_id() -> str | None:
+def current_trace_id() -> str | None:
     """Return the active OTEL trace_id as 32 hex chars, or None."""
     try:
         from opentelemetry import trace as _otel_trace
@@ -50,7 +50,7 @@ class TraceIdResponseMiddleware:
 
         async def send_with_trace_id(message: Message) -> None:
             if message["type"] == "http.response.start":
-                trace_id = _current_trace_id()
+                trace_id = current_trace_id()
                 if trace_id:
                     headers = MutableHeaders(scope=message)
                     # Only set if not already present (error handlers may set them)
