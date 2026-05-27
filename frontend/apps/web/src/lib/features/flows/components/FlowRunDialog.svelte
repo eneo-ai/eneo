@@ -670,13 +670,7 @@
       },
       stopSegment: () => {
         recorderRefsByStepId[stepId]?.stopExternal();
-      },
-      // The dialog already owns persistence + upload via handleRecordedAudio,
-      // so the session-class deps for upload/delete are no-ops here. We
-      // never call session.onSegmentFinalized — only notifyHardFailure —
-      // so these branches don't run in practice but must satisfy the type.
-      uploadSegment: async () => ({ ok: true, fileId: "" }),
-      deleteUploadedSegment: async () => undefined
+      }
     };
   }
 
@@ -684,23 +678,19 @@
     if (!flow?.id) return null;
     const step = stepsRequiringInput.find((s) => s.step_id === stepId);
     if (!step) return null;
-    const contractSnapshot = buildContractSnapshotFromStep(
-      step,
-      runContract?.published_flow_version ?? null
-    );
 
     const existing = recordingSessionsByStepId[stepId];
     if (existing) {
       const phase = existing.summary().state;
+      // The dialog owns persistence and upload through handleRecordedAudio;
+      // RecordingSession only manages recorder lifecycle and retry state.
       // The session knows how to take over a queued retry; let it cancel
       // its own retry timer rather than disposing the session here.
       if (phase === "reconnecting") {
-        existing.beginRecordingExternal({ flowId: flow.id, stepId, contractSnapshot });
+        existing.beginRecordingExternal();
         return existing;
       }
-      // Terminal states need a fresh session — beginRecordingExternal would
-      // refuse on a session that has already produced segments.
-      if (phase === "completed" || phase === "discarded" || phase === "paused-failed") {
+      if (phase === "paused-failed") {
         existing.dispose();
         recordingSessionsByStepId[stepId] = null;
       } else {
@@ -721,11 +711,7 @@
       }
     });
     recordingSessionsByStepId[stepId] = session;
-    session.beginRecordingExternal({
-      flowId: flow.id,
-      stepId,
-      contractSnapshot
-    });
+    session.beginRecordingExternal();
     return session;
   }
 

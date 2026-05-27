@@ -111,7 +111,7 @@ source_material:
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/new-codex-session-prompt.md"
     - "docs/goals/flows-clean-architecture-2026-05-25/notes/peer-review-prompt-for-claude-chatgpt.md"
 
-active_task: T103
+active_task: T108
 
 tasks:
   - id: T001
@@ -2307,7 +2307,7 @@ tasks:
   - id: T015
     type: worker
     assignee: Worker
-    status: queued
+    status: done
     reasoning_hint: medium
     objective: "Harden API consumer DX: runtime paths, stable error codes, examples, generated client alignment, and service-key journey contract tests."
     allowed_files: []
@@ -2315,7 +2315,44 @@ tasks:
     stop_if:
       - "Public runtime capabilities are undecided."
       - "Generated client pipeline is red for unrelated reasons."
-    receipt: null
+    receipt:
+      result: done
+      completed_by_subtasks:
+        - id: T004
+          summary: "Normalized Flow scope mismatches onto the GeneralError envelope."
+        - id: T007
+          summary: "Deleted the duplicate /input-policy/ path and made /run-contract/ the runtime input owner."
+        - id: T008
+          summary: "Removed frontend generated-contract fallbacks for Flow run contracts."
+        - id: T022
+          summary: "Verified the canonical consumer journey test already exists."
+        - id: T026
+          summary: "Classified GET /flows/{id}/ service-key behavior as wrong endpoint/API DX rather than a permission-matrix bug."
+        - id: T027
+          summary: "Approved the self-directing service-key draft-endpoint denial and SDK published.get fix."
+        - id: T028
+          summary: "Made draft/current GET service-key denial self-directing and fixed intric-js published.get string-id handling."
+        - id: T085
+          summary: "Mapped T015 and found no immediate API Worker; current non-DB API/OpenAPI/SDK checks passed."
+        - id: T103
+          summary: "Rechecked T015 after T102; OpenAPI, SDK, and service-key runtime projection checks still pass."
+      disposition:
+        runtime_paths: "covered by published runtime projection, run-contract, SDK helpers, and tests."
+        stable_error_codes: "covered by Flow GeneralError/OpenAPI tests and current `flow_api_common` owner."
+        generated_client_alignment: "covered by T102 generated schema update plus T103 SDK checks."
+        service_key_runtime_journey: "covered for published discovery, run-contract, run creation, own-run listing, and unpublished hiding."
+        service_key_review_rerun_policy: "blocked under T009/T011 product decisions; not part of T015 safe completion."
+      consolidation_effect:
+        reused_existing_owner: "Flow API routers/models, `flow_api_common.error_response`, published runtime projection, FlowRunContractService, generated SDK updater/helpers, and service-key integration tests."
+        logic_moved_from: "Duplicate input-policy/frontend fallback paths were removed in earlier subtasks."
+        logic_deleted: "Deleted /input-policy/ and obsolete generated-contract fallbacks in T007/T008; no deletion in T103."
+        duplicate_path_removed: "Draft-derived input-policy and frontend contract mirrors."
+        new_code_added: "Focused API/SDK checks and earlier route hint/SDK helper fixes; no new T103 source code."
+        why_existing_owners_were_insufficient: "Existing owners are sufficient for safe T015 scope; remaining service-key review/rerun semantics require product decisions, not speculative API edits."
+        guard_preventing_duplicate_logic_from_returning: "OpenAPI contract tests, SDK endpoint tests, service-key integration tests, and generated-client check."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+      naming_gate: "No new source names in T103; existing names remain clear for the final architecture where-to-change-X table."
 
   - id: T016
     type: worker
@@ -10417,7 +10454,7 @@ tasks:
   - id: T103
     type: scout
     assignee: Scout
-    status: active
+    status: done
     reasoning_hint: high
     objective: "Re-scout T015 API consumer DX after the schema/runtime cleanup and identify the next smallest safe API/contract Worker, or block product-gated service-key/review/rerun work."
     inputs:
@@ -10449,6 +10486,456 @@ tasks:
       - "The next API change requires service-key review/resume/rerun or retention product decisions."
       - "OpenAPI/generated-client pipeline is red for in-scope reasons that need source edits."
       - "The smallest useful API Worker would cross schema/runtime/frontend boundaries without a Judge plan gate."
+    receipt:
+      result: done
+      completed_at: "2026-05-27T01:29:41+02:00"
+      decision: "no_api_worker_now"
+      summary: "Re-scouted T015 after T102. The published-runtime API consumer journey remains source-backed and verified: `FlowRunPublic.user_id` is absent from OpenAPI, published/run-contract/run-create error responses use `GeneralError`, SDK helper tests pass, and focused service-key runtime projection tests pass. No new API Worker is justified; service-key review/rerun/identity policy remains blocked under T009/T011."
+      owner_inventory:
+        error_response_owner: "backend/src/intric/flows/api/flow_api_common.py:49 owns Flow API GeneralError response metadata; backend/src/intric/flows/api/flow_api_common.py:90 owns scope mismatch translation through UnauthorizedException."
+        route_scope_owner: "backend/src/intric/flows/api/flow_router_common.py:112 and :134 adapt FastAPI request scope into flow_api_common access contexts."
+        published_runtime_owner: "backend/src/intric/flows/api/flow_authoring_router.py:445 exposes /published/ as the service-key-safe runtime projection."
+        run_contract_owner: "FlowRunContractService and /api/v1/flows/{id}/run-contract/ remain the runtime input contract owner."
+        sdk_owner: "frontend/packages/intric-js/src/endpoints/flows.js owns published/run-contract/runtime helper paths; update.js owns generated schema refresh."
+      classification:
+        published_runtime_projection: "safe_now; verified and no Worker needed."
+        run_contract_and_upload_paths: "safe_now; existing OpenAPI and SDK checks cover the contract."
+        flow_scope_errors: "safe_now; remaining scope mismatches use UnauthorizedException -> GeneralError."
+        direct_http_exception: "keep_temporarily; only Flow API hit is required_uuid internal invariant in flow_router_common.py, not a public domain/application error leak."
+        service_key_published_runtime_journey: "safe_now; focused integration tests pass."
+        service_key_review_rerun_identity: "blocked_product_decision under T009/T011."
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1, status=ok, blockers=[]"
+        - cmd: "sed -n '1,220p' /Users/ccimen/.agents/skills/fastapi/SKILL.md"
+          status: pass
+          output: "Loaded FastAPI guidance for router/schema/OpenAPI analysis."
+        - cmd: "rg/nl source reads for Flow API routers, flow_api_common, flow_router_common, OpenAPI tests, SDK endpoints, and service-key integration tests"
+          status: pass
+        - cmd: "rg -n 'raise HTTPException|HTTPException\\(' backend/src/intric/flows/api"
+          status: pass
+          output: "Only backend/src/intric/flows/api/flow_router_common.py:105 required_uuid internal invariant."
+        - cmd: "cd backend && uv run pytest tests/unit/test_flow_openapi_contract.py -q"
+          status: pass
+          output: "61 passed, 15 warnings"
+        - cmd: "cd frontend/packages/intric-js && bun test update.test.js src/endpoints/flows.test.js"
+          status: pass
+          output: "35 pass"
+        - cmd: "cd frontend/packages/intric-js && bun run check"
+          status: pass
+        - cmd: "cd backend && uv run python - <<'PY' ... app.openapi() FlowRunPublic/user_id and GeneralError probe ... PY"
+          status: pass
+          output: "FlowRunPublic.user_id present: False; published/run-contract/run-create 4xx responses use GeneralError except FastAPI 422 validation."
+        - cmd: "cd backend && uv run pytest -m integration tests/integration/test_api_key_service_keys.py::<4 focused Flow service-key runtime tests> -q"
+          status: pass
+          output: "4 passed, 16 warnings"
+      consolidation_effect:
+        reused_existing_owner: "Flow API error adapter, published runtime projection, run-contract service, generated SDK flow endpoints, and service-key integration tests."
+        logic_moved_from: "None in T103; read-only Scout."
+        logic_deleted: "None in T103."
+        duplicate_path_removed: "None in T103; earlier T007/T008/T028/T102 removed duplicate input/error/SDK/public-field paths."
+        new_code_added: "No source code."
+        why_existing_owners_were_insufficient: "They are sufficient for safe T015 scope; remaining policy-sensitive work needs product decisions."
+        guard_preventing_duplicate_logic_from_returning: "Existing OpenAPI contract tests, SDK tests, and service-key integration tests."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+      naming_gate: "No new source names; current owners would appear clearly in docs/flows/architecture.md and the where-to-change-X table."
+      next_task: T104
+
+  - id: T104
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit remaining queued/blocked Flow work after T014 and T015 closure, decide whether T016 can close by evidence or needs a new safe preflight, and decide whether T901 final maintainer docs are ready."
+    inputs:
+      - "T014 receipt"
+      - "T015 receipt"
+      - "T016 queued frontend task"
+      - "T091 receipt"
+      - "T901 final docs task"
+      - "T009/T010/T011 blocked product/data tasks"
+      - "docs/goals/flows-clean-architecture-2026-05-25/goal.md"
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only Judge except board receipt/task transition."
+      - "Before transitioning or activating any Worker, check the watchdog blocker file."
+      - "Do not start retention, service-key identity/review/rerun, materialized webhook snapshots, schema migrations, webhook outbox, Flow AI Builder cleanup, or docs/flows/architecture.md unless the board gate is satisfied."
+      - "Do not use non-Flow frontend check failures as a reason to broaden this goal."
+      - "If activating T901, confirm no unresolved safe runtime/API/schema/frontend Worker remains ahead of it and that open decisions can be documented as known caveats."
+    expected_output:
+      - "Decision: activate T901 | activate new Scout/Judge | blocked."
+      - "Disposition for T016, T901, and blocked T009/T010/T011."
+      - "If T901 is activated: exact confirmation that this is final maintainer docs only, no source/test/generated/migration edits."
+      - "Consolidation effect and naming-gate answer."
+    stop_if:
+      - "A safe non-docs Worker remains available and source-backed."
+      - "T016 has unresolved implementation work that is not product/UX/runtime-preflight gated."
+      - "The architecture doc would become stale because active runtime/API/schema/frontend work is still changing."
+    receipt:
+      result: done
+      completed_at: "2026-05-27T01:31:22+02:00"
+      decision: "activate_t105_scout"
+      summary: "Final maintainer docs are not ready yet. T014 and T015 are closed, but T016 still has two source-backed `needs_preflight` areas from T091: form-schema draft edit conflict semantics and run-dialog upload/recording ownership. Activated T105 as a read-only Scout to decide whether either has a safe Worker or must be explicitly blocked before T901 final docs."
+      evidence:
+        - "T014 status is done with published pointer, owner mirror, stale-index, and tenant-FK dispositions."
+        - "T015 status is done; remaining service-key review/rerun/identity policy is blocked under T009/T011."
+        - "T091 classified form schema draft edit state as needs_preflight because conflict/reset UX is undecided."
+        - "T091 classified runtime file upload and recording state as needs_preflight because moving side effects needs audio/file recovery behavior evidence and a dedicated design gate."
+        - "T901 says final docs must not activate while unresolved runtime/API/schema/frontend implementation work remains."
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1, status=ok, blockers=[]"
+        - cmd: "sed/rg reads for T016, T091, T901, T009/T010/T011, and remaining frontend state source locations"
+          status: pass
+      disposition:
+        T014: "done."
+        T015: "done for safe API consumer DX; product-gated service-key review/rerun remains under T009/T011."
+        T016: "queued; T105 must determine whether remaining frontend state candidates are safe, blocked, or closeable."
+        T901: "queued; not active until T105 resolves T016 disposition."
+        product_data_gated_tasks: "T009/T010/T011 remain blocked until owner decisions are recorded."
+      consolidation_effect:
+        reused_existing_owner: "T091 frontend owner inventory, T901 final-docs gate, and blocked product/data decision tasks."
+        logic_moved_from: "N/A, read-only Judge."
+        logic_deleted: "N/A."
+        duplicate_path_removed: "N/A."
+        new_code_added: "No source code; one read-only Scout task."
+        why_existing_owners_were_insufficient: "T091 found unresolved frontend ownership questions that need one more preflight before final docs."
+        guard_preventing_duplicate_logic_from_returning: "T105 must name guard/test requirements before approving any Worker."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+      naming_gate: "No new source names; T105 must judge any proposed frontend owner name against the final where-to-change-X table."
+      next_task: T105
+
+  - id: T105
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Preflight the remaining T016 frontend state ownership questions: form-schema draft edit conflict semantics and run-dialog upload/recording ownership."
+    inputs:
+      - "T016 queued frontend task"
+      - "T091 receipt"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte"
+      - "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts"
+      - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.svelte.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowRunLaunchInputState.svelte.ts"
+      - "frontend/apps/web/src/lib/features/flows/flowRunWizard.ts"
+      - "frontend/apps/web/src/lib/features/audio/recordingSession.ts"
+      - "frontend/apps/web/src/lib/features/audio/flowRunRecordingSession.ts"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only Scout only: no source edits, test edits, generated-client edits, backend edits, docs/flows/architecture.md, or Flow AI Builder cleanup."
+      - "Before starting, check the watchdog blocker file."
+      - "Use impeccable/frontend-state guidance if proposing UI/UX behavior changes or component ownership changes."
+      - "Do not propose moving browser audio/file side effects unless source evidence identifies a smaller canonical owner and behavior tests."
+      - "Do not propose form-schema conflict behavior changes unless current product behavior can be inferred safely from source/tests or a product/UX decision is recorded."
+      - "Do not broaden into non-Flow frontend check failures."
+    expected_output:
+      - "Inventory table: Concept | Current locations | Behavior differences | Canonical owner | Merge/delete path."
+      - "Classification for each remaining T016 candidate: approve_worker | blocked_product_ux | needs_design_gate | keep_temporarily | close_t016."
+      - "If a Worker is safe: exact allowed_files, verify commands, review tier, stop_if, consolidation effect, and naming-gate answer."
+      - "If no Worker is safe: exact blocker/disposition and whether T016 can be closed as blocked/deferred before T901."
+    stop_if:
+      - "The next step requires a product/UX decision not recorded in state.yaml."
+      - "The only useful Worker would move runtime-sensitive audio/file persistence side effects without a behavior test strategy."
+      - "The remaining work is outside Flows proper or only fixes unrelated frontend diagnostics."
+    receipt:
+      result: done
+      completed_at: "2026-05-27T01:47:40+02:00"
+      decision: "activate_t106_judge"
+      summary: "T105 found no safe product/UX Worker for form-schema draft conflict semantics, but did find one source-backed frontend consolidation candidate: `RecordingSession` exposes upload/persistence/resume APIs that are only used by tests while production `FlowRunDialog` passes no-op upload/delete deps and owns persistence/upload through `flowRunRecordingSession`. Because Flow proper has no production users, this should be treated as cleanup debt, not legacy behavior to preserve. Activated T106 to judge the smallest safe deletion/consolidation Worker before final docs."
+      no_production_legacy_bias: "No current Flow users means compatibility and data-preservation fears do not justify keeping unused Flow paths. T105 blockers are current UX/runtime correctness questions, not legacy-data protection."
+      inventory:
+        - concept: "Form schema field shape and persisted metadata"
+          current_locations: "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts:20-221; frontend/apps/web/src/lib/features/flows/FlowEditor.ts:510-520; frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte:56-179"
+          behavior_differences: "`flowFormSchema.ts` owns normalization/metadata shape; `FlowEditor.replaceFormSchemaFields` owns persisted metadata updates; the Svelte component owns transient invalid/in-progress edits and only syncs persistable field names."
+          canonical_owner: "`flowFormSchema.ts` for shape/normalization, `FlowEditor` for persisted draft metadata, `FlowFormSchemaEditor.svelte` for local edit buffer until UX conflict semantics are decided."
+          merge_delete_path: "Do not create a new form-schema store now. A later Worker may deepen FlowEditor/component ownership only after product/UX decides whether dirty local edits should merge, overwrite, warn, or discard when persisted metadata changes."
+          classification: "blocked_product_ux"
+        - concept: "Flow run launch input"
+          current_locations: "frontend/apps/web/src/lib/features/flows/components/FlowRunLaunchInputState.svelte.ts:1-51; frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:100,126-128,337,1090"
+          behavior_differences: "A small class owns form/freeform values and reset semantics; FlowRunDialog reads it for blockers and run intent."
+          canonical_owner: "FlowRunLaunchInputState"
+          merge_delete_path: "Keep; no duplicate owner found."
+          classification: "close_t016_for_this_concept"
+        - concept: "Runtime file upload state and wizard blockers"
+          current_locations: "frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.svelte.ts:1-331; frontend/apps/web/src/lib/features/flows/flowRunWizard.ts:145-245; frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:548-608; frontend/apps/web/src/lib/features/flows/components/FlowRunDialogRuntimeStep.svelte:1323-1360"
+          behavior_differences: "FlowRunFileInputState owns per-step UI state; flowRunWizard owns blocker derivation; FlowRunDialog owns browser file picker/drop and SDK upload side effects; FlowRunDialogRuntimeStep renders props/callbacks."
+          canonical_owner: "Keep current split: state class, wizard blocker builder, dialog side-effect boundary, runtime-step renderer."
+          merge_delete_path: "Do not move browser upload side effects in T016 without a narrower design and tests; this would otherwise copy behavior into another controller."
+          classification: "needs_design_gate"
+        - concept: "Recording session lifecycle versus Flow upload/persistence"
+          current_locations: "frontend/apps/web/src/lib/features/audio/recordingSession.ts:39-43,471-573,587-710; frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:655-680,808-875,948-1017; frontend/apps/web/src/lib/features/audio/flowRunRecordingSession.ts:139-295"
+          behavior_differences: "`RecordingSession` owns retry/rotation state, but also contains upload/persistence/resume methods whose only callers are tests. Production FlowRunDialog passes no-op upload/delete deps and instead persists/uploads through `flowRunRecordingSession`."
+          canonical_owner: "`RecordingSession` should be lifecycle/retry only; `FlowRunDialog` plus `flowRunRecordingSession` should remain the Flow runtime recording persistence/upload owner unless a future design deliberately moves those side effects."
+          merge_delete_path: "T106 should judge a Worker to delete unused RecordingSession upload/persistence/resume API and tests, remove no-op deps from FlowRunDialog, and keep current production behavior."
+          classification: "approve_judge_for_worker"
+      evidence:
+        - "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte:56-73 derives persisted metadata then protects local dirty edits from overwrites."
+        - "frontend/apps/web/src/lib/features/flows/components/FlowFormSchemaEditor.svelte:107-115 only persists form fields when field names are valid."
+        - "frontend/apps/web/src/lib/features/flows/FlowEditor.ts:510-520 owns persisted form_schema metadata updates."
+        - "frontend/apps/web/src/lib/features/flows/flowFormSchema.ts:20-221 owns form field normalization, persistence shape, and runtime-key validation."
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:507-608 owns SDK runtime-file upload and timeout handling."
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.svelte.ts:1-331 owns per-step runtime file, recording, resume, and reset state."
+        - "frontend/apps/web/src/lib/features/flows/flowRunWizard.ts:145-245 owns blocker derivation for missing input, upload in progress, recording in progress, local recording, and template readiness."
+        - "frontend/apps/web/src/lib/features/audio/recordingSession.ts:39-43 defines upload/delete deps, but the only production RecordingSession construction passes no-op deps at FlowRunDialog.svelte:674-680."
+        - "frontend/apps/web/src/lib/features/audio/recordingSession.ts:471-573 and :587-710 contain segment persistence/upload/resume paths whose callers are tests only by `rg` evidence."
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:808-875 is the production recorded-audio persist/upload path."
+        - "frontend/apps/web/src/lib/features/audio/flowRunRecordingSession.ts:139-295 owns Flow recording ledger persistence, upload marking, recovery scan, purge, and detach helpers."
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1, status=ok, blockers=[]"
+        - cmd: "node /Users/ccimen/.agents/skills/impeccable/scripts/load-context.mjs"
+          status: pass
+          output: "Loaded product/UI context for frontend ownership preflight; no UI source edits were made."
+        - cmd: "sed -n '1,220p' docs/engineering/frontend-state-standard.md"
+          status: pass
+          output: "Loaded frontend state-owner guidance."
+        - cmd: "rg/nl source reads for FlowFormSchemaEditor, flowFormSchema, FlowEditor, FlowRunDialog, FlowRunFileInputState, FlowRunLaunchInputState, flowRunWizard, RecordingSession, flowRunRecordingSession, and focused tests"
+          status: pass
+        - cmd: "rg -n 'new RecordingSession|\\.onSegmentFinalized\\(|uploadSegment:|deleteUploadedSegment:|continueRecording\\(|\\.resume\\(' frontend/apps/web/src/lib/features -g '*.ts' -g '*.svelte'"
+          status: pass
+          output: "Production construction is FlowRunDialog only; RecordingSession upload/persistence/resume callers are tests or no-op deps."
+        - cmd: "cd frontend/apps/web && bun run test:unit src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/FlowEditor.test.ts src/lib/features/flows/components/FlowRunFileInputState.test.ts src/lib/features/flows/flowRunWizard.test.ts src/lib/features/audio/flowRunRecordingSession.test.ts src/lib/features/audio/recordingSession.test.ts src/lib/features/audio/recordingSessionStore.test.ts"
+          status: fail_inconclusive
+          output: "Forgot --run; partial tests passed but Vitest stayed long-running and was killed with code 143."
+        - cmd: "cd frontend/apps/web && bun run test:unit -- --run src/lib/features/flows/flowFormSchema.test.ts src/lib/features/flows/components/FlowRunFileInputState.test.ts src/lib/features/flows/flowRunWizard.test.ts src/lib/features/audio/flowRunRecordingSession.test.ts src/lib/features/audio/recordingSession.test.ts src/lib/features/audio/recordingSessionStore.test.ts"
+          status: pass
+          output: "6 files passed; 72 tests passed."
+        - cmd: "cd frontend/apps/web && bun run test:unit -- --run src/lib/features/flows/FlowEditor.test.ts"
+          status: pass
+          output: "1 file passed; 40 tests passed."
+      consolidation_effect:
+        reused_existing_owner: "FlowEditor, flowFormSchema, FlowRunFileInputState, flowRunWizard, FlowRunDialog, RecordingSession, and flowRunRecordingSession."
+        logic_moved_from: "N/A, read-only Scout."
+        logic_deleted: "N/A, read-only Scout."
+        duplicate_path_removed: "N/A, but T106 must judge deleting the test-only RecordingSession upload/persistence path."
+        new_code_added: "No source code; one Judge task."
+        why_existing_owners_were_insufficient: "Existing owners are mostly sufficient; the exception is that RecordingSession still exposes a broader upload/persistence API than production uses."
+        guard_preventing_duplicate_logic_from_returning: "T106 must require `rg` production-call guards and focused tests before approving a Worker."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+      naming_gate: "No new source names. A future Worker should prefer deleting the broad RecordingSession API over inventing a new controller; any new name must make the runtime recording lifecycle or Flow runtime upload axis obvious in docs/flows/architecture.md."
+      next_task: T106
+
+  - id: T106
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Judge whether to activate the smallest safe frontend consolidation Worker for the unused RecordingSession upload/persistence path found by T105."
+    inputs:
+      - "T105 receipt"
+      - "frontend/apps/web/src/lib/features/audio/recordingSession.ts"
+      - "frontend/apps/web/src/lib/features/audio/recordingSession.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte"
+      - "frontend/apps/web/src/lib/features/audio/flowRunRecordingSession.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowRunFileInputState.svelte.ts"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only Judge except board receipt/task transition."
+      - "Before starting and before activating any Worker, check the watchdog blocker file."
+      - "Do not edit source/tests in T106."
+      - "Apply the no-production-Flow-users rule: do not retain unused Flow paths for legacy/data fear."
+      - "Reuse-before-inventing: prefer deleting or narrowing RecordingSession over creating a new controller/service."
+      - "Do not move browser audio capture, IDB persistence, or SDK upload side effects unless the Worker is explicitly allowed and has behavior tests."
+      - "Use tiered review: Claude-only plan gate if approving a frontend-state Worker; Antigravity only if Claude/Codex disagree or the slice crosses runtime/API/data boundaries."
+    expected_output:
+      - "Decision: activate a narrow Worker | reject as unsafe | close T016 as blocked/deferred."
+      - "If activating a Worker: exact allowed_files, verify commands, review tier, stop_if, rollback notes, consolidation effect, and naming-gate answer."
+      - "Explicit answer to whether RecordingSession upload/persistence paths have any production callers."
+    stop_if:
+      - "Any production caller uses RecordingSession.onSegmentFinalized, start/stop/discard/resume/continueRecording, uploadedFileIdsSortedBySegmentIndex, uploadSegment deps, or deleteUploadedSegment deps."
+      - "The smallest Worker would change AudioRecorder capture semantics, FlowRunDialog upload semantics, persisted ledger format, run-contract shape, backend API, generated client, or non-Flow audio features."
+      - "A product/UX decision is required before deleting or narrowing the path."
+    receipt:
+      result: done
+      completed_at: "2026-05-27T01:54:20+02:00"
+      decision: "activate_t107_worker"
+      summary: "Approved a narrow frontend consolidation Worker after Claude rejected the first brief for leaving adjacent dead RecordingSession surfaces. T107 must make RecordingSession lifecycle-only by deleting the test-only upload/persistence/resume API, removing FlowRunDialog's no-op upload/delete deps, rewriting tests around the production-used beginRecordingExternal/notifyHardFailure/summary/dispose surface, and sweeping dead summary/listener/private fields created by the deletion."
+      evidence:
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:711 is the only production `new RecordingSession(...)` call."
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:674-680 passes no-op upload/delete deps only to satisfy the current type."
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:808-875 is the production recorded-audio persistence/upload path."
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte:948-1017 is the production resumed-recording path."
+        - "frontend/apps/web/src/lib/features/audio/flowRunRecordingSession.ts:139-295 owns Flow recording ledger persistence, upload marking, recovery scanning, purge, and detach."
+        - "frontend/apps/web/src/lib/features/audio/recordingSession.ts:39-43,471-573,587-710 expose upload/persistence/resume behavior with test-only callers."
+        - "frontend/apps/web/src/lib/features/audio/recordingSession.ts:395 and :582 define additional test/self-only surfaces `continueRecordingExternal` and `listRecoverable`."
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1, status=ok, blockers=[]"
+        - cmd: "rg -n 'continueRecordingExternal|listRecoverable\\b|uploadedFileIdsSortedBySegmentIndex|markSubmitted\\(|async start\\(|async discard\\(|async resume\\(|async continueRecording\\(|onSegmentFinalized\\(' frontend/apps/web/src/lib/features -g '*.ts' -g '*.svelte'"
+          status: pass
+          output: "Deleted-candidate methods have no production callers; hits are definitions/self references/tests."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t106-recording-session-consolidation --new-session --phase plan --iteration 1 --timeout-seconds 1200 ..."
+          status: fail_expected
+          output: "GREEN_LIGHT no; MIN_SCORE 7. Valid blockers: include continueRecordingExternal/listRecoverable, private cleanup, rg guard, comment rewrite, test rewrite, dirty-worktree staging hygiene."
+        - cmd: "/Users/ccimen/.agents/skills/claude-peer-loop/scripts/claude_peer_loop.py --session flows-clean-architecture-t106-recording-session-consolidation --phase verification --iteration 2 --require-green --required-min-score 8 --timeout-seconds 1200 ..."
+          status: pass
+          output: "GREEN_LIGHT yes; MIN_SCORE 8."
+      peer_review:
+        claude_iteration_1:
+          artifact: ".codex/artifacts/claude-peer-loop-t106-recording-session-consolidation-judge-20260526T234620Z.md"
+          verdict: "changes_required; valid blockers addressed in revised brief."
+        claude_iteration_2:
+          artifact: ".codex/artifacts/claude-peer-loop-t106-recording-session-consolidation-judge-revision-20260526T235002Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+          carry_forward:
+            - "T107 should also delete SegmentFinalizedInput, onPersistenceModeChanged, onContractMismatch, _persistenceMode, and _contractIssues if the primary deletion makes them constant or unused."
+            - "T107 receipt should explicitly note production resume remains in FlowRunDialog.continueResumedSession, independent of deleted RecordingSession.resume."
+      consolidation_effect:
+        reused_existing_owner: "FlowRunDialog for browser/SDK side effects, flowRunRecordingSession for recording ledger persistence/recovery helpers, and RecordingSession for lifecycle/retry state."
+        logic_moved_from: "None in T106; read-only Judge."
+        logic_deleted: "None in T106."
+        duplicate_path_removed: "None in T106; T107 is approved to delete the test-only RecordingSession upload/persistence/resume path."
+        new_code_added: "No source code; one Worker task."
+        why_existing_owners_were_insufficient: "Existing owners are sufficient; the problem is an over-broad RecordingSession API, not a missing abstraction."
+        guard_preventing_duplicate_logic_from_returning: "T107 must include production-call rg guards, focused tests, `bun run check` or exact unrelated failure evidence, and explicit staged-file checks."
+        net_flow_logic_surface_area: "preserved"
+        if_increased_why: "N/A"
+      naming_gate: "T107 should prefer deletion/narrowing over new names. If any new name appears, it must clearly map to recording lifecycle or Flow recording persistence in the final architecture where-to-change-X table."
+      next_task: T107
+
+  - id: T107
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "refactor(flows-frontend): narrow RecordingSession to lifecycle ownership."
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      - "frontend/apps/web/src/lib/features/audio/recordingSession.ts"
+      - "frontend/apps/web/src/lib/features/audio/recordingSession.test.ts"
+      - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte"
+    verify:
+      - "cd frontend/apps/web && bun run test:unit -- --run src/lib/features/audio/recordingSession.test.ts src/lib/features/audio/flowRunRecordingSession.test.ts src/lib/features/flows/components/FlowRunFileInputState.test.ts src/lib/features/flows/flowRunWizard.test.ts"
+      - "cd frontend/apps/web && bun run test:unit -- --run src/lib/features/flows/FlowEditor.test.ts src/lib/features/flows/flowFormSchema.test.ts"
+      - "rg -n 'new RecordingSession|\\.onSegmentFinalized\\(|uploadSegment:|deleteUploadedSegment:|continueRecording\\(|continueRecordingExternal|listRecoverable\\b|\\.resume\\(|markSubmitted\\(|uploadedFileIdsSortedBySegmentIndex' frontend/apps/web/src/lib/features -g '*.ts' -g '*.svelte'"
+      - "rg -n '_uploadedFileIds|_startedAt|_segmentFilenameBase|extensionForMime|recordToSummarySegment|UploadResult|onPersistenceModeChanged|onContractMismatch|_persistenceMode|_contractIssues|SegmentFinalizedInput' frontend/apps/web/src/lib/features/audio/recordingSession.ts"
+      - "cd frontend/apps/web && bun run check"
+      - "git diff --check"
+      - "git diff --cached --name-only"
+    stop_if:
+      - "Watchdog reports a halt-worthy blocker."
+      - "Need files outside allowed_files."
+      - "Any production caller uses RecordingSession.onSegmentFinalized, start, stop, discard, resume, continueRecording, continueRecordingExternal, listRecoverable, markSubmitted, uploadedFileIdsSortedBySegmentIndex, uploadSegment deps, or deleteUploadedSegment deps."
+      - "The change modifies AudioRecorder capture semantics, FlowRunDialog upload/persistence semantics, IndexedDB ledger format, backend API, generated client, or non-Flow audio behavior."
+      - "Tests can only pass by adding compatibility shims, fake deps, broad casts, or test-only backdoors."
+      - "The rewritten tests cannot preserve production-used retry/reconnect coverage through beginRecordingExternal, notifyHardFailure, summary, and dispose."
+    consolidation_effect:
+      reused_existing_owner: "FlowRunDialog remains the browser/SDK side-effect boundary; flowRunRecordingSession remains the Flow recording ledger owner; RecordingSession becomes lifecycle/retry only."
+      logic_moved_from: "No move expected; delete test-only RecordingSession upload/persistence/resume code."
+      logic_deleted: "RecordingSession upload/delete deps, test-only segment persistence/upload/resume methods, adjacent dead private fields/listeners/types, no-op FlowRunDialog deps, and obsolete tests."
+      duplicate_path_removed: "The parallel RecordingSession persistence/upload path beside FlowRunDialog + flowRunRecordingSession."
+      new_code_added: "Only rewritten focused tests if needed; no new production abstraction."
+      why_existing_owners_were_insufficient: "They are sufficient; the current API is over-broad."
+      guard_preventing_duplicate_logic_from_returning: "Production-call rg guard, dead-symbol rg guard, focused lifecycle tests, and staged-file hygiene."
+      net_flow_logic_surface_area: "reduced"
+      if_increased_why: "N/A"
+    review:
+      tier: "Claude-only for frontend state/ownership; Antigravity only if Claude/Codex disagree or the slice expands across runtime/API/data boundaries."
+      plan_gate: "T106 Claude iteration 2 green, MIN_SCORE 8."
+      commit_gate_required: true
+    receipt:
+      result: done
+      completed_at: "2026-05-27T02:06:36+02:00"
+      summary: "Narrowed `RecordingSession` to lifecycle/retry ownership. Deleted the test-only upload/persistence/resume API, removed FlowRunDialog's no-op upload/delete dependencies, and rewrote RecordingSession tests around the production-used beginRecordingExternal/notifyHardFailure/summary/dispose surface. Production audio persistence/upload remains in FlowRunDialog.handleRecordedAudio plus flowRunRecordingSession; production resumed-recording behavior remains in FlowRunDialog.continueResumedSession."
+      no_production_legacy_bias: "Flow proper has no production users, so no compatibility or legacy-data concern justified keeping the unused RecordingSession persistence path. The slice removed the weaker unused path instead of preserving two paths."
+      files_changed:
+        - "frontend/apps/web/src/lib/features/audio/recordingSession.ts"
+        - "frontend/apps/web/src/lib/features/audio/recordingSession.test.ts"
+        - "frontend/apps/web/src/lib/features/flows/components/FlowRunDialog.svelte"
+        - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+      commands:
+        - cmd: "cat /Users/ccimen/.codex/overnight-watchdog/flows-clean-architecture-watchdog.json"
+          status: pass
+          output: "schema_version=1, status=ok, blockers=[]"
+        - cmd: "cd frontend/apps/web && bun run test:unit -- --run src/lib/features/audio/recordingSession.test.ts src/lib/features/audio/flowRunRecordingSession.test.ts src/lib/features/flows/components/FlowRunFileInputState.test.ts src/lib/features/flows/flowRunWizard.test.ts"
+          status: pass
+          output: "4 files passed; 53 tests passed. Expected stderr from flowRunRecordingSession purge error handling test was emitted while the test passed."
+        - cmd: "cd frontend/apps/web && bun run test:unit -- --run src/lib/features/flows/FlowEditor.test.ts src/lib/features/flows/flowFormSchema.test.ts"
+          status: pass
+          output: "2 files passed; 54 tests passed."
+        - cmd: "cd frontend/apps/web && bun run check"
+          status: fail_unrelated
+          output: "Failed only on existing out-of-scope diagnostics: frontend/packages/intric-js/src/client/stream.js implicit-any parameters at lines 16 and 39, plus frontend/apps/web/src/lib/features/api-keys/ExtendExpirationDialog.svelte line 28 state_referenced_locally warning. No T107 RecordingSession or FlowRunDialog diagnostic appeared."
+        - cmd: "cd frontend/apps/web && bunx prettier --write src/lib/features/audio/recordingSession.ts src/lib/features/audio/recordingSession.test.ts src/lib/features/flows/components/FlowRunDialog.svelte"
+          status: pass
+          output: "Formatted recordingSession.ts; other listed files unchanged."
+        - cmd: "cd frontend/apps/web && bunx prettier --check src/lib/features/audio/recordingSession.ts src/lib/features/audio/recordingSession.test.ts src/lib/features/flows/components/FlowRunDialog.svelte"
+          status: pass
+        - cmd: "rg -n 'new RecordingSession\\(|\\.onSegmentFinalized\\(|uploadSegment:|deleteUploadedSegment:|continueRecording\\(|continueRecordingExternal|listRecoverable\\b|markSubmitted\\(|uploadedFileIdsSortedBySegmentIndex|RecordingSession\\.resume|session\\.resume\\(' frontend/apps/web/src/lib/features -g '*.ts' -g '*.svelte'"
+          status: pass
+          output: "Only `new RecordingSession(...)` call sites remain in RecordingSession tests and FlowRunDialog; no deleted production method/dependency references."
+        - cmd: "rg -n '_uploadedFileIds|_startedAt|_segmentFilenameBase|extensionForMime|recordToSummarySegment|UploadResult|onPersistenceModeChanged|onContractMismatch|_persistenceMode|_contractIssues|SegmentFinalizedInput|SessionSegment|onSegmentsChanged|onUploadFailed|SESSION_RECOVERY_TTL_MS|SegmentRecord|SessionRecoveryHint|StoreMode' frontend/apps/web/src/lib/features/audio/recordingSession.ts"
+          status: pass
+          output: "No hits."
+        - cmd: "git diff --check"
+          status: pass
+      peer_review:
+        claude_commit_gate:
+          artifact: ".codex/artifacts/claude-peer-loop-t107-recording-session-lifecycle-implementation-review-20260527T000611Z.md"
+          verdict: "GREEN_LIGHT yes; MIN_SCORE 8."
+          notes:
+            - "No blockers. P3 nits were comment placement/tightening only; not changed after green to avoid invalidating the reviewed diff."
+            - "Claude explicitly required staging hygiene: stage only the four allowed files and verify `git diff --cached --name-only`."
+        antigravity: "Not run. T107 was Claude-only tier frontend state ownership; it did not cross runtime/API/data/schema boundaries and Claude/Codex did not disagree."
+      consolidation_effect:
+        reused_existing_owner: "FlowRunDialog remains the browser/SDK side-effect boundary; flowRunRecordingSession remains the Flow recording ledger persistence/recovery owner; RecordingSession now owns only recorder rotation and retry lifecycle."
+        logic_moved_from: "None; the correct owners already existed."
+        logic_deleted: "RecordingSession upload/delete deps, test-only segment persistence/upload/resume methods, adjacent dead listener/private-field/type surfaces, no-op FlowRunDialog deps, and obsolete upload/persistence tests."
+        duplicate_path_removed: "Removed the parallel RecordingSession persistence/upload path beside FlowRunDialog.handleRecordedAudio plus flowRunRecordingSession."
+        new_code_added: "Only focused tests for the lifecycle/retry surface that production uses."
+        why_existing_owners_were_insufficient: "Existing owners were sufficient; the problem was an over-broad RecordingSession API."
+        guard_preventing_duplicate_logic_from_returning: "Focused lifecycle tests plus rg guards for deleted production-call symbols and dead private/type surfaces."
+        net_flow_logic_surface_area: "reduced"
+        if_increased_why: "N/A"
+      naming_gate: "No new production modules/classes/types/statuses/files. The narrowed RecordingSession name remains clear enough for docs/flows/architecture.md and the where-to-change-X table."
+      next_task: T108
+
+  - id: T108
+    type: judge
+    assignee: Judge
+    status: active
+    reasoning_hint: high
+    objective: "Reassess T016 after T107 and decide whether any safe frontend state Worker remains before final maintainer docs."
+    inputs:
+      - "T016 queued frontend task"
+      - "T091 frontend state inventory"
+      - "T105 Scout receipt"
+      - "T106 Judge receipt"
+      - "T107 Worker receipt"
+      - "T901 final maintainer docs task"
+      - "T009/T010/T011 blocked product/data decision tasks"
+    allowed_files:
+      - "docs/goals/flows-clean-architecture-2026-05-25/state.yaml"
+    constraints:
+      - "Read-only Judge except state.yaml receipt/task transition."
+      - "Before starting and before any transition, check the watchdog blocker file."
+      - "Do not edit source, tests, generated client, backend code, migrations, docs/flows/architecture.md, or Flow AI Builder files."
+      - "Apply the no-production-Flow-users rule: do not keep legacy/compatibility Flow paths without current caller evidence, but do not invent UX behavior where product semantics are undecided."
+      - "Reuse/move/merge/delete before proposing new frontend logic."
+      - "Do not activate T901 unless T016 is closed or explicitly blocked/deferred and no source-backed safe Worker remains before final docs."
+    expected_output:
+      - "Disposition for T016: done, blocked/deferred, or one more narrow Worker with exact allowed_files and validation."
+      - "If closing T016, record which frontend state concerns are resolved, which are blocked by product/UX/design gates, and why final docs can proceed without source becoming stale."
+      - "If activating another Worker, include consolidation effect, naming gate, stop_if, review tier, verification commands, and rollback notes."
+      - "Explicit decision for whether T901 can activate next."
+    stop_if:
+      - "Any remaining candidate requires product/UX decisions not recorded in state.yaml."
+      - "A useful source Worker would move browser upload/audio side effects without a tested canonical owner."
+      - "The next step would broaden into unrelated frontend diagnostics or Flow AI Builder cleanup."
     receipt: null
 
   - id: T901

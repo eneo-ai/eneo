@@ -1,13 +1,17 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  MAX_RETRY_ATTEMPTS,
+  RETRY_BACKOFF_MS,
+  RETRY_WALL_CLOCK_CAP_MS,
   RecordingSession,
+  SEGMENT_ROTATION_MS,
   buildSegmentFilenameBase,
   diffContractSnapshot,
   generateSessionId,
   type RecordingSessionDeps,
   type RecordingSessionEventListeners
 } from "./recordingSession";
-import { recordingSessionStore, type ContractSnapshot } from "./recordingSessionStore";
+import type { ContractSnapshot } from "./recordingSessionStore";
 
 const baseSnapshot: ContractSnapshot = {
   publishedFlowVersion: 1,
@@ -21,33 +25,9 @@ function makeDeps(overrides: Partial<RecordingSessionDeps> = {}): RecordingSessi
   return {
     startSegment: vi.fn(async () => ({ ok: true })) as RecordingSessionDeps["startSegment"],
     stopSegment: vi.fn() as RecordingSessionDeps["stopSegment"],
-    uploadSegment: vi.fn(async (file: File) => ({
-      ok: true as const,
-      fileId: `uploaded-${file.name}`
-    })),
-    deleteUploadedSegment: vi.fn(async () => undefined),
     ...overrides
   };
 }
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((innerResolve, innerReject) => {
-    resolve = innerResolve;
-    reject = innerReject;
-  });
-  return { promise, resolve, reject };
-}
-
-async function flushMicrotasks(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-}
-
-beforeEach(() => {
-  recordingSessionStore.__resetForTests();
-});
 
 afterEach(() => {
   vi.useRealTimers();
@@ -133,111 +113,100 @@ describe("diffContractSnapshot", () => {
 });
 
 describe("RecordingSession lifecycle", () => {
-  it("transitions to recording on a successful start", async () => {
+  it("begins external recording and arms recorder rotation without starting capture", () => {
+    vi.useFakeTimers();
     const states: string[] = [];
+    const startSegment = vi.fn(async () => ({ ok: true as const }));
+    const stopSegment = vi.fn();
+    const deps = makeDeps({ startSegment, stopSegment });
     const listeners: RecordingSessionEventListeners = {
       onStateChange: (s) => states.push(s)
     };
-    const session = new RecordingSession(makeDeps(), listeners);
-    const outcome = await session.start({
-      flowId: "flow-1",
-      stepId: "step-1",
-      contractSnapshot: baseSnapshot
-    });
-    expect(outcome.ok).toBe(true);
-    expect(states).toContain("preparing");
-    expect(states).toContain("recording");
+    const session = new RecordingSession(deps, listeners);
+
+    session.beginRecordingExternal();
+    expect(session.summary().state).toBe("recording");
+    expect(session.summary().sessionId).toEqual(expect.any(String));
+    expect(states).toEqual(["recording"]);
+    expect(startSegment).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
+    expect(session.summary().state).toBe("rotating");
+    expect(stopSegment).toHaveBeenCalledWith("rotation");
     session.dispose();
   });
 
-  it("transitions to paused-failed when startSegment rejects", async () => {
-    const deps = makeDeps({
-      startSegment: vi.fn(async () => ({ ok: false, error: new Error("denied") }))
+  it("retries after a hard failure and auto-recovers when recorder restart succeeds", async () => {
+    vi.useFakeTimers();
+    const startSegment = vi.fn(async () => ({ ok: true as const }));
+    const onAutoRecovered = vi.fn();
+    const states: string[] = [];
+    const deps = makeDeps({ startSegment });
+    const session = new RecordingSession(deps, {
+      onAutoRecovered,
+      onStateChange: (state) => states.push(state)
     });
-    const session = new RecordingSession(deps, {});
-    const outcome = await session.start({
-      flowId: "flow-1",
-      stepId: "step-1",
-      contractSnapshot: baseSnapshot
-    });
-    expect(outcome.ok).toBe(false);
+
+    session.beginRecordingExternal();
+    session.notifyHardFailure();
+
+    expect(session.summary().state).toBe("reconnecting");
+    await vi.advanceTimersByTimeAsync(RETRY_BACKOFF_MS[0]);
+
+    expect(startSegment).toHaveBeenCalledTimes(1);
+    expect(session.summary().state).toBe("recording");
+    expect(session.summary().retryAttempt).toBe(0);
+    expect(onAutoRecovered).toHaveBeenCalledTimes(1);
+    expect(states).toEqual(["recording", "reconnecting", "recording"]);
+    session.dispose();
+  });
+
+  it("moves to paused-failed after retry attempts are exhausted", async () => {
+    vi.useFakeTimers();
+    const startSegment = vi.fn(async () => ({ ok: false as const, error: new Error("denied") }));
+    const onRetryFailed = vi.fn();
+    const deps = makeDeps({ startSegment });
+    const session = new RecordingSession(deps, { onRetryFailed });
+
+    session.beginRecordingExternal();
+    session.notifyHardFailure();
+
+    for (const backoff of RETRY_BACKOFF_MS) {
+      await vi.advanceTimersByTimeAsync(backoff);
+    }
+
+    expect(startSegment).toHaveBeenCalledTimes(MAX_RETRY_ATTEMPTS);
     expect(session.summary().state).toBe("paused-failed");
+    expect(onRetryFailed).toHaveBeenCalledTimes(1);
     session.dispose();
   });
 
-  it("marks the session completed on a manual stop", async () => {
-    const deps = makeDeps();
-    const session = new RecordingSession(deps, {});
-    await session.start({
-      flowId: "flow-1",
-      stepId: "step-1",
-      contractSnapshot: baseSnapshot
-    });
-    await session.onSegmentFinalized({
-      blob: new Blob(["data"], { type: "audio/webm" }),
-      mimeType: "audio/webm",
-      reason: "manual",
-      durationMs: 1000
-    });
-    expect(session.summary().state).toBe("completed");
-    expect(session.summary().segments).toHaveLength(1);
-    session.dispose();
-  });
+  it("honors the retry wall-clock cap", async () => {
+    vi.useFakeTimers();
+    let now = 0;
+    const startSegment = vi.fn(async () => ({ ok: false as const, error: new Error("denied") }));
+    const onRetryFailed = vi.fn();
+    const deps = makeDeps({ startSegment });
+    const session = new RecordingSession(deps, { onRetryFailed }, { now: () => now });
 
-  it("orders uploaded file ids by capture index, not upload completion", async () => {
-    const firstUpload = deferred<{ ok: true; fileId: string }>();
-    const secondUpload = deferred<{ ok: true; fileId: string }>();
-    const uploadSegment = vi
-      .fn<RecordingSessionDeps["uploadSegment"]>()
-      .mockReturnValueOnce(firstUpload.promise)
-      .mockReturnValueOnce(secondUpload.promise);
-    const deps = makeDeps({
-      uploadSegment
-    });
-    const session = new RecordingSession(deps, {});
-    await session.start({
-      flowId: "flow-1",
-      stepId: "step-1",
-      contractSnapshot: baseSnapshot
-    });
-    await session.onSegmentFinalized({
-      blob: new Blob(["a"], { type: "audio/webm" }),
-      mimeType: "audio/webm",
-      reason: "rotation",
-      durationMs: 1000
-    });
-    await session.onSegmentFinalized({
-      blob: new Blob(["b"], { type: "audio/webm" }),
-      mimeType: "audio/webm",
-      reason: "manual",
-      durationMs: 1000
-    });
+    session.beginRecordingExternal();
+    session.notifyHardFailure();
+    now = RETRY_WALL_CLOCK_CAP_MS + 1;
+    await vi.advanceTimersByTimeAsync(RETRY_BACKOFF_MS[0]);
 
-    secondUpload.resolve({ ok: true, fileId: "second-uploaded" });
-    await flushMicrotasks();
-    expect(session.uploadedFileIdsSortedBySegmentIndex()).toEqual(["second-uploaded"]);
-
-    firstUpload.resolve({ ok: true, fileId: "first-uploaded" });
-    await flushMicrotasks();
-    const sortedIds = session.uploadedFileIdsSortedBySegmentIndex();
-    expect(sortedIds).toEqual(["first-uploaded", "second-uploaded"]);
+    expect(startSegment).toHaveBeenCalledTimes(1);
+    expect(session.summary().state).toBe("paused-failed");
+    expect(onRetryFailed).toHaveBeenCalledTimes(1);
     session.dispose();
   });
 
   it("beginRecordingExternal cancels a queued retry timer when called from reconnecting", async () => {
     vi.useFakeTimers();
-    const startSegment = vi
-      .fn<RecordingSessionDeps["startSegment"]>()
-      .mockResolvedValueOnce({ ok: false, error: new Error("denied") })
-      .mockResolvedValue({ ok: true });
+    const startSegment = vi.fn(async () => ({ ok: true as const }));
     const deps = makeDeps({ startSegment });
     const session = new RecordingSession(deps, {});
 
-    session.beginRecordingExternal({
-      flowId: "flow-1",
-      stepId: "step-1",
-      contractSnapshot: baseSnapshot
-    });
+    session.beginRecordingExternal();
     expect(session.summary().state).toBe("recording");
 
     // Recorder reports a hard failure; session schedules its first retry.
@@ -248,13 +217,10 @@ describe("RecordingSession lifecycle", () => {
     // must take over: cancel the queued retry and resume recording in the
     // SAME session (sessionId must be preserved).
     const sessionIdBeforeRetake = session.summary().sessionId;
-    session.beginRecordingExternal({
-      flowId: "flow-1",
-      stepId: "step-1",
-      contractSnapshot: baseSnapshot
-    });
+    session.beginRecordingExternal();
     expect(session.summary().state).toBe("recording");
     expect(session.summary().sessionId).toBe(sessionIdBeforeRetake);
+    expect(session.summary().retryAttempt).toBe(0);
 
     // Fast-forward past every backoff window. The cancelled retry must NOT
     // call startSegment a second time — the bug we're regressing against
@@ -266,28 +232,22 @@ describe("RecordingSession lifecycle", () => {
     vi.useRealTimers();
   });
 
-  it("clears segments and transitions to discarded after discard", async () => {
-    const deleteSpy = vi.fn(async () => undefined);
-    const deps = makeDeps({ deleteUploadedSegment: deleteSpy });
+  it("dispose cancels pending rotation and retry work", async () => {
+    vi.useFakeTimers();
+    const startSegment = vi.fn(async () => ({ ok: true as const }));
+    const stopSegment = vi.fn();
+    const deps = makeDeps({ startSegment, stopSegment });
     const session = new RecordingSession(deps, {});
-    await session.start({
-      flowId: "flow-1",
-      stepId: "step-1",
-      contractSnapshot: baseSnapshot
-    });
-    await session.onSegmentFinalized({
-      blob: new Blob(["a"], { type: "audio/webm" }),
-      mimeType: "audio/webm",
-      reason: "manual",
-      durationMs: 1000
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-    await session.discard();
-    expect(session.summary().state).toBe("discarded");
-    expect(session.summary().segments).toEqual([]);
-    // Discard cleans up server-side mirror of every uploaded segment so
-    // the orphan janitor doesn't have to.
-    expect(deleteSpy).toHaveBeenCalled();
+
+    session.beginRecordingExternal();
+    session.notifyHardFailure();
+    session.dispose();
+    session.dispose();
+
+    await vi.advanceTimersByTimeAsync(RETRY_BACKOFF_MS[0]);
+    vi.advanceTimersByTime(SEGMENT_ROTATION_MS);
+
+    expect(startSegment).not.toHaveBeenCalled();
+    expect(stopSegment).not.toHaveBeenCalled();
   });
 });
