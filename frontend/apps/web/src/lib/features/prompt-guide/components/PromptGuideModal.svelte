@@ -296,7 +296,9 @@
             >{m.prompt_guide_current_prompt_label()}</span
           >
           <ChevronDown
-            class="text-muted size-4 shrink-0 transition-transform {contextOpen ? 'rotate-180' : ''}"
+            class="text-muted size-4 shrink-0 transition-transform {contextOpen
+              ? 'rotate-180'
+              : ''}"
             aria-hidden="true"
           />
         </button>
@@ -344,7 +346,9 @@
                   {turn.role === "assistant" ? m.prompt_guide_dialog_title() : m.you()}
                 </div>
                 {#if turn.role === "user"}
-                  <div class="text-default text-sm break-words whitespace-pre-wrap">{turn.text}</div>
+                  <div class="text-default text-sm break-words whitespace-pre-wrap">
+                    {turn.text}
+                  </div>
                 {:else if turn.isStreaming && turn.text.length === 0}
                   <div class="text-muted flex items-center gap-2 text-sm" role="status">
                     <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
@@ -358,7 +362,8 @@
                   <PromptGuideMarkdown source={turn.text} class="text-default" />
                   {#if turn.isStreaming}
                     <span class="sr-only">{m.prompt_guide_streaming_announcement()}</span>
-                    <span class="bg-primary ml-0.5 inline-block h-4 w-0.5 animate-pulse align-middle"
+                    <span
+                      class="bg-primary ml-0.5 inline-block h-4 w-0.5 animate-pulse align-middle"
                     ></span>
                   {/if}
                 {/if}

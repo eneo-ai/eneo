@@ -33,12 +33,14 @@ describe("extractFinalPrompt", () => {
   });
 
   test("returns the last fenced block when several are present", () => {
-    const reply = "```\nfirst draft\n```\n\nOn reflection, this is better:\n\n```\nfinal draft\n```";
+    const reply =
+      "```\nfirst draft\n```\n\nOn reflection, this is better:\n\n```\nfinal draft\n```";
     expect(extractFinalPrompt(reply)).toBe("final draft");
   });
 
   test("finds the block even after a list of suggestions", () => {
-    const reply = "I'd change:\n1. Be specific\n2. Add a tone\n\n```\nYou are concise and friendly.\n```";
+    const reply =
+      "I'd change:\n1. Be specific\n2. Add a tone\n\n```\nYou are concise and friendly.\n```";
     expect(extractFinalPrompt(reply)).toBe("You are concise and friendly.");
   });
 
