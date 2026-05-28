@@ -29,6 +29,7 @@
   import { m } from "$lib/paraglide/messages";
   import { tick, untrack } from "svelte";
   import { extractFinalPrompt } from "../extractFinalPrompt";
+  import { extractStructuredQuestion } from "../extractStructuredQuestion";
   import PromptGuideContextCard from "./PromptGuideContextCard.svelte";
   import PromptGuideConversation, { type Turn } from "./PromptGuideConversation.svelte";
   import PromptGuideFinalCard from "./PromptGuideFinalCard.svelte";
@@ -97,6 +98,32 @@
   });
   const finalPrompt = $derived(extractFinalPrompt(lastFinalAssistantText));
 
+  // The bottom textarea is no longer the default reply path — every card
+  // already carries a free-text input (the "Other" field on multi-choice
+  // cards, or the primary input on free-text intake cards). We keep it as
+  // a conditional fallback ONLY when the LLM goes off-script and finishes
+  // a turn without a usable card; otherwise it's hidden.
+  const latestAssistantTurn = $derived.by(() => {
+    for (let i = turns.length - 1; i >= 0; i--) {
+      if (turns[i].role === "assistant") return turns[i];
+    }
+    return null;
+  });
+  const needsFallbackInput = $derived.by(() => {
+    if (isStreaming) return false;
+    if (finalPrompt) return false;
+    if (!latestAssistantTurn || latestAssistantTurn.isStreaming) return false;
+    const segment = extractStructuredQuestion(latestAssistantTurn.text);
+    return segment.kind === "none" || segment.kind === "invalid";
+  });
+
+  // Focus the fallback input the moment it appears so the user can type
+  // immediately. The card paths handle their own focus internally.
+  $effect(() => {
+    if (!needsFallbackInput) return;
+    void tick().then(() => inputElement?.focus());
+  });
+
   function resetState() {
     if (activeAbortController) {
       activeAbortController.abort();
@@ -136,7 +163,10 @@
       if (isOpen && !wasOpen) {
         resetState();
         capturedPrompt = (targetPrompt ?? "").trim();
-        void tick().then(() => inputElement?.focus());
+        // Bits-ui's Dialog manages initial focus; each rendered card auto-
+        // focuses its first interactive control on mount. No manual focus
+        // call needed here.
+        //
         // Auto-start: send the current prompt for analysis. The priming
         // message isn't shown as a user bubble — the guide's reply is the
         // first visible turn; the prompt itself lives in the context card.
@@ -226,7 +256,8 @@
       if (activeAbortController === controller) {
         activeAbortController = null;
         isStreaming = false;
-        void tick().then(() => inputElement?.focus());
+        // Focus moves into the next card as it mounts (cards self-focus);
+        // the fallback input has its own dedicated effect when shown.
       }
     }
   }
@@ -294,11 +325,17 @@
       </div>
     {/if}
 
-    <PromptGuideInput
-      bind:value={inputText}
-      bind:ref={inputElement}
-      disabled={isStreaming}
-      onSubmit={(text) => void sendQuestion(text)}
-    />
+    {#if needsFallbackInput}
+      <!-- Fallback escape hatch: shown only when the latest assistant turn
+           finished without a usable question card AND no final-prompt
+           artifact is up. In the normal flow, all reply input happens
+           inside the cards themselves. -->
+      <PromptGuideInput
+        bind:value={inputText}
+        bind:ref={inputElement}
+        disabled={isStreaming}
+        onSubmit={(text) => void sendQuestion(text)}
+      />
+    {/if}
   </Dialog.Content>
 </Dialog.Root>

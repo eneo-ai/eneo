@@ -3171,6 +3171,8 @@
   "prompt_guide_retry": "Försök igen",
   "prompt_guide_question_other_label": "Annat (skriv eget svar)",
   "prompt_guide_question_other_placeholder": "Skriv ditt eget svar…",
+  "prompt_guide_question_free_answer_label": "Ditt svar",
+  "prompt_guide_question_free_answer_placeholder": "Skriv ditt svar här…",
   "prompt_guide_question_send": "Skicka",
   "prompt_guide_question_thinking": "Förbereder en fråga…",
   "prompt_guide_apply_overwrite_warning": "När du använder förslaget ersätts dina osparade ändringar i prompten. Vill du fortsätta?",

@@ -3171,6 +3171,8 @@
   "prompt_guide_retry": "Try again",
   "prompt_guide_question_other_label": "Other (write your own)",
   "prompt_guide_question_other_placeholder": "Type your own answer…",
+  "prompt_guide_question_free_answer_label": "Your answer",
+  "prompt_guide_question_free_answer_placeholder": "Type your answer here…",
   "prompt_guide_question_send": "Send",
   "prompt_guide_question_thinking": "Preparing a question…",
   "prompt_guide_apply_overwrite_warning": "Applying will replace your unsaved changes to the prompt. Continue?",

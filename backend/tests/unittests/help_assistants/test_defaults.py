@@ -80,6 +80,20 @@ def test_prompt_guide_prompt_teaches_eneo_question_envelope():
     assert "multiSelect" in prompt
 
 
+def test_prompt_guide_prompt_enforces_intake_first_and_free_text_mode():
+    # The first question must be a free-text intake — that's the domain
+    # anchor the LLM uses to tailor everything that follows. If this drift,
+    # the modal will open with a generic multi-choice card instead and the
+    # cascading domain-tuned questions stop working. Lock the two clauses
+    # the contract depends on: an "intake" mention and the empty-options
+    # free-text shape.
+    prompt = PROMPT_GUIDE_DEFAULTS.prompt_text
+
+    assert "intake" in prompt.lower()
+    assert '"options": []' in prompt or "options: []" in prompt
+    assert "Free-text" in prompt or "free-text" in prompt
+
+
 def test_seed_migration_prompt_text_matches_runtime_defaults():
     migration = _load_seed_migration()
 

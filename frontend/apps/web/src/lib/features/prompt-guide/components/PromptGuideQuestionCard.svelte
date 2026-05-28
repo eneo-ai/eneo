@@ -27,6 +27,7 @@
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { m } from "$lib/paraglide/messages";
   import type { PromptGuideQuestion } from "../extractStructuredQuestion";
 
@@ -56,12 +57,28 @@
   $effect(() => {
     void tick().then(() =>
       untrack(() => {
+        // Multi-choice cards focus the first radio / checkbox; free-text
+        // intake cards focus the textarea. The `textarea` selector handles
+        // the latter — for multi-choice cards a radio/checkbox always
+        // appears in the DOM before the "Other" input, so the selector's
+        // left-to-right order resolves correctly.
         cardElement
-          ?.querySelector<HTMLElement>("[data-slot=radio-group-item], [data-slot=checkbox]")
+          ?.querySelector<HTMLElement>(
+            "[data-slot=radio-group-item], [data-slot=checkbox], textarea"
+          )
           ?.focus();
       })
     );
   });
+
+  // Enter sends, Shift+Enter inserts a newline — same convention as the
+  // rest of the app. Used by the free-text intake textarea.
+  function handleTextareaKeydown(event: KeyboardEvent) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      submit();
+    }
+  }
 
   // Single-select: typing in Other clears the radio, picking a radio clears
   // Other. Multi-select keeps both visible so the user can layer an "Also: …"
@@ -140,80 +157,106 @@
     {question.question}
   </div>
 
-  {#if question.multiSelect}
-    <fieldset
-      class="flex flex-col gap-2"
-      disabled={submitted || disabled}
-      aria-labelledby={titleId}
-    >
-      <legend class="sr-only">{question.question}</legend>
-      {#each question.options as option, index (index)}
-        {@const id = `${cardId}-opt-${index}`}
-        <Label
-          for={id}
-          class="hover:bg-hover-dimmer flex cursor-pointer items-start gap-3 rounded-md p-2"
-        >
-          <Checkbox
-            {id}
-            bind:checked={checkedFlags[index]}
-            disabled={submitted || disabled}
-            class="mt-0.5"
-          />
-          <span class="flex-1 text-sm">
-            <span class="text-default block font-medium">{option.label}</span>
-            {#if option.description}
-              <span class="text-muted block text-xs">{option.description}</span>
-            {/if}
-          </span>
-        </Label>
-      {/each}
-    </fieldset>
-  {:else}
-    <RadioGroup.Root
-      bind:value={radioValue}
-      disabled={submitted || disabled}
-      aria-labelledby={titleId}
-      class="gap-2"
-    >
-      {#each question.options as option, index (index)}
-        {@const id = `${cardId}-opt-${index}`}
-        <Label
-          for={id}
-          class="hover:bg-hover-dimmer flex cursor-pointer items-start gap-3 rounded-md p-2"
-        >
-          <RadioGroup.Item
-            value={String(index)}
-            {id}
-            disabled={submitted || disabled}
-            class="mt-0.5"
-          />
-          <span class="flex-1 text-sm">
-            <span class="text-default block font-medium">{option.label}</span>
-            {#if option.description}
-              <span class="text-muted block text-xs">{option.description}</span>
-            {/if}
-          </span>
-        </Label>
-      {/each}
-    </RadioGroup.Root>
+  {#if question.options.length > 0}
+    {#if question.multiSelect}
+      <fieldset
+        class="flex flex-col gap-2"
+        disabled={submitted || disabled}
+        aria-labelledby={titleId}
+      >
+        <legend class="sr-only">{question.question}</legend>
+        {#each question.options as option, index (index)}
+          {@const id = `${cardId}-opt-${index}`}
+          <Label
+            for={id}
+            class="hover:bg-hover-dimmer flex cursor-pointer items-start gap-3 rounded-md p-2"
+          >
+            <Checkbox
+              {id}
+              bind:checked={checkedFlags[index]}
+              disabled={submitted || disabled}
+              class="mt-0.5"
+            />
+            <span class="flex-1 text-sm">
+              <span class="text-default block font-medium">{option.label}</span>
+              {#if option.description}
+                <span class="text-muted block text-xs">{option.description}</span>
+              {/if}
+            </span>
+          </Label>
+        {/each}
+      </fieldset>
+    {:else}
+      <RadioGroup.Root
+        bind:value={radioValue}
+        disabled={submitted || disabled}
+        aria-labelledby={titleId}
+        class="gap-2"
+      >
+        {#each question.options as option, index (index)}
+          {@const id = `${cardId}-opt-${index}`}
+          <Label
+            for={id}
+            class="hover:bg-hover-dimmer flex cursor-pointer items-start gap-3 rounded-md p-2"
+          >
+            <RadioGroup.Item
+              value={String(index)}
+              {id}
+              disabled={submitted || disabled}
+              class="mt-0.5"
+            />
+            <span class="flex-1 text-sm">
+              <span class="text-default block font-medium">{option.label}</span>
+              {#if option.description}
+                <span class="text-muted block text-xs">{option.description}</span>
+              {/if}
+            </span>
+          </Label>
+        {/each}
+      </RadioGroup.Root>
+    {/if}
   {/if}
 
-  <div class="mt-3">
-    <Label for={otherInputId} class="text-muted mb-1 block text-xs">
-      {m.prompt_guide_question_other_label()}
+  {#if question.options.length === 0}
+    <!-- Free-text intake mode: the input is the primary affordance, not an
+         "Other" escape hatch — render a generous textarea, not an inline
+         input. The system prompt requires the first interview question to
+         take this shape. -->
+    <Label for={otherInputId} class="text-default mb-2 block text-sm font-medium">
+      {m.prompt_guide_question_free_answer_label()}
     </Label>
-    <div class="flex items-stretch gap-2">
-      <input
+    <div class="flex flex-col gap-2">
+      <Textarea
         id={otherInputId}
-        type="text"
         bind:value={otherText}
-        placeholder={m.prompt_guide_question_other_placeholder()}
+        onkeydown={handleTextareaKeydown}
+        placeholder={m.prompt_guide_question_free_answer_placeholder()}
         disabled={submitted || disabled}
-        class="border-default bg-primary ring-default flex-1 rounded-md border px-3 py-1.5 text-sm shadow-sm focus-within:ring-2 hover:ring-2 focus-visible:ring-2 disabled:opacity-60"
+        rows={3}
+        class="resize-none"
       />
-      <Button size="sm" disabled={!canSubmit} onclick={submit}>
+      <Button size="sm" disabled={!canSubmit} onclick={submit} class="self-end">
         {m.prompt_guide_question_send()}
       </Button>
     </div>
-  </div>
+  {:else}
+    <div class="mt-3">
+      <Label for={otherInputId} class="text-muted mb-1 block text-xs">
+        {m.prompt_guide_question_other_label()}
+      </Label>
+      <div class="flex items-stretch gap-2">
+        <input
+          id={otherInputId}
+          type="text"
+          bind:value={otherText}
+          placeholder={m.prompt_guide_question_other_placeholder()}
+          disabled={submitted || disabled}
+          class="border-default bg-primary ring-default flex-1 rounded-md border px-3 py-1.5 text-sm shadow-sm focus-within:ring-2 hover:ring-2 focus-visible:ring-2 disabled:opacity-60"
+        />
+        <Button size="sm" disabled={!canSubmit} onclick={submit}>
+          {m.prompt_guide_question_send()}
+        </Button>
+      </div>
+    </div>
+  {/if}
 </div>

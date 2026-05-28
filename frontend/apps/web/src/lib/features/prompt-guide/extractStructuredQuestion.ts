@@ -51,12 +51,19 @@ const QUESTION_LANG = "eneo-question";
 // emit a label of 10MB; the rule of thumb is "if it doesn't fit comfortably
 // on a radio button, refuse to render". Sized to be generous for legitimate
 // content and tight for nonsense.
+//
+// Options length rules:
+// - 0 options is valid — that's the free-text intake mode (the card renders
+//   only a single text field). The system prompt requires the first question
+//   of every interview to be free-text.
+// - 1 option is invalid — a single "choice" is not a choice.
+// - 2..6 options is valid — multi-choice mode.
 const LIMITS = {
   header: 100,
   question: 1000,
   label: 200,
   description: 500,
-  minOptions: 2,
+  minOptionsWhenChoice: 2,
   maxOptions: 6
 } as const;
 
@@ -164,13 +171,11 @@ function parseAndValidate(body: string): PromptGuideQuestion | null {
   if (!isBoundedString(r.header, LIMITS.header)) return null;
   if (!isBoundedString(r.question, LIMITS.question)) return null;
   if (typeof r.multiSelect !== "boolean") return null;
-  if (
-    !Array.isArray(r.options) ||
-    r.options.length < LIMITS.minOptions ||
-    r.options.length > LIMITS.maxOptions
-  ) {
-    return null;
-  }
+  if (!Array.isArray(r.options)) return null;
+  // 0 options = free-text intake mode; 2..6 = multi-choice; anything else
+  // (notably 1) is malformed.
+  if (r.options.length === 1 || r.options.length > LIMITS.maxOptions) return null;
+  if (r.options.length > 0 && r.options.length < LIMITS.minOptionsWhenChoice) return null;
 
   const options: PromptGuideOption[] = [];
   for (const opt of r.options) {

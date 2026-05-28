@@ -111,6 +111,16 @@ describe("extractStructuredQuestion — parsed (valid envelope)", () => {
     }
   });
 
+  test("parses a free-text intake question (options: [])", () => {
+    const envelope = makeValidEnvelope({ options: [] });
+    const result = extractStructuredQuestion(envelope);
+    expect(result.kind).toBe("parsed");
+    if (result.kind === "parsed") {
+      expect(result.question.options).toEqual([]);
+      expect(result.question.header).toBe("Audience");
+    }
+  });
+
   test("when two complete blocks appear in one turn, only the LAST is returned", () => {
     // The system prompt forbids this but models occasionally over-share.
     // The user is being asked the latest question; earlier ones are stale.
@@ -164,9 +174,13 @@ describe("extractStructuredQuestion — invalid (malformed envelope)", () => {
     );
   });
 
-  test("rejects fewer than 2 or more than 6 options", () => {
+  test("rejects exactly 1 option (free-text intake uses 0, multi-choice uses 2+)", () => {
     const base = { header: "h", question: "q", multiSelect: false };
     expectInvalid(JSON.stringify({ ...base, options: [{ label: "only one" }] }));
+  });
+
+  test("rejects more than 6 options", () => {
+    const base = { header: "h", question: "q", multiSelect: false };
     expectInvalid(
       JSON.stringify({
         ...base,
