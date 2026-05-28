@@ -58,6 +58,9 @@ def _get_span_context() -> dict[str, str]:
                 "trace_flags": format(int(ctx.trace_flags), "02x"),
             }
     except Exception:
+        # Runs inside the logging formatter — any uncaught exception here
+        # would propagate into logging.Handler.handleError and risk losing
+        # log records. Trace correlation is best-effort; absence is fine.
         pass
     return {}
 

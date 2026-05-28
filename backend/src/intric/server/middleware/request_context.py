@@ -25,6 +25,8 @@ def _current_trace_id() -> str | None:
         if ctx.is_valid:
             return format(ctx.trace_id, "032x")
     except Exception:
+        # Trace correlation must never break request handling — if the OTEL
+        # SDK is in an unexpected state, fall back to no trace_id.
         pass
     return None
 

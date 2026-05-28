@@ -27,6 +27,8 @@ def current_trace_id() -> str | None:
         if ctx.is_valid:
             return format(ctx.trace_id, "032x")
     except Exception:
+        # Trace-header injection runs on the response hot path; absence of a
+        # trace_id is fine, but raising here would break the response.
         pass
     return None
 
