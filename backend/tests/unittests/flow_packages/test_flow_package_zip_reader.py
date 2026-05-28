@@ -68,6 +68,18 @@ def test_manifest_only_change_changes_content_checksum_not_spec_hash() -> None:
     assert base.content_checksum != manifest_changed.content_checksum
 
 
+def test_document_body_writer_refs_do_not_change_package_spec_hash() -> None:
+    base = reader.read_flow_package(_package_bytes(spec=_flow_spec()))
+    with_refs = reader.read_flow_package(
+        _package_bytes(
+            spec=_flow_spec(document_body_writer_step_refs=("extract",)),
+        )
+    )
+
+    assert with_refs.spec.document_body_writer_step_refs == ("extract",)
+    assert base.spec_hash == with_refs.spec_hash
+
+
 def test_draft_change_changes_spec_hash_and_content_checksum() -> None:
     base = reader.read_flow_package(_package_bytes(spec=_flow_spec()))
     draft_changed = reader.read_flow_package(
@@ -362,7 +374,11 @@ def _package_docs(
     }
 
 
-def _flow_spec(flow_name: str = "Demo") -> FlowDraftSpecCore:
+def _flow_spec(
+    flow_name: str = "Demo",
+    *,
+    document_body_writer_step_refs: tuple[str, ...] | None = None,
+) -> FlowDraftSpecCore:
     return FlowDraftSpecCore(
         flow_name=flow_name,
         steps=[
@@ -376,6 +392,7 @@ def _flow_spec(flow_name: str = "Demo") -> FlowDraftSpecCore:
                 input_source=InputSource.FLOW_INPUT,
             )
         ],
+        document_body_writer_step_refs=document_body_writer_step_refs,
     )
 
 

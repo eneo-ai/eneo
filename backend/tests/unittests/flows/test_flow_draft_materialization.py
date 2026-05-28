@@ -211,3 +211,21 @@ def test_shared_compile_matches_ai_builder_compile_for_generic_changeset_shape()
     assert shared.compiled_steps[0].change_kind is FlowDraftStepChangeKind.MODIFIED
     assert shared.compiled_steps[1].change_kind is FlowDraftStepChangeKind.ADDED
     assert len(shared.assistants_to_delete) == 1
+
+
+def test_shared_compile_ignores_document_body_writer_refs() -> None:
+    steps = [
+        _step_spec(plan_step_ref="step_a"),
+        _step_spec(plan_step_ref="step_b", input_source=InputSource.PREVIOUS_STEP),
+    ]
+    base = FlowDraftSpecCore(flow_name="Updated flow", steps=steps)
+    with_refs = FlowDraftSpecCore(
+        flow_name="Updated flow",
+        steps=steps,
+        document_body_writer_step_refs=("step_b",),
+    )
+
+    assert compile_flow_draft_changeset(
+        with_refs,
+        current_flow=None,
+    ) == compile_flow_draft_changeset(base, current_flow=None)

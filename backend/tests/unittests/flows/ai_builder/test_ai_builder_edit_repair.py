@@ -211,6 +211,24 @@ class TestValidateRepairInvariance:
         repaired = _spec(description="New")
         assert validate_repair_invariance(original, repaired) is True
 
+    def test_accepts_when_only_description_changed_with_writer_refs(self) -> None:
+        original = FlowDraftSpecCore(
+            flow_name="Test",
+            flow_description="Old",
+            steps=[
+                StepSpec(
+                    plan_step_ref="step_a",
+                    name="Step",
+                    assistant_spec=AssistantSpec(instructions="Do."),
+                    input_source=InputSource.FLOW_INPUT,
+                )
+            ],
+            document_body_writer_step_refs=("step_a",),
+        )
+        repaired = original.model_copy(update={"flow_description": "New"})
+
+        assert validate_repair_invariance(original, repaired) is True
+
     def test_rejects_when_steps_changed(self) -> None:
         original = _spec(description="Old")
         repaired = FlowDraftSpecCore(

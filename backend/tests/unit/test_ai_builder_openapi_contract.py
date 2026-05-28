@@ -190,6 +190,17 @@ def test_openapi_plan_response_and_plan_event_share_edit_result_schema(
     }.intersection(plan_event["properties"])
 
 
+def test_openapi_flow_draft_spec_exposes_writer_refs_not_step_spec(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    flow_spec = schemas["FlowDraftSpecCore"]
+    step_spec = schemas["StepSpec"]
+
+    assert "document_body_writer_step_refs" in flow_spec["properties"]
+    assert "document_body_writer_step_refs" not in step_spec["properties"]
+
+
 def test_openapi_ai_builder_sse_plan_event_payload_is_typed(openapi_spec: dict) -> None:
     schema = openapi_spec["components"]["schemas"]["AIBuilderPlanEvent"]
 

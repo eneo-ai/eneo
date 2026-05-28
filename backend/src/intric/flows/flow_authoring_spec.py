@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Self
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -208,10 +209,37 @@ class FlowDraftSpecCore(BaseModel):
     flow_description: str = ""
     steps: list[StepSpec]
     form_fields: list[FormFieldSpec] | None = None
+    document_body_writer_step_refs: tuple[str, ...] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+
+    @model_validator(mode="after")
+    def normalize_document_body_writer_step_refs(self) -> Self:
+        refs = self.document_body_writer_step_refs
+        if refs is None:
+            return self
+
+        valid_refs = {step.plan_step_ref for step in self.steps}
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for raw_ref in refs:
+            ref = raw_ref.strip()
+            if not ref or ref in seen or ref not in valid_refs:
+                continue
+            normalized.append(ref)
+            seen.add(ref)
+
+        self.document_body_writer_step_refs = tuple(normalized) or None
+        return self
 
     def spec_hash(self) -> str:
+        payload = self.model_dump(
+            mode="json",
+            exclude={"document_body_writer_step_refs"},
+        )
         serialized = json.dumps(
-            self.model_dump(mode="json"),
+            payload,
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,

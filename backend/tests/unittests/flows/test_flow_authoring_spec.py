@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import inspect
+
 import pytest
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -82,6 +84,86 @@ def test_flow_draft_spec_hash_is_key_order_independent() -> None:
     assert first.spec_hash() == second.spec_hash()
 
 
+def test_pydantic_field_supports_exclude_if_for_absent_spec_metadata() -> None:
+    assert "exclude_if" in inspect.signature(Field).parameters, (
+        "exclude_if removed from Pydantic Field; switch "
+        "document_body_writer_step_refs to a @field_serializer fallback."
+    )
+
+
+def test_flow_draft_spec_omits_absent_document_body_writer_refs() -> None:
+    spec = FlowDraftSpecCore(flow_name="Demo", steps=[_step()])
+
+    dumped = spec.model_dump(mode="json")
+    restored = FlowDraftSpecCore.model_validate(dumped)
+
+    assert "document_body_writer_step_refs" not in dumped
+    assert restored.model_dump(mode="json") == dumped
+
+
+def test_flow_draft_spec_preserves_document_body_writer_refs() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Demo",
+        steps=[_step(plan_step_ref="step_a"), _step(plan_step_ref="step_b")],
+        document_body_writer_step_refs=("step_b",),
+    )
+
+    assert spec.document_body_writer_step_refs == ("step_b",)
+    assert spec.model_dump(mode="json")["document_body_writer_step_refs"] == [
+        "step_b"
+    ]
+
+
+def test_document_body_writer_refs_do_not_change_spec_hash() -> None:
+    steps = [_step(plan_step_ref="step_a"), _step(plan_step_ref="step_b")]
+    base = FlowDraftSpecCore(flow_name="Demo", steps=steps)
+    with_refs = FlowDraftSpecCore(
+        flow_name="Demo",
+        steps=steps,
+        document_body_writer_step_refs=("step_b",),
+    )
+
+    assert with_refs.spec_hash() == base.spec_hash()
+
+
+def test_document_body_writer_refs_soft_prune_stale_refs_in_order() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Demo",
+        steps=[_step(plan_step_ref="step_a"), _step(plan_step_ref="step_c")],
+        document_body_writer_step_refs=("step_a", "step_b", "step_c"),
+    )
+
+    assert spec.document_body_writer_step_refs == ("step_a", "step_c")
+
+
+def test_document_body_writer_refs_prune_to_absent_field() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Demo",
+        steps=[_step(plan_step_ref="step_b")],
+        document_body_writer_step_refs=("step_a",),
+    )
+
+    assert spec.document_body_writer_step_refs is None
+    assert "document_body_writer_step_refs" not in spec.model_dump(mode="json")
+
+
+def test_stale_document_body_writer_refs_are_dropped_on_rehydrate() -> None:
+    payload = FlowDraftSpecCore(
+        flow_name="Demo",
+        steps=[_step(plan_step_ref="step_a"), _step(plan_step_ref="step_c")],
+        document_body_writer_step_refs=("step_a", "step_c"),
+    ).model_dump(mode="json")
+    payload["document_body_writer_step_refs"] = ["step_a", "step_b", "step_c"]
+
+    restored = FlowDraftSpecCore.model_validate(payload)
+
+    assert restored.document_body_writer_step_refs == ("step_a", "step_c")
+    assert restored.model_dump(mode="json")["document_body_writer_step_refs"] == [
+        "step_a",
+        "step_c",
+    ]
+
+
 def test_step_spec_strips_completion_model_ref_for_transcribe_only() -> None:
     step = _step(output_mode=OutputMode.TRANSCRIBE_ONLY, model_ref="model.default")
 
@@ -102,11 +184,12 @@ def test_step_spec_keeps_completion_model_ref_when_runtime_uses_completion_model
 def _step(
     input_bindings: JsonObject | None = None,
     *,
+    plan_step_ref: str = "collect_input",
     output_mode: OutputMode = OutputMode.PASS_THROUGH,
     model_ref: str | None = None,
 ) -> StepSpec:
     return StepSpec(
-        plan_step_ref="collect_input",
+        plan_step_ref=plan_step_ref,
         name="Collect input",
         assistant_spec=AssistantSpec(
             instructions="Use the provided input.",

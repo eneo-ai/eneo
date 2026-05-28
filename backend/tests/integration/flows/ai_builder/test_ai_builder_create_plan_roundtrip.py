@@ -108,6 +108,60 @@ async def test_create_plan_roundtrips_spec_json_and_envelope_metadata(
 
 
 @pytest.mark.asyncio
+async def test_create_plan_roundtrips_document_body_writer_refs(
+    db_container,
+) -> None:
+    space_id = await _create_space(
+        db_container=db_container,
+        space_name="AI Builder document body writer ref roundtrip",
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Document writer refs",
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                name="Extract",
+                assistant_spec=AssistantSpec(instructions="Extract facts."),
+                input_source=InputSource.FLOW_INPUT,
+            ),
+            StepSpec(
+                plan_step_ref="step_b",
+                name="Write report body",
+                assistant_spec=AssistantSpec(instructions="Write the report."),
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ],
+        document_body_writer_step_refs=("step_b",),
+    )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=space_id,
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        plan = await repo.create_plan(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+            spec=spec,
+            envelope=PlannerPlanEnvelope(spec=spec),
+        )
+
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        user = container.user()
+        fetched = await repo.get_plan(plan_id=plan.id, tenant_id=user.tenant_id)
+
+    assert fetched.spec.document_body_writer_step_refs == ("step_b",)
+    assert fetched.spec.model_dump(mode="json") == spec.model_dump(mode="json")
+    assert fetched.spec_hash == fetched.spec.spec_hash()
+
+
+@pytest.mark.asyncio
 async def test_create_plan_roundtrips_resource_bindings_json(db_container) -> None:
     space_id = await _create_space(
         db_container=db_container,
