@@ -29,12 +29,13 @@ Each release publishes these files:
 
 | File | Purpose |
 | --- | --- |
-| `eneo-backend-<release-tag>-linux-amd64.cyclonedx.json` | Backend SBOM in CycloneDX JSON |
-| `eneo-backend-<release-tag>-linux-amd64.spdx.json` | Backend SBOM in SPDX JSON |
-| `eneo-backend-<release-tag>-linux-amd64.table.txt` | Backend package list for human review |
-| `eneo-frontend-<release-tag>-linux-amd64.cyclonedx.json` | Frontend SBOM in CycloneDX JSON |
-| `eneo-frontend-<release-tag>-linux-amd64.spdx.json` | Frontend SBOM in SPDX JSON |
-| `eneo-frontend-<release-tag>-linux-amd64.table.txt` | Frontend package list for human review |
+| `eneo-backend-<release-tag>-linux-amd64.cyclonedx.json` | Backend image SBOM in CycloneDX JSON |
+| `eneo-backend-<release-tag>-linux-amd64.spdx.json` | Backend image SBOM in SPDX JSON |
+| `eneo-backend-<release-tag>-linux-amd64.table.txt` | Backend image package list for human review |
+| `eneo-backend-python-runtime-<release-tag>-linux-amd64.cyclonedx.json` | Backend Python runtime SBOM in CycloneDX JSON |
+| `eneo-frontend-<release-tag>-linux-amd64.cyclonedx.json` | Frontend image SBOM in CycloneDX JSON |
+| `eneo-frontend-<release-tag>-linux-amd64.spdx.json` | Frontend image SBOM in SPDX JSON |
+| `eneo-frontend-<release-tag>-linux-amd64.table.txt` | Frontend image package list for human review |
 | `IMAGE-DIGESTS.txt` | Exact image tags and digests that were scanned |
 | `SBOM-SHA256SUMS.txt` | SHA-256 checksums for the SBOM bundle |
 
@@ -47,6 +48,11 @@ The SBOMs describe packages Syft finds inside the released container images.
 For the backend image, this usually includes Debian packages, Python packages,
 and binaries. For the frontend image, this usually includes Debian packages,
 npm packages, and binaries.
+
+The backend Python runtime SBOM is narrower. It is generated from the Python
+environment installed at `/app/.venv` inside the released backend image. It is
+useful when you specifically want the Python runtime dependency inventory, but
+it does not replace the full backend image SBOM.
 
 The SBOMs are generated from immutable image digest references, not only from
 tags. `IMAGE-DIGESTS.txt` records the digest references used during the scan.
@@ -67,9 +73,11 @@ GitHub-managed release asset storage and the image digests recorded in
 
 1. Open the GitHub Release page for the version you use.
 2. Download the backend and frontend `.table.txt` files for a quick review.
-3. Download CycloneDX or SPDX files for your security tooling.
-4. Check `IMAGE-DIGESTS.txt` if you need the exact image digests scanned.
-5. Check `SBOM-SHA256SUMS.txt` if you need file checksums for the SBOM bundle.
+3. Download CycloneDX or SPDX image SBOMs for your security tooling.
+4. Download the backend Python runtime SBOM if you only need the Python
+   dependency inventory for the backend runtime environment.
+5. Check `IMAGE-DIGESTS.txt` if you need the exact image digests scanned.
+6. Check `SBOM-SHA256SUMS.txt` if you need file checksums for the SBOM bundle.
 
 To compare two releases, compare the SBOM files from both release pages. Package
 additions, removals, and version changes show what changed between the images.
