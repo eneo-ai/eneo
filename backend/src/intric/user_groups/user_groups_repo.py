@@ -23,7 +23,9 @@ from intric.user_groups.user_group import (
     UserGroupUpdate,
 )
 
-_NOT_DELETED = sa.or_(UserGroups.state.is_(None), UserGroups.state != UserGroupState.DELETED)
+_NOT_DELETED = sa.or_(
+    UserGroups.state.is_(None), UserGroups.state != UserGroupState.DELETED
+)
 
 
 class UserGroupsRepository:
