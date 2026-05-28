@@ -5,9 +5,7 @@
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { Markdown } from "@intric/ui";
   import Message from "./Message.svelte";
-  import ConversationAttachments from "./ConversationAttachments.svelte";
-  import ConversationInput from "./ConversationInput.svelte";
-  import ContextUsageBar from "./ContextUsageBar.svelte";
+  import ChatComposer from "./ChatComposer.svelte";
   import { fade } from "svelte/transition";
   import { browser } from "$app/environment";
   import { Tooltip } from "@intric/ui";
@@ -122,11 +120,7 @@
         </Tooltip>
       </div>
     {/if}
-    <ConversationAttachments></ConversationAttachments>
-    <div class="w-[100%] max-w-[74ch] md:w-full">
-      <ContextUsageBar {onNewConversation}></ContextUsageBar>
-    </div>
-    <ConversationInput {scrollToBottom} {onNewConversation}></ConversationInput>
+    <ChatComposer {scrollToBottom} {onNewConversation}></ChatComposer>
   </div>
 </div>
 {#if isDragging}
