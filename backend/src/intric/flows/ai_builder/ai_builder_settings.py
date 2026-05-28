@@ -1,21 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from intric.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
+from intric.flows.flow_ai_builder_budget_settings import (
+    extract_ai_builder_budget_settings,
+    parse_ai_builder_budget_token,
+)
 from intric.main.config import get_settings
-
-_MIN_TOKENS = 1
-_MAX_TOKENS = 10_000_000
-_AI_BUILDER_BUDGET_FIELDS = {
-    "conversation_safety_buffer_tokens",
-    "minimum_conversation_budget_tokens",
-    "unknown_model_context_window_tokens",
-}
 
 
 @dataclass(frozen=True)
@@ -38,68 +34,20 @@ def _default_policy(defaults: Any | None = None) -> AIBuilderBudgetPolicy:
     )
 
 
-def _extract_ai_builder_settings(
-    tenant_flow_settings: dict[str, Any] | None,
-) -> dict[str, Any]:
-    if not isinstance(tenant_flow_settings, dict):
-        return {}
-
-    ai_builder = tenant_flow_settings.get("ai_builder")
-    if not isinstance(ai_builder, dict):
-        return {}
-
-    return dict(cast(dict[str, Any], ai_builder))
-
-
 def _parse_token_int(
     value: Any, field_name: str, *, allow_none: bool = False
 ) -> int | None:
-    if value is None and allow_none:
-        return None
-    if not isinstance(value, int) or isinstance(value, bool):
+    try:
+        return parse_ai_builder_budget_token(
+            value,
+            field_name,
+            allow_none=allow_none,
+        )
+    except ValueError as error:
         raise AIBuilderBadRequestException(
-            f"{field_name} must be an integer.",
+            str(error),
             code=AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS,
-        )
-    if value < _MIN_TOKENS or value > _MAX_TOKENS:
-        raise AIBuilderBadRequestException(
-            f"{field_name} must be between {_MIN_TOKENS} and {_MAX_TOKENS}.",
-            code=AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS,
-        )
-    return value
-
-
-def validate_ai_builder_budget_settings_object(
-    value: Any,
-) -> dict[str, Any]:
-    if value is None:
-        return {}
-    if not isinstance(value, dict):
-        raise ValueError("flow_settings.ai_builder must be an object")
-
-    value_dict = cast(dict[str, Any], value)
-    unknown_fields = set(value_dict) - _AI_BUILDER_BUDGET_FIELDS
-    if unknown_fields:
-        unknown = ", ".join(sorted(unknown_fields))
-        raise ValueError(f"flow_settings.ai_builder contains unknown fields: {unknown}")
-
-    validated: dict[str, Any] = {}
-    for field_name in (
-        "conversation_safety_buffer_tokens",
-        "minimum_conversation_budget_tokens",
-    ):
-        if field_name in value_dict:
-            validated[field_name] = _parse_token_int(
-                value_dict[field_name],
-                f"flow_settings.ai_builder.{field_name}",
-            )
-    if "unknown_model_context_window_tokens" in value_dict:
-        validated["unknown_model_context_window_tokens"] = _parse_token_int(
-            value_dict["unknown_model_context_window_tokens"],
-            "flow_settings.ai_builder.unknown_model_context_window_tokens",
-            allow_none=True,
-        )
-    return validated
+        ) from error
 
 
 def resolve_ai_builder_budget_policy(
@@ -108,7 +56,7 @@ def resolve_ai_builder_budget_policy(
     defaults: Any | None = None,
 ) -> AIBuilderBudgetPolicy:
     resolved_defaults = _default_policy(defaults)
-    raw = _extract_ai_builder_settings(tenant_flow_settings)
+    raw = extract_ai_builder_budget_settings(tenant_flow_settings)
 
     safety_buffer = resolved_defaults.conversation_safety_buffer_tokens
     if "conversation_safety_buffer_tokens" in raw:
@@ -154,7 +102,7 @@ def apply_ai_builder_budget_policy_patch(
     result = (
         dict(current_flow_settings) if isinstance(current_flow_settings, dict) else {}
     )
-    current = _extract_ai_builder_settings(result)
+    current = extract_ai_builder_budget_settings(result)
     next_settings: dict[str, Any] = dict(current)
 
     if conversation_safety_buffer_tokens is not None:

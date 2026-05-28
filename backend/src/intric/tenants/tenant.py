@@ -298,7 +298,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
 
         ai_builder = v.get("ai_builder")
         if ai_builder is not None:
-            from intric.flows.ai_builder.ai_builder_settings import (
+            from intric.flows.flow_ai_builder_budget_settings import (
                 validate_ai_builder_budget_settings_object,
             )
 
