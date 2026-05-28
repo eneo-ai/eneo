@@ -108,6 +108,39 @@ _AUDIO_REFERENCE_PREFIXES: tuple[str, ...] = (
     "intervju",
     "interview",
 )
+_STRONG_AUDIO_REFERENCE_PREFIXES: tuple[str, ...] = (
+    "audio",
+    "ljud",
+    "ljudfil",
+    "inspel",
+    "recording",
+    "recorded",
+    "mötesinspel",
+    "motesinspel",
+)
+_EVENT_AUDIO_REFERENCE_PREFIXES: tuple[str, ...] = (
+    "samtal",
+    "discussion",
+    "medarbetarsamtal",
+    "möte",
+    "mote",
+    "meeting",
+    "intervju",
+    "interview",
+    "call",
+    "conversation",
+)
+_RECORDING_ACTION_PREFIXES: tuple[str, ...] = (
+    "spela",
+    "spel",
+    "record",
+)
+_RECORDING_ACTION_PHRASES: tuple[str, ...] = (
+    "spela in",
+    "spelar in",
+    "record",
+    "recording",
+)
 
 _RUNTIME_FILE_ACTION_PREFIXES: tuple[str, ...] = (
     "uppladd",
@@ -524,11 +557,18 @@ def _audio_runtime_input_requested(text: str) -> bool:
 
 
 def _mentions_runtime_audio_input(text: str) -> bool:
-    return _reference_has_nearby_runtime_action(
+    if _reference_has_nearby_runtime_action(
         text,
-        reference_prefixes=_AUDIO_REFERENCE_PREFIXES,
+        reference_prefixes=_STRONG_AUDIO_REFERENCE_PREFIXES,
         action_prefixes=_RUNTIME_FILE_ACTION_PREFIXES,
         action_phrases=_RUNTIME_FILE_ACTION_PHRASES,
+    ):
+        return True
+    return _reference_has_nearby_runtime_action(
+        text,
+        reference_prefixes=_EVENT_AUDIO_REFERENCE_PREFIXES,
+        action_prefixes=_RECORDING_ACTION_PREFIXES,
+        action_phrases=_RECORDING_ACTION_PHRASES,
     )
 
 

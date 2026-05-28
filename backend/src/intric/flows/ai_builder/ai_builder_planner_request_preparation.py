@@ -40,6 +40,9 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
 )
+from intric.flows.ai_builder.ai_builder_framework_policy import (
+    aggregate_freeform_user_text,
+)
 from intric.flows.ai_builder.ai_builder_interaction_utils import (
     looks_like_information_request,
 )
@@ -51,12 +54,18 @@ from intric.flows.ai_builder.ai_builder_orchestrator import (
     OrchestrationContext,
     PlannerOutput,
 )
+from intric.flows.ai_builder.ai_builder_output_sections_signals import (
+    extract_requested_output_sections,
+)
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     build_plan_revision_prompt_block,
 )
 from intric.flows.ai_builder.ai_builder_plan_proposal_task import (
     build_plan_proposal_system_prompt,
+)
+from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+    build_requirements_signal_text,
 )
 from intric.flows.ai_builder.ai_builder_prompts import (
     build_available_kbs_context,
@@ -263,6 +272,14 @@ async def prepare_planner_request(
         )
 
     confirmed_requirements = latest_confirmed_requirements(request.conversation)
+    section_signal_text = "\n".join(
+        part
+        for part in (
+            aggregate_freeform_user_text(request.conversation),
+            build_requirements_signal_text(confirmed_requirements),
+        )
+        if part
+    )
     attachment_context_result = build_ai_builder_attachment_context(
         request.attachment_files
     )
@@ -279,6 +296,9 @@ async def prepare_planner_request(
             is_edit_mode=request.flow is not None,
             resource_catalog=resource_catalog,
             mcp_selection_values=mcp_resource_selection_values(request.conversation),
+            requested_output_sections=extract_requested_output_sections(
+                section_signal_text
+            ),
             plan_revision_context=build_plan_revision_prompt_block(
                 context=request.plan_edit_context,
                 prior_plan=request.prior_plan_for_revision,

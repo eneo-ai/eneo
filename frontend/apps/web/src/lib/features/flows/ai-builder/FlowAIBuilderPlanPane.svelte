@@ -127,7 +127,7 @@
       ? buildAIBuilderDiagnosticReport({
           kind: "quality",
           surface: "plan_quality",
-          issue_kind: AIBuilderIssueKind.BadEditResult,
+          issue_kind: AIBuilderIssueKind.QualityWarning,
           session: diagnosticSession,
           plan: diagnosticPlan,
           details: {

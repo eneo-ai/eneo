@@ -218,6 +218,34 @@ def test_resolve_input_intent_uses_role_scoped_input_clause_for_uploaded_pdf() -
     assert intent.audio_requested is False
 
 
+def test_resolve_input_intent_treats_word_meeting_minutes_as_document_input() -> (
+    None
+):
+    intent = resolve_input_intent(
+        (
+            "Skapa ett flöde som tar emot ett Word-dokument med ett mötesprotokoll "
+            "som input och skriver en svensk rapport."
+        ),
+        {},
+    )
+
+    assert intent.primary_runtime_input == "documents"
+    assert intent.document_runtime_input_requested is True
+    assert intent.audio_requested is False
+    assert intent.needs_architecture_clarification is False
+
+
+def test_resolve_input_intent_still_treats_meeting_recording_as_audio_input() -> None:
+    intent = resolve_input_intent(
+        "Skapa ett flöde som tar emot en mötesinspelning och skriver ett protokoll.",
+        {},
+    )
+
+    assert intent.primary_runtime_input == "audio"
+    assert intent.audio_requested is True
+    assert intent.document_runtime_input_requested is False
+
+
 @pytest.mark.parametrize(
     "prompt",
     [

@@ -35,6 +35,35 @@ _MULTI_GOAL_INDICATORS = [
     " därefter ",
     " followed by ",
 ]
+_SECTION_WRITER_MARKERS = (
+    "skriv avsnitt",
+    "skriv rubrik",
+    "för avsnittet",
+    "write the section",
+    "write section",
+)
+_SECTION_FORMAT_MARKERS = (
+    "tabell",
+    "kolumn",
+    "inled med",
+    "börja med",
+    "table",
+    "column",
+    "start with",
+)
+_REPORT_ASSEMBLER_MARKERS = (
+    "sammanställ",
+    "sammanhållet",
+    "assemble",
+    "compile",
+)
+_REPORT_DOCUMENT_MARKERS = (
+    "rapport",
+    "dokument",
+    "report",
+    "document",
+    "memo",
+)
 
 
 def lint_all_previous_steps_overuse(
@@ -72,21 +101,50 @@ def lint_multi_goal_prompts(
     spec: FlowDraftSpecCore, result: SpecValidationResult
 ) -> None:
     for step in spec.steps:
-        instructions_lower = step.assistant_spec.instructions.lower()
-        for indicator in _MULTI_GOAL_INDICATORS:
-            if (
-                indicator in instructions_lower
-                and len(step.assistant_spec.instructions) > 300
-            ):
-                result.add_warning(
-                    step_ref=step.plan_step_ref,
-                    code="multi_goal_prompt",
-                    message=(
-                        "Step instructions may contain multiple goals. "
-                        "Consider splitting into separate steps for better results."
-                    ),
-                )
-                break
+        if _should_warn_multi_goal_prompt(step):
+            result.add_warning(
+                step_ref=step.plan_step_ref,
+                code="multi_goal_prompt",
+                message=(
+                    "Step instructions may contain multiple goals. "
+                    "Consider splitting into separate steps for better results."
+                ),
+            )
+
+
+def _should_warn_multi_goal_prompt(step: StepSpec) -> bool:
+    instructions = step.assistant_spec.instructions
+    if len(instructions) <= 300:
+        return False
+    instructions_lower = instructions.casefold()
+    if not any(indicator in instructions_lower for indicator in _MULTI_GOAL_INDICATORS):
+        return False
+    return not (
+        _looks_like_section_writer_with_output_format(step)
+        or _looks_like_report_assembler(step)
+    )
+
+
+def _looks_like_section_writer_with_output_format(step: StepSpec) -> bool:
+    if step.output_type != OutputType.TEXT:
+        return False
+    text = f"{step.name}\n{step.assistant_spec.instructions}".casefold()
+    return _has_any(text, _SECTION_WRITER_MARKERS) and _has_any(
+        text, _SECTION_FORMAT_MARKERS
+    )
+
+
+def _looks_like_report_assembler(step: StepSpec) -> bool:
+    if step.output_type != OutputType.TEXT:
+        return False
+    text = f"{step.name}\n{step.assistant_spec.instructions}".casefold()
+    return _has_any(text, _REPORT_ASSEMBLER_MARKERS) and _has_any(
+        text, _REPORT_DOCUMENT_MARKERS
+    )
+
+
+def _has_any(text: str, markers: tuple[str, ...]) -> bool:
+    return any(marker in text for marker in markers)
 
 
 def lint_single_step_flow(

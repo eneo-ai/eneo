@@ -425,6 +425,11 @@ async def test_handle_outline_flow_tool_call_returns_architecture_error_without_
     payload = json.loads(events[0]["data"])
     assert payload["code"] == "architecture_materialization_failed"
     assert payload["phase"] == "proposal"
+    assert payload["details"]["architecture_error_code"] == (
+        "architecture_materialization_failed"
+    )
+    assert payload["details"]["architecture_error_detail"] == "invalid skeleton"
+    assert payload["details"]["surface"] == "test"
 
     telemetry = tracker.build_planner_telemetry()
     assert telemetry["proposal_first_attempt_success"] is False

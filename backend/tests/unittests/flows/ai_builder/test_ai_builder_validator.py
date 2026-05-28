@@ -1253,6 +1253,66 @@ class TestQualityLint:
         assert result.valid
         assert not any(w.code == "multi_goal_prompt" for w in result.warnings)
 
+    def test_section_writer_table_format_no_multi_goal_warning(self) -> None:
+        instructions = (
+            "Skriv avsnittet Resursåtgång i form av tidsuppskattning och "
+            "personella resurser. Inled med en kort sammanfattning och skapa "
+            "därefter en tabell med kolumnerna Roll/kompetens, Ansvar/aktivitet, "
+            "Intern/extern resurs, Uppskattad tidsåtgång, Timkostnad, Beräknad "
+            "kostnad och Kommentar. Använd roller som nämns i dokumentet. Om "
+            "roller inte nämns men tydligt kan härledas, markera dem som "
+            "'Bedömd roll utifrån underlaget'. Om timmar eller kostnader saknas, "
+            "skriv [Behöver kompletteras: tidsuppskattning] respektive "
+            "[Behöver kompletteras: kostnadsuppgift]."
+        )
+        result = validate_spec(
+            _spec([_step(name="Skriv Resursåtgång", instructions=instructions)])
+        )
+        assert result.valid
+        assert not any(w.code == "multi_goal_prompt" for w in result.warnings)
+
+    def test_report_assembler_quality_check_no_multi_goal_warning(self) -> None:
+        instructions = (
+            "Granska samtliga skrivna avsnitt som en helhet och säkerställ att "
+            "problem/nuläge leder vidare till lösningsförslag/nyläge, att "
+            "resursåtgång, tidplan, kostnader, nyttor, finansiering, ansvar "
+            "för nyttorealisering, förändringskomplexitet och plan för "
+            "nyttorealisering hänger ihop logiskt, att inga fakta har lagts "
+            "till utan stöd i underlaget och att alla saknade uppgifter är "
+            "tydligt markerade. Sammanställ därefter ett sammanhållet "
+            "beslutsunderlag med de rubriker som användaren efterfrågat, redo "
+            "för generering som Word-dokument."
+        )
+        result = validate_spec(
+            _spec(
+                [
+                    _step(
+                        name="Kvalitetsgranska och sammanställ beslutsunderlaget",
+                        instructions=instructions,
+                    )
+                ]
+            )
+        )
+        assert result.valid
+        assert not any(w.code == "multi_goal_prompt" for w in result.warnings)
+
+    def test_real_multi_goal_prompt_still_warns_with_report_words(self) -> None:
+        instructions = (
+            "Skriv en rapport med bakgrund, risker och rekommendationer och sedan "
+            "extrahera alla datum, kostnader, ansvariga och avvikande villkor till "
+            "separata strukturerade fält och därefter kontrollera varje källa mot "
+            "en extern policy innan sluttexten skrivs. Beskriv också hur varje "
+            "fält ska användas i nästa steg och skapa en separat lista över "
+            "saknade uppgifter som användaren ska komplettera."
+        )
+
+        result = validate_spec(
+            _spec([_step(name="Skriv rapport", instructions=instructions)])
+        )
+
+        assert result.valid
+        assert any(w.code == "multi_goal_prompt" for w in result.warnings)
+
     def test_single_step_flow_info(self) -> None:
         result = validate_spec(_spec([_step(name="Sammanfatta")]))
         assert result.valid

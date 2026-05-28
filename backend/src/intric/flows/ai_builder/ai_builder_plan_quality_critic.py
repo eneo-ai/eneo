@@ -21,6 +21,9 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
+from intric.flows.ai_builder.ai_builder_output_sections_signals import (
+    extract_requested_output_sections,
+)
 from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     build_requirements_signal_text,
     detect_planner_pattern_signals,
@@ -100,6 +103,7 @@ def build_conversation_critic_context(
         primary_runtime_input=input_intent.primary_runtime_input,
         aggregation_intent=aggregation_intent,
         resource_catalog=resource_catalog,
+        requested_output_sections=extract_requested_output_sections(signal_text),
     )
 
 

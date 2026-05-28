@@ -42,8 +42,14 @@ CREATE_CRITIC_REMEDIATION: dict[str, str] = {
     "terminal_renderer_must_consume_previous_composer": (
         "Låt det terminala DOCX/PDF-steget endast rendera den färdiga texten från föregående semantiska steg, inte läsa alla tidigare strukturerade steg igen."
     ),
+    "terminal_renderer_must_not_consume_review_only_step": (
+        "Lägg inte ett granskningssteg som bara producerar anteckningar direkt före DOCX/PDF. Sista textsteget före renderern ska vara den färdiga dokumenttexten: flytta granskningen före slutlig sammanställning, eller låt granskningssteget skriva en reviderad slutversion av hela dokumentet."
+    ),
     "section_text_steps_must_reference_source_json_fields": (
         "Låt varje avsnittssteg beskriva vilka namngivna fält från den strukturerade extraktionen som behövs för just det avsnittet, så att varje rubrik får relevant underlag utan att läsa allt tidigare innehåll."
+    ),
+    "requested_output_sections_require_section_writers": (
+        "Bevara användarens namngivna rapportavsnitt som tydliga semantiska skrivsteg i outline-planen, och gruppera bara närliggande rubriker när det behövs."
     ),
     "redundant_terminal_json_format_tail_after_final_text_composer": (
         "Ta bort det extra JSON-formatsteget efter sluttexten när användaren inte har valt JSON som slutformat. Låt det semantiska textsteget som skriver slutversionen vara terminalt."

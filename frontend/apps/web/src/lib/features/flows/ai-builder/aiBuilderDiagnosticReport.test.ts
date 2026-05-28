@@ -97,6 +97,28 @@ describe("aiBuilderDiagnosticReport", () => {
     expect(rendered).toContain("- actual_output_type: json");
   });
 
+  it("formats plan-quality lint warnings without classifying them as bad edits", () => {
+    const report = buildAIBuilderDiagnosticReport({
+      generated_at: "2026-05-21T20:02:00.000Z",
+      kind: "quality",
+      surface: "plan_quality",
+      issue_kind: AIBuilderIssueKind.QualityWarning,
+      session,
+      plan: { plan_id: "plan-1", status: "proposed" },
+      details: {
+        lint_warning_count: 1,
+        advisory_count: 0
+      }
+    });
+
+    expect(report.issue_kind).toBe(AIBuilderIssueKind.QualityWarning);
+
+    const rendered = formatAIBuilderDiagnosticReport(report);
+    expect(rendered).toContain("issue_kind: quality_warning");
+    expect(rendered).toContain("- lint_warning_count: 1");
+    expect(rendered).not.toContain("issue_kind: bad_edit_result");
+  });
+
   it("rejects raw prompt, full conversation, and full plan inputs at compile time", () => {
     function compileTimeOnly() {
       buildAIBuilderDiagnosticReport({

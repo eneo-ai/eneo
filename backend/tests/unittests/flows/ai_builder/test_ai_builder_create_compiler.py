@@ -1642,10 +1642,11 @@ def test_compile_outline_parity_aggregate_context_snapshot() -> None:
                 output_type="text",
             ),
             _create_step_snapshot(
-                name="Review quality and gaps",
+                name="Review and finalize",
                 instructions=(
                     "Review the analysis for missing information, uncertainty, "
-                    "and quality issues before the final output is created."
+                    "and quality issues, then write the revised final version "
+                    "for the final output."
                 ),
                 input_source="all_previous_steps",
                 input_type="text",
@@ -4889,10 +4890,10 @@ def test_auto_bind_targeted_underlag_skips_when_text_priors_exceed_soft_cap() ->
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         auto_bind_targeted_underlag_for_text_composer,
     )
+    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
     from intric.flows.ai_builder.ai_builder_underlag_policy import (
         TARGETED_UNDERLAG_SOFT_CAP,
     )
-    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 
     text_priors: list[NewStepDraft] = []
     for index in range(TARGETED_UNDERLAG_SOFT_CAP + 1):
@@ -4938,10 +4939,10 @@ def test_auto_bind_targeted_underlag_fires_when_many_json_priors_with_few_text_p
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         auto_bind_targeted_underlag_for_text_composer,
     )
+    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
     from intric.flows.ai_builder.ai_builder_underlag_policy import (
         TARGETED_UNDERLAG_SOFT_CAP,
     )
-    from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 
     transcription = NewStepDraft(
         name="Transkribera ljudet",
@@ -5236,7 +5237,7 @@ def test_auto_bound_c2_shape_does_not_trigger_targeted_underlag_critic_loop() ->
             output_type="text",
         ),
         NewStepDraft(
-            name="Granska kvalitet och luckor",
+            name="Granska och färdigställ",
             instructions="x",
             input_source="previous_step",
             input_type="text",
@@ -7817,7 +7818,7 @@ def test_compile_outline_flow_realizes_structured_quality_chain_from_pattern() -
     assert [step.name for step in draft.steps] == [
         "Extract structured foundation",
         "Analyze material",
-        "Review quality and gaps",
+        "Review and finalize",
         "Create PDF",
     ]
     assert [step.output_type.value for step in draft.steps] == [
@@ -7877,7 +7878,7 @@ def test_compile_outline_flow_structured_quality_text_terminal_uses_reviewed_out
     assert [step.name for step in draft.steps] == [
         "Extrahera strukturerad grund",
         "Identifiera motsägelser",
-        "Granska kvalitet och luckor",
+        "Granska och färdigställ",
         "Skapa slutresultat",
     ]
     assert draft.steps[-1].input_source == InputSource.PREVIOUS_STEP
@@ -7927,6 +7928,17 @@ def test_compile_outline_flow_localizes_server_owned_final_step_name() -> None:
 
 
 def test_compile_outline_flow_quality_chain_preserves_all_semantic_steps() -> None:
+    from intric.flows.ai_builder.ai_builder_critic_invariants import (
+        CriticContext,
+        evaluate_critic_invariants,
+    )
+    from intric.flows.ai_builder.ai_builder_framework_policy import (
+        OutputIntentResolution,
+    )
+    from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
+        PlannerPatternSignals,
+    )
+
     outline = parse_outline_flow_arguments(
         {
             "flow_name": "Structured report",
@@ -7969,11 +7981,25 @@ def test_compile_outline_flow_quality_chain_preserves_all_semantic_steps() -> No
         "Extract structured foundation",
         "Analyze material",
         "Draft report",
-        "Review quality and gaps",
+        "Review and finalize",
         "Create PDF",
     ]
     assert compiled.steps[-1].output_type.value == "pdf"
     assert validation.valid
+
+    context = CriticContext(
+        spec=compiled,
+        flow=None,
+        answer_signals={},
+        text="",
+        requirements_text="",
+        signal_text="",
+        planner_patterns=PlannerPatternSignals(),
+        output_intent=OutputIntentResolution(terminal_output="pdf_document"),
+        mixed_audio_doc_input=False,
+    )
+    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
+    assert "terminal_renderer_must_not_consume_review_only_step" not in issue_ids
 
 
 def test_compile_outline_flow_quality_chain_wraps_rich_outline_from_pattern() -> None:
@@ -8018,7 +8044,7 @@ def test_compile_outline_flow_quality_chain_wraps_rich_outline_from_pattern() ->
         "Phase 2",
         "Phase 3",
         "Phase 4",
-        "Review quality and gaps",
+        "Review and finalize",
         "Create PDF",
     ]
     assert draft.steps[-1].output_type.value == "pdf"

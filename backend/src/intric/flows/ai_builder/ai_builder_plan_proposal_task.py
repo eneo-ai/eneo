@@ -12,6 +12,9 @@ from intric.flows.ai_builder.ai_builder_mcp_intent import (
     MCP_SELECTION_WITHOUT,
     mcp_selected_server_refs_from_values,
 )
+from intric.flows.ai_builder.ai_builder_output_sections_signals import (
+    RequestedOutputSections,
+)
 from intric.flows.ai_builder.ai_builder_requirements_state import (
     render_confirmed_requirements_proposal_prompt_block,
 )
@@ -34,6 +37,7 @@ def build_plan_proposal_system_prompt(
     mcp_selection_values: set[str] | frozenset[str] | None = None,
     resource_catalog: AIBuilderResourceCatalog,
     plan_revision_context: str | None = None,
+    requested_output_sections: RequestedOutputSections | None = None,
 ) -> str:
     submission_tool = active_submission_tool_name(is_edit_mode=is_edit_mode)
     selected_mcp_server_refs = mcp_selected_server_refs_from_values(
@@ -57,6 +61,8 @@ def build_plan_proposal_system_prompt(
         if not is_edit_mode
         else []
     )
+    section_rule = _requested_output_sections_design_rule(requested_output_sections)
+    terminal_document_rule = _terminal_document_design_rule(planning_state)
     lines = [
         "You are drafting an Eneo Flow plan.",
         "",
@@ -69,6 +75,8 @@ def build_plan_proposal_system_prompt(
         "- Direct text transformations such as translation, rewriting, correction, shortening, or summarizing a supplied snippet default to one text step; add JSON, review, form fields, or extra steps only when the user explicitly asks for them.",
         "- Prefer a clear multi-step flow for complex work instead of one overloaded step.",
         "- Use JSON output fields when later steps need specific structured facts.",
+        *([section_rule] if section_rule is not None else []),
+        *([terminal_document_rule] if terminal_document_rule is not None else []),
         "- Describe each step's semantic work; the backend derives runtime uploads and final output mechanics from the committed architecture.",
         "- Do not author field-level previous-step paths; let the backend wire dataflow.",
         "- Do not write template variables, raw JSON Schema, raw input bindings, IDs, hashes, timestamps, or backend-owned refs.",
@@ -85,6 +93,9 @@ def build_plan_proposal_system_prompt(
         "Confirmed requirements:",
         render_confirmed_requirements_proposal_prompt_block(confirmed_requirements),
     ]
+    section_block = _requested_output_sections_block(requested_output_sections)
+    if section_block is not None:
+        lines.extend(["", "Requested output sections:", section_block])
     if flow_context:
         lines.extend(["", "Existing flow context:", flow_context])
     resource_context = _resource_context_block(resource_material)
@@ -101,6 +112,43 @@ def build_plan_proposal_system_prompt(
     if attachment_context:
         lines.extend(["", "Attachment context:", attachment_context])
     return "\n".join(lines)
+
+
+def _requested_output_sections_design_rule(
+    requested_output_sections: RequestedOutputSections | None,
+) -> str | None:
+    if requested_output_sections is None or not requested_output_sections.high_confidence:
+        return None
+    return (
+        "- When the user names multiple output headings/sections for an AI-generated "
+        "report or document, preserve those sections as semantic section-writing "
+        "work and add final assembly before DOCX/PDF delivery. Group only tightly "
+        "related sections when needed; do not apply this to sectioned form intake "
+        "or simple transformations."
+    )
+
+
+def _terminal_document_design_rule(planning_state: PlanningState) -> str | None:
+    commit = planning_state.architecture_commit
+    if commit is None:
+        return None
+    if not any(triple.output_type in {"docx", "pdf"} for triple in commit.tuples_chain):
+        return None
+    return (
+        "- For DOCX/PDF delivery, the final text step immediately before the "
+        "renderer must output the complete document body. If the flow includes "
+        "quality review or consistency checks, place that review before final "
+        "assembly or make the review step rewrite the full revised final body; "
+        "do not put review notes directly before DOCX/PDF rendering."
+    )
+
+
+def _requested_output_sections_block(
+    requested_output_sections: RequestedOutputSections | None,
+) -> str | None:
+    if requested_output_sections is None or not requested_output_sections.high_confidence:
+        return None
+    return "\n".join(f"- {section}" for section in requested_output_sections.sections)
 
 
 def _architecture_block(planning_state: PlanningState) -> str:

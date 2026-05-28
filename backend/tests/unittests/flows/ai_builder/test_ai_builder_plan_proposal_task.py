@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
+from intric.flows.ai_builder.ai_builder_output_sections_signals import (
+    RequestedOutputSections,
+)
 from intric.flows.ai_builder.ai_builder_plan_proposal_task import (
     build_plan_proposal_system_prompt,
 )
@@ -38,23 +41,33 @@ def _empty_catalog() -> AIBuilderResourceCatalog:
     )
 
 
-def test_plan_proposal_prompt_includes_readable_resources_without_execution_surface():
-    state = PlanningState.empty().model_copy(
+def _planning_state_with_architecture(
+    *tuples: StepTriple,
+    chosen_patterns: list[str] | None = None,
+    required_capabilities: list[str] | None = None,
+) -> PlanningState:
+    return PlanningState.empty().model_copy(
         update={
             "architecture_commit": ArchitectureCommit(
-                chosen_patterns=["mcp_lookup"],
-                required_capabilities=["mcp_policy"],
+                chosen_patterns=chosen_patterns or [],
+                required_capabilities=required_capabilities or [],
                 committed_at=datetime.now(timezone.utc),
                 architecture_hash="a" * 64,
-                tuples_chain=[
-                    StepTriple(
-                        input_type="text",
-                        output_type="json",
-                        output_mode="pass_through",
-                    )
-                ],
+                tuples_chain=list(tuples),
             )
         }
+    )
+
+
+def test_plan_proposal_prompt_includes_readable_resources_without_execution_surface():
+    state = _planning_state_with_architecture(
+        StepTriple(
+            input_type="text",
+            output_type="json",
+            output_mode="pass_through",
+        ),
+        chosen_patterns=["mcp_lookup"],
+        required_capabilities=["mcp_policy"],
     )
 
     catalog = build_ai_builder_resource_catalog(
@@ -176,6 +189,75 @@ def test_plan_proposal_prompt_teaches_direct_text_transform_restraint():
     assert "Direct text transformations" in prompt
     assert "default to one text step" in prompt
     assert "only when the user explicitly asks" in prompt
+
+
+def test_plan_proposal_prompt_surfaces_requested_output_sections_once() -> None:
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=PlanningState.empty(),
+        confirmed_requirements=_requirements(
+            summary="Skapa ett beslutsunderlag från ett Word-dokument.",
+        ),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+        requested_output_sections=RequestedOutputSections(
+            sections=(
+                "Problem/nuläge",
+                "Lösningsförslag/nyläge",
+                "Resursåtgång",
+                "Planerad tidplan",
+            ),
+            confidence="high",
+        ),
+    )
+
+    assert "Requested output sections:" in prompt
+    assert "- Problem/nuläge" in prompt
+    assert "preserve those sections as semantic section-writing work" in prompt
+    assert prompt.count("Problem/nuläge") == 1
+
+
+def test_plan_proposal_prompt_omits_section_rule_for_simple_transform() -> None:
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=PlanningState.empty(),
+        confirmed_requirements=_requirements(
+            summary="Översätt en kort mening till engelska.",
+        ),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+        requested_output_sections=RequestedOutputSections(),
+    )
+
+    assert "Direct text transformations" in prompt
+    assert "Requested output sections:" not in prompt
+    assert "section-writing work" not in prompt
+    assert "DOCX/PDF delivery" not in prompt
+
+
+def test_plan_proposal_prompt_guides_terminal_document_review_shape() -> None:
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=_planning_state_with_architecture(
+            StepTriple(
+                input_type="document",
+                output_type="docx",
+                output_mode="pass_through",
+            )
+        ),
+        confirmed_requirements=_requirements(
+            summary="Skapa ett beslutsunderlag från ett Word-dokument.",
+        ),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "For DOCX/PDF delivery" in prompt
+    assert "complete document body" in prompt
+    assert "do not put review notes directly before DOCX/PDF rendering" in prompt
 
 
 def test_plan_proposal_prompt_omits_confirmed_requirement_boilerplate():

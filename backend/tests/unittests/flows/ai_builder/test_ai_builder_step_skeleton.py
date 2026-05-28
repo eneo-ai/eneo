@@ -281,7 +281,7 @@ def test_materialize_structured_quality_skeleton_uses_swedish_fixed_step_names()
     assert [slot.default_name for slot in skeleton] == [
         "Extrahera strukturerad grund",
         "Analysera strukturerat underlag",
-        "Granska kvalitet och luckor",
+        "Granska och färdigställ",
         "Skapa PDF",
     ]
 
@@ -530,7 +530,7 @@ def test_backend_fixed_slots_keep_locked_input_type_after_structured_semantics()
         "Extract structured foundation",
         "Extract section data",
         "Extract risk data",
-        "Review quality and gaps",
+        "Review and finalize",
         "Create PDF",
     ]
     assert composition.steps[2].output_type == OutputType.TEXT

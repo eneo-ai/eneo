@@ -224,8 +224,9 @@ BEGRÄNSNINGAR:
 1. **Enkel kedja** (steg 2 bearbetar steg 1): Instruktioner räcker, underlag kan vara tomt
 2. **Sammansättning** (steg kombinerar data från flera steg): Underlag bygger texten, \
    instruktioner styr bearbetningen
-3. **Komplex produktion** (sista steget i en rapport): Underlag samlar ALL \
-   data, instruktioner beskriver format och krav i detalj
+3. **Komplex produktion** (sista steget i en rapport): Underlag samlar relevant \
+   avsnittstext och utvalda JSON-fält som steget behöver, inte alla tidigare steg \
+   slentrianmässigt. Instruktioner beskriver format och krav i detalj.
 
 ## Variabler i instruktioner vs underlag
 - I **underlag**: `{{ step_c.output.text }}` → texten LÄGGS IN i underlaget

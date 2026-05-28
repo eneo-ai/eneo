@@ -19,7 +19,7 @@ layer.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 from intric.flows.ai_builder.ai_builder_architecture_errors import (
@@ -45,6 +45,9 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
 )
 from intric.flows.ai_builder.ai_builder_mcp_intent import (
     find_named_mcp_reference_issue,
+)
+from intric.flows.ai_builder.ai_builder_output_sections_signals import (
+    RequestedOutputSections,
 )
 from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     PlannerPatternSignals,
@@ -102,6 +105,9 @@ class CriticContext:
     primary_runtime_input: PrimaryRuntimeInput = "unknown"
     aggregation_intent: AggregationIntent = "linear"
     resource_catalog: "AIBuilderResourceCatalog | None" = None
+    requested_output_sections: RequestedOutputSections = field(
+        default_factory=RequestedOutputSections
+    )
 
 
 CriticCheck = Callable[[CriticContext], bool]
@@ -1125,6 +1131,84 @@ _TERMINAL_RENDERER_MUST_CONSUME_PREVIOUS_COMPOSER = CriticInvariant(
 )
 
 
+_REVIEW_STEP_MARKERS: tuple[str, ...] = (
+    "granska",
+    "kontrollera",
+    "kvalitetsgranska",
+    "kvalitetspass",
+    "validera",
+    "quality",
+    "review",
+    "validate",
+    "check",
+)
+_FINAL_BODY_STEP_MARKERS: tuple[str, ...] = (
+    "sammanställ",
+    "sätt samman",
+    "harmonisera",
+    "slutversion",
+    "slutlig rapport",
+    "färdigställ",
+    "färdigställd",
+    "färdig rapport",
+    "färdig text",
+    "redo för",
+    "revidera",
+    "assemble",
+    "compose",
+    "final report",
+    "final body",
+    "final version",
+    "complete document",
+    "revise",
+    "polish",
+)
+
+
+def _terminal_renderer_must_not_consume_review_only_step_evidence(
+    context: CriticContext,
+) -> bool:
+    if len(context.spec.steps) < 2:
+        return False
+    terminal = context.spec.steps[-1]
+    previous = context.spec.steps[-2]
+    if not _is_renderer_step(terminal):
+        return False
+    if previous.output_type != OutputType.TEXT or _is_renderer_step(previous):
+        return False
+    return _looks_like_review_only_text_step(previous)
+
+
+def _looks_like_review_only_text_step(step: StepSpec) -> bool:
+    text = f"{step.name}\n{step.assistant_spec.instructions}".casefold()
+    if not _contains_any(text, _REVIEW_STEP_MARKERS):
+        return False
+    return not _contains_any(text, _FINAL_BODY_STEP_MARKERS)
+
+
+def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
+    return any(marker in text for marker in markers)
+
+
+_TERMINAL_RENDERER_MUST_NOT_CONSUME_REVIEW_ONLY_STEP = CriticInvariant(
+    id="terminal_renderer_must_not_consume_review_only_step",
+    kind="semantic",
+    description=(
+        "A terminal DOCX/PDF renderer should not render a review-only step. "
+        "If a review step is last before the renderer, it must output the "
+        "revised final document body, not only comments, gaps, or quality notes."
+    ),
+    evidence=_terminal_renderer_must_not_consume_review_only_step_evidence,
+    remediation=(
+        "DOCX/PDF-steget ligger direkt efter ett granskningssteg som verkar "
+        "producera kvalitetsanteckningar snarare än den färdiga dokumenttexten. "
+        "Flytta granskningen före sammanställningen, eller ändra "
+        "granskningssteget så att det skriver en reviderad slutversion av "
+        "hela dokumentet som renderern kan använda."
+    ),
+)
+
+
 def _section_text_steps_must_reference_source_json_fields_evidence(
     context: CriticContext,
 ) -> bool:
@@ -1273,7 +1357,61 @@ def _prior_json_contract_count(spec: FlowDraftSpecCore, *, before_index: int) ->
         if not _is_renderer_step(step)
         and step.output_type == OutputType.JSON
         and step.output_contract is not None
+)
+
+
+def _requested_output_sections_require_section_writers_evidence(
+    context: CriticContext,
+) -> bool:
+    requested = context.requested_output_sections
+    if not requested.high_confidence or not _spec_has_report_terminal(context.spec):
+        return False
+    # One writer may cover at most two adjacent requested sections; fewer writers
+    # recreates the overloaded single-step shape this invariant is meant to reject.
+    required_writers = (len(requested.sections) + 1) // 2
+    return _section_writer_count(context.spec) < required_writers
+
+
+def _spec_has_report_terminal(spec: FlowDraftSpecCore) -> bool:
+    terminal = spec.steps[-1] if spec.steps else None
+    return terminal is not None and terminal.output_type in {
+        OutputType.TEXT,
+        OutputType.DOCX,
+        OutputType.PDF,
+    }
+
+
+def _section_writer_count(spec: FlowDraftSpecCore) -> int:
+    return sum(
+        1
+        for step in spec.steps
+        if step.output_type == OutputType.TEXT
+        and not _is_renderer_step(step)
+        and not _looks_like_review_only_text_step(step)
+        and not is_source_surfacing_text(
+            input_source=step.input_source,
+            input_type=step.input_type,
+            output_type=step.output_type,
+        )
     )
+
+
+_REQUESTED_OUTPUT_SECTIONS_REQUIRE_SECTION_WRITERS = CriticInvariant(
+    id="requested_output_sections_require_section_writers",
+    kind="semantic",
+    description=(
+        "When the user names several output sections for a generated report, "
+        "the plan must preserve them as section-writing work. A single broad "
+        "composer loses reviewability and gives weaker models too much to do."
+    ),
+    evidence=_requested_output_sections_require_section_writers_evidence,
+    remediation=(
+        "Användaren har namngivit flera rubriker/avsnitt för slutrapporten. "
+        "Dela upp outline-planen i tydliga semantiska avsnittssteg, högst ett "
+        "par närliggande rubriker per steg, och lägg ett avslutande "
+        "sammanställningssteg före DOCX/PDF/textleveransen."
+    ),
+)
 
 
 def _redundant_terminal_json_format_tail_after_final_text_composer_evidence(
@@ -1646,7 +1784,9 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _PREFER_TARGETED_UNDERLAG_OVER_ALL_PREVIOUS_STEPS,
     _FINAL_ASSEMBLER_MUST_REFERENCE_EXPLICIT_SECTION_OUTPUTS,
     _TERMINAL_RENDERER_MUST_CONSUME_PREVIOUS_COMPOSER,
+    _TERMINAL_RENDERER_MUST_NOT_CONSUME_REVIEW_ONLY_STEP,
     _SECTION_TEXT_STEPS_MUST_REFERENCE_SOURCE_JSON_FIELDS,
+    _REQUESTED_OUTPUT_SECTIONS_REQUIRE_SECTION_WRITERS,
     _REDUNDANT_TERMINAL_JSON_FORMAT_TAIL_AFTER_FINAL_TEXT_COMPOSER,
     _FINAL_TEXT_STEP_MUST_REFERENCE_RELEVANT_STRUCTURED_OUTPUTS,
     _FORM_FIELDS_DECLARED_MUST_BE_REFERENCED,

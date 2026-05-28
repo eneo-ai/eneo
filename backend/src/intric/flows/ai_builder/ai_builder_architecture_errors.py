@@ -86,4 +86,5 @@ def build_proposal_architecture_error_event(
         code=coerce_ai_builder_error_code(error.public_code),
         phase=AIBuilderErrorPhase.PROPOSAL,
         request_id=request_id,
+        details=error.log_extra(),
     )

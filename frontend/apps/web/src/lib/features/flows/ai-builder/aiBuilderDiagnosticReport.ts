@@ -14,6 +14,7 @@ export enum AIBuilderIssueKind {
   MissingFormFields = "missing_form_fields",
   WrongOutputType = "wrong_output_type",
   UnclearQuestion = "unclear_question",
+  QualityWarning = "quality_warning",
   BadEditResult = "bad_edit_result",
   Other = "other"
 }

@@ -137,10 +137,11 @@ _COMPILED_CHAIN_STEP_TEMPLATES = MappingProxyType(
             ),
         ),
         ANALYSIS_OR_QUALITY_REVIEW_STEP: CompiledChainStepTemplate(
-            name="Review quality and gaps",
+            name="Review and finalize",
             task=(
                 "Review the analysis for missing information, uncertainty, "
-                "and quality issues before the final output is created."
+                "and quality issues, then write the revised final version "
+                "for the final output."
             ),
         ),
         TEMPLATE_FILL_DOCX_STEP: CompiledChainStepTemplate(
@@ -184,10 +185,11 @@ _SWEDISH_COMPILED_CHAIN_STEP_TEMPLATES = MappingProxyType(
             ),
         ),
         ANALYSIS_OR_QUALITY_REVIEW_STEP: CompiledChainStepTemplate(
-            name="Granska kvalitet och luckor",
+            name="Granska och färdigställ",
             task=(
                 "Granska analysen för saknad information, osäkerhet och "
-                "kvalitetsproblem innan slutresultatet skapas."
+                "kvalitetsproblem och skriv sedan en reviderad slutversion "
+                "för slutresultatet."
             ),
         ),
         TEMPLATE_FILL_DOCX_STEP: CompiledChainStepTemplate(
