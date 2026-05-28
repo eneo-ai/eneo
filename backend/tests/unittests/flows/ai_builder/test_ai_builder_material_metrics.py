@@ -124,6 +124,8 @@ def test_runtime_and_form_field_references_do_not_count_as_step_fan_in() -> None
 
     assert metrics.fan_in_width == 0
     assert metrics.binding_bytes == len(steps[0].question.encode("utf-8"))
+    assert metrics.runtime_input_reference_count == 1
+    assert metrics.form_field_reference_count == 1
 
 
 def test_all_previous_steps_count_is_independent_from_targeted_references() -> None:
@@ -224,6 +226,144 @@ def test_per_step_metrics_sum_to_aggregate_for_additive_material_costs() -> None
     assert sum(
         metrics.all_previous_steps_count for _step_order, metrics in per_step
     ) == (aggregate.all_previous_steps_count)
+    assert (
+        sum(metrics.runtime_input_reference_count for _step_order, metrics in per_step)
+        == aggregate.runtime_input_reference_count
+    )
+    assert (
+        sum(metrics.form_field_reference_count for _step_order, metrics in per_step)
+        == aggregate.form_field_reference_count
+    )
+    assert (
+        sum(metrics.text_prior_count for _step_order, metrics in per_step)
+        == aggregate.text_prior_count
+    )
+    assert (
+        sum(metrics.text_prior_ref_count for _step_order, metrics in per_step)
+        == aggregate.text_prior_ref_count
+    )
+
+
+def test_structured_prior_coverage_detects_missing_json_priors_for_composer() -> (
+    None
+):
+    steps = (
+        _metric_step(ref="step_a", order=1, output_type="text"),
+        _metric_step(ref="step_b", order=2, output_type="json"),
+        _metric_step(ref="step_c", order=3, output_type="json"),
+        _metric_step(ref="step_d", order=4, output_type="json"),
+        _metric_step(
+            ref="step_e",
+            order=5,
+            output_type="text",
+            question=(
+                "{{ step_b.output.structured.problem }}\n"
+                "{{ step_d.output.structured.plan }}"
+            ),
+        ),
+    )
+
+    final_metrics = compute_step_material_metrics(steps, step_order=5)
+
+    assert final_metrics.structured_prior_count == 3
+    assert final_metrics.structured_prior_ref_count == 2
+    assert final_metrics.structured_prior_coverage_ratio == 2 / 3
+    assert final_metrics.missing_structured_prior_steps == ("step_c",)
+    assert final_metrics.whole_output_reference_count == 0
+
+
+def test_multi_section_report_composer_golden_uses_targeted_fields_without_blobs() -> (
+    None
+):
+    steps = (
+        _metric_step(ref="step_a", order=1, input_source="flow_input"),
+        _metric_step(ref="step_b", order=2, output_type="json"),
+        _metric_step(ref="step_c", order=3, output_type="json"),
+        _metric_step(ref="step_d", order=4, output_type="json"),
+        _metric_step(
+            ref="step_e",
+            order=5,
+            output_type="text",
+            question=(
+                "Problem: {{ step_b.output.structured.problem }}\n"
+                "Lösning: {{ step_c.output.structured.solution }}\n"
+                "Tidplan: {{ step_d.output.structured.timeline }}"
+            ),
+        ),
+    )
+
+    final_metrics = compute_step_material_metrics(steps, step_order=5)
+
+    assert final_metrics.structured_prior_count == 3
+    assert final_metrics.structured_prior_ref_count == 3
+    assert final_metrics.structured_prior_coverage_ratio == 1.0
+    assert final_metrics.missing_structured_prior_steps == ()
+    assert final_metrics.whole_output_reference_count == 0
+
+
+def test_text_prior_coverage_detects_hidden_all_previous_final_assembler() -> None:
+    steps = (
+        _metric_step(
+            ref="step_a",
+            order=1,
+            input_source="flow_input",
+            input_type="document",
+            output_type="text",
+        ),
+        _metric_step(ref="step_b", order=2, output_type="json"),
+        _metric_step(ref="step_c", order=3, output_type="text"),
+        _metric_step(ref="step_d", order=4, output_type="text"),
+        _metric_step(
+            ref="step_e",
+            order=5,
+            input_source="all_previous_steps",
+            output_type="text",
+        ),
+        _metric_step(ref="step_f", order=6, output_type="docx"),
+    )
+
+    final_metrics = compute_step_material_metrics(steps, step_order=5)
+
+    assert final_metrics.text_prior_count == 2
+    assert final_metrics.text_prior_ref_count == 0
+    assert final_metrics.text_prior_coverage_ratio == 0.0
+    assert final_metrics.missing_text_prior_steps == ("step_c", "step_d")
+    assert final_metrics.all_previous_steps_count == 1
+
+
+def test_multi_section_report_composer_golden_uses_section_outputs_without_source_blob() -> (
+    None
+):
+    steps = (
+        _metric_step(
+            ref="step_a",
+            order=1,
+            input_source="flow_input",
+            input_type="document",
+            output_type="text",
+        ),
+        _metric_step(ref="step_b", order=2, output_type="json"),
+        _metric_step(ref="step_c", order=3, output_type="text"),
+        _metric_step(ref="step_d", order=4, output_type="text"),
+        _metric_step(
+            ref="step_e",
+            order=5,
+            output_type="text",
+            question=(
+                "Section one: {{ step_c.output.text }}\n"
+                "Section two: {{ step_d.output.text }}"
+            ),
+        ),
+        _metric_step(ref="step_f", order=6, output_type="docx"),
+    )
+
+    final_metrics = compute_step_material_metrics(steps, step_order=5)
+
+    assert final_metrics.text_prior_count == 2
+    assert final_metrics.text_prior_ref_count == 2
+    assert final_metrics.text_prior_coverage_ratio == 1.0
+    assert final_metrics.missing_text_prior_steps == ()
+    assert final_metrics.source_duplication_count == 0
 
 
 def test_canonical_wide_targeted_fan_in_keeps_source_duplication_per_step_bounded() -> (

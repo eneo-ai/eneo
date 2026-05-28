@@ -4779,12 +4779,11 @@ def test_compile_outline_audio_docx_body_step_auto_authors_targeted_refs_when_js
     assert validation.valid
 
 
-def test_auto_bind_targeted_underlag_skips_when_aggregation_intent_is_aggregate() -> (
+def test_auto_bind_targeted_underlag_rewrites_aggregate_but_not_compare() -> (
     None
 ):
-    """Aggregation intents `aggregate` and `compare` retain `all_previous_steps`
-    because the multi-document compare invariant requires it. Auto-binding
-    must defer to that wider rule.
+    """`compare` retains broad fan-in, but `aggregate` still gets targeted
+    underlag because aggregate classification is intentionally conservative.
     """
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         auto_bind_targeted_underlag_for_text_composer,
@@ -4823,13 +4822,23 @@ def test_auto_bind_targeted_underlag_skips_when_aggregation_intent_is_aggregate(
             draft,
             aggregation_intent=cast(AggregationIntent, intent),
         )
-        assert result is draft.steps
-        assert result == steps_before, (
-            f"intent={intent!r} should be a no-op, but the composer was rewritten"
-        )
         composer = result[2]
-        assert composer.input_source.value == "all_previous_steps"
-        assert composer.uses_previous_fields == []
+        if intent == "compare":
+            assert result is draft.steps
+            assert result == steps_before, (
+                f"intent={intent!r} should be a no-op, but the composer was rewritten"
+            )
+            assert composer.input_source.value == "all_previous_steps"
+            assert composer.uses_previous_fields == []
+        else:
+            assert result is not draft.steps
+            assert composer.input_source.value == "previous_step"
+            assert {
+                (ref.from_step, ref.field_path) for ref in composer.uses_previous_fields
+            } >= {
+                (1, "section_a"),
+                (2, "section_b"),
+            }
 
 
 def test_auto_bind_targeted_underlag_two_step_linear_flow_is_unchanged() -> None:
@@ -4880,7 +4889,7 @@ def test_auto_bind_targeted_underlag_skips_when_text_priors_exceed_soft_cap() ->
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         auto_bind_targeted_underlag_for_text_composer,
     )
-    from intric.flows.ai_builder.ai_builder_critic_invariants import (
+    from intric.flows.ai_builder.ai_builder_underlag_policy import (
         TARGETED_UNDERLAG_SOFT_CAP,
     )
     from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
@@ -4929,7 +4938,7 @@ def test_auto_bind_targeted_underlag_fires_when_many_json_priors_with_few_text_p
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         auto_bind_targeted_underlag_for_text_composer,
     )
-    from intric.flows.ai_builder.ai_builder_critic_invariants import (
+    from intric.flows.ai_builder.ai_builder_underlag_policy import (
         TARGETED_UNDERLAG_SOFT_CAP,
     )
     from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
@@ -6418,9 +6427,13 @@ def test_targeted_underlag_predicate_skips_renderer() -> None:
     ) == "skip"
 
 
-@pytest.mark.parametrize("intent", ["aggregate", "compare"])
-def test_targeted_underlag_predicate_skips_aggregate_and_compare_intents(
+@pytest.mark.parametrize(
+    ("intent", "expected_mode"),
+    [("aggregate", "with_text_priors"), ("compare", "skip")],
+)
+def test_targeted_underlag_predicate_handles_aggregation_intents(
     intent: AggregationIntent,
+    expected_mode: str,
 ) -> None:
     from intric.flows.ai_builder.ai_builder_create_dataflow import (
         _targeted_underlag_binding_mode,
@@ -6458,7 +6471,7 @@ def test_targeted_underlag_predicate_skips_aggregate_and_compare_intents(
         all_previous_candidate_indexes={2},
         primary_source_ref=None,
         aggregation_intent=intent,
-    ) == "skip"
+    ) == expected_mode
 
 
 def test_auto_bind_is_idempotent_for_all_previous_steps_composer() -> None:

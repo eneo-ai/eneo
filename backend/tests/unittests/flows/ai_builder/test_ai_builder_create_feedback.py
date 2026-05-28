@@ -104,6 +104,8 @@ def test_format_create_outline_quality_feedback_maps_contracts_to_output_fields(
     "issue_id",
     [
         "prefer_targeted_underlag_over_all_previous_steps",
+        "final_assembler_must_reference_explicit_section_outputs",
+        "terminal_renderer_must_consume_previous_composer",
         "final_text_step_must_reference_relevant_structured_outputs",
     ],
 )

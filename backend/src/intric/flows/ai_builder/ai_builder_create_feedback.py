@@ -36,6 +36,12 @@ CREATE_CRITIC_REMEDIATION: dict[str, str] = {
     "prefer_targeted_underlag_over_all_previous_steps": (
         "Beskriv ett semantiskt syntessteg som sammanställer just de relevanta strukturerade resultaten från tidigare steg, i stället för att läsa allt tidigare innehåll."
     ),
+    "final_assembler_must_reference_explicit_section_outputs": (
+        "Beskriv slutsteget som ett semantiskt sammansättningssteg som använder de relevanta strukturerade avsnittstexterna från tidigare steg explicit, i stället för att läsa allt tidigare innehåll."
+    ),
+    "terminal_renderer_must_consume_previous_composer": (
+        "Låt det terminala DOCX/PDF-steget endast rendera den färdiga texten från föregående semantiska steg, inte läsa alla tidigare strukturerade steg igen."
+    ),
     "section_text_steps_must_reference_source_json_fields": (
         "Låt varje avsnittssteg beskriva vilka namngivna fält från den strukturerade extraktionen som behövs för just det avsnittet, så att varje rubrik får relevant underlag utan att läsa allt tidigare innehåll."
     ),

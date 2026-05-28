@@ -3,9 +3,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
-from intric.flows.ai_builder.ai_builder_critic_invariants import (
+from intric.flows.ai_builder.ai_builder_underlag_policy import (
     TARGETED_UNDERLAG_SOFT_CAP,
-    targeted_underlag_all_previous_indexes_for_drafts,
+    TargetedUnderlagStepSignal,
+    final_assembler_rewrite_indexes,
+    is_document_renderer,
+    is_source_surfacing_text,
+    targeted_underlag_rewrite_indexes,
+    terminal_renderer_rewrite_indexes,
 )
 from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     normalize_discovery_text,
@@ -395,20 +400,45 @@ def auto_bind_targeted_underlag_for_text_composer(
     pass owns only the targeted field/output refs that keep composers from
     reading broad structured JSON blobs.
     """
-    if aggregation_intent in {"aggregate", "compare"}:
-        return draft.steps
-
     rewritten_steps = draft.steps
     source_ref = primary_source_material_ref(draft)
-    # Capture candidates before rewrites because binding changes input_source.
+    # Capture candidates before rewrites because each pass mutates input_source.
+    terminal_renderer_candidate_indexes = set(
+        _terminal_renderer_rewrite_indexes_for_draft(rewritten_steps)
+    )
     all_previous_candidate_indexes = set(
-        targeted_underlag_all_previous_indexes_for_drafts(
+        _targeted_underlag_rewrite_indexes_for_draft(
+            rewritten_steps,
+            aggregation_intent=aggregation_intent,
+        )
+    )
+    final_assembler_candidate_indexes = set(
+        _final_assembler_rewrite_indexes_for_draft(
             rewritten_steps,
             aggregation_intent=aggregation_intent,
         )
     )
     changed = False
+    if terminal_renderer_candidate_indexes:
+        updated_steps = _bind_terminal_renderers_to_previous_composer(
+            rewritten_steps,
+            renderer_indexes=terminal_renderer_candidate_indexes,
+        )
+        if updated_steps is not rewritten_steps:
+            rewritten_steps = updated_steps
+            changed = True
+    if aggregation_intent == "compare":
+        return rewritten_steps if changed else draft.steps
     for composer_index in range(len(rewritten_steps)):
+        if composer_index in final_assembler_candidate_indexes:
+            updated_steps = _bind_final_assembler_prior_outputs(
+                rewritten_steps,
+                composer_index=composer_index,
+            )
+            if updated_steps is not rewritten_steps:
+                rewritten_steps = updated_steps
+                changed = True
+                continue
         binding_mode = _targeted_underlag_binding_mode(
             steps=rewritten_steps,
             composer_index=composer_index,
@@ -432,6 +462,82 @@ def auto_bind_targeted_underlag_for_text_composer(
     return rewritten_steps if changed else draft.steps
 
 
+def _terminal_renderer_rewrite_indexes_for_draft(
+    steps: list[NewStepDraft],
+) -> tuple[int, ...]:
+    return terminal_renderer_rewrite_indexes(
+        _underlag_step_signals_for_draft(steps),
+    )
+
+
+def _targeted_underlag_rewrite_indexes_for_draft(
+    steps: list[NewStepDraft],
+    *,
+    aggregation_intent: "AggregationIntent",
+) -> tuple[int, ...]:
+    return targeted_underlag_rewrite_indexes(
+        _underlag_step_signals_for_draft(steps),
+        aggregation_intent=aggregation_intent,
+    )
+
+
+def _final_assembler_rewrite_indexes_for_draft(
+    steps: list[NewStepDraft],
+    *,
+    aggregation_intent: "AggregationIntent",
+) -> tuple[int, ...]:
+    return final_assembler_rewrite_indexes(
+        _underlag_step_signals_for_draft(steps),
+        aggregation_intent=aggregation_intent,
+    )
+
+
+def _underlag_step_signals_for_draft(
+    steps: list[NewStepDraft],
+) -> tuple[TargetedUnderlagStepSignal, ...]:
+    """Draft mode has no compiled question, so it cannot count existing refs."""
+    return tuple(
+        TargetedUnderlagStepSignal(
+            input_source=step.input_source,
+            input_type=step.input_type,
+            output_type=step.output_type,
+            is_renderer=_is_renderer_draft(step),
+            has_structured_json_output=(
+                step.output_type == OutputType.JSON and bool(step.output_fields)
+            ),
+            already_targets_previous_fields=bool(step.uses_previous_fields),
+            question_targets_prior_structured_field=False,
+            is_source_surfacing_text=is_source_surfacing_text(
+                input_source=step.input_source,
+                input_type=step.input_type,
+                output_type=step.output_type,
+            ),
+        )
+        for step in steps
+    )
+
+
+def _bind_terminal_renderers_to_previous_composer(
+    steps: list[NewStepDraft],
+    *,
+    renderer_indexes: set[int],
+) -> list[NewStepDraft]:
+    """Reset terminal renderers to read only the previous composed text body."""
+    rewritten_steps = list(steps)
+    changed = False
+    for renderer_index in sorted(renderer_indexes):
+        renderer = rewritten_steps[renderer_index]
+        rewritten_steps[renderer_index] = renderer.model_copy(
+            update={
+                "input_source": InputSource.PREVIOUS_STEP,
+                "uses_previous_fields": [],
+                "uses_previous_outputs": [],
+            }
+        )
+        changed = True
+    return rewritten_steps if changed else steps
+
+
 def _targeted_underlag_binding_mode(
     *,
     steps: list[NewStepDraft],
@@ -444,7 +550,7 @@ def _targeted_underlag_binding_mode(
     composer = steps[composer_index]
     if _is_renderer_draft(composer):
         return "skip"
-    if aggregation_intent in {"aggregate", "compare"}:
+    if aggregation_intent == "compare":
         return "skip"
 
     priors = _targeted_underlag_prior_steps(steps, composer_index=composer_index)
@@ -487,13 +593,10 @@ def _targeted_underlag_binding_mode(
             else "fields_only"
         )
 
-    if (
-        composer.output_type == OutputType.TEXT
-        and _single_json_section_writer_chain(
-            steps=steps,
-            composer_index=composer_index,
-            json_priors=json_priors,
-        )
+    if composer.output_type == OutputType.TEXT and _json_section_writer_chain(
+        steps=steps,
+        composer_index=composer_index,
+        json_priors=json_priors,
     ):
         return "fields_only"
 
@@ -509,6 +612,51 @@ def _targeted_underlag_binding_mode(
     ):
         return "with_text_priors"
     return "skip"
+
+
+def _bind_final_assembler_prior_outputs(
+    steps: list[NewStepDraft],
+    *,
+    composer_index: int,
+) -> list[NewStepDraft]:
+    composer = steps[composer_index]
+    output_refs: list[PreviousOutputRef] = list(composer.uses_previous_outputs)
+    seen_output_steps = {ref.from_step for ref in output_refs}
+
+    for predecessor_index, predecessor in enumerate(steps[:composer_index]):
+        if _is_renderer_draft(predecessor):
+            continue
+        if predecessor.output_type != OutputType.TEXT:
+            continue
+        if is_source_surfacing_text(
+            input_source=predecessor.input_source,
+            input_type=predecessor.input_type,
+            output_type=predecessor.output_type,
+        ):
+            continue
+        step_number = predecessor_index + 1
+        if step_number in seen_output_steps:
+            continue
+        seen_output_steps.add(step_number)
+        output_refs.append(
+            PreviousOutputRef(
+                from_step=step_number,
+                label=predecessor.name or f"Steg {step_number}",
+            )
+        )
+
+    if not output_refs:
+        return steps
+
+    rewritten = composer.model_copy(
+        update={
+            "input_source": InputSource.PREVIOUS_STEP,
+            "uses_previous_outputs": output_refs,
+        }
+    )
+    new_steps = list(steps)
+    new_steps[composer_index] = rewritten
+    return new_steps
 
 
 def _prebound_broad_composer_missing_json_prior(
@@ -534,17 +682,17 @@ def _prebound_broad_composer_missing_json_prior(
     return bool(json_prior_steps - covered_steps)
 
 
-def _single_json_section_writer_chain(
+def _json_section_writer_chain(
     *,
     steps: list[NewStepDraft],
     composer_index: int,
     json_priors: list[tuple[int, NewStepDraft]],
 ) -> bool:
-    if len(json_priors) != 1:
+    if not json_priors:
         return False
     if not _looks_like_section_or_document_composer(steps[composer_index]):
         return False
-    json_index, _json_step = json_priors[0]
+    json_index = min(index for index, _json_step in json_priors)
     if composer_index <= json_index:
         return False
     downstream_text_composers = [
@@ -1060,9 +1208,9 @@ def _field_ref_from_draft_field(
 
 
 def _is_renderer_draft(step: NewStepDraft) -> bool:
-    return (
-        step.document_delivery_mode == "template_fill"
-        or step.output_type in _DOCUMENT_OUTPUT_TYPES
+    return is_document_renderer(
+        output_type=step.output_type,
+        document_delivery_mode=step.document_delivery_mode,
     )
 
 

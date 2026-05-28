@@ -64,6 +64,8 @@ EXPECTED_CRITIC_INVARIANT_KINDS = {
     "mcp_selection_requires_semantic_support": "semantic",
     "json_input_rejects_all_previous_steps_source": "architecture",
     "prefer_targeted_underlag_over_all_previous_steps": "semantic",
+    "final_assembler_must_reference_explicit_section_outputs": "semantic",
+    "terminal_renderer_must_consume_previous_composer": "semantic",
     "section_text_steps_must_reference_source_json_fields": "semantic",
     "redundant_terminal_json_format_tail_after_final_text_composer": "semantic",
     "final_text_step_must_reference_relevant_structured_outputs": "semantic",
@@ -1403,6 +1405,38 @@ def test_flags_missing_all_previous_steps_for_multi_document_compare() -> None:
     assert "all_previous_steps" in feedback
 
 
+def test_does_not_require_all_previous_steps_for_aggregate_intent() -> None:
+    conversation = [
+        {
+            "role": "user",
+            "content": "Skapa ett samlat PDF- eller Word-underlag från dokumentet.",
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Samlad rapport",
+        steps=[
+            _step(
+                "step_a",
+                "Analysera",
+                "Analysera dokument.",
+                input_type=InputType.DOCUMENT,
+            ),
+            _step(
+                "step_b",
+                "Sammanfatta",
+                "Skriv sammanfattning.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ],
+    )
+    feedback = build_conversation_aware_quality_feedback(
+        conversation,
+        spec,
+        aggregation_intent="aggregate",
+    )
+    assert feedback is None or "all_previous_steps" not in feedback
+
+
 def test_does_not_infer_fan_in_from_conversation_words_without_architecture() -> None:
     conversation = [
         {
@@ -2192,12 +2226,12 @@ class TestPreferTargetedUnderlagInvariant:
         }
         assert ids == set()
 
-    def test_render_critic_issues_silent_when_aggregate_intent(
+    def test_render_critic_issues_silent_when_compare_intent(
         self,
     ) -> None:
         """`multi_document_compare_requires_all_previous_steps` owns the
-        aggregate / compare cases. The targeted-underlag rule must
-        defer rather than contradict."""
+        true compare case. The targeted-underlag rule must defer rather
+        than contradict."""
 
         from intric.flows.ai_builder.ai_builder_critic_invariants import (
             CriticContext,
@@ -2899,6 +2933,12 @@ class TestPreferTargetedUnderlagInvariant:
 _FINAL_TEXT_STEP_INVARIANT_ID = (
     "final_text_step_must_reference_relevant_structured_outputs"
 )
+_FINAL_ASSEMBLER_INVARIANT_ID = (
+    "final_assembler_must_reference_explicit_section_outputs"
+)
+_TERMINAL_RENDERER_INVARIANT_ID = (
+    "terminal_renderer_must_consume_previous_composer"
+)
 _SECTION_TEXT_STEPS_INVARIANT_ID = (
     "section_text_steps_must_reference_source_json_fields"
 )
@@ -3148,6 +3188,178 @@ class TestSectionTextStepsReferenceSourceJsonFields:
             issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues
         )
 
+    def test_fires_when_two_json_priors_are_dropped_by_section_writers(
+        self,
+    ) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Procurement report",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extract source facts",
+                    "Extract source facts.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"source_facts": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Extract report fields",
+                    "Extract reusable report fields.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {
+                            "requirements": {"type": "string"},
+                            "risks": {"type": "string"},
+                        },
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Section one",
+                    "Write section one.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_d",
+                    "Section two",
+                    "Write section two.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_e",
+                    "Section three",
+                    "Write section three.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(
+            issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues
+        )
+
+    def test_silent_when_multi_json_section_writers_reference_any_prior_json(
+        self,
+    ) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Procurement report",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extract source facts",
+                    "Extract source facts.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"source_facts": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Extract report fields",
+                    "Extract reusable report fields.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {
+                            "requirements": {"type": "string"},
+                            "risks": {"type": "string"},
+                        },
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Section one",
+                    "Write section one.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": "{{ step_b.output.structured.requirements }}",
+                    },
+                ),
+                _step(
+                    "step_d",
+                    "Section two",
+                    "Write section two.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": "{{ step_b.output.structured.risks }}",
+                    },
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(
+            issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues
+        )
+
+    def test_silent_when_multi_json_chain_has_one_section_writer(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Short report",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extract source facts",
+                    "Extract source facts.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"source_facts": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Extract report fields",
+                    "Extract reusable report fields.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"summary": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Section one",
+                    "Write section one.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(
+            issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues
+        )
+
     def test_silent_on_writer_then_critique_chain(
         self,
     ) -> None:
@@ -3365,17 +3577,29 @@ class TestRedundantTerminalJsonFormatTailAfterFinalTextComposer:
             issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
         )
 
-    @pytest.mark.parametrize("intent", ["aggregate", "compare"])
-    def test_silent_on_aggregate_or_compare_topologies(self, intent: str) -> None:
+    def test_silent_on_compare_topology(self) -> None:
         spec = _quality_chain_with_redundant_terminal_json_tail(
             terminal_text_unwrap=True
         )
 
         issues = evaluate_critic_invariants(
-            _final_text_step_critic_context(spec, aggregation_intent=intent)
+            _final_text_step_critic_context(spec, aggregation_intent="compare")
         )
 
         assert not any(
+            issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
+        )
+
+    def test_fires_on_aggregate_topology(self) -> None:
+        spec = _quality_chain_with_redundant_terminal_json_tail(
+            terminal_text_unwrap=True
+        )
+
+        issues = evaluate_critic_invariants(
+            _final_text_step_critic_context(spec, aggregation_intent="aggregate")
+        )
+
+        assert any(
             issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
         )
 
@@ -3495,6 +3719,461 @@ class TestRedundantTerminalJsonFormatTailAfterFinalTextComposer:
         assert any(
             issue.id == _REDUNDANT_TERMINAL_JSON_TAIL_INVARIANT_ID for issue in issues
         )
+
+
+class TestFinalAssemblerReferencesExplicitSectionOutputs:
+    def test_invariant_is_registered(self) -> None:
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CRITIC_INVARIANTS,
+            CriticInvariant,
+        )
+
+        ids = [inv.id for inv in CRITIC_INVARIANTS]
+        assert _FINAL_ASSEMBLER_INVARIANT_ID in ids
+        inv = next(
+            item for item in CRITIC_INVARIANTS if item.id == _FINAL_ASSEMBLER_INVARIANT_ID
+        )
+        assert isinstance(inv, CriticInvariant)
+        assert callable(inv.evidence)
+        assert "uses_previous_outputs" in inv.remediation
+
+    def test_fires_when_final_assembler_uses_all_previous_before_docx_renderer(
+        self,
+    ) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Language-neutral report",
+            steps=[
+                _step(
+                    "step_a",
+                    "Read source material",
+                    "Read the uploaded material.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_b",
+                    "Draft section one",
+                    "Write the first section.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_c",
+                    "Draft section two",
+                    "Write the second section.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_d",
+                    "Assemble body",
+                    "Assemble the body from section drafts.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_e",
+                    "Render DOCX",
+                    "Create the document.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.DOCX,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(issue.id == _FINAL_ASSEMBLER_INVARIANT_ID for issue in issues)
+
+    def test_fires_before_template_fill_renderer(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Template report",
+            steps=[
+                _step(
+                    "step_a",
+                    "Draft section one",
+                    "Write the first section.",
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_b",
+                    "Draft section two",
+                    "Write the second section.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_c",
+                    "Assemble body",
+                    "Assemble the body from section drafts.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_d",
+                    "Fill template",
+                    "Fill the template.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_mode=OutputMode.TEMPLATE_FILL,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(issue.id == _FINAL_ASSEMBLER_INVARIANT_ID for issue in issues)
+
+    def test_fires_when_broad_assembler_precedes_final_review_and_renderer(
+        self,
+    ) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Reviewed report",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extract facts",
+                    "Extract facts.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"facts": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Draft section one",
+                    "Write the first section.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": "{{ step_a.output.structured.facts }}",
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Draft section two",
+                    "Write the second section.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": "{{ step_a.output.structured.facts }}",
+                    },
+                ),
+                _step(
+                    "step_d",
+                    "Assemble body",
+                    "Assemble the section drafts.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_e",
+                    "Review body",
+                    "Review the body.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_f",
+                    "Render DOCX",
+                    "Create the document.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.DOCX,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(issue.id == _FINAL_ASSEMBLER_INVARIANT_ID for issue in issues)
+
+    def test_silent_when_final_assembler_already_references_section_outputs(
+        self,
+    ) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Explicit report",
+            steps=[
+                _step(
+                    "step_a",
+                    "Draft section one",
+                    "Write the first section.",
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_b",
+                    "Draft section two",
+                    "Write the second section.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_c",
+                    "Assemble body",
+                    "Assemble the body from section drafts.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": (
+                            "{{ step_a.output.text }}\n"
+                            "{{ step_b.output.text }}"
+                        )
+                    },
+                ),
+                _step(
+                    "step_d",
+                    "Render DOCX",
+                    "Create the document.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.DOCX,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(issue.id == _FINAL_ASSEMBLER_INVARIANT_ID for issue in issues)
+
+    def test_fires_for_aggregate_intent(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Aggregate report",
+            steps=[
+                _step("step_a", "Part one", "Write part one."),
+                _step(
+                    "step_b",
+                    "Part two",
+                    "Write part two.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                ),
+                _step(
+                    "step_c",
+                    "Aggregate body",
+                    "Aggregate all prior text.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_d",
+                    "Render PDF",
+                    "Create PDF.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.PDF,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(
+            _final_text_step_critic_context(spec, aggregation_intent="aggregate")
+        )
+
+        assert any(issue.id == _FINAL_ASSEMBLER_INVARIANT_ID for issue in issues)
+
+    def test_silent_for_compare_intent(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Compare report",
+            steps=[
+                _step("step_a", "Part one", "Write part one."),
+                _step(
+                    "step_b",
+                    "Part two",
+                    "Write part two.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                ),
+                _step(
+                    "step_c",
+                    "Compare body",
+                    "Compare all prior text.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_d",
+                    "Render PDF",
+                    "Create PDF.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.PDF,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(
+            _final_text_step_critic_context(spec, aggregation_intent="compare")
+        )
+
+        assert not any(issue.id == _FINAL_ASSEMBLER_INVARIANT_ID for issue in issues)
+
+
+class TestTerminalRendererConsumesPreviousComposer:
+    def test_invariant_is_registered(self) -> None:
+        from intric.flows.ai_builder.ai_builder_critic_invariants import (
+            CRITIC_INVARIANTS,
+            CriticInvariant,
+        )
+
+        ids = [inv.id for inv in CRITIC_INVARIANTS]
+        assert _TERMINAL_RENDERER_INVARIANT_ID in ids
+        inv = next(
+            item for item in CRITIC_INVARIANTS if item.id == _TERMINAL_RENDERER_INVARIANT_ID
+        )
+        assert isinstance(inv, CriticInvariant)
+        assert callable(inv.evidence)
+        assert 'input_source="previous_step"' in inv.remediation
+
+    def test_fires_when_terminal_renderer_uses_all_previous_after_text_composer(
+        self,
+    ) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Rendered report",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extract facts",
+                    "Extract facts.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"facts": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Compose body",
+                    "Compose the body.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                    input_bindings={
+                        "question": "{{ step_a.output.structured.facts }}",
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Render PDF",
+                    "Render the body.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.PDF,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert any(issue.id == _TERMINAL_RENDERER_INVARIANT_ID for issue in issues)
+
+    def test_silent_when_terminal_renderer_uses_previous_step(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Rendered report",
+            steps=[
+                _step("step_a", "Compose body", "Compose the body."),
+                _step(
+                    "step_b",
+                    "Render PDF",
+                    "Render the body.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.PDF,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(issue.id == _TERMINAL_RENDERER_INVARIANT_ID for issue in issues)
+
+    def test_fires_for_aggregate_intent(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Aggregate render",
+            steps=[
+                _step("step_a", "Part one", "Write part one."),
+                _step(
+                    "step_b",
+                    "Render PDF",
+                    "Render everything.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.PDF,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(
+            _final_text_step_critic_context(spec, aggregation_intent="aggregate")
+        )
+
+        assert any(issue.id == _TERMINAL_RENDERER_INVARIANT_ID for issue in issues)
+
+    def test_fires_for_compare_intent(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Compare render",
+            steps=[
+                _step("step_a", "Part one", "Write part one."),
+                _step(
+                    "step_b",
+                    "Render PDF",
+                    "Render everything.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.PDF,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(
+            _final_text_step_critic_context(spec, aggregation_intent="compare")
+        )
+
+        assert any(issue.id == _TERMINAL_RENDERER_INVARIANT_ID for issue in issues)
+
+    def test_silent_without_text_composer_prior(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Structured render",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extract facts",
+                    "Extract facts.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"facts": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Normalize facts",
+                    "Normalize facts.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"normalized": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Render PDF",
+                    "Render facts.",
+                    input_source=InputSource.ALL_PREVIOUS_STEPS,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.PDF,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(issue.id == _TERMINAL_RENDERER_INVARIANT_ID for issue in issues)
 
 
 class TestFinalTextStepReferencesRelevantStructuredOutputs:
@@ -3752,11 +4431,10 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
 
         assert any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
 
-    @pytest.mark.parametrize("intent", ["aggregate", "compare"])
-    def test_silent_on_aggregate_or_compare_intent(self, intent: str) -> None:
+    def test_silent_on_compare_intent(self) -> None:
         """`multi_document_compare_requires_all_previous_steps` owns the
-        aggregate / compare cases. This rule must defer rather than nudge
-        toward `previous_step` against the aggregate-shape requirement."""
+        true compare case. This rule must defer rather than nudge toward
+        `previous_step` against the compare-shape requirement."""
 
         spec = FlowDraftSpecCore(
             flow_name="Aggregeringsflöde",
@@ -3794,10 +4472,52 @@ class TestFinalTextStepReferencesRelevantStructuredOutputs:
         )
 
         issues = evaluate_critic_invariants(
-            _final_text_step_critic_context(spec, aggregation_intent=intent)
+            _final_text_step_critic_context(spec, aggregation_intent="compare")
         )
 
         assert not any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
+
+    def test_fires_on_aggregate_intent(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Aggregeringsflöde",
+            steps=[
+                _step(
+                    "step_a",
+                    "Extrahera produktdata",
+                    "Extrahera produktdata.",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"produkt": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_b",
+                    "Extrahera kunddata",
+                    "Extrahera kunddata.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"kund": {"type": "string"}},
+                    },
+                ),
+                _step(
+                    "step_c",
+                    "Skriv sammanfattning",
+                    "Skriv en kort sammanfattning.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+            ],
+        )
+
+        issues = evaluate_critic_invariants(
+            _final_text_step_critic_context(spec, aggregation_intent="aggregate")
+        )
+
+        assert any(issue.id == _FINAL_TEXT_STEP_INVARIANT_ID for issue in issues)
 
     def test_silent_when_priors_are_text(self) -> None:
         """Priors that emit plain text expose no structured fields. The
@@ -4309,6 +5029,8 @@ class TestCriticInvariantRegistry:
             "mcp_selection_requires_semantic_support",
             "json_input_rejects_all_previous_steps_source",
             "prefer_targeted_underlag_over_all_previous_steps",
+            "final_assembler_must_reference_explicit_section_outputs",
+            "terminal_renderer_must_consume_previous_composer",
             "section_text_steps_must_reference_source_json_fields",
             "redundant_terminal_json_format_tail_after_final_text_composer",
             "final_text_step_must_reference_relevant_structured_outputs",
