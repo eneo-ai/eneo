@@ -95,7 +95,7 @@ class RouteInfo:
     has_resource_perm_dep: bool
     has_scope_check_dep: bool
     has_api_key_permission_dep: bool
-    has_tenant_scope_for_delete_dep: bool
+    has_file_delete_scope_guard_dep: bool
     resource_perm_config: ResourcePermConfig | None
     scope_check_config: ScopeCheckConfig | None
 
@@ -157,7 +157,7 @@ def walk_routes() -> list[RouteInfo]:
         has_resource_perm_dep = False
         has_scope_check_dep = False
         has_api_key_permission_dep = False
-        has_tenant_scope_for_delete_dep = False
+        has_file_delete_scope_guard_dep = False
 
         # Router-level dependencies (passed to include_router(dependencies=[...]))
         router_dep_fns: list[Any] = [
@@ -191,7 +191,7 @@ def walk_routes() -> list[RouteInfo]:
             elif dep_name == "_api_key_permission_dep":
                 has_api_key_permission_dep = True
             elif dep_name == "_stash":
-                has_tenant_scope_for_delete_dep = True
+                has_file_delete_scope_guard_dep = True
 
         for method in sorted(methods):
             infos.append(
@@ -202,7 +202,7 @@ def walk_routes() -> list[RouteInfo]:
                     has_resource_perm_dep=has_resource_perm_dep,
                     has_scope_check_dep=has_scope_check_dep,
                     has_api_key_permission_dep=has_api_key_permission_dep,
-                    has_tenant_scope_for_delete_dep=has_tenant_scope_for_delete_dep,
+                    has_file_delete_scope_guard_dep=has_file_delete_scope_guard_dep,
                     resource_perm_config=resource_perm_config,
                     scope_check_config=scope_check_config,
                 )
