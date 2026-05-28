@@ -1,4 +1,3 @@
-import { dev } from "$app/environment";
 import { DASHBOARD_URL } from "$lib/core/constants";
 import { detectMobile } from "$lib/core/detectMobile";
 import { getFeatureFlags } from "$lib/core/flags.server";
@@ -83,9 +82,17 @@ export const handleError: HandleServerError = async ({ error, status, message })
     code = error.code;
   }
 
-  if (dev) {
-    console.error("server error", error);
-  }
+  // Always log server-side errors. This used to be gated on `dev`, which meant
+  // production SSR failures (e.g. a transient backend fetch that rejects a
+  // layout `load`) surfaced as a 500 page with no server-side trace at all —
+  // impossible to diagnose in a deployed environment. Log unconditionally and
+  // include the stack for unexpected (non-IntricError) errors.
+  console.error("[SSR error]", {
+    status,
+    code,
+    message,
+    error: error instanceof Error ? (error.stack ?? error.message) : error
+  });
 
   return {
     status,
