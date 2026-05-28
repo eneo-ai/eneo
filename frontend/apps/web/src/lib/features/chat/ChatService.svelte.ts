@@ -85,16 +85,28 @@ export class ChatService {
   pendingContextWindow = $state<number>(0);
   #preflightDebounce: ReturnType<typeof setTimeout> | null = null;
   #preflightGen = 0;
-  // Prefer the pending preflight model/window while the user is composing;
-  // otherwise use the model recorded on the most recent message (covers group
-  // chats where the active model varies per turn), then the partner's own
-  // completion model for fresh assistant conversations.
+  // Resolution order for the active model's context window:
+  //   1. preflight (server-resolved current model, set while composing)
+  //   2. for a single assistant, the partner's own model — it is global and
+  //      authoritative for the next turn, so it must win over history (opening
+  //      an old conversation must reflect the model that will actually answer,
+  //      i.e. what the picker shows, not whatever model answered last time)
+  //   3. the most recent message's model — only meaningful for group chats,
+  //      where the active model varies per turn
   contextLimit = $derived<number>(
     this.pendingContextWindow ||
+      this.#partnerModelTokenLimit() ||
       this.#latestMessageTokenLimit() ||
-      (this.#chatPartner && "completion_model" in this.#chatPartner
-        ? (this.#chatPartner.completion_model?.token_limit ?? 0)
-        : 0)
+      0
+  );
+
+  // The name of the model that will answer the next turn. Single source of
+  // truth for any "active model" label (e.g. the context bar) so it can never
+  // disagree with contextLimit — same precedence: live preflight, then the
+  // single assistant's own (global) model, then the latest message's model
+  // for group chats where the active model varies per turn.
+  activeModelName = $derived<string>(
+    this.pendingModelName || this.#partnerModelName() || this.#latestMessageModelName() || ""
   );
 
   // Single source of truth for "the next message would overflow context".
@@ -105,12 +117,41 @@ export class ChatService {
       this.contextTokens + this.pendingInputTokens + this.pendingFileTokens > this.contextLimit
   );
 
+  // The current partner's own completion model — set only for single
+  // assistants (group chats carry no single model, so this is undefined and
+  // the caller falls back to the latest-message model).
+  #partnerModelTokenLimit(): number | undefined {
+    const partner = this.#chatPartner;
+    if (partner && "completion_model" in partner) {
+      return partner.completion_model?.token_limit ?? undefined;
+    }
+    return undefined;
+  }
+
+  #partnerModelName(): string | undefined {
+    const partner = this.#chatPartner;
+    if (partner && "completion_model" in partner) {
+      return partner.completion_model?.name ?? undefined;
+    }
+    return undefined;
+  }
+
   #latestMessageTokenLimit(): number | undefined {
     const messages = this.currentConversation?.messages;
     if (!messages?.length) return undefined;
     for (let i = messages.length - 1; i >= 0; i--) {
       const limit = messages[i].completion_model?.token_limit;
       if (limit) return limit;
+    }
+    return undefined;
+  }
+
+  #latestMessageModelName(): string | undefined {
+    const messages = this.currentConversation?.messages;
+    if (!messages?.length) return undefined;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const name = messages[i].completion_model?.name;
+      if (name) return name;
     }
     return undefined;
   }
@@ -363,10 +404,16 @@ export class ChatService {
   }
 
   changeChatPartner(newPartner: ChatPartner) {
-    const oldPartner = this.#chatPartner;
+    // Compare by id, not object identity: switching the personal assistant's
+    // model replaces the partner object but keeps the same id, and that must
+    // not wipe the open conversation — the model is global, so a switch just
+    // changes which model answers the next turn. A different id is a genuine
+    // partner switch and resets. (Comparing the $state proxy with !== also
+    // trips Svelte's state_proxy_equality_mismatch warning.)
+    const partnerChanged = this.#chatPartner?.id !== newPartner?.id;
     this.#chatPartner = newPartner;
 
-    if (oldPartner !== newPartner) {
+    if (partnerChanged) {
       this.newConversation();
       this.reloadHistory();
     }
@@ -379,7 +426,8 @@ export class ChatService {
       tools?: ConversationTools,
       useWebSearch?: boolean,
       requireToolApproval?: boolean,
-      abortController?: AbortController
+      abortController?: AbortController,
+      disabledMcpServerIds?: string[]
     ) => {
       // Clear preflight estimate — the message is leaving the input
       this.#clearPreflight();
@@ -409,6 +457,7 @@ export class ChatService {
           abortController,
           useWebSearch,
           requireToolApproval,
+          disabledMcpServerIds,
           callbacks: {
             onFirstChunk: (chunk) => {
               if (isStale()) return;
