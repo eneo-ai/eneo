@@ -1,27 +1,131 @@
 # Release SBOMs
 
-Each Eneo release includes Software Bill of Materials files for the published
-backend and frontend container images. The files are attached to the GitHub
-Release so you can download them for security review, compliance work, or
-release comparison.
+Each Eneo release includes Software Bill of Materials (SBOM) files for the
+published backend and frontend container images. The files are attached to the
+GitHub Release so you can download the dependency inventory for the exact
+version you run.
 
-The release workflow creates SBOMs for:
+The release workflow covers:
 
 - `ghcr.io/eneo-ai/eneo-backend:<version>`
 - `ghcr.io/eneo-ai/eneo-frontend:<version>`
 
 For a release tag such as `v2.0.0`, the image tag is `2.0.0`.
-The SBOM filenames use the release tag, including the `v` prefix.
+The SBOM filenames use the release tag, including the `v` prefix. Prereleases
+use the same process, so a tag such as `v2.0.0-rc.2` gets SBOM files for that
+prerelease.
 
-## When SBOMs are published
+## How the release flow works
 
-When maintainers publish a GitHub Release, Eneo waits for the matching backend
-and frontend images to appear in GitHub Container Registry. The workflow then
-scans the `linux/amd64` image digests and attaches the generated files to the
-same release page.
+When maintainers publish a GitHub Release, the release SBOM workflow runs
+automatically:
 
-Each new release gets its own SBOM files. Older release pages keep their
-original SBOM files, so you can compare one version with the next.
+1. The workflow reads the release tag and derives the container image tag.
+2. It waits for the matching backend and frontend images in GitHub Container
+   Registry.
+3. It resolves the immutable `linux/amd64` image digest for each image.
+4. It scans those digest references, not only the mutable image tags.
+5. It uploads the generated files to the same GitHub Release page.
+
+Each release keeps its own SBOM files. Older release pages keep their original
+assets, so you can compare one version with the next.
+
+The same workflow can also run manually as a dry run. In dry-run mode it creates
+the files as a temporary workflow artifact and does not attach them to the
+GitHub Release.
+
+The diagram follows the same path as the release workflow:
+
+<style>{`
+  .sbom-release-flow {
+    margin-top: 1rem;
+    overflow-x: auto;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    background: rgba(8, 145, 178, 0.06);
+  }
+
+  .sbom-release-flow > div {
+    min-height: 38rem;
+    min-width: 28rem;
+  }
+
+  .sbom-release-flow svg {
+    height: auto;
+    min-width: 28rem;
+    width: 100%;
+  }
+`}</style>
+
+<div className="sbom-release-flow">
+
+```mermaid
+flowchart TD
+  release["GitHub Release<br/>published"]
+  manual["Manual dry run"]
+  tag["Derive image tag<br/>from release tag"]
+  digests["Resolve immutable<br/>linux/amd64 GHCR digests"]
+
+  syft["Syft scans full images<br/>backend and frontend"]
+  python["CycloneDX Python scans<br/>backend /app/.venv"]
+
+  imageSboms["Image SBOM assets<br/>CycloneDX, SPDX, table"]
+  runtimeSbom["Backend Python runtime SBOM<br/>CycloneDX JSON"]
+  verification["Verification files<br/>image digests and checksums"]
+
+  release --> tag --> digests
+  manual --> tag
+  digests --> syft
+  digests --> python
+  syft --> imageSboms
+  python --> runtimeSbom
+  imageSboms --> verification
+  runtimeSbom --> verification
+  verification --> upload["Attach assets to<br/>the same GitHub Release"]
+  manual -. dry run .-> artifact["Temporary workflow artifact"]
+
+  classDef trigger fill:#eff6ff,stroke:#2563eb,color:#0f172a
+  classDef source fill:#ecfeff,stroke:#0891b2,color:#0f172a
+  classDef scanner fill:#f0fdf4,stroke:#16a34a,color:#0f172a
+  classDef asset fill:#fff7ed,stroke:#ea580c,color:#0f172a
+  classDef output fill:#f8fafc,stroke:#64748b,color:#0f172a
+
+  class release,manual,tag trigger
+  class digests source
+  class syft,python scanner
+  class imageSboms,runtimeSbom asset
+  class verification,upload,artifact output
+```
+
+</div>
+
+## Why Eneo uses more than one SBOM file
+
+Eneo publishes a small set of files because each file answers a different
+question.
+
+The backend and frontend image SBOMs are the main release inventory. They are
+generated with [Syft](https://github.com/anchore/syft), which scans container
+images and filesystems and can export several SBOM formats. For Eneo, Syft
+scans the released backend and frontend image digests and creates:
+
+- [CycloneDX](https://cyclonedx.org/) JSON for tools that consume the
+  CycloneDX SBOM standard.
+- [SPDX](https://spdx.dev/learn/overview/) JSON for tools and processes that
+  use SPDX.
+- A readable package table for quick human review.
+
+The backend also has a narrower Python runtime SBOM. It is generated with the
+[CycloneDX Python tool](https://github.com/CycloneDX/cyclonedx-python) from the
+Python environment installed at `/app/.venv` inside the released backend image.
+This file is useful when you specifically want the backend Python dependency
+inventory. It does not replace the full backend image SBOM because it does not
+describe the whole container image.
+
+Eneo scans the released image digests instead of source lockfiles because the
+image digest is the shipped artifact. Lockfiles describe build input; the image
+describes what users receive.
 
 ## Files on the release page
 
@@ -39,23 +143,51 @@ Each release publishes these files:
 | `IMAGE-DIGESTS.txt` | Exact image tags and digests that were scanned |
 | `SBOM-SHA256SUMS.txt` | SHA-256 checksums for the SBOM bundle |
 
-Use the `.table.txt` files when you want to inspect the package list quickly.
-Use CycloneDX or SPDX when you need to import the SBOM into another tool.
+Use the `.table.txt` files when you want to inspect a package list quickly. Use
+CycloneDX or SPDX when you need to import an SBOM into another tool.
 
 ## What the SBOM covers
 
-The SBOMs describe packages Syft finds inside the released container images.
-For the backend image, this usually includes Debian packages, Python packages,
-and binaries. For the frontend image, this usually includes Debian packages,
-npm packages, and binaries.
+The image SBOMs describe packages Syft finds inside the released container
+images.
+
+For the backend image, this usually includes:
+
+- operating system packages
+- Python packages installed in the image
+- binaries and other package metadata Syft can identify
+
+For the frontend image, this usually includes:
+
+- operating system packages
+- npm packages present in the image
+- binaries and other package metadata Syft can identify
 
 The backend Python runtime SBOM is narrower. It is generated from the Python
 environment installed at `/app/.venv` inside the released backend image. It is
-useful when you specifically want the Python runtime dependency inventory, but
-it does not replace the full backend image SBOM.
+validated during the workflow by checking that the Python distributions found
+in that runtime environment appear in the generated CycloneDX file.
 
 The SBOMs are generated from immutable image digest references, not only from
 tags. `IMAGE-DIGESTS.txt` records the digest references used during the scan.
+
+## Which file should you use?
+
+Use the backend or frontend CycloneDX JSON files when your tooling expects
+CycloneDX and you want the full container image inventory.
+
+Use the SPDX JSON files when your process or supplier tooling expects SPDX.
+
+Use `eneo-backend-python-runtime-<release-tag>-linux-amd64.cyclonedx.json` when
+you want a focused view of the Python packages installed in the backend runtime
+environment.
+
+Use the `.table.txt` files when you want to read the package list without
+importing an SBOM into another tool.
+
+Use `IMAGE-DIGESTS.txt` to see which GHCR image digests were scanned. Use
+`SBOM-SHA256SUMS.txt` to check the downloaded SBOM files against the checksums
+published with the release.
 
 ## What the SBOM does not cover
 
@@ -69,9 +201,32 @@ The current release assets are not signed. Their authenticity relies on
 GitHub-managed release asset storage and the image digests recorded in
 `IMAGE-DIGESTS.txt`.
 
-## Checking a release
+The current release workflow publishes `linux/amd64` SBOM files. If Eneo adds
+more release platforms later, each platform should get its own SBOM files
+because package contents can differ by image architecture.
 
-1. Open the GitHub Release page for the version you use.
+## Standards and tools
+
+These references explain the formats and tools used by Eneo:
+
+- [CycloneDX](https://cyclonedx.org/) is the SBOM format used for the
+  CycloneDX JSON release assets.
+- [OWASP SCVS SBOM requirements](https://scvs.owasp.org/scvs/v2-software-bill-of-materials/)
+  describe maturity expectations such as automated SBOM creation,
+  machine-readable formats, metadata, and component inventory.
+- [Syft](https://github.com/anchore/syft) is used for the backend and frontend
+  image SBOMs.
+- [CycloneDX Python](https://github.com/CycloneDX/cyclonedx-python) is used for
+  the backend Python runtime SBOM.
+- [Anchore SBOM Action](https://github.com/anchore/sbom-action) provides the
+  GitHub Action helpers used to download Syft in the release workflow.
+- [SPDX](https://spdx.dev/learn/overview/) is the other machine-readable SBOM
+  format published for each image.
+
+## Check a release
+
+1. Open the [Eneo GitHub Releases page](https://github.com/eneo-ai/eneo/releases)
+   and choose the version you use.
 2. Download the backend and frontend `.table.txt` files for a quick review.
 3. Download CycloneDX or SPDX image SBOMs for your security tooling.
 4. Download the backend Python runtime SBOM if you only need the Python
