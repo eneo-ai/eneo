@@ -256,6 +256,52 @@ class TestBulkFailOnErrors:
         assert ops[0]["status"] == "404"
 
 
+class TestBulkLimits:
+    async def test_exceeds_max_operations_returns_413(self, client: AsyncClient):
+        # 101 operations is one over the advertised maxOperations (100).
+        ops = [
+            {"method": "DELETE", "path": f"/Users/{uuid4()}"} for _ in range(101)
+        ]
+        res = await client.post(
+            "/scim/v2/Bulk",
+            json={"Operations": ops},
+            headers=AUTH,
+        )
+        assert res.status_code == 413
+        body = res.json()
+        assert "urn:ietf:params:scim:api:messages:2.0:Error" in body["schemas"]
+        assert body["status"] == "413"
+        assert body["scimType"] == "tooMany"
+
+    async def test_at_max_operations_not_rejected(self, client: AsyncClient):
+        # Exactly 100 operations must NOT trip the limit (guards off-by-one).
+        ops = [
+            {"method": "DELETE", "path": f"/Users/{uuid4()}"} for _ in range(100)
+        ]
+        res = await client.post(
+            "/scim/v2/Bulk",
+            json={"Operations": ops},
+            headers=AUTH,
+        )
+        assert res.status_code == 200
+
+    async def test_exceeds_payload_size_returns_413(self, client: AsyncClient):
+        # Patch the byte limit to a tiny value so any normal request body
+        # exceeds it — avoids building a real >1 MiB payload in the test.
+        with patch(
+            "intric.scim.resources.bulk.SCIM_BULK_MAX_PAYLOAD_BYTES", 10
+        ):
+            res = await client.post(
+                "/scim/v2/Bulk",
+                json={"Operations": [{"method": "DELETE", "path": f"/Users/{uuid4()}"}]},
+                headers=AUTH,
+            )
+        assert res.status_code == 413
+        body = res.json()
+        assert "urn:ietf:params:scim:api:messages:2.0:Error" in body["schemas"]
+        assert body["status"] == "413"
+
+
 class TestBulkIdReference:
     async def test_bulkid_resolved_in_subsequent_operation(self, client: AsyncClient):
         user = _make_scim_user()
