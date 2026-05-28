@@ -41,6 +41,9 @@ from intric.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_output_type_values,
 )
 from intric.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
+from intric.flows.ai_builder.ai_builder_output_sections_signals import (
+    RequestedOutputSections,
+)
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
     AIBuilderAvailableModelResource,
@@ -4771,6 +4774,7 @@ def test_compile_outline_audio_docx_body_step_auto_authors_targeted_refs_when_js
         planner_patterns=PlannerPatternSignals(),
         output_intent=OutputIntentResolution(terminal_output="docx_document"),
         mixed_audio_doc_input=False,
+        requested_output_sections=RequestedOutputSections.empty(),
     )
     issues = evaluate_critic_invariants(context, invariants=CRITIC_INVARIANTS)
     issue_ids = [issue.id for issue in issues]
@@ -5272,6 +5276,7 @@ def test_auto_bound_c2_shape_does_not_trigger_targeted_underlag_critic_loop() ->
         planner_patterns=PlannerPatternSignals(),
         output_intent=OutputIntentResolution(terminal_output="pdf_document"),
         mixed_audio_doc_input=False,
+        requested_output_sections=RequestedOutputSections.empty(),
     )
 
     issue_ids = {
@@ -5488,6 +5493,7 @@ def test_auto_bind_targeted_underlag_caps_and_distributes_declared_fields() -> N
                 planner_patterns=PlannerPatternSignals(),
                 output_intent=OutputIntentResolution(terminal_output="text"),
                 mixed_audio_doc_input=False,
+                requested_output_sections=RequestedOutputSections.empty(),
             ),
             invariants=CRITIC_INVARIANTS,
         )
@@ -7997,6 +8003,7 @@ def test_compile_outline_flow_quality_chain_preserves_all_semantic_steps() -> No
         planner_patterns=PlannerPatternSignals(),
         output_intent=OutputIntentResolution(terminal_output="pdf_document"),
         mixed_audio_doc_input=False,
+        requested_output_sections=RequestedOutputSections.empty(),
     )
     issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
     assert "terminal_renderer_must_not_consume_review_only_step" not in issue_ids

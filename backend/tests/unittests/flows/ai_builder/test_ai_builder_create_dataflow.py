@@ -8,6 +8,9 @@ from intric.flows.ai_builder.ai_builder_create_models import (
 )
 from intric.flows.ai_builder.ai_builder_create_validator import validate_create_draft
 from intric.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
+from intric.flows.ai_builder.ai_builder_output_sections_signals import (
+    RequestedOutputSections,
+)
 
 
 def test_create_dataflow_does_not_import_critic_invariants() -> None:
@@ -267,7 +270,9 @@ def test_normalize_create_draft_mechanics_and_critic_share_targeted_underlag_pol
     composer = normalized.steps[3]
 
     assert composer.input_source == "previous_step"
-    assert {(ref.from_step, ref.field_path) for ref in composer.uses_previous_fields} >= {
+    assert {
+        (ref.from_step, ref.field_path) for ref in composer.uses_previous_fields
+    } >= {
         (2, "background"),
         (3, "findings"),
     }
@@ -283,6 +288,7 @@ def test_normalize_create_draft_mechanics_and_critic_share_targeted_underlag_pol
         planner_patterns=PlannerPatternSignals(),
         output_intent=OutputIntentResolution(terminal_output="pdf_document"),
         mixed_audio_doc_input=False,
+        requested_output_sections=RequestedOutputSections.empty(),
     )
     issue_ids = {
         issue.id
@@ -432,9 +438,9 @@ def test_normalize_create_draft_mechanics_preserves_final_assembler_field_refs()
     normalized = normalize_create_draft_mechanics(draft)
     assembler = normalized.steps[-2]
 
-    assert [(ref.from_step, ref.field_path) for ref in assembler.uses_previous_fields] == [
-        (1, "facts")
-    ]
+    assert [
+        (ref.from_step, ref.field_path) for ref in assembler.uses_previous_fields
+    ] == [(1, "facts")]
     assert [ref.from_step for ref in assembler.uses_previous_outputs] == [2, 3]
 
 
@@ -511,6 +517,7 @@ def test_normalize_create_draft_mechanics_rewrites_final_assembler_for_aggregate
         planner_patterns=PlannerPatternSignals(),
         output_intent=OutputIntentResolution(terminal_output="pdf_document"),
         mixed_audio_doc_input=False,
+        requested_output_sections=RequestedOutputSections.empty(),
         aggregation_intent="aggregate",
     )
     issue_ids = {

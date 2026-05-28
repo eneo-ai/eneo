@@ -50,15 +50,17 @@ _EXPLICIT_HEADING_RE = re.compile(
     r"(?im)^\s*(?:rubrik|heading)\s*:\s*(?P<title>.+?)\s*$"
 )
 _MARKDOWN_HEADING_RE = re.compile(r"(?m)^\s*#{1,3}\s+(?P<title>[^#\n].*?)\s*$")
-_LIST_ITEM_RE = re.compile(
-    r"(?m)^\s*(?:[-*•]|\d+[.)])\s+(?P<title>[^\n]+?)\s*$"
-)
+_LIST_ITEM_RE = re.compile(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+(?P<title>[^\n]+?)\s*$")
 
 
 @dataclass(frozen=True, slots=True)
 class RequestedOutputSections:
     sections: tuple[str, ...] = ()
     confidence: OutputSectionConfidence = "low"
+
+    @classmethod
+    def empty(cls) -> "RequestedOutputSections":
+        return cls()
 
     @property
     def high_confidence(self) -> bool:
@@ -68,7 +70,7 @@ class RequestedOutputSections:
 def extract_requested_output_sections(text: str) -> RequestedOutputSections:
     normalized = text.casefold()
     if not normalized or mentions_sectioned_form_intake(text):
-        return RequestedOutputSections()
+        return RequestedOutputSections.empty()
 
     explicit_titles = _explicit_heading_titles(text)
     candidates = (

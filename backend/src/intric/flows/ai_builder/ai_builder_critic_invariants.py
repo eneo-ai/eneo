@@ -19,7 +19,7 @@ layer.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from intric.flows.ai_builder.ai_builder_architecture_errors import (
@@ -102,12 +102,10 @@ class CriticContext:
     planner_patterns: PlannerPatternSignals
     output_intent: OutputIntentResolution
     mixed_audio_doc_input: bool
+    requested_output_sections: RequestedOutputSections
     primary_runtime_input: PrimaryRuntimeInput = "unknown"
     aggregation_intent: AggregationIntent = "linear"
     resource_catalog: "AIBuilderResourceCatalog | None" = None
-    requested_output_sections: RequestedOutputSections = field(
-        default_factory=RequestedOutputSections
-    )
 
 
 CriticCheck = Callable[[CriticContext], bool]
@@ -908,7 +906,9 @@ def _last_compositional_step_index(spec: FlowDraftSpecCore) -> int | None:
     happens one step earlier; the targeted-underlag rule must evaluate
     that step's input wiring, not the renderer's.
     """
-    return last_compositional_step_index(_underlag_structural_step_signals_for_spec(spec))
+    return last_compositional_step_index(
+        _underlag_structural_step_signals_for_spec(spec)
+    )
 
 
 def _composer_question_prior_text_output_ref_count(
@@ -1357,7 +1357,7 @@ def _prior_json_contract_count(spec: FlowDraftSpecCore, *, before_index: int) ->
         if not _is_renderer_step(step)
         and step.output_type == OutputType.JSON
         and step.output_contract is not None
-)
+    )
 
 
 def _requested_output_sections_require_section_writers_evidence(

@@ -15,6 +15,9 @@ from intric.flows.ai_builder.ai_builder_critic_invariants import (
 from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
+from intric.flows.ai_builder.ai_builder_output_sections_signals import (
+    RequestedOutputSections,
+)
 from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_aware_quality_feedback,
     build_conversation_critic_context,
@@ -149,6 +152,39 @@ def _four_section_report_prompt() -> str:
     Rubrik: Åtgärder
     Rubrik: Risker
     """
+
+
+def test_build_conversation_critic_context_exposes_requested_output_sections() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Beslutsunderlag",
+        steps=[
+            _step(
+                "step_a",
+                "Skriv beslutsunderlag",
+                "Skriv ett beslutsunderlag.",
+                output_type=OutputType.TEXT,
+            )
+        ],
+    )
+
+    context = build_conversation_critic_context(
+        [{"role": "user", "content": _named_section_report_prompt()}],
+        spec,
+    )
+
+    assert context.requested_output_sections.high_confidence
+    assert context.requested_output_sections.sections == (
+        "problem/nuläge",
+        "lösningsförslag/nyläge",
+        "resursåtgång",
+        "planerad tidplan",
+        "ekonomisk nytta och kostnader",
+        "nyttor",
+        "finansiering",
+        "ansvarig för nyttorealisering",
+        "bedömning av förändringens komplexitet",
+        "plan för nyttorealisering",
+    )
 
 
 def _structured_source_step() -> StepSpec:
@@ -2040,6 +2076,7 @@ class TestCriticInvariantLoop:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output="pdf_document"),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         issues = render_critic_issues(context)
@@ -2080,6 +2117,7 @@ class TestCriticInvariantLoop:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output="pdf_document"),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         assert render_critic_issues(context) == []
@@ -2111,6 +2149,7 @@ class TestCriticInvariantLoop:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         assert render_critic_issues(context) == []
@@ -2186,6 +2225,7 @@ class TestJsonInputRejectsAllPreviousStepsSourceInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         issues = render_critic_issues(context)
@@ -2239,6 +2279,7 @@ class TestJsonInputRejectsAllPreviousStepsSourceInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         assert render_critic_issues(context) == []
@@ -2292,6 +2333,7 @@ class TestJsonInputRejectsAllPreviousStepsSourceInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         assert render_critic_issues(context) == []
@@ -2395,6 +2437,7 @@ class TestPreferTargetedUnderlagInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         issues = render_critic_issues(context)
@@ -2456,6 +2499,7 @@ class TestPreferTargetedUnderlagInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         ids = {
@@ -2516,6 +2560,7 @@ class TestPreferTargetedUnderlagInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
             aggregation_intent="compare",
         )
 
@@ -2590,6 +2635,7 @@ class TestPreferTargetedUnderlagInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         ids = {
@@ -2662,6 +2708,7 @@ class TestPreferTargetedUnderlagInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         issues = render_critic_issues(context)
@@ -2744,6 +2791,7 @@ class TestPreferTargetedUnderlagInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         issues = render_critic_issues(context)
@@ -2851,6 +2899,7 @@ class TestPreferTargetedUnderlagInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         issues = evaluate_critic_invariants(context, invariants=CRITIC_INVARIANTS)
@@ -2933,6 +2982,7 @@ class TestPreferTargetedUnderlagInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         ids = {
@@ -3017,6 +3067,7 @@ class TestPreferTargetedUnderlagInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         issues = [
@@ -3096,6 +3147,7 @@ class TestPreferTargetedUnderlagInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         issues = [
@@ -3159,6 +3211,7 @@ class TestPreferTargetedUnderlagInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
 
         ids = {
@@ -3175,9 +3228,7 @@ _FINAL_TEXT_STEP_INVARIANT_ID = (
 _FINAL_ASSEMBLER_INVARIANT_ID = (
     "final_assembler_must_reference_explicit_section_outputs"
 )
-_TERMINAL_RENDERER_INVARIANT_ID = (
-    "terminal_renderer_must_consume_previous_composer"
-)
+_TERMINAL_RENDERER_INVARIANT_ID = "terminal_renderer_must_consume_previous_composer"
 _TERMINAL_REVIEW_ONLY_INVARIANT_ID = (
     "terminal_renderer_must_not_consume_review_only_step"
 )
@@ -3216,6 +3267,7 @@ def _final_text_step_critic_context(
         planner_patterns=PlannerPatternSignals(),
         output_intent=OutputIntentResolution(terminal_output=terminal_output),
         mixed_audio_doc_input=False,
+        requested_output_sections=RequestedOutputSections.empty(),
         aggregation_intent=cast("AggregationIntent", aggregation_intent),
     )
 
@@ -3337,8 +3389,7 @@ class TestSectionTextStepsReferenceSourceJsonFields:
                     output_type=OutputType.TEXT,
                     input_bindings={
                         "question": (
-                            "Problem: "
-                            "{{ step_b.output.structured.nulage_och_problem }}"
+                            "Problem: {{ step_b.output.structured.nulage_och_problem }}"
                         )
                     },
                 ),
@@ -3363,9 +3414,7 @@ class TestSectionTextStepsReferenceSourceJsonFields:
 
         issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
 
-        assert any(
-            issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues
-        )
+        assert any(issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues)
 
     def test_silent_when_section_writers_target_source_json(
         self,
@@ -3402,8 +3451,7 @@ class TestSectionTextStepsReferenceSourceJsonFields:
                     output_type=OutputType.TEXT,
                     input_bindings={
                         "question": (
-                            "Problem: "
-                            "{{ step_b.output.structured.nulage_och_problem }}"
+                            "Problem: {{ step_b.output.structured.nulage_och_problem }}"
                         )
                     },
                 ),
@@ -3416,8 +3464,7 @@ class TestSectionTextStepsReferenceSourceJsonFields:
                     output_type=OutputType.TEXT,
                     input_bindings={
                         "question": (
-                            "Lösning: "
-                            "{{ step_b.output.structured.losningsinriktning }}"
+                            "Lösning: {{ step_b.output.structured.losningsinriktning }}"
                         )
                     },
                 ),
@@ -3426,9 +3473,7 @@ class TestSectionTextStepsReferenceSourceJsonFields:
 
         issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
 
-        assert not any(
-            issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues
-        )
+        assert not any(issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues)
 
     def test_fires_when_two_json_priors_are_dropped_by_section_writers(
         self,
@@ -3491,9 +3536,7 @@ class TestSectionTextStepsReferenceSourceJsonFields:
 
         issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
 
-        assert any(
-            issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues
-        )
+        assert any(issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues)
 
     def test_silent_when_multi_json_section_writers_reference_any_prior_json(
         self,
@@ -3554,9 +3597,7 @@ class TestSectionTextStepsReferenceSourceJsonFields:
 
         issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
 
-        assert not any(
-            issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues
-        )
+        assert not any(issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues)
 
     def test_silent_when_multi_json_chain_has_one_section_writer(self) -> None:
         spec = FlowDraftSpecCore(
@@ -3598,9 +3639,7 @@ class TestSectionTextStepsReferenceSourceJsonFields:
 
         issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
 
-        assert not any(
-            issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues
-        )
+        assert not any(issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues)
 
     def test_silent_on_writer_then_critique_chain(
         self,
@@ -3646,9 +3685,7 @@ class TestSectionTextStepsReferenceSourceJsonFields:
 
         issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
 
-        assert not any(
-            issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues
-        )
+        assert not any(issue.id == _SECTION_TEXT_STEPS_INVARIANT_ID for issue in issues)
 
 
 class TestRedundantTerminalJsonFormatTailAfterFinalTextComposer:
@@ -3973,7 +4010,9 @@ class TestFinalAssemblerReferencesExplicitSectionOutputs:
         ids = [inv.id for inv in CRITIC_INVARIANTS]
         assert _FINAL_ASSEMBLER_INVARIANT_ID in ids
         inv = next(
-            item for item in CRITIC_INVARIANTS if item.id == _FINAL_ASSEMBLER_INVARIANT_ID
+            item
+            for item in CRITIC_INVARIANTS
+            if item.id == _FINAL_ASSEMBLER_INVARIANT_ID
         )
         assert isinstance(inv, CriticInvariant)
         assert callable(inv.evidence)
@@ -4162,8 +4201,7 @@ class TestFinalAssemblerReferencesExplicitSectionOutputs:
                     output_type=OutputType.TEXT,
                     input_bindings={
                         "question": (
-                            "{{ step_a.output.text }}\n"
-                            "{{ step_b.output.text }}"
+                            "{{ step_a.output.text }}\n{{ step_b.output.text }}"
                         )
                     },
                 ),
@@ -4262,7 +4300,9 @@ class TestTerminalRendererConsumesPreviousComposer:
         ids = [inv.id for inv in CRITIC_INVARIANTS]
         assert _TERMINAL_RENDERER_INVARIANT_ID in ids
         inv = next(
-            item for item in CRITIC_INVARIANTS if item.id == _TERMINAL_RENDERER_INVARIANT_ID
+            item
+            for item in CRITIC_INVARIANTS
+            if item.id == _TERMINAL_RENDERER_INVARIANT_ID
         )
         assert isinstance(inv, CriticInvariant)
         assert callable(inv.evidence)
@@ -4450,9 +4490,7 @@ class TestTerminalRendererRejectsReviewOnlyPreviousStep:
 
         issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
 
-        assert any(
-            issue.id == _TERMINAL_REVIEW_ONLY_INVARIANT_ID for issue in issues
-        )
+        assert any(issue.id == _TERMINAL_REVIEW_ONLY_INVARIANT_ID for issue in issues)
 
     def test_fires_for_paraphrased_validation_step_before_docx(self) -> None:
         spec = FlowDraftSpecCore(
@@ -4488,9 +4526,7 @@ class TestTerminalRendererRejectsReviewOnlyPreviousStep:
 
         issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
 
-        assert any(
-            issue.id == _TERMINAL_REVIEW_ONLY_INVARIANT_ID for issue in issues
-        )
+        assert any(issue.id == _TERMINAL_REVIEW_ONLY_INVARIANT_ID for issue in issues)
 
     def test_silent_when_review_step_outputs_revised_final_body(self) -> None:
         spec = FlowDraftSpecCore(
@@ -5179,6 +5215,7 @@ class TestStandaloneAudioInvariant:
             planner_patterns=PlannerPatternSignals(),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=mixed_audio_doc_input,
+            requested_output_sections=RequestedOutputSections.empty(),
             primary_runtime_input=cast("PrimaryRuntimeInput", primary_runtime_input),
         )
 
@@ -5475,6 +5512,7 @@ class TestCriticInvariantRegistry:
                 docx_output_mode="template_fill_docx",
             ),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
         template_fill_only = tuple(
             inv
@@ -5559,6 +5597,7 @@ class TestRichWorkflowInvariants:
             ),
             output_intent=OutputIntentResolution(terminal_output=None),
             mixed_audio_doc_input=False,
+            requested_output_sections=RequestedOutputSections.empty(),
         )
 
     def test_rich_workflow_requires_form_fields_fires_when_form_fields_missing(

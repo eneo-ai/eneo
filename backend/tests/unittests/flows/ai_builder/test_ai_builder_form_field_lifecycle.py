@@ -28,6 +28,9 @@ from intric.flows.ai_builder.ai_builder_edit_models import (
 )
 from intric.flows.ai_builder.ai_builder_form_field_usage import find_unused_form_fields
 from intric.flows.ai_builder.ai_builder_framework_policy import OutputIntentResolution
+from intric.flows.ai_builder.ai_builder_output_sections_signals import (
+    RequestedOutputSections,
+)
 from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     PlannerPatternSignals,
 )
@@ -379,6 +382,7 @@ def _critic_issue_ids(spec: FlowDraftSpecCore) -> set[str]:
             terminal_output=spec.steps[-1].output_type.value
         ),
         mixed_audio_doc_input=False,
+        requested_output_sections=RequestedOutputSections.empty(),
     )
     return {
         issue.id
