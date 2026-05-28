@@ -125,36 +125,18 @@
     return true;
   });
 
-  // Prompt Guide (help-assistants): an availability-gated toolbar action. The
-  // availability endpoint is the single source of truth for whether the helper
-  // is usable here (role assigned + enabled + visible + a usable completion
-  // model + caller has EDIT on this assistant). Re-checked whenever the edited
-  // assistant changes; a pending or failed check leaves the button hidden.
+  // Prompt Guide (help-assistants): an availability-gated toolbar action.
+  // The availability endpoint is the single source of truth for whether the
+  // helper is usable here (role assigned + enabled + visible + a usable
+  // completion model + caller has EDIT on this assistant) and is prefetched
+  // in `+page.ts` so the button renders with its real state on first paint —
+  // same cadence as the History button next to it, with no post-mount flash.
+  // SvelteKit re-runs the load on navigation between assistants, so the
+  // value tracks `data.assistant.id` automatically.
   let isModalOpen = $state(false);
   // Bound to the modal's active run so the Apply handler can mark it completed.
   let promptGuideRunId = $state<string | null>(null);
-  let promptGuideAvailability = $state<{
-    available: boolean;
-    disabled_reason?: string | null;
-  } | null>(null);
-
-  $effect(() => {
-    const targetId = data.assistant.id;
-    let cancelled = false;
-    promptGuideAvailability = null;
-    data.intric.helpAssistants.runs
-      .availability({ kind: "prompt_guide", target_id: targetId })
-      .then((result) => {
-        if (!cancelled) promptGuideAvailability = result;
-      })
-      .catch(() => {
-        // Fail closed: don't offer an action the backend would reject.
-        if (!cancelled) promptGuideAvailability = null;
-      });
-    return () => {
-      cancelled = true;
-    };
-  });
+  const promptGuideAvailability = $derived(data.promptGuideAvailability);
 
   function promptGuideDisabledTooltip(reason: string | null | undefined): string {
     switch (reason) {
