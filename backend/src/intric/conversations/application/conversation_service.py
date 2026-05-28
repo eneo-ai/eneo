@@ -67,6 +67,7 @@ class ConversationService:
         version: int = 1,
         use_web_search: bool = False,
         require_tool_approval: bool = False,
+        disabled_mcp_server_ids: "list[UUID] | None" = None,
     ) -> "AssistantResponse":
         """
         Routes a conversation request to the appropriate service based on the parameters.
@@ -127,6 +128,7 @@ class ConversationService:
                     version=version,
                     use_web_search=use_web_search,
                     require_tool_approval=require_tool_approval,
+                    disabled_mcp_server_ids=disabled_mcp_server_ids,
                 )
 
         # case 2: starting a new conversation
@@ -154,6 +156,7 @@ class ConversationService:
                     version=version,
                     use_web_search=use_web_search,
                     require_tool_approval=require_tool_approval,
+                    disabled_mcp_server_ids=disabled_mcp_server_ids,
                 )
             else:
                 # should never happen due to model validation, but just to be safe
@@ -241,14 +244,16 @@ class ConversationService:
                 )
             else:
                 assert session.assistant is not None
-                assistant, _ = await self.assistant_service.get_assistant(
+                # Governance-aware: same model ask() will use, including the
+                # policy fallback when the assistant's own model is disallowed.
+                model = await self.assistant_service.get_effective_completion_model(
                     session.assistant.id
                 )
-                model = assistant.completion_model
                 selector_tokens = 0
         elif assistant_id:
-            assistant, _ = await self.assistant_service.get_assistant(assistant_id)
-            model = assistant.completion_model
+            model = await self.assistant_service.get_effective_completion_model(
+                assistant_id
+            )
             selector_tokens = 0
         elif group_chat_id:
             model, selector_tokens = await self._group_chat_preflight_model(

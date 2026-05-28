@@ -6,7 +6,11 @@ from intric.governance_policy.domain.governance_policy import (
     PolicyCompletionModel,
     PolicyScope,
 )
-from intric.governance_policy.domain.policy_resolver import resolve
+from intric.governance_policy.domain.policy_resolver import (
+    EffectiveConfig,
+    resolve,
+    select_effective_completion_model,
+)
 
 
 def _mk_assistant(is_default: bool = True):
@@ -290,3 +294,66 @@ def test_prompt_enforced_without_text_fails_safe():
     )
     assert cfg.prompt_enforced is True
     assert cfg.enforced_prompt_text is None
+
+
+# ---- select_effective_completion_model ----------------------------------
+
+
+def _eff_config(
+    *,
+    models_enforced=True,
+    available_models=None,
+    policy_default_model=None,
+) -> EffectiveConfig:
+    return EffectiveConfig(
+        models_enforced=models_enforced,
+        available_models=available_models or [],
+        locked_model=None,
+        policy_default_model=policy_default_model,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+    )
+
+
+def test_select_model_no_config_returns_current():
+    current = _mk_model()
+    assert select_effective_completion_model(current, None) is current
+
+
+def test_select_model_not_enforced_returns_current():
+    current = _mk_model()
+    cfg = _eff_config(models_enforced=False, available_models=[_mk_model()])
+    assert select_effective_completion_model(current, cfg) is current
+
+
+def test_select_model_enforced_and_allowed_keeps_current():
+    current = _mk_model()
+    cfg = _eff_config(available_models=[current, _mk_model()])
+    assert select_effective_completion_model(current, cfg) is current
+
+
+def test_select_model_disallowed_falls_back_to_policy_default():
+    current = _mk_model()
+    allowed, default = _mk_model(), _mk_model()
+    cfg = _eff_config(available_models=[allowed, default], policy_default_model=default)
+    assert select_effective_completion_model(current, cfg) is default
+
+
+def test_select_model_disallowed_no_default_falls_back_to_first_allowed():
+    current = _mk_model()
+    first, second = _mk_model(), _mk_model()
+    cfg = _eff_config(available_models=[first, second])
+    assert select_effective_completion_model(current, cfg) is first
+
+
+def test_select_model_none_current_falls_back_to_allowed():
+    first = _mk_model()
+    cfg = _eff_config(available_models=[first])
+    assert select_effective_completion_model(None, cfg) is first
+
+
+def test_select_model_enforced_empty_whitelist_returns_none():
+    cfg = _eff_config(available_models=[])
+    assert select_effective_completion_model(_mk_model(), cfg) is None

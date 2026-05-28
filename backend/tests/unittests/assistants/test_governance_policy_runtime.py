@@ -115,6 +115,160 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     )
 
 
+async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
+    """GRANT semantics: a personal default assistant gets the policy's MCP
+    servers at ask-time even though it has none attached on the entity."""
+    assistant_id = uuid4()
+    session = SessionInDB(
+        id=uuid4(),
+        name="hello",
+        user_id=TEST_USER.id,
+        questions=[],
+    )
+    response = MagicMock()
+    datastore_result = DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[])
+    policy_server = SimpleNamespace(id=uuid4(), name="Sundsvall.se")
+
+    assistant = MagicMock()
+    assistant.id = assistant_id
+    assistant.name = "Personal assistant"
+    assistant.description = None
+    assistant.is_default = True
+    assistant.completion_model = TEST_MODEL_CHATGPT
+    assistant.tool_assistants = []
+    assistant.mcp_servers = []  # nothing attached on the entity
+    assistant.ask = AsyncMock(return_value=(response, datastore_result))
+
+    space = MagicMock()
+    space.get_assistant.return_value = assistant
+    space.can_ask_assistant.return_value = None
+    space.is_personal.return_value = True
+
+    actor = MagicMock()
+    actor.can_read_assistant.return_value = True
+
+    effective_config_service = AsyncMock()
+    effective_config_service.resolve_for.return_value = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        policy_default_model=None,
+        mcp_enforced=True,
+        available_mcp_servers=[policy_server],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+    )
+
+    service = AssistantService(
+        repo=AsyncMock(),
+        space_repo=AsyncMock(get_space_by_assistant=AsyncMock(return_value=space)),
+        user=TEST_USER,
+        auth_service=MagicMock(),
+        service_repo=AsyncMock(),
+        step_repo=AsyncMock(),
+        completion_model_crud_service=AsyncMock(),
+        space_service=AsyncMock(),
+        factory=MagicMock(),
+        prompt_service=AsyncMock(),
+        file_service=AsyncMock(get_files_by_ids=AsyncMock(return_value=[])),
+        assistant_template_service=AsyncMock(),
+        session_service=AsyncMock(
+            create_session=AsyncMock(return_value=session),
+            create_question_placeholder=AsyncMock(return_value=uuid4()),
+        ),
+        actor_manager=MagicMock(
+            get_space_actor_from_space=MagicMock(return_value=actor)
+        ),
+        integration_knowledge_repo=AsyncMock(),
+        completion_service=AsyncMock(),
+        references_service=AsyncMock(),
+        icon_repo=AsyncMock(),
+        effective_config_service=effective_config_service,
+    )
+    service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
+
+    await service.ask(question="hello", assistant_id=assistant_id)
+
+    assistant.ask.assert_awaited_once()
+    assert assistant.ask.await_args.kwargs["mcp_servers_override"] == [policy_server]
+
+
+async def test_ask_respects_disabled_mcp_server_ids():
+    """A per-request opt-out narrows the effective MCP set (here the granted
+    policy servers) by the servers the user switched off in the composer."""
+    assistant_id = uuid4()
+    session = SessionInDB(id=uuid4(), name="hello", user_id=TEST_USER.id, questions=[])
+    response = MagicMock()
+    datastore_result = DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[])
+    server_a = SimpleNamespace(id=uuid4(), name="Sundsvall.se")
+    server_b = SimpleNamespace(id=uuid4(), name="Confluence")
+
+    assistant = MagicMock()
+    assistant.id = assistant_id
+    assistant.name = "Personal assistant"
+    assistant.description = None
+    assistant.is_default = True
+    assistant.completion_model = TEST_MODEL_CHATGPT
+    assistant.tool_assistants = []
+    assistant.mcp_servers = []
+    assistant.ask = AsyncMock(return_value=(response, datastore_result))
+
+    space = MagicMock()
+    space.get_assistant.return_value = assistant
+    space.can_ask_assistant.return_value = None
+    space.is_personal.return_value = True
+
+    actor = MagicMock()
+    actor.can_read_assistant.return_value = True
+
+    effective_config_service = AsyncMock()
+    effective_config_service.resolve_for.return_value = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        policy_default_model=None,
+        mcp_enforced=True,
+        available_mcp_servers=[server_a, server_b],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+    )
+
+    service = AssistantService(
+        repo=AsyncMock(),
+        space_repo=AsyncMock(get_space_by_assistant=AsyncMock(return_value=space)),
+        user=TEST_USER,
+        auth_service=MagicMock(),
+        service_repo=AsyncMock(),
+        step_repo=AsyncMock(),
+        completion_model_crud_service=AsyncMock(),
+        space_service=AsyncMock(),
+        factory=MagicMock(),
+        prompt_service=AsyncMock(),
+        file_service=AsyncMock(get_files_by_ids=AsyncMock(return_value=[])),
+        assistant_template_service=AsyncMock(),
+        session_service=AsyncMock(
+            create_session=AsyncMock(return_value=session),
+            create_question_placeholder=AsyncMock(return_value=uuid4()),
+        ),
+        actor_manager=MagicMock(
+            get_space_actor_from_space=MagicMock(return_value=actor)
+        ),
+        integration_knowledge_repo=AsyncMock(),
+        completion_service=AsyncMock(),
+        references_service=AsyncMock(),
+        icon_repo=AsyncMock(),
+        effective_config_service=effective_config_service,
+    )
+    service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
+
+    await service.ask(
+        question="hello",
+        assistant_id=assistant_id,
+        disabled_mcp_server_ids=[server_a.id],
+    )
+
+    assistant.ask.assert_awaited_once()
+    assert assistant.ask.await_args.kwargs["mcp_servers_override"] == [server_b]
+
+
 async def test_update_guard_rejects_disallowed_model_on_personal_default_assistant():
     effective_config_service = AsyncMock()
     effective_config_service.resolve_for.return_value = SimpleNamespace(
@@ -195,6 +349,40 @@ async def test_update_guard_grandfathers_already_attached_mcp_server():
         completion_model_id=None,
         mcp_server_ids=[already_attached.id, allowed.id],
     )
+
+
+async def test_update_guard_reuses_passed_effective_config_without_reresolving():
+    """update_assistant resolves the effective config once (to also decide
+    whether to skip the space-assignment check) and passes it in. The guard must
+    reuse that config instead of issuing a second policy round-trip."""
+    allowed = SimpleNamespace(id=uuid4())
+    pre_resolved = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        mcp_enforced=True,
+        available_mcp_servers=[allowed],
+    )
+
+    effective_config_service = AsyncMock()
+    service = _service_with_effective_config(effective_config_service)
+
+    space = MagicMock()
+    space.is_personal.return_value = True
+    assistant = SimpleNamespace(
+        is_default=True,
+        completion_model=TEST_MODEL_CHATGPT,
+        mcp_servers=[],
+    )
+
+    await service._ensure_governance_policy_allows_update(
+        space=space,
+        assistant=assistant,
+        completion_model_id=None,
+        mcp_server_ids=[allowed.id],
+        effective_config=pre_resolved,
+    )
+
+    effective_config_service.resolve_for.assert_not_called()
 
 
 async def test_update_guard_rejects_newly_added_disallowed_mcp_server():

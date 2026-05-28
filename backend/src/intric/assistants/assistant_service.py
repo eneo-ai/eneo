@@ -20,6 +20,9 @@ from intric.authentication.auth_service import AuthService
 from intric.completion_models.infrastructure.context_builder import count_tokens
 from intric.completion_models.infrastructure.web_search import WebSearch
 from intric.files.file_service import FileService
+from intric.governance_policy.domain.policy_resolver import (
+    select_effective_completion_model,
+)
 from intric.icons.icon_repo import IconRepository
 from intric.logging.logging import LoggingDetails
 from intric.main.exceptions import BadRequestException, UnauthorizedException
@@ -219,16 +222,19 @@ class AssistantService:
         assistant: Assistant,
         completion_model_id: UUID | None,
         mcp_server_ids: list[UUID] | None,
+        effective_config: "EffectiveConfig | None | NotProvided" = NOT_PROVIDED,
     ) -> None:
         # Nothing to validate → skip resolving the policy (and its DB round-trip).
         if completion_model_id is None and mcp_server_ids is None:
             return
 
         # _resolve_effective_config owns the is_default / personal-space / no-service
-        # short-circuits and returns None when the policy does not apply.
-        effective_config = await self._resolve_effective_config(
-            space=space, assistant=assistant
-        )
+        # short-circuits and returns None when the policy does not apply. Callers
+        # that already resolved it pass it in to avoid a second round-trip.
+        if isinstance(effective_config, NotProvided):
+            effective_config = await self._resolve_effective_config(
+                space=space, assistant=assistant
+            )
         if effective_config is None:
             return
 
@@ -499,6 +505,7 @@ class AssistantService:
             ]
 
         # Validate MCP server assignments against tenant + space boundaries.
+        mcp_effective_config: "EffectiveConfig | None | NotProvided" = NOT_PROVIDED
         if mcp_server_ids is not None:
             import sqlalchemy as sa
 
@@ -529,28 +536,45 @@ class AssistantService:
                     + ", ".join(missing_tenant_enabled_ids)
                 )
 
-            space_servers_query = sa.select(SpacesMCPServersTable.mcp_server_id).where(
-                SpacesMCPServersTable.space_id == space.id,
-                SpacesMCPServersTable.mcp_server_id.in_(mcp_server_ids),
+            # For a personal default assistant under an active MCP policy, the
+            # governance whitelist (enforced just below) is the source of truth.
+            # Personal spaces are seeded with tenant MCP servers only at creation
+            # time and are not back-filled when a server is enabled later, so the
+            # space-assignment check would wrongly reject a policy-allowed server.
+            mcp_effective_config = await self._resolve_effective_config(
+                space=space, assistant=assistant
             )
-            space_servers_result = await self.repo.session.execute(space_servers_query)
-            space_server_ids = {row[0] for row in space_servers_result.fetchall()}
-            missing_space_ids = [
-                str(server_id)
-                for server_id in mcp_server_ids
-                if server_id not in space_server_ids
-            ]
-            if missing_space_ids:
-                raise BadRequestException(
-                    "MCP server(s) are not assigned to this assistant's space: "
-                    + ", ".join(missing_space_ids)
+            mcp_governed = (
+                mcp_effective_config is not None and mcp_effective_config.mcp_enforced
+            )
+            if not mcp_governed:
+                space_servers_query = sa.select(
+                    SpacesMCPServersTable.mcp_server_id
+                ).where(
+                    SpacesMCPServersTable.space_id == space.id,
+                    SpacesMCPServersTable.mcp_server_id.in_(mcp_server_ids),
                 )
+                space_servers_result = await self.repo.session.execute(
+                    space_servers_query
+                )
+                space_server_ids = {row[0] for row in space_servers_result.fetchall()}
+                missing_space_ids = [
+                    str(server_id)
+                    for server_id in mcp_server_ids
+                    if server_id not in space_server_ids
+                ]
+                if missing_space_ids:
+                    raise BadRequestException(
+                        "MCP server(s) are not assigned to this assistant's space: "
+                        + ", ".join(missing_space_ids)
+                    )
 
         await self._ensure_governance_policy_allows_update(
             space=space,
             assistant=assistant,
             completion_model_id=completion_model_id,
             mcp_server_ids=mcp_server_ids,
+            effective_config=mcp_effective_config,
         )
 
         # Store MCP server IDs and tool settings for repository to handle.
@@ -662,6 +686,25 @@ class AssistantService:
         )
 
         return assistant, permissions, effective_config
+
+    async def get_effective_completion_model(
+        self, assistant_id: UUID
+    ) -> "CompletionModel | None":
+        """The model that will actually answer for this assistant, honoring a
+        personal-assistant models policy.
+
+        Mirrors the resolution `ask()` applies so read-time preflight and
+        ask-time enforcement never disagree about which model a request uses.
+        """
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        effective_config = await self._resolve_effective_config(
+            space=space, assistant=assistant
+        )
+        return select_effective_completion_model(
+            current_model=assistant.completion_model,
+            effective_config=effective_config,
+        )
 
     async def get_assistants(
         self,
@@ -1120,6 +1163,7 @@ class AssistantService:
         use_web_search: bool = False,
         assistant_selector_tokens: int = 0,
         require_tool_approval: bool = False,
+        disabled_mcp_server_ids: list["UUID"] | None = None,
     ):
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         active_assistant = space.get_assistant(assistant_id=assistant_id)
@@ -1211,35 +1255,50 @@ class AssistantService:
         )
         if effective_config is not None:
             if effective_config.models_enforced:
-                current_model = assistant_to_ask.completion_model
-                allowed_ids = {m.id for m in effective_config.available_models}
-                if current_model is None or current_model.id not in allowed_ids:
-                    # Stale assignment — fall back to policy default, then
-                    # first allowed model. Refuse only when the whitelist
-                    # is empty.
-                    fallback = effective_config.policy_default_model or (
-                        effective_config.available_models[0]
-                        if effective_config.available_models
-                        else None
+                # Same resolution preflight uses, so the projected and actual
+                # models can't diverge. None here means the whitelist is empty.
+                resolved_model = select_effective_completion_model(
+                    current_model=assistant_to_ask.completion_model,
+                    effective_config=effective_config,
+                )
+                if resolved_model is None:
+                    raise BadRequestException(
+                        "Personal assistant governance policy has no allowed models — "
+                        "contact admin",
                     )
-                    if fallback is None:
-                        raise BadRequestException(
-                            "Personal assistant governance policy has no allowed models — "
-                            "contact admin",
-                        )
-                    completion_model_override = fallback  # type: ignore[assignment]
+                # Only override when the policy steered away from the assistant's
+                # own (stale) model; otherwise leave it untouched.
+                if resolved_model is not assistant_to_ask.completion_model:
+                    completion_model_override = resolved_model  # type: ignore[assignment]
 
             if effective_config.mcp_enforced:
-                allowed_mcp_ids = {s.id for s in effective_config.available_mcp_servers}
-                mcp_servers_override = [
-                    s for s in assistant_to_ask.mcp_servers if s.id in allowed_mcp_ids
-                ]
+                # GRANT semantics: the policy provides its allowed MCP servers to
+                # the personal assistant directly. The user does not attach them
+                # on the assistant (the entity's own mcp_servers stay empty), so
+                # we hand the policy set straight to the completion call rather
+                # than intersecting with assistant_to_ask.mcp_servers.
+                mcp_servers_override = list(effective_config.available_mcp_servers)
 
             if (
                 effective_config.prompt_enforced
                 and effective_config.enforced_prompt_text
             ):
                 prompt_override = effective_config.enforced_prompt_text
+
+        # Per-request MCP opt-out from the composer toolbar: narrow whatever set
+        # is effective (policy-granted servers above, or the assistant's own) by
+        # the servers the user switched off for this message. Narrowing only — it
+        # can never enable a server that isn't already active.
+        disabled_ids = set(disabled_mcp_server_ids or [])
+        if disabled_ids:
+            base_mcp_servers = (
+                mcp_servers_override
+                if mcp_servers_override is not None
+                else list(assistant_to_ask.mcp_servers)
+            )
+            mcp_servers_override = [
+                server for server in base_mcp_servers if server.id not in disabled_ids
+            ]
 
         effective_completion_model = (
             completion_model_override or assistant_to_ask.completion_model

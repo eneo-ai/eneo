@@ -125,3 +125,36 @@ def resolve(
         prompt_enforced=policy.prompt_enforcement_enabled,
         enforced_prompt_text=enforced_prompt_text,
     )
+
+
+def select_effective_completion_model(
+    current_model: "CompletionModel | None",
+    effective_config: "EffectiveConfig | None",
+) -> "CompletionModel | None":
+    """The completion model that will actually answer, honoring a models policy.
+
+    Single source of truth shared by ask-time enforcement and read-time
+    preflight so the two can never disagree about which model a request will
+    use:
+
+    - No policy enforcing models → the assistant's own `current_model`.
+    - Models enforced and `current_model` is allowed → keep it.
+    - Models enforced and `current_model` is missing/stale → fall back to the
+      policy default, then the first allowed model.
+
+    Returns None only when nothing is available (an enforced policy with an
+    empty whitelist, or no model configured at all). Callers decide whether
+    that is an error.
+    """
+    if effective_config is None or not effective_config.models_enforced:
+        return current_model
+
+    allowed_ids = {model.id for model in effective_config.available_models}
+    if current_model is not None and current_model.id in allowed_ids:
+        return current_model
+
+    return effective_config.policy_default_model or (
+        effective_config.available_models[0]
+        if effective_config.available_models
+        else None
+    )

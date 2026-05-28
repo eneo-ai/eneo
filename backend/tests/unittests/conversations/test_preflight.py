@@ -22,6 +22,11 @@ def _make_service(
     assistant_service = AsyncMock()
     if assistant is not None:
         assistant_service.get_assistant = AsyncMock(return_value=(assistant, []))
+        # Preflight resolves the model through the governance-aware path, which
+        # returns the effective model directly (mirrors ask()).
+        assistant_service.get_effective_completion_model = AsyncMock(
+            return_value=assistant.completion_model
+        )
 
     group_chat_service = AsyncMock()
     if group_chat is not None:
@@ -182,7 +187,9 @@ async def test_preflight_resolves_session_assistant_model():
     assert result.input_tokens > 0
     assert result.model_name == "gpt-4o"
     service.session_service.get_session_by_uuid.assert_awaited_once_with(session_id)
-    service.assistant_service.get_assistant.assert_awaited_once_with(assistant_id)
+    service.assistant_service.get_effective_completion_model.assert_awaited_once_with(
+        assistant_id
+    )
 
 
 @pytest.mark.asyncio
