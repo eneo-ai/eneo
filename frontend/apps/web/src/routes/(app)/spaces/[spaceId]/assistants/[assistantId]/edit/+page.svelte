@@ -344,6 +344,7 @@
               targetType="assistant"
               targetId={data.assistant.id}
               targetPrompt={$update.prompt.text}
+              hasUnsavedPromptChanges={$currentChanges.diff.prompt !== undefined}
               onApply={(text) => {
                 // Apply only mutates local editor state (PRD §10): the produced
                 // prompt is written into $update.prompt.text and persisted later

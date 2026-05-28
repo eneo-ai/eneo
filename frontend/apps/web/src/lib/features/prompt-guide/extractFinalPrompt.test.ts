@@ -48,4 +48,40 @@ describe("extractFinalPrompt", () => {
     expect(extractFinalPrompt("")).toBeNull();
     expect(extractFinalPrompt("   \n  ")).toBeNull();
   });
+
+  test("accepts the language tags the guide may emit for the final artifact", () => {
+    for (const lang of ["prompt", "markdown", "md", "system", "instructions"]) {
+      const reply = "```" + lang + "\nYou are a helpful assistant.\n```";
+      expect(extractFinalPrompt(reply)).toBe("You are a helpful assistant.");
+    }
+  });
+
+  test("language tag matching is case-insensitive", () => {
+    expect(extractFinalPrompt("```PROMPT\nYou are a helpful assistant.\n```")).toBe(
+      "You are a helpful assistant."
+    );
+  });
+
+  test("rejects an eneo-question block as the final prompt", () => {
+    // The interview-time question envelope must never be applied as the
+    // assistant's instructions — that's what `extractStructuredQuestion`
+    // is for.
+    const reply =
+      '```eneo-question\n{"header":"x","question":"y","multiSelect":false,"options":[{"label":"a"},{"label":"b"}]}\n```';
+    expect(extractFinalPrompt(reply)).toBeNull();
+  });
+
+  test("rejects arbitrary code-fence languages so they can't be misapplied", () => {
+    for (const lang of ["json", "yaml", "python", "ts", "bash"]) {
+      const reply = "```" + lang + '\n{"x":1}\n```';
+      expect(extractFinalPrompt(reply)).toBeNull();
+    }
+  });
+
+  test("picks the last accepted block even if a rejected block appears later", () => {
+    // If the model emits the final prompt and then accidentally wraps a
+    // post-script in a json fence, the artifact still wins.
+    const reply = "Final:\n```\nYou are concise.\n```\nDebug payload:\n```json\n{}\n```";
+    expect(extractFinalPrompt(reply)).toBe("You are concise.");
+  });
 });

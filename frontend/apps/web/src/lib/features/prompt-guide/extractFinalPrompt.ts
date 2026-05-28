@@ -1,13 +1,40 @@
 import { marked, type Token, type Tokens } from "marked";
 
 /**
- * Extract the Prompt Guide's final, ready-to-use prompt from a markdown reply.
+ * Language tags accepted as a "final prompt" code block.
  *
  * The Prompt Guide is instructed (backend `defaults.py`) to emit the final
- * prompt as the *only* fenced code block in its reply, reserving fenced blocks
- * exclusively for that artifact. We therefore return the text of the **last**
- * fenced code block — or `null` while the guide is still interviewing (no
- * fenced block yet, so there is nothing to apply).
+ * prompt as an *untagged* fenced code block, but the model occasionally
+ * reaches for a benign synonym (`prompt`, `text`, `markdown`, …). We accept
+ * the synonyms it has been known to pick and reject everything else so a
+ * stray ```` ```json ```` or ```` ```eneo-question ```` block can never be
+ * confused for the artifact.
+ *
+ * Comparison is case-insensitive after `.trim()`.
+ */
+const FINAL_PROMPT_LANGS = new Set([
+  "",
+  "prompt",
+  "text",
+  "markdown",
+  "md",
+  "system",
+  "instructions"
+]);
+
+function isFinalPromptLang(lang: string | undefined | null): boolean {
+  return FINAL_PROMPT_LANGS.has((lang ?? "").trim().toLowerCase());
+}
+
+/**
+ * Extract the Prompt Guide's final, ready-to-use prompt from a markdown reply.
+ *
+ * Returns the text of the **last** fenced code block whose language tag is
+ * in {@link FINAL_PROMPT_LANGS} — or `null` while the guide is still
+ * interviewing (no qualifying fenced block yet, so there is nothing to apply).
+ * Tagged blocks the Prompt Guide uses for other purposes (notably
+ * `eneo-question` cards) are skipped, as are blocks tagged with arbitrary
+ * code-fence languages (`json`, `yaml`, `python`, …).
  *
  * Inline code (`codespan`) is ignored on purpose: only fenced ```` ``` ````
  * blocks count, so a stray backtick in a question never looks applicable.
@@ -28,7 +55,10 @@ export function extractFinalPrompt(markdown: string): string | null {
     if (!nodes) return;
     for (const token of nodes) {
       if (token.type === "code") {
-        codeBlocks.push((token as Tokens.Code).text ?? "");
+        const codeToken = token as Tokens.Code;
+        if (isFinalPromptLang(codeToken.lang)) {
+          codeBlocks.push(codeToken.text ?? "");
+        }
       }
       // Recurse into containers that may wrap a fenced block (blockquotes,
       // paragraphs, list items) so the artifact is found regardless of nesting.
