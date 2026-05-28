@@ -1,17 +1,22 @@
+from __future__ import annotations
+
 import hashlib
 import secrets
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.audit.application.audit_service import AuditService
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.entity_types import EntityType
 from intric.database.tables.tenant_table import Tenants
 from intric.main.exceptions import NotFoundException
+
+if TYPE_CHECKING:
+    from intric.audit.application.audit_service import AuditService
 
 _SYSADMIN_ACTOR = {"type": "sysadmin", "via": "eneo_super_api_key"}
 
