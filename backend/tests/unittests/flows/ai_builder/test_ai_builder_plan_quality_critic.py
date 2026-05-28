@@ -297,6 +297,41 @@ def test_named_output_sections_do_not_count_review_only_step_as_writer() -> None
     assert "requested_output_sections_require_section_writers" in issue_ids
 
 
+def test_named_output_sections_count_typed_document_body_writer() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Rapport",
+        flow_description="",
+        steps=[
+            _structured_source_step(),
+            _section_writer_step("step_b", "Skriv bakgrund"),
+            _step(
+                "step_c",
+                "Validera rapporten",
+                "Validera kvaliteten innan den slutliga versionen sätts samman.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.TEXT,
+            ),
+            _step(
+                "step_d",
+                "Skapa DOCX",
+                "Skapa Word-dokument.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                output_type=OutputType.DOCX,
+            ),
+        ],
+        document_body_writer_step_refs=("step_c",),
+    )
+    context = build_conversation_critic_context(
+        [{"role": "user", "content": _four_section_report_prompt()}],
+        spec,
+    )
+
+    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
+    assert "requested_output_sections_require_section_writers" not in issue_ids
+
+
 def test_named_output_sections_allow_grouped_section_writers() -> None:
     steps = [_structured_source_step()]
     previous_ref: str | None = None
@@ -4491,6 +4526,42 @@ class TestTerminalRendererRejectsReviewOnlyPreviousStep:
         issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
 
         assert any(issue.id == _TERMINAL_REVIEW_ONLY_INVARIANT_ID for issue in issues)
+
+    def test_typed_writer_ref_overrides_review_markers_before_docx(self) -> None:
+        spec = FlowDraftSpecCore(
+            flow_name="Meeting report",
+            steps=[
+                _step(
+                    "step_a",
+                    "Skriv rapport",
+                    "Skriv rapporten.",
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_b",
+                    "Granska kvalitet och luckor",
+                    "Granska analysen för saknad information och kvalitetsproblem.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.TEXT,
+                ),
+                _step(
+                    "step_c",
+                    "Skapa DOCX",
+                    "Skapa Word-dokument.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.TEXT,
+                    output_type=OutputType.DOCX,
+                ),
+            ],
+            document_body_writer_step_refs=("step_b",),
+        )
+
+        issues = evaluate_critic_invariants(_final_text_step_critic_context(spec))
+
+        assert not any(
+            issue.id == _TERMINAL_REVIEW_ONLY_INVARIANT_ID for issue in issues
+        )
 
     def test_fires_for_paraphrased_validation_step_before_docx(self) -> None:
         spec = FlowDraftSpecCore(

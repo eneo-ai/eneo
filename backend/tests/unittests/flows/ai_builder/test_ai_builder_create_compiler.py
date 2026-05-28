@@ -7990,6 +7990,8 @@ def test_compile_outline_flow_quality_chain_preserves_all_semantic_steps() -> No
         "Review and finalize",
         "Create PDF",
     ]
+    assert draft.document_body_writer_step_indexes == (3,)
+    assert compiled.document_body_writer_step_refs == ("step_d",)
     assert compiled.steps[-1].output_type.value == "pdf"
     assert validation.valid
 

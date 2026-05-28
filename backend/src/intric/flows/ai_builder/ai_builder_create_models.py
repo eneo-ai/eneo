@@ -56,6 +56,10 @@ class FlowCreateDraft(BaseModel):
         default_factory=lambda: cast(list[CreateFormFieldDraft], [])
     )
     steps: list[NewStepDraft]
+    document_body_writer_step_indexes: tuple[int, ...] = Field(
+        default_factory=tuple,
+        exclude=True,
+    )
 
     @field_validator("plan_rationale")
     @classmethod

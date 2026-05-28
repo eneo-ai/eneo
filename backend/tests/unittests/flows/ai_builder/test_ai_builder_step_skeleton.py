@@ -426,6 +426,7 @@ def test_skeleton_composition_appends_terminal_text_after_structured_semantic() 
 
     assert [step.output_type.value for step in composition.steps] == ["json", "text"]
     assert composition.steps[-1].name == "Create final answer"
+    assert composition.document_body_writer_step_indexes == (1,)
 
 
 def test_artifact_skeleton_keeps_final_semantic_body_text_when_fields_are_requested() -> (
@@ -533,6 +534,7 @@ def test_backend_fixed_slots_keep_locked_input_type_after_structured_semantics()
         "Review and finalize",
         "Create PDF",
     ]
+    assert composition.document_body_writer_step_indexes == (3,)
     assert composition.steps[2].output_type == OutputType.TEXT
     assert composition.steps[2].output_fields is None
     assert composition.steps[3].input_type == InputType.TEXT

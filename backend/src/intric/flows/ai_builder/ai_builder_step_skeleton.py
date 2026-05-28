@@ -111,6 +111,7 @@ class StepSkeletonComposition:
 
     steps: tuple[NewStepDraft, ...]
     output_type_drifts: tuple[StepSkeletonOutputTypeDrift, ...]
+    document_body_writer_step_indexes: tuple[int, ...] = ()
 
 
 _COMPILED_CHAIN_STEP_TEMPLATES = MappingProxyType(
@@ -341,6 +342,7 @@ class StepSkeletonPlan:
         slots = self.slots_for_semantic_count(len(semantic_steps))
         steps: list[NewStepDraft] = []
         output_type_drifts: list[StepSkeletonOutputTypeDrift] = []
+        document_body_writer_step_indexes: list[int] = []
         semantic_index = 0
 
         for slot_index, slot in enumerate(slots):
@@ -358,6 +360,8 @@ class StepSkeletonPlan:
                 ),
             )
             steps.append(step)
+            if _slot_writes_document_body(slot):
+                document_body_writer_step_indexes.append(len(steps) - 1)
             if drift is not None:
                 output_type_drifts.append(drift)
 
@@ -376,9 +380,14 @@ class StepSkeletonPlan:
                 allow_json_output=True,
             )
             steps.append(terminal_step)
+            if _slot_writes_document_body(terminal_slot):
+                document_body_writer_step_indexes.append(len(steps) - 1)
         return StepSkeletonComposition(
             steps=tuple(steps),
             output_type_drifts=tuple(output_type_drifts),
+            document_body_writer_step_indexes=tuple(
+                document_body_writer_step_indexes
+            ),
         )
 
     def _semantic_slot_at(
@@ -594,6 +603,15 @@ def _compiled_chain_step_template(
 
 def materialized_compiled_pattern_ids() -> frozenset[str]:
     return _COMPILED_PATTERN_MATERIALIZER_IDS
+
+
+def _slot_writes_document_body(slot: StepSkeleton) -> bool:
+    if slot.chain_token == ANALYSIS_OR_QUALITY_REVIEW_STEP:
+        return True
+    return (
+        slot.chain_token == TERMINAL_ARTIFACT_STEP
+        and slot.output_type == OutputType.TEXT
+    )
 
 
 def _compose_step_skeleton_slot(

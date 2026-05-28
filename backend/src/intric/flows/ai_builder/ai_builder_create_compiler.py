@@ -250,6 +250,7 @@ def compile_outline_to_create_draft(
         assumptions=outline.assumptions,
         form_fields=form_fields,
         steps=steps,
+        document_body_writer_step_indexes=composition.document_body_writer_step_indexes,
     )
 
 
@@ -315,8 +316,24 @@ def compile_create_draft(
         flow_description=draft.flow_description or "",
         steps=compiled_steps,
         form_fields=[_compile_form_field(field) for field in draft.form_fields] or None,
+        document_body_writer_step_refs=_document_body_writer_step_refs(
+            compiled_steps=compiled_steps,
+            step_indexes=draft.document_body_writer_step_indexes,
+        ),
     )
     return normalize_flow_draft_runtime_inputs(compiled)
+
+
+def _document_body_writer_step_refs(
+    *,
+    compiled_steps: list[StepSpec],
+    step_indexes: tuple[int, ...],
+) -> tuple[str, ...]:
+    return tuple(
+        compiled_steps[index].plan_step_ref
+        for index in step_indexes
+        if 0 <= index < len(compiled_steps)
+    )
 
 
 def _compile_form_field(field: CreateFormFieldDraft) -> FormFieldSpec:

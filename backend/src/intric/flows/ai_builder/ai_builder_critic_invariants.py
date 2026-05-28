@@ -1176,10 +1176,16 @@ def _terminal_renderer_must_not_consume_review_only_step_evidence(
         return False
     if previous.output_type != OutputType.TEXT or _is_renderer_step(previous):
         return False
-    return _looks_like_review_only_text_step(previous)
+    return _looks_like_review_only_text_step(context.spec, previous)
 
 
-def _looks_like_review_only_text_step(step: StepSpec) -> bool:
+def is_document_body_writer(spec: FlowDraftSpecCore, step: StepSpec) -> bool:
+    return step.plan_step_ref in (spec.document_body_writer_step_refs or ())
+
+
+def _looks_like_review_only_text_step(spec: FlowDraftSpecCore, step: StepSpec) -> bool:
+    if is_document_body_writer(spec, step):
+        return False
     text = f"{step.name}\n{step.assistant_spec.instructions}".casefold()
     if not _contains_any(text, _REVIEW_STEP_MARKERS):
         return False
@@ -1387,7 +1393,7 @@ def _section_writer_count(spec: FlowDraftSpecCore) -> int:
         for step in spec.steps
         if step.output_type == OutputType.TEXT
         and not _is_renderer_step(step)
-        and not _looks_like_review_only_text_step(step)
+        and not _looks_like_review_only_text_step(spec, step)
         and not is_source_surfacing_text(
             input_source=step.input_source,
             input_type=step.input_type,
