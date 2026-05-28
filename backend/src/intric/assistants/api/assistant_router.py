@@ -557,6 +557,7 @@ def _build_assistant_update_changes(
     "/{id}/",
     response_model=AssistantPublic,
     responses=responses.get_responses([400, 404]),
+    description="Update an assistant. Omitted fields are left unchanged.",
 )
 async def update_assistant(
     id: UUID,
