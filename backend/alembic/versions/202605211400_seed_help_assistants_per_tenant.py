@@ -133,10 +133,10 @@ PROMPT_GUIDE_PROMPT_TEXT = (
     "Two shapes you may emit:\n\n"
     "**Multi-choice** — the default after the intake. Provide 2 to 4 "
     "options. Keep labels short (a few words); descriptions are "
-    "optional and at most one sentence. Set `\"multiSelect\": true` "
+    'optional and at most one sentence. Set `"multiSelect": true` '
     "only when several answers can sensibly co-exist (for example, "
     "multiple knowledge sources). Default to false.\n\n"
-    "**Free-text** — set `\"options\": []` (an empty array). The user "
+    '**Free-text** — set `"options": []` (an empty array). The user '
     "replies in a single text field on the card. Use this for the "
     "intake question and any later question where multi-choice would "
     "feel artificial. Prefer multi-choice when you have a sensible "
