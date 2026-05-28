@@ -2,8 +2,21 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DB_CONTAINER="eneo_devcontainer-db-1"
 ENV_FILE="${REPO_ROOT}/backend/.env"
+
+PROJECT="$(docker ps --filter label=com.docker.compose.service=eneo \
+                     --format '{{.Label "com.docker.compose.project"}}' | head -1)"
+if [ -z "$PROJECT" ]; then
+  echo "Error: no running compose project with an 'eneo' service. Is the devcontainer up?" >&2
+  exit 1
+fi
+DB_CONTAINER="$(docker ps --filter label=com.docker.compose.project="$PROJECT" \
+                          --filter label=com.docker.compose.service=db \
+                          --format '{{.Names}}' | head -1)"
+if [ -z "$DB_CONTAINER" ]; then
+  echo "Error: could not discover db container in project '$PROJECT'." >&2
+  exit 1
+fi
 
 psql_t1() {
   docker exec -i "$DB_CONTAINER" psql -U postgres -d template1 -v ON_ERROR_STOP=1 "$@"

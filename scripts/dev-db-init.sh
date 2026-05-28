@@ -2,10 +2,33 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DB_CONTAINER="eneo_devcontainer-db-1"
-APP_CONTAINER="eneo_devcontainer-eneo-1"
 ENV_FILE="${REPO_ROOT}/backend/.env"
 BASELINE="eneo_develop"
+
+PROJECT="$(docker ps --filter label=com.docker.compose.service=eneo \
+                     --format '{{.Label "com.docker.compose.project"}}' | head -1)"
+if [ -z "$PROJECT" ]; then
+  echo "Error: no running compose project with an 'eneo' service. Is the devcontainer up?" >&2
+  exit 1
+fi
+DB_CONTAINER="$(docker ps --filter label=com.docker.compose.project="$PROJECT" \
+                          --filter label=com.docker.compose.service=db \
+                          --format '{{.Names}}' | head -1)"
+APP_CONTAINER="$(docker ps --filter label=com.docker.compose.project="$PROJECT" \
+                           --filter label=com.docker.compose.service=eneo \
+                           --format '{{.Names}}' | head -1)"
+if [ -z "$DB_CONTAINER" ] || [ -z "$APP_CONTAINER" ]; then
+  echo "Error: could not discover db/eneo containers in project '$PROJECT'." >&2
+  exit 1
+fi
+
+# Detect whether we're running inside the eneo devcontainer (docker socket is
+# mounted, so docker commands work either way; this lets us skip the wasteful
+# `docker exec into self` for alembic and adjust the restart-instructions).
+IN_APP_CONTAINER=0
+if [ -f /.dockerenv ] && [ "$REPO_ROOT" = "/workspace" ]; then
+  IN_APP_CONTAINER=1
+fi
 
 psql_t1() {
   docker exec -i "$DB_CONTAINER" psql -U postgres -d template1 -v ON_ERROR_STOP=1 "$@"
@@ -86,10 +109,22 @@ psql_t1 -c "CREATE DATABASE $active WITH TEMPLATE $source_db;"
 echo "Active DB '$active' replaced with contents of '$source_db'."
 
 echo "Running alembic upgrade head..."
-docker exec -u vscode "$APP_CONTAINER" bash -i -c "cd /workspace/backend && uv run alembic upgrade head"
+if [ $IN_APP_CONTAINER -eq 1 ]; then
+  ( cd "${REPO_ROOT}/backend" && PATH="${HOME}/.local/bin:${PATH}" uv run alembic upgrade head )
+else
+  docker exec -u vscode "$APP_CONTAINER" bash -i -c "cd /workspace/backend && uv run alembic upgrade head"
+fi
 
-cat <<EOF
+if [ $IN_APP_CONTAINER -eq 1 ]; then
+  cat <<EOF
+
+Done. Restart backend with:
+  cd /workspace/backend && uv run start
+EOF
+else
+  cat <<EOF
 
 Done. Restart backend with:
   docker exec -u vscode $APP_CONTAINER bash -i -c "cd /workspace/backend && uv run start"
 EOF
+fi
