@@ -1826,6 +1826,10 @@
   "auto_accept_tools": "Auto",
   "auto_accept_tools_on": "Verktyg körs automatiskt utan godkännande",
   "auto_accept_tools_off": "Du tillfrågas innan verktyg körs",
+  "mcp_run_tools_automatically": "Kör verktyg automatiskt",
+  "mcp_tool_approval": "Verktygsgodkännande",
+  "mcp_servers_active_count": "{active} av {total} aktiva",
+  "mcp_servers_status_aria": "MCP-servrar – {active} av {total} aktiva",
   "enable_mcp_servers_in_admin": "Aktivera MCP-servrar i admininställningarna först.",
   "server_type": "Servertyp",
   "npm_package": "NPM-paket",
@@ -3256,5 +3260,7 @@
   "governance_assistant_prompt_locked_hint": "System-prompten styrs av organisationens policy. Din sparade prompt visas men används inte.",
   "governance_assistant_locked_by_policy": "Låst av organisationens policy.",
   "governance_assistant_models_filtered_hint": "Endast modeller som är tillåtna av organisationens policy visas.",
-  "governance_assistant_mcp_filtered_hint": "Endast MCP-servrar som är tillåtna av organisationens policy visas."
+  "governance_assistant_mcp_filtered_hint": "Endast MCP-servrar som är tillåtna av organisationens policy visas.",
+  "governance_assistant_mcp_provided_by_policy": "Dessa MCP-servrar tillhandahålls av organisationens policy och är alltid aktiva.",
+  "governance_assistant_mcp_none": "Organisationens policy tillhandahåller inga MCP-servrar."
 }

@@ -485,19 +485,31 @@
               >{m.mcp_disabled_when_knowledge_active()}
             </p>
           {/if}
-          <div class={mcpDisabledByKnowledge ? "pointer-events-none opacity-50" : ""}>
-            <SelectMCPServers
-              bind:selectedMCPServers={$update.mcp_servers}
-              bind:selectedMCPTools={$update.mcp_tools}
-              selectedModel={$update.completion_model}
-              allowedMCPServers={availableMCPServers}
-            />
-            {#if mcpEnforced}
-              <p class="text-muted mt-2 text-xs">
-                {m.governance_assistant_mcp_filtered_hint()}
-              </p>
+          {#if mcpEnforced}
+            <!-- Policy GRANTs these servers to the personal assistant; they are
+                 applied automatically at ask-time, so the picker is read-only. -->
+            {#if availableMCPServers && availableMCPServers.length > 0}
+              <div class="border-default bg-secondary/30 divide-default divide-y rounded-lg border">
+                {#each availableMCPServers as server (server.id)}
+                  <p class="text-default px-3 py-2 text-sm font-medium">{server.name}</p>
+                {/each}
+              </div>
+            {:else}
+              <p class="text-muted text-sm">{m.governance_assistant_mcp_none()}</p>
             {/if}
-          </div>
+            <p class="text-muted mt-2 text-xs">
+              {m.governance_assistant_mcp_provided_by_policy()}
+            </p>
+          {:else}
+            <div class={mcpDisabledByKnowledge ? "pointer-events-none opacity-50" : ""}>
+              <SelectMCPServers
+                bind:selectedMCPServers={$update.mcp_servers}
+                bind:selectedMCPTools={$update.mcp_tools}
+                selectedModel={$update.completion_model}
+                allowedMCPServers={availableMCPServers}
+              />
+            </div>
+          {/if}
         </Settings.Row>
       </Settings.Group>
 

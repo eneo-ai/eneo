@@ -1792,6 +1792,10 @@
   "auto_accept_tools": "Auto",
   "auto_accept_tools_on": "Tools will run automatically without approval",
   "auto_accept_tools_off": "You will be asked before tools run",
+  "mcp_run_tools_automatically": "Run tools automatically",
+  "mcp_tool_approval": "Tool approval",
+  "mcp_servers_active_count": "{active} of {total} active",
+  "mcp_servers_status_aria": "MCP servers — {active} of {total} active",
   "enable_mcp_servers_in_admin": "Enable MCP servers in the admin settings first.",
   "server_type": "Server Type",
   "npm_package": "NPM Package",
@@ -3256,5 +3260,7 @@
   "governance_assistant_prompt_locked_hint": "The system prompt is controlled by your organization's policy. Your saved prompt is shown but not used.",
   "governance_assistant_locked_by_policy": "Locked by your organization's policy.",
   "governance_assistant_models_filtered_hint": "Only models allowed by your organization's policy are shown.",
-  "governance_assistant_mcp_filtered_hint": "Only MCP servers allowed by your organization's policy are shown."
+  "governance_assistant_mcp_filtered_hint": "Only MCP servers allowed by your organization's policy are shown.",
+  "governance_assistant_mcp_provided_by_policy": "These MCP servers are provided by your organization's policy and are always active.",
+  "governance_assistant_mcp_none": "Your organization's policy does not provide any MCP servers."
 }

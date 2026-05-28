@@ -29,6 +29,10 @@ type CompletionModel = {
   provider_id?: string | null;
   nickname?: string | null;
   name: string;
+  // Mirrors the backend's accept set: the policy PUT rejects any model whose
+  // `can_access` is false (effectively-deprecated, locked, not org-enabled, …),
+  // so the picker must only offer accessible models.
+  can_access?: boolean;
 };
 type ModelProvider = { id: string; name: string; is_active?: boolean };
 type McpServer = { id: string; name: string; is_available?: boolean };
@@ -91,11 +95,14 @@ export class PolicyDraft {
   sync(data: PolicyPageData) {
     this.#intric = data.intric;
     this.#policy = data.policy;
-    this.#allModels = data.models.completionModels;
+    // Only models the backend will accept (`can_access`); offering a
+    // deprecated/locked model would make the policy PUT 400 on save.
+    const selectableModels = data.models.completionModels.filter((m) => m.can_access);
+    this.#allModels = selectableModels;
     this.#allProviders = (data.modelProviders ?? []).filter((p) => p.is_active);
     this.#allMcpServers = (data.mcpSettings?.items ?? []).filter((s) => s.is_available);
     this.promptOptions = data.promptLibrary.items;
-    this.#seed(data.policy, data.models.completionModels);
+    this.#seed(data.policy, selectableModels);
   }
 
   #seed(policy: Policy, allModels: CompletionModel[]) {
