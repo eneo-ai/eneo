@@ -29,7 +29,6 @@ from intric.scim.repositories.group_repository import ScimGroupRepository
 from intric.scim.schemas.common import ScimFilter, ScimSort
 from intric.tenants.tenant import TenantBase
 
-
 # ---------------------------------------------------------------------------
 # Repository-level integration tests
 # ---------------------------------------------------------------------------

@@ -16,7 +16,6 @@ from intric.database.tables.users_table import Users
 from intric.scim.repositories.user_repository import ScimUserRepository
 from intric.scim.schemas.common import ScimFilter, ScimSort
 
-
 # ---------------------------------------------------------------------------
 # Repository-level integration tests
 # ---------------------------------------------------------------------------
@@ -301,6 +300,7 @@ async def test_soft_delete_via_state_inactive(db_session, scim_user):
 async def test_list_filters_by_tenant(db_session, test_tenant):
     """list() returns only users for the given tenant_id — no cross-tenant leakage."""
     from dependency_injector import providers
+
     from intric.main.container.container import Container
     from intric.tenants.tenant import TenantBase
 
