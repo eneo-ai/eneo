@@ -53,10 +53,10 @@ The repository uses GitHub security features and CI to prevent regressions:
   frontend, GitHub Actions, Dockerfiles, and devcontainer configuration.
 - Dependency Review runs on pull requests into `develop` and blocks newly
   introduced vulnerable dependencies at `high` severity or above.
-- CodeQL uses the repository's advanced GitHub Actions workflow so the scanned
-  languages and query suites are versioned with the code. It scans Python,
-  JavaScript/TypeScript, and GitHub Actions workflows on pushes and pull
-  requests to `develop`, plus a weekly scheduled scan.
+- CodeQL advanced setup is paused while maintainers evaluate a code-scanning
+  setup that gives developers useful feedback without high false-positive noise.
+  Re-enable code scanning only after the query set and triage process are tuned
+  enough that alerts are actionable for maintainers.
 - Release SBOMs are generated from the published backend and frontend container
   image digests and attached to GitHub Releases as CycloneDX JSON, SPDX JSON,
   and human-readable table files. The backend release also includes a narrower
@@ -71,15 +71,14 @@ The repository uses GitHub security features and CI to prevent regressions:
 - The normal `CI` gate validates frozen backend and frontend installs before
   dependency update pull requests are merged.
 
-During the initial rollout, branch protection should require `CI`, `Dependency
-Review`, and `CodeQL`, but CodeQL code-scanning protection should only block
-high and critical alerts. Do not block every medium or low finding until the
-baseline is stable.
+Branch protection should require `CI` and `Dependency Review`. While code
+scanning is paused, remove `CodeQL gate` from the GitHub ruleset; otherwise pull
+requests can wait for a check that no longer runs.
 
 ## Alert Triage
 
 Use this order for existing Dependabot, malware, secret scanning, Dependency
-Review, Docker, GitHub Actions, and CodeQL alerts.
+Review, Docker, GitHub Actions, and any enabled code-scanning alerts.
 
 ### P0: Same Day
 
