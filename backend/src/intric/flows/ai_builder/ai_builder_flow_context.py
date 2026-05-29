@@ -1,20 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     FlowCapabilityProfile,
     build_flow_capability_profile,
-)
-from intric.flows.ai_builder.ai_builder_mcp_resources import (
-    AIBuilderMCPResourceInput,
-    normalize_ai_builder_mcp_resources,
-)
-from intric.flows.ai_builder.ai_builder_resource_catalog import (
-    AIBuilderResourceCatalog,
-    AIBuilderResourceCatalogEntry,
-    build_ai_builder_resource_catalog,
 )
 from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
@@ -232,88 +223,6 @@ def _build_edit_mode_flow_context(
             lines.append(f"{ref} | {name} | {io}")
 
     return "\n".join(lines)
-
-
-def build_available_models_context(
-    *,
-    resource_catalog: AIBuilderResourceCatalog,
-) -> list[dict[str, str]]:
-    return [
-        {
-            "ref": entry.authoring_ref,
-            "name": entry.name,
-            "display_name": entry.display_name,
-            "provider": entry.provider,
-        }
-        for entry in resource_catalog.models
-    ]
-
-
-def build_available_kbs_context(
-    *,
-    resource_catalog: AIBuilderResourceCatalog,
-) -> list[dict[str, str]]:
-    return [
-        {
-            "ref": entry.authoring_ref,
-            "name": entry.name,
-            "display_name": entry.display_name,
-            "description": entry.description,
-        }
-        for entry in resource_catalog.knowledge_bases
-    ]
-
-
-def build_available_mcp_context(
-    mcp_servers: AIBuilderMCPResourceInput,
-    *,
-    resource_catalog: AIBuilderResourceCatalog | None = None,
-) -> list[dict[str, Any]]:
-    """Build MCP resource context for prompt injection."""
-    normalized_servers = normalize_ai_builder_mcp_resources(mcp_servers)
-    catalog = resource_catalog or build_ai_builder_resource_catalog(
-        available_models=[],
-        available_kbs=[],
-        available_mcps=normalized_servers,
-    )
-    server_entries_by_local_ref = _entries_by_local_ref(catalog.mcp_servers)
-    tool_entries_by_local_ref = _entries_by_local_ref(catalog.mcp_tools)
-    context: list[dict[str, Any]] = []
-    for server in normalized_servers:
-        server_entry = server_entries_by_local_ref.get(server["ref"])
-        if server_entry is None:
-            continue
-        tools: list[dict[str, str]] = []
-        for tool in server["tools"]:
-            tool_entry = tool_entries_by_local_ref.get(tool["ref"])
-            if tool_entry is None:
-                continue
-            tools.append(
-                {
-                    "ref": tool_entry.authoring_ref,
-                    "name": tool["name"],
-                    "display_name": tool["display_name"],
-                    "description": tool["description"],
-                }
-            )
-        if not tools:
-            continue
-        context.append(
-            {
-                "ref": server_entry.authoring_ref,
-                "name": server["name"],
-                "display_name": server["display_name"],
-                "description": server["description"],
-                "tools": tools,
-            }
-        )
-    return context
-
-
-def _entries_by_local_ref(
-    entries: tuple[AIBuilderResourceCatalogEntry, ...],
-) -> dict[str, AIBuilderResourceCatalogEntry]:
-    return {entry.local_ref: entry for entry in entries}
 
 
 def build_step_ref_mapping(flow: Flow) -> dict[str, UUID]:

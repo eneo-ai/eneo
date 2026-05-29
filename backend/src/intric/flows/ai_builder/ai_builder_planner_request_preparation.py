@@ -68,9 +68,6 @@ from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     build_requirements_signal_text,
 )
 from intric.flows.ai_builder.ai_builder_prompts import (
-    build_available_kbs_context,
-    build_available_mcp_context,
-    build_available_models_context,
     build_clarification_hints,
     build_flow_context,
     build_system_prompt,
@@ -90,6 +87,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
+    build_ai_builder_resource_reference_material,
 )
 from intric.flows.ai_builder.ai_builder_server_actions import (
     build_server_planner_output,
@@ -345,23 +343,8 @@ async def prepare_planner_request(
             discovery_runtime=discovery_runtime,
         )
 
-    models_ctx = (
-        build_available_models_context(resource_catalog=resource_catalog)
-        if resource_catalog.models
-        else None
-    )
-    kbs_ctx = (
-        build_available_kbs_context(resource_catalog=resource_catalog)
-        if resource_catalog.knowledge_bases
-        else None
-    )
-    mcps_ctx = (
-        build_available_mcp_context(
-            request.available_mcps,
-            resource_catalog=resource_catalog,
-        )
-        if request.available_mcps
-        else None
+    resource_material = build_ai_builder_resource_reference_material(
+        catalog=resource_catalog,
     )
     clarification_hints = build_clarification_hints(
         conversation=request.conversation,
@@ -377,9 +360,7 @@ async def prepare_planner_request(
     )
     system_prompt = build_system_prompt(
         flow_context=flow_context,
-        available_models=models_ctx,
-        available_knowledge_bases=kbs_ctx,
-        available_mcp_servers=mcps_ctx,
+        available_resources=resource_material,
         attachment_context=(
             attachment_context_result.context
             if attachment_context_result is not None
@@ -412,9 +393,9 @@ async def prepare_planner_request(
                 if attachment_context_result is not None
                 else ""
             ),
-            "available_models_count": len(models_ctx or []),
-            "available_kbs_count": len(kbs_ctx or []),
-            "available_mcps_count": len(mcps_ctx or []),
+            "available_models_count": len(resource_material.models),
+            "available_kbs_count": len(resource_material.knowledge_bases),
+            "available_mcps_count": len(resource_material.mcp_servers),
             "conversation_budget_tokens": prepared_prompt.conversation_budget_tokens,
             "conversation_message_count": len(request.conversation),
             "trimmed_message_count": prepared_prompt.trimmed_message_count,

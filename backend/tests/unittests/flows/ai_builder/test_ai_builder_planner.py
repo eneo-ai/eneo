@@ -642,22 +642,13 @@ async def test_prepare_planner_request_builds_llm_messages_with_system_prompt_he
     assert prepared.requirements_state is requirements_state
     assert prepared.followup is None
     assert prepared.llm_messages[0] == {"role": "system", "content": "system prompt"}
-    assert build_system_prompt.call_args.kwargs["available_models"] == [
-        {
-            "ref": "model.model-a",
-            "name": "Model A",
-            "display_name": "Model A",
-            "provider": "openai",
-        }
+    resource_material = build_system_prompt.call_args.kwargs["available_resources"]
+    assert [entry.ref for entry in resource_material.models] == ["model.model-a"]
+    assert resource_material.models[0].display_name == "Model A"
+    assert [entry.ref for entry in resource_material.knowledge_bases] == [
+        "knowledge.kb-a"
     ]
-    assert build_system_prompt.call_args.kwargs["available_knowledge_bases"] == [
-        {
-            "ref": "knowledge.kb-a",
-            "name": "KB A",
-            "display_name": "KB A",
-            "description": "",
-        }
-    ]
+    assert resource_material.knowledge_bases[0].display_name == "KB A"
 
 
 @pytest.mark.asyncio

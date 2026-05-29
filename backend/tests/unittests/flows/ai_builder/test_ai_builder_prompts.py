@@ -19,9 +19,6 @@ from intric.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
 from intric.flows.ai_builder.ai_builder_prompts import (
-    build_available_kbs_context,
-    build_available_mcp_context,
-    build_available_models_context,
     build_clarification_hints,
     build_flow_context,
     build_plan_summary,
@@ -31,6 +28,7 @@ from intric.flows.ai_builder.ai_builder_prompts import (
 )
 from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
+    build_ai_builder_resource_reference_material,
 )
 from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
@@ -192,54 +190,38 @@ class TestBuildSystemPrompt:
         assert '"input_source":' not in prompt
 
     def test_prompt_exposes_mcp_refs_as_step_scoped_resources(self) -> None:
-        prompt = build_system_prompt(
-            available_mcp_servers=[
+        catalog = build_ai_builder_resource_catalog(
+            available_models=None,
+            available_kbs=None,
+            available_mcps=[
                 {
-                    "ref": "server-1",
+                    "id": "server-1",
                     "name": "Case system",
-                    "display_name": "Case system",
-                    "description": "Live case data.",
                     "tools": [
                         {
-                            "ref": "tool-1",
+                            "id": "tool-1",
                             "name": "lookup_case",
                             "display_name": "Lookup case",
                             "description": "Fetch a case.",
                         }
                     ],
                 }
-            ]
+            ],
         )
+        material = build_ai_builder_resource_reference_material(catalog=catalog)
+        prompt = build_system_prompt(available_resources=material)
 
         assert "Tillgängliga MCP-verktyg" in prompt
-        assert "server_ref=`server-1`" in prompt
-        assert "Lookup case [tool-1]: Fetch a case." in prompt
+        assert "server_ref=`mcp_server.case-system`" in prompt
+        assert "tool_ref=`mcp_tool.case-system-lookup-case`" in prompt
+        assert "Lookup case" in prompt
+        assert "Fetch a case." in prompt
         assert "mcp_tool_refs" in prompt
         assert "ska inte köra MCP-verktyg" in prompt
         assert "Verktygsbeskrivningar är beslutsstöd" in prompt
         assert "systemval eller tillstånd saknas" in prompt
         assert "ställ en kort förtydligande fråga" in prompt
         assert "Kombinera inte MCP med `knowledge_refs`" in prompt
-
-    def test_prompt_omits_malformed_mcp_resources(self) -> None:
-        prompt = build_system_prompt(
-            available_mcp_servers=[
-                {"ref": "", "name": "Broken", "tools": [{"ref": "ignored-tool"}]},
-                {
-                    "ref": "server-1",
-                    "name": "Case system",
-                    "tools": [
-                        {"ref": " ", "name": "blank"},
-                        {"ref": "tool-1", "name": "lookup_case"},
-                    ],
-                },
-            ]
-        )
-
-        assert "server_ref=`server-1`" in prompt
-        assert "lookup_case [tool-1]" in prompt
-        assert "ignored-tool" not in prompt
-        assert "blank [" not in prompt
 
     def test_edit_mode_prompt_contains_flow_chaining_rules(self) -> None:
         prompt = build_system_prompt(
@@ -300,13 +282,29 @@ class TestBuildSystemPrompt:
         assert "Bedöm" in prompt
 
     def test_prompt_with_models(self) -> None:
-        models = [
-            {"ref": "gpt-4", "name": "GPT-4", "provider": "openai"},
-            {"ref": "claude-3", "name": "Claude 3", "provider": "anthropic"},
-        ]
-        prompt = build_system_prompt(available_models=models)
-        assert "gpt-4" in prompt
-        assert "claude-3" in prompt
+        catalog = build_ai_builder_resource_catalog(
+            available_models=[
+                {
+                    "id": "m1",
+                    "ref": "m1",
+                    "name": "GPT-4",
+                    "display_name": "GPT-4",
+                    "provider": "openai",
+                },
+                {
+                    "id": "m2",
+                    "ref": "m2",
+                    "name": "Claude 3",
+                    "display_name": "Claude 3",
+                    "provider": "anthropic",
+                },
+            ],
+            available_kbs=None,
+        )
+        material = build_ai_builder_resource_reference_material(catalog=catalog)
+        prompt = build_system_prompt(available_resources=material)
+        assert "model.gpt-4" in prompt
+        assert "model.claude-3" in prompt
         assert "Tillgängliga modeller" in prompt
 
     def test_prompt_includes_planner_hints(self) -> None:
@@ -320,15 +318,21 @@ class TestBuildSystemPrompt:
         assert "svenska" in prompt
 
     def test_prompt_with_knowledge_bases(self) -> None:
-        kbs = [
-            {
-                "ref": "kb_policy",
-                "name": "Policy KB",
-                "description": "Internal policies",
-            },
-        ]
-        prompt = build_system_prompt(available_knowledge_bases=kbs)
-        assert "kb_policy" in prompt
+        catalog = build_ai_builder_resource_catalog(
+            available_models=None,
+            available_kbs=[
+                {
+                    "id": "kb1",
+                    "ref": "kb1",
+                    "name": "Policy KB",
+                    "display_name": "Policy KB",
+                    "description": "Internal policies",
+                }
+            ],
+        )
+        material = build_ai_builder_resource_reference_material(catalog=catalog)
+        prompt = build_system_prompt(available_resources=material)
+        assert "knowledge.policy-kb" in prompt
         assert "Tillgängliga kunskapsbaser" in prompt
 
     def test_prompt_without_optional_sections(self) -> None:
@@ -1016,127 +1020,6 @@ class TestBuildClarificationHints:
         assert "Aktiv familj: output_artifact" in ctx
         assert "Begärd ändring: PDF -> DOCX" in ctx
         assert "Draft-revision" not in ctx
-
-
-# ---------------------------------------------------------------------------
-# Model / KB context builders
-# ---------------------------------------------------------------------------
-
-
-class TestContextBuilders:
-    def test_model_and_kb_context_source_metadata_from_catalog(self) -> None:
-        catalog = build_ai_builder_resource_catalog(
-            available_models=[
-                {
-                    "id": "model-1",
-                    "ref": "model-1",
-                    "name": "Internal GPT",
-                    "display_name": "Displayed GPT",
-                    "provider": "azure",
-                }
-            ],
-            available_kbs=[
-                {
-                    "id": "kb-1",
-                    "ref": "kb-1",
-                    "name": "Policy Internal",
-                    "display_name": "Policy Display",
-                    "description": "Catalog policy description.",
-                }
-            ],
-            available_mcps=[],
-        )
-
-        models_context = build_available_models_context(resource_catalog=catalog)
-        kbs_context = build_available_kbs_context(resource_catalog=catalog)
-
-        assert models_context == [
-            {
-                "ref": "model.displayed-gpt",
-                "name": "Internal GPT",
-                "display_name": "Displayed GPT",
-                "provider": "azure",
-            }
-        ]
-        assert kbs_context == [
-            {
-                "ref": "knowledge.policy-display",
-                "name": "Policy Internal",
-                "display_name": "Policy Display",
-                "description": "Catalog policy description.",
-            }
-        ]
-
-    def test_build_models_context(self) -> None:
-        catalog = build_ai_builder_resource_catalog(
-            available_models=[
-                {
-                    "id": "abc-123",
-                    "ref": "abc-123",
-                    "name": "GPT-4",
-                    "display_name": "GPT-4",
-                    "provider": "openai",
-                }
-            ],
-            available_kbs=[],
-            available_mcps=[],
-        )
-        result = build_available_models_context(resource_catalog=catalog)
-        assert len(result) == 1
-        assert result[0]["ref"] == "model.gpt-4"
-        assert result[0]["name"] == "GPT-4"
-        assert result[0]["provider"] == "openai"
-
-    def test_build_kbs_context(self) -> None:
-        catalog = build_ai_builder_resource_catalog(
-            available_models=[],
-            available_kbs=[
-                {
-                    "id": "kb-1",
-                    "ref": "kb-1",
-                    "name": "Policy",
-                    "display_name": "Policy",
-                    "description": "Company policies",
-                }
-            ],
-            available_mcps=[],
-        )
-        result = build_available_kbs_context(resource_catalog=catalog)
-        assert len(result) == 1
-        assert result[0]["ref"] == "knowledge.policy"
-        assert result[0]["display_name"] == "Policy"
-        assert result[0]["description"] == "Company policies"
-
-    def test_build_kbs_context_no_description(self) -> None:
-        catalog = build_ai_builder_resource_catalog(
-            available_models=[],
-            available_kbs=[
-                {
-                    "id": "kb-1",
-                    "ref": "kb-1",
-                    "name": "Policy",
-                    "display_name": "Policy",
-                    "description": "",
-                }
-            ],
-            available_mcps=[],
-        )
-        result = build_available_kbs_context(resource_catalog=catalog)
-        assert result[0]["description"] == ""
-
-    def test_build_mcp_context_uses_slot_refs(self) -> None:
-        mcps = [
-            {
-                "id": "server-1",
-                "name": "Case Registry",
-                "tools": [{"id": "tool-1", "name": "lookup_case"}],
-            }
-        ]
-
-        result = build_available_mcp_context(mcps)
-
-        assert result[0]["ref"] == "mcp_server.case-registry"
-        assert result[0]["tools"][0]["ref"] == "mcp_tool.case-registry-lookup-case"
 
 
 # ---------------------------------------------------------------------------
