@@ -326,27 +326,6 @@ class ScimUserService:
         model = await self._repository.get_by_id(user_id, tenant_id=self._tenant_id)
         if model is None:
             raise ScimUserNotFoundError(f"User '{user_id}' not found")
-        # TEMPORARY DIAGNOSTIC: dump every operation's raw op/path/value so we
-        # can see exactly what the IdP sends (Azure Entra ID is suspected to
-        # send `active` as the string "False" instead of a JSON boolean,
-        # which `bool()` then coerces to True, silently no-op'ing soft-deletes).
-        # Remove once the value semantics are confirmed and the fix is in.
-        logger.info(
-            "scim.diag.patch_operations",
-            extra={
-                "tenant_id": str(self._tenant_id),
-                "user_id": str(user_id),
-                "operations": [
-                    {
-                        "op": op.op,
-                        "path": op.path,
-                        "value_type": type(op.value).__name__,
-                        "value_repr": repr(op.value),
-                    }
-                    for op in operations
-                ],
-            },
-        )
         for op in operations:
             _apply_patch_operation(model, op)
         await self._validate_unique_fields(
@@ -451,19 +430,7 @@ def _coerce_active(value: Any) -> bool:
 
 def _apply_user_attr(model: UserModel, attr: str, value: Any) -> None:
     if attr == "active":
-        coerced = _coerce_active(value)
-        # TEMPORARY DIAGNOSTIC: capture the type and repr Azure sends plus
-        # the coerced result, so we can verify the fix in production. Remove
-        # once we have one full sync cycle of confirmation.
-        logger.info(
-            "scim.diag.active_value_received",
-            extra={
-                "value_type": type(value).__name__,
-                "value_repr": repr(value),
-                "coerced": coerced,
-            },
-        )
-        _set_active(model, coerced)
+        _set_active(model, _coerce_active(value))
     elif attr == "username":
         model.username = str(value) if value is not None else model.username
     elif attr == "externalid":
