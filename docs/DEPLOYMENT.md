@@ -354,6 +354,22 @@ docker compose up -d
 
 Enable optional features by setting variables in `env_backend.env`.
 
+### Observability & Logging
+
+Eneo writes structured logs as NDJSON to STDOUT and emits distributed traces using the OpenTelemetry SDK. There is no built-in log shipper or trace exporter; the choice of log collector and aggregation system is left to your infrastructure.
+
+Minimum production setup in `env_backend.env`:
+
+```bash
+JSON_LOGS=true
+OTEL_SERVICE_NAME=eneo
+OTEL_SERVICE_VERSION=<your-git-sha-or-release-tag>
+OTEL_DEPLOYMENT_ENVIRONMENT=production
+```
+
+For the full log schema, ID contract (`trace_id`, `error_id`, `correlation_id`), redaction policy, and a Kubernetes log-collection reference setup with Fluent Bit and Vector, see [OBSERVABILITY.md](./OBSERVABILITY.md).
+
+
 **Enable Crawler & Document Upload:**
 > To use the web crawler or upload documents, the worker service must be running and at least one embedding model must be enabled in the admin panel.
 

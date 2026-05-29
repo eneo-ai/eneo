@@ -171,6 +171,17 @@ If a secret is exposed:
 - add or adjust secret scanning patterns when the secret format is specific to
   Eneo
 
+## Log Redaction
+
+Eneo's structured-log path enforces redaction on both stdout log attributes and auto-instrumented span attributes:
+
+- `Authorization`, `Cookie`, and `Set-Cookie` headers are never logged.
+- Query parameters named `code`, `state`, `token`, `access_token`, `refresh_token`, `client_secret`, or matching `*token*` or `*secret*` (case-insensitive) are replaced with `[REDACTED]` in both log lines and span URL attributes.
+- Request and response bodies are not logged by default; adding body logging requires a deliberate code change and a redaction review.
+- `user_email` is logged as a deliberate carryover from existing audit behavior. It is high-cardinality PII; configure the log aggregation system not to pre-index it.
+
+The redaction policy is unit-tested across both layers (stdout logs and span attributes from FastAPI, `httpx`, and `aiohttp` instrumentation). For the full policy and verification commands, see [OBSERVABILITY.md §8](./OBSERVABILITY.md#8-redaction-policy).
+
 ## Tracking and Exceptions
 
 Track security work in GitHub issues or GitHub Security Advisories, not in

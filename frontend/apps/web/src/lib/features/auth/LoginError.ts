@@ -19,6 +19,9 @@ export const providers = ["zitadel", "mobilityguard", "oidc"] as const;
 export class LoginError extends Error {
   code: keyof typeof LoginErrorCode;
   provider: (typeof providers)[number];
+  /** Backend trace ID for this error (X-Trace-Id; falls back to legacy X-Correlation-ID). */
+  traceId?: string;
+  /** @deprecated Use {@link traceId}. Kept as a same-value alias during the migration period. */
   correlationId?: string;
   statusCode?: number;
   rawDetail?: string;
@@ -27,13 +30,20 @@ export class LoginError extends Error {
     provider: (typeof providers)[number],
     code: keyof typeof LoginErrorCode,
     message: string = "",
-    metadata?: { correlationId?: string; statusCode?: number; rawDetail?: string }
+    metadata?: {
+      traceId?: string;
+      correlationId?: string;
+      statusCode?: number;
+      rawDetail?: string;
+    }
   ) {
     super(LoginErrorCode[code] + message);
     this.name = "LoginError";
     this.provider = provider;
     this.code = code;
-    this.correlationId = metadata?.correlationId;
+    const id = metadata?.traceId ?? metadata?.correlationId;
+    this.traceId = id;
+    this.correlationId = id;
     this.statusCode = metadata?.statusCode;
     this.rawDetail = metadata?.rawDetail;
   }

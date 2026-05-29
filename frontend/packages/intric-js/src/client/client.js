@@ -306,6 +306,20 @@ export class IntricError extends Error {
   }
 
   /**
+   * Return the backend trace ID for this error, suitable for support reports.
+   *
+   * Reads ``X-Trace-Id`` (set by TraceIdResponseMiddleware on every response,
+   * including 4xx/5xx) and falls back to the legacy ``X-Correlation-ID``
+   * during the migration period when both headers are emitted in parallel.
+   *
+   * @returns {string | undefined} 32-char hex trace ID, or undefined if no
+   *   span was active when the response was produced.
+   */
+  getTraceId() {
+    return this.headers?.get("x-trace-id") ?? this.headers?.get("x-correlation-id") ?? undefined;
+  }
+
+  /**
    * Rethrow an error as an IntricError
    * @param {unknown} error
    * @param {{endpoint: string; payload?: object;}} requestInfo
