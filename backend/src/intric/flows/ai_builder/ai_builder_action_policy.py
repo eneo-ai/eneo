@@ -8,9 +8,7 @@ orchestrator.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
-from types import MappingProxyType
 from typing import Literal
 
 from intric.flows.ai_builder.ai_builder_architecture_derivation import (
@@ -28,10 +26,6 @@ from intric.flows.ai_builder.planning_state import PlanningState
 CORE_ARCHITECTURAL_SLOTS: frozenset[str] = frozenset(
     {"primary_runtime_input", "terminal_output"}
 )
-
-MAX_ASKS_PER_SLOT = 2
-
-_EMPTY_ASK_COUNTS: Mapping[str, int] = MappingProxyType({})
 
 PlannerActionKind = Literal[
     "ask_question",
@@ -51,7 +45,6 @@ class PlannerActionPolicy:
 
     allowed_action_kinds: tuple[PlannerActionKind, ...]
     allowed_ask_question_targets: tuple[str, ...] = ()
-    capped_required_ask_targets: tuple[str, ...] = ()
     blocked_action_reasons: dict[PlannerActionKind, str] = field(
         default_factory=_empty_blocked_action_reasons
     )
@@ -63,7 +56,6 @@ def build_planner_action_policy(
     unresolved_architectural_choices: frozenset[str],
     selected_discovery_question_ids: frozenset[str],
     requirements_confirmed: bool = False,
-    ask_counts: Mapping[str, int] = _EMPTY_ASK_COUNTS,
 ) -> PlannerActionPolicy:
     """Compute the legal action surface from typed server state.
 
@@ -89,35 +81,13 @@ def build_planner_action_policy(
             | _missing_core_architecture_slots(resolved_slot_names)
             | unresolved_commit_slots
         )
-    candidate_targets = ask_target_set - resolved_slot_names
-    required_targets = (
-        _normalize_ask_targets(
-            unresolved_architectural_choices
-            | _missing_core_architecture_slots(resolved_slot_names)
-            | unresolved_commit_slots
-        )
-        - resolved_slot_names
-    )
-    askable_targets = frozenset(
-        target
-        for target in candidate_targets
-        if ask_counts.get(target, 0) < MAX_ASKS_PER_SLOT
-    )
-    capped_required = tuple(
-        sorted((candidate_targets - askable_targets) & required_targets)
-    )
-    ask_targets = tuple(sorted(askable_targets))
+    ask_targets = tuple(sorted(ask_target_set - resolved_slot_names))
 
     blocked: dict[PlannerActionKind, str] = {}
     allowed: list[PlannerActionKind] = []
 
     if ask_targets:
         allowed.append("ask_question")
-    elif capped_required:
-        blocked["ask_question"] = (
-            "required slots unresolved after repeated attempts: "
-            + ", ".join(capped_required)
-        )
     else:
         blocked["ask_question"] = "no unresolved ask_question targets"
 
@@ -155,7 +125,6 @@ def build_planner_action_policy(
     return PlannerActionPolicy(
         allowed_action_kinds=tuple(allowed),
         allowed_ask_question_targets=ask_targets,
-        capped_required_ask_targets=capped_required,
         blocked_action_reasons=blocked,
     )
 
