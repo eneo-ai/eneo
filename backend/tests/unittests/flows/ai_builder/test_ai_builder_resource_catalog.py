@@ -14,6 +14,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     RESOURCE_DESCRIPTION_MAX_CHARS,
     AIBuilderAvailableKnowledgeBaseResource,
     AIBuilderAvailableModelResource,
+    AIBuilderResourceReferenceMaterial,
     AssistantSnapshotResourceUnavailableError,
     build_ai_builder_resource_catalog,
     build_ai_builder_resource_reference_material,
@@ -22,6 +23,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     canonicalize_flow_spec_resources,
     collect_flow_spec_resource_bindings,
     format_resource_resolution_feedback,
+    render_resource_reference_block,
 )
 from intric.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
@@ -913,3 +915,59 @@ def test_resource_reference_material_keeps_description_at_clamp_boundary() -> No
     material = build_ai_builder_resource_reference_material(catalog=catalog)
 
     assert material.knowledge_bases[0].description == description
+
+
+def _reference_material(
+    *,
+    model_count: int = 0,
+    kb_count: int = 0,
+    server_count: int = 0,
+    tools_per_server: int = 0,
+) -> AIBuilderResourceReferenceMaterial:
+    def _uuid(group: int, index: int) -> str:
+        return f"{group:08d}-{index:04d}-4000-8000-000000000000"
+
+    models = [_model_resource(_uuid(1, i), f"Model {i}") for i in range(model_count)]
+    kbs = [_kb_resource(_uuid(2, i), f"Knowledge {i}") for i in range(kb_count)]
+    mcps = [
+        {
+            "id": _uuid(3, s),
+            "name": f"Server {s}",
+            "tools": [
+                {"id": _uuid(4, s * 100 + t), "name": f"tool_{s}_{t}"}
+                for t in range(tools_per_server)
+            ],
+        }
+        for s in range(server_count)
+    ]
+    catalog = build_ai_builder_resource_catalog(
+        available_models=models or None,
+        available_kbs=kbs or None,
+        available_mcps=mcps or None,
+    )
+    return build_ai_builder_resource_reference_material(catalog=catalog)
+
+
+class TestRenderResourceReferenceBlock:
+    def test_renders_every_resource_ref(self) -> None:
+        material = _reference_material(
+            model_count=2, kb_count=2, server_count=1, tools_per_server=2
+        )
+
+        rendered = render_resource_reference_block(material)
+
+        assert "model.model-0" in rendered.models
+        assert "model.model-1" in rendered.models
+        assert "knowledge.knowledge-0" in rendered.knowledge_bases
+        assert "knowledge.knowledge-1" in rendered.knowledge_bases
+        assert "mcp_server.server-0" in rendered.mcp
+        assert rendered.mcp.count("tool_ref=") == 2
+
+    def test_nests_each_mcp_tool_under_its_server(self) -> None:
+        material = _reference_material(server_count=2, tools_per_server=1)
+
+        rendered = render_resource_reference_block(material)
+
+        lines = rendered.mcp.splitlines()
+        assert sum(line.startswith("- server_ref=") for line in lines) == 2
+        assert sum(line.startswith("  - tool_ref=") for line in lines) == 2

@@ -436,6 +436,40 @@ def build_ai_builder_resource_reference_material(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class RenderedResourceReferences:
+    models: str
+    knowledge_bases: str
+    mcp: str
+
+
+def render_resource_reference_block(
+    material: AIBuilderResourceReferenceMaterial,
+) -> RenderedResourceReferences:
+    """Render prompt-visible resource reference bullet lines from typed material.
+
+    Phases share the per-kind bullet formatting and add their own headings/copy.
+    """
+    mcp_lines: list[str] = []
+    for server in material.mcp_servers:
+        mcp_lines.append(f"- {server.prompt_fields(ref_label='server_ref')}")
+        mcp_lines.extend(
+            f"  - {tool.prompt_fields(ref_label='tool_ref')}"
+            for tool in material.mcp_tools
+            if tool.parent_ref == server.ref
+        )
+    return RenderedResourceReferences(
+        models="\n".join(
+            f"- {entry.prompt_fields(ref_label='ref')}" for entry in material.models
+        ),
+        knowledge_bases="\n".join(
+            f"- {entry.prompt_fields(ref_label='ref')}"
+            for entry in material.knowledge_bases
+        ),
+        mcp="\n".join(mcp_lines),
+    )
+
+
 def canonicalize_flow_spec_resources(
     spec: FlowDraftSpecCore,
     *,

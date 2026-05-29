@@ -22,6 +22,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     AIBuilderResourceReferenceMaterial,
     build_ai_builder_resource_reference_material,
+    render_resource_reference_block,
 )
 from intric.flows.ai_builder.ai_builder_tools import active_submission_tool_name
 from intric.flows.ai_builder.planning_state import PlanningState
@@ -117,7 +118,10 @@ def build_plan_proposal_system_prompt(
 def _requested_output_sections_design_rule(
     requested_output_sections: RequestedOutputSections | None,
 ) -> str | None:
-    if requested_output_sections is None or not requested_output_sections.high_confidence:
+    if (
+        requested_output_sections is None
+        or not requested_output_sections.high_confidence
+    ):
         return None
     return (
         "- When the user names multiple output headings/sections for an AI-generated "
@@ -146,7 +150,10 @@ def _terminal_document_design_rule(planning_state: PlanningState) -> str | None:
 def _requested_output_sections_block(
     requested_output_sections: RequestedOutputSections | None,
 ) -> str | None:
-    if requested_output_sections is None or not requested_output_sections.high_confidence:
+    if (
+        requested_output_sections is None
+        or not requested_output_sections.high_confidence
+    ):
         return None
     return "\n".join(f"- {section}" for section in requested_output_sections.sections)
 
@@ -179,30 +186,21 @@ def _resolved_slots_block(planning_state: PlanningState) -> str:
 def _resource_context_block(
     material: AIBuilderResourceReferenceMaterial,
 ) -> str:
+    rendered = render_resource_reference_block(material)
     sections: list[str] = []
-    if material.models:
+    if rendered.models:
         sections.append("Models:")
-        sections.extend(
-            f"- {entry.prompt_fields(ref_label='ref')}" for entry in material.models
-        )
-    if material.knowledge_bases:
+        sections.append(rendered.models)
+    if rendered.knowledge_bases:
         sections.append("Knowledge bases:")
-        sections.extend(
-            f"- {entry.prompt_fields(ref_label='ref')}"
-            for entry in material.knowledge_bases
-        )
-    if material.mcp_servers:
+        sections.append(rendered.knowledge_bases)
+    if rendered.mcp:
         sections.append("MCP metadata:")
         sections.append(
             "- Planning may read this metadata but must not execute MCP tools. "
             "Use MCP refs only when a step needs external tools or live data."
         )
-        for server in material.mcp_servers:
-            sections.append(f"- {server.prompt_fields(ref_label='server_ref')}")
-            for tool in material.mcp_tools:
-                if tool.parent_ref != server.ref:
-                    continue
-                sections.append(f"  - {tool.prompt_fields(ref_label='tool_ref')}")
+        sections.append(rendered.mcp)
     return "\n".join(sections)
 
 
