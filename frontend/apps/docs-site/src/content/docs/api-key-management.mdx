@@ -289,6 +289,73 @@ Tenant administrators can configure API key policies that apply to all keys in t
 
 ---
 
+## FAQ
+
+### Which key type should I use?
+
+Use an `sk_` key for backend systems, scheduled jobs, MCP servers, and other server-to-server integrations. `sk_` keys can use `read`, `write`, or `admin` permission and may be restricted by client IP.
+
+Use a `pk_` key only for browser-based integrations. `pk_` keys are read-only, must list allowed origins, cannot use IP restrictions, and can only use `none` or `read` resource permissions. `jobs` and `prompts` resource permissions are rejected for `pk_` keys.
+
+### Should integrations use user keys or service keys?
+
+Use a user key when the integration should follow a specific user's lifecycle and memberships. If the user is deactivated, removed from a space, or loses required permissions, the key stops working.
+
+Use a service key for production automation that must outlive an individual employee. Service keys are created by tenant administrators, resolve to a synthetic service identity, and are authorized by their key scope and permission instead of a real user's memberships. The important caveat is that service keys cannot create user-owned resources; they are for operating on supported resources that already exist.
+
+### What new permissions do v2 keys have?
+
+V2 keys add explicit permission levels, scopes, ownership, and optional per-resource permissions. The top-level permission is a method ceiling:
+
+- `read` allows read-style requests such as `GET`
+- `write` allows create/update-style requests such as `POST`, `PUT`, and `PATCH`
+- `admin` allows delete-style requests such as `DELETE`
+
+Routes can override the method mapping when a request is semantically read-only. If `resource_permissions` are set, the key must also have enough permission for that resource type. Resource permissions can be configured for `assistants`, `apps`, `spaces`, `knowledge`, `conversations`, `files`, `jobs`, and `prompts`. For `sk_` keys, the top-level permission is derived from the highest configured resource permission. For `pk_` keys, every resource permission is capped at `read`, and `jobs`/`prompts` are not available.
+
+### How do scopes affect access?
+
+Scope limits where the key can operate:
+
+- `tenant` keys can access tenant-wide resources, subject to permission checks
+- `space` keys are limited to one space
+- `assistant` keys are limited to one assistant and its conversations
+- `app` keys are limited to one app and its runs
+
+Tenant-scoped admin user keys require the owner to remain a tenant administrator. Tenant-scoped read/write user keys inherit the owner's live role permissions through endpoint-level guards. Space-, assistant-, and app-scoped user keys require the owner to remain a member of the target space.
+
+### Can API keys create or manage other API keys?
+
+No. API-key management endpoints require a session login. API-key callers, including tenant-admin service keys, are rejected for API-key mutations.
+
+### Can service keys create resources?
+
+No. This is the main caveat with service keys: they are automation principals, not resource owners. Service keys can operate on supported existing resources within their scope, but endpoints that create new rows owned by `user_id` reject service-key callers with `code: "service_key_cannot_create_resources"`.
+
+Create assistants, apps, spaces, group chats, prompts, collections, websites, files, info blobs, roles, and MCP servers with a user account first. Then use the service key for supported automation around those resources. Files are more restricted than most existing resources: service keys cannot upload files and cannot delete files because files are user-owned today.
+
+### What happens to our old keys?
+
+Legacy keys still resolve through a compatibility path. When a legacy key is used, Eneo mirrors it into `api_keys_v2` where possible:
+
+- Legacy user keys become tenant-scoped `sk_` keys tied to the original owner. They become `admin` only if the owner currently has tenant admin permission; otherwise they become `write`.
+- Legacy assistant keys become assistant-scoped `sk_` keys with read permission.
+- Existing SHA256-backed v2 keys upgrade to HMAC-SHA256 when they resolve through the v2 lookup path.
+
+This keeps existing integrations working while giving resolved keys the v2 lifecycle, audit, scope, and policy machinery. The original plain secret is not changed or shown again.
+
+### When do we need to migrate to the new keys?
+
+Legacy keys are supported through the compatibility path, so existing integrations do not need to stop on release day. Migrate when you want narrower scopes, service-key ownership, explicit resource permissions, rotation, better audit visibility, or browser-safe `pk_` origin restrictions.
+
+The safest migration path is to create a new v2 key with the narrowest practical scope and permission, deploy it to the integration, confirm traffic and audit logs show the new key being used, then revoke the legacy key. For production automations owned by a team rather than a person, prefer a service `sk_` key with an IP allowlist or expiration date.
+
+### Can I retrieve a key secret later?
+
+No. The plain secret is shown exactly once when the key is created or rotated. If a secret is lost, rotate the key and update the integration with the new value.
+
+---
+
 ## Security Design
 
 ### Storage
