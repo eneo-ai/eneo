@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 from typing import Any, cast
 from uuid import UUID
@@ -393,6 +394,26 @@ def _set_active(model: UserModel, active: bool) -> None:
         model.deleted_at = datetime.now(timezone.utc)
 
 
+_PATCH_PATH_BASE_RE = re.compile(r"^([a-zA-Z_][a-zA-Z0-9_]*)")
+
+
+def _parse_patch_path(path: str) -> str:
+    """Extract the base attribute name from a SCIM PATCH path.
+
+    SCIM RFC 7644 §3.5.2 allows paths like:
+      - "userName"                       (simple)
+      - "emails[type eq \"work\"].value" (filter + sub-attribute)
+      - "name.givenName"                 (sub-attribute only)
+
+    Azure Entra ID uses the filter-expression form for multi-valued attributes
+    such as emails. Eneo's user model is flat (one email per user), so we only
+    need the base attribute name to dispatch the update; the filter and
+    sub-attribute selector are discarded.
+    """
+    match = _PATCH_PATH_BASE_RE.match(path)
+    return match.group(1).lower() if match else path.lower()
+
+
 def _apply_user_attr(model: UserModel, attr: str, value: Any) -> None:
     if attr == "active":
         _set_active(model, bool(value))
@@ -401,6 +422,12 @@ def _apply_user_attr(model: UserModel, attr: str, value: Any) -> None:
     elif attr == "externalid":
         model.external_id = str(value) if value is not None else None
     elif attr == "emails":
+        # Scalar form: Azure sends `emails[type eq "work"].value = "x@y.com"`,
+        # which after _parse_patch_path reduces to attr=emails, value=string.
+        if isinstance(value, str):
+            model.email = value
+            return
+        # Array form: PUT body or path-less PATCH passes a list of email dicts.
         raw_entries: list[Any] = (
             cast(list[Any], value) if isinstance(value, list) else [value]
         )
@@ -422,4 +449,4 @@ def _apply_patch_operation(model: UserModel, op: PatchOperation) -> None:
         for key, val in cast(dict[str, Any], op.value).items():  # pyright: ignore[reportUnknownMemberType]
             _apply_user_attr(model, key.lower(), val)
         return
-    _apply_user_attr(model, (op.path or "").lower(), op.value)  # pyright: ignore[reportUnknownMemberType]
+    _apply_user_attr(model, _parse_patch_path(op.path or ""), op.value)  # pyright: ignore[reportUnknownMemberType]

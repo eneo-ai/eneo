@@ -200,6 +200,38 @@ For single-tenant installations this is invisible. For multi-tenant installation
 
 ---
 
+## Provisioning scope and deprovisioning triggers
+
+Azure Entra ID's SCIM provisioning has two scope modes that decide **which users are in scope** for a given Enterprise application. The mode you pick changes what user actions in Azure send `active=false` to Eneo — which is often counter-intuitive.
+
+### The two scope modes
+
+Set under **Enterprise applications → [app] → Provisioning → Settings → Scope**:
+
+| Scope | Who gets synced | When does Azure send `active=false`? |
+|---|---|---|
+| **Sync only assigned users and groups** | Only users on the app's **Users and groups** list | When you **remove a user from the assignment list** (or remove a user from an assigned group) |
+| **Sync all users and groups** | Every user in the Azure tenant | When you **delete the user from Azure** entirely |
+
+A common surprise: in **either mode**, just unchecking **Account Enabled** on a user does **not** by itself send `active=false`. Azure derives `active` from whether the user is in scope, not from the enabled flag.
+
+### Safety net: "Prevent accidental deletion"
+
+Under **Provisioning → Settings**, the **"Prevent accidental deletion"** toggle (with an **Accidental deletion threshold** value) acts as a circuit breaker: if a sync cycle would deprovision more users than the threshold, Azure **pauses the cycle**, sends an email to the configured notification address, and waits for the operator to review and approve or reject the deletions before any users are actually deprovisioned.
+
+This is not "ignore deletions" — it's "stop and ask" when the deletion count crosses the line. Useful when changing scope or assignments on an already-provisioned tenant, where a mistake could otherwise mass-deprovision users.
+
+### Triggering a sync immediately
+
+Periodic sync runs every ~40 minutes by default. To trigger an action without waiting:
+
+- **Provision on demand**: select a specific user or group in Azure (Enterprise app → Provisioning → Provision on demand). Bypasses the periodic cycle. Note: requires the user to still exist in Azure — you cannot target a user that has already been deleted from the directory.
+- **Restart provisioning**: forces a full delta cycle for everything in scope.
+
+If a user has been deleted in Azure entirely (so they're no longer selectable in Provision on demand), Eneo will deprovision them at the next periodic sync; there is no Azure-side button to push that immediately.
+
+---
+
 ## Deprovisioning and reactivation
 
 When the IdP sets `active=false` on a user (typically because the user was disabled or left the organization), Eneo performs a **soft delete**:
@@ -334,9 +366,14 @@ See [Sign-in prerequisites when paired with OIDC](#sign-in-prerequisites-when-pa
 
 ### Users are not deactivated when removed from Entra
 
-Verify that the user is **disabled** in Entra (not just unassigned from the application). Unassigning only stops sync; it does not push `active=false`.
+What triggers deprovisioning depends on the provisioning **scope** of the Enterprise application — and unchecking **Account Enabled** on a user is **not** one of the triggers. Azure derives `active` from whether the user is in scope, not from the enabled flag.
 
-If you want users to be deprovisioned when unassigned, configure Entra's provisioning scope to **Sync only assigned users and groups** and ensure the deprovisioning action under **Mappings → Provision Microsoft Entra ID Users** is set to **Disable**.
+The common deprovisioning triggers:
+
+- **Scope = "Sync only assigned users and groups"**: removing the user from the app's **Users and groups** list sends `active=false` at the next sync.
+- **Scope = "Sync all users and groups"**: deleting the user from Azure entirely sends `active=false` at the next sync.
+
+See [Provisioning scope and deprovisioning triggers](#provisioning-scope-and-deprovisioning-triggers) for the full picture and the "Prevent accidental deletion" safety net.
 
 ### Group members are missing
 

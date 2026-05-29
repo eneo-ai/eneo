@@ -483,6 +483,34 @@ class TestPatchUser:
 
         assert db_user.email == "new@example.com"
 
+    async def test_patch_emails_with_azure_filter_path(self):
+        """Azure Entra ID sends email updates with a filter-expression path.
+
+        Regression: Eneo previously only matched simple paths like "emails";
+        the filter form was silently no-op'd because the full path string
+        (`emails[type eq "work"].value`) did not match any branch in
+        _apply_user_attr. _parse_patch_path now strips the filter and
+        sub-attribute selector so the update reaches the email column.
+        """
+        repo = AsyncMock()
+        db_user = _make_db_user()
+        repo.get_by_id.return_value = db_user
+        repo.update.return_value = db_user
+
+        service = _make_service(repo)
+        await service.patch_user(
+            db_user.id,
+            [
+                PatchOperation(
+                    op="Replace",
+                    path='emails[type eq "work"].value',
+                    value="updated@example.com",
+                )
+            ],
+        )
+
+        assert db_user.email == "updated@example.com"
+
     async def test_patch_emails_picks_primary_over_first(self):
         repo = AsyncMock()
         db_user = _make_db_user()
