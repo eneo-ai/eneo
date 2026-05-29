@@ -47,6 +47,13 @@ export type StructuredQuestionResult =
 
 const QUESTION_LANG = "eneo-question";
 
+// Fallback language tags accepted when the body parses to a valid envelope.
+// Weak / over-chatty models often reach for `question` (the obvious English
+// word) or `json` (it's JSON, after all) instead of the canonical tag. We
+// honour those AS LONG AS the body is a shape-valid envelope — that way a
+// real ` ```json` snippet from the LLM can't get hijacked into a card.
+const FALLBACK_LANGS = new Set(["question", "json"]);
+
 // Length guards. A maliciously-prompt-injected or just confused model could
 // emit a label of 10MB; the rule of thumb is "if it doesn't fit comfortably
 // on a radio button, refuse to render". Sized to be generous for legitimate
@@ -103,33 +110,51 @@ export function extractStructuredQuestion(text: string): StructuredQuestionResul
   }
 
   let cursor = 0;
-  let lastBlock: { start: number; raw: string; body: string } | null = null;
+  let lastCanonicalBlock: { start: number; raw: string; body: string } | null = null;
+  const fallbackBlocks: Array<{ start: number; raw: string; body: string }> = [];
+
   for (const token of tokens) {
     const raw = (token as { raw?: string }).raw ?? "";
-    if (
-      token.type === "code" &&
-      (token as Tokens.Code).lang?.trim().toLowerCase() === QUESTION_LANG
-    ) {
-      lastBlock = {
-        start: cursor,
-        raw,
-        body: (token as Tokens.Code).text ?? ""
-      };
+    if (token.type === "code") {
+      const lang = (token as Tokens.Code).lang?.trim().toLowerCase() ?? "";
+      const body = (token as Tokens.Code).text ?? "";
+      if (lang === QUESTION_LANG) {
+        lastCanonicalBlock = { start: cursor, raw, body };
+      } else if (FALLBACK_LANGS.has(lang)) {
+        fallbackBlocks.push({ start: cursor, raw, body });
+      }
     }
     cursor += raw.length;
   }
 
-  if (lastBlock === null) return { kind: "none" };
-
-  const proseBefore = text.slice(0, lastBlock.start);
-  const proseAfter = text.slice(lastBlock.start + lastBlock.raw.length);
-  const parsed = parseAndValidate(lastBlock.body);
-
-  if (parsed === null) {
-    return { kind: "invalid", proseBefore, proseAfter };
+  // Prefer the canonical block when the LLM used the right tag — even if
+  // its body is malformed (render as 'invalid' so the model's error is
+  // visible to the user). Only fall back to `question` / `json` blocks
+  // when there is no canonical block at all.
+  if (lastCanonicalBlock !== null) {
+    const proseBefore = text.slice(0, lastCanonicalBlock.start);
+    const proseAfter = text.slice(lastCanonicalBlock.start + lastCanonicalBlock.raw.length);
+    const parsed = parseAndValidate(lastCanonicalBlock.body);
+    return parsed === null
+      ? { kind: "invalid", proseBefore, proseAfter }
+      : { kind: "parsed", proseBefore, question: parsed, proseAfter };
   }
 
-  return { kind: "parsed", proseBefore, question: parsed, proseAfter };
+  // No canonical block — accept the LAST fallback-tagged block whose body
+  // happens to validate. A real ```json snippet the LLM is showing for
+  // some other reason cannot accidentally render as a card because it
+  // won't have the envelope shape.
+  for (let i = fallbackBlocks.length - 1; i >= 0; i--) {
+    const block = fallbackBlocks[i];
+    const parsed = parseAndValidate(block.body);
+    if (parsed !== null) {
+      const proseBefore = text.slice(0, block.start);
+      const proseAfter = text.slice(block.start + block.raw.length);
+      return { kind: "parsed", proseBefore, question: parsed, proseAfter };
+    }
+  }
+
+  return { kind: "none" };
 }
 
 /**
@@ -162,7 +187,8 @@ function parseAndValidate(body: string): PromptGuideQuestion | null {
   try {
     raw = JSON.parse(body);
   } catch {
-    return null;
+    raw = tryRepairAndParse(body);
+    if (raw === undefined) return null;
   }
 
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -205,4 +231,27 @@ function parseAndValidate(body: string): PromptGuideQuestion | null {
 
 function isBoundedString(value: unknown, maxLen: number): value is string {
   return typeof value === "string" && value.trim().length > 0 && value.length <= maxLen;
+}
+
+/**
+ * Light JSON-repair pass for the two mistakes weak models make most often
+ * inside an envelope: trailing commas before the closing `]` / `}`, and
+ * "smart" curly quotes around keys or string values. Returns the parsed
+ * value on success, `undefined` on continued failure.
+ *
+ * Intentionally NOT a full JSON5 implementation — we only fix the cases
+ * that have actually been observed in the wild on smaller / older models.
+ * False positives are cheap (the validation downstream still rejects
+ * anything that doesn't match the envelope shape).
+ */
+function tryRepairAndParse(body: string): unknown {
+  const repaired = body
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/,(\s*[}\]])/g, "$1");
+  try {
+    return JSON.parse(repaired);
+  } catch {
+    return undefined;
+  }
 }

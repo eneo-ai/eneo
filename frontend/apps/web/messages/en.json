@@ -3176,6 +3176,7 @@
   "prompt_guide_question_send": "Send",
   "prompt_guide_question_thinking": "Preparing a question…",
   "prompt_guide_apply_overwrite_warning": "Applying will replace your unsaved changes to the prompt. Continue?",
+  "prompt_guide_warning_llm_off_format": "The language model didn't return a structured question card this turn. It may be having trouble following the Prompt Guide format — reply manually below, or try a stronger model in this assistant's settings.",
   "admin_help_assistants_nav_label": "Help assistants",
   "admin_help_assistants_page_title": "Help assistants",
   "admin_help_assistants_page_intro": "Manage the built-in helpers that support users across Eneo. Assign, enable, or hide them for your organization.",

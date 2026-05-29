@@ -138,6 +138,79 @@ describe("extractStructuredQuestion — parsed (valid envelope)", () => {
   });
 });
 
+describe("extractStructuredQuestion — fallback language tags", () => {
+  test("accepts a ` ```question` block whose body is a valid envelope", () => {
+    const envelope = JSON.stringify({
+      header: "Audience",
+      question: "Who will primarily talk to this assistant?",
+      multiSelect: false,
+      options: [{ label: "End users" }, { label: "Internal staff" }]
+    });
+    const text = "```question\n" + envelope + "\n```";
+    const result = extractStructuredQuestion(text);
+    expect(result.kind).toBe("parsed");
+  });
+
+  test("accepts a ` ```json` block whose body is a valid envelope", () => {
+    const envelope = JSON.stringify({
+      header: "Audience",
+      question: "Who will primarily talk to this assistant?",
+      multiSelect: false,
+      options: [{ label: "End users" }, { label: "Internal staff" }]
+    });
+    const text = "```json\n" + envelope + "\n```";
+    const result = extractStructuredQuestion(text);
+    expect(result.kind).toBe("parsed");
+  });
+
+  test("does NOT hijack an unrelated ` ```json` snippet that lacks the envelope shape", () => {
+    // A real JSON snippet the LLM is showing for some other reason — eg.
+    // a logging payload — must not get rendered as a card.
+    const text = '```json\n{"foo": "bar"}\n```';
+    const result = extractStructuredQuestion(text);
+    expect(result.kind).toBe("none");
+  });
+
+  test("canonical eneo-question wins over a co-existing ```question fallback", () => {
+    // Even when the canonical block is malformed, render it as invalid
+    // rather than silently substituting the fallback — the user can see
+    // the LLM mistake instead of getting confusingly different content.
+    const fallback = JSON.stringify({
+      header: "Fallback",
+      question: "fallback-q",
+      multiSelect: false,
+      options: [{ label: "a" }, { label: "b" }]
+    });
+    const text = "```question\n" + fallback + "\n```\n\n```eneo-question\ngarbage\n```";
+    const result = extractStructuredQuestion(text);
+    expect(result.kind).toBe("invalid");
+  });
+});
+
+describe("extractStructuredQuestion — JSON repair", () => {
+  function repairCase(rawBody: string): { kind: string } {
+    return extractStructuredQuestion("```eneo-question\n" + rawBody + "\n```");
+  }
+
+  test("accepts an envelope with trailing commas after options", () => {
+    const body =
+      '{"header":"h","question":"q","multiSelect":false,"options":[{"label":"a"},{"label":"b"},]}';
+    expect(repairCase(body).kind).toBe("parsed");
+  });
+
+  test("accepts an envelope using curly double quotes", () => {
+    // Smart-quoted keys + values — common from voice-tuned models.
+    const body =
+      "{“header”:“h”,“question”:“q”,“multiSelect”:false,“options”:[{“label”:“a”},{“label”:“b”}]}";
+    expect(repairCase(body).kind).toBe("parsed");
+  });
+
+  test("still rejects bodies that cannot be repaired", () => {
+    expect(repairCase("totally not json").kind).toBe("invalid");
+    expect(repairCase('{ "header": "h"').kind).toBe("invalid");
+  });
+});
+
 describe("extractStructuredQuestion — invalid (malformed envelope)", () => {
   function expectInvalid(body: string): void {
     const result = extractStructuredQuestion("```eneo-question\n" + body + "\n```");

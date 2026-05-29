@@ -41,12 +41,30 @@
 
   let { question, disabled = false, onAnswer }: Props = $props();
 
+  // Latch onto the first valid `question` prop we receive. Weak / over-
+  // chatty models sometimes keep streaming additional `eneo-question`
+  // blocks after the closing fence (against the system prompt's rules) —
+  // the parser then "follows" the LATEST block, swapping the prop under
+  // the card while the user is in the middle of answering. Latching pins
+  // the visible question to the first one so the user's in-progress
+  // selections and typing are never reset by an LLM that won't stop.
+  let latchedQuestion = $state<PromptGuideQuestion | null>(null);
+  $effect(() => {
+    if (latchedQuestion === null) {
+      const incoming = question;
+      untrack(() => {
+        latchedQuestion = incoming;
+      });
+    }
+  });
+  const q = $derived(latchedQuestion ?? question);
+
   let radioValue = $state<string>("");
   // The card is mounted once per turn; options length is fixed for that
   // mount even if the parser re-runs as the stream tails on. `untrack` makes
   // that contract explicit and silences Svelte's "reference captures initial
   // value" warning.
-  let checkedFlags = $state<boolean[]>(untrack(() => question.options.map(() => false)));
+  let checkedFlags = $state<boolean[]>(untrack(() => q.options.map(() => false)));
   let otherText = $state<string>("");
   let submitted = $state(false);
   let cardElement = $state<HTMLDivElement>();
@@ -84,7 +102,7 @@
   // Other. Multi-select keeps both visible so the user can layer an "Also: …"
   // note onto a multi-pick.
   $effect(() => {
-    if (question.multiSelect) return;
+    if (q.multiSelect) return;
     if (radioValue !== "" && otherText.length > 0) {
       untrack(() => {
         otherText = "";
@@ -93,7 +111,7 @@
   });
 
   $effect(() => {
-    if (question.multiSelect) return;
+    if (q.multiSelect) return;
     if (otherText.length > 0 && radioValue !== "") {
       untrack(() => {
         radioValue = "";
@@ -101,23 +119,29 @@
     }
   });
 
+  // Two-stage gating: the inputs themselves stay typeable / pickable as
+  // long as the card hasn't been submitted (so the user can compose their
+  // reply WHILE a chatty model keeps streaming — weak models that don't
+  // stop after the closing fence used to make the textarea silently
+  // unresponsive). Only the Send button is gated by `disabled` (the
+  // streaming flag), via this `canSubmit` derived.
   const canSubmit = $derived.by(() => {
     if (submitted || disabled) return false;
     if (otherText.trim().length > 0) return true;
-    if (question.multiSelect) return checkedFlags.some((c) => c);
+    if (q.multiSelect) return checkedFlags.some((c) => c);
     return radioValue !== "";
   });
 
   function answerText(): string {
     const picked: string[] = [];
-    if (question.multiSelect) {
-      for (let i = 0; i < question.options.length; i++) {
-        if (checkedFlags[i]) picked.push(question.options[i].label);
+    if (q.multiSelect) {
+      for (let i = 0; i < q.options.length; i++) {
+        if (checkedFlags[i]) picked.push(q.options[i].label);
       }
     } else if (radioValue !== "") {
       const idx = Number.parseInt(radioValue, 10);
-      if (Number.isFinite(idx) && question.options[idx]) {
-        picked.push(question.options[idx].label);
+      if (Number.isFinite(idx) && q.options[idx]) {
+        picked.push(q.options[idx].label);
       }
     }
     const other = otherText.trim();
@@ -136,7 +160,7 @@
   // the page. Built from `question` content so two different questions never
   // collide even within one assistant turn.
   const cardId = $derived(
-    `pg-q-${question.header.replace(/\s+/g, "-").toLowerCase()}-${question.question.length}`
+    `pg-q-${q.header.replace(/\s+/g, "-").toLowerCase()}-${q.question.length}`
   );
   const titleId = $derived(`${cardId}-title`);
   const otherInputId = $derived(`${cardId}-other`);
@@ -151,32 +175,23 @@
   aria-busy={submitted}
 >
   <div class="text-muted mb-1 text-xs font-medium tracking-wide uppercase">
-    {question.header}
+    {q.header}
   </div>
   <div id={titleId} class="text-default mb-3 text-sm font-medium">
-    {question.question}
+    {q.question}
   </div>
 
-  {#if question.options.length > 0}
-    {#if question.multiSelect}
-      <fieldset
-        class="flex flex-col gap-2"
-        disabled={submitted || disabled}
-        aria-labelledby={titleId}
-      >
-        <legend class="sr-only">{question.question}</legend>
-        {#each question.options as option, index (index)}
+  {#if q.options.length > 0}
+    {#if q.multiSelect}
+      <fieldset class="flex flex-col gap-2" disabled={submitted} aria-labelledby={titleId}>
+        <legend class="sr-only">{q.question}</legend>
+        {#each q.options as option, index (index)}
           {@const id = `${cardId}-opt-${index}`}
           <Label
             for={id}
             class="hover:bg-hover-dimmer flex cursor-pointer items-start gap-3 rounded-md p-2"
           >
-            <Checkbox
-              {id}
-              bind:checked={checkedFlags[index]}
-              disabled={submitted || disabled}
-              class="mt-0.5"
-            />
+            <Checkbox {id} bind:checked={checkedFlags[index]} disabled={submitted} class="mt-0.5" />
             <span class="flex-1 text-sm">
               <span class="text-default block font-medium">{option.label}</span>
               {#if option.description}
@@ -189,22 +204,17 @@
     {:else}
       <RadioGroup.Root
         bind:value={radioValue}
-        disabled={submitted || disabled}
+        disabled={submitted}
         aria-labelledby={titleId}
         class="gap-2"
       >
-        {#each question.options as option, index (index)}
+        {#each q.options as option, index (index)}
           {@const id = `${cardId}-opt-${index}`}
           <Label
             for={id}
             class="hover:bg-hover-dimmer flex cursor-pointer items-start gap-3 rounded-md p-2"
           >
-            <RadioGroup.Item
-              value={String(index)}
-              {id}
-              disabled={submitted || disabled}
-              class="mt-0.5"
-            />
+            <RadioGroup.Item value={String(index)} {id} disabled={submitted} class="mt-0.5" />
             <span class="flex-1 text-sm">
               <span class="text-default block font-medium">{option.label}</span>
               {#if option.description}
@@ -217,7 +227,7 @@
     {/if}
   {/if}
 
-  {#if question.options.length === 0}
+  {#if q.options.length === 0}
     <!-- Free-text intake mode: the input is the primary affordance, not an
          "Other" escape hatch — render a generous textarea, not an inline
          input. The system prompt requires the first interview question to
@@ -231,7 +241,7 @@
         bind:value={otherText}
         onkeydown={handleTextareaKeydown}
         placeholder={m.prompt_guide_question_free_answer_placeholder()}
-        disabled={submitted || disabled}
+        disabled={submitted}
         rows={3}
         class="resize-none"
       />
@@ -250,7 +260,7 @@
           type="text"
           bind:value={otherText}
           placeholder={m.prompt_guide_question_other_placeholder()}
-          disabled={submitted || disabled}
+          disabled={submitted}
           class="border-default bg-primary ring-default flex-1 rounded-md border px-3 py-1.5 text-sm shadow-sm focus-within:ring-2 hover:ring-2 focus-visible:ring-2 disabled:opacity-60"
         />
         <Button size="sm" disabled={!canSubmit} onclick={submit}>

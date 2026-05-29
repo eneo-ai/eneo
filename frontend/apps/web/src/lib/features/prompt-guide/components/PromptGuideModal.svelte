@@ -22,7 +22,7 @@
 -->
 
 <script lang="ts">
-  import { RefreshCw, Sparkles } from "lucide-svelte";
+  import { CircleAlert, RefreshCw, Sparkles } from "lucide-svelte";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { getIntric } from "$lib/core/Intric";
@@ -326,10 +326,21 @@
     {/if}
 
     {#if needsFallbackInput}
-      <!-- Fallback escape hatch: shown only when the latest assistant turn
-           finished without a usable question card AND no final-prompt
-           artifact is up. In the normal flow, all reply input happens
-           inside the cards themselves. -->
+      <!-- Off-format warning + fallback escape hatch. Both surface only
+           when the latest assistant turn finished without a usable
+           question card AND no final-prompt artifact is up. The warning
+           explains WHY the card is missing (LLM didn't follow the
+           format) so the user understands the cause and can switch
+           models; the fallback input lets them keep the conversation
+           moving manually. In the normal flow neither appears — cards
+           own all reply input. -->
+      <div
+        role="status"
+        class="border-caution bg-caution text-caution flex items-start gap-2 rounded-md border px-3 py-2 text-xs"
+      >
+        <CircleAlert class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+        <span class="flex-1">{m.prompt_guide_warning_llm_off_format()}</span>
+      </div>
       <PromptGuideInput
         bind:value={inputText}
         bind:ref={inputElement}

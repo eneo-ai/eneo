@@ -3176,6 +3176,7 @@
   "prompt_guide_question_send": "Skicka",
   "prompt_guide_question_thinking": "Förbereder en fråga…",
   "prompt_guide_apply_overwrite_warning": "När du använder förslaget ersätts dina osparade ändringar i prompten. Vill du fortsätta?",
+  "prompt_guide_warning_llm_off_format": "Språkmodellen returnerade inte ett strukturerat frågekort den här gången. Den kanske har svårt att följa Promptguidens format — svara manuellt nedan, eller välj en starkare modell i assistentens inställningar.",
   "admin_help_assistants_nav_label": "Hjälpassistenter",
   "admin_help_assistants_page_title": "Hjälpassistenter",
   "admin_help_assistants_page_intro": "Hantera de inbyggda hjälpassistenterna som stöder användarna i Eneo. Tilldela, aktivera eller dölj dem för din organisation.",
