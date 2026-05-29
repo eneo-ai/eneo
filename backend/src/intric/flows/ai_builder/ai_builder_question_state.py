@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
@@ -31,6 +32,7 @@ class AskedQuestionState:
     asked_question_ids: frozenset[str]
     question_ids_with_new_evidence: frozenset[str]
     has_new_evidence: bool
+    question_id_counts: Mapping[str, int]
 
 
 def derive_asked_question_state(
@@ -46,11 +48,13 @@ def derive_asked_question_state(
     asked: set[str] = set()
     awaiting_evidence: set[str] = set()
     with_new_evidence: set[str] = set()
+    counts: dict[str, int] = {}
 
     for message in conversation:
         question_id = assistant_question_id(message)
         if question_id is not None:
             asked.add(question_id)
+            counts[question_id] = counts.get(question_id, 0) + 1
             awaiting_evidence.add(question_id)
             with_new_evidence.discard(question_id)
             continue
@@ -65,6 +69,7 @@ def derive_asked_question_state(
         asked_question_ids=frozenset(asked),
         question_ids_with_new_evidence=frozenset(with_new_evidence),
         has_new_evidence=bool(with_new_evidence),
+        question_id_counts=MappingProxyType(counts),
     )
 
 

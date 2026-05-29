@@ -169,11 +169,13 @@ def _asked_question_state(
     asked_question_ids: frozenset[str] = frozenset(),
     question_ids_with_new_evidence: frozenset[str] = frozenset(),
     has_new_evidence: bool = False,
+    question_id_counts: dict[str, int] | None = None,
 ) -> AskedQuestionState:
     return AskedQuestionState(
         asked_question_ids=asked_question_ids,
         question_ids_with_new_evidence=question_ids_with_new_evidence,
         has_new_evidence=has_new_evidence,
+        question_id_counts=question_id_counts or {},
     )
 
 

@@ -52,3 +52,35 @@ def test_derive_asked_question_state_resets_evidence_after_question_is_reasked()
     assert state.asked_question_ids == frozenset({"runtime_metadata_fields"})
     assert state.question_ids_with_new_evidence == frozenset()
     assert state.has_new_evidence is False
+
+
+def test_question_id_counts_track_repeated_asks_across_evidence() -> None:
+    state = derive_asked_question_state(
+        [
+            ConversationMessage(role="user", content="Build a flow."),
+            ConversationMessage(
+                role="assistant",
+                content="Which input?",
+                metadata={"question_id": "primary_runtime_input"},
+            ),
+            ConversationMessage(role="user", content="A document."),
+            ConversationMessage(
+                role="assistant",
+                content="Which input, exactly?",
+                metadata={"question_id": "primary_runtime_input"},
+            ),
+            ConversationMessage(role="user", content="Not sure."),
+        ]
+    )
+
+    # The count survives the intervening evidence turn (only the evidence set resets).
+    assert state.question_id_counts["primary_runtime_input"] == 2
+    assert state.question_ids_with_new_evidence == frozenset({"primary_runtime_input"})
+
+
+def test_question_id_counts_is_empty_when_no_question_asked() -> None:
+    state = derive_asked_question_state(
+        [ConversationMessage(role="user", content="Build a flow.")]
+    )
+
+    assert dict(state.question_id_counts) == {}
