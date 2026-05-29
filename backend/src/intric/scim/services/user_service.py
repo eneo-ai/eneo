@@ -435,21 +435,35 @@ def _parse_patch_path(path: str) -> str:
     return match.group(1).lower() if match else path.lower()
 
 
+def _coerce_active(value: Any) -> bool:
+    """Coerce a SCIM `active` value to a Python bool.
+
+    Azure Entra ID sends `active` as the string "True"/"False" in PATCH
+    operations (documented quirk, not RFC-compliant but established). Python's
+    bool() returns True for any non-empty string — including "False" — so
+    without explicit handling a soft-delete from Azure would silently leave
+    the user active and Azure (which gets 200 OK back) would never retry.
+    """
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return bool(value)
+
+
 def _apply_user_attr(model: UserModel, attr: str, value: Any) -> None:
     if attr == "active":
-        # TEMPORARY DIAGNOSTIC: capture the type and repr of the value Azure
-        # actually sends, so we can verify whether it's a JSON boolean or a
-        # string. Remove once the cause of silent soft-delete no-ops is
-        # confirmed and the fix is in place.
+        coerced = _coerce_active(value)
+        # TEMPORARY DIAGNOSTIC: capture the type and repr Azure sends plus
+        # the coerced result, so we can verify the fix in production. Remove
+        # once we have one full sync cycle of confirmation.
         logger.info(
             "scim.diag.active_value_received",
             extra={
                 "value_type": type(value).__name__,
                 "value_repr": repr(value),
-                "coerced_bool": bool(value),
+                "coerced": coerced,
             },
         )
-        _set_active(model, bool(value))
+        _set_active(model, coerced)
     elif attr == "username":
         model.username = str(value) if value is not None else model.username
     elif attr == "externalid":

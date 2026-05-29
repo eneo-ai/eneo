@@ -430,6 +430,58 @@ class TestPatchUser:
         assert db_user.state == ScimUserState.DELETED
         repo.update.assert_called_once_with(db_user)
 
+    async def test_patch_sets_active_false_with_string_value(self):
+        """Azure Entra sends `active` as the STRING "False" in PATCH payloads.
+
+        Regression: Python's `bool("False")` is True, so without explicit
+        coercion the user would remain active and Azure (which gets 200 OK
+        back) would never retry. `_coerce_active` parses string forms case-
+        insensitively.
+        """
+        repo = AsyncMock()
+        db_user = _make_db_user(active=True)
+        repo.get_by_id.return_value = db_user
+        repo.update.return_value = db_user
+
+        service = _make_service(repo)
+        await service.patch_user(
+            db_user.id,
+            [PatchOperation(op="Replace", path="active", value="False")],
+        )
+
+        assert db_user.state == ScimUserState.DELETED
+
+    async def test_patch_sets_active_false_with_lowercase_string(self):
+        """Lowercase "false" must deactivate too (case-insensitive parse)."""
+        repo = AsyncMock()
+        db_user = _make_db_user(active=True)
+        repo.get_by_id.return_value = db_user
+        repo.update.return_value = db_user
+
+        service = _make_service(repo)
+        await service.patch_user(
+            db_user.id,
+            [PatchOperation(op="Replace", path="active", value="false")],
+        )
+
+        assert db_user.state == ScimUserState.DELETED
+
+    async def test_patch_sets_active_true_with_string_value(self):
+        """The string "True" must reactivate (the symmetric case)."""
+        repo = AsyncMock()
+        db_user = _make_db_user(active=False)
+        db_user.state = ScimUserState.DELETED
+        repo.get_by_id.return_value = db_user
+        repo.update.return_value = db_user
+
+        service = _make_service(repo)
+        await service.patch_user(
+            db_user.id,
+            [PatchOperation(op="Replace", path="active", value="True")],
+        )
+
+        assert db_user.state == ScimUserState.ACTIVE
+
     async def test_patch_updates_external_id(self):
         repo = AsyncMock()
         db_user = _make_db_user()
