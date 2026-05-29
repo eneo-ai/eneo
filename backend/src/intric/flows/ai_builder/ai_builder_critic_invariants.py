@@ -1835,22 +1835,31 @@ def enforce_architecture_critic_invariants(
     context: CriticContext,
     *,
     invariants: tuple[CriticInvariant, ...] = CRITIC_INVARIANTS,
+    issues: tuple[CriticIssue, ...] | None = None,
 ) -> None:
-    issues = tuple(
-        issue
-        for issue in evaluate_critic_invariants(context, invariants=invariants)
-        if issue.kind == "architecture"
+    """Raise ``AIBuilderArchitectureError`` if any architecture invariant fired.
+
+    Pass ``issues`` (already-evaluated critic issues) to reuse a single critic
+    evaluation; when omitted the invariants are evaluated here.
+    """
+    evaluated = (
+        issues
+        if issues is not None
+        else evaluate_critic_invariants(context, invariants=invariants)
     )
-    if not issues:
+    architecture_issues = tuple(
+        issue for issue in evaluated if issue.kind == "architecture"
+    )
+    if not architecture_issues:
         return
 
-    issue_ids = ",".join(issue.id for issue in issues)
+    issue_ids = ",".join(issue.id for issue in architecture_issues)
     raise AIBuilderArchitectureError(
         public_code="architecture_critic_invariant_failed",
         detail=f"Architecture critic invariants failed: {issue_ids}",
         log_context={
             "critic_issue_ids": issue_ids,
-            "critic_issue_count": len(issues),
+            "critic_issue_count": len(architecture_issues),
             "flow_name": context.spec.flow_name,
             "step_count": len(context.spec.steps),
         },

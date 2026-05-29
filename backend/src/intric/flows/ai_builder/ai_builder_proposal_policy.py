@@ -13,13 +13,13 @@ from intric.flows.ai_builder.ai_builder_create_feedback import (
 )
 from intric.flows.ai_builder.ai_builder_critic_invariants import (
     enforce_architecture_critic_invariants,
-    evaluate_critic_invariants,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
     LintWarning,
 )
+from intric.flows.ai_builder.ai_builder_draft_preflight import run_draft_preflight
 from intric.flows.ai_builder.ai_builder_feedback_formatting import (
     format_revision_feedback,
 )
@@ -169,8 +169,9 @@ def format_create_contextual_quality_feedback(
         aggregation_intent=aggregation_intent,
         resource_catalog=resource_catalog,
     )
-    enforce_architecture_critic_invariants(context)
-    return format_create_critic_feedback(evaluate_critic_invariants(context))
+    preflight = run_draft_preflight(context)
+    enforce_architecture_critic_invariants(context, issues=preflight.issues)
+    return format_create_critic_feedback(preflight.semantic_issues)
 
 
 def resolve_ui_language(
