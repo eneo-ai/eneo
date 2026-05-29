@@ -795,9 +795,10 @@ async def edit_flow_run_review_checkpoint(
                 current_payload_json=review_in.current_payload_json,
             )
         )
-    return await _to_review_checkpoint_public(
-        container=container, checkpoint=checkpoint
-    )
+        response = await _to_review_checkpoint_public(
+            container=container, checkpoint=checkpoint
+        )
+    return response
 
 
 @router.post(
@@ -870,9 +871,10 @@ async def approve_flow_run_review_checkpoint(
             checkpoint_id=checkpoint_id,
             expected_checkpoint_revision=review_in.expected_checkpoint_revision,
         )
-    return await _to_review_checkpoint_public(
-        container=container, checkpoint=checkpoint
-    )
+        response = await _to_review_checkpoint_public(
+            container=container, checkpoint=checkpoint
+        )
+    return response
 
 
 @router.post(
@@ -946,9 +948,10 @@ async def reject_flow_run_review_checkpoint(
             expected_checkpoint_revision=review_in.expected_checkpoint_revision,
             reason=review_in.reason,
         )
-    return await _to_review_checkpoint_public(
-        container=container, checkpoint=checkpoint
-    )
+        response = await _to_review_checkpoint_public(
+            container=container, checkpoint=checkpoint
+        )
+    return response
 
 
 @router.post(
@@ -1035,16 +1038,17 @@ async def resume_flow_run_review_checkpoint(
         if result.accepted:
             run_service = container.flow_run_service()
             dispatch_request = run_service.build_dispatch_request(result.run)
+        checkpoint = await _to_review_checkpoint_public(
+            container=container,
+            checkpoint=result.checkpoint,
+        )
     if dispatch_request is not None:
         background_tasks.add_task(
             common.dispatch_flow_run_recoverably_after_commit,
             request=dispatch_request,
         )
     return FlowRunReviewCheckpointResumeResponse(
-        checkpoint=await _to_review_checkpoint_public(
-            container=container,
-            checkpoint=result.checkpoint,
-        ),
+        checkpoint=checkpoint,
         run=FlowAssembler().to_run_public(result.run),
     )
 

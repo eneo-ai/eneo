@@ -11,6 +11,8 @@ import pytest
 
 from intric.authentication.auth_dependencies import ScopeFilter
 from intric.flows.api import flow_router_common as router_common_module
+from intric.flows.api import flow_run_execution_router as router_module
+from intric.flows.api.flow_assembler import FlowAssembler
 from intric.flows.api.flow_models import (
     FlowRunReviewCheckpointApproveRequest,
     FlowRunReviewCheckpointEditRequest,
@@ -38,6 +40,24 @@ from tests.unittests.flows.test_flow_router import (
     _review_checkpoint,
     _run,
 )
+
+
+def _record_review_checkpoint_public(monkeypatch, events: list[str]):
+    async def _to_review_checkpoint_public(*, container, checkpoint):
+        events.append("to_review_checkpoint_public")
+        checkpoint_for_public = checkpoint.model_copy(
+            update={
+                "requester_user_id": uuid4(),
+                "decided_by_user_id": uuid4(),
+            }
+        )
+        return FlowAssembler().to_review_checkpoint_public(checkpoint_for_public)
+
+    monkeypatch.setattr(
+        router_module,
+        "_to_review_checkpoint_public",
+        _to_review_checkpoint_public,
+    )
 
 
 @pytest.mark.asyncio
@@ -82,6 +102,7 @@ async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypa
     container.user.return_value = user
     _enable_space_access(container)
     _enable_explicit_transaction(container, events)
+    _record_review_checkpoint_public(monkeypatch, events)
     monkeypatch.setattr(
         router_common_module,
         "get_scope_filter",
@@ -107,6 +128,7 @@ async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypa
     assert events == [
         "transaction_enter",
         "build_dispatch_request",
+        "to_review_checkpoint_public",
         "transaction_exit",
         "add_task",
     ]
@@ -124,9 +146,10 @@ async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_edit_review_checkpoint_commits_before_response(monkeypatch):
+async def test_edit_review_checkpoint_builds_response_inside_transaction(monkeypatch):
     container = MagicMock()
     ctx = _enable_review_checkpoint_route_context(container)
+    _record_review_checkpoint_public(monkeypatch, ctx.events)
 
     async def _edit_review_checkpoint(**_kwargs):
         ctx.events.append("edit_review_checkpoint")
@@ -151,6 +174,7 @@ async def test_edit_review_checkpoint_commits_before_response(monkeypatch):
     assert ctx.events == [
         "transaction_enter",
         "edit_review_checkpoint",
+        "to_review_checkpoint_public",
         "transaction_exit",
     ]
     ctx.review_service.edit_review_checkpoint.assert_awaited_once_with(
@@ -163,9 +187,10 @@ async def test_edit_review_checkpoint_commits_before_response(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_approve_review_checkpoint_commits_before_response(monkeypatch):
+async def test_approve_review_checkpoint_builds_response_inside_transaction(monkeypatch):
     container = MagicMock()
     ctx = _enable_review_checkpoint_route_context(container)
+    _record_review_checkpoint_public(monkeypatch, ctx.events)
 
     async def _approve_review_checkpoint(**_kwargs):
         ctx.events.append("approve_review_checkpoint")
@@ -191,6 +216,7 @@ async def test_approve_review_checkpoint_commits_before_response(monkeypatch):
     assert ctx.events == [
         "transaction_enter",
         "approve_review_checkpoint",
+        "to_review_checkpoint_public",
         "transaction_exit",
     ]
     ctx.review_service.approve_review_checkpoint.assert_awaited_once_with(
@@ -202,9 +228,10 @@ async def test_approve_review_checkpoint_commits_before_response(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reject_review_checkpoint_commits_before_response(monkeypatch):
+async def test_reject_review_checkpoint_builds_response_inside_transaction(monkeypatch):
     container = MagicMock()
     ctx = _enable_review_checkpoint_route_context(container)
+    _record_review_checkpoint_public(monkeypatch, ctx.events)
 
     async def _reject_review_checkpoint(**_kwargs):
         ctx.events.append("reject_review_checkpoint")
@@ -229,6 +256,7 @@ async def test_reject_review_checkpoint_commits_before_response(monkeypatch):
     assert ctx.events == [
         "transaction_enter",
         "reject_review_checkpoint",
+        "to_review_checkpoint_public",
         "transaction_exit",
     ]
     ctx.review_service.reject_review_checkpoint.assert_awaited_once_with(
