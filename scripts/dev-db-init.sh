@@ -96,16 +96,36 @@ fi
 if [ $assume_yes -eq 0 ]; then
   echo
   echo "WARNING: this will REPLACE active DB '$active' with contents of '$source_db'."
-  echo "Uncommitted changes will be lost. Run ./scripts/db-commit first to keep them."
+  echo "Uncommitted changes will be lost. Run ./scripts/dev-db-commit.sh first to keep them."
   if ! confirm "Continue?"; then
     echo "Aborted."
     exit 1
   fi
 fi
 
+restore_suffix="$(date +%s)_$$"
+restore_tmp="eneo_restore_tmp_${restore_suffix}"
+restore_old="eneo_restore_old_${restore_suffix}"
+
+if db_exists "$restore_tmp"; then
+  echo "Removing leftover restore temp DB '$restore_tmp'."
+  kick_connections "$restore_tmp"
+  psql_t1 -c "DROP DATABASE $restore_tmp;"
+fi
+
+kick_connections "$source_db"
+psql_t1 -c "CREATE DATABASE $restore_tmp WITH TEMPLATE $source_db;"
+
 kick_connections "$active"
-psql_t1 -c "DROP DATABASE $active;"
-psql_t1 -c "CREATE DATABASE $active WITH TEMPLATE $source_db;"
+psql_t1 -c "ALTER DATABASE $active RENAME TO $restore_old;"
+if ! psql_t1 -c "ALTER DATABASE $restore_tmp RENAME TO $active;"; then
+  echo "Error: failed to rename '$restore_tmp' to '$active'. Restoring previous active DB." >&2
+  psql_t1 -c "ALTER DATABASE $restore_old RENAME TO $active;" || true
+  exit 1
+fi
+
+kick_connections "$restore_old"
+psql_t1 -c "DROP DATABASE $restore_old;"
 echo "Active DB '$active' replaced with contents of '$source_db'."
 
 echo "Running alembic upgrade head..."
