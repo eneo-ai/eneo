@@ -10,7 +10,7 @@ Do not report sensitive vulnerabilities in public issues, pull requests, or disc
 
 ## Pull Request Checks
 
-Pull requests into `develop` run three security and quality gates:
+Pull requests into `develop` run two security and quality gates:
 
 ### CI
 
@@ -28,11 +28,9 @@ Ruff currently checks `backend/src/intric`. Tests and Alembic are not part of th
 
 When this check fails, update the dependency to a safe version, remove it, or document why the vulnerable code is not reachable. Do not dismiss the warning just to make the PR green.
 
-### CodeQL
+### Code scanning
 
-`CodeQL / CodeQL gate` runs GitHub code scanning from the repository workflow. It scans Python, JavaScript/TypeScript, and GitHub Actions workflows.
-
-For the initial rollout, high and critical CodeQL alerts should block merges. Medium and low findings still matter, but the team should triage them after the baseline is stable.
+CodeQL advanced setup is paused while maintainers evaluate a code-scanning setup that gives developers useful feedback without high false-positive noise. Re-enable code scanning only with a tuned query set and a triage process that keeps alerts actionable.
 
 ## Required Checks in Branch Protection
 
@@ -40,10 +38,10 @@ The `develop` ruleset should require these checks:
 
 - `CI / CI`
 - `Dependency Review / Dependency Review`
-- `CodeQL / CodeQL gate`
 
-Remove older required status checks if they appear as `Expected` and never report:
+Remove older or paused required status checks if they appear as `Expected` and never report:
 
+- `CodeQL gate`
 - `Backend checks (Ruff)`
 - `Frontend basic checks`
 - `Run unit tests`
@@ -64,7 +62,7 @@ Dependabot opens weekly PRs for:
 - Dockerfiles
 - devcontainer configuration
 
-Routine minor and patch updates are grouped to reduce PR noise. Do not enable auto-merge until CI, Dependency Review, and CodeQL have been stable for long enough that failures are rare and understandable.
+Routine minor and patch updates are grouped to reduce PR noise. Do not enable auto-merge until CI and Dependency Review have been stable for long enough that failures are rare and understandable.
 
 For packages that handle prompts, files, provider keys, network calls, authentication, authorization, Docker images, or GitHub Actions, read the changelog before merging.
 

@@ -31,6 +31,8 @@ env:
   PLATFORM_OS: linux
   PLATFORM_ARCH: amd64
   SYFT_VERSION: v1.44.0
+  CYCLONEDX_BOM_VERSION: "7.3.0"
+  CYCLONEDX_SPEC_VERSION: "1.6"
 
 jobs:
   release-sbom:
@@ -142,6 +144,10 @@ jobs:
 
             printf '%s %s %s\n' "$component" "$image_ref" "$digest_ref" >> "$out_dir/IMAGE-DIGESTS.txt"
 
+            if [[ "$component" == "backend" ]]; then
+              backend_digest_ref="$digest_ref"
+            fi
+
             "$SYFT_CMD" "registry:$digest_ref" \
               --platform "$PLATFORM" \
               -q \
@@ -150,7 +156,130 @@ jobs:
               -o "syft-table=$out_dir/${asset_prefix}.table.txt"
           }
 
+          generate_backend_python_runtime_sbom() {
+            local backend_digest_ref="$1"
+            local asset_prefix="eneo-backend-python-runtime-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}"
+            local script_dir
+            local container_script
+            local output_file="/out/${asset_prefix}.cyclonedx.json"
+
+            if [[ -z "$backend_digest_ref" ]]; then
+              echo "::error::Backend image digest reference is required for the Python runtime SBOM." >&2
+              exit 1
+            fi
+
+            script_dir="$(mktemp -d)"
+            container_script="$script_dir/generate-python-runtime-sbom.sh"
+            cat > "$container_script" <<'PYTHON_RUNTIME_SBOM'
+          set -eu
+
+          runtime_python="/app/.venv/bin/python"
+          runtime_distributions="/tmp/runtime-distributions.json"
+          tool_venv="/tmp/cdx-tool"
+
+          if [ ! -x "$runtime_python" ]; then
+            echo "Runtime Python not found at $runtime_python" >&2
+            exit 1
+          fi
+
+          mkdir -p "$HOME"
+
+          "$runtime_python" - <<'PY' > "$runtime_distributions"
+          import importlib.metadata as metadata
+          import json
+          import sysconfig
+
+          paths = sorted({sysconfig.get_paths()[key] for key in ("purelib", "platlib")})
+          rows = []
+          seen = set()
+
+          for dist in metadata.distributions(path=paths):
+              name = dist.metadata.get("Name") or dist.name
+              version = dist.version
+              key = (name, version)
+              if key in seen:
+                  continue
+              seen.add(key)
+              rows.append({"name": name, "version": version})
+
+          print(json.dumps(sorted(rows, key=lambda row: row["name"].lower())))
+          PY
+
+          "$runtime_python" -m venv "$tool_venv"
+          "$tool_venv/bin/python" -m pip install -q --no-cache-dir --disable-pip-version-check "cyclonedx-bom==$CYCLONEDX_BOM_VERSION"
+          "$tool_venv/bin/cyclonedx-py" environment "$runtime_python" \
+            --spec-version "$CYCLONEDX_SPEC_VERSION" \
+            --output-format JSON \
+            --output-file "$OUTPUT_FILE" \
+            --validate
+
+          "$runtime_python" - "$runtime_distributions" "$OUTPUT_FILE" "$CYCLONEDX_SPEC_VERSION" <<'PY'
+          import json
+          import re
+          import sys
+
+          runtime_path, sbom_path, expected_spec = sys.argv[1:]
+
+          def normalize(name: str) -> str:
+              return re.sub(r"[-_.]+", "-", name).lower()
+
+          with open(runtime_path, encoding="utf-8") as handle:
+              runtime = json.load(handle)
+          with open(sbom_path, encoding="utf-8") as handle:
+              bom = json.load(handle)
+
+          if bom.get("bomFormat") != "CycloneDX":
+              raise SystemExit("Generated Python runtime SBOM is not CycloneDX JSON")
+          if bom.get("specVersion") != expected_spec:
+              raise SystemExit(
+                  f"Expected CycloneDX specVersion {expected_spec}, got {bom.get('specVersion')}"
+              )
+
+          components = bom.get("components") or []
+          if not components:
+              raise SystemExit("Generated Python runtime SBOM has no components")
+
+          component_pairs = {
+              (normalize(component.get("name", "")), str(component.get("version", "")))
+              for component in components
+              if component.get("name") and component.get("version")
+          }
+          missing = [
+              f"{dist['name']}=={dist['version']}"
+              for dist in runtime
+              if (normalize(dist["name"]), str(dist["version"])) not in component_pairs
+          ]
+          if missing:
+              raise SystemExit(
+                  "Generated Python runtime SBOM is missing installed distributions: "
+                  + ", ".join(missing[:20])
+              )
+
+          print(
+              f"Validated {len(runtime)} installed Python distributions "
+              f"against {len(components)} SBOM components."
+          )
+          PY
+          PYTHON_RUNTIME_SBOM
+
+            docker run --rm -i \
+              --platform "$PLATFORM" \
+              --user "$(id -u):$(id -g)" \
+              -e HOME=/tmp/cdx-home \
+              -e CYCLONEDX_BOM_VERSION \
+              -e CYCLONEDX_SPEC_VERSION \
+              -e OUTPUT_FILE="$output_file" \
+              -v "$PWD/$out_dir:/out" \
+              -v "$script_dir:/cdx-script:ro" \
+              --entrypoint /bin/sh \
+              "$backend_digest_ref" "/cdx-script/$(basename "$container_script")"
+
+            rm -rf "$script_dir"
+          }
+
+          backend_digest_ref=""
           generate_component_sbom "backend" "$BACKEND_IMAGE"
+          generate_backend_python_runtime_sbom "$backend_digest_ref"
           generate_component_sbom "frontend" "$FRONTEND_IMAGE"
 
           (
@@ -168,6 +297,8 @@ jobs:
             while read -r component image_ref digest_ref; do
               echo "| $component | \`$image_ref\` | \`$digest_ref\` |"
             done < "$out_dir/IMAGE-DIGESTS.txt"
+            echo ""
+            echo "Generated a backend Python runtime SBOM from \`/app/.venv\` in the backend image."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload workflow artifact
@@ -176,7 +307,7 @@ jobs:
           name: release-sbom-${{ steps.release.outputs.tag }}
           path: release-sbom/*
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 7
 
       - name: Attach SBOMs to GitHub release
         if: steps.release.outputs.upload-release-assets == 'true'
@@ -188,12 +319,13 @@ jobs:
 
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
           release_assets=(
-            "release-sbom/eneo-backend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.cyclonedx.json#Backend SBOM - CycloneDX JSON"
-            "release-sbom/eneo-backend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.spdx.json#Backend SBOM - SPDX JSON"
-            "release-sbom/eneo-backend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.table.txt#Backend packages - readable table"
-            "release-sbom/eneo-frontend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.cyclonedx.json#Frontend SBOM - CycloneDX JSON"
-            "release-sbom/eneo-frontend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.spdx.json#Frontend SBOM - SPDX JSON"
-            "release-sbom/eneo-frontend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.table.txt#Frontend packages - readable table"
+            "release-sbom/eneo-backend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.cyclonedx.json#Backend image SBOM - CycloneDX JSON"
+            "release-sbom/eneo-backend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.spdx.json#Backend image SBOM - SPDX JSON"
+            "release-sbom/eneo-backend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.table.txt#Backend image packages - readable table"
+            "release-sbom/eneo-backend-python-runtime-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.cyclonedx.json#Backend Python runtime SBOM - CycloneDX JSON"
+            "release-sbom/eneo-frontend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.cyclonedx.json#Frontend image SBOM - CycloneDX JSON"
+            "release-sbom/eneo-frontend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.spdx.json#Frontend image SBOM - SPDX JSON"
+            "release-sbom/eneo-frontend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.table.txt#Frontend image packages - readable table"
             "release-sbom/IMAGE-DIGESTS.txt#Image digests scanned"
             "release-sbom/SBOM-SHA256SUMS.txt#SBOM file checksums"
           )
