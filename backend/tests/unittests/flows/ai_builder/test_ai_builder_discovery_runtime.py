@@ -1,19 +1,30 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 from intric.flows.ai_builder import ai_builder_discovery_runtime as runtime
+from intric.flows.ai_builder.ai_builder_discovery_models import (
+    BackendQuestion,
+    DiscoveryAnalysis,
+)
 from intric.flows.ai_builder.ai_builder_discovery_runtime import (
+    RuntimeDiscoveryContext,
+    _targeted_classification_bias,
     analyze_discovery_runtime,
     build_discovery_block_message_runtime,
+    build_discovery_runtime_result,
     build_runtime_planning_state,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
+)
+from intric.flows.ai_builder.ai_builder_event_models import (
+    StructuredQuestionOptionPayload,
+    StructuredQuestionPayload,
 )
 from intric.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
@@ -462,3 +473,118 @@ async def test_discovery_block_runtime_uses_one_classification_for_analysis_and_
     assert planning_state.resolved_slots["primary_runtime_input"].source == "model"
     assert planning_state.resolved_slots["terminal_output"].source == "model"
     litellm_client.acompletion.assert_awaited_once()
+
+
+def _clarification_question(question_id: str = "terminal_output") -> BackendQuestion:
+    return BackendQuestion(
+        question_data=StructuredQuestionPayload(
+            question_id=question_id,
+            question="Vilket format ska slutresultatet ha?",
+            options=[StructuredQuestionOptionPayload(label="PDF")],
+            selection_mode="single",
+            allow_custom=True,
+        ),
+        assistant_text="Jag behöver förstå slutresultatet.",
+    )
+
+
+def test_targeted_bias_maps_legacy_question_id_to_slot() -> None:
+    bias = _targeted_classification_bias(
+        [
+            ConversationMessage(
+                role="assistant",
+                content="Vilket format?",
+                metadata={"question_id": "final_output_mode"},
+            ),
+            ConversationMessage(role="user", content="en fil jag kan ladda ner"),
+        ],
+        {"terminal_output": {"docx_document", "structured_text"}},
+    )
+
+    assert bias is not None
+    assert bias.target_slot_name == "terminal_output"
+    assert bias.asked_question_id == "final_output_mode"
+    assert bias.latest_user_answer == "en fil jag kan ladda ner"
+
+
+def test_targeted_bias_is_none_when_target_already_resolved() -> None:
+    bias = _targeted_classification_bias(
+        [
+            ConversationMessage(
+                role="assistant",
+                content="Vilket format?",
+                metadata={"question_id": "final_output_mode"},
+            ),
+            ConversationMessage(role="user", content="en fil"),
+        ],
+        {"primary_runtime_input": {"text", "documents"}},
+    )
+
+    assert bias is None
+
+
+async def _run_with_followup(conversation: list[ConversationMessage]):
+    with (
+        patch.object(
+            runtime,
+            "build_runtime_discovery_context",
+            new_callable=AsyncMock,
+            return_value=RuntimeDiscoveryContext(planning_state=PlanningState.empty()),
+        ),
+        patch.object(
+            runtime, "analyze_discovery", return_value=DiscoveryAnalysis(issues=())
+        ),
+        patch.object(
+            runtime, "build_discovery_followup", return_value=_clarification_question()
+        ),
+        patch.object(runtime, "build_discovery_block_message", return_value=None),
+        patch.object(
+            runtime,
+            "phrase_clarification_question",
+            new_callable=AsyncMock,
+            return_value="Omformulerad ledtext med PDF-exempel.",
+        ) as phrasing,
+    ):
+        result = await build_discovery_runtime_result(
+            conversation,
+            litellm_client=MagicMock(),
+            litellm_model="gpt-test",
+            tenant_id=uuid4(),
+        )
+    return result, phrasing
+
+
+@pytest.mark.asyncio
+async def test_reask_is_phrased_without_changing_question_data() -> None:
+    conversation = [
+        ConversationMessage(role="user", content="Bygg ett flöde."),
+        ConversationMessage(
+            role="assistant",
+            content="Vilket format?",
+            metadata={"question_id": "terminal_output"},
+        ),
+        ConversationMessage(role="user", content="vet inte"),
+    ]
+
+    result, phrasing = await _run_with_followup(conversation)
+
+    phrasing.assert_awaited_once()
+    assert result.followup is not None
+    assert result.followup.assistant_text == "Omformulerad ledtext med PDF-exempel."
+    # The structured payload (slot identity + options) must be untouched.
+    assert result.followup.question_data.question_id == "terminal_output"
+    assert (
+        result.followup.question_data.question == "Vilket format ska slutresultatet ha?"
+    )
+    assert [o.label for o in result.followup.question_data.options] == ["PDF"]
+
+
+@pytest.mark.asyncio
+async def test_first_ask_keeps_catalog_text_and_skips_phrasing() -> None:
+    conversation = [ConversationMessage(role="user", content="Bygg ett flöde.")]
+
+    result, phrasing = await _run_with_followup(conversation)
+
+    phrasing.assert_not_awaited()
+    assert result.followup is not None
+    assert result.followup.assistant_text == "Jag behöver förstå slutresultatet."

@@ -25,7 +25,9 @@ async def _phrase(client: AsyncMock, *, ask_count: int = 0) -> str | None:
         litellm_client=client,
         litellm_model="gpt-test",
         litellm_kwargs={},
-        baseline_text="Vilket format ska slutresultatet ha?",
+        baseline_text="Jag behöver förstå slutresultatet.",
+        question_text="Vilket format ska slutresultatet ha?",
+        options=["PDF", "Word-dokument", "Text i chatten"],
         question_id="terminal_output",
         ask_count=ask_count,
         ui_language="sv",
@@ -84,3 +86,18 @@ async def test_phrasing_skips_escalation_on_first_ask() -> None:
 
     user_prompt = client.acompletion.await_args.kwargs["messages"][-1]["content"]
     assert "differently" not in user_prompt
+
+
+@pytest.mark.asyncio
+async def test_phrasing_prompt_includes_the_question_and_options() -> None:
+    client = AsyncMock()
+    client.acompletion.return_value = _make_response("ledtext")
+
+    await _phrase(client, ask_count=1)
+
+    user_prompt = client.acompletion.await_args.kwargs["messages"][-1]["content"]
+    # The model must see the deterministic question and options so the rewritten
+    # lead-in stays aligned with what is actually asked.
+    assert "Vilket format ska slutresultatet ha?" in user_prompt
+    assert "PDF" in user_prompt
+    assert "Word-dokument" in user_prompt

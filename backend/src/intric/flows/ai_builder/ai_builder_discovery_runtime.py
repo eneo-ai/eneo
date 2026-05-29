@@ -310,6 +310,8 @@ async def build_discovery_runtime_result(
                 litellm_model=litellm_model,
                 litellm_kwargs=litellm_kwargs or {},
                 baseline_text=followup.assistant_text,
+                question_text=followup.question_data.question,
+                options=[option.label for option in followup.question_data.options],
                 question_id=followup.question_data.question_id,
                 ask_count=ask_count,
                 ui_language=ui_language,
