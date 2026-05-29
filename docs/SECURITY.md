@@ -61,11 +61,15 @@ The repository uses GitHub security features and CI to prevent regressions:
   image digests and attached to GitHub Releases as CycloneDX JSON, SPDX JSON,
   and human-readable table files. The backend release also includes a narrower
   CycloneDX SBOM for the Python runtime installed in `/app/.venv` inside the
-  released backend image. These assets provide dependency transparency for each
-  release; their authenticity currently relies on GitHub-managed release asset
-  storage and the image digests recorded in the SBOM bundle.
-  `SBOM-SHA256SUMS.txt` covers the SBOM files; container image integrity is
-  verified through the GHCR image digests recorded in `IMAGE-DIGESTS.txt`.
+  released backend image. The frontend release also includes a source dependency
+  SBOM generated with CycloneDX Generator after installing the frontend from the
+  checked-out release tag with the frozen Bun lockfile, so JavaScript
+  dependencies remain visible even when the runtime image only contains the
+  bundled build output. Release SBOM assets are attested through GitHub artifact
+  attestations, and the pushed backend and frontend images include provenance
+  attestations in GHCR.
+  `SBOM-SHA256SUMS.txt` covers the SBOM files; `IMAGE-DIGESTS.txt` records the
+  exact image digests scanned.
 - Secret scanning and push protection should remain enabled for provider keys,
   tokens, credentials, and other repository secrets.
 - The normal `CI` gate validates frozen backend and frontend installs before

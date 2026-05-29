@@ -21,14 +21,20 @@ When maintainers publish a GitHub Release, the release SBOM workflow runs
 automatically:
 
 1. The workflow reads the release tag and derives the container image tag.
-2. It waits for the matching backend and frontend images in GitHub Container
+2. It checks out the release tag for source-based dependency inventory.
+3. It waits for the matching backend and frontend images in GitHub Container
    Registry.
-3. It resolves the immutable `linux/amd64` image digest for each image.
-4. It scans those digest references, not only the mutable image tags.
-5. It uploads the generated files to the same GitHub Release page.
+4. It resolves the immutable `linux/amd64` image digest for each image.
+5. It scans those digest references, not only the mutable image tags.
+6. It installs frontend dependencies with Bun's frozen lockfile and generates a
+   frontend source dependency SBOM.
+7. It uploads the generated files to the same GitHub Release page.
+8. It attests the release SBOM assets with GitHub artifact attestations.
 
 Each release keeps its own SBOM files. Older release pages keep their original
-assets, so you can compare one version with the next.
+assets, so you can compare one version with the next. The backend and frontend
+container images also get provenance attestations when they are built and pushed
+to GitHub Container Registry.
 
 The same workflow can also run manually as a dry run. In dry-run mode it creates
 the files as a temporary workflow artifact and does not attach them to the
@@ -69,20 +75,27 @@ flowchart TD
 
   syft["Syft scans full images<br/>backend and frontend"]
   python["CycloneDX Python scans<br/>backend /app/.venv"]
+  source["CycloneDX Generator scans frontend source<br/>installed from frozen lockfile"]
 
   imageSboms["Image SBOM assets<br/>CycloneDX, SPDX, table"]
   runtimeSbom["Backend Python runtime SBOM<br/>CycloneDX JSON"]
+  sourceSbom["Frontend source dependency SBOM<br/>CycloneDX JSON"]
   verification["Verification files<br/>image digests and checksums"]
+  attestation["GitHub artifact attestations<br/>for release SBOM assets"]
 
   release --> tag --> digests
   manual --> tag
   digests --> syft
   digests --> python
+  tag --> source
   syft --> imageSboms
   python --> runtimeSbom
+  source --> sourceSbom
   imageSboms --> verification
   runtimeSbom --> verification
+  sourceSbom --> verification
   verification --> upload["Attach assets to<br/>the same GitHub Release"]
+  verification --> attestation
   manual -. dry run .-> artifact["Temporary workflow artifact"]
 
   classDef trigger fill:#eff6ff,stroke:#2563eb,color:#0f172a
@@ -93,9 +106,9 @@ flowchart TD
 
   class release,manual,tag trigger
   class digests source
-  class syft,python scanner
-  class imageSboms,runtimeSbom asset
-  class verification,upload,artifact output
+  class syft,python,source scanner
+  class imageSboms,runtimeSbom,sourceSbom asset
+  class verification,upload,artifact,attestation output
 ```
 
 </div>
@@ -127,6 +140,12 @@ Eneo scans the released image digests instead of source lockfiles because the
 image digest is the shipped artifact. Lockfiles describe build input; the image
 describes what users receive.
 
+There is one deliberate exception: the frontend source dependency SBOM. The
+frontend runtime image contains the bundled build output, not the full Bun
+workspace dependency tree. The source dependency SBOM keeps the JavaScript
+dependency inventory visible for scanners and reviewers. Treat it as build-input
+dependency inventory, not as a byte-for-byte inventory of the runtime image.
+
 ## Files on the release page
 
 Each release publishes these files:
@@ -140,6 +159,7 @@ Each release publishes these files:
 | `eneo-frontend-<release-tag>-linux-amd64.cyclonedx.json` | Frontend image SBOM in CycloneDX JSON |
 | `eneo-frontend-<release-tag>-linux-amd64.spdx.json` | Frontend image SBOM in SPDX JSON |
 | `eneo-frontend-<release-tag>-linux-amd64.table.txt` | Frontend image package list for human review |
+| `eneo-frontend-source-<release-tag>.cyclonedx.json` | Frontend source dependency SBOM in CycloneDX JSON |
 | `IMAGE-DIGESTS.txt` | Exact image tags and digests that were scanned |
 | `SBOM-SHA256SUMS.txt` | SHA-256 checksums for the SBOM bundle |
 
@@ -160,8 +180,14 @@ For the backend image, this usually includes:
 For the frontend image, this usually includes:
 
 - operating system packages
-- npm packages present in the image
+- npm packages still identifiable from the bundled runtime image
 - binaries and other package metadata Syft can identify
+
+The frontend source dependency SBOM is broader than the frontend image SBOM. It
+is generated from the checked-out release tag after the workflow runs
+`bun install --frozen-lockfile` against `frontend/bun.lock`. It can include
+build-time dependencies that are not present as separate packages in the runtime
+image.
 
 The backend Python runtime SBOM is narrower. It is generated from the Python
 environment installed at `/app/.venv` inside the released backend image. It is
@@ -182,12 +208,35 @@ Use `eneo-backend-python-runtime-<release-tag>-linux-amd64.cyclonedx.json` when
 you want a focused view of the Python packages installed in the backend runtime
 environment.
 
+Use `eneo-frontend-source-<release-tag>.cyclonedx.json` when you want a focused
+view of frontend JavaScript dependencies from the release source and lockfile.
+
 Use the `.table.txt` files when you want to read the package list without
 importing an SBOM into another tool.
 
 Use `IMAGE-DIGESTS.txt` to see which GHCR image digests were scanned. Use
 `SBOM-SHA256SUMS.txt` to check the downloaded SBOM files against the checksums
 published with the release.
+
+Use GitHub artifact attestations when you need cryptographic evidence that a
+release SBOM asset was generated by Eneo's GitHub Actions workflow:
+
+```bash
+gh attestation verify ./eneo-backend-v2.0.0-linux-amd64.cyclonedx.json \
+  --repo eneo-ai/eneo
+```
+
+The backend and frontend container images also have provenance attestations in
+GitHub Container Registry:
+
+```bash
+gh attestation verify oci://ghcr.io/eneo-ai/eneo-backend:2.0.0 \
+  --repo eneo-ai/eneo
+```
+
+If an image package is private, verification follows normal GitHub and GHCR
+access rules. No separate identity provider is required to read or verify the
+SBOM.
 
 ## What the SBOM does not cover
 
@@ -197,9 +246,9 @@ whether a vulnerability is reachable in Eneo.
 Use vulnerability scanners such as Grype, Trivy, GitHub Advanced Security, or
 your internal tooling if you need vulnerability findings based on the SBOM.
 
-The current release assets are not signed. Their authenticity relies on
-GitHub-managed release asset storage and the image digests recorded in
-`IMAGE-DIGESTS.txt`.
+The attestations prove where the release SBOM assets and container images came
+from. They do not decide whether a dependency is vulnerable or whether a
+vulnerability is reachable in Eneo.
 
 The current release workflow publishes `linux/amd64` SBOM files. If Eneo adds
 more release platforms later, each platform should get its own SBOM files
@@ -218,10 +267,17 @@ These references explain the formats and tools used by Eneo:
   image SBOMs.
 - [CycloneDX Python](https://github.com/CycloneDX/cyclonedx-python) is used for
   the backend Python runtime SBOM.
+- [CycloneDX Generator](https://github.com/CycloneDX/cdxgen) is used for the
+  frontend source dependency SBOM.
 - [Anchore SBOM Action](https://github.com/anchore/sbom-action) provides the
   GitHub Action helpers used to download Syft in the release workflow.
 - [SPDX](https://spdx.dev/learn/overview/) is the other machine-readable SBOM
   format published for each image.
+- [GitHub artifact attestations](https://docs.github.com/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)
+  provide cryptographic provenance for the release SBOM assets and container
+  images.
+- [SLSA provenance](https://slsa.dev/spec/v1.1/provenance) describes where a
+  built artifact came from and how it was produced.
 
 ## Check a release
 
@@ -231,8 +287,11 @@ These references explain the formats and tools used by Eneo:
 3. Download CycloneDX or SPDX image SBOMs for your security tooling.
 4. Download the backend Python runtime SBOM if you only need the Python
    dependency inventory for the backend runtime environment.
-5. Check `IMAGE-DIGESTS.txt` if you need the exact image digests scanned.
-6. Check `SBOM-SHA256SUMS.txt` if you need file checksums for the SBOM bundle.
+5. Download the frontend source dependency SBOM if you need the JavaScript
+   dependency inventory from the release source and lockfile.
+6. Check `IMAGE-DIGESTS.txt` if you need the exact image digests scanned.
+7. Check `SBOM-SHA256SUMS.txt` if you need file checksums for the SBOM bundle.
+8. Use `gh attestation verify` if you need cryptographic provenance.
 
 To compare two releases, compare the SBOM files from both release pages. Package
 additions, removals, and version changes show what changed between the images.
