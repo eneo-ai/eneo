@@ -389,21 +389,27 @@ class AssistantService:
 
         prompt_obj: Prompt | None = None
         if prompt is not None:
-            # Create the prompt if the prompt contains text
-            # Update the description if the prompt contains description
-            if prompt.text:
-                # Attribute the prompt to the assistant's owner, not the
-                # caller. Keeps service-key edits FK-safe (synthetic id has
-                # no `users` row) and makes admin edits to others'
-                # assistants attribute correctly.
-                prompt_owner_id = (
-                    assistant.user.id if assistant.user is not None else self.user.id
-                )
-                prompt_obj = await self.prompt_service.create_prompt(
-                    prompt.text,
-                    prompt.description,
-                    owner_user_id=prompt_owner_id,
-                )
+            # When the update carries a `prompt` field, persist it — empty
+            # text included. An empty string is a deliberate "clear the
+            # prompt" action by the user (they emptied the textarea on
+            # purpose), not a missing field; the outer ``prompt is not
+            # None`` check above already distinguishes "this update does
+            # not touch the prompt" from "set the prompt to X". Treating
+            # ``""`` as falsy here silently kept the previous prompt and
+            # reverted the user's clear-and-save.
+            #
+            # Attribute the prompt to the assistant's owner, not the
+            # caller. Keeps service-key edits FK-safe (synthetic id has
+            # no `users` row) and makes admin edits to others'
+            # assistants attribute correctly.
+            prompt_owner_id = (
+                assistant.user.id if assistant.user is not None else self.user.id
+            )
+            prompt_obj = await self.prompt_service.create_prompt(
+                prompt.text,
+                prompt.description,
+                owner_user_id=prompt_owner_id,
+            )
 
         completion_model = None
         if completion_model_id is not None:

@@ -215,6 +215,36 @@ async def test_update_assistant_completion_model_in_space(setup: Setup):
     await setup.service.update_assistant(TEST_UUID)
 
 
+async def test_update_assistant_persists_empty_prompt_to_clear_it(setup: Setup):
+    # Regression: clearing the prompt textarea in the assistant edit page and
+    # pressing Save used to silently keep the old prompt because the service
+    # treated ``prompt.text == ""`` as "no prompt update" (truthy guard). An
+    # empty string here is a deliberate "clear the prompt" action, so the
+    # service must call create_prompt with the empty string just like it
+    # would for any other value.
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID,
+        prompt=PromptCreate(text="", description=""),
+    )
+
+    setup.service.prompt_service.create_prompt.assert_awaited_once()
+    create_args = setup.service.prompt_service.create_prompt.await_args
+    # text is the first positional arg; description the second.
+    assert create_args.args[0] == ""
+    assert create_args.args[1] == ""
+
+
+async def test_update_assistant_skips_prompt_creation_when_field_omitted(setup: Setup):
+    # Counterpart to the regression above — make sure the fix did not flip
+    # the other behaviour. A partial update that does NOT touch the prompt
+    # (``prompt=None``, the field's default) must NOT create a new prompt
+    # version, otherwise every unrelated edit (e.g. just renaming the
+    # assistant) would pollute the prompt history.
+    await setup.service.update_assistant(assistant_id=TEST_UUID, name="renamed")
+
+    setup.service.prompt_service.create_prompt.assert_not_awaited()
+
+
 @pytest.mark.parametrize("template_in_space", [True, False])
 async def test_create_from_template_prefers_template_model_when_available(
     setup: Setup,
