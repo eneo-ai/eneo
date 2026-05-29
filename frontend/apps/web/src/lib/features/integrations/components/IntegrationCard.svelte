@@ -47,13 +47,13 @@
         <span
           class="text-accent-stronger bg-accent-dimmer border-accent-default rounded border px-1.5 py-0.5 text-xs font-semibold"
         >
-          Organization
+          {m.integration_org_badge()}
         </span>
       {:else if authType === "user_oauth"}
         <span
           class="text-secondary bg-dimmer border-default rounded border px-1.5 py-0.5 text-xs font-semibold"
         >
-          Personal
+          {m.integration_personal_badge()}
         </span>
       {/if}
     </div>

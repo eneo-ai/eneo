@@ -110,7 +110,7 @@
           : 'text-[var(--text-secondary)] hover:bg-[var(--background-hover-dimmer)] hover:text-[var(--text-primary)]'}"
         onclick={() => {
           datasetKey = "byDate";
-        }}>Datum</button
+        }}>{m.by_date()}</button
       >
       <button
         class="rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all duration-200
@@ -119,7 +119,7 @@
           : 'text-[var(--text-secondary)] hover:bg-[var(--background-hover-dimmer)] hover:text-[var(--text-primary)]'}"
         onclick={() => {
           datasetKey = "byWeekday";
-        }}>Veckodag</button
+        }}>{m.by_weekday()}</button
       >
       <button
         class="rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all duration-200
@@ -128,7 +128,7 @@
           : 'text-[var(--text-secondary)] hover:bg-[var(--background-hover-dimmer)] hover:text-[var(--text-primary)]'}"
         onclick={() => {
           datasetKey = "byHour";
-        }}>Timme</button
+        }}>{m.by_hour()}</button
       >
     </div>
   </div>
@@ -174,7 +174,11 @@
         >
           <Info class="h-3 w-3 opacity-40" />
           <span
-            >{partialDataInfo.actualStart} ({partialDataInfo.actualDays}/{partialDataInfo.requestedDays}d)</span
+            >{m.insights_partial_data({
+              start: partialDataInfo.actualStart,
+              actual: partialDataInfo.actualDays,
+              requested: partialDataInfo.requestedDays
+            })}</span
           >
         </div>
       {/if}

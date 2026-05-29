@@ -78,7 +78,7 @@ class ServiceService:
 
     async def validate_space_service(self, service: Service, space: "Space") -> None:
         # validate completion mode
-        if not space.is_completion_model_in_space(service.completion_model_id):
+        if not space.is_completion_model_available(service.completion_model_id):
             raise BadRequestException("Completion model is not in space.")
 
         # validate groups

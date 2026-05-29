@@ -253,9 +253,13 @@ def test_domain_model_normalizes_invalid_capabilities_before_public_assembly():
         base_url=None,
         litellm_model_name=None,
         model_kwargs_capabilities={"temperature": {"control": "dial"}},
+        input_cost_per_token=None,
+        output_cost_per_token=None,
         security_classification=None,
         tenant_id=uuid4(),
         provider_id=uuid4(),
+        migrated_to_model_id=None,
+        deleted_at=None,
     )
     domain_model = CompletionModelDomain.create_from_db(
         db_model,
@@ -379,6 +383,8 @@ def test_public_completion_model_preserves_litellm_capabilities():
         max_input_tokens=128000,
         max_output_tokens=4096,
         is_deprecated=False,
+        is_effectively_deprecated=False,
+        litellm_deprecation_date=None,
         nr_billion_parameters=None,
         hf_link=None,
         stability=None,
@@ -409,6 +415,7 @@ def test_public_completion_model_preserves_litellm_capabilities():
         provider_id=uuid4(),
         provider_name="Mistral",
         provider_type="mistral",
+        migrated_to_model_id=None,
     )
 
     public_model = CompletionModelAssembler().from_completion_model_to_model(

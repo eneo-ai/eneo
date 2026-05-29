@@ -52,6 +52,7 @@
   import ScopeResourceSelector from "$lib/features/api-keys/ScopeResourceSelector.svelte";
   import TagInput from "$lib/features/api-keys/TagInput.svelte";
   import ExpirationPicker from "$lib/features/api-keys/ExpirationPicker.svelte";
+  import { apiKeysMessage } from "$lib/features/api-keys/apiKeysMessage";
 
   const intric = getIntric();
   const { user } = getAppContext();
@@ -373,7 +374,7 @@
   // Scope-aware capability preview rows for the "What this key can do" box.
   // Each row is rendered with a check (allow) or ban (deny) icon.
   type CapabilityRow = { kind: "allow" | "deny"; msg: string };
-  const capabilityRows: CapabilityRow[] = $derived.by(() => {
+  const simpleCapabilityRows: CapabilityRow[] = $derived.by(() => {
     if (scopeType === "tenant" || scopeType === "space") {
       const isSpace = scopeType === "space";
       if (permission === "read") {
@@ -444,6 +445,35 @@
     }
     return [];
   });
+  const fineGrainedCapabilityRows: CapabilityRow[] = $derived.by(() => {
+    const rows: CapabilityRow[] = [];
+
+    if (scopeType === "assistant") {
+      addSelectedAssistantCapabilityRows(rows);
+      addResourceAccessRows(rows, ["conversations"]);
+    } else if (scopeType === "app") {
+      addSelectedAppCapabilityRows(rows);
+    } else {
+      addResourceAccessRows(
+        rows,
+        resourcePermissionOptions.map((option) => option.key).filter((key) => key !== "files")
+      );
+    }
+
+    addFileCapabilityRows(rows);
+
+    if (keyType === "pk_") {
+      rows.push({
+        kind: "deny",
+        msg: apiKeysMessage("api_keys_capability_public_readonly", "Public keys are read-only.")
+      });
+    }
+
+    return rows;
+  });
+  const capabilityRows: CapabilityRow[] = $derived.by(() =>
+    usesResourcePermissions ? fineGrainedCapabilityRows : simpleCapabilityRows
+  );
 
   // Effect: Reset permission to read for public keys
   $effect(() => {
@@ -781,8 +811,15 @@
     }
     if (apiKey.key_type === "pk_") {
       const origins = allowedOrigins.filter(Boolean);
+      // Block the round-trip when the admin emptied the origin list: backend
+      // requires at least one origin for pk_, and the fail-closed origin check
+      // would otherwise lock the key out the moment this PATCH lands.
+      if (origins.length === 0) {
+        errorMessage = m.api_keys_origin_required();
+        return;
+      }
       if (JSON.stringify(origins) !== JSON.stringify(apiKey.allowed_origins ?? [])) {
-        updates.allowed_origins = origins.length > 0 ? origins : null;
+        updates.allowed_origins = origins;
       }
     }
     if (apiKey.key_type === "sk_") {
@@ -1029,19 +1066,6 @@
     return scopeAllowsFineGrained;
   }
 
-  function getResourceAccessScopeMessage() {
-    switch (scopeType) {
-      case "tenant":
-        return m.api_keys_scope_resource_access_link_tenant();
-      case "space":
-        return m.api_keys_scope_resource_access_link_space();
-      case "assistant":
-        return m.api_keys_scope_resource_access_link_assistant();
-      case "app":
-        return m.api_keys_scope_resource_access_link_app();
-    }
-  }
-
   // Permission level display config — uses eneo's semantic state tokens
   // (warning = elevated write access, negative = destructive admin) so the
   // colours match ApiKeyTable's permission badges and render identically
@@ -1112,6 +1136,180 @@
     if (key === requiredResourcePermissionKey && level === "none") return false;
     return keyType !== "pk_" || level === "none" || level === "read";
   }
+
+  function addSelectedAssistantCapabilityRows(rows: CapabilityRow[]) {
+    const level = getResourcePermission("assistants");
+    if (level === "none") return;
+
+    rows.push({ kind: "allow", msg: m.api_keys_capability_assistant_call_read() });
+    if (level === "write" || level === "admin") {
+      rows.push({ kind: "allow", msg: m.api_keys_capability_assistant_edit() });
+    }
+    if (level === "admin") {
+      rows.push({ kind: "allow", msg: m.api_keys_capability_assistant_delete() });
+    }
+  }
+
+  function addSelectedAppCapabilityRows(rows: CapabilityRow[]) {
+    const level = getResourcePermission("apps");
+    if (level === "none") return;
+
+    rows.push({ kind: "allow", msg: m.api_keys_capability_app_run_read() });
+    if (level === "write" || level === "admin") {
+      rows.push({ kind: "allow", msg: m.api_keys_capability_app_edit() });
+    }
+    if (level === "admin") {
+      rows.push({ kind: "allow", msg: m.api_keys_capability_app_delete() });
+    }
+  }
+
+  function addResourceAccessRows(rows: CapabilityRow[], keys: ResourcePermissionKey[]) {
+    const visibleKeys = keys.filter(
+      (key) => scopeResourcePermissionKeys.includes(key) && getResourcePermission(key) !== "none"
+    );
+    const readKeys = visibleKeys.filter((key) =>
+      ["read", "write", "admin"].includes(getResourcePermission(key))
+    );
+    const writeKeys = visibleKeys.filter((key) =>
+      ["write", "admin"].includes(getResourcePermission(key))
+    );
+    const adminKeys = visibleKeys.filter((key) => getResourcePermission(key) === "admin");
+
+    if (readKeys.length > 0) {
+      rows.push({
+        kind: "allow",
+        msg: apiKeysMessage(
+          "api_keys_capability_read_named_resources",
+          "Can read {resources} within this scope.",
+          { resources: formatCapabilityResourceList(readKeys) }
+        )
+      });
+    }
+    if (writeKeys.length > 0) {
+      rows.push({
+        kind: "allow",
+        msg: apiKeysMessage(
+          "api_keys_capability_write_named_resources",
+          "Can create and update {resources} within this scope.",
+          { resources: formatCapabilityResourceList(writeKeys) }
+        )
+      });
+    }
+    if (adminKeys.length > 0) {
+      rows.push({
+        kind: "allow",
+        msg: apiKeysMessage(
+          "api_keys_capability_admin_named_resources",
+          "Can delete and administer {resources} within this scope.",
+          { resources: formatCapabilityResourceList(adminKeys) }
+        )
+      });
+    }
+  }
+
+  function addFileCapabilityRows(rows: CapabilityRow[]) {
+    if (
+      keyType !== "sk_" ||
+      !scopeResourcePermissionKeys.includes("files") ||
+      getResourcePermission("files") === "none"
+    ) {
+      return;
+    }
+
+    if (ownership === "service") {
+      rows.push({
+        kind: "deny",
+        msg: apiKeysMessage(
+          "api_keys_capability_files_service_blocked",
+          "Service keys cannot upload or delete files."
+        )
+      });
+      return;
+    }
+
+    const level = getResourcePermission("files");
+    if (level === "read") {
+      rows.push({
+        kind: "allow",
+        msg: apiKeysMessage(
+          "api_keys_capability_files_read_user",
+          "Can read files owned by the key's user."
+        )
+      });
+      return;
+    }
+
+    rows.push({
+      kind: "allow",
+      msg: apiKeysMessage(
+        "api_keys_capability_files_upload_read_user",
+        "Can upload and read files owned by the key's user."
+      )
+    });
+
+    if (level === "write") {
+      rows.push({
+        kind: "deny",
+        msg: apiKeysMessage(
+          "api_keys_capability_files_no_delete_user",
+          "Cannot delete files. Choose Admin for files."
+        )
+      });
+      return;
+    }
+
+    rows.push({
+      kind: "allow",
+      msg: apiKeysMessage(
+        "api_keys_capability_files_delete_user",
+        "Can delete files owned by the key's user."
+      )
+    });
+    rows.push({
+      kind: "deny",
+      msg: apiKeysMessage(
+        "api_keys_capability_files_no_other_users",
+        "Cannot delete files owned by other users."
+      )
+    });
+  }
+
+  function formatCapabilityResourceList(keys: ResourcePermissionKey[]) {
+    const labels = keys.map(getCapabilityResourceLabel);
+    if (labels.length === 1) return labels[0];
+    if (labels.length === 2) {
+      return apiKeysMessage("api_keys_capability_list_pair", "{first} and {second}", {
+        first: labels[0],
+        second: labels[1]
+      });
+    }
+
+    return apiKeysMessage("api_keys_capability_list_many", "{items}, and {last}", {
+      items: labels.slice(0, -1).join(", "),
+      last: labels[labels.length - 1]
+    });
+  }
+
+  function getCapabilityResourceLabel(key: ResourcePermissionKey) {
+    switch (key) {
+      case "assistants":
+        return apiKeysMessage("api_keys_capability_resource_assistants", "assistants");
+      case "apps":
+        return apiKeysMessage("api_keys_capability_resource_apps", "apps");
+      case "spaces":
+        return apiKeysMessage("api_keys_capability_resource_spaces", "spaces");
+      case "knowledge":
+        return apiKeysMessage("api_keys_capability_resource_knowledge", "knowledge");
+      case "conversations":
+        return apiKeysMessage("api_keys_capability_resource_conversations", "conversations");
+      case "jobs":
+        return apiKeysMessage("api_keys_capability_resource_jobs", "jobs");
+      case "prompts":
+        return apiKeysMessage("api_keys_capability_resource_prompts", "prompts");
+      case "files":
+        return apiKeysMessage("api_keys_capability_resource_files", "files");
+    }
+  }
 </script>
 
 <Dialog.Root
@@ -1166,7 +1364,7 @@
         <!-- Step indicator - improved contrast and accessibility (WCAG 2.2 AA) -->
         <nav
           class="mt-6 hidden items-center justify-between sm:flex"
-          aria-label="API key creation progress"
+          aria-label={m.apikey_creation_progress()}
         >
           <ol class="flex w-full items-center justify-between" role="list">
             {#each steps as step, index (step.number)}
@@ -1182,7 +1380,7 @@
                   type="button"
                   onclick={() => goToStep(step.number)}
                   disabled={!canNavigate}
-                  aria-label="Step {step.number}: {step.title}"
+                  aria-label={m.apikey_step_label({ number: step.number, title: step.title })}
                   aria-current={isActive ? "step" : undefined}
                   class="group focus-visible:ring-accent-default flex items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
                   {isActive ? 'bg-accent-default/10' : ''}
@@ -1247,7 +1445,7 @@
               {isCompleted ? 'bg-positive-default' : ''}
               {!isActive && !isCompleted ? 'bg-tertiary' : ''}
               disabled:opacity-40"
-              aria-label="Step {step.number}"
+              aria-label={m.apikey_step_number({ number: step.number })}
             ></button>
           {/each}
         </div>
@@ -1374,9 +1572,8 @@
                               >
                               <span
                                 class="bg-accent-default/15 text-accent-default rounded-md px-2 py-0.5 font-mono text-xs font-bold"
+                                >sk_</span
                               >
-                                sk_
-                              </span>
                             </div>
                             <p class="text-muted mt-1 text-sm leading-relaxed">
                               {m.api_keys_secret_key_desc()}
@@ -1425,9 +1622,8 @@
                               >
                               <span
                                 class="bg-label-dimmer text-label-stronger rounded-md px-2 py-0.5 font-mono text-xs font-bold"
+                                >pk_</span
                               >
-                                pk_
-                              </span>
                             </div>
                             <p class="text-muted mt-1 text-sm leading-relaxed">
                               {m.api_keys_public_key_desc()}
@@ -1649,14 +1845,6 @@
                     {/if}
 
                     {#if usesResourcePermissions}
-                      <div
-                        class="border-default/70 bg-subtle/50 text-muted flex items-start gap-2 rounded-lg border px-3 py-2 text-xs"
-                      >
-                        <Info class="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                        <span>
-                          {getResourceAccessScopeMessage()}
-                        </span>
-                      </div>
                       <fieldset>
                         <legend class="sr-only">
                           {keyType === "pk_"
@@ -1732,15 +1920,6 @@
                               </div>
                             </div>
                           {/each}
-                        </div>
-                        <div
-                          class="border-accent-default/30 bg-accent-default/5 mt-3 flex items-start gap-3 rounded-lg border px-4 py-3"
-                        >
-                          <Info class="text-accent-default mt-0.5 h-4 w-4 flex-shrink-0" />
-                          <p class="text-accent-default text-xs leading-relaxed">
-                            <!-- eslint-disable-next-line svelte/no-at-html-tags -- localized info is trusted i18n content -->
-                            {@html m.api_keys_fine_grained_info()}
-                          </p>
                         </div>
                       </fieldset>
                     {:else}
@@ -1833,9 +2012,15 @@
                           {/each}
                         </div>
                       </fieldset>
+                    {/if}
 
-                      <!-- Contextual capability summary -->
-                      <div class="border-default bg-subtle/50 rounded-xl border p-4">
+                    <!-- Contextual capability summary -->
+                    {#if capabilityRows.length > 0}
+                      <div
+                        class="border-default bg-subtle/50 rounded-xl border p-4"
+                        role="region"
+                        aria-label={m.api_keys_capability_summary_title()}
+                      >
                         <p class="text-muted mb-3 text-xs font-semibold tracking-wider uppercase">
                           {m.api_keys_capability_summary_title()}
                         </p>
@@ -1905,7 +2090,7 @@
                       bind:value={allowedOrigins}
                       label={m.api_keys_allowed_origins()}
                       description={m.api_keys_allowed_origins_desc()}
-                      placeholder="https://example.com"
+                      placeholder={m.apikey_origins_placeholder()}
                       required={isCreateMode}
                       disabled={readonly}
                     />

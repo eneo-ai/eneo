@@ -390,7 +390,7 @@
               disabled={notificationSettingsSaving}
               onclick={() => selectPreset(day)}
             >
-              {day}d
+              {m.apikey_day_chip({ day })}
             </button>
           {/each}
         </div>

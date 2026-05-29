@@ -1,6 +1,8 @@
+from typing import Any, cast
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy import CursorResult
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import selectinload
 
@@ -73,7 +75,7 @@ class GroupRepository:
         result = await self.session.execute(
             sa.delete(CollectionsTable).where(CollectionsTable.id == group_id)
         )
-        return result.rowcount
+        return cast("CursorResult[Any]", result).rowcount
 
     async def move_group_owner(
         self, group_id: UUID, new_owner_space_id: UUID

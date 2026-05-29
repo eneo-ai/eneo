@@ -36,7 +36,9 @@ def parse_response(response: Response) -> CrawledPage | None:
 
     # Replace relative links with absolute
     for url in soup.find_all("a", href=True):
-        url["href"] = urljoin(response.url, url["href"])
+        href = url["href"]
+        href = href[0] if isinstance(href, list) else href
+        url["href"] = urljoin(response.url, href)
 
     content = html2text(str(soup))
     # response.css() is from untyped Scrapy; its return type is partially unknown.

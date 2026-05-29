@@ -106,7 +106,17 @@ async def get_file(
     return await service.get_file_by_id(file_id=id)
 
 
-@router.delete("/{id}/", status_code=204)
+@router.delete(
+    "/{id}/",
+    status_code=204,
+    response_class=Response,
+    responses={
+        204: {
+            "description": "File deleted successfully. No response body is returned."
+        },
+        **responses.get_responses([403, 404]),
+    },
+)
 async def delete_file(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -114,8 +124,8 @@ async def delete_file(
     service = container.file_service()
     current_user = container.user()
 
-    # Get file details BEFORE deletion (snapshot pattern)
-    file = await service.get_file_by_id(file_id=id)
+    # Delete atomically by owner; the returned row is kept for audit metadata.
+    file = await service.delete_file(id)
 
     # Build extra context capturing what was deleted
     extra = {
@@ -128,9 +138,6 @@ async def delete_file(
         if hasattr(file, "created_at") and file.created_at
         else None,
     }
-
-    # Delete file
-    await service.delete_file(id)
 
     # Audit logging
     audit_service = container.audit_service()

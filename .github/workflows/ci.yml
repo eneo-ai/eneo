@@ -148,6 +148,17 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
+  script-tests:
+    name: Script tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run developer-tooling tests
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
@@ -158,6 +169,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # Enforced in pre-commit too, but pre-commit can be bypassed; CI is the
+      # backstop that keeps the i18n catalogs duplicate-free and in key parity.
+      - name: Check i18n message catalogs
+        run: |
+          python3 apps/web/scripts/check-i18n-duplicates.py
+          python3 apps/web/scripts/check-i18n-parity.py
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -176,6 +194,9 @@ jobs:
       # The docs workflow owns docs-site lint/build; this gate stays focused on shipped frontend packages.
       - name: Run package lint
         run: FORCE_COLOR=1 bun run --filter '@intric/*' lint
+
+      - name: Run package tests
+        run: FORCE_COLOR=1 bun run --filter '@intric/eslint-plugin' test
 
       - name: Build frontend
         run: bun run build
@@ -217,6 +238,7 @@ jobs:
       - branch-policy
       - backend-quality
       - backend-tests
+      - script-tests
       - frontend
       - docker-builds
 
@@ -226,6 +248,7 @@ jobs:
           BRANCH_POLICY_RESULT: ${{ needs.branch-policy.result }}
           BACKEND_QUALITY_RESULT: ${{ needs.backend-quality.result }}
           BACKEND_TESTS_RESULT: ${{ needs.backend-tests.result }}
+          SCRIPT_TESTS_RESULT: ${{ needs.script-tests.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           DOCKER_BUILDS_RESULT: ${{ needs.docker-builds.result }}
         run: |
@@ -249,6 +272,7 @@ jobs:
           check_result "Branch policy" "$BRANCH_POLICY_RESULT"
           check_result "Backend quality" "$BACKEND_QUALITY_RESULT"
           check_result "Backend tests" "$BACKEND_TESTS_RESULT"
+          check_result "Script tests" "$SCRIPT_TESTS_RESULT"
           check_result "Frontend" "$FRONTEND_RESULT"
           check_result "Docker builds" "$DOCKER_BUILDS_RESULT"
 

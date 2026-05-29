@@ -12,6 +12,7 @@
     type UserTokenUsage,
     type UserTokenUsageSummary
   } from "@intric/intric-js";
+  import type { CostRateMap } from "$lib/features/ai-models/costRates";
   import UserOverviewBar from "./UserOverviewBar.svelte";
   import UserTokenTable from "./UserTokenTable.svelte";
   import { CalendarDate, type DateValue } from "@internationalized/date";
@@ -21,6 +22,9 @@
   import { page } from "$app/stores";
   import { m } from "$lib/paraglide/messages";
   import { SvelteURLSearchParams } from "svelte/reactivity";
+
+  type Props = { costRates: CostRateMap };
+  const { costRates }: Props = $props();
 
   let userStats = $state<UserTokenUsageSummary | null>(null);
   let isLoading = $state(false);
@@ -184,6 +188,7 @@
           sortOrder={paginationState.sortOrder}
           highThreshold={thresholds.high}
           mediumThreshold={thresholds.medium}
+          {costRates}
           {onUserClick}
           {onPageChange}
           {onSortChange}

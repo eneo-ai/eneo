@@ -227,7 +227,7 @@ async def require_user_for_creation(
                 "message": (
                     "Service API keys cannot create new resources. "
                     "Create the resource with a user account; the service "
-                    "key can then operate on it via its scope."
+                    "key can then operate on supported endpoints via its scope."
                 ),
             },
         )
@@ -356,11 +356,12 @@ def require_resource_permission(
     return _resource_check_dep
 
 
-def require_tenant_scope_for_delete() -> Callable[..., Awaitable[None]]:
-    """Block DELETE requests for non-tenant-scoped API keys.
+def require_file_delete_scope_guard() -> Callable[..., Awaitable[None]]:
+    """Mark file DELETE requests for post-auth scope/ownership handling.
 
-    Files are user-scoped (no space_id column). GET/POST are safe for scoped keys,
-    but DELETE could affect files attached to conversations in other spaces.
+    Files are user-scoped (no space_id column). User-owned scoped keys may
+    delete through the FileService owner-bound SQL predicate, but service keys
+    do not have a real ``users.id`` owner and cannot delete user-owned files.
 
     Uses the deferred-enforcement pattern: stashes a marker on ``request.state``
     so the actual check runs inside ``_resolve_api_key`` (after auth has populated
@@ -370,7 +371,7 @@ def require_tenant_scope_for_delete() -> Callable[..., Awaitable[None]]:
 
     async def _stash(request: Request) -> None:
         if request.method == "DELETE":
-            request.state._require_tenant_scope_for_delete = True
+            request.state._require_file_delete_scope_guard = True
 
     return _stash
 

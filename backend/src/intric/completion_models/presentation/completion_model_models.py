@@ -69,7 +69,8 @@ class ValidationResult(BaseModel):
     """Result of migration compatibility validation."""
 
     compatible: bool
-    warnings: List[str]
+    warnings: List[str]  # Human-readable warning messages
+    warning_codes: List[str] = []  # Machine-readable codes for frontend translation
     requires_confirmation: bool
     user_confirmed: bool = False
 
@@ -112,9 +113,9 @@ class ModelMigrationHistory(BaseModel):
     """Historical record of a model migration."""
 
     id: UUID
-    from_model_id: UUID
+    from_model_id: Optional[UUID] = None
     from_model_name: str
-    to_model_id: UUID
+    to_model_id: Optional[UUID] = None
     to_model_name: str
     migrated_count: int
     status: str  # 'pending', 'in_progress', 'completed', 'failed'
@@ -124,3 +125,5 @@ class ModelMigrationHistory(BaseModel):
     completed_at: Optional[datetime] = None
     duration: Optional[float] = None  # Duration in seconds
     error_message: Optional[str] = None
+    migration_details: Optional[Dict[str, int]] = None  # Breakdown per entity type
+    warnings: Optional[List[str]] = None

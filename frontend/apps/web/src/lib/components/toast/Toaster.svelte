@@ -5,6 +5,7 @@
   import { cubicOut, backOut } from "svelte/easing";
   import { X, CheckCircle2, XCircle, Info, AlertTriangle } from "lucide-svelte";
   import { toasts, content, close, portal, type ToastType } from "./toastStore";
+  import { m } from "$lib/paraglide/messages";
 
   const icons: Record<ToastType, typeof CheckCircle2> = {
     success: CheckCircle2,
@@ -32,7 +33,7 @@
   use:portal
   class="pointer-events-none fixed inset-0 z-[60] flex flex-col items-end gap-2.5 pt-16 pr-4 sm:pr-6"
   aria-live="polite"
-  aria-label="Notifications"
+  aria-label={m.toast_notifications()}
 >
   <div class="ml-auto flex w-full max-w-sm flex-col items-end gap-2.5">
     {#each $toasts as { id, data } (id)}
@@ -55,7 +56,7 @@
         <button
           {...$close(id)}
           class="-mr-1 flex-shrink-0 rounded-md p-1 opacity-50 transition-all duration-150 hover:bg-black/5 hover:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-current/40"
-          aria-label="Dismiss"
+          aria-label={m.toast_dismiss()}
         >
           <X class="h-3.5 w-3.5" />
         </button>

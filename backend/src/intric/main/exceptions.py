@@ -56,6 +56,10 @@ class ErrorCodes(int, Enum):
     # Resource readiness
     RESOURCE_NOT_READY = 9038
     RESOURCE_GONE = 9039
+    # Model lifecycle — soft-delete blocked because the model is still
+    # referenced by an active resource (assistants, apps, services,
+    # assistant/app templates). Space membership alone does not block.
+    MODEL_IN_USE = 9040
 
 
 class NotFoundException(Exception):
@@ -172,6 +176,18 @@ class TypedIOValidationException(BadRequestException):
         self.input_payload_json: dict[str, Any] | None = None
         self.effective_prompt: str | None = None
         self.contract_validation: dict[str, Any] | None = None
+
+
+class ModelInUseException(Exception):
+    """Raised when trying to soft-delete a model that is still referenced.
+
+    Surfaced as 400 with a dedicated error code so the frontend can show a
+    localized "Model is in use" message and offer the migration flow as a
+    follow-up action — the generic BAD_REQUEST code can't carry that
+    context.
+    """
+
+    pass
 
 
 class QuotaExceededException(Exception):
@@ -440,6 +456,11 @@ EXCEPTION_MAP = {
     ),
     BadRequestException: (400, None, ErrorCodes.BAD_REQUEST),
     ResourceGoneException: (410, None, ErrorCodes.RESOURCE_GONE),
+    ModelInUseException: (
+        400,
+        "Model is currently in use and cannot be deleted.",
+        ErrorCodes.MODEL_IN_USE,
+    ),
     QuotaExceededException: (403, None, ErrorCodes.QUOTA_EXCEEDED),
     UniqueException: (400, None, ErrorCodes.UNIQUE_ERROR),
     OpenAIException: (503, None, ErrorCodes.OPENAI_ERROR),

@@ -520,58 +520,23 @@ _KNOWLEDGE_PACK_STEP_DESIGN = """\
 - Vanliga typer: text (fritext), select (val), multiselect (flerval), number, date"""
 
 
-_KNOWLEDGE_PACK_IO_INTELLIGENCE = """
-## Steg-IO: Bästa praxis
-
-### Input → Output typ-kombinationer
-- Ljud → text: Alltid `transcribe_only` på första steget, `pass_through` på resten
-- Dokument → JSON: Använd `output_contract` med namngivna fält och beskrivningar
-- JSON → text: Använd `input_bindings.question` med `{{ step_X.output.structured.field }}`
-- Dokument → DOCX: Separera extrahering (JSON) från dokumentgenerering (template_fill)
-- Multi-dokument: `all_previous_steps` ELLER `input_bindings` med specifika steg-refs
-
-### Underlag efter stegintention
-- **Analysera / bedöma**: ge AI:n sammanställd sakdata via rubriker + specifika fält
-- **Sammanfatta**: mata främst text (`previous_step` eller `step_input.text`) och bara nödvändig metadata
-- **Generera dokument**: samla färdiga rapporttexter, rubriker och utvalda JSON-fält — inte rå JSON
-- **Jämföra flera källor**: använd selektiva bindings eller `all_previous_steps` bara när ALLA föregående steg faktiskt behövs
-
-### När ska man använda JSON output?
-- När nästa steg behöver specifika datapunkter (inte bara fritext)
-- När man vill ha deterministisk vidarebearbetning
-- Alltid med tydliga `output_fields` — backend skapar då rätt kontrakt
-
-### När ska man INTE använda JSON output?
-- När slutresultatet är en rapport eller sammanfattning → text
-- När steget bara ska omformulera eller sammanfatta → text
-
-### Referensdisciplin
-- I create-läge deklarerar du inte stegrefar alls — backend gör det
-- Använd inte `step_1`, `step_2` eller stegnamn-alias i nya utkast
-- Om ett kompilerat explicit underlag används för runtime-uppladdningar måste det innehålla riktiga \
-  `step_input.*`-referenser; backend kompilerar detta i create-läge"""
-
-
 KNOWLEDGE_PACK_FLOW_ARCHITECTURE = _KNOWLEDGE_PACK_FLOW_ARCHITECTURE
 KNOWLEDGE_PACK_VARIABLE_SYSTEM = _KNOWLEDGE_PACK_VARIABLE_SYSTEM
 KNOWLEDGE_PACK_INSTRUCTIONS_AND_UNDERLAG = _KNOWLEDGE_PACK_INSTRUCTIONS_AND_UNDERLAG
 KNOWLEDGE_PACK_CONTRACTS = _KNOWLEDGE_PACK_CONTRACTS
 KNOWLEDGE_PACK_ANTI_PATTERNS = _KNOWLEDGE_PACK_ANTI_PATTERNS
 KNOWLEDGE_PACK_STEP_DESIGN = _KNOWLEDGE_PACK_STEP_DESIGN
-KNOWLEDGE_PACK_IO_INTELLIGENCE = _KNOWLEDGE_PACK_IO_INTELLIGENCE
 
 __all__ = [
     "_KNOWLEDGE_PACK_ANTI_PATTERNS",
     "_KNOWLEDGE_PACK_CONTRACTS",
     "_KNOWLEDGE_PACK_FLOW_ARCHITECTURE",
-    "_KNOWLEDGE_PACK_IO_INTELLIGENCE",
     "_KNOWLEDGE_PACK_INSTRUCTIONS_AND_UNDERLAG",
     "_KNOWLEDGE_PACK_STEP_DESIGN",
     "_KNOWLEDGE_PACK_VARIABLE_SYSTEM",
     "KNOWLEDGE_PACK_ANTI_PATTERNS",
     "KNOWLEDGE_PACK_CONTRACTS",
     "KNOWLEDGE_PACK_FLOW_ARCHITECTURE",
-    "KNOWLEDGE_PACK_IO_INTELLIGENCE",
     "KNOWLEDGE_PACK_INSTRUCTIONS_AND_UNDERLAG",
     "KNOWLEDGE_PACK_STEP_DESIGN",
     "KNOWLEDGE_PACK_VARIABLE_SYSTEM",

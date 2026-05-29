@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, Union, cast
 from uuid import UUID
@@ -15,7 +16,6 @@ from intric.completion_models.domain.model_kwargs_capabilities import (
 from intric.files.file_models import File
 from intric.logging.logging import LoggingDetails
 from intric.main.models import NOT_PROVIDED, InDB, ModelId, NotProvided, partial_model
-from intric.model_providers.domain.model_defaults import lookup_model_defaults
 from intric.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
 )
@@ -25,35 +25,6 @@ if TYPE_CHECKING:
         CompletionModel as CompletionModelDomain,
     )
     from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
-
-
-_COMPLETION_MODEL_FIELDS = (
-    "id",
-    "created_at",
-    "updated_at",
-    "name",
-    "nickname",
-    "family",
-    "max_input_tokens",
-    "max_output_tokens",
-    "is_deprecated",
-    "nr_billion_parameters",
-    "hf_link",
-    "stability",
-    "hosting",
-    "open_source",
-    "description",
-    "deployment_name",
-    "org",
-    "vision",
-    "reasoning",
-    "supports_tool_calling",
-    "base_url",
-    "litellm_model_name",
-    "model_kwargs_capabilities",
-    "provider_type",
-    "tenant_id",
-)
 
 
 class TokenUsage(BaseModel):
@@ -130,38 +101,6 @@ class Completion:
     usage: Optional[TokenUsage] = None
 
 
-def _normalize_token_fields(value: Any) -> Any:
-    data: dict[str, Any]
-
-    if isinstance(value, dict):
-        data = dict(cast(dict[str, Any], value))
-        token_limit = data.get("token_limit")
-    else:
-        missing = object()
-        data = {}
-        for field in _COMPLETION_MODEL_FIELDS:
-            attr = getattr(value, field, missing)
-            if attr is not missing:
-                data[field] = attr
-        data["_stored_model_projection"] = True
-        token_limit = getattr(value, "token_limit", None)
-
-    if data.get("max_input_tokens") is None and token_limit is not None:
-        data["max_input_tokens"] = token_limit
-
-    if data.get("max_output_tokens") is None:
-        defaults = lookup_model_defaults(
-            data.get("litellm_model_name"),
-            data.get("name"),
-        )
-        if defaults is not None and defaults.max_output_tokens is not None:
-            data["max_output_tokens"] = defaults.max_output_tokens
-        elif token_limit is not None:
-            data["max_output_tokens"] = token_limit
-
-    return data
-
-
 class CompletionModelBase(BaseModel):
     name: str
     nickname: Optional[str] = None
@@ -183,37 +122,27 @@ class CompletionModelBase(BaseModel):
     base_url: Optional[str] = None
     litellm_model_name: Optional[str] = None
     model_kwargs_capabilities: Optional[SupportedModelKwargs] = None
+    # Indicative USD ratecard. NULL = unknown / self-hosted.
+    input_cost_per_token: Optional[Decimal] = None
+    output_cost_per_token: Optional[Decimal] = None
 
     @model_validator(mode="before")
     @classmethod
     def ignore_invalid_stored_model_kwargs_capabilities(cls, data: object) -> object:
         if isinstance(data, dict):
-            values = cast(dict[str, object], data)
-            if not values.get("_stored_model_projection"):
-                return values
-            raw_capabilities = values.get("model_kwargs_capabilities")
-            completion_model_id = values.get("id")
-            tenant_id = values.get("tenant_id")
-        else:
-            raw_capabilities = getattr(data, "model_kwargs_capabilities", None)
-            completion_model_id = getattr(data, "id", None)
-            tenant_id = getattr(data, "tenant_id", None)
+            return cast(dict[str, object], data)
 
+        raw_capabilities = getattr(data, "model_kwargs_capabilities", None)
         if raw_capabilities is None:
             return data
 
         capabilities = coerce_model_kwargs_capabilities(
             raw_capabilities,
-            completion_model_id=completion_model_id
-            if isinstance(completion_model_id, UUID)
-            else None,
-            tenant_id=tenant_id if isinstance(tenant_id, UUID) else None,
+            completion_model_id=getattr(data, "id", None),
+            tenant_id=getattr(data, "tenant_id", None),
         )
         if capabilities is not None:
             return data
-
-        if isinstance(data, dict):
-            return {**values, "model_kwargs_capabilities": None}
 
         values: dict[str, object] = {}
         for field_name in cls.model_fields:
@@ -221,11 +150,6 @@ class CompletionModelBase(BaseModel):
                 values[field_name] = getattr(data, field_name)
         values["model_kwargs_capabilities"] = None
         return values
-
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_fields(cls, value: Any) -> Any:
-        return _normalize_token_fields(value)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -252,33 +176,7 @@ class CompletionModelBase(BaseModel):
 
 
 class CompletionModelCreate(CompletionModelBase):
-    @model_validator(mode="before")
-    @classmethod
-    def _apply_litellm_defaults(cls, value: Any) -> Any:
-        data = _normalize_token_fields(value)
-        defaults = lookup_model_defaults(
-            data.get("litellm_model_name"),
-            data.get("name"),
-        )
-        if defaults is None:
-            return data
-
-        if (
-            data.get("max_input_tokens") is None
-            and defaults.max_input_tokens is not None
-        ):
-            data["max_input_tokens"] = defaults.max_input_tokens
-        if (
-            data.get("max_output_tokens") is None
-            and defaults.max_output_tokens is not None
-        ):
-            max_input_tokens = data.get("max_input_tokens")
-            data["max_output_tokens"] = (
-                min(int(max_input_tokens), defaults.max_output_tokens)
-                if max_input_tokens is not None
-                else defaults.max_output_tokens
-            )
-        return data
+    pass
 
 
 @partial_model
@@ -299,6 +197,7 @@ class CompletionModel(CompletionModelBase, InDB):
     tenant_id: Optional[UUID] = None
     provider_id: Optional[UUID] = None
     provider_type: Optional[str] = None
+    migrated_to_model_id: Optional[UUID] = None
 
     def _provider_type(self) -> str | None:
         return self.provider_type
@@ -311,6 +210,8 @@ class CompletionModelPublic(CompletionModel):
     credential_provider: Optional[str] = None
     security_classification: Optional[SecurityClassificationPublic] = None
     provider_name: Optional[str] = None
+    deprecation_date: Optional[str] = None
+    migrated_to_model_id: Optional[UUID] = None
 
     @classmethod
     def from_domain(cls, completion_model: CompletionModelDomain):
@@ -323,7 +224,7 @@ class CompletionModelPublic(CompletionModel):
             family=completion_model.family,
             max_input_tokens=completion_model.max_input_tokens,
             max_output_tokens=completion_model.max_output_tokens,
-            is_deprecated=completion_model.is_deprecated,
+            is_deprecated=completion_model.is_effectively_deprecated,
             nr_billion_parameters=completion_model.nr_billion_parameters,
             hf_link=completion_model.hf_link,
             stability=completion_model.stability,
@@ -338,6 +239,12 @@ class CompletionModelPublic(CompletionModel):
             base_url=completion_model.base_url,
             litellm_model_name=completion_model.litellm_model_name,
             model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
+            input_cost_per_token=getattr(
+                completion_model, "input_cost_per_token", None
+            ),
+            output_cost_per_token=getattr(
+                completion_model, "output_cost_per_token", None
+            ),
             is_org_enabled=completion_model.is_org_enabled,
             is_org_default=completion_model.is_org_default,
             can_access=completion_model.can_access,
@@ -352,6 +259,10 @@ class CompletionModelPublic(CompletionModel):
             provider_id=completion_model.provider_id,
             provider_name=completion_model.provider_name,
             provider_type=completion_model.provider_type,
+            deprecation_date=completion_model.litellm_deprecation_date,
+            migrated_to_model_id=getattr(
+                completion_model, "migrated_to_model_id", None
+            ),
         )
 
 

@@ -37,9 +37,9 @@
     onEnterPressed: ask
   });
 
-  type Props = { scrollToBottom: () => void };
+  type Props = { scrollToBottom: () => void; onNewConversation?: () => void };
 
-  const { scrollToBottom }: Props = $props();
+  const { scrollToBottom, onNewConversation }: Props = $props();
 
   let abortController: AbortController | undefined;
   const AUTO_ACCEPT_TOOLS_STORAGE_KEY = "autoAcceptToolsEnabled";
@@ -86,8 +86,17 @@
     queueValidUploads([...event.clipboardData.files]);
   }
 
-  let inputError = $state<{ message: string; details?: string } | null>(null);
+  let inputError = $state<{ message: string; details?: string; isContextError?: boolean } | null>(
+    null
+  );
   let errorInputSnapshot = { question: "", attachmentIds: "" };
+
+  const startNewConversation = () => {
+    inputError = null;
+    errorInputSnapshot = { question: "", attachmentIds: "" };
+    if (onNewConversation) onNewConversation();
+    else chat.newConversation();
+  };
 
   function parseTokenError(errorMessage: string): { used: number; limit: number } | null {
     const match = errorMessage.match(/(\d[\d,]*)\s*tokens?\s*used.*?limit\s*(?:is\s*)?(\d[\d,]*)/i);
@@ -143,10 +152,11 @@
           const excess = tokenInfo.used - tokenInfo.limit;
           inputError = {
             message: m.context_window_exceeded(),
-            details: `${tokenInfo.used.toLocaleString()} / ${tokenInfo.limit.toLocaleString()} tokens (${excess.toLocaleString()} ${m.over()})`
+            details: `${tokenInfo.used.toLocaleString()} / ${tokenInfo.limit.toLocaleString()} tokens (${excess.toLocaleString()} ${m.over()})`,
+            isContextError: true
           };
         } else {
-          inputError = { message: m.context_window_exceeded() };
+          inputError = { message: m.context_window_exceeded(), isContextError: true };
         }
       } else {
         inputError = { message: getErrorMessage(error) };
@@ -180,6 +190,23 @@
     focusMentionInput();
   });
 
+  // Request a token preflight whenever the user input or attached files
+  // change. Debounced inside ChatService; safe to fire on every keystroke.
+  $effect(() => {
+    const fileIds = $attachments
+      .map((a) => a.fileRef?.id)
+      .filter((id): id is string => Boolean(id));
+    const tools =
+      $mentions.length > 0
+        ? {
+            assistants: $mentions.map((mention) => {
+              return { id: mention.id, handle: mention.handle };
+            })
+          }
+        : undefined;
+    chat.requestPreflight($question, fileIds, tools);
+  });
+
   let useWebSearch = $state(false);
 
   const shouldShowMentionButton = $derived.by(() => {
@@ -200,11 +227,16 @@
     return false;
   });
 
+  // Block sending while the local projection says the next message will
+  // overflow the context window. Removes the need to round-trip the server
+  // error path for the obvious case; the server still validates as the
+  // authoritative source.
   const isAskingDisabled = $derived(
     chat.askQuestion.isLoading ||
       $isUploading ||
       ($question === "" && $attachments.length === 0) ||
-      !chat.hasCompletionModel
+      !chat.hasCompletionModel ||
+      chat.willExceedContext
   );
 </script>
 
@@ -251,15 +283,26 @@
 
   {#if inputError}
     <div
-      class="text-negative-stronger bg-negative-dimmer/30 mt-1 flex items-start gap-2 rounded-md px-2 py-1.5 text-sm"
+      class="text-negative-stronger bg-negative-dimmer/30 mt-1 flex items-start justify-between gap-2 rounded-md px-2 py-1.5 text-sm"
     >
-      <AlertTriangle class="mt-0.5 h-4 w-4 flex-shrink-0" />
-      <div>
-        <p class="font-medium">{inputError.message}</p>
-        {#if inputError.details}
-          <p class="text-negative-stronger mt-0.5">{inputError.details}</p>
-        {/if}
+      <div class="flex items-start gap-2">
+        <AlertTriangle class="mt-0.5 h-4 w-4 flex-shrink-0" />
+        <div>
+          <p class="font-medium">{inputError.message}</p>
+          {#if inputError.details}
+            <p class="text-negative-stronger mt-0.5">{inputError.details}</p>
+          {/if}
+        </div>
       </div>
+      {#if inputError.isContextError}
+        <button
+          type="button"
+          onclick={startNewConversation}
+          class="border-negative-stronger/40 hover:bg-negative-dimmer/50 ml-2 flex-shrink-0 self-center rounded-md border px-2 py-1 text-xs font-medium whitespace-nowrap transition-colors"
+        >
+          {m.new_conversation()}
+        </button>
+      {/if}
     </div>
   {/if}
 

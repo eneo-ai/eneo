@@ -65,6 +65,12 @@ dependencies = [
     "uuid-utils>=0.9,<1",  # UUIDv7 for stable ConversationMessage ids
     "weasyprint>=66,<67",
     "markdown-it-py>=4,<5",
+    "opentelemetry-sdk>=1.20.0,<2",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.41b0",
+    "opentelemetry-instrumentation-redis>=0.41b0",
+    "opentelemetry-instrumentation-httpx>=0.41b0",
+    "opentelemetry-instrumentation-aiohttp-client>=0.41b0",
 ]
 
 [project.scripts]

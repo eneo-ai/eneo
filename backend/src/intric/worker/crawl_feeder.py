@@ -20,6 +20,7 @@ from typing import Any, cast
 from uuid import UUID
 
 import redis.asyncio as aioredis
+from sqlalchemy import CursorResult
 
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
@@ -95,10 +96,11 @@ class CrawlFeeder:
                     .execution_options(synchronize_session=False)
                 )
                 result = await session.execute(cleanup_stmt)
-                if result.rowcount > 0:
+                cleaned_count = cast("CursorResult[Any]", result).rowcount
+                if cleaned_count > 0:
                     logger.info(
                         "Cleaned up orphaned CrawlRuns with NULL job_id",
-                        extra={"cleaned_count": result.rowcount},
+                        extra={"cleaned_count": cleaned_count},
                     )
         except Exception as exc:
             logger.warning(

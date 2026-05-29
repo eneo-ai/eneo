@@ -214,6 +214,46 @@ async def test_log_async_skips_when_should_log_returns_false(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_log_async_swallows_redis_enqueue_failure(monkeypatch, caplog):
+    """Audit is best-effort: a Redis/ARQ enqueue exception must not propagate.
+
+    Otherwise a transient Redis outage would 500 every mutation that audits,
+    turning a partial degradation into a full one. The handler should log a
+    warning and return None so callers continue without noticing.
+    """
+    import logging
+
+    async def fake_enqueue(task, job_id, params):  # noqa: ARG001
+        raise ConnectionError("redis unreachable")
+
+    monkeypatch.setattr(
+        "intric.audit.application.audit_service.job_manager.enqueue", fake_enqueue
+    )
+
+    repo = AsyncMock()
+    service = AuditService(repository=repo)
+
+    caplog.set_level(logging.WARNING, logger="intric.audit.application.audit_service")
+
+    job_id = await service.log_async(
+        tenant_id=uuid4(),
+        actor_id=uuid4(),
+        action=ActionType.ASSISTANT_CREATED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=uuid4(),
+        description="probe",
+        metadata={},
+    )
+
+    assert job_id is None
+    assert any(
+        "Failed to enqueue audit event" in record.message
+        and record.levelname == "WARNING"
+        for record in caplog.records
+    )
+
+
+@pytest.mark.asyncio
 async def test_log_persists_contextvars_through_repository(monkeypatch):
     """The sync log() method also reads contextvars."""
 

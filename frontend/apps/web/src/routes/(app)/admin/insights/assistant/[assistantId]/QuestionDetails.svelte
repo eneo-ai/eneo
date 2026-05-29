@@ -64,7 +64,9 @@
   </Button>
   <Dialog.Content width="medium">
     <Dialog.Title>{m.details_for({ question: message.question || m.untitled() })}</Dialog.Title>
-    <Dialog.Description hidden>Details for message with id {message.id}</Dialog.Description>
+    <Dialog.Description hidden
+      >{m.insights_details_for_message({ id: message.id ?? "" })}</Dialog.Description
+    >
     {#if loadingLog}
       {m.loading()}
     {:else}
@@ -74,7 +76,10 @@
           <div class="text-secondary"><strong>{m.created()}:</strong> {message.created_at}</div>
         {/if}
         {#if message.session_id}
-          <div class="text-secondary"><strong>Session ID:</strong> {message.session_id}</div>
+          <div class="text-secondary">
+            <strong>{m.insights_session_id()}</strong>
+            {message.session_id}
+          </div>
         {/if}
       </div>
       <div class="mb-3 flex justify-end">

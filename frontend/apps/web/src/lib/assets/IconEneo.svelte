@@ -12,5 +12,7 @@
   style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; font-size: 16px; color: #4f46e5;"
   {...$$restProps}
 >
+  <!-- eslint-disable intric/no-hardcoded-text -- brand mark letter -->
   E
+  <!-- eslint-enable intric/no-hardcoded-text -->
 </div>

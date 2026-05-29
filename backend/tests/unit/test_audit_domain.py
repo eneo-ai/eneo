@@ -10,12 +10,12 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.audit_log import AuditLog
 from intric.audit.domain.constants import (
+    DEFAULT_RETENTION_DAYS,
     MAX_DESCRIPTION_LENGTH,
     MAX_ERROR_MESSAGE_LENGTH,
+    MAX_RETENTION_DAYS,
     MAX_USER_AGENT_LENGTH,
     MIN_RETENTION_DAYS,
-    MAX_RETENTION_DAYS,
-    DEFAULT_RETENTION_DAYS,
 )
 from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
@@ -460,6 +460,7 @@ def test_action_types_enum():
     assert ActionType.INTEGRATION_CONNECTED == "integration_connected"
     assert ActionType.INTEGRATION_KNOWLEDGE_CREATED == "integration_knowledge_created"
     assert ActionType.COMPLETION_MODEL_UPDATED == "completion_model_updated"
+    assert ActionType.COMPLETION_MODEL_MIGRATED == "completion_model_migrated"
     assert ActionType.EMBEDDING_MODEL_UPDATED == "embedding_model_updated"
     assert ActionType.TRANSCRIPTION_MODEL_UPDATED == "transcription_model_updated"
     assert (

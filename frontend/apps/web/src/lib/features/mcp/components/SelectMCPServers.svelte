@@ -5,13 +5,12 @@
 -->
 
 <script lang="ts">
-  import { createEventDispatcher, onMount } from "svelte";
+  import { onMount } from "svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { Input, Tooltip } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight } from "lucide-svelte";
   import { SvelteSet } from "svelte/reactivity";
-  import { sanitizeMcpSelection } from "../mcpSelection";
 
   interface MCPTool {
     id: string;
@@ -25,40 +24,24 @@
     name: string;
     description?: string;
     tags?: string[];
-    security_classification?: { security_level?: number; name?: string } | null;
     tools?: MCPTool[];
     [key: string]: unknown;
   }
 
-  type ServerCompatibility = {
-    isCompatible: boolean;
-    reason?: string;
-  };
-
   type Props = {
     /** Array of MCP server objects that are selected. Uses index signature for schema compatibility. */
-    selectedMCPServers?: { [key: string]: unknown }[];
+    selectedMCPServers: { [key: string]: unknown }[] | undefined;
     /** Optional: MCP tool settings to track tool-level overrides */
     selectedMCPTools?: Array<{ tool_id: string; is_enabled: boolean }>;
     /** Optional: Currently selected completion model to check tool calling support */
     selectedModel?: { supports_tool_calling?: boolean } | null;
-    /** Optional: Flow/feature-specific compatibility metadata per server */
-    serverCompatibilityById?: Record<string, ServerCompatibility>;
   };
 
   let {
     selectedMCPServers = $bindable([]),
     selectedMCPTools = $bindable([]),
-    selectedModel = null,
-    serverCompatibilityById = {}
+    selectedModel = null
   }: Props = $props();
-
-  const dispatch = createEventDispatcher<{
-    change: {
-      selectedMCPServers: { [key: string]: unknown }[];
-      selectedMCPTools: Array<{ tool_id: string; is_enabled: boolean }>;
-    };
-  }>();
 
   /** Type-safe view of selectedMCPServers */
   let servers = $derived((selectedMCPServers ?? []) as unknown as MCPServer[]);
@@ -85,34 +68,6 @@
 
   function getServerTools(server: MCPServer): MCPTool[] {
     return server.tools ?? [];
-  }
-
-  function sanitizeSelection() {
-    const sanitizedSelection = sanitizeMcpSelection({
-      selectedServers: servers,
-      selectedTools: selectedMCPTools,
-      availableServers
-    });
-
-    selectedMCPServers = sanitizedSelection.selectedServers;
-    selectedMCPTools = sanitizedSelection.selectedTools;
-
-    return {
-      selectedMCPServers,
-      selectedMCPTools
-    };
-  }
-
-  function getServerCompatibility(serverId: string): ServerCompatibility {
-    return serverCompatibilityById[serverId] ?? { isCompatible: true };
-  }
-
-  function notifySelectionChange() {
-    const sanitizedSelection = sanitizeSelection();
-    dispatch("change", {
-      selectedMCPServers: sanitizedSelection.selectedMCPServers,
-      selectedMCPTools: sanitizedSelection.selectedMCPTools
-    });
   }
 
   // Load available MCP servers from space
@@ -222,8 +177,6 @@
         selectedMCPTools = [...selectedMCPTools, ...toolOverrides];
       }
     }
-
-    notifySelectionChange();
   }
 
   function toggleTool(server: MCPServer, tool: MCPTool) {
@@ -252,31 +205,10 @@
         selectedMCPServers = [...servers];
       }
     }
-
-    notifySelectionChange();
-  }
-
-  function setAllTools(server: MCPServer, isEnabled: boolean) {
-    ensureAllSelectedServersToolsTracked();
-
-    const serverToolIds = new Set((server.tools ?? []).map((tool) => tool.id));
-    selectedMCPTools = selectedMCPTools.map((tool) =>
-      serverToolIds.has(tool.tool_id) ? { ...tool, is_enabled: isEnabled } : tool
-    );
-
-    const selectedServerIndex = servers.findIndex((s) => s.id === server.id);
-    if (selectedServerIndex !== -1 && servers[selectedServerIndex].tools) {
-      servers[selectedServerIndex].tools = servers[selectedServerIndex].tools!.map(
-        (tool: MCPTool) => ({ ...tool, is_enabled: isEnabled })
-      );
-      selectedMCPServers = [...servers];
-    }
-
-    notifySelectionChange();
   }
 </script>
 
-<div class="space-y-1" role="group" aria-label="MCP-servrar">
+<div class="space-y-1" role="group" aria-label={m.mcp_servers()}>
   {#if !modelSupportsTools}
     <p
       class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
@@ -336,132 +268,121 @@
         {@const hasTools = isSelected && server.tools && server.tools.length > 0}
         {@const isExpanded = expandedServers.has(server.id)}
         {@const toolCount = server.tools?.length ?? 0}
-        {@const compatibility = getServerCompatibility(server.id)}
-        {@const serverToggleAllowed = compatibility.isCompatible || isSelected}
         {@const enabledToolCount =
           server.tools?.filter((t) => isToolEnabled(server, t.id)).length ?? 0}
-        <Tooltip text={!compatibility.isCompatible ? compatibility.reason : undefined}>
-          <div
-            class="transition-colors {isSelected ? 'bg-accent-dimmer/20' : ''}"
-            class:opacity-60={!compatibility.isCompatible}
-          >
-            <!-- Server Row -->
-            <div class="flex items-center">
-              <!-- Expand Button -->
-              <button
-                type="button"
-                class="text-muted hover:text-default disabled:hover:text-muted flex h-full w-10 shrink-0 items-center justify-center p-2.5 transition-colors disabled:opacity-20"
-                disabled={!hasTools}
-                onclick={() => toggleExpanded(server.id)}
-                aria-label={isExpanded ? "Dölj verktyg" : "Visa verktyg"}
-                aria-expanded={isExpanded}
-              >
-                <ChevronRight
-                  class="h-4 w-4 transition-transform duration-200 {isExpanded ? 'rotate-90' : ''}"
-                />
-              </button>
+        <div class="transition-colors {isSelected ? 'bg-accent-dimmer/20' : ''}">
+          <!-- Server Row -->
+          <div class="flex items-center">
+            <!-- Expand Button -->
+            <button
+              type="button"
+              class="text-muted hover:text-default disabled:hover:text-muted flex h-full w-10 shrink-0 items-center justify-center p-2.5 transition-colors disabled:opacity-20"
+              disabled={!hasTools}
+              onclick={() => toggleExpanded(server.id)}
+              aria-label={isExpanded ? "Dölj verktyg" : "Visa verktyg"}
+              aria-expanded={isExpanded}
+            >
+              <ChevronRight
+                class="h-4 w-4 transition-transform duration-200 {isExpanded ? 'rotate-90' : ''}"
+              />
+            </button>
 
-              <!-- Server Toggle -->
-              <div class="flex-1 py-2.5 pr-4">
-                <Input.Switch
-                  value={isSelected}
-                  sideEffect={() => {
-                    if (serverToggleAllowed) {
-                      toggleServer(server);
-                    }
-                  }}
-                >
-                  <div class="flex flex-col gap-0.5">
-                    <div class="flex items-center gap-2">
-                      <span class="text-default font-medium">{server.name}</span>
-                      {#if hasTools}
-                        <span
-                          class="bg-secondary text-muted inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
-                        >
-                          <span class="text-positive-default">{enabledToolCount}</span>
-                          <span class="text-dimmer">/</span>
-                          <span>{toolCount}</span>
-                        </span>
-                      {/if}
-                    </div>
-                    {#if server.description}
-                      <p class="text-muted line-clamp-1 text-xs leading-snug">
-                        {server.description}
-                      </p>
+            <!-- Server Toggle -->
+            <div class="flex-1 py-2.5 pr-4">
+              <Input.Switch value={isSelected} sideEffect={() => toggleServer(server)}>
+                <div class="flex flex-col gap-0.5">
+                  <div class="flex items-center gap-2">
+                    <span class="text-default font-medium">{server.name}</span>
+                    {#if hasTools}
+                      <span
+                        class="bg-secondary text-muted inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
+                      >
+                        <span class="text-positive-default">{enabledToolCount}</span>
+                        <span class="text-dimmer">/</span>
+                        <span>{toolCount}</span>
+                      </span>
                     {/if}
                   </div>
-                </Input.Switch>
+                  {#if server.description}
+                    <p class="text-muted line-clamp-1 text-xs leading-snug">{server.description}</p>
+                  {/if}
+                </div>
+              </Input.Switch>
+            </div>
+          </div>
+
+          <!-- Tools List (only show if expanded) -->
+          {#if hasTools && isExpanded}
+            <div
+              class="border-dimmer bg-secondary/20 border-l-accent-default/70 mr-3 mb-2 ml-10 rounded-lg border-t border-l-[3px]"
+              role="group"
+              aria-label={m.mcp_tools_for_server_aria({ name: server.name })}
+            >
+              <!-- Tools header with bulk actions -->
+              <div class="border-dimmer/50 flex items-center justify-between border-b px-3 py-1.5">
+                <span class="text-muted text-[11px] font-medium tracking-wider uppercase"
+                  >{m.tools()} ({toolCount})</span
+                >
+                <div class="flex items-center gap-1">
+                  <button
+                    type="button"
+                    class="text-muted hover:text-default hover:bg-hover-dimmer rounded px-2 py-1 text-[10px] font-medium transition-colors"
+                    onclick={() => {
+                      server.tools?.forEach((tool) => {
+                        if (!isToolEnabled(server, tool.id)) toggleTool(server, tool);
+                      });
+                    }}
+                  >
+                    {m.mcp_all_on()}
+                  </button>
+                  <span class="text-dimmer">|</span>
+                  <button
+                    type="button"
+                    class="text-muted hover:text-default hover:bg-hover-dimmer rounded px-2 py-1 text-[10px] font-medium transition-colors"
+                    onclick={() => {
+                      server.tools?.forEach((tool) => {
+                        if (isToolEnabled(server, tool.id)) toggleTool(server, tool);
+                      });
+                    }}
+                  >
+                    {m.mcp_all_off()}
+                  </button>
+                </div>
+              </div>
+
+              <!-- Scrollable tools list -->
+              <div class="max-h-[240px] overflow-y-auto">
+                <div class="divide-dimmer divide-y">
+                  {#each getServerTools(server) as tool (tool.id)}
+                    {@const toolEnabled = isToolEnabled(server, tool.id)}
+                    <div
+                      class="hover:bg-hover-dimmer flex items-center gap-3 px-3 py-2.5 transition-all {toolEnabled
+                        ? ''
+                        : 'opacity-40 grayscale-[30%]'}"
+                    >
+                      <div class="min-w-0 flex-1">
+                        <span class="text-default block truncate font-mono text-xs font-medium"
+                          >{tool.name}</span
+                        >
+                        {#if tool.description}
+                          <Tooltip text={tool.description} placement="bottom">
+                            <p class="text-muted cursor-help truncate text-xs leading-snug">
+                              {tool.description}
+                            </p>
+                          </Tooltip>
+                        {/if}
+                      </div>
+                      <Input.Switch
+                        value={toolEnabled}
+                        sideEffect={() => toggleTool(server, tool)}
+                      />
+                    </div>
+                  {/each}
+                </div>
               </div>
             </div>
-
-            <!-- Tools List (only show if expanded) -->
-            {#if hasTools && isExpanded}
-              <div
-                class="border-dimmer bg-secondary/20 border-l-accent-default/70 mr-3 mb-2 ml-10 rounded-lg border-t border-l-[3px]"
-                role="group"
-                aria-label="Verktyg för {server.name}"
-              >
-                <!-- Tools header with bulk actions -->
-                <div
-                  class="border-dimmer/50 flex items-center justify-between border-b px-3 py-1.5"
-                >
-                  <span class="text-muted text-[11px] font-medium tracking-wider uppercase"
-                    >{m.tools()} ({toolCount})</span
-                  >
-                  <div class="flex items-center gap-1">
-                    <button
-                      type="button"
-                      class="text-muted hover:text-default hover:bg-hover-dimmer rounded px-2 py-1 text-[10px] font-medium transition-colors"
-                      onclick={() => setAllTools(server, true)}
-                    >
-                      Alla på
-                    </button>
-                    <span class="text-dimmer">|</span>
-                    <button
-                      type="button"
-                      class="text-muted hover:text-default hover:bg-hover-dimmer rounded px-2 py-1 text-[10px] font-medium transition-colors"
-                      onclick={() => setAllTools(server, false)}
-                    >
-                      Alla av
-                    </button>
-                  </div>
-                </div>
-
-                <!-- Scrollable tools list -->
-                <div class="max-h-[240px] overflow-y-auto">
-                  <div class="divide-dimmer divide-y">
-                    {#each getServerTools(server) as tool (tool.id)}
-                      {@const toolEnabled = isToolEnabled(server, tool.id)}
-                      <div
-                        class="hover:bg-hover-dimmer flex items-center gap-3 px-3 py-2.5 transition-all {toolEnabled
-                          ? ''
-                          : 'opacity-40 grayscale-[30%]'}"
-                      >
-                        <div class="min-w-0 flex-1">
-                          <span class="text-default block truncate font-mono text-xs font-medium"
-                            >{tool.name}</span
-                          >
-                          {#if tool.description}
-                            <Tooltip text={tool.description} placement="bottom">
-                              <p class="text-muted cursor-help truncate text-xs leading-snug">
-                                {tool.description}
-                              </p>
-                            </Tooltip>
-                          {/if}
-                        </div>
-                        <Input.Switch
-                          value={toolEnabled}
-                          disabled={!compatibility.isCompatible}
-                          sideEffect={() => toggleTool(server, tool)}
-                        />
-                      </div>
-                    {/each}
-                  </div>
-                </div>
-              </div>
-            {/if}
-          </div>
-        </Tooltip>
+          {/if}
+        </div>
       {/each}
     </div>
   {/if}

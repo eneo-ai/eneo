@@ -183,45 +183,50 @@ class TextExtractor:
 
         display_name = filename or filepath.name
         try:
+            # pandas-stubs miss the context-manager protocol on ExcelFile, so
+            # close() explicitly to avoid leaking the underlying file handle.
             xls = pd.ExcelFile(filepath, engine="calamine")
-            parts: list[str] = []
+            try:
+                parts: list[str] = []
 
-            # Global file context (helpful for first chunk and direct chat)
-            parts.append(f"File: {display_name}")
+                # Global file context (helpful for first chunk and direct chat)
+                parts.append(f"File: {display_name}")
 
-            for sheet_name in xls.sheet_names:
-                df: pd.DataFrame = pd.read_excel(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs are incomplete
-                    xls, sheet_name=sheet_name, engine="calamine"
-                )
+                for sheet_name in xls.sheet_names:
+                    df: pd.DataFrame = pd.read_excel(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs are incomplete
+                        xls, sheet_name=sheet_name, engine="calamine"
+                    )
 
-                if df.empty:  # pyright: ignore[reportUnknownMemberType]  # pandas stubs are incomplete
-                    continue
+                    if df.empty:  # pyright: ignore[reportUnknownMemberType]  # pandas stubs are incomplete
+                        continue
 
-                # Handle merged cells - forward fill values
-                df = df.ffill()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs are incomplete
+                    # Handle merged cells - forward fill values
+                    df = df.ffill()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs are incomplete
 
-                # Clean column names (ensure strings, remove newlines)
-                df.columns = (  # pyright: ignore[reportUnknownMemberType]  # pandas stubs are incomplete
-                    df.columns.astype(str).str.replace("\n", " ")  # pyright: ignore[reportUnknownMemberType]  # pandas stubs are incomplete
-                )
+                    # Clean column names (ensure strings, remove newlines)
+                    df.columns = (  # pyright: ignore[reportUnknownMemberType]  # pandas stubs are incomplete
+                        df.columns.astype(str).str.replace("\n", " ")  # pyright: ignore[reportUnknownMemberType]  # pandas stubs are incomplete
+                    )
 
-                # Serialize each row as self-contained key-value pairs
-                # This ensures every chunk has full context, even if split
-                def serialize_row(row: pd.Series) -> str:  # type: ignore[type-arg]  # pd.Series generic param unavailable at runtime
-                    # Filter out NaN to save tokens
-                    pairs = [
-                        f"{col}: {val}"
-                        for col, val in row.items()
-                        if pd.notna(val)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]  # pandas stubs are incomplete
-                    ]
-                    return f"Sheet: {sheet_name} | " + " | ".join(pairs)
+                    # Serialize each row as self-contained key-value pairs
+                    # This ensures every chunk has full context, even if split
+                    def serialize_row(row: pd.Series) -> str:  # type: ignore[type-arg]  # pd.Series generic param unavailable at runtime
+                        # Filter out NaN to save tokens
+                        pairs = [
+                            f"{col}: {val}"
+                            for col, val in row.items()
+                            if pd.notna(val)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]  # pandas stubs are incomplete
+                        ]
+                        return f"Sheet: {sheet_name} | " + " | ".join(pairs)
 
-                # pandas apply/str.cat return types are unknown due to incomplete stubs
-                raw_sheet_text = df.apply(serialize_row, axis=1).str.cat(sep="\n")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs are incomplete
-                sheet_text: str = str(raw_sheet_text)  # pyright: ignore[reportUnknownArgumentType]  # pandas stubs are incomplete
-                parts.append(sheet_text)
+                    # pandas apply/str.cat return types are unknown due to incomplete stubs
+                    raw_sheet_text = df.apply(serialize_row, axis=1).str.cat(sep="\n")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs are incomplete
+                    sheet_text: str = str(raw_sheet_text)  # pyright: ignore[reportUnknownArgumentType]  # pandas stubs are incomplete
+                    parts.append(sheet_text)
 
-            return "\n\n".join(parts)
+                return "\n\n".join(parts)
+            finally:
+                xls.close()  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]  # pandas-stubs miss ExcelFile.close
         except ValueError as e:
             raise CorruptFileError(display_name, f"Cannot parse Excel format: {e}")
         except Exception as e:

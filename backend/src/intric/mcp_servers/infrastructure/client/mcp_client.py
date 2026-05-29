@@ -1,13 +1,12 @@
 """MCP Client for connecting to and executing HTTP-based MCP servers."""
 
 import asyncio
-from datetime import timedelta
 from types import TracebackType
 from typing import Any, Optional
 
 import httpx
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from intric.main.config import get_settings
 from intric.main.exceptions import MCPAuthenticationError, MCPClientError
@@ -116,6 +115,7 @@ class MCPClient:
         self.session: Optional[ClientSession] = None
         self._streams_context = None
         self._session_context = None
+        self._http_client: httpx.AsyncClient | None = None
 
     def _build_auth_headers(self) -> dict[str, str]:
         """Build authentication headers based on server auth type."""
@@ -173,6 +173,14 @@ class MCPClient:
         finally:
             self._streams_context = None
 
+        try:
+            if self._http_client:
+                await self._http_client.aclose()
+        except BaseException:
+            pass
+        finally:
+            self._http_client = None
+
     async def _connect_internal(self) -> None:
         """Internal connection logic.
 
@@ -181,12 +189,20 @@ class MCPClient:
         """
         headers = self._build_auth_headers()
 
-        # Create the streamable HTTP context manager with timeout delegated
-        # to the transport layer (avoids asyncio.wait_for vs anyio conflicts)
-        streams_context = streamablehttp_client(
-            url=self.mcp_server.http_url,
+        # We own this client: streamable_http_client does not close a
+        # caller-provided client (it only manages ones it creates), so we close
+        # it in disconnect()/_cleanup_contexts(). read=300 keeps the SDK's
+        # default SSE read timeout; the base timeout is our connect budget,
+        # delegated to the transport to avoid anyio cancel-scope conflicts.
+        http_client = httpx.AsyncClient(
             headers=headers,
-            timeout=timedelta(seconds=self.timeout),
+            timeout=httpx.Timeout(self.timeout, read=300),
+            follow_redirects=True,
+        )
+        self._http_client = http_client
+        streams_context = streamable_http_client(
+            url=self.mcp_server.http_url,
+            http_client=http_client,
         )
 
         # Enter the streams context
@@ -356,7 +372,7 @@ class MCPClient:
         """Disconnect from the MCP server.
 
         Must run on the same asyncio.Task that called connect(). The MCP SDK's
-        streamablehttp_client uses anyio cancel scopes bound to the entering
+        streamable_http_client uses anyio cancel scopes bound to the entering
         task; calling __aexit__ from a different task fails the task-boundary
         check and leaks the internal anyio TaskGroup's child tasks (the
         persistent HTTP read/write loops). We log this case explicitly so
@@ -369,6 +385,9 @@ class MCPClient:
 
         streams_ctx = self._streams_context
         self._streams_context = None
+
+        http_client = self._http_client
+        self._http_client = None
 
         cleanup_errors: list[BaseException] = []
 
@@ -384,12 +403,18 @@ class MCPClient:
         except BaseException as e:
             cleanup_errors.append(e)
 
+        try:
+            if http_client:
+                await http_client.aclose()
+        except BaseException as e:
+            cleanup_errors.append(e)
+
         for err in cleanup_errors:
             msg = str(err).lower()
             if "cancel scope" in msg or "different task" in msg:
                 logger.error(
                     "MCP cleanup task-boundary error for %s: %s. This leaks the "
-                    "streamablehttp_client TaskGroup; ensure connect() and "
+                    "streamable_http_client TaskGroup; ensure connect() and "
                     "disconnect() run on the same asyncio.Task.",
                     self.mcp_server.name,
                     err,

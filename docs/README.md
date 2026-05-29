@@ -15,6 +15,7 @@ This directory contains the complete documentation for Eneo, the democratic AI p
 | **[CONTRIBUTING.md](CONTRIBUTING.md)** | Development workflow and standards | Contributors |
 | **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** | Common issues and solutions | All users |
 | **[SECURITY.md](SECURITY.md)** | Security practices and reporting | Security teams, administrators |
+| **[OBSERVABILITY.md](OBSERVABILITY.md)** | Structured logs, distributed tracing, log collection setup | Operators, developers, SREs |
 
 ---
 

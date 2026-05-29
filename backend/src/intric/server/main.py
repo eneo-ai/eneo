@@ -25,16 +25,32 @@ from intric.flows.runtime.flow_runtime_health import (
 )
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
+from intric.main.observability import init_observability, instrument_fastapi
 from intric.main.request_context import get_request_context
 from intric.server import api_documentation
 from intric.server.dependencies.lifespan import lifespan as app_lifespan
 from intric.server.exception_handlers import add_exception_handlers
 from intric.server.middleware.cors import CORSMiddleware
 from intric.server.middleware.request_context import RequestContextMiddleware
+from intric.server.middleware.trace_id import (
+    TraceIdResponseMiddleware,
+    current_trace_id,
+)
 from intric.server.models.api import VersionResponse
 from intric.server.routers import router as api_router
 
 logger = get_logger(__name__)
+
+# Single source of truth for trace headers exposed to cross-origin callers.
+# Used in both the normal CORSMiddleware config and the manual CORS block in
+# 500 error handlers so they stay in sync.
+_TRACE_EXPOSE_HEADERS = ("X-Trace-Id", "X-Correlation-ID")
+
+
+# Initialise OTEL before the FastAPI app is created so that SQLAlchemy,
+# Redis, and aiohttp auto-instrumentation is active before those
+# engines/pools are created during lifespan startup.
+init_observability()
 
 
 def _log_api_key_security_overrides() -> None:
@@ -298,14 +314,24 @@ def get_application():
 
     app.add_middleware(RequestContextMiddleware)
 
+    # TraceIdResponseMiddleware injects X-Trace-Id at the ASGI send level.
+    # It must sit inside the OTEL middleware (added before instrument_fastapi)
+    # so the server span is guaranteed active when http.response.start fires.
+    app.add_middleware(TraceIdResponseMiddleware)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=list(_TRACE_EXPOSE_HEADERS),
         callback=get_origin,
     )
+
+    # OTEL middleware must be outermost so the span is active when inner
+    # middlewares run. instrument_fastapi adds it last.
+    instrument_fastapi(app)
 
     app.include_router(api_router, prefix=get_settings().api_prefix)
 
@@ -456,6 +482,12 @@ def get_application():
         #   https://github.com/tiangolo/fastapi/issues/775#issuecomment-723628299
         response = JSONResponse(status_code=500, content=error_content)
 
+        # Attach trace_id so the client can correlate the error with backend logs
+        trace_id = current_trace_id()
+        if trace_id:
+            response.headers["X-Trace-Id"] = trace_id
+            response.headers["X-Correlation-ID"] = trace_id
+
         origin = request.headers.get("origin")
 
         if origin:
@@ -467,6 +499,7 @@ def get_application():
                 allow_credentials=True,
                 allow_methods=["*"],
                 allow_headers=["*"],
+                expose_headers=list(_TRACE_EXPOSE_HEADERS),
                 callback=get_origin,
             )
 
@@ -528,6 +561,12 @@ def get_application():
 
         response = JSONResponse(status_code=500, content=error_content)
 
+        # Attach trace_id so the client can correlate the error with backend logs
+        trace_id = current_trace_id()
+        if trace_id:
+            response.headers["X-Trace-Id"] = trace_id
+            response.headers["X-Correlation-ID"] = trace_id
+
         origin = request.headers.get("origin")
 
         if origin:
@@ -537,6 +576,7 @@ def get_application():
                 allow_credentials=True,
                 allow_methods=["*"],
                 allow_headers=["*"],
+                expose_headers=list(_TRACE_EXPOSE_HEADERS),
                 callback=get_origin,
             )
             response.headers.update(cors.simple_headers)

@@ -23,12 +23,15 @@
   import { IconChevronDown } from "@intric/icons/chevron-down";
   import { m } from "$lib/paraglide/messages";
   import ProviderGlyph from "../../../../routes/(app)/admin/models/components/ProviderGlyph.svelte";
+  import ModelCostBadge from "./ModelCostBadge.svelte";
+  import type { CompletionModel } from "@intric/intric-js";
 
   let {
     availableModels,
     selectedModel = $bindable(null),
     aria = { "aria-label": m.select_ai_model() },
-    dropdownLabel = m.select_completion_model()
+    dropdownLabel = m.select_completion_model(),
+    showCost = true
   }: {
     /** An array of models the user can choose from */
     availableModels: T[];
@@ -37,6 +40,9 @@
     aria?: AriaProps;
     /** Optional label for the dropdown menu header */
     dropdownLabel?: string;
+    /** Hide the inline cost chip on dropdown rows. Useful for surfaces where
+     *  cost is irrelevant or the row is too narrow. */
+    showCost?: boolean;
   } = $props();
 
   const sortedAvailableModels = $derived.by(() => {
@@ -54,6 +60,13 @@
     if (models.length === 0) return false;
     // Check if provider_name field exists in the model type
     return "provider_name" in models[0];
+  }
+
+  // ModelCostBadge types its prop as the full model union; the rows we render
+  // are real CompletionModel/TranscriptionModel objects, so widening the
+  // structural SelectableAIModel view for the cost chip is safe.
+  function asCostModel(model: T): CompletionModel {
+    return model as unknown as CompletionModel;
   }
 
   const modelGroups = $derived.by(() =>
@@ -117,7 +130,7 @@
       <IconCancel />{m.unsupported_model_selected()} ({selectedModel?.name ?? m.no_model_found()})
     </div>
   {:else if $selected}
-    <ModelNameAndVendor model={$selected.value}></ModelNameAndVendor>
+    <ModelNameAndVendor model={$selected.value} descriptionMode="hidden"></ModelNameAndVendor>
   {:else}
     <div class="text-negative-default flex gap-3 truncate pl-1">
       <IconCancel />{m.no_model_selected()}
@@ -148,13 +161,19 @@
       </div>
       {#each group.models as model (model.id)}
         <div
-          class="border-default hover:bg-hover-default flex min-h-16 items-center justify-between border-b px-4 hover:cursor-pointer"
+          class="border-default hover:bg-hover-default flex min-h-16 items-center justify-between gap-3 border-b px-4 hover:cursor-pointer"
           {...$option({ value: model, label: model.nickname ?? undefined })}
           use:option
         >
-          <ModelNameAndVendor model={model as T}></ModelNameAndVendor>
-          <div class="check {$isSelected(model) ? 'block' : 'hidden'}">
-            <IconCheck class="text-positive-default" />
+          <ModelNameAndVendor model={model as T} descriptionMode="non-tabbable"
+          ></ModelNameAndVendor>
+          <div class="flex items-center gap-3">
+            {#if showCost}
+              <ModelCostBadge model={asCostModel(model as T)} dense />
+            {/if}
+            <div class="check {$isSelected(model) ? 'block' : 'hidden'}">
+              <IconCheck class="text-positive-default" />
+            </div>
           </div>
         </div>
       {/each}
@@ -162,13 +181,18 @@
   {:else}
     {#each sortedAvailableModels as model (model.id)}
       <div
-        class="border-default hover:bg-hover-default flex min-h-16 items-center justify-between border-b px-4 hover:cursor-pointer"
+        class="border-default hover:bg-hover-default flex min-h-16 items-center justify-between gap-3 border-b px-4 hover:cursor-pointer"
         {...$option({ value: model, label: model.nickname ?? undefined })}
         use:option
       >
-        <ModelNameAndVendor {model}></ModelNameAndVendor>
-        <div class="check {$isSelected(model) ? 'block' : 'hidden'}">
-          <IconCheck class="text-positive-default" />
+        <ModelNameAndVendor {model} descriptionMode="non-tabbable"></ModelNameAndVendor>
+        <div class="flex items-center gap-3">
+          {#if showCost}
+            <ModelCostBadge model={asCostModel(model)} dense />
+          {/if}
+          <div class="check {$isSelected(model) ? 'block' : 'hidden'}">
+            <IconCheck class="text-positive-default" />
+          </div>
         </div>
       </div>
     {/each}

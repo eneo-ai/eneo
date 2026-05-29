@@ -3,7 +3,7 @@
 import asyncio
 import tempfile
 import wave
-from collections.abc import AsyncIterator, Generator
+from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import IO
@@ -60,7 +60,7 @@ def _to_wav(filepath: str) -> IO[bytes]:
 
 
 @asynccontextmanager
-async def to_wav(filepath: str) -> AsyncIterator["AudioFile"]:
+async def to_wav(filepath: str) -> AsyncGenerator["AudioFile", None]:
     tmp_file = await asyncio.to_thread(_to_wav, filepath)
 
     try:
@@ -130,7 +130,7 @@ class AudioFile:
         return temp_files
 
     @asynccontextmanager
-    async def asplit_file(self, seconds: int) -> AsyncIterator[list[Path]]:
+    async def asplit_file(self, seconds: int) -> AsyncGenerator[list[Path], None]:
         logger.debug("Splitting the file")
 
         temp_files = await asyncio.to_thread(self._split_file, seconds)

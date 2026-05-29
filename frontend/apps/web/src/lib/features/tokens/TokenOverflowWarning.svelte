@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { m } from "$lib/paraglide/messages";
+
   interface Props {
     overflowTokens: number;
   }
@@ -10,11 +12,11 @@
 </script>
 
 <div class="flex max-w-xs flex-col gap-2 p-1 text-sm">
-  <div class="font-semibold text-white">Context Limit Exceeded</div>
+  <div class="font-semibold text-white">{m.token_context_limit_exceeded()}</div>
   <hr class="border-white/20" />
   <p class="leading-snug text-slate-300">
-    You are over the limit by
+    {m.token_over_limit_prefix()}
     <strong class="text-negative-default font-bold">{formattedOverflow}</strong>
-    tokens. Older messages or file content may be truncated.
+    {m.token_over_limit_suffix()}
   </p>
 </div>
