@@ -151,12 +151,50 @@ def test_prompt_hash_changes_when_allowed_slot_values_change() -> None:
     changed_hash = slot_classification_prompt_hash(
         text="Sammanfatta ärendet",
         ui_language="sv",
-        allowed_slot_values={
-            "terminal_output": {"pdf_document", "structured_text"}
-        },
+        allowed_slot_values={"terminal_output": {"pdf_document", "structured_text"}},
     )
 
     assert changed_hash != base_hash
+
+
+def test_prompt_hash_changes_when_classification_bias_is_present() -> None:
+    allowed = {"terminal_output": {"docx_document", "structured_text"}}
+    base_hash = slot_classification_prompt_hash(
+        text="en fil jag kan ladda ner",
+        ui_language="sv",
+        allowed_slot_values=allowed,
+    )
+
+    biased_hash = slot_classification_prompt_hash(
+        text="en fil jag kan ladda ner",
+        ui_language="sv",
+        allowed_slot_values=allowed,
+        bias=classifier.SlotClassificationBias(
+            target_slot_name="terminal_output",
+            asked_question_id="final_output_mode",
+            latest_user_answer="en fil jag kan ladda ner",
+        ),
+    )
+
+    # A biased targeted answer must not reuse the unbiased aggregate cache entry.
+    assert biased_hash != base_hash
+
+
+def test_classification_prompt_emphasizes_the_biased_target_slot() -> None:
+    messages = classifier._build_slot_classification_prompt(
+        text="en fil jag kan ladda ner",
+        allowed_slot_values={"terminal_output": frozenset({"docx_document"})},
+        ui_language="sv",
+        bias=classifier.SlotClassificationBias(
+            target_slot_name="terminal_output",
+            asked_question_id="final_output_mode",
+            latest_user_answer="en fil jag kan ladda ner",
+        ),
+    )
+
+    user_prompt = messages[-1]["content"]
+    assert "terminal_output" in user_prompt
+    assert "en fil jag kan ladda ner" in user_prompt
 
 
 @pytest.mark.asyncio

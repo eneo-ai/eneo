@@ -140,8 +140,42 @@ def _question_id_from_legacy_tool_calls(
     return None
 
 
+def last_answered_question(
+    conversation: Sequence[ConversationMessage | Mapping[str, Any]],
+) -> tuple[str, str] | None:
+    """The most recently asked question the user has since replied to in text.
+
+    Returns ``(question_id, latest_user_answer)`` when the last assistant
+    question is followed by a free-text user reply, so targeted slot
+    classification can bias toward that question's slot. Returns ``None`` when no
+    question was asked, the latest turn is still the question, or the reply
+    carried no free text.
+    """
+    last_question_id: str | None = None
+    latest_answer: str | None = None
+    for message in conversation:
+        question_id = assistant_question_id(message)
+        if question_id is not None:
+            last_question_id = question_id
+            latest_answer = None
+            continue
+        if last_question_id is None or not _is_user_evidence(message):
+            continue
+        content = (
+            message.content
+            if isinstance(message, ConversationMessage)
+            else message.get("content")
+        )
+        if isinstance(content, str) and content.strip():
+            latest_answer = content.strip()
+    if last_question_id is None or latest_answer is None:
+        return None
+    return last_question_id, latest_answer
+
+
 __all__ = [
     "AskedQuestionState",
     "assistant_question_id",
     "derive_asked_question_state",
+    "last_answered_question",
 ]

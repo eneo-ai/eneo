@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -24,7 +25,11 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
 )
+from intric.flows.ai_builder.ai_builder_question_state import (
+    last_answered_question,
+)
 from intric.flows.ai_builder.ai_builder_slot_classifier import (
+    SlotClassificationBias,
     SlotClassificationResult,
     classify_slots,
     slot_classification_prompt_hash,
@@ -35,6 +40,9 @@ from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     llm_resolvable_slot_values_for_state,
     merge_llm_resolved_slots,
+)
+from intric.flows.ai_builder.question_catalog import (
+    slot_name_for_legacy_question_id,
 )
 from intric.flows.domain.flow import Flow
 
@@ -108,6 +116,30 @@ async def analyze_discovery_runtime(
     )
 
 
+def _targeted_classification_bias(
+    conversation: list[ConversationMessage],
+    allowed_slot_values: Mapping[str, Collection[str]],
+) -> SlotClassificationBias | None:
+    """Bias classification toward the slot the user just answered, when unresolved.
+
+    Only fires when the user replied with free text to the last asked question
+    and that slot is still being classified, so a previous aggregate result is
+    not reused for a targeted reply.
+    """
+    answered = last_answered_question(conversation)
+    if answered is None:
+        return None
+    asked_question_id, latest_answer = answered
+    target_slot = slot_name_for_legacy_question_id(asked_question_id)
+    if target_slot not in allowed_slot_values:
+        return None
+    return SlotClassificationBias(
+        target_slot_name=target_slot,
+        asked_question_id=asked_question_id,
+        latest_user_answer=latest_answer,
+    )
+
+
 async def build_runtime_discovery_context(
     conversation: list[ConversationMessage],
     *,
@@ -139,6 +171,7 @@ async def build_runtime_discovery_context(
     if not allowed_values:
         return RuntimeDiscoveryContext(planning_state=state)
 
+    bias = _targeted_classification_bias(conversation, allowed_values)
     result = await classify_slots(
         litellm_client=litellm_client,
         litellm_model=litellm_model,
@@ -147,6 +180,7 @@ async def build_runtime_discovery_context(
         allowed_slot_values=allowed_values,
         tenant_id=tenant_id,
         ui_language=ui_language,
+        bias=bias,
     )
     if result is None:
         return RuntimeDiscoveryContext(planning_state=state)
@@ -155,6 +189,7 @@ async def build_runtime_discovery_context(
         text=text,
         ui_language=ui_language,
         allowed_slot_values=allowed_values,
+        bias=bias,
     )
     merge_llm_resolved_slots(state, result, prompt_hash=prompt_hash)
     apply_policy_defaults_from_resolved_slots(state, freeform_text=text)

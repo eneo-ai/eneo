@@ -37,6 +37,20 @@ class SlotClassificationResult:
     cached: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class SlotClassificationBias:
+    """Sharpens classification toward the slot the user was just asked about.
+
+    When the user has answered a specific clarification question, the classifier
+    should prioritize resolving that slot from the (possibly indirect) latest
+    reply instead of weighting the whole conversation evenly.
+    """
+
+    target_slot_name: str
+    asked_question_id: str
+    latest_user_answer: str
+
+
 async def classify_slots(
     *,
     litellm_client: Any,
@@ -46,6 +60,7 @@ async def classify_slots(
     allowed_slot_values: Mapping[str, Collection[str]],
     tenant_id: UUID,
     ui_language: str | None = None,
+    bias: SlotClassificationBias | None = None,
 ) -> SlotClassificationResult | None:
     slot_values = _normalize_allowed_slot_values(allowed_slot_values)
     if not text.strip() or not slot_values:
@@ -56,6 +71,7 @@ async def classify_slots(
         text=text,
         ui_language=ui_language,
         allowed_slot_values=slot_values,
+        bias=bias,
     )
     cached = _SLOT_CLASSIFICATION_CACHE.get(cache_key)
     if cached is not None:
@@ -82,6 +98,7 @@ async def classify_slots(
                 text=text,
                 allowed_slot_values=slot_values,
                 ui_language=ui_language,
+                bias=bias,
             ),
             stream=False,
             drop_params=True,
@@ -209,14 +226,28 @@ def slot_classification_prompt_hash(
     text: str,
     ui_language: str | None,
     allowed_slot_values: Mapping[str, Collection[str]],
+    bias: SlotClassificationBias | None = None,
 ) -> str:
     return hashlib.sha256(
         _classification_cache_payload(
             text=text,
             ui_language=ui_language,
             allowed_slot_values=allowed_slot_values,
+            bias=bias,
         ).encode("utf-8")
     ).hexdigest()
+
+
+def _bias_prompt_section(bias: SlotClassificationBias | None) -> str:
+    if bias is None:
+        return ""
+    return (
+        f"The user was just asked the '{bias.asked_question_id}' question "
+        f"(slot `{bias.target_slot_name}`). Their latest reply: "
+        f'"{bias.latest_user_answer}". Resolve `{bias.target_slot_name}` from this '
+        "reply by meaning, even if phrased indirectly, before weighing other "
+        "slots.\n\n"
+    )
 
 
 def _build_slot_classification_prompt(
@@ -224,6 +255,7 @@ def _build_slot_classification_prompt(
     text: str,
     allowed_slot_values: Mapping[str, frozenset[str]],
     ui_language: str | None,
+    bias: SlotClassificationBias | None = None,
 ) -> list[dict[str, str]]:
     dimension_lines = [
         f"- {slot_name}: {', '.join(sorted(values))}"
@@ -262,6 +294,7 @@ def _build_slot_classification_prompt(
     )
     user = (
         f"{language_hint}\n\n"
+        f"{_bias_prompt_section(bias)}"
         "Conversation summary:\n"
         f"{text}\n\n"
         "Unresolved slots and allowed values:\n"
@@ -285,20 +318,24 @@ def _classification_cache_payload(
     text: str,
     ui_language: str | None,
     allowed_slot_values: Mapping[str, Collection[str]],
+    bias: SlotClassificationBias | None = None,
 ) -> str:
     normalized_values = _normalize_allowed_slot_values(allowed_slot_values)
-    return json.dumps(
-        {
-            "allowed_slot_values": {
-                slot_name: sorted(values)
-                for slot_name, values in sorted(normalized_values.items())
-            },
-            "text": text,
-            "ui_language": ui_language,
+    payload: dict[str, object] = {
+        "allowed_slot_values": {
+            slot_name: sorted(values)
+            for slot_name, values in sorted(normalized_values.items())
         },
-        ensure_ascii=False,
-        sort_keys=True,
-    )
+        "text": text,
+        "ui_language": ui_language,
+    }
+    if bias is not None:
+        payload["bias"] = {
+            "target_slot_name": bias.target_slot_name,
+            "asked_question_id": bias.asked_question_id,
+            "latest_user_answer": bias.latest_user_answer,
+        }
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
 def _normalize_allowed_slot_values(
