@@ -28,6 +28,10 @@ class ActionType(str, Enum):
     API_KEY_USED = "api_key_used"
     API_KEY_AUTH_FAILED = "api_key_auth_failed"
     TENANT_POLICY_UPDATED = "tenant_policy_updated"
+    GOVERNANCE_POLICY_UPDATED = "governance_policy_updated"
+    PROMPT_LIBRARY_ENTRY_CREATED = "prompt_library_entry_created"
+    PROMPT_LIBRARY_ENTRY_UPDATED = "prompt_library_entry_updated"
+    PROMPT_LIBRARY_ENTRY_DELETED = "prompt_library_entry_deleted"
     MODULE_ADDED = "module_added"
     MODULE_ADDED_TO_TENANT = "module_added_to_tenant"
 

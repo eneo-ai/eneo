@@ -12,7 +12,10 @@ from intric.main.exceptions import (
     NotFoundException,
 )
 from intric.main.models import NOT_PROVIDED, NotProvided
-from intric.prompt_library.domain.prompt_library import PromptLibraryEntry
+from intric.prompt_library.domain.prompt_library import (
+    PromptLibraryEntry,
+    PromptLibraryVersion,
+)
 from intric.prompt_library.domain.prompt_library_repo import PromptLibraryRepo
 from intric.roles.permissions import Permission, validate_permission
 from intric.users.user import UserInDB
@@ -68,6 +71,7 @@ class PromptLibraryService:
             name=name,
             description=description,
             text=text,
+            current_version=1,
             created_by_user_id=self.user.id,
             created_at=None,
             updated_at=None,
@@ -91,8 +95,34 @@ class PromptLibraryService:
             ):
                 raise BadRequestException(f"A prompt named '{name}' already exists")
 
+        old_name = entry.name
+        old_description = entry.description
+        old_text = entry.text
+        old_version = entry.current_version
         entry.update(name=name, description=description, text=text)
-        return await self.repo.update(entry)
+
+        create_version = (
+            entry.name != old_name
+            or entry.description != old_description
+            or entry.text != old_text
+        )
+        if create_version:
+            entry.current_version = old_version + 1
+
+        return await self.repo.update(
+            entry,
+            create_version=create_version,
+            version_created_by_user_id=self.user.id,
+        )
+
+    async def list_versions(self, id: UUID) -> list[PromptLibraryVersion]:
+        validate_permission(self.user, Permission.ADMIN)
+        entry = await self.get_entry(id)
+        assert entry.id is not None
+        return await self.repo.list_versions(
+            prompt_library_id=entry.id,
+            tenant_id=self.user.tenant_id,
+        )
 
     async def delete_entry(self, id: UUID) -> None:
         validate_permission(self.user, Permission.ADMIN)

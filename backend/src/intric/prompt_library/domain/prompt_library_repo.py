@@ -6,7 +6,10 @@
 from typing import Protocol
 from uuid import UUID
 
-from intric.prompt_library.domain.prompt_library import PromptLibraryEntry
+from intric.prompt_library.domain.prompt_library import (
+    PromptLibraryEntry,
+    PromptLibraryVersion,
+)
 
 
 class PromptLibraryRepo(Protocol):
@@ -16,7 +19,17 @@ class PromptLibraryRepo(Protocol):
 
     async def list_by_tenant(self, tenant_id: UUID) -> list[PromptLibraryEntry]: ...
 
-    async def update(self, entry: PromptLibraryEntry) -> PromptLibraryEntry: ...
+    async def update(
+        self,
+        entry: PromptLibraryEntry,
+        *,
+        create_version: bool,
+        version_created_by_user_id: UUID,
+    ) -> PromptLibraryEntry: ...
+
+    async def list_versions(
+        self, prompt_library_id: UUID, tenant_id: UUID
+    ) -> list[PromptLibraryVersion]: ...
 
     async def delete(self, id: UUID, tenant_id: UUID) -> None: ...
 

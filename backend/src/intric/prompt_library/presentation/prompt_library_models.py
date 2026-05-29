@@ -28,6 +28,7 @@ class PromptLibraryEntryPublic(BaseModel):
     name: str
     description: str | None
     text: str
+    current_version: int
     created_by_user_id: UUID
     created_at: datetime
     updated_at: datetime
@@ -39,6 +40,19 @@ class PromptLibraryEntrySparse(BaseModel):
     id: UUID
     name: str
     description: str | None
+    current_version: int
+    created_by_user_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class PromptLibraryVersionPublic(BaseModel):
+    id: UUID
+    prompt_library_id: UUID
+    version: int
+    name: str
+    description: str | None
+    text: str
     created_by_user_id: UUID
     created_at: datetime
     updated_at: datetime

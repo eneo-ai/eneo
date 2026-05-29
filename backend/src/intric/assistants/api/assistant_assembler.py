@@ -101,6 +101,13 @@ class AssistantAssembler:
                 if effective_config.locked_model is not None
                 else None
             ),
+            default_model=(
+                CompletionModelAssembler.from_completion_model_to_sparse(
+                    completion_model=effective_config.policy_default_model
+                )
+                if effective_config.policy_default_model is not None
+                else None
+            ),
             mcp_enforced=effective_config.mcp_enforced,
             available_mcp_servers=[
                 cast(

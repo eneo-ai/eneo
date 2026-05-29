@@ -114,6 +114,7 @@ class EffectiveConfigPublic(BaseModel):
     models_enforced: bool
     available_models: list[CompletionModelSparse]
     locked_model: CompletionModelSparse | None
+    default_model: CompletionModelSparse | None
     mcp_enforced: bool
     available_mcp_servers: list[MCPServerPublicDict] = Field(
         default_factory=_empty_mcp_server_public_dict_list  # type: ignore[arg-type]

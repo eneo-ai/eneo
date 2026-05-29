@@ -5582,6 +5582,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/prompt-library/{id}/versions/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List Prompt Library Entry Versions */
+    get: operations["list_prompt_library_entry_versions_api_v1_admin_prompt_library__id__versions__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/governance-policy/": {
     parameters: {
       query?: never;
@@ -10096,6 +10113,7 @@ export interface components {
       /** Available Models */
       available_models: components["schemas"]["CompletionModelSparse"][];
       locked_model: components["schemas"]["CompletionModelSparse"] | null;
+      default_model: components["schemas"]["CompletionModelSparse"] | null;
       /** Mcp Enforced */
       mcp_enforced: boolean;
       /** Available Mcp Servers */
@@ -12841,6 +12859,19 @@ export interface components {
        */
       readonly count: number;
     };
+    /** PaginatedResponse[PromptLibraryVersionPublic] */
+    PaginatedResponse_PromptLibraryVersionPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["PromptLibraryVersionPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** PaginatedResponse[PromptSparse] */
     PaginatedResponse_PromptSparse_: {
       /**
@@ -13560,6 +13591,8 @@ export interface components {
       description: string | null;
       /** Text */
       text: string;
+      /** Current Version */
+      current_version: number;
       /**
        * Created By User Id
        * Format: uuid
@@ -13590,6 +13623,44 @@ export interface components {
       name: string;
       /** Description */
       description: string | null;
+      /** Current Version */
+      current_version: number;
+      /**
+       * Created By User Id
+       * Format: uuid
+       */
+      created_by_user_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /** PromptLibraryVersionPublic */
+    PromptLibraryVersionPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Prompt Library Id
+       * Format: uuid
+       */
+      prompt_library_id: string;
+      /** Version */
+      version: number;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      /** Text */
+      text: string;
       /**
        * Created By User Id
        * Format: uuid
@@ -33460,6 +33531,55 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PromptLibraryEntryPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_prompt_library_entry_versions_api_v1_admin_prompt_library__id__versions__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_PromptLibraryVersionPublic_"];
         };
       };
       /** @description Forbidden */

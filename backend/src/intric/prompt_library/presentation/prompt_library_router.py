@@ -8,13 +8,18 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.main.container.container import Container
-from intric.main.models import PaginatedResponse
+from intric.main.models import PaginatedResponse, is_provided
+from intric.prompt_library.domain.prompt_library import PromptLibraryEntry
 from intric.prompt_library.presentation.prompt_library_models import (
     PromptLibraryEntryCreate,
     PromptLibraryEntryPublic,
     PromptLibraryEntrySparse,
     PromptLibraryEntryUpdate,
+    PromptLibraryVersionPublic,
 )
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
@@ -22,6 +27,35 @@ from intric.server.protocol import responses
 router = APIRouter()
 
 _ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
+
+
+def _entry_extra(entry: PromptLibraryEntry) -> dict[str, object]:
+    return {
+        "current_version": entry.current_version,
+        "text_length": len(entry.text),
+        "has_description": entry.description is not None,
+    }
+
+
+def _update_changes(
+    before: PromptLibraryEntry, after: PromptLibraryEntry
+) -> dict[str, object]:
+    changes: dict[str, object] = {}
+    if before.name != after.name:
+        changes["name"] = {"old": before.name, "new": after.name}
+    if before.description != after.description:
+        changes["description_changed"] = True
+    if before.text != after.text:
+        changes["text"] = {
+            "old_length": len(before.text),
+            "new_length": len(after.text),
+        }
+    if before.current_version != after.current_version:
+        changes["current_version"] = {
+            "old": before.current_version,
+            "new": after.current_version,
+        }
+    return changes
 
 
 @router.get(
@@ -55,6 +89,21 @@ async def create_prompt_library_entry(
         description=payload.description,
         text=payload.text,
     )
+    assert entry.id is not None
+    user = container.user()
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.PROMPT_LIBRARY_ENTRY_CREATED,
+        entity_type=EntityType.PROMPT_LIBRARY_ENTRY,
+        entity_id=entry.id,
+        description=f"Created prompt library entry '{entry.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=entry,
+            extra=_entry_extra(entry),
+        ),
+    )
     return container.prompt_library_assembler().to_public(entry)
 
 
@@ -69,6 +118,20 @@ async def get_prompt_library_entry(id: UUID, container: _ContainerWithUser):
     return container.prompt_library_assembler().to_public(entry)
 
 
+@router.get(
+    "/{id}/versions/",
+    response_model=PaginatedResponse[PromptLibraryVersionPublic],
+    responses=responses.get_responses([403, 404]),
+)
+async def list_prompt_library_entry_versions(id: UUID, container: _ContainerWithUser):
+    service = container.prompt_library_service()
+    versions = await service.list_versions(id)
+    assembler = container.prompt_library_assembler()
+    return PaginatedResponse(
+        items=[assembler.version_to_public(version) for version in versions]
+    )
+
+
 @router.put(
     "/{id}/",
     response_model=PromptLibraryEntryPublic,
@@ -80,12 +143,34 @@ async def update_prompt_library_entry(
     container: _ContainerWithUser,
 ):
     service = container.prompt_library_service()
+    before = await service.get_entry(id)
     entry = await service.update_entry(
         id,
         name=payload.name,
         description=payload.description,
         text=payload.text,
     )
+    assert entry.id is not None
+    changes = _update_changes(before, entry)
+    if changes:
+        user = container.user()
+        await container.audit_service().log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.PROMPT_LIBRARY_ENTRY_UPDATED,
+            entity_type=EntityType.PROMPT_LIBRARY_ENTRY,
+            entity_id=entry.id,
+            description=f"Updated prompt library entry '{entry.name}'",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=entry,
+                changes=changes,
+                extra={
+                    **_entry_extra(entry),
+                    "description_was_provided": is_provided(payload.description),
+                },
+            ),
+        )
     return container.prompt_library_assembler().to_public(entry)
 
 
@@ -96,4 +181,19 @@ async def update_prompt_library_entry(
 )
 async def delete_prompt_library_entry(id: UUID, container: _ContainerWithUser):
     service = container.prompt_library_service()
+    entry = await service.get_entry(id)
     await service.delete_entry(id)
+    user = container.user()
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.PROMPT_LIBRARY_ENTRY_DELETED,
+        entity_type=EntityType.PROMPT_LIBRARY_ENTRY,
+        entity_id=id,
+        description=f"Deleted prompt library entry '{entry.name}'",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=entry,
+            extra=_entry_extra(entry),
+        ),
+    )

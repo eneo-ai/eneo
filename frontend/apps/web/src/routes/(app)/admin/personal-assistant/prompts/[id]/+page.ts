@@ -4,8 +4,9 @@
     Licensed under the MIT License.
 */
 
-export const load = async (event) => {
-  const { intric } = await event.parent();
-  const entry = await intric.promptLibrary.get({ id: event.params.id });
-  return { entry };
+import { redirect } from "@sveltejs/kit";
+import { resolve } from "$app/paths";
+
+export const load = ({ params }) => {
+  throw redirect(307, resolve(`/admin/prompt-library/${params.id}`));
 };

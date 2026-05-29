@@ -40,6 +40,7 @@ def _entry(tenant_id, name="Standard"):
         name=name,
         description=None,
         text="text",
+        current_version=1,
         created_by_user_id=uuid4(),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -102,6 +103,7 @@ async def test_create_calls_repo_with_user_id_and_tenant_id():
     assert len(captured) == 1
     assert captured[0].tenant_id == tenant_id
     assert captured[0].created_by_user_id == user.id
+    assert captured[0].current_version == 1
 
 
 @pytest.mark.asyncio
@@ -126,6 +128,48 @@ async def test_update_rejects_duplicate_name():
 
     with pytest.raises(BadRequestException):
         await service.update_entry(target.id, name="New")
+
+
+@pytest.mark.asyncio
+async def test_update_creates_new_version_when_text_changes():
+    tenant_id = uuid4()
+    target = _entry(tenant_id, name="Old")
+    user = _admin_user(tenant_id)
+    repo = AsyncMock()
+    repo.get.return_value = target
+    repo.exists_by_name.return_value = False
+    repo.update.side_effect = lambda entry, **_: entry
+    service = PromptLibraryService(user=user, repo=repo)
+
+    result = await service.update_entry(target.id, text="new text")
+
+    assert result.current_version == 2
+    repo.update.assert_awaited_once_with(
+        target,
+        create_version=True,
+        version_created_by_user_id=user.id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_creates_new_version_when_metadata_changes():
+    tenant_id = uuid4()
+    target = _entry(tenant_id, name="Old")
+    user = _admin_user(tenant_id)
+    repo = AsyncMock()
+    repo.get.return_value = target
+    repo.exists_by_name.return_value = False
+    repo.update.side_effect = lambda entry, **_: entry
+    service = PromptLibraryService(user=user, repo=repo)
+
+    result = await service.update_entry(target.id, description="description")
+
+    assert result.current_version == 2
+    repo.update.assert_awaited_once_with(
+        target,
+        create_version=True,
+        version_created_by_user_id=user.id,
+    )
 
 
 @pytest.mark.asyncio

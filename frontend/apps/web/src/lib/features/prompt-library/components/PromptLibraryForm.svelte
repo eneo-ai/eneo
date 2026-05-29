@@ -81,7 +81,11 @@
   <Card.Content>
     <form onsubmit={submit} class="space-y-4">
       <div class="space-y-2">
-        <Label for="name">{m.name()}</Label>
+        <Label for="name">
+          {m.name()}
+          <span class="text-destructive" aria-hidden="true">*</span>
+          <span class="sr-only">{m.field_required()}</span>
+        </Label>
         <Input
           id="name"
           bind:value={name}
@@ -101,7 +105,11 @@
       </div>
 
       <div class="space-y-2">
-        <Label for="text">{m.governance_prompt_form_text_label()}</Label>
+        <Label for="text">
+          {m.governance_prompt_form_text_label()}
+          <span class="text-destructive" aria-hidden="true">*</span>
+          <span class="sr-only">{m.field_required()}</span>
+        </Label>
         <Textarea id="text" bind:value={text} rows={12} required />
         <p class="text-muted text-xs">
           {m.governance_prompt_form_characters({ count: text.length })}

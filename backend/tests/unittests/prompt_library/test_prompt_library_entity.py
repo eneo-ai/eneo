@@ -14,6 +14,7 @@ def _entry() -> PromptLibraryEntry:
         name="Standard",
         description="desc",
         text="You are a helpful assistant.",
+        current_version=1,
         created_by_user_id=uuid4(),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),

@@ -222,10 +222,15 @@ class AssistantService:
         assistant: Assistant,
         completion_model_id: UUID | None,
         mcp_server_ids: list[UUID] | None,
+        prompt_changing: bool = False,
         effective_config: "EffectiveConfig | None | NotProvided" = NOT_PROVIDED,
     ) -> None:
         # Nothing to validate → skip resolving the policy (and its DB round-trip).
-        if completion_model_id is None and mcp_server_ids is None:
+        if (
+            completion_model_id is None
+            and mcp_server_ids is None
+            and not prompt_changing
+        ):
             return
 
         # _resolve_effective_config owns the is_default / personal-space / no-service
@@ -237,6 +242,11 @@ class AssistantService:
             )
         if effective_config is None:
             return
+
+        if prompt_changing and effective_config.prompt_enforced:
+            raise BadRequestException(
+                "Prompt is locked by personal assistant governance policy",
+            )
 
         if completion_model_id is not None and effective_config.models_enforced:
             current_model_id = (
@@ -453,6 +463,20 @@ class AssistantService:
                 },
             )
 
+        update_effective_config: "EffectiveConfig | None | NotProvided" = NOT_PROVIDED
+        if prompt is not None:
+            update_effective_config = await self._resolve_effective_config(
+                space=space, assistant=assistant
+            )
+            await self._ensure_governance_policy_allows_update(
+                space=space,
+                assistant=assistant,
+                completion_model_id=None,
+                mcp_server_ids=None,
+                prompt_changing=True,
+                effective_config=update_effective_config,
+            )
+
         prompt_obj: Prompt | None = None
         if prompt is not None:
             # Create the prompt if the prompt contains text
@@ -505,7 +529,9 @@ class AssistantService:
             ]
 
         # Validate MCP server assignments against tenant + space boundaries.
-        mcp_effective_config: "EffectiveConfig | None | NotProvided" = NOT_PROVIDED
+        mcp_effective_config: "EffectiveConfig | None | NotProvided" = (
+            update_effective_config
+        )
         if mcp_server_ids is not None:
             import sqlalchemy as sa
 
@@ -541,9 +567,10 @@ class AssistantService:
             # Personal spaces are seeded with tenant MCP servers only at creation
             # time and are not back-filled when a server is enabled later, so the
             # space-assignment check would wrongly reject a policy-allowed server.
-            mcp_effective_config = await self._resolve_effective_config(
-                space=space, assistant=assistant
-            )
+            if isinstance(mcp_effective_config, NotProvided):
+                mcp_effective_config = await self._resolve_effective_config(
+                    space=space, assistant=assistant
+                )
             mcp_governed = (
                 mcp_effective_config is not None and mcp_effective_config.mcp_enforced
             )
@@ -574,6 +601,7 @@ class AssistantService:
             assistant=assistant,
             completion_model_id=completion_model_id,
             mcp_server_ids=mcp_server_ids,
+            prompt_changing=False,
             effective_config=mcp_effective_config,
         )
 
@@ -1196,57 +1224,9 @@ class AssistantService:
         cleaned_question = clean_intric_tag(question)
         files = await self.file_service.get_files_by_ids(file_ids=file_ids or [])
 
-        if session_id is not None:
-            if group_chat_id is not None:
-                session = await self.session_service.get_session_by_uuid(
-                    id=session_id, group_chat_id=group_chat_id
-                )
-            else:
-                session = await self.session_service.get_session_by_uuid(
-                    id=session_id, assistant_id=assistant_id
-                )
-        else:
-            # Set the name as the question or the filenames
-            name = question
-            if not name and files:
-                name = " ".join(file.name for file in files)
-            if group_chat_id is not None:
-                session = await self.session_service.create_session(
-                    name=name, group_chat_id=group_chat_id
-                )
-            else:
-                session = await self.session_service.create_session(
-                    name=name, assistant_id=active_assistant.id
-                )
-
-        assert session is not None
-        for _question in session.questions:
-            _question.question = clean_intric_tag(_question.question)
-
-        # Persist a placeholder Question row BEFORE the LLM stream begins. This commits
-        # with the router's setup transaction (conversations_router.py line 300/328), so
-        # the user's message is durable even if the stream is aborted mid-flight.
-        question_id = await self.session_service.create_question_placeholder(
-            question=question,
-            session=session,
-            files=files,
-            assistant_id=assistant_to_ask.id,
-            completion_model=cast(
-                "AICompletionModel | None", assistant_to_ask.completion_model
-            ),
-        )
-
-        if use_web_search and version == 2:
-            web_search = await self.web_search
-            web_search_results = await web_search.search(search_query=question)
-        else:
-            web_search_results = []
-
         # Personal assistant governance runtime enforcement.
-        # If the assistant is the default assistant in a personal space and
-        # tenant policy enforcement is active, override model / MCP / prompt at
-        # ask-time. UI filtering alone is not enough — stale entity state or
-        # direct API callers could otherwise bypass the policy.
+        # Resolve before creating a session/question placeholder so invalid
+        # policy states fail without leaving empty conversation history behind.
         completion_model_override: "CompletionModel | None" = None
         mcp_servers_override: "list[MCPServer] | None" = None
         prompt_override: str | None = None
@@ -1303,6 +1283,54 @@ class AssistantService:
         effective_completion_model = (
             completion_model_override or assistant_to_ask.completion_model
         )
+        if effective_completion_model is None:
+            raise BadRequestException(
+                "No completion model configured for this conversation.",
+            )
+
+        if session_id is not None:
+            if group_chat_id is not None:
+                session = await self.session_service.get_session_by_uuid(
+                    id=session_id, group_chat_id=group_chat_id
+                )
+            else:
+                session = await self.session_service.get_session_by_uuid(
+                    id=session_id, assistant_id=assistant_id
+                )
+        else:
+            # Set the name as the question or the filenames
+            name = question
+            if not name and files:
+                name = " ".join(file.name for file in files)
+            if group_chat_id is not None:
+                session = await self.session_service.create_session(
+                    name=name, group_chat_id=group_chat_id
+                )
+            else:
+                session = await self.session_service.create_session(
+                    name=name, assistant_id=active_assistant.id
+                )
+
+        assert session is not None
+        for _question in session.questions:
+            _question.question = clean_intric_tag(_question.question)
+
+        # Persist a placeholder Question row BEFORE the LLM stream begins. This commits
+        # with the router's setup transaction (conversations_router.py line 300/328), so
+        # the user's message is durable even if the stream is aborted mid-flight.
+        question_id = await self.session_service.create_question_placeholder(
+            question=question,
+            session=session,
+            files=files,
+            assistant_id=assistant_to_ask.id,
+            completion_model=cast("AICompletionModel", effective_completion_model),
+        )
+
+        if use_web_search and version == 2:
+            web_search = await self.web_search
+            web_search_results = await web_search.search(search_query=question)
+        else:
+            web_search_results = []
 
         response, datastore_result = await assistant_to_ask.ask(
             question=cleaned_question,
@@ -1321,7 +1349,6 @@ class AssistantService:
 
         # TODO: Separate the response based on stream true or false
 
-        assert effective_completion_model is not None
         answer = await self._handle_response(
             response=response,
             datastore_result=datastore_result,

@@ -8,7 +8,7 @@
   import { page } from "$app/stores";
   import { resolve } from "$app/paths";
   import { m } from "$lib/paraglide/messages";
-  import { SlidersHorizontal, BookText } from "lucide-svelte";
+  import { SlidersHorizontal } from "lucide-svelte";
 
   let { children } = $props();
 
@@ -24,13 +24,6 @@
       hint: m.governance_tab_configuration_hint(),
       icon: SlidersHorizontal,
       matches: (p: string) => p.startsWith(resolve("/admin/personal-assistant/configuration"))
-    },
-    {
-      href: "/admin/personal-assistant/prompts",
-      label: m.governance_tab_prompts(),
-      hint: m.governance_tab_prompts_hint(),
-      icon: BookText,
-      matches: (p: string) => p.startsWith(resolve("/admin/personal-assistant/prompts"))
     }
   ] as const);
 </script>

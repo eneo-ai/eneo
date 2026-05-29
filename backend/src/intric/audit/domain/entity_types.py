@@ -11,6 +11,8 @@ class EntityType(str, Enum):
     FILE = "file"
     WEBSITE = "website"
     TENANT_SETTINGS = "tenant_settings"
+    GOVERNANCE_POLICY = "governance_policy"
+    PROMPT_LIBRARY_ENTRY = "prompt_library_entry"
     CREDENTIAL = "credential"
     FEDERATION_CONFIG = "federation_config"
     API_KEY = "api_key"

@@ -73,6 +73,10 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
         prompt_enforced=False,
         enforced_prompt_text=None,
     )
+    session_service = AsyncMock(
+        create_session=AsyncMock(return_value=session),
+        create_question_placeholder=AsyncMock(return_value=uuid4()),
+    )
 
     service = AssistantService(
         repo=AsyncMock(),
@@ -87,10 +91,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
         prompt_service=AsyncMock(),
         file_service=AsyncMock(get_files_by_ids=AsyncMock(return_value=[])),
         assistant_template_service=AsyncMock(),
-        session_service=AsyncMock(
-            create_session=AsyncMock(return_value=session),
-            create_question_placeholder=AsyncMock(return_value=uuid4()),
-        ),
+        session_service=session_service,
         actor_manager=MagicMock(
             get_space_actor_from_space=MagicMock(return_value=actor)
         ),
@@ -110,9 +111,83 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
         is TEST_MODEL_GPT4
     )
     assert result.completion_model.id == TEST_MODEL_GPT4.id
+    assert (
+        session_service.create_question_placeholder.await_args.kwargs[
+            "completion_model"
+        ]
+        is TEST_MODEL_GPT4
+    )
     effective_config_service.resolve_for.assert_awaited_once_with(
         assistant, space_is_personal=True
     )
+
+
+async def test_ask_rejects_empty_model_policy_before_creating_history():
+    assistant_id = uuid4()
+
+    assistant = MagicMock()
+    assistant.id = assistant_id
+    assistant.name = "Personal assistant"
+    assistant.description = None
+    assistant.is_default = True
+    assistant.completion_model = TEST_MODEL_CHATGPT
+    assistant.tool_assistants = []
+
+    space = MagicMock()
+    space.get_assistant.return_value = assistant
+    space.can_ask_assistant.return_value = None
+    space.is_personal.return_value = True
+
+    actor = MagicMock()
+    actor.can_read_assistant.return_value = True
+
+    effective_config_service = AsyncMock()
+    effective_config_service.resolve_for.return_value = SimpleNamespace(
+        models_enforced=True,
+        available_models=[],
+        policy_default_model=None,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+    )
+    session_service = AsyncMock(
+        create_session=AsyncMock(),
+        create_question_placeholder=AsyncMock(),
+    )
+
+    service = AssistantService(
+        repo=AsyncMock(),
+        space_repo=AsyncMock(get_space_by_assistant=AsyncMock(return_value=space)),
+        user=TEST_USER,
+        auth_service=MagicMock(),
+        service_repo=AsyncMock(),
+        step_repo=AsyncMock(),
+        completion_model_crud_service=AsyncMock(),
+        space_service=AsyncMock(),
+        factory=MagicMock(),
+        prompt_service=AsyncMock(),
+        file_service=AsyncMock(get_files_by_ids=AsyncMock(return_value=[])),
+        assistant_template_service=AsyncMock(),
+        session_service=session_service,
+        actor_manager=MagicMock(
+            get_space_actor_from_space=MagicMock(return_value=actor)
+        ),
+        integration_knowledge_repo=AsyncMock(),
+        completion_service=AsyncMock(),
+        references_service=AsyncMock(),
+        icon_repo=AsyncMock(),
+        effective_config_service=effective_config_service,
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="Personal assistant governance policy has no allowed models",
+    ):
+        await service.ask(question="hello", assistant_id=assistant_id)
+
+    session_service.create_session.assert_not_called()
+    session_service.create_question_placeholder.assert_not_called()
 
 
 async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
@@ -295,6 +370,37 @@ async def test_update_guard_rejects_disallowed_model_on_personal_default_assista
             assistant=assistant,
             completion_model_id=uuid4(),
             mcp_server_ids=None,
+        )
+
+
+async def test_update_guard_rejects_prompt_change_when_prompt_enforced():
+    effective_config_service = AsyncMock()
+    effective_config_service.resolve_for.return_value = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=True,
+    )
+    service = _service_with_effective_config(effective_config_service)
+
+    space = MagicMock()
+    space.is_personal.return_value = True
+    assistant = SimpleNamespace(
+        is_default=True,
+        completion_model=TEST_MODEL_CHATGPT,
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="Prompt is locked by personal assistant governance policy",
+    ):
+        await service._ensure_governance_policy_allows_update(
+            space=space,
+            assistant=assistant,
+            completion_model_id=None,
+            mcp_server_ids=None,
+            prompt_changing=True,
         )
 
 

@@ -100,6 +100,22 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "API-nyckelpolicy uppdaterad",
         "description_sv": "Loggar ändringar av API-nyckelpolicy per tenant",
     },
+    ActionType.GOVERNANCE_POLICY_UPDATED.value: {
+        "name_sv": "Styrningspolicy uppdaterad",
+        "description_sv": "Loggar ändringar av styrningspolicy för personlig assistent",
+    },
+    ActionType.PROMPT_LIBRARY_ENTRY_CREATED.value: {
+        "name_sv": "Promptbibliotekspost skapad",
+        "description_sv": "Loggar när en prompt skapas i promptbiblioteket",
+    },
+    ActionType.PROMPT_LIBRARY_ENTRY_UPDATED.value: {
+        "name_sv": "Promptbibliotekspost uppdaterad",
+        "description_sv": "Loggar ändringar av en prompt i promptbiblioteket",
+    },
+    ActionType.PROMPT_LIBRARY_ENTRY_DELETED.value: {
+        "name_sv": "Promptbibliotekspost raderad",
+        "description_sv": "Loggar när en prompt tas bort från promptbiblioteket",
+    },
     ActionType.MODULE_ADDED.value: {
         "name_sv": "Modul tillagd",
         "description_sv": "Loggar när en ny modul läggs till",

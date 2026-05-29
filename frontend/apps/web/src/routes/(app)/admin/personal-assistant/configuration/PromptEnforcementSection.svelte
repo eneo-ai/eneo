@@ -63,7 +63,7 @@
           {m.governance_prompt_library_empty()}
           <a
             class="text-accent-default mt-1 inline-block underline"
-            href={resolve("/admin/personal-assistant/prompts")}
+            href={resolve("/admin/prompt-library")}
           >
             {m.governance_prompt_create_in_library()}
           </a>

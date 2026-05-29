@@ -37,7 +37,10 @@
   let { servers, disabledServerIds, autoAcceptTools = $bindable() }: Props = $props();
 
   const total = $derived(servers.length);
-  const activeCount = $derived(total - disabledServerIds.size);
+  const disabledCount = $derived(
+    servers.filter((server) => disabledServerIds.has(server.id)).length
+  );
+  const activeCount = $derived(total - disabledCount);
 
   function setServer(id: string, on: boolean) {
     if (on) disabledServerIds.delete(id);

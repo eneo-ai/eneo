@@ -4,6 +4,7 @@ import { toastError } from "$lib/core/errors";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import { waitFor } from "$lib/core/waitFor";
+import { SvelteSet } from "svelte/reactivity";
 import {
   type ConversationSparse,
   type Assistant,
@@ -24,17 +25,17 @@ export type PendingToolApproval = {
 };
 
 export type ChatPartner = GroupChat | Assistant;
+type SparseCompletionModel = NonNullable<Assistant["completion_model"]>;
 
 export class ChatService {
   #chatPartner = $state<ChatPartner>() as ChatPartner; // Needs typecast to get rid of undefined
   partner = $derived(this.#chatPartner);
-  hasCompletionModel = $derived(
-    this.#chatPartner &&
-      ("completion_model" in this.#chatPartner
-        ? this.#chatPartner.completion_model !== null &&
-          this.#chatPartner.completion_model !== undefined
-        : "tools" in this.#chatPartner && this.#chatPartner.tools?.assistants?.length > 0)
-  );
+  hasCompletionModel = $derived.by(() => {
+    const partner = this.#chatPartner;
+    if (!partner) return false;
+    if ("completion_model" in partner) return this.#partnerEffectiveModel() !== undefined;
+    return "tools" in partner && partner.tools?.assistants?.length > 0;
+  });
   #intric: Intric;
   currentConversation = $state<Conversation>(emptyConversation());
   totalConversations = $state<number>(0);
@@ -117,23 +118,36 @@ export class ChatService {
       this.contextTokens + this.pendingInputTokens + this.pendingFileTokens > this.contextLimit
   );
 
-  // The current partner's own completion model — set only for single
-  // assistants (group chats carry no single model, so this is undefined and
-  // the caller falls back to the latest-message model).
-  #partnerModelTokenLimit(): number | undefined {
+  // The current partner's effective model — set only for single assistants
+  // (group chats carry no single model, so this is undefined and the caller
+  // falls back to the latest-message model). Mirrors backend governance
+  // resolution: keep an allowed current model, otherwise use policy default,
+  // then the first allowed model.
+  #partnerEffectiveModel(): SparseCompletionModel | undefined {
     const partner = this.#chatPartner;
-    if (partner && "completion_model" in partner) {
-      return partner.completion_model?.token_limit ?? undefined;
-    }
-    return undefined;
+    if (!partner || !("completion_model" in partner)) return undefined;
+
+    const current = partner.completion_model ?? undefined;
+    const effectiveConfig = partner.effective_config;
+    if (!effectiveConfig?.models_enforced) return current;
+
+    const allowedIds = new SvelteSet(effectiveConfig.available_models.map((model) => model.id));
+    if (current && allowedIds.has(current.id)) return current;
+
+    return (
+      effectiveConfig.default_model ??
+      effectiveConfig.locked_model ??
+      effectiveConfig.available_models[0] ??
+      undefined
+    );
+  }
+
+  #partnerModelTokenLimit(): number | undefined {
+    return this.#partnerEffectiveModel()?.token_limit ?? undefined;
   }
 
   #partnerModelName(): string | undefined {
-    const partner = this.#chatPartner;
-    if (partner && "completion_model" in partner) {
-      return partner.completion_model?.name ?? undefined;
-    }
-    return undefined;
+    return this.#partnerEffectiveModel()?.name ?? undefined;
   }
 
   #latestMessageTokenLimit(): number | undefined {
@@ -410,7 +424,14 @@ export class ChatService {
     // changes which model answers the next turn. A different id is a genuine
     // partner switch and resets. (Comparing the $state proxy with !== also
     // trips Svelte's state_proxy_equality_mismatch warning.)
-    const partnerChanged = this.#chatPartner?.id !== newPartner?.id;
+    const current = this.#chatPartner;
+    const partnerChanged = current?.id !== newPartner?.id;
+    if (
+      !partnerChanged &&
+      partnerRuntimeSignature(current) === partnerRuntimeSignature(newPartner)
+    ) {
+      return;
+    }
     this.#chatPartner = newPartner;
 
     if (partnerChanged) {
@@ -804,6 +825,31 @@ export class ChatService {
 }
 
 export const [getChatService, initChatService] = createClassContext("Chat service", ChatService);
+
+function partnerRuntimeSignature(partner: ChatPartner | undefined) {
+  if (!partner) return "";
+
+  if ("completion_model" in partner) {
+    const effectiveConfig = partner.effective_config;
+    return JSON.stringify({
+      id: partner.id,
+      type: partner.type,
+      name: partner.name,
+      completion_model_id: partner.completion_model?.id ?? null,
+      models_enforced: effectiveConfig?.models_enforced ?? false,
+      default_model_id: effectiveConfig?.default_model?.id ?? null,
+      locked_model_id: effectiveConfig?.locked_model?.id ?? null,
+      available_model_ids: effectiveConfig?.available_models.map((model) => model.id) ?? []
+    });
+  }
+
+  return JSON.stringify({
+    id: partner.id,
+    type: partner.type,
+    name: partner.name,
+    assistant_ids: partner.tools?.assistants.map((assistant) => assistant.id) ?? []
+  });
+}
 
 function emptyMessage(partial?: Partial<ConversationMessage>): ConversationMessage {
   return {

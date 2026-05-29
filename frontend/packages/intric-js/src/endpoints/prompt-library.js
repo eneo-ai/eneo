@@ -29,6 +29,20 @@ export function initPromptLibrary(client) {
     },
 
     /**
+     * List saved versions for a prompt library entry (admin only).
+     * @param {Object} params
+     * @param {string} params.id Entry ID
+     * @throws {IntricError}
+     */
+    versions: async ({ id }) => {
+      const res = await client.fetch("/api/v1/admin/prompt-library/{id}/versions/", {
+        method: "get",
+        params: { path: { id } }
+      });
+      return res;
+    },
+
+    /**
      * Create a new prompt library entry (admin only).
      * @param {Object} params
      * @param {string} params.name Display name (unique per tenant)

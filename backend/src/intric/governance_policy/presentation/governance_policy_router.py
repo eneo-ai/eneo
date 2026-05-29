@@ -3,11 +3,16 @@
 # Licensed under the MIT License.
 
 
-from typing import Annotated
+from typing import Annotated, Iterable
+from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.governance_policy.domain.governance_policy import (
+    GovernancePolicy,
     PolicyCompletionModel,
 )
 from intric.governance_policy.presentation.governance_policy_models import (
@@ -21,6 +26,63 @@ from intric.server.protocol import responses
 router = APIRouter()
 
 _ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
+
+
+def _ids(ids: Iterable[UUID]) -> list[str]:
+    return sorted(str(id) for id in ids)
+
+
+def _policy_changes(
+    before: GovernancePolicy, after: GovernancePolicy
+) -> dict[str, object]:
+    changes: dict[str, object] = {}
+
+    before_models = [
+        {"id": str(m.completion_model_id), "is_default": m.is_default}
+        for m in before.completion_models
+    ]
+    after_models = [
+        {"id": str(m.completion_model_id), "is_default": m.is_default}
+        for m in after.completion_models
+    ]
+    if before.models_restriction_enabled != after.models_restriction_enabled:
+        changes["models_restriction_enabled"] = {
+            "old": before.models_restriction_enabled,
+            "new": after.models_restriction_enabled,
+        }
+    if before_models != after_models:
+        changes["completion_models"] = {"old": before_models, "new": after_models}
+    if _ids(before.model_provider_ids) != _ids(after.model_provider_ids):
+        changes["model_provider_ids"] = {
+            "old": _ids(before.model_provider_ids),
+            "new": _ids(after.model_provider_ids),
+        }
+    if before.mcp_restriction_enabled != after.mcp_restriction_enabled:
+        changes["mcp_restriction_enabled"] = {
+            "old": before.mcp_restriction_enabled,
+            "new": after.mcp_restriction_enabled,
+        }
+    if _ids(before.mcp_server_ids) != _ids(after.mcp_server_ids):
+        changes["mcp_server_ids"] = {
+            "old": _ids(before.mcp_server_ids),
+            "new": _ids(after.mcp_server_ids),
+        }
+    if before.prompt_enforcement_enabled != after.prompt_enforcement_enabled:
+        changes["prompt_enforcement_enabled"] = {
+            "old": before.prompt_enforcement_enabled,
+            "new": after.prompt_enforcement_enabled,
+        }
+    if before.default_prompt_library_id != after.default_prompt_library_id:
+        changes["default_prompt_library_id"] = {
+            "old": str(before.default_prompt_library_id)
+            if before.default_prompt_library_id
+            else None,
+            "new": str(after.default_prompt_library_id)
+            if after.default_prompt_library_id
+            else None,
+        }
+
+    return changes
 
 
 @router.get(
@@ -46,6 +108,7 @@ async def update_governance_policy(
 ):
     service = container.governance_policy_service()
     assembler = container.governance_policy_assembler()
+    before = await service.get_policy()
 
     models_restriction = None
     if payload.models_restriction is not None:
@@ -80,4 +143,22 @@ async def update_governance_policy(
         mcp_restriction=mcp_restriction,
         prompt_enforcement=prompt_enforcement,
     )
+    assert policy.id is not None
+    changes = _policy_changes(before, policy)
+    if changes:
+        user = container.user()
+        await container.audit_service().log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.GOVERNANCE_POLICY_UPDATED,
+            entity_type=EntityType.GOVERNANCE_POLICY,
+            entity_id=policy.id,
+            description="Updated personal assistant governance policy",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=policy,
+                changes=changes,
+                extra={"scope": policy.scope.value},
+            ),
+        )
     return assembler.to_public(policy)

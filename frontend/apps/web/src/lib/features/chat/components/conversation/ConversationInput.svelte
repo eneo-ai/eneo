@@ -252,6 +252,13 @@
     return [];
   });
 
+  $effect(() => {
+    const validIds = new Set(mcpServers.map((server) => server.id));
+    for (const id of Array.from(disabledMcpServerIds)) {
+      if (!validIds.has(id)) disabledMcpServerIds.delete(id);
+    }
+  });
+
   // Check if the assistant has MCP servers/tools
   const hasMcpTools = $derived(mcpServers.length > 0);
 

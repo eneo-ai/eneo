@@ -48,8 +48,16 @@
     )
   );
 
-  const selectedId = $derived(defaultAssistant.completion_model?.id ?? "");
-  const selectedLabel = $derived(defaultAssistant.completion_model?.nickname ?? m.select_a_model());
+  const selectedModel = $derived.by(() => {
+    const current = defaultAssistant.completion_model;
+    if (!effectiveConfig?.models_enforced) return current;
+    if (current && policyAllowedModelIds?.has(current.id)) return current;
+    return (
+      effectiveConfig.default_model ?? effectiveConfig.locked_model ?? visibleModels[0] ?? null
+    );
+  });
+  const selectedId = $derived(selectedModel?.id ?? "");
+  const selectedLabel = $derived(selectedModel?.nickname ?? m.select_a_model());
 
   function selectModel(id: string) {
     if (!id || id === selectedId) return;

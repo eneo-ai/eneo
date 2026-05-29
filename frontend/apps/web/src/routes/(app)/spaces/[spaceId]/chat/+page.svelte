@@ -70,9 +70,11 @@
   // conversation (see ChatService.changeChatPartner).
   $effect(() => {
     const canonical = $currentSpace.default_assistant;
-    if (canonical && chat.partner?.type === "default-assistant") {
-      chat.changeChatPartner(canonical);
-    }
+    untrack(() => {
+      if (canonical && chat.partner?.type === "default-assistant") {
+        chat.changeChatPartner(canonical);
+      }
+    });
   });
 </script>
 

@@ -53,6 +53,7 @@ async def test_admin_full_crud_round_trip(client, admin_token):
     entry_id = payload["id"]
     assert payload["name"] == "My Prompt"
     assert payload["text"] == "be nice"
+    assert payload["current_version"] == 1
 
     list_resp = await client.get(
         "/api/v1/admin/prompt-library/",
@@ -77,6 +78,17 @@ async def test_admin_full_crud_round_trip(client, admin_token):
     assert update_resp.status_code == 200, update_resp.text
     assert update_resp.json()["name"] == "Renamed"
     assert update_resp.json()["text"] == "be very nice"
+    assert update_resp.json()["current_version"] == 2
+
+    versions_resp = await client.get(
+        f"/api/v1/admin/prompt-library/{entry_id}/versions/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert versions_resp.status_code == 200, versions_resp.text
+    versions = versions_resp.json()["items"]
+    assert [version["version"] for version in versions] == [2, 1]
+    assert versions[0]["text"] == "be very nice"
+    assert versions[1]["text"] == "be nice"
 
     delete_resp = await client.delete(
         f"/api/v1/admin/prompt-library/{entry_id}/",

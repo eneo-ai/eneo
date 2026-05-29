@@ -18,6 +18,7 @@ class PromptLibraryEntry:
     name: str
     description: str | None
     text: str
+    current_version: int
     created_by_user_id: UUID
     created_at: datetime | None
     updated_at: datetime | None
@@ -39,3 +40,17 @@ class PromptLibraryEntry:
             if not text.strip():
                 raise BadRequestException("text cannot be empty")
             self.text = text
+
+
+@dataclass
+class PromptLibraryVersion:
+    id: UUID | None
+    prompt_library_id: UUID
+    tenant_id: UUID
+    version: int
+    name: str
+    description: str | None
+    text: str
+    created_by_user_id: UUID
+    created_at: datetime | None
+    updated_at: datetime | None

@@ -16,8 +16,8 @@
 
   async function create(payload: { name: string; description: string | null; text: string }) {
     await intric.promptLibrary.create(payload);
-    await invalidate("admin:personal-assistant");
-    await goto(resolve("/admin/personal-assistant/prompts"));
+    await invalidate("admin:prompt-library");
+    await goto(resolve("/admin/prompt-library"));
   }
 </script>
 
@@ -34,7 +34,7 @@
       <PromptLibraryForm
         submitLabel={m.create()}
         onSubmit={create}
-        onCancel={() => goto(resolve("/admin/personal-assistant/prompts"))}
+        onCancel={() => goto(resolve("/admin/prompt-library"))}
       />
     </div>
   </Page.Main>

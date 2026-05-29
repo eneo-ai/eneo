@@ -6,6 +6,7 @@
 
 export const load = async (event) => {
   event.depends("admin:governance-policy");
+  event.depends("admin:prompt-library");
   const { intric } = await event.parent();
   const [policy, models, mcpSettings, promptLibrary, modelProviders] = await Promise.all([
     intric.governancePolicy.get(),
