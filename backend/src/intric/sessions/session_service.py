@@ -32,6 +32,7 @@ from intric.sessions.sessions_repo import SessionRepository
 from intric.users.user import UserInDB
 
 if TYPE_CHECKING:
+    from intric.ai_models.completion_models.completion_model import McpToolReference
     from intric.completion_models.infrastructure.web_search import WebSearchResult
 
 logger = get_logger(__name__)
@@ -214,6 +215,19 @@ class SessionService:
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
 
+    async def get_tool_call_result(
+        self,
+        session_id: UUID,
+        tool_call_id: str,
+    ) -> tuple[str | None, str | None]:
+        """Return (result, mcp_tool_name) for one visible tool call."""
+        session = await self.get_session_by_uuid(session_id)
+        for question in session.questions or []:
+            for tc in question.tool_calls or []:
+                if tc.tool_call_id and tc.tool_call_id == tool_call_id:
+                    return tc.result, tc.mcp_tool_name
+        return None, None
+
     async def get_sessions_by_assistant(
         self,
         assistant_id: UUID,
@@ -334,6 +348,7 @@ class SessionService:
         logging_details: LoggingDetails | None = None,
         web_search_results: Sequence["WebSearchResult"] | None = None,
         tool_calls: list[ToolCallInfo] | None = None,
+        mcp_tool_references: list["McpToolReference"] | None = None,
     ) -> None:
         """Update a placeholder Question row with the final assistant answer."""
         completion_model_id = completion_model.id if completion_model else None
@@ -352,6 +367,7 @@ class SessionService:
                 if web_search_results
                 else None,
                 logging_details=logging_details,
+                mcp_tool_references=mcp_tool_references,
             )
 
     async def leave_feedback(

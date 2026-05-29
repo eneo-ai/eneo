@@ -22,7 +22,14 @@ def to_question_public(question: Question) -> Message:
     tools = UseTools(assistants=assistants)
 
     return Message(
-        **question.model_dump(exclude={"references", "assistant_id", "assistant_name"}),
+        **question.model_dump(
+            exclude={
+                "references",
+                "assistant_id",
+                "assistant_name",
+                "mcp_tool_references",
+            }
+        ),
         references=[
             InfoBlobPublicNoText(
                 **blob.model_dump(),
@@ -39,6 +46,7 @@ def to_question_public(question: Question) -> Message:
             )
             for web_search_result in question.web_search_results
         ],
+        mcp_tool_references=list(question.mcp_tool_references),
     )
 
 

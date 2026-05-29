@@ -542,6 +542,22 @@ export class ChatService {
                   ref.mcp_tool_calls.push(tool);
                 }
               }
+              const newRefs = (event as unknown as { mcp_tool_references?: Array<{ id: string }> })
+                .mcp_tool_references;
+              if (newRefs && newRefs.length) {
+                if (!ref.mcp_tool_references) {
+                  ref.mcp_tool_references = [];
+                }
+                // eslint-disable-next-line svelte/prefer-svelte-reactivity
+                const seen = new Set(ref.mcp_tool_references.map((r) => r.id));
+                for (const newRef of newRefs) {
+                  if (!seen.has(newRef.id)) {
+                    seen.add(newRef.id);
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    ref.mcp_tool_references.push(newRef as any);
+                  }
+                }
+              }
             },
             onToolApprovalRequired: (event) => {
               if (isStale()) return;

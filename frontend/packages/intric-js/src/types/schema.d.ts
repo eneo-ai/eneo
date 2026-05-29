@@ -1367,6 +1367,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/result/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Tool Call Result
+     * @description Lazy-load a single tool call's upstream response text.
+     */
+    get: operations["get_tool_call_result_api_v1_conversations__session_id__tool_calls__tool_call_id__result__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/conversations/{session_id}/feedback/": {
     parameters: {
       query?: never;
@@ -8086,6 +8106,11 @@ export interface components {
       tools: components["schemas"]["UseTools"];
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
+      /**
+       * Mcp Tool References
+       * @default []
+       */
+      mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
       model?: components["schemas"]["CompletionModelPublic"] | null;
     };
     /**
@@ -11605,6 +11630,8 @@ export interface components {
       mcp_server_id: string;
       /** Name */
       name: string;
+      /** Title */
+      title?: string | null;
       /** Description */
       description: string | null;
       /** Input Schema */
@@ -11706,6 +11733,43 @@ export interface components {
       /** Is Enabled */
       is_enabled: boolean;
     };
+    /**
+     * McpToolReferencePublic
+     * @description One MCP resource block captured from a tool call.
+     *
+     *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+     *     raw `meta` dict are exposed. Frontend may read generic keys from `meta`
+     *     (e.g. `sourceType`, `title`) to drive richer affordances but must degrade
+     *     gracefully when meta is empty.
+     */
+    McpToolReferencePublic: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Uri */
+      uri: string;
+      /** Mime Type */
+      mime_type?: string | null;
+      /** Content */
+      content?: string | null;
+      /**
+       * Meta
+       * @default {}
+       */
+      meta?: {
+        [key: string]: unknown;
+      };
+      /** Tool Call Id */
+      tool_call_id?: string | null;
+      /** Mcp Tool Name */
+      mcp_tool_name?: string | null;
+    };
     /** Message */
     Message: {
       /** Created At */
@@ -11729,20 +11793,15 @@ export interface components {
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
       /**
+       * Mcp Tool References
+       * @default []
+       */
+      mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
+      /**
        * Tool Calls
        * @default []
        */
       tool_calls?: components["schemas"]["ToolCallInfo"][];
-      /**
-       * Num Tokens Question
-       * @default 0
-       */
-      num_tokens_question?: number;
-      /**
-       * Num Tokens Answer
-       * @default 0
-       */
-      num_tokens_answer?: number;
     };
     /** MessageLogging */
     MessageLogging: {
@@ -11767,20 +11826,15 @@ export interface components {
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
       /**
+       * Mcp Tool References
+       * @default []
+       */
+      mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
+      /**
        * Tool Calls
        * @default []
        */
       tool_calls?: components["schemas"]["ToolCallInfo"][];
-      /**
-       * Num Tokens Question
-       * @default 0
-       */
-      num_tokens_question?: number;
-      /**
-       * Num Tokens Answer
-       * @default 0
-       */
-      num_tokens_answer?: number;
       logging_details: components["schemas"]["LoggingDetailsPublic"];
     };
     /** MetadataCount */
@@ -13340,12 +13394,22 @@ export interface components {
      *     `model_name` and `context_window` are echoed so a client can compute the
      *     percentage fill locally without a separate round-trip to fetch model
      *     metadata.
+     *
+     *     `excluded_file_count` is the number of attached files we could not
+     *     tokenise here (images and other binary payloads use provider-specific
+     *     multimodal accounting). Callers should treat the response as a
+     *     conservative lower bound when this is non-zero.
      */
     PreflightResponse: {
       /** Input Tokens */
       input_tokens: number;
       /** File Tokens */
       file_tokens: number;
+      /**
+       * Excluded File Count
+       * @default 0
+       */
+      excluded_file_count?: number;
       /** Model Name */
       model_name: string;
       /** Context Window */
@@ -15452,6 +15516,8 @@ export interface components {
       server_name: string;
       /** Tool Name */
       tool_name: string;
+      /** Title */
+      title?: string | null;
       /** Arguments */
       arguments?: {
         [key: string]: unknown;
@@ -15462,6 +15528,22 @@ export interface components {
       approved?: boolean | null;
       /** Result Status */
       result_status?: string | null;
+      /** Result */
+      result?: string | null;
+      /** Mcp Tool Name */
+      mcp_tool_name?: string | null;
+    };
+    /**
+     * ToolCallResultPublic
+     * @description Lazy-loaded payload for a single tool call's upstream response.
+     *
+     *     Only the niche "Visa svar" view fetches this — keeping it out of the
+     *     streaming hot path lets the SSE payload stay small even when a tool
+     *     returns several KB of text.
+     */
+    ToolCallResultPublic: {
+      /** Tool Call Id */
+      tool_call_id: string;
       /** Result */
       result?: string | null;
       /** Mcp Tool Name */
@@ -17027,6 +17109,11 @@ export interface components {
       intric_event_type?: components["schemas"]["IntricEventType"];
       /** Tools */
       tools: components["schemas"]["ToolCallInfo"][];
+      /**
+       * Mcp Tool References
+       * @default []
+       */
+      mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
     };
     /**
      * SSEToolApprovalRequired
@@ -17112,6 +17199,11 @@ export interface components {
       tools: components["schemas"]["UseTools"];
       /** Web Search References */
       web_search_references: components["schemas"]["WebSearchResultPublic"][];
+      /**
+       * Mcp Tool References
+       * @default []
+       */
+      mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
     };
     /** SSEError */
     SSEError: {
@@ -20623,6 +20715,11 @@ export interface operations {
             tools: components["schemas"]["UseTools"];
             /** Web Search References */
             web_search_references: components["schemas"]["WebSearchResultPublic"][];
+            /**
+             * Mcp Tool References
+             * @default []
+             */
+            mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
             model?: components["schemas"]["CompletionModelPublic"] | null;
             $defs: {
               /** CompletionModelPublic */
@@ -20776,6 +20873,43 @@ export interface operations {
                 embedding_model_id: string;
                 /** Size */
                 size: number;
+              };
+              /**
+               * McpToolReferencePublic
+               * @description One MCP resource block captured from a tool call.
+               *
+               *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+               *     raw `meta` dict are exposed. Frontend may read generic keys from `meta`
+               *     (e.g. `sourceType`, `title`) to drive richer affordances but must degrade
+               *     gracefully when meta is empty.
+               */
+              McpToolReferencePublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Uri */
+                uri: string;
+                /** Mime Type */
+                mime_type?: string | null;
+                /** Content */
+                content?: string | null;
+                /**
+                 * Meta
+                 * @default {}
+                 */
+                meta?: {
+                  [key: string]: unknown;
+                };
+                /** Tool Call Id */
+                tool_call_id?: string | null;
+                /** Mcp Tool Name */
+                mcp_tool_name?: string | null;
               };
               /** ModelKwargCapability */
               ModelKwargCapability: {
@@ -20980,6 +21114,11 @@ export interface operations {
             tools: components["schemas"]["UseTools"];
             /** Web Search References */
             web_search_references: components["schemas"]["WebSearchResultPublic"][];
+            /**
+             * Mcp Tool References
+             * @default []
+             */
+            mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
             model?: components["schemas"]["CompletionModelPublic"] | null;
             $defs: {
               /** CompletionModelPublic */
@@ -21133,6 +21272,43 @@ export interface operations {
                 embedding_model_id: string;
                 /** Size */
                 size: number;
+              };
+              /**
+               * McpToolReferencePublic
+               * @description One MCP resource block captured from a tool call.
+               *
+               *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+               *     raw `meta` dict are exposed. Frontend may read generic keys from `meta`
+               *     (e.g. `sourceType`, `title`) to drive richer affordances but must degrade
+               *     gracefully when meta is empty.
+               */
+              McpToolReferencePublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Uri */
+                uri: string;
+                /** Mime Type */
+                mime_type?: string | null;
+                /** Content */
+                content?: string | null;
+                /**
+                 * Meta
+                 * @default {}
+                 */
+                meta?: {
+                  [key: string]: unknown;
+                };
+                /** Tool Call Id */
+                tool_call_id?: string | null;
+                /** Mcp Tool Name */
+                mcp_tool_name?: string | null;
               };
               /** ModelKwargCapability */
               ModelKwargCapability: {
@@ -21984,6 +22160,11 @@ export interface operations {
                 intric_event_type?: components["schemas"]["IntricEventType"];
                 /** Tools */
                 tools: components["schemas"]["ToolCallInfo"][];
+                /**
+                 * Mcp Tool References
+                 * @default []
+                 */
+                mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
                 $defs: {
                   /**
                    * IntricEventType
@@ -21996,6 +22177,43 @@ export interface operations {
                     | "tool_approval_timeout"
                     | "token_usage";
                   /**
+                   * McpToolReferencePublic
+                   * @description One MCP resource block captured from a tool call.
+                   *
+                   *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+                   *     raw `meta` dict are exposed. Frontend may read generic keys from `meta`
+                   *     (e.g. `sourceType`, `title`) to drive richer affordances but must degrade
+                   *     gracefully when meta is empty.
+                   */
+                  McpToolReferencePublic: {
+                    /** Created At */
+                    created_at?: string | null;
+                    /** Updated At */
+                    updated_at?: string | null;
+                    /**
+                     * Id
+                     * Format: uuid
+                     */
+                    id: string;
+                    /** Uri */
+                    uri: string;
+                    /** Mime Type */
+                    mime_type?: string | null;
+                    /** Content */
+                    content?: string | null;
+                    /**
+                     * Meta
+                     * @default {}
+                     */
+                    meta?: {
+                      [key: string]: unknown;
+                    };
+                    /** Tool Call Id */
+                    tool_call_id?: string | null;
+                    /** Mcp Tool Name */
+                    mcp_tool_name?: string | null;
+                  };
+                  /**
                    * ToolCallInfo
                    * @description Info about a single tool being called.
                    */
@@ -22004,6 +22222,8 @@ export interface operations {
                     server_name: string;
                     /** Tool Name */
                     tool_name: string;
+                    /** Title */
+                    title?: string | null;
                     /** Arguments */
                     arguments?: {
                       [key: string]: unknown;
@@ -22053,6 +22273,8 @@ export interface operations {
                     server_name: string;
                     /** Tool Name */
                     tool_name: string;
+                    /** Title */
+                    title?: string | null;
                     /** Arguments */
                     arguments?: {
                       [key: string]: unknown;
@@ -22102,6 +22324,8 @@ export interface operations {
                     server_name: string;
                     /** Tool Name */
                     tool_name: string;
+                    /** Title */
+                    title?: string | null;
                     /** Arguments */
                     arguments?: {
                       [key: string]: unknown;
@@ -22171,6 +22395,11 @@ export interface operations {
                 tools: components["schemas"]["UseTools"];
                 /** Web Search References */
                 web_search_references: components["schemas"]["WebSearchResultPublic"][];
+                /**
+                 * Mcp Tool References
+                 * @default []
+                 */
+                mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
                 $defs: {
                   /** FilePublic */
                   FilePublic: {
@@ -22226,6 +22455,43 @@ export interface operations {
                     embedding_model_id: string;
                     /** Size */
                     size: number;
+                  };
+                  /**
+                   * McpToolReferencePublic
+                   * @description One MCP resource block captured from a tool call.
+                   *
+                   *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+                   *     raw `meta` dict are exposed. Frontend may read generic keys from `meta`
+                   *     (e.g. `sourceType`, `title`) to drive richer affordances but must degrade
+                   *     gracefully when meta is empty.
+                   */
+                  McpToolReferencePublic: {
+                    /** Created At */
+                    created_at?: string | null;
+                    /** Updated At */
+                    updated_at?: string | null;
+                    /**
+                     * Id
+                     * Format: uuid
+                     */
+                    id: string;
+                    /** Uri */
+                    uri: string;
+                    /** Mime Type */
+                    mime_type?: string | null;
+                    /** Content */
+                    content?: string | null;
+                    /**
+                     * Meta
+                     * @default {}
+                     */
+                    meta?: {
+                      [key: string]: unknown;
+                    };
+                    /** Tool Call Id */
+                    tool_call_id?: string | null;
+                    /** Mcp Tool Name */
+                    mcp_tool_name?: string | null;
                   };
                   /** ToolAssistant */
                   ToolAssistant: {
@@ -22435,6 +22701,58 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_tool_call_result_api_v1_conversations__session_id__tool_calls__tool_call_id__result__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+        /** @description The LLM-issued tool_call_id within this session */
+        tool_call_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ToolCallResultPublic"];
+        };
       };
       /** @description Bad Request */
       400: {
@@ -28633,12 +28951,30 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description File deleted successfully. No response body is returned. */
       204: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {

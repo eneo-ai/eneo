@@ -15,6 +15,7 @@ from typing import (
     TypedDict,
     cast,
 )
+from urllib.parse import urlparse
 
 import litellm
 from litellm.exceptions import (
@@ -27,6 +28,7 @@ from typing_extensions import override
 
 from intric.ai_models.completion_models.completion_model import (
     Completion,
+    McpToolReference,
     ModelKwargs,
     ResponseType,
     TokenUsage,
@@ -34,6 +36,10 @@ from intric.ai_models.completion_models.completion_model import (
 )
 from intric.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
+)
+from intric.completion_models.infrastructure.static_prompts import (
+    MCP_TOOL_REFERENCES_CONTEXT_HEADER,
+    MCP_TOOL_REFERENCES_INSTRUCTION,
 )
 from intric.files.file_models import File
 from intric.logging.logging import LoggingDetails
@@ -48,6 +54,109 @@ logger = get_logger(__name__)
 
 # Regex to match Qwen3 thinking blocks: <think>...</think>
 THINKING_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+
+
+def _pick_resource_title(meta: dict[str, Any], uri: Optional[str]) -> str:
+    """Generic title extraction for an MCP resource block.
+
+    Probes generic title metadata first, then falls back to the URI hostname
+    (for http/https) or the URI itself. Returns a non-empty string suitable
+    for display in the LLM source context.
+    """
+    title = meta.get("title")
+    if isinstance(title, str) and title.strip():
+        return title.strip()
+    if uri:
+        parsed = urlparse(uri)
+        if parsed.hostname:
+            return parsed.hostname
+        return uri
+    return "(unknown source)"
+
+
+def _resource_context_json(ref: McpToolReference) -> str:
+    """Serialize one persisted MCP resource into the LLM source context.
+
+    The shape stays generic: Eneo adds only `source_id` and a derived display
+    `title`; MCP-provided data remains in `uri`, `mime_type`, `metadata`, and
+    `content`.
+    """
+    payload: dict[str, Any] = {
+        "source_id": str(ref.id)[:8],
+        "title": _pick_resource_title(ref.meta, ref.uri),
+        "uri": ref.uri,
+        "mime_type": ref.mime_type,
+        "metadata": ref.meta,
+    }
+    if ref.content:
+        payload["content"] = ref.content
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _build_tool_result_with_references(
+    content_list: list[dict[str, Any]],
+    tool_call_id: Optional[str],
+    mcp_tool_name: Optional[str],
+    existing_prefixes: set[str],
+) -> tuple[str, str, list[McpToolReference]]:
+    """Build LLM-facing and user-facing tool result texts; capture resource refs.
+
+    Two texts are produced because they serve different audiences:
+
+    - ``llm_text`` (forwarded to the LLM): upstream text blocks concatenated
+      verbatim, then a structured MCP source context. The context uses generic
+      MCP resource fields plus Eneo's citation id.
+    - ``display_text`` (persisted on ``ToolCallInfo.result`` for the chat
+      UI's "view tool response" affordance): upstream text blocks only, no
+      source context, no internal markers — what a vanilla MCP client would see.
+
+    Resource blocks are captured as ``McpToolReference`` rows for separate
+    persistence. ``existing_prefixes`` is mutated in place so multi-tool-call
+    turns don't mint colliding 8-char prefixes.
+    """
+    text_parts: list[str] = []
+    refs: list[McpToolReference] = []
+    for ci in content_list:
+        block_type = ci.get("type")
+        if block_type == "text":
+            text_parts.append(ci.get("text") or "")
+        elif block_type == "resource":
+            uri = ci.get("uri") or ""
+            if not uri:
+                # Resource without a URI has nothing to cite. Skip.
+                continue
+            # Mint a UUID whose 8-char hex prefix is unique within this Message
+            # so frontend prefix lookup is unambiguous.
+            ref_id = uuid.uuid4()
+            attempt = 0
+            while str(ref_id)[:8] in existing_prefixes and attempt < 8:
+                ref_id = uuid.uuid4()
+                attempt += 1
+            prefix = str(ref_id)[:8]
+            existing_prefixes.add(prefix)
+            refs.append(
+                McpToolReference(
+                    id=ref_id,
+                    tool_call_id=tool_call_id,
+                    mcp_tool_name=mcp_tool_name,
+                    uri=uri,
+                    mime_type=ci.get("mime_type"),
+                    content=ci.get("text"),
+                    meta=ci.get("meta") or {},
+                    order=len(refs),
+                )
+            )
+
+    display_text = "".join(text_parts)
+    if not refs:
+        return display_text, display_text, refs
+
+    context_lines = [f"\n\n{MCP_TOOL_REFERENCES_CONTEXT_HEADER}"]
+    context_lines.extend(_resource_context_json(ref) for ref in refs)
+    context_lines.append("")
+    context_lines.append(MCP_TOOL_REFERENCES_INSTRUCTION)
+    llm_text = display_text + "\n".join(context_lines)
+    return llm_text, display_text, refs
 
 
 class _LiteLLMUsageDetails(Protocol):
@@ -688,24 +797,41 @@ class TenantModelAdapter(CompletionModelAdapter):
                         proxy_calls.append((tc.function.name, arguments))
                     results = await mcp_proxy.call_tools_parallel(proxy_calls)
 
-                    # Add tool results to messages
+                    # Add tool results to messages. Resource content blocks are
+                    # captured as McpToolReferences (buffered on completion for
+                    # later persistence) and woven into the LLM-facing text via
+                    # a structured MCP source context so the model can emit
+                    # <inref/> markers without relying on server-specific shapes.
+                    seen_prefixes: set[str] = set()
+                    captured_refs: list[McpToolReference] = []
                     for tc, result in zip(msg.tool_calls, results):
-                        result_text = ""
-                        if result.get("content"):
-                            for ci in result["content"]:
-                                if ci.get("type") == "text":
-                                    result_text += ci.get("text", "")
+                        content_list = cast(
+                            list[dict[str, Any]], result.get("content") or []
+                        )
+                        (
+                            llm_text,
+                            _display_text,
+                            refs_for_call,
+                        ) = _build_tool_result_with_references(
+                            content_list=content_list,
+                            tool_call_id=tc.id,
+                            mcp_tool_name=tc.function.name,
+                            existing_prefixes=seen_prefixes,
+                        )
+                        captured_refs.extend(refs_for_call)
                         if result.get("is_error"):
-                            result_text = json.dumps(
-                                {"error": result_text or "Tool execution failed"}
+                            llm_text = json.dumps(
+                                {"error": llm_text or "Tool execution failed"}
                             )
                         messages.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": tc.id,
-                                "content": result_text,
+                                "content": llm_text,
                             }
                         )
+                    if captured_refs:
+                        completion.mcp_tool_references = captured_refs
 
                     # Follow-up completion without tools
                     follow_up_kwargs = {
@@ -1145,15 +1271,17 @@ class TenantModelAdapter(CompletionModelAdapter):
                             args = None
                         info = mcp_proxy.get_tool_info(name)
                         if info:
-                            sname, tname = info
+                            sname, tname, title = info
                         elif "__" in name:
                             sname, tname = name.split("__", 1)
+                            title = None
                         else:
-                            sname, tname = "", name
+                            sname, tname, title = "", name, None
                         tool_metadata.append(
                             ToolCallMetadata(
                                 server_name=sname,
                                 tool_name=tname,
+                                title=title,
                                 arguments=args,
                                 tool_call_id=tc["id"],
                                 mcp_tool_name=name,
@@ -1214,6 +1342,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     ToolCallMetadata(
                                         server_name=tm.server_name,
                                         tool_name=tm.tool_name,
+                                        title=tm.title,
                                         arguments=_tool_metadata_arguments(tm),
                                         tool_call_id=tm.tool_call_id,
                                         approved=False,
@@ -1230,6 +1359,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 ToolCallMetadata(
                                     server_name=tm.server_name,
                                     tool_name=tm.tool_name,
+                                    title=tm.title,
                                     arguments=_tool_metadata_arguments(tm),
                                     tool_call_id=tm.tool_call_id,
                                     approved=decision_map.get(
@@ -1267,6 +1397,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 ToolCallMetadata(
                                     server_name=tm.server_name,
                                     tool_name=tm.tool_name,
+                                    title=tm.title,
                                     arguments=_tool_metadata_arguments(tm),
                                     tool_call_id=tm.tool_call_id,
                                     approved=tm.approved,
@@ -1317,44 +1448,63 @@ class TenantModelAdapter(CompletionModelAdapter):
                             await mcp_proxy.call_tools_parallel(proxy_calls),
                         )
                         execution_metadata: list[ToolCallMetadata] = []
+                        captured_refs: list[McpToolReference] = []
+                        seen_prefixes: set[str] = set()
                         for tc, res in zip(approved_tcs, results):
                             result_data = res
-                            text = ""
-                            if result_data.get("content"):
-                                for ci in result_data["content"]:
-                                    if ci.get("type") == "text":
-                                        text += ci.get("text", "")
+                            content_list = cast(
+                                list[dict[str, Any]], result_data.get("content") or []
+                            )
+                            (
+                                llm_text,
+                                display_text,
+                                refs_for_call,
+                            ) = _build_tool_result_with_references(
+                                content_list=content_list,
+                                tool_call_id=tc["id"],
+                                mcp_tool_name=tc["function"]["name"],
+                                existing_prefixes=seen_prefixes,
+                            )
+                            captured_refs.extend(refs_for_call)
                             result_status = "succeeded"
                             if result_data.get("is_error"):
-                                text = json.dumps(
-                                    {"error": text or "Tool execution failed"}
+                                error_payload = json.dumps(
+                                    {"error": llm_text or "Tool execution failed"}
                                 )
+                                llm_text = error_payload
+                                display_text = error_payload
                                 result_status = "failed"
                             messages.append(
                                 {
                                     "role": "tool",
                                     "tool_call_id": tc["id"],
-                                    "content": text,
+                                    "content": llm_text,
                                 }
                             )
                             tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
                             if tool_info:
-                                server_name, tool_name = tool_info
+                                server_name, tool_name, title = tool_info
                             elif "__" in tc["function"]["name"]:
                                 server_name, tool_name = tc["function"]["name"].split(
                                     "__", 1
                                 )
+                                title = None
                             else:
-                                server_name, tool_name = "", tc["function"]["name"]
+                                server_name, tool_name, title = (
+                                    "",
+                                    tc["function"]["name"],
+                                    None,
+                                )
                             execution_metadata.append(
                                 ToolCallMetadata(
                                     server_name=server_name,
                                     tool_name=tool_name,
+                                    title=title,
                                     arguments=tool_args_by_call_id.get(tc["id"] or ""),
                                     tool_call_id=tc["id"],
                                     approved=True,
                                     result_status=result_status,
-                                    result=text,
+                                    result=display_text,
                                     mcp_tool_name=tc["function"]["name"],
                                 )
                             )
@@ -1363,6 +1513,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                             yield Completion(
                                 response_type=ResponseType.TOOL_CALL,
                                 tool_calls_metadata=execution_metadata,
+                                mcp_tool_references=(
+                                    captured_refs if captured_refs else None
+                                ),
                             )
 
                     # Add denied tool results
@@ -1383,17 +1536,23 @@ class TenantModelAdapter(CompletionModelAdapter):
                         )
                         tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
                         if tool_info:
-                            server_name, tool_name = tool_info
+                            server_name, tool_name, title = tool_info
                         elif "__" in tc["function"]["name"]:
                             server_name, tool_name = tc["function"]["name"].split(
                                 "__", 1
                             )
+                            title = None
                         else:
-                            server_name, tool_name = "", tc["function"]["name"]
+                            server_name, tool_name, title = (
+                                "",
+                                tc["function"]["name"],
+                                None,
+                            )
                         denied_metadata.append(
                             ToolCallMetadata(
                                 server_name=server_name,
                                 tool_name=tool_name,
+                                title=title,
                                 arguments=tool_args_by_call_id.get(tc["id"] or ""),
                                 tool_call_id=tc["id"],
                                 approved=False,

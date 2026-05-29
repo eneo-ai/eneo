@@ -84,6 +84,23 @@ export function initConversations(client) {
     },
 
     /**
+     * Lazy-fetch the persisted upstream response of a single tool call.
+     * @param  {{ sessionId: string, toolCallId: string }} params
+     * @returns {Promise<{tool_call_id: string, result?: string | null, mcp_tool_name?: string | null}>}
+     * @throws {IntricError}
+     */
+    getToolCallResult: async ({ sessionId, toolCallId }) => {
+      const res = await client.fetch(
+        "/api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/result/",
+        {
+          method: "get",
+          params: { path: { session_id: sessionId, tool_call_id: toolCallId } }
+        }
+      );
+      return res;
+    },
+
+    /**
      * Delete a specific conversation.
      * @param  {{id: string} | Conversation} conversation conversation
      * @returns {Promise<true>} true on success, otherwise throws

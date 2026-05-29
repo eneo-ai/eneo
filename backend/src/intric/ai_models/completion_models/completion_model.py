@@ -66,6 +66,7 @@ class ToolCallMetadata:
 
     server_name: str
     tool_name: str
+    title: Optional[str] = None
     arguments: Optional[dict[str, object]] = (
         None  # The input values provided to the tool
     )
@@ -84,12 +85,32 @@ class ToolCallMetadata:
 
 
 @dataclass
+class McpToolReference:
+    """An MCP resource content block captured from a tool call.
+
+    Generic across MCP servers. The 8-char `<inref>` prefix used in the
+    LLM-facing tool message is `str(id)[:8]`; minting is collision-checked
+    against the other reference pools in a given message.
+    """
+
+    id: UUID
+    tool_call_id: Optional[str]
+    mcp_tool_name: Optional[str]
+    uri: str
+    mime_type: Optional[str]
+    content: Optional[str]
+    meta: dict[str, Any]
+    order: int
+
+
+@dataclass
 class Completion:
     reasoning_token_count: Optional[int] = 0
     text: Optional[str] = None
     reference_chunks: Optional[list[InfoBlobChunkInDBWithScore]] = None
     tool_call: Optional[FunctionCall] = None
     tool_calls_metadata: Optional[list[ToolCallMetadata]] = None  # For TOOL_CALL events
+    mcp_tool_references: Optional[list[McpToolReference]] = None
     approval_id: Optional[str] = None  # For TOOL_APPROVAL_REQUIRED events
     image_data: Optional[bytes] = None
     response_type: Optional[ResponseType] = None

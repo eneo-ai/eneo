@@ -3,7 +3,7 @@
 import asyncio
 from datetime import timedelta
 from types import TracebackType
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import httpx
 from mcp import ClientSession
@@ -20,6 +20,43 @@ _settings = get_settings()
 MCP_CONNECTION_TIMEOUT_DEFAULT = _settings.mcp_client_connect_timeout_seconds
 MCP_LIST_TOOLS_TIMEOUT_DEFAULT = _settings.mcp_client_list_tools_timeout_seconds
 MCP_TOOL_CALL_TIMEOUT_DEFAULT = _settings.mcp_client_call_timeout_seconds
+
+# Defensive caps for resource content blocks. An adversarial MCP server can
+# emit arbitrarily large `text` / `_meta` payloads. Cap the parsed resource
+# blocks before they flow into persistence or citation rendering.
+RESOURCE_TEXT_MAX_BYTES = 8 * 1024
+RESOURCE_META_MAX_BYTES = 16 * 1024
+
+
+def _truncate_text(value: Optional[str], max_bytes: int) -> Optional[str]:
+    if value is None:
+        return None
+    encoded = value.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    return encoded[:max_bytes].decode("utf-8", errors="ignore")
+
+
+def _truncate_meta(meta: Any, max_bytes: int) -> dict[str, Any]:
+    """Best-effort cap on the JSON-serialized size of an MCP resource _meta dict.
+
+    Keeps the structure (returns a dict) but drops keys from the tail until the
+    JSON payload fits. Non-dict input collapses to an empty dict.
+    """
+    import json
+
+    if not isinstance(meta, dict):
+        return {}
+    typed_meta = cast(dict[str, Any], meta)
+    if len(json.dumps(typed_meta).encode("utf-8")) <= max_bytes:
+        return typed_meta
+    truncated: dict[str, Any] = {}
+    for k, v in typed_meta.items():
+        candidate: dict[str, Any] = {**truncated, k: v}
+        if len(json.dumps(candidate).encode("utf-8")) > max_bytes:
+            break
+        truncated = candidate
+    return truncated
 
 
 def _extract_error_message(exc: BaseException) -> str:
@@ -98,6 +135,7 @@ class MCPClient:
         timeout: int | None = None,
         list_tools_timeout: int | None = None,
         tool_call_timeout: int | None = None,
+        resume_mcp_session_id: str | None = None,
     ):
         """
         Initialize MCP client.
@@ -106,6 +144,9 @@ class MCPClient:
             mcp_server: MCP server configuration
             auth_credentials: Authentication credentials from tenant settings
             timeout: Connection timeout in seconds (defaults to 30s)
+            resume_mcp_session_id: If set, sent as the initial ``Mcp-Session-Id``
+                header so the server resumes the prior logical session for state
+                that outlives a single transport connection.
         """
         super().__init__()
         self.mcp_server = mcp_server
@@ -113,18 +154,40 @@ class MCPClient:
         self.timeout = timeout or MCP_CONNECTION_TIMEOUT_DEFAULT
         self.list_tools_timeout = list_tools_timeout or MCP_LIST_TOOLS_TIMEOUT_DEFAULT
         self.tool_call_timeout = tool_call_timeout or MCP_TOOL_CALL_TIMEOUT_DEFAULT
+        self.resume_mcp_session_id = resume_mcp_session_id
         self.session: Optional[ClientSession] = None
         self._streams_context = None
         self._session_context = None
+        # Populated after a successful connect() / initialize() round-trip.
+        # assigned_mcp_session_id is the MCP-protocol session id the server
+        # returned and we should persist.
+        self.server_info_name: Optional[str] = None
+        self.server_info_version: Optional[str] = None
+        self.assigned_mcp_session_id: Optional[str] = None
+        # Set by the streamable HTTP transport; reading it after initialize()
+        # returns the session id the SDK captured from the server response.
+        self._get_session_id_callable: Optional[Any] = None
 
-    def _build_auth_headers(self) -> dict[str, str]:
-        """Build authentication headers based on server auth type."""
+    async def _build_auth_headers(self) -> dict[str, str]:
+        """Build authentication + session-resume headers for this connection.
+
+        ``Mcp-Session-Id`` is the MCP-protocol session id. Sending a previously
+        stored value asks the server to resume that logical session — the SDK
+        will then propagate the server's response value (which may be the same
+        or a fresh one) on every subsequent request automatically.
+
+        """
         headers: dict[str, str] = {}
 
+        token: Optional[str] = None
         if self.mcp_server.http_auth_type == "bearer":
             token = self.auth_credentials.get("token")
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
+
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        if self.resume_mcp_session_id:
+            headers["Mcp-Session-Id"] = self.resume_mcp_session_id
 
         return headers
 
@@ -145,8 +208,14 @@ class MCPClient:
             if not error_msg:
                 # Cancel scope or other unhelpful error — do a direct HTTP
                 # request to surface the real issue (e.g. 401).
+                try:
+                    diagnostic_headers = await self._build_auth_headers()
+                except Exception:
+                    # Still produce a diagnostic if auth header construction
+                    # fails for any unexpected reason.
+                    diagnostic_headers = {}
                 error_msg = await _diagnose_http(
-                    self.mcp_server.http_url, self._build_auth_headers()
+                    self.mcp_server.http_url, diagnostic_headers
                 )
             logger.error(
                 f"Failed to connect to MCP server {self.mcp_server.name}: {error_msg}"
@@ -178,33 +247,58 @@ class MCPClient:
 
         Errors are NOT wrapped here — they propagate to connect() which
         has the diagnostic fallback for unhelpful cancel scope errors.
-        """
-        headers = self._build_auth_headers()
 
-        # Create the streamable HTTP context manager with timeout delegated
-        # to the transport layer (avoids asyncio.wait_for vs anyio conflicts)
+        Two flavors:
+          1. Fresh connect (no resume_mcp_session_id): open transport, run
+             ``initialize()``, capture the server-assigned session id.
+          2. Resume (resume_mcp_session_id set): open transport with
+             ``terminate_on_close=False`` so the previous turn's DELETE didn't
+             evict the server-side session, pre-seed the SDK transport's
+             session_id with the persisted value, and SKIP ``initialize()``.
+             Calling ``initialize()`` on resume can cause some servers to mint
+             a fresh Mcp-Session-Id and lose per-session state. See the
+             cross-turn contract in ``ChatSessionMcpStateRepo``.
+        """
+        headers = await self._build_auth_headers()
+
+        # terminate_on_close=False: the SDK otherwise sends DELETE /mcp on
+        # transport teardown, which evicts the server-side session and breaks
+        # the next turn's resume. Server idle TTL bounds the leak.
         streams_context = streamablehttp_client(
             url=self.mcp_server.http_url,
             headers=headers,
             timeout=timedelta(seconds=self.timeout),
+            terminate_on_close=False,
         )
 
-        # Enter the streams context
         streams = await streams_context.__aenter__()
 
-        # Successfully entered - now save the reference
         self._streams_context = streams_context
-        read, write, _ = streams
+        read, write, get_session_id = streams
+        # ``get_session_id`` is the bound ``transport.get_session_id`` method;
+        # its ``__self__`` is the StreamableHTTPTransport instance, which is
+        # the only handle we have on the transport's session_id field (the
+        # outer ``streamablehttp_client`` async generator does not expose it
+        # directly). Pre-seeding session_id is required for resume — see the
+        # docstring.
+        self._get_session_id_callable = get_session_id
+        transport = getattr(get_session_id, "__self__", None)
+        if transport is None:
+            await streams_context.__aexit__(None, None, None)
+            self._streams_context = None
+            raise MCPClientError(
+                "MCP SDK transport not accessible — get_session_id is not a "
+                "bound method. The SDK version may be incompatible with eneo's "
+                "cross-turn resume mechanism."
+            )
         logger.debug(
             f"Streamable HTTP transport connected to {self.mcp_server.http_url}"
         )
 
-        # Create and enter session context
         session_context = ClientSession(read, write)
         try:
             session = await session_context.__aenter__()
         except BaseException:
-            # Session entry failed - cleanup streams context
             try:
                 await streams_context.__aexit__(None, None, None)
             except BaseException:
@@ -212,18 +306,54 @@ class MCPClient:
             self._streams_context = None
             raise
 
-        # Successfully entered - save references
         self._session_context = session_context
         self.session = session
 
-        # Initialize the MCP protocol session
+        if self.resume_mcp_session_id:
+            # Resume path: pre-seed the SDK's session_id so every outgoing
+            # request carries the persisted Mcp-Session-Id, and DO NOT call
+            # initialize(). serverInfo/protocol_version stay None on this
+            # transport — that's fine because the server negotiated them on
+            # the original turn for this logical session, and the SDK only
+            # sends MCP-Protocol-Version when it has a value (skipping is
+            # acceptable for a resumed session).
+            transport.session_id = self.resume_mcp_session_id
+            self.assigned_mcp_session_id = self.resume_mcp_session_id
+            logger.info(
+                "Resumed MCP session for %s (session_id=%s, skipped initialize)",
+                self.mcp_server.name,
+                self.resume_mcp_session_id,
+            )
+            return
+
+        # Fresh-connect path: negotiate via initialize() and capture the
+        # server-assigned session id.
         try:
-            await self.session.initialize()
+            init_result = await self.session.initialize()
         except BaseException:
             await self._cleanup_contexts()
             raise
 
-        logger.info(f"Connected to MCP server: {self.mcp_server.name}")
+        try:
+            server_info = init_result.serverInfo
+            self.server_info_name = getattr(server_info, "name", None)
+            self.server_info_version = getattr(server_info, "version", None)
+        except AttributeError:
+            # Pre-spec servers may omit serverInfo; not a fatal error.
+            pass
+
+        try:
+            self.assigned_mcp_session_id = get_session_id()
+        except Exception:
+            self.assigned_mcp_session_id = None
+
+        logger.info(
+            "Connected to MCP server: %s (server_info=%s/%s, session_id=%s)",
+            self.mcp_server.name,
+            self.server_info_name,
+            self.server_info_version,
+            self.assigned_mcp_session_id,
+        )
 
     async def list_tools(self) -> list[dict[str, Any]]:
         """
@@ -243,9 +373,14 @@ class MCPClient:
             tools: list[dict[str, Any]] = []
 
             for tool in response.tools:
+                annotations = getattr(tool, "annotations", None)
+                title = getattr(annotations, "title", None) or getattr(
+                    tool, "title", None
+                )
                 tools.append(
                     {
                         "name": tool.name,
+                        "title": title,
                         "description": tool.description,
                         "input_schema": tool.inputSchema,
                     }
@@ -317,11 +452,30 @@ class MCPClient:
                         }
                     )
                 elif content_item.type == "resource":
+                    # The MCP SDK wraps the resource in an `EmbeddedResource`
+                    # whose `.resource` is `TextResourceContents | BlobResourceContents`.
+                    # Older shapes flatten the fields onto the content item;
+                    # probe both so we work across SDK versions.
+                    resource = getattr(content_item, "resource", content_item)
+                    raw_meta: Any = (
+                        getattr(resource, "_meta", None)
+                        or getattr(resource, "meta", None)
+                        or {}
+                    )
+                    raw_uri = getattr(resource, "uri", None)
+                    # Pydantic AnyUrl on the SDK side; asyncpg won't coerce it,
+                    # and downstream consumers expect a plain string.
+                    uri_str = str(raw_uri) if raw_uri is not None else None
                     content_list.append(
                         {
                             "type": "resource",
-                            "uri": getattr(content_item, "uri", None),
-                            "text": getattr(content_item, "text", None),
+                            "uri": uri_str,
+                            "text": _truncate_text(
+                                getattr(resource, "text", None),
+                                RESOURCE_TEXT_MAX_BYTES,
+                            ),
+                            "mime_type": getattr(resource, "mimeType", None),
+                            "meta": _truncate_meta(raw_meta, RESOURCE_META_MAX_BYTES),
                         }
                     )
 

@@ -10,6 +10,7 @@ import pytest
 from intric.ai_models.completion_models.completion_model import ResponseType
 from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
     TenantModelAdapter,
+    _build_tool_result_with_references,
 )
 from intric.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
@@ -68,7 +69,7 @@ class _FakeMCPProxy:
         return {"server__tool"}
 
     def get_tool_info(self, prefixed_tool_name: str):
-        return ("Server", "tool")
+        return ("Server", "tool", "Tool title")
 
     async def call_tools_parallel(self, proxy_calls):
         self.calls.append(proxy_calls)
@@ -80,6 +81,65 @@ def _make_adapter() -> TenantModelAdapter:
     adapter.litellm_model = "openai/test-model"
     adapter.model = SimpleNamespace(name="test-model")
     return adapter
+
+
+def test_build_tool_result_with_references_uses_generic_mcp_source_context():
+    llm_text, display_text, refs = _build_tool_result_with_references(
+        content_list=[
+            {"type": "text", "text": "Tool summary.\n"},
+            {
+                "type": "resource",
+                "uri": "https://example.test/docs/alpha",
+                "mime_type": "text/markdown",
+                "text": "Resource body",
+                "meta": {
+                    "title": "Alpha document",
+                    "pageRange": "3-4",
+                    "customKey": {"nested": True},
+                },
+            },
+        ],
+        tool_call_id="call_1",
+        mcp_tool_name="server__tool",
+        existing_prefixes=set(),
+    )
+
+    assert display_text == "Tool summary.\n"
+    assert len(refs) == 1
+    source_id = str(refs[0].id)[:8]
+    assert refs[0].uri == "https://example.test/docs/alpha"
+    assert refs[0].mime_type == "text/markdown"
+    assert refs[0].content == "Resource body"
+    assert refs[0].meta["customKey"] == {"nested": True}
+
+    assert "MCP referenced resources:" in llm_text
+    assert '"source_id": "' + source_id + '"' in llm_text
+    assert '"uri": "https://example.test/docs/alpha"' in llm_text
+    assert '"mime_type": "text/markdown"' in llm_text
+    assert '"metadata": {' in llm_text
+    assert '"content": "Resource body"' in llm_text
+    assert '<inref id="<source_id>"/>' in llm_text
+    assert "Källor" not in llm_text
+
+
+def test_build_tool_result_with_references_skips_unciteable_resources():
+    llm_text, display_text, refs = _build_tool_result_with_references(
+        content_list=[
+            {"type": "text", "text": "Tool summary."},
+            {
+                "type": "resource",
+                "text": "No URI",
+                "meta": {"title": "Cannot cite"},
+            },
+        ],
+        tool_call_id="call_1",
+        mcp_tool_name="server__tool",
+        existing_prefixes=set(),
+    )
+
+    assert display_text == "Tool summary."
+    assert llm_text == "Tool summary."
+    assert refs == []
 
 
 async def _collect(adapter: TenantModelAdapter, stream, **kwargs):
