@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Final, Literal, TypeAlias, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 from intric.flows.ai_builder.ai_builder_domain_models import (
     PlannerPlanEnvelope,
@@ -54,6 +54,23 @@ class RequirementsSummaryPayload(BaseModel):
     output_description: str
     assumptions: list[str] = Field(default_factory=list)
     manual_setup_notes: list[str] = Field(default_factory=list)
+
+    @field_validator("key_decisions", mode="after")
+    @classmethod
+    def _one_decision_per_topic(
+        cls, decisions: list[KeyDecisionPayload]
+    ) -> list[KeyDecisionPayload]:
+        # A topic names a single decision; the planner occasionally repeats a
+        # topic, which would render as duplicate rows. Keep the first occurrence
+        # so the summary stays unique and the UI's per-topic keys do not collide.
+        seen: set[str] = set()
+        unique: list[KeyDecisionPayload] = []
+        for decision in decisions:
+            if decision.topic in seen:
+                continue
+            seen.add(decision.topic)
+            unique.append(decision)
+        return unique
 
 
 class AIBuilderPlanEventData(BaseModel):
