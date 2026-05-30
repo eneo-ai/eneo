@@ -9,16 +9,23 @@
 
   let { phase, answeredCount = 0 }: Props = $props();
 
-  const phases: { key: AIBuilderPhase; label: () => string }[] = [
-    { key: "discovering", label: () => m.ai_builder_phase_discovering() },
-    { key: "confirming", label: () => m.ai_builder_phase_confirming() },
-    { key: "building", label: () => m.ai_builder_phase_building() },
-    { key: "reviewing", label: () => m.ai_builder_phase_reviewing() }
+  // The four backend phases collapse into a calmer three-state status so the
+  // conversation, not a wizard, is the spine: the AI understands, then
+  // proposes, then the plan is ready.
+  const phases: { label: () => string }[] = [
+    { label: () => m.ai_builder_phase_understanding() },
+    { label: () => m.ai_builder_phase_proposing() },
+    { label: () => m.ai_builder_phase_ready() }
   ];
 
-  const phaseOrder: AIBuilderPhase[] = ["discovering", "confirming", "building", "reviewing"];
+  const phaseToDisplayIndex: Record<AIBuilderPhase, number> = {
+    discovering: 0,
+    confirming: 0,
+    building: 1,
+    reviewing: 2
+  };
 
-  const currentIndex = $derived(phaseOrder.indexOf(phase));
+  const currentIndex = $derived(phaseToDisplayIndex[phase]);
 
   function stateFor(index: number): "completed" | "active" | "upcoming" {
     if (index < currentIndex) return "completed";
@@ -27,9 +34,9 @@
   }
 </script>
 
-<nav class="phase-bar" aria-label="AI Builder progress">
+<nav class="phase-bar" aria-label={m.ai_builder_progress_aria()}>
   <ol class="phase-list" role="list">
-    {#each phases as step, i (step.key)}
+    {#each phases as step, i (i)}
       {@const state = stateFor(i)}
       <li
         class="phase-step"
@@ -60,7 +67,7 @@
         </span>
         <span class="phase-labels">
           <span class="phase-text">{step.label()}</span>
-          {#if step.key === "discovering" && state === "active" && answeredCount > 0}
+          {#if i === 0 && phase === "discovering" && state === "active" && answeredCount > 0}
             <span class="phase-counter"
               >{m.ai_builder_questions_answered({ count: answeredCount })}</span
             >
