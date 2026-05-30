@@ -287,7 +287,7 @@
     const isVertical = layoutDirection === "TB";
     const sourcePos = isVertical ? Position.Bottom : Position.Right;
     const targetPos = isVertical ? Position.Top : Position.Left;
-    const nodeWidth = isPowerUser ? 300 : 160;
+    const nodeWidth = isPowerUser ? 300 : isVertical ? 260 : 160;
     const nodeHeight = isPowerUser ? 150 : 48;
     const inputNodeSize = { width: 160, height: 74 };
     const outputNodeSize = { width: 170, height: 78 };

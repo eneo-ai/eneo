@@ -175,7 +175,7 @@
   <!-- User Mode: Compact pill -->
   <Card.Root
     class="bg-primary flex-row items-center gap-2 border-2 px-3 py-1.5 shadow-sm transition-colors {borderColor}"
-    style="min-width: 120px; max-width: 160px;"
+    style="min-width: 120px; max-width: {data.direction === 'TB' ? '260px' : '160px'};"
   >
     <span
       class="bg-hover-default flex size-5 shrink-0 items-center justify-center rounded text-xs font-bold"
