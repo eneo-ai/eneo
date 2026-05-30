@@ -4,9 +4,11 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
+  import * as Tabs from "$lib/components/ui/tabs/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
   import FlowAIBuilderStepCard from "./FlowAIBuilderStepCard.svelte";
+  import FlowAIBuilderCanvas from "./FlowAIBuilderCanvas.svelte";
   import FlowAIBuilderTokenUsage from "./FlowAIBuilderTokenUsage.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import type { AIBuilderSuggestChangeIntent, EditAdvisory } from "./protocol";
@@ -37,6 +39,9 @@
   const {
     state: { currentSpace }
   } = getSpacesManager();
+
+  // Steps visualization: the living diagram (default) or the detailed step cards.
+  let stepsView = $state<"diagram" | "details">("diagram");
 
   // ---- Derivations ---------------------------------------------------------
 
@@ -313,9 +318,9 @@
                         </div>
                         <span
                           class="text-muted shrink-0 font-mono text-[10.5px] tabular-nums"
-                          aria-label="File size"
+                          aria-label={m.file_size()}
                         >
-                          {Math.max(1, Math.round(file.size / 1024))} KB
+                          {m.kb({ value: Math.max(1, Math.round(file.size / 1024)) })}
                         </span>
                       </li>
                     {/each}
@@ -550,46 +555,66 @@
             </section>
           {/if}
 
-          <!-- Steps -->
+          <!-- Steps: the living diagram or the detailed step-card list -->
           <section class="border-default border-t px-5 py-4 md:px-6">
-            <h3 class="text-muted mb-3 text-[11px] font-semibold tracking-[0.06em] uppercase">
-              {m.flow_steps()}
-            </h3>
-            <div class="flex flex-col">
-              {#each spec.steps as step, i (step.plan_step_ref)}
-                <FlowAIBuilderStepCard
-                  {step}
-                  stepNumber={i + 1}
-                  planId={plan.plan_id}
-                  changeKind={getStepChangeKind(step, plan.edit_diff ?? null)}
-                  {resolveModelName}
-                  {resolveMcpServerName}
-                  {resolveMcpToolName}
-                  isFirst={i === 0}
-                  isLast={i === spec.steps.length - 1}
-                  planStatus={plan.status}
-                  buildDiagnosticReport={() =>
-                    buildAIBuilderDiagnosticReport({
-                      kind: "quality",
-                      surface: "step_quality",
-                      issue_kind: AIBuilderIssueKind.Other,
-                      session: diagnosticSession,
-                      plan: diagnosticPlan,
-                      step: {
-                        plan_step_ref: step.plan_step_ref,
-                        step_name: step.name,
-                        step_number: i + 1,
-                        input_type: step.input_type,
-                        output_type: step.output_type
-                      },
-                      details: {
-                        actual_output_type: step.output_type
-                      }
-                    })}
-                  onsuggestchange={(intent) => onsuggestchange?.(intent)}
-                />
-              {/each}
-            </div>
+            <Tabs.Root
+              value={stepsView}
+              onValueChange={(v) => (stepsView = v as "diagram" | "details")}
+            >
+              <div class="mb-3 flex items-center justify-between gap-3">
+                <h3 class="text-muted text-[11px] font-semibold tracking-[0.06em] uppercase">
+                  {m.flow_steps()}
+                </h3>
+                <Tabs.List class="h-8">
+                  <Tabs.Trigger value="diagram" class="px-3 py-1 text-xs">
+                    {m.ai_builder_canvas_tab_diagram()}
+                  </Tabs.Trigger>
+                  <Tabs.Trigger value="details" class="px-3 py-1 text-xs">
+                    {m.ai_builder_canvas_tab_details()}
+                  </Tabs.Trigger>
+                </Tabs.List>
+              </div>
+              <Tabs.Content value="diagram">
+                <FlowAIBuilderCanvas {spec} isStreaming={service.isStreaming} />
+              </Tabs.Content>
+              <Tabs.Content value="details">
+                <div class="flex flex-col">
+                  {#each spec.steps as step, i (step.plan_step_ref)}
+                    <FlowAIBuilderStepCard
+                      {step}
+                      stepNumber={i + 1}
+                      planId={plan.plan_id}
+                      changeKind={getStepChangeKind(step, plan.edit_diff ?? null)}
+                      {resolveModelName}
+                      {resolveMcpServerName}
+                      {resolveMcpToolName}
+                      isFirst={i === 0}
+                      isLast={i === spec.steps.length - 1}
+                      planStatus={plan.status}
+                      buildDiagnosticReport={() =>
+                        buildAIBuilderDiagnosticReport({
+                          kind: "quality",
+                          surface: "step_quality",
+                          issue_kind: AIBuilderIssueKind.Other,
+                          session: diagnosticSession,
+                          plan: diagnosticPlan,
+                          step: {
+                            plan_step_ref: step.plan_step_ref,
+                            step_name: step.name,
+                            step_number: i + 1,
+                            input_type: step.input_type,
+                            output_type: step.output_type
+                          },
+                          details: {
+                            actual_output_type: step.output_type
+                          }
+                        })}
+                      onsuggestchange={(intent) => onsuggestchange?.(intent)}
+                    />
+                  {/each}
+                </div>
+              </Tabs.Content>
+            </Tabs.Root>
           </section>
 
           <!-- Removed steps -->

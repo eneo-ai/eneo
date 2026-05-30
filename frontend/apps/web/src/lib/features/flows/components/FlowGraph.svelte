@@ -15,10 +15,12 @@
   import "@xyflow/svelte/dist/style.css";
   import dagre from "dagre";
   import type { Flow, FlowStep } from "@intric/intric-js";
+  import type { Readable } from "svelte/store";
   import FlowNodeLlm from "./FlowNodeLlm.svelte";
   import FlowNodeIO from "./FlowNodeIO.svelte";
   import FlowEdgeInteractive from "./FlowEdgeInteractive.svelte";
-  import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
+  import FlowGraphAutoFit from "./FlowGraphAutoFit.svelte";
+  import { getFlowUserMode, type FlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
   import { getEdgePayloadKind } from "$lib/features/flows/flowStepPresentation";
   import { IconDownload } from "@intric/icons/download";
@@ -31,16 +33,37 @@
     type FlowStepMcpSummary
   } from "$lib/features/flows/flowStepMcpConfig";
 
+  // Draft canvases (the AI builder) have no flow-editor context, so FlowGraph
+  // accepts the user mode and an assistant source as optional props. When they
+  // are omitted (the flow editor), it falls back to the page-level contexts.
+  interface FlowGraphAssistantSource {
+    assistantRevision: Readable<number>;
+    loadAssistant: (assistantId: string) => Promise<unknown>;
+    insertStepAfter?: (afterOrder: number) => Promise<void>;
+  }
+
   interface Props {
     flow: Flow;
     activeStepId: string | null;
     onnodeclick?: (id: string) => void;
+    mode?: Readable<FlowUserMode>;
+    assistantSource?: FlowGraphAssistantSource;
+    autoFit?: boolean;
   }
-  let { flow, activeStepId, onnodeclick }: Props = $props();
+  let {
+    flow,
+    activeStepId,
+    onnodeclick,
+    mode = getFlowUserMode(),
+    assistantSource = getFlowEditor(),
+    autoFit = false
+  }: Props = $props();
 
-  const mode = getFlowUserMode();
-  const flowEditor = getFlowEditor();
-  const assistantRevision = flowEditor.assistantRevision;
+  // assistantSource is stable for the component's lifetime (a context singleton on the
+  // flow editor, a const draft source on the builder canvas), so capturing its revision
+  // store once is safe and is required for the `$assistantRevision` subscription below.
+  // svelte-ignore state_referenced_locally
+  const assistantRevision = assistantSource.assistantRevision;
 
   let doFitView = $state(false);
 
@@ -179,7 +202,7 @@
     const revision = $assistantRevision;
     loadingAssistantIds.add(assistantId);
     try {
-      const assistant = await flowEditor.loadAssistant(assistantId);
+      const assistant = await assistantSource.loadAssistant(assistantId);
       const parsed = parseAssistantMeta(assistant);
       assistantMetaById.set(assistantId, parsed);
       lastLoadedRevisionByAssistant.set(assistantId, revision);
@@ -227,7 +250,7 @@
   async function handleEdgeInsert(sourceStepOrder: number): Promise<void> {
     if ($mode !== "power_user") return;
     if (flow.published_version != null) return;
-    await flowEditor.insertStepAfter(sourceStepOrder);
+    await assistantSource.insertStepAfter?.(sourceStepOrder);
   }
 
   function handleEdgeInspect(params: {
@@ -545,6 +568,7 @@
     {edgeTypes}
     fitView={doFitView}
     fitViewOptions={{ padding: 0.3 }}
+    minZoom={autoFit ? 0.2 : 0.5}
     proOptions={{ hideAttribution: true }}
     nodesDraggable={false}
     nodesConnectable={false}
@@ -553,6 +577,9 @@
     zoomOnScroll={true}
     onnodeclick={handleNodeClick}
   >
+    {#if autoFit}
+      <FlowGraphAutoFit />
+    {/if}
     {#if $mode === "power_user"}
       <Background variant={BackgroundVariant.Dots} />
       <MiniMap width={140} height={90} nodeColor={minimapNodeColor} />
