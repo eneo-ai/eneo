@@ -49,6 +49,7 @@
     mode?: Readable<FlowUserMode>;
     assistantSource?: FlowGraphAssistantSource;
     autoFit?: boolean;
+    direction?: "LR" | "TB";
   }
   let {
     flow,
@@ -56,7 +57,8 @@
     onnodeclick,
     mode = getFlowUserMode(),
     assistantSource = getFlowEditor(),
-    autoFit = false
+    autoFit = false,
+    direction = "LR"
   }: Props = $props();
 
   // assistantSource is stable for the component's lifetime (a context singleton on the
@@ -112,10 +114,12 @@
     }
   });
 
-  // Memoize layout — only rebuild when step structure or mode changes, not on activeStepId alone
+  // Memoize layout — only rebuild when step structure, mode, or layout direction
+  // changes, not on activeStepId alone
   let lastStepsJson = "";
   let lastMode = "";
   let lastMetaJson = "";
+  let lastDirection = "";
   let cachedLayout: { nodes: Node[]; edges: Edge[] } = { nodes: [], edges: [] };
 
   $effect(() => {
@@ -140,11 +144,17 @@
     );
     const currentMode = $mode;
 
-    if (stepsJson !== lastStepsJson || currentMode !== lastMode || metaJson !== lastMetaJson) {
+    if (
+      stepsJson !== lastStepsJson ||
+      currentMode !== lastMode ||
+      metaJson !== lastMetaJson ||
+      direction !== lastDirection
+    ) {
       lastStepsJson = stepsJson;
       lastMode = currentMode;
       lastMetaJson = metaJson;
-      cachedLayout = buildLayout(flow?.steps ?? [], activeStepId, currentMode);
+      lastDirection = direction;
+      cachedLayout = buildLayout(flow?.steps ?? [], activeStepId, currentMode, direction);
       nodes = cachedLayout.nodes;
       edges = cachedLayout.edges;
     } else {
@@ -269,10 +279,14 @@
   function buildLayout(
     steps: FlowStep[],
     activeId: string | null,
-    userMode: string
+    userMode: string,
+    layoutDirection: "LR" | "TB"
   ): { nodes: Node[]; edges: Edge[] } {
     const orderedSteps = structuredClone(steps).sort((a, b) => a.step_order - b.step_order);
     const isPowerUser = userMode === "power_user";
+    const isVertical = layoutDirection === "TB";
+    const sourcePos = isVertical ? Position.Bottom : Position.Right;
+    const targetPos = isVertical ? Position.Top : Position.Left;
     const nodeWidth = isPowerUser ? 300 : 160;
     const nodeHeight = isPowerUser ? 150 : 48;
     const inputNodeSize = { width: 160, height: 74 };
@@ -281,7 +295,7 @@
     const g = new dagre.graphlib.Graph();
     g.setDefaultEdgeLabel(() => ({}));
     g.setGraph({
-      rankdir: "LR",
+      rankdir: layoutDirection,
       ranksep: isPowerUser ? 140 : 80,
       nodesep: isPowerUser ? 50 : 30,
       marginx: 20,
@@ -293,9 +307,14 @@
       {
         id: "input",
         type: "input",
-        sourcePosition: Position.Right,
+        sourcePosition: sourcePos,
         position: { x: 0, y: 0 },
-        data: { label: m.flow_graph_node_input(), nodeType: "input", mode: userMode }
+        data: {
+          label: m.flow_graph_node_input(),
+          nodeType: "input",
+          mode: userMode,
+          direction: layoutDirection
+        }
       }
     ];
 
@@ -305,14 +324,15 @@
       resultNodes.push({
         id,
         type: step.output_mode === "template_fill" ? "assembly" : "llm",
-        sourcePosition: Position.Right,
-        targetPosition: Position.Left,
+        sourcePosition: sourcePos,
+        targetPosition: targetPos,
         position: { x: 0, y: 0 },
         data: {
           label: step.user_description ?? `Step ${step.step_order}`,
           step,
           isActive: id === activeId,
           mode: userMode,
+          direction: layoutDirection,
           modelName: assistantMetaById.get(step.assistant_id)?.modelName ?? null,
           assistantClassLevel:
             assistantMetaById.get(step.assistant_id)?.assistantClassificationLevel ?? null,
@@ -327,9 +347,14 @@
     resultNodes.push({
       id: "output",
       type: "output",
-      targetPosition: Position.Left,
+      targetPosition: targetPos,
       position: { x: 0, y: 0 },
-      data: { label: m.flow_graph_node_output(), nodeType: "output", mode: userMode }
+      data: {
+        label: m.flow_graph_node_output(),
+        nodeType: "output",
+        mode: userMode,
+        direction: layoutDirection
+      }
     });
 
     type EdgeSpec = {
@@ -568,7 +593,7 @@
     {edgeTypes}
     fitView={doFitView}
     fitViewOptions={{ padding: 0.3 }}
-    minZoom={autoFit ? 0.2 : 0.5}
+    minZoom={autoFit ? (direction === "TB" ? 0.5 : 0.2) : 0.5}
     proOptions={{ hideAttribution: true }}
     nodesDraggable={false}
     nodesConnectable={false}

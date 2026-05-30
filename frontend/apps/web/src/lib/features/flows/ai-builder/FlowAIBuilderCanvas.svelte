@@ -34,6 +34,7 @@
       assistantSource={draftAssistants}
       activeStepId={null}
       autoFit
+      direction="TB"
     />
   </div>
 {:else if isStreaming}

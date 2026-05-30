@@ -8,6 +8,7 @@
       label: string;
       nodeType: "input" | "output";
       mode?: "user" | "power_user";
+      direction?: "LR" | "TB";
       runStatus?: string;
     };
   } = $props();
@@ -26,7 +27,7 @@
 </div>
 
 {#if isInput}
-  <Handle type="source" position={Position.Right} />
+  <Handle type="source" position={data.direction === "TB" ? Position.Bottom : Position.Right} />
 {:else}
-  <Handle type="target" position={Position.Left} />
+  <Handle type="target" position={data.direction === "TB" ? Position.Top : Position.Left} />
 {/if}

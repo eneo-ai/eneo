@@ -23,6 +23,7 @@
       >;
       isActive: boolean;
       mode: "user" | "power_user";
+      direction?: "LR" | "TB";
       runStatus?: string;
       numTokensInput?: number;
       numTokensOutput?: number;
@@ -185,5 +186,5 @@
   </Card.Root>
 {/if}
 
-<Handle type="target" position={Position.Left} />
-<Handle type="source" position={Position.Right} />
+<Handle type="target" position={data.direction === "TB" ? Position.Top : Position.Left} />
+<Handle type="source" position={data.direction === "TB" ? Position.Bottom : Position.Right} />
