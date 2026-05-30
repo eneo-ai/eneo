@@ -315,6 +315,13 @@ def _normalize_pre_terminal_artifact_body_step(
     if not body_step_indexes:
         return spec, []
 
+    if len(body_step_indexes) > 1:
+        # Several pre-terminal steps look like artifact-body work. Flattening
+        # them all to the single canonical name only manufactures confusing
+        # "(2)" collisions, so keep the planner's distinct names; the terminal
+        # step still owns file creation.
+        return spec, []
+
     used_step_names = {
         _step_name_key(step.name)
         for index, step in enumerate(spec.steps)

@@ -823,7 +823,13 @@ def test_normalize_ai_builder_spec_renames_pre_terminal_docx_body_step() -> None
     ] == ["pre_terminal_artifact_body_step_renamed"]
 
 
-def test_normalize_ai_builder_spec_keeps_artifact_body_names_unique() -> None:
+def test_normalize_ai_builder_spec_keeps_distinct_names_for_multiple_artifact_body_steps() -> (
+    None
+):
+    # When several pre-terminal steps look like artifact-body work, flattening
+    # them all to the single canonical name only manufactures confusing "(2)"
+    # collisions. Keep the planner's distinct names; the terminal step still owns
+    # file creation.
     spec = FlowDraftSpecCore(
         flow_name="Audio DOCX",
         steps=[
@@ -865,18 +871,15 @@ def test_normalize_ai_builder_spec_keeps_artifact_body_names_unique() -> None:
 
     assert [step.name for step in normalized.steps] == [
         "Transkribera ljud",
-        "Förbered DOCX-innehåll",
-        "Förbered DOCX-innehåll (2)",
+        "Skapa rapportutkast",
+        "Skapa DOCX-rapport",
         "Skapa DOCX",
     ]
     assert [
         change.code
         for _step_spec, change in changes
         if change.code == "pre_terminal_artifact_body_step_renamed"
-    ] == [
-        "pre_terminal_artifact_body_step_renamed",
-        "pre_terminal_artifact_body_step_renamed",
-    ]
+    ] == []
 
 
 def test_normalize_ai_builder_spec_renames_non_adjacent_pdf_body_step() -> None:
