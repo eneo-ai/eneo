@@ -111,7 +111,7 @@
             variant="secondary"
             class="bg-warning-dimmer text-warning-stronger text-[10px] font-bold"
           >
-            DOCX
+            {m.flow_node_assembly_format_badge()}
           </Badge>
         {/if}
       </div>
@@ -121,7 +121,7 @@
             variant="secondary"
             class="bg-accent-dimmer text-accent-stronger text-[10px] font-bold"
           >
-            Model K{data.assistantClassLevel}
+            {m.flow_node_model_class_badge({ level: String(data.assistantClassLevel) })}
           </Badge>
         {/if}
         {#if data.classLevel != null && data.classLevel !== data.assistantClassLevel}
@@ -134,7 +134,7 @@
                 ? 'bg-warning-dimmer text-warning-stronger'
                 : 'bg-positive-dimmer text-positive-stronger'}"
           >
-            Output K{data.classLevel}
+            {m.flow_node_output_class_badge({ level: String(data.classLevel) })}
           </Badge>
         {/if}
       </div>
@@ -166,7 +166,10 @@
       {/if}
       {#if data.runStatus && (data.numTokensInput || data.numTokensOutput)}
         <div class="text-secondary">
-          {data.numTokensInput ?? 0} / {data.numTokensOutput ?? 0} tokens
+          {m.flow_node_token_usage({
+            input: String(data.numTokensInput ?? 0),
+            output: String(data.numTokensOutput ?? 0)
+          })}
         </div>
       {/if}
     </Card.Content>
