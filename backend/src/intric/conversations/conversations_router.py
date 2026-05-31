@@ -336,6 +336,7 @@ async def chat(
 
 @router.post(
     "/preflight",
+    description="Returns the exact token cost the next chat request will add.",
     response_model=PreflightResponse,
     responses=responses.get_responses([400, 403, 404, 422, 429]),
 )

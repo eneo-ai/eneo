@@ -108,6 +108,7 @@ async def get_file(
 
 @router.delete(
     "/{id}/",
+    description="Deletes a file by its ID.",
     status_code=204,
     response_class=Response,
     responses={

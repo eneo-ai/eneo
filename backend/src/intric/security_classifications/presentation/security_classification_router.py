@@ -213,6 +213,7 @@ async def update_security_classification_levels(
 
 @router.delete(
     "/{id}/",
+    description="Deletes a security classification, refusing referenced ones unless force=true.",
     status_code=204,
     responses=responses.get_responses([400, 403, 404]),
 )
