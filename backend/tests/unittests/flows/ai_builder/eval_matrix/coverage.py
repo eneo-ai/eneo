@@ -57,12 +57,12 @@ def unsatisfied_required_columns(
         policy = row_complexity_policy(row)
         if policy is None:
             continue
-        missing = [
+        required = {
             column
             for column in _COMPLEXITY_COLUMNS
             if policy.requirement_for(column) is CoverageRequirement.REQUIRED
-            and column not in covered.get(row, set())
-        ]
+        } | set(policy.required_columns)
+        missing = sorted(required - covered.get(row, set()), key=lambda c: c.value)
         if missing:
             result[row] = missing
     return result

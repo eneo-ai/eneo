@@ -138,7 +138,9 @@ def test_known_gaps_runtime_support_is_real_but_not_authorable(
 def test_each_golden_has_no_architecture_blockers(case: BuildableGoldenCase) -> None:
     # Draft preflight only (no materializer run): the spec is buildable on its
     # own terms. End-to-end materialization stays the live-eval runner's job.
-    blockers = architecture_blockers(case.spec)
+    blockers = architecture_blockers(
+        case.spec, aggregation_intent=case.aggregation_intent
+    )
     assert not blockers, (
         f"{case.case_id}: critic reports architecture blockers {blockers}"
     )
@@ -162,13 +164,29 @@ def test_declared_columns_match_derived(case: BuildableGoldenCase) -> None:
 
 
 def test_docx_fill_and_create_are_distinct_shapes() -> None:
-    fill = _single_golden(CapabilityRow.DOCUMENT_TO_DOCX_TEMPLATE)
-    create = _single_golden(CapabilityRow.DOCUMENT_TO_DOCX_CREATE)
-    fill_modes = {step.output_mode for step in fill.spec.steps if _is_docx(step)}
-    create_modes = {step.output_mode for step in create.spec.steps if _is_docx(step)}
+    fills = [
+        c
+        for c in GOLDEN_CASES
+        if c.capability_row == CapabilityRow.DOCUMENT_TO_DOCX_TEMPLATE
+    ]
+    creates = [
+        c
+        for c in GOLDEN_CASES
+        if c.capability_row == CapabilityRow.DOCUMENT_TO_DOCX_CREATE
+    ]
+    assert fills and creates
+    fill_modes = {
+        step.output_mode for c in fills for step in c.spec.steps if _is_docx(step)
+    }
+    create_modes = {
+        step.output_mode for c in creates for step in c.spec.steps if _is_docx(step)
+    }
+    # Fill always uses TEMPLATE_FILL; create always generates via PASS_THROUGH.
     assert fill_modes == {AIBuilderOutputMode.TEMPLATE_FILL}
     assert create_modes == {AIBuilderOutputMode.PASS_THROUGH}
-    assert fill.spec.spec_hash() != create.spec.spec_hash()
+    fill_hashes = {c.spec.spec_hash() for c in fills}
+    create_hashes = {c.spec.spec_hash() for c in creates}
+    assert fill_hashes.isdisjoint(create_hashes)
 
 
 def test_golden_case_ids_are_unique() -> None:
@@ -256,12 +274,6 @@ def test_declare_only_not_derived_when_a_later_step_uses_a_form_field() -> None:
         form_fields=[FormFieldSpec(name="topic", type="text", label="Ämne")],
     )
     assert CompositionColumn.FORM_FIELDS_DECLARE_ONLY not in columns
-
-
-def _single_golden(row: CapabilityRow) -> BuildableGoldenCase:
-    matches = [case for case in GOLDEN_CASES if case.capability_row == row]
-    assert len(matches) == 1, f"expected exactly one golden for {row.value}"
-    return matches[0]
 
 
 def _is_docx(step: StepSpec) -> bool:
@@ -401,6 +413,39 @@ def test_distinct_rows_per_column_counts_rows_not_cases() -> None:
     counts = distinct_rows_per_column(same_row)
     # Two single-step cases on one row count as one row for the column.
     assert counts[CompositionColumn.BASIC_SINGLE_STEP] == 1
+
+
+# --- Hard global coverage thresholds ---
+
+_MIN_ROWS_PER_COLUMN = 3
+_MIN_CHAIN_SHARE = 0.30
+_MIN_EDIT_SHARE = 0.20
+
+
+def test_every_composition_column_spans_at_least_three_rows() -> None:
+    counts = distinct_rows_per_column()
+    for column in CompositionColumn:
+        assert counts.get(column, 0) >= _MIN_ROWS_PER_COLUMN, (
+            f"{column.value} is covered by only {counts.get(column, 0)} rows"
+        )
+
+
+def test_form_fields_chain_meets_minimum_share() -> None:
+    share = composition_ratio(CompositionColumn.FORM_FIELDS_CHAIN)
+    assert share >= _MIN_CHAIN_SHARE, (
+        f"form_fields_chain share {share:.2f} is below {_MIN_CHAIN_SHARE}"
+    )
+
+
+def test_edit_path_meets_minimum_share() -> None:
+    share = composition_ratio(CompositionColumn.EDIT_PATH)
+    assert share >= _MIN_EDIT_SHARE, (
+        f"edit_path share {share:.2f} is below {_MIN_EDIT_SHARE}"
+    )
+
+
+def test_no_http_threshold_violations() -> None:
+    assert http_threshold_violations() == []
 
 
 # --- Anti-slop quality + Pattern Registry grounding ---

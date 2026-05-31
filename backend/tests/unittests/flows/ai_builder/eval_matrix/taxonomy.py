@@ -54,16 +54,15 @@ class CompositionColumn(str, Enum):
 _EXPECTED_MATRIX_STATE: dict[CapabilityRow, MatrixRowState] = {
     CapabilityRow.SUMMARIZE_TEXT: "buildable",
     CapabilityRow.EXTRACT_STRUCTURED_FIELDS: "buildable",
+    CapabilityRow.DOCUMENT_TO_STRUCTURED_REPORT: "buildable",
     CapabilityRow.DOCUMENT_TO_DOCX_TEMPLATE: "buildable",
     CapabilityRow.DOCUMENT_TO_DOCX_CREATE: "buildable",
-    CapabilityRow.SECTIONED_FORM_INTAKE: "buildable",
+    CapabilityRow.DOCUMENT_TO_PDF_REPORT: "buildable",
+    CapabilityRow.AUDIO_TRANSCRIPTION: "buildable",
     CapabilityRow.MULTI_STEP_QUALITY_CHAIN: "buildable",
-    # Buildable in principle, not yet seeded with a golden.
-    CapabilityRow.DOCUMENT_TO_STRUCTURED_REPORT: "planned",
-    CapabilityRow.DOCUMENT_TO_PDF_REPORT: "planned",
-    CapabilityRow.AUDIO_TRANSCRIPTION: "planned",
-    CapabilityRow.COMPARISON: "planned",
-    CapabilityRow.UNDERLAG_TILL_TEXT: "planned",
+    CapabilityRow.COMPARISON: "buildable",
+    CapabilityRow.SECTIONED_FORM_INTAKE: "buildable",
+    CapabilityRow.UNDERLAG_TILL_TEXT: "buildable",
     # Runtime-only: the AI Builder authoring enums cannot emit HTTP steps.
     CapabilityRow.HTTP_POST_CALL: "gap",
     CapabilityRow.HTTP_GET_CALL: "gap",
@@ -92,24 +91,32 @@ class CoverageRequirement(str, Enum):
 
 @dataclass(frozen=True)
 class RowComplexityPolicy:
-    """Per-row coverage policy for the two complexity columns.
+    """Per-row coverage policy: the two complexity columns plus any
+    non-complexity column the row must always carry.
 
     Encodes that some capabilities are inherently single-step (advanced is a
     forced graft) and some inherently multi-step (a basic single-step version is
     a contradiction), so "basic AND advanced on every row" is not a uniform
-    contract. The other five composition columns are not complexity-graded and
-    are governed by the global per-column threshold, not this policy.
+    contract. `required_columns` pins composition concepts whose defining shape
+    is not a complexity grade (e.g. underlag_till_text -> JSON_IN_JSON_OUT_PIPE);
+    any remaining column is governed by the global per-column threshold.
     """
 
     basic_single_step: CoverageRequirement
     advanced_multi_capability: CoverageRequirement
+    # Non-complexity columns this row must also cover. Used for composition
+    # concepts whose defining shape is not a complexity grade — e.g.
+    # underlag_till_text requires JSON_IN_JSON_OUT_PIPE so its golden cannot
+    # silently vanish.
+    required_columns: frozenset[CompositionColumn] = frozenset()
 
     def requirement_for(self, column: CompositionColumn) -> CoverageRequirement:
         if column is CompositionColumn.BASIC_SINGLE_STEP:
             return self.basic_single_step
         if column is CompositionColumn.ADVANCED_MULTI_CAPABILITY:
             return self.advanced_multi_capability
-        # Non-complexity columns are governed globally, never per-row.
+        # Only the two complexity columns are graded here; a row's
+        # `required_columns` set governs any non-complexity column it must carry.
         return CoverageRequirement.ALLOWED
 
 
@@ -122,12 +129,19 @@ _NA = CoverageRequirement.NOT_APPLICABLE
 _ROW_COMPLEXITY_POLICIES: dict[CapabilityRow, RowComplexityPolicy] = {
     CapabilityRow.SUMMARIZE_TEXT: RowComplexityPolicy(_REQ, _OPT),
     CapabilityRow.EXTRACT_STRUCTURED_FIELDS: RowComplexityPolicy(_REQ, _OPT),
-    CapabilityRow.DOCUMENT_TO_DOCX_TEMPLATE: RowComplexityPolicy(_REQ, _OPT),
+    CapabilityRow.DOCUMENT_TO_STRUCTURED_REPORT: RowComplexityPolicy(_REQ, _REQ),
+    CapabilityRow.DOCUMENT_TO_DOCX_TEMPLATE: RowComplexityPolicy(_REQ, _REQ),
     CapabilityRow.DOCUMENT_TO_DOCX_CREATE: RowComplexityPolicy(_REQ, _OPT),
-    # The seeded golden covers form_fields_chain, a non-complexity column, so
-    # neither complexity column is row-required yet.
-    CapabilityRow.SECTIONED_FORM_INTAKE: RowComplexityPolicy(_OPT, _OPT),
+    CapabilityRow.DOCUMENT_TO_PDF_REPORT: RowComplexityPolicy(_REQ, _OPT),
+    CapabilityRow.AUDIO_TRANSCRIPTION: RowComplexityPolicy(_REQ, _OPT),
     CapabilityRow.MULTI_STEP_QUALITY_CHAIN: RowComplexityPolicy(_NA, _REQ),
+    CapabilityRow.COMPARISON: RowComplexityPolicy(_REQ, _REQ),
+    CapabilityRow.SECTIONED_FORM_INTAKE: RowComplexityPolicy(_REQ, _REQ),
+    CapabilityRow.UNDERLAG_TILL_TEXT: RowComplexityPolicy(
+        _NA,
+        _OPT,
+        required_columns=frozenset({CompositionColumn.JSON_IN_JSON_OUT_PIPE}),
+    ),
 }
 
 

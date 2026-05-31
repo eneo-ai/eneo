@@ -21,6 +21,7 @@ from intric.flows.ai_builder.ai_builder_form_field_usage import (
 from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_critic_context,
 )
+from intric.flows.ai_builder.planning_state import AggregationIntent
 from intric.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -44,15 +45,22 @@ _ADVANCED_CAPABILITY_THRESHOLD = 3
 _FORM_FIELDS_CHAIN_MIN_STEPS = 3
 
 
-def architecture_blockers(spec: FlowDraftSpecCore) -> tuple[str, ...]:
+def architecture_blockers(
+    spec: FlowDraftSpecCore,
+    *,
+    aggregation_intent: AggregationIntent = "linear",
+) -> tuple[str, ...]:
     """Architecture-invariant ids the critic draft preflight reports for this spec.
 
     Uses an empty conversation: with no user-intent signals only the
     spec-internal architecture invariants can fire, which is exactly the
     "is this draft buildable on its own terms" question the matrix asks. This is
-    preflight, not a materializer run.
+    preflight, not a materializer run. `aggregation_intent` lets comparison
+    goldens carry the fan-in semantics the compare invariants expect.
     """
-    context = build_conversation_critic_context([], spec)
+    context = build_conversation_critic_context(
+        [], spec, aggregation_intent=aggregation_intent
+    )
     result = run_draft_preflight(context)
     return tuple(issue.id for issue in result.architecture_issues)
 

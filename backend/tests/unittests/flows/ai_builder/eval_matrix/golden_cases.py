@@ -6,19 +6,18 @@ with no architecture blocker, resolves its declared form fields, and that its
 declared composition columns match what the spec shape derives. End-to-end
 materialization is the live-eval runner's job, not this deterministic fence.
 
-This is the foundation set: enough goldens to exercise the column-derivation and
-ratchet machinery across distinct shapes. Growing to full per-row and per-column
-coverage (and switching on the population thresholds) is the next step; the
-matrix-state ratchet in `taxonomy.py` keeps the not-yet-seeded rows visible.
-
-Capabilities the authoring enums cannot express (HTTP) are recorded as
-`KnownCapabilityGap`, never faked into a buildable golden.
+The set covers every AI-Builder-expressible capability row across the composition
+columns, meeting each row's complexity policy and the global coverage thresholds
+(every column spans several rows; form-field chains and edit paths clear their
+minimum shares). Capabilities the authoring enums cannot express (HTTP) are
+recorded as `KnownCapabilityGap`, never faked into a buildable golden.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from intric.flows.ai_builder.planning_state import AggregationIntent
 from intric.flows.enums import FlowInputSource, FlowOutputMode
 from intric.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -41,6 +40,10 @@ class BuildableGoldenCase:
     spec: FlowDraftSpecCore
     declared_columns: frozenset[CompositionColumn]
     via_edit: bool = False
+    # Fan-in semantics the critic needs for compare-style flows; comparison
+    # goldens set "compare" so the multi-document-compare invariants evaluate
+    # the spec the way the planner would.
+    aggregation_intent: AggregationIntent = "linear"
 
 
 @dataclass(frozen=True)
@@ -247,6 +250,385 @@ def _multi_step_quality_chain() -> BuildableGoldenCase:
     )
 
 
+def _structured_report_basic() -> BuildableGoldenCase:
+    spec = FlowDraftSpecCore(
+        flow_name="Avtalets risköversikt",
+        steps=[
+            _step(
+                "step_a",
+                "Skriv risköversikt",
+                "Läs det uppladdade avtalet och skriv en kort risköversikt med de "
+                "viktigaste punkterna.",
+                input_type=InputType.DOCUMENT,
+            )
+        ],
+    )
+    return BuildableGoldenCase(
+        case_id="document_to_structured_report__basic",
+        capability_row=CapabilityRow.DOCUMENT_TO_STRUCTURED_REPORT,
+        spec=spec,
+        declared_columns=frozenset({CompositionColumn.BASIC_SINGLE_STEP}),
+    )
+
+
+def _structured_report_advanced() -> BuildableGoldenCase:
+    spec = FlowDraftSpecCore(
+        flow_name="Fördjupad upphandlingsrapport",
+        steps=[
+            _step(
+                "step_a",
+                "Extrahera fynd",
+                "Extrahera strukturerade fynd ur upphandlingsdokumentet med fokus "
+                "på {{report_focus}}.",
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                "step_b",
+                "Analysera fynd",
+                "Analysera och fördjupa resonemanget utifrån "
+                "{{step_a.output.structured.findings}}.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+            _step(
+                "step_c",
+                "Skriv rapport",
+                "Skriv en sammanhållen rapport som väger "
+                "{{step_a.output.structured.findings}} mot {{step_b.output.text}} "
+                "med fokus på {{report_focus}}.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ],
+        form_fields=[FormFieldSpec(name="report_focus", type="text", label="Fokus")],
+    )
+    return BuildableGoldenCase(
+        case_id="document_to_structured_report__advanced",
+        capability_row=CapabilityRow.DOCUMENT_TO_STRUCTURED_REPORT,
+        spec=spec,
+        declared_columns=frozenset(
+            {
+                CompositionColumn.ADVANCED_MULTI_CAPABILITY,
+                CompositionColumn.JSON_IN_JSON_OUT_PIPE,
+                CompositionColumn.FORM_FIELDS_CHAIN,
+                CompositionColumn.ALL_STEPS_MULTI_REFERENCE,
+                CompositionColumn.EDIT_PATH,
+            }
+        ),
+        via_edit=True,
+    )
+
+
+def _pdf_report_basic() -> BuildableGoldenCase:
+    spec = FlowDraftSpecCore(
+        flow_name="Periodens PDF-rapport",
+        steps=[
+            _step(
+                "step_a",
+                "Skapa PDF-rapport",
+                "Skapa en PDF-rapport för perioden {{reporting_period}} utifrån "
+                "det uppladdade underlaget.",
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.PDF,
+            )
+        ],
+        form_fields=[
+            FormFieldSpec(name="reporting_period", type="text", label="Period")
+        ],
+    )
+    return BuildableGoldenCase(
+        case_id="document_to_pdf_report__basic",
+        capability_row=CapabilityRow.DOCUMENT_TO_PDF_REPORT,
+        spec=spec,
+        declared_columns=frozenset(
+            {
+                CompositionColumn.BASIC_SINGLE_STEP,
+                CompositionColumn.FORM_FIELDS_DECLARE_ONLY,
+            }
+        ),
+    )
+
+
+def _audio_transcription_basic() -> BuildableGoldenCase:
+    spec = FlowDraftSpecCore(
+        flow_name="Transkribera intervju",
+        steps=[
+            _step(
+                "step_a",
+                "Transkribera ljud",
+                "Transkribera den uppladdade intervjuinspelningen till text.",
+                input_type=InputType.AUDIO,
+                output_mode=OutputMode.TRANSCRIBE_ONLY,
+            )
+        ],
+    )
+    return BuildableGoldenCase(
+        case_id="audio_transcription__basic",
+        capability_row=CapabilityRow.AUDIO_TRANSCRIPTION,
+        spec=spec,
+        declared_columns=frozenset({CompositionColumn.BASIC_SINGLE_STEP}),
+    )
+
+
+def _comparison_basic() -> BuildableGoldenCase:
+    spec = FlowDraftSpecCore(
+        flow_name="Jämför offerter",
+        steps=[
+            _step(
+                "step_a",
+                "Jämför offerter",
+                "Jämför de uppladdade offerterna och returnera en strukturerad "
+                "jämförelse i JSON.",
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+            )
+        ],
+    )
+    return BuildableGoldenCase(
+        case_id="comparison__basic",
+        capability_row=CapabilityRow.COMPARISON,
+        spec=spec,
+        declared_columns=frozenset({CompositionColumn.BASIC_SINGLE_STEP}),
+        aggregation_intent="compare",
+    )
+
+
+def _comparison_advanced() -> BuildableGoldenCase:
+    spec = FlowDraftSpecCore(
+        flow_name="Viktad offertjämförelse",
+        steps=[
+            _step(
+                "step_a",
+                "Läs första offerten",
+                "Extrahera nyckeltal ur den första offerten enligt {{criteria}}.",
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                "step_b",
+                "Läs andra offerten",
+                "Extrahera nyckeltal ur den andra offerten enligt {{criteria}}.",
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                "step_c",
+                "Väg samman",
+                "Jämför {{step_a.output.structured.metrics}} och "
+                "{{step_b.output.structured.metrics}} mot {{criteria}} och skriv "
+                "en motiverad rekommendation.",
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+            ),
+        ],
+        form_fields=[FormFieldSpec(name="criteria", type="text", label="Kriterier")],
+    )
+    return BuildableGoldenCase(
+        case_id="comparison__advanced",
+        capability_row=CapabilityRow.COMPARISON,
+        spec=spec,
+        declared_columns=frozenset(
+            {
+                CompositionColumn.ADVANCED_MULTI_CAPABILITY,
+                CompositionColumn.JSON_IN_JSON_OUT_PIPE,
+                CompositionColumn.FORM_FIELDS_CHAIN,
+                CompositionColumn.ALL_STEPS_MULTI_REFERENCE,
+            }
+        ),
+        aggregation_intent="compare",
+    )
+
+
+def _docx_template_advanced() -> BuildableGoldenCase:
+    spec = FlowDraftSpecCore(
+        flow_name="Mallfyllning med granskning",
+        steps=[
+            _step(
+                "step_a",
+                "Extrahera variabler",
+                "Extrahera mallvariabler ur det uppladdade dokumentet för "
+                "{{template_name}}.",
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                "step_b",
+                "Validera variabler",
+                "Komplettera och validera variablerna från "
+                "{{step_a.output.structured.fields}}.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                "step_c",
+                "Fyll mallen",
+                "Fyll DOCX-mallen {{template_name}} med variablerna från "
+                "{{step_b.output.structured.fields}}.",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.DOCX,
+                output_mode=OutputMode.TEMPLATE_FILL,
+            ),
+        ],
+        form_fields=[FormFieldSpec(name="template_name", type="text", label="Mall")],
+    )
+    return BuildableGoldenCase(
+        case_id="document_to_docx_template__advanced",
+        capability_row=CapabilityRow.DOCUMENT_TO_DOCX_TEMPLATE,
+        spec=spec,
+        declared_columns=frozenset(
+            {
+                CompositionColumn.ADVANCED_MULTI_CAPABILITY,
+                CompositionColumn.JSON_IN_JSON_OUT_PIPE,
+                CompositionColumn.FORM_FIELDS_CHAIN,
+                CompositionColumn.EDIT_PATH,
+            }
+        ),
+        via_edit=True,
+    )
+
+
+def _sectioned_form_intake_basic() -> BuildableGoldenCase:
+    spec = FlowDraftSpecCore(
+        flow_name="Enkel introduktionsplan",
+        steps=[
+            _step(
+                "step_a",
+                "Sammanställ plan",
+                "Sammanställ en introduktionsplan för {{applicant_name}} i rollen "
+                "{{role}}.",
+            )
+        ],
+        form_fields=[
+            FormFieldSpec(name="applicant_name", type="text", label="Namn"),
+            FormFieldSpec(name="role", type="text", label="Roll"),
+        ],
+    )
+    return BuildableGoldenCase(
+        case_id="sectioned_form_intake__basic",
+        capability_row=CapabilityRow.SECTIONED_FORM_INTAKE,
+        spec=spec,
+        declared_columns=frozenset(
+            {
+                CompositionColumn.BASIC_SINGLE_STEP,
+                CompositionColumn.FORM_FIELDS_DECLARE_ONLY,
+            }
+        ),
+    )
+
+
+def _sectioned_form_intake_advanced() -> BuildableGoldenCase:
+    spec = FlowDraftSpecCore(
+        flow_name="Avsnittsintag med underlag",
+        steps=[
+            _step(
+                "step_a",
+                "Extrahera avsnitt",
+                "Extrahera relevanta avsnitt ur det uppladdade underlaget för "
+                "{{unit}}.",
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                "step_b",
+                "Skriv utkast",
+                "Skriv ett utkast utifrån {{step_a.output.structured.sections}}.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+            _step(
+                "step_c",
+                "Färdigställ",
+                "Färdigställ texten från {{step_b.output.text}} med fokus på {{unit}}.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ],
+        form_fields=[FormFieldSpec(name="unit", type="text", label="Enhet")],
+    )
+    return BuildableGoldenCase(
+        case_id="sectioned_form_intake__advanced",
+        capability_row=CapabilityRow.SECTIONED_FORM_INTAKE,
+        spec=spec,
+        declared_columns=frozenset(
+            {
+                CompositionColumn.ADVANCED_MULTI_CAPABILITY,
+                CompositionColumn.JSON_IN_JSON_OUT_PIPE,
+                CompositionColumn.FORM_FIELDS_CHAIN,
+            }
+        ),
+    )
+
+
+def _multi_step_quality_chain_form_fields() -> BuildableGoldenCase:
+    spec = FlowDraftSpecCore(
+        flow_name="Tonanpassad granskningskedja",
+        steps=[
+            _step(
+                "step_a",
+                "Strukturera utkast",
+                "Extrahera utkastets struktur ur det uppladdade dokumentet med "
+                "ton {{tone}}.",
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                "step_b",
+                "Kritisera",
+                "Kritisera och förbättra utkastet utifrån "
+                "{{step_a.output.structured.draft}}.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+            _step(
+                "step_c",
+                "Revidera",
+                "Revidera texten genom att väga {{step_a.output.structured.draft}} "
+                "mot {{step_b.output.text}} och anpassa tonen {{tone}}.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ],
+        form_fields=[FormFieldSpec(name="tone", type="text", label="Ton")],
+    )
+    return BuildableGoldenCase(
+        case_id="multi_step_quality_chain__form_fields",
+        capability_row=CapabilityRow.MULTI_STEP_QUALITY_CHAIN,
+        spec=spec,
+        declared_columns=frozenset(
+            {
+                CompositionColumn.ADVANCED_MULTI_CAPABILITY,
+                CompositionColumn.JSON_IN_JSON_OUT_PIPE,
+                CompositionColumn.FORM_FIELDS_CHAIN,
+                CompositionColumn.ALL_STEPS_MULTI_REFERENCE,
+                CompositionColumn.EDIT_PATH,
+            }
+        ),
+        via_edit=True,
+    )
+
+
+def _underlag_till_text_pipe() -> BuildableGoldenCase:
+    spec = FlowDraftSpecCore(
+        flow_name="Strukturerad data till text",
+        steps=[
+            _step(
+                "step_a",
+                "Extrahera data",
+                "Extrahera strukturerade uppgifter ur det uppladdade formuläret.",
+                input_type=InputType.DOCUMENT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                "step_b",
+                "Skriv text",
+                "Skriv en sammanhängande text utifrån "
+                "{{step_a.output.structured.data}}.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ],
+    )
+    return BuildableGoldenCase(
+        case_id="underlag_till_text__pipe",
+        capability_row=CapabilityRow.UNDERLAG_TILL_TEXT,
+        spec=spec,
+        declared_columns=frozenset({CompositionColumn.JSON_IN_JSON_OUT_PIPE}),
+    )
+
+
 GOLDEN_CASES: tuple[BuildableGoldenCase, ...] = (
     _summarize_text(),
     _extract_structured_fields(),
@@ -254,6 +636,17 @@ GOLDEN_CASES: tuple[BuildableGoldenCase, ...] = (
     _document_to_docx_template(),
     _document_to_docx_create(),
     _multi_step_quality_chain(),
+    _structured_report_basic(),
+    _structured_report_advanced(),
+    _pdf_report_basic(),
+    _audio_transcription_basic(),
+    _comparison_basic(),
+    _comparison_advanced(),
+    _docx_template_advanced(),
+    _sectioned_form_intake_basic(),
+    _sectioned_form_intake_advanced(),
+    _multi_step_quality_chain_form_fields(),
+    _underlag_till_text_pipe(),
 )
 
 
