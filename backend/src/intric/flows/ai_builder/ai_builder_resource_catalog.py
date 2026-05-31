@@ -450,13 +450,17 @@ def render_resource_reference_block(
 
     Phases share the per-kind bullet formatting and add their own headings/copy.
     """
+    tools_by_server_ref: dict[str, list[AIBuilderResourceReferenceEntry]] = {}
+    for tool in material.mcp_tools:
+        if tool.parent_ref is None:
+            continue
+        tools_by_server_ref.setdefault(tool.parent_ref, []).append(tool)
     mcp_lines: list[str] = []
     for server in material.mcp_servers:
         mcp_lines.append(f"- {server.prompt_fields(ref_label='server_ref')}")
         mcp_lines.extend(
             f"  - {tool.prompt_fields(ref_label='tool_ref')}"
-            for tool in material.mcp_tools
-            if tool.parent_ref == server.ref
+            for tool in tools_by_server_ref.get(server.ref, ())
         )
     return RenderedResourceReferences(
         models="\n".join(

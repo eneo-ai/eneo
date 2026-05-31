@@ -14,6 +14,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     RESOURCE_DESCRIPTION_MAX_CHARS,
     AIBuilderAvailableKnowledgeBaseResource,
     AIBuilderAvailableModelResource,
+    AIBuilderResourceReferenceEntry,
     AIBuilderResourceReferenceMaterial,
     AssistantSnapshotResourceUnavailableError,
     build_ai_builder_resource_catalog,
@@ -971,3 +972,47 @@ class TestRenderResourceReferenceBlock:
         lines = rendered.mcp.splitlines()
         assert sum(line.startswith("- server_ref=") for line in lines) == 2
         assert sum(line.startswith("  - tool_ref=") for line in lines) == 2
+
+    def test_groups_interleaved_tools_under_parents_preserving_order(self) -> None:
+        # Tools arrive interleaved across parents, plus one orphan (unknown
+        # server) and one with no parent. Each tool must reattach to its own
+        # server in input order, the orphan and parentless tools are dropped,
+        # and a server with no tools is still emitted as a bullet.
+        def _entry(
+            ref: str, name: str, parent: str | None = None
+        ) -> AIBuilderResourceReferenceEntry:
+            return AIBuilderResourceReferenceEntry(
+                ref=ref, display_name=name, parent_ref=parent
+            )
+
+        material = AIBuilderResourceReferenceMaterial(
+            models=(),
+            knowledge_bases=(),
+            mcp_servers=(
+                _entry("mcp_server.a", "Server A"),
+                _entry("mcp_server.b", "Server B"),
+                _entry("mcp_server.c", "Server C"),
+            ),
+            mcp_tools=(
+                _entry("mcp_tool.a1", "Tool A1", parent="mcp_server.a"),
+                _entry("mcp_tool.b1", "Tool B1", parent="mcp_server.b"),
+                _entry("mcp_tool.a2", "Tool A2", parent="mcp_server.a"),
+                _entry("mcp_tool.orphan", "Orphan", parent="mcp_server.zzz"),
+                _entry("mcp_tool.loose", "Loose"),
+            ),
+            selected_mcp_servers=(),
+            selected_mcp_tools=(),
+        )
+
+        rendered = render_resource_reference_block(material)
+
+        assert rendered.mcp == (
+            "- server_ref=`mcp_server.a` | name=`Server A`\n"
+            "  - tool_ref=`mcp_tool.a1` | name=`Tool A1`\n"
+            "  - tool_ref=`mcp_tool.a2` | name=`Tool A2`\n"
+            "- server_ref=`mcp_server.b` | name=`Server B`\n"
+            "  - tool_ref=`mcp_tool.b1` | name=`Tool B1`\n"
+            "- server_ref=`mcp_server.c` | name=`Server C`"
+        )
+        assert "mcp_tool.orphan" not in rendered.mcp
+        assert "mcp_tool.loose" not in rendered.mcp
