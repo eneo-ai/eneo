@@ -24,6 +24,7 @@ from intric.flows.ai_builder.ai_builder_domain_models import (
 )
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_freeform_user_text,
+    slot_names_blocked_by_explicit_uncertainty,
 )
 from intric.flows.ai_builder.ai_builder_question_phrasing import (
     phrase_clarification_question,
@@ -40,6 +41,7 @@ from intric.flows.ai_builder.ai_builder_slot_classifier import (
 )
 from intric.flows.ai_builder.planning_state import PlanningState
 from intric.flows.ai_builder.planning_state_builder import (
+    apply_model_blocked_slots,
     apply_policy_defaults_from_resolved_slots,
     build_planning_state_from_conversation,
     llm_resolvable_slot_values_for_state,
@@ -164,6 +166,17 @@ async def build_runtime_discovery_context(
         return RuntimeDiscoveryContext(planning_state=state)
 
     allowed_values = llm_resolvable_slot_values_for_state(state)
+    model_blocked_slots = slot_names_blocked_by_explicit_uncertainty(
+        conversation,
+        flow=flow,
+    )
+    apply_model_blocked_slots(state, model_blocked_slots=model_blocked_slots)
+    if model_blocked_slots:
+        allowed_values = {
+            slot_name: values
+            for slot_name, values in allowed_values.items()
+            if slot_name not in model_blocked_slots
+        }
     if not allowed_values:
         return RuntimeDiscoveryContext(planning_state=state)
     allowed_values = _narrow_structured_analysis_need_from_classifier(
@@ -195,7 +208,12 @@ async def build_runtime_discovery_context(
         allowed_slot_values=allowed_values,
         bias=bias,
     )
-    merge_llm_resolved_slots(state, result, prompt_hash=prompt_hash)
+    merge_llm_resolved_slots(
+        state,
+        result,
+        prompt_hash=prompt_hash,
+        model_blocked_slots=model_blocked_slots,
+    )
     apply_policy_defaults_from_resolved_slots(state, freeform_text=text)
     return RuntimeDiscoveryContext(
         planning_state=state,

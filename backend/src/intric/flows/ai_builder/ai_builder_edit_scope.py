@@ -218,7 +218,7 @@ def resolve_edit_scope(
 
     flow_defaults = capabilities.to_signal_defaults()
     output_intent = resolve_output_intent(
-        normalized_text,
+        active_request_text,
         active_answer_signals,
         flow_defaults=flow_defaults,
     )

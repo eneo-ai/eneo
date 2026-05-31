@@ -199,6 +199,7 @@ def build_discovery_profile(
         text,
         active_answers,
         flow_defaults=flow_defaults,
+        conversation=active_conversation,
     )
     explicit_input_question_ids = {
         question_id

@@ -207,6 +207,7 @@ def terminal_output_type_for_conversation(
         output_intent = resolve_output_intent(
             latest_user_content,
             extract_answer_signals([latest_user_message]),
+            conversation=[latest_user_message],
         )
         latest_output_type = _output_type_from_intent(output_intent.terminal_output)
         return (
@@ -218,6 +219,7 @@ def terminal_output_type_for_conversation(
     output_intent = resolve_output_intent(
         aggregate_freeform_user_text(conversation),
         extract_answer_signals(conversation),
+        conversation=conversation,
     )
     return _output_type_from_intent(output_intent.terminal_output)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
@@ -86,7 +87,9 @@ __all__ = [
     "resolve_explicit_output_choice",
     "resolve_output_intent",
     "runtime_metadata_requested",
+    "slot_names_blocked_by_explicit_uncertainty",
     "supported_structured_question_ids",
+    "terminal_output_uncertainty_is_unresolved",
 ]
 
 
@@ -131,6 +134,52 @@ _ARTIFACT_TRAILING_NEGATION_WORDS: frozenset[str] = frozenset({"ej", "inte", "no
 _ARTIFACT_NEGATION_LOOKBEHIND_WORDS = 3
 _ARTIFACT_NEGATION_LOOKAHEAD_WORDS = 3
 _NEGATION_TOKEN_STRIP_CHARS = ".,;!?:\")'`"
+_TERMINAL_OUTPUT_UNCERTAINTY_SEGMENT_RE = re.compile(
+    r"[\n.!?;:,]+|\b(?:but|men)\b",
+    re.IGNORECASE,
+)
+_TERMINAL_OUTPUT_UNCERTAINTY_CUES: tuple[str, ...] = (
+    "do not know",
+    "don t know",
+    "dont know",
+    "ej bestämt",
+    "ej bestamt",
+    "help me choose",
+    "hjälp mig välja",
+    "hjalp mig valja",
+    "inte bestämt",
+    "inte bestamt",
+    "inte säker",
+    "inte saker",
+    "inte valt",
+    "not decided",
+    "not sure",
+    "osäker",
+    "osaker",
+    "undecided",
+    "vet ej",
+    "vet inte",
+)
+_TERMINAL_OUTPUT_UNCERTAINTY_SCOPE_MARKERS: tuple[str, ...] = (
+    "deliverable",
+    "delivery",
+    "filformat",
+    "filformatet",
+    "final answer",
+    "final output",
+    "format",
+    "formatet",
+    "leverans",
+    "output",
+    "rapportformat",
+    "result",
+    "resultat",
+    "resultatet",
+    "slutformat",
+    "slutresultat",
+    "slutresultatet",
+    "utdata",
+)
 
 
 def latest_pending_structured_question(
@@ -607,6 +656,7 @@ def question_is_already_resolved(
                 freeform_text,
                 answer_signals,
                 flow_defaults=flow_defaults,
+                conversation=conversation,
             )
             is not None
         )
@@ -633,8 +683,17 @@ def resolve_explicit_output_choice(
     answer_signals: dict[str, set[str]],
     *,
     flow_defaults: dict[str, set[str]] | None = None,
+    conversation: Sequence[ConversationMessage | Mapping[str, Any]] | None = None,
 ) -> str | None:
     normalized_text = normalize_signal_text(text)
+    if terminal_output_uncertainty_is_unresolved(
+        text,
+        answer_signals,
+        flow_defaults=flow_defaults,
+        conversation=conversation,
+    ):
+        return None
+
     scoped_text = build_role_scoped_text(normalized_text)
     replacement_target = _resolve_replacement_output_choice(
         scoped_text,
@@ -771,6 +830,91 @@ def _resolve_direct_output_choice(
     if _looks_like_docx_template_fill_terminal_output(fallback_text):
         return "docx_document"
     return None
+
+
+def slot_names_blocked_by_explicit_uncertainty(
+    conversation: Sequence[ConversationMessage | Mapping[str, Any]],
+    *,
+    flow: Flow | None = None,
+) -> frozenset[str]:
+    text = aggregate_freeform_user_text(conversation)
+    if terminal_output_uncertainty_is_unresolved(
+        text,
+        extract_answer_signals(conversation),
+        flow_defaults=build_flow_discovery_defaults(flow),
+        conversation=conversation,
+    ):
+        return frozenset({"terminal_output"})
+    return frozenset()
+
+
+def terminal_output_uncertainty_is_unresolved(
+    text: str,
+    answer_signals: dict[str, set[str]],
+    *,
+    flow_defaults: dict[str, set[str]] | None = None,
+    conversation: Sequence[ConversationMessage | Mapping[str, Any]] | None = None,
+) -> bool:
+    if answer_signals.get("final_output_mode"):
+        return False
+
+    normalized_text = normalize_signal_text(text)
+    if (
+        flow_defaults
+        and flow_defaults.get("final_output_mode")
+        and not mentions_output_change(normalized_text)
+    ):
+        return False
+
+    for segment in _terminal_output_intent_segments(
+        conversation=conversation,
+        fallback_text=text,
+    ):
+        normalized_segment = normalize_signal_text(segment)
+        if not normalized_segment:
+            continue
+        if _segment_has_terminal_output_uncertainty(normalized_segment):
+            return True
+        if _segment_has_decisive_terminal_output_choice(normalized_segment):
+            return False
+    return False
+
+
+def _terminal_output_intent_segments(
+    *,
+    conversation: Sequence[ConversationMessage | Mapping[str, Any]] | None,
+    fallback_text: str,
+) -> list[str]:
+    if conversation is None:
+        return list(
+            reversed(_split_terminal_output_uncertainty_segments(fallback_text))
+        )
+
+    segments: list[str] = []
+    for _index, content in reversed(extract_freeform_user_messages(conversation)):
+        segments.extend(reversed(_split_terminal_output_uncertainty_segments(content)))
+    return segments
+
+
+def _split_terminal_output_uncertainty_segments(text: str) -> tuple[str, ...]:
+    return tuple(
+        segment.strip()
+        for segment in _TERMINAL_OUTPUT_UNCERTAINTY_SEGMENT_RE.split(text)
+        if segment.strip()
+    )
+
+
+def _segment_has_terminal_output_uncertainty(segment: str) -> bool:
+    return contains_any_phrase(
+        segment,
+        _TERMINAL_OUTPUT_UNCERTAINTY_CUES,
+    ) and contains_any_phrase(segment, _TERMINAL_OUTPUT_UNCERTAINTY_SCOPE_MARKERS)
+
+
+def _segment_has_decisive_terminal_output_choice(segment: str) -> bool:
+    return (
+        _resolve_direct_output_choice(build_role_scoped_text(segment), {}) is not None
+    )
 
 
 def _looks_like_text_terminal_output(text: str) -> bool:
@@ -998,13 +1142,15 @@ def resolve_output_intent(
     answer_signals: dict[str, set[str]],
     *,
     flow_defaults: dict[str, set[str]] | None = None,
+    conversation: Sequence[ConversationMessage | Mapping[str, Any]] | None = None,
 ) -> OutputIntentResolution:
     normalized_text = normalize_signal_text(text)
     content_shape = _infer_output_content_shape(normalized_text)
     terminal_output = resolve_explicit_output_choice(
-        normalized_text,
+        text,
         answer_signals,
         flow_defaults=flow_defaults,
+        conversation=conversation,
     )
     return OutputIntentResolution(
         terminal_output=terminal_output,

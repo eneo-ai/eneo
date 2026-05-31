@@ -435,7 +435,7 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
 
 
 @pytest.mark.asyncio
-async def test_runtime_discovery_asks_output_question_for_explicitly_uncertain_audio_prompt() -> (
+async def test_runtime_discovery_asks_output_question_when_model_guesses_uncertain_output() -> (
     None
 ):
     litellm_client = AsyncMock()
@@ -451,9 +451,9 @@ async def test_runtime_discovery_asks_output_question_for_explicitly_uncertain_a
                     },
                     {
                         "slot_name": "terminal_output",
-                        "value": UNKNOWN_SLOT_VALUE,
+                        "value": "structured_text",
                         "confidence": "high",
-                        "reason": "user_explicit_uncertain",
+                        "reason": "a readable result is implied",
                     },
                 ],
             }
@@ -488,6 +488,10 @@ async def test_runtime_discovery_asks_output_question_for_explicitly_uncertain_a
     }
     assert "final_output_mode" in question_ids
     assert analysis.ready_for_confirmation is False
+
+    messages = litellm_client.acompletion.await_args.kwargs["messages"]
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "\n- terminal_output:" not in prompt
 
 
 @pytest.mark.asyncio

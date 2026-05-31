@@ -234,6 +234,7 @@ def build_clarification_hints(
         intent_text,
         answer_signals,
         flow_defaults=flow_defaults,
+        conversation=conversation,
     )
     input_intent = resolve_input_intent(
         intent_text,

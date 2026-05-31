@@ -517,6 +517,49 @@ class TestPolicyDefaults:
         assert slot.confidence == "high"
         assert state.resolved_slots["terminal_output"].value == "docx_document"
 
+    def test_explicitly_uncertain_output_format_keeps_terminal_output_unresolved(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Jag har en svensk ljudinspelning från ett möte och vill "
+                        "göra ett flöde av den. Flödet ska ta ljudfilen, förstå "
+                        "vad som sades och skapa något användbart som jag kan dela "
+                        "vidare efteråt. Jag vet inte exakt vilket format "
+                        "slutresultatet ska vara ännu, men det ska kännas "
+                        "professionellt och lätt att läsa."
+                    ),
+                )
+            ]
+        )
+
+        assert "terminal_output" not in state.resolved_slots
+
+    def test_later_freeform_output_choice_overrides_earlier_uncertainty(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Jag har en svensk ljudinspelning. Jag vet inte exakt "
+                        "vilket format slutresultatet ska vara ännu."
+                    ),
+                ),
+                ConversationMessage(
+                    role="user",
+                    content="Slutresultatet ska vara ett DOCX-dokument.",
+                ),
+            ]
+        )
+
+        assert state.resolved_slots["terminal_output"].value == "docx_document"
+        assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
+
 
 class TestRuntimeMetadataClassificationBoundaries:
     def test_classifier_cannot_override_explicit_negated_runtime_field_request(
@@ -1015,6 +1058,49 @@ class TestModelSlotMerge:
         )
 
         assert state.resolved_slots == {}
+
+    def test_model_blocked_slot_clears_nonprotected_guess(self) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "terminal_output": _slot(
+                name="terminal_output",
+                value="structured_text",
+                source="heuristic",
+            )
+        }
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(_classified("terminal_output", "structured_text", "high"),)
+            ),
+            prompt_hash="f" * 64,
+            model_blocked_slots=frozenset({"terminal_output"}),
+        )
+
+        assert "terminal_output" not in state.resolved_slots
+
+    def test_model_blocked_slot_preserves_structured_answer(self) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "terminal_output": _slot(
+                name="terminal_output",
+                value="docx_document",
+                source="structured_answer",
+            )
+        }
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(_classified("terminal_output", "structured_text", "high"),)
+            ),
+            prompt_hash="f" * 64,
+            model_blocked_slots=frozenset({"terminal_output"}),
+        )
+
+        assert state.resolved_slots["terminal_output"].value == "docx_document"
+        assert state.resolved_slots["terminal_output"].source == "structured_answer"
 
     def test_non_llm_resolvable_slots_are_not_persisted(self) -> None:
         state = _state()

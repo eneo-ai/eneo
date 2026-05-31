@@ -29,6 +29,7 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     has_explicit_structured_answer,
     mentions_runtime_metadata,
     resolve_output_intent,
+    slot_names_blocked_by_explicit_uncertainty,
 )
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
@@ -118,16 +119,22 @@ def build_planning_state_from_conversation(
         ),
         resolved_slots=resolved_slots,
     )
-    _replay_slot_classification_metadata(state, conversation)
+    _replay_slot_classification_metadata(state, conversation, flow=flow)
     return state
 
 
 def _replay_slot_classification_metadata(
     state: PlanningState,
     conversation: list[ConversationMessage],
+    *,
+    flow: Flow | None,
 ) -> None:
     """Replay persisted classifier facts and only then apply derived defaults."""
     freeform_text = aggregate_freeform_user_text(conversation)
+    model_blocked_slots = slot_names_blocked_by_explicit_uncertainty(
+        conversation,
+        flow=flow,
+    )
     replayed = False
     for message in conversation:
         classification = slot_classification_from_metadata(message.metadata)
@@ -137,6 +144,7 @@ def _replay_slot_classification_metadata(
             state,
             classification.to_result(),
             prompt_hash=classification.prompt_hash,
+            model_blocked_slots=model_blocked_slots,
         )
         replayed = True
     if replayed:
@@ -197,22 +205,22 @@ def merge_llm_resolved_slots(
     classification_result: SlotClassificationResult,
     *,
     prompt_hash: str,
+    model_blocked_slots: frozenset[str] = frozenset(),
 ) -> None:
     """Overlay model slots without displacing explicit user or flow evidence."""
     if not prompt_hash.strip():
         raise ValueError("prompt_hash must be non-empty")
 
+    apply_model_blocked_slots(state, model_blocked_slots=model_blocked_slots)
+
     for classified_slot in classification_result.slots:
         if not _model_slot_is_persistable(classified_slot.slot_name):
             continue
+        if classified_slot.slot_name in model_blocked_slots:
+            _clear_nonprotected_model_slot(state, classified_slot.slot_name)
+            continue
         if classified_slot.value == UNKNOWN_SLOT_VALUE:
-            existing_slot = state.resolved_slots.get(classified_slot.slot_name)
-            # Later classifier uncertainty must not revoke explicit choices.
-            if (
-                existing_slot is not None
-                and existing_slot.source not in _MODEL_PROTECTED_SOURCES
-            ):
-                state.resolved_slots.pop(classified_slot.slot_name, None)
+            _clear_nonprotected_model_slot(state, classified_slot.slot_name)
             continue
         if classified_slot.confidence == "low":
             continue
@@ -238,6 +246,27 @@ def merge_llm_resolved_slots(
 
     if state.resolved_slots and state.phase == "awaiting_input":
         state.phase = "discovering"
+
+
+def apply_model_blocked_slots(
+    state: PlanningState,
+    *,
+    model_blocked_slots: frozenset[str],
+) -> None:
+    """Remove transient model-owned slots that current user intent blocks."""
+    for slot_name in model_blocked_slots:
+        if _model_slot_is_persistable(slot_name):
+            _clear_nonprotected_model_slot(state, slot_name)
+
+
+def _clear_nonprotected_model_slot(state: PlanningState, slot_name: str) -> None:
+    existing_slot = state.resolved_slots.get(slot_name)
+    # Model uncertainty/blocking must not revoke explicit choices.
+    if (
+        existing_slot is not None
+        and existing_slot.source not in _MODEL_PROTECTED_SOURCES
+    ):
+        state.resolved_slots.pop(slot_name, None)
 
 
 def apply_policy_defaults_from_resolved_slots(
@@ -378,6 +407,7 @@ def _resolve_slots(
         freeform_text,
         answer_signals,
         flow_defaults=flow_defaults,
+        conversation=conversation,
     )
 
     slots: dict[str, ResolvedSlot] = {}

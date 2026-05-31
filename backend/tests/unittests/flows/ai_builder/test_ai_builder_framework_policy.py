@@ -28,6 +28,8 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     resolve_explicit_output_choice,
     resolve_output_intent,
     resolve_pdf_generation_mode,
+    slot_names_blocked_by_explicit_uncertainty,
+    terminal_output_uncertainty_is_unresolved,
 )
 from intric.flows.ai_builder.ai_builder_keywords import OUTPUT_CHANGE_KEYWORDS
 from intric.flows.ai_builder.planning_state_builder import (
@@ -124,6 +126,123 @@ def test_resolve_output_intent_keeps_pdf_files_as_input_when_output_is_absent() 
     output = resolve_output_intent("flera pdf filer ska vara input", {})
 
     assert output.terminal_output is None
+
+
+def test_resolve_output_intent_keeps_explicitly_uncertain_output_unresolved() -> None:
+    prompt = (
+        "Jag har en svensk ljudinspelning från ett möte och vill göra ett flöde "
+        "av den. Flödet ska ta ljudfilen, förstå vad som sades och skapa något "
+        "användbart som jag kan dela vidare efteråt. Jag vet inte exakt vilket "
+        "format slutresultatet ska vara ännu, men det ska kännas professionellt "
+        "och lätt att läsa."
+    )
+    conversation = [ConversationMessage(role="user", content=prompt)]
+
+    output = resolve_output_intent(
+        prompt,
+        extract_answer_signals(conversation),
+        conversation=conversation,
+    )
+
+    assert output.terminal_output is None
+    assert terminal_output_uncertainty_is_unresolved(
+        prompt,
+        extract_answer_signals(conversation),
+        conversation=conversation,
+    )
+    assert slot_names_blocked_by_explicit_uncertainty(conversation) == frozenset(
+        {"terminal_output"}
+    )
+
+
+def test_resolve_output_intent_allows_later_freeform_output_clarification() -> None:
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=(
+                "Jag har en svensk ljudinspelning. Jag vet inte exakt vilket "
+                "format slutresultatet ska vara ännu."
+            ),
+        ),
+        ConversationMessage(
+            role="user",
+            content="Slutresultatet ska vara ett DOCX-dokument.",
+        ),
+    ]
+    text = aggregate_freeform_user_text(conversation)
+
+    output = resolve_output_intent(
+        text,
+        extract_answer_signals(conversation),
+        conversation=conversation,
+    )
+
+    assert output.terminal_output == "docx_document"
+    assert output.docx_output_mode == "generated_docx"
+    assert not terminal_output_uncertainty_is_unresolved(
+        text,
+        extract_answer_signals(conversation),
+        conversation=conversation,
+    )
+    assert slot_names_blocked_by_explicit_uncertainty(conversation) == frozenset()
+
+
+def test_resolve_output_intent_does_not_treat_topic_uncertainty_as_output_uncertainty() -> (
+    None
+):
+    prompt = (
+        "Jag vet inte vad mötet handlar om. Slutresultatet ska vara ett DOCX-dokument."
+    )
+    conversation = [ConversationMessage(role="user", content=prompt)]
+
+    output = resolve_output_intent(
+        prompt,
+        extract_answer_signals(conversation),
+        conversation=conversation,
+    )
+
+    assert output.terminal_output == "docx_document"
+    assert not terminal_output_uncertainty_is_unresolved(
+        prompt,
+        extract_answer_signals(conversation),
+        conversation=conversation,
+    )
+
+
+def test_resolve_output_intent_does_not_treat_non_output_uncertainty_clause_as_output_uncertainty() -> (
+    None
+):
+    prompt = "Jag är osäker på texten, men slutresultatet ska vara ett DOCX-dokument."
+    conversation = [ConversationMessage(role="user", content=prompt)]
+
+    output = resolve_output_intent(
+        prompt,
+        extract_answer_signals(conversation),
+        conversation=conversation,
+    )
+
+    assert output.terminal_output == "docx_document"
+    assert not terminal_output_uncertainty_is_unresolved(
+        prompt,
+        extract_answer_signals(conversation),
+        conversation=conversation,
+    )
+
+
+def test_resolve_output_intent_asks_when_same_turn_lists_tentative_formats() -> None:
+    prompt = "Jag är osäker på om slutresultatet ska vara PDF eller DOCX."
+    conversation = [ConversationMessage(role="user", content=prompt)]
+
+    output = resolve_output_intent(
+        prompt,
+        extract_answer_signals(conversation),
+        conversation=conversation,
+    )
+
+    assert output.terminal_output is None
+    assert slot_names_blocked_by_explicit_uncertainty(conversation) == frozenset(
+        {"terminal_output"}
+    )
 
 
 @pytest.mark.parametrize(
