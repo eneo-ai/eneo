@@ -904,6 +904,7 @@ class SpaceRepository:
                 id=tool_db.id,
                 mcp_server_id=tool_db.mcp_server_id,
                 name=tool_db.name,
+                title=tool_db.title,
                 description=tool_db.description,
                 input_schema=tool_db.input_schema,
                 is_enabled_by_default=is_enabled,  # Effective status after all overrides
@@ -1182,6 +1183,7 @@ class SpaceRepository:
                 id=tool_db.id,
                 mcp_server_id=tool_db.mcp_server_id,
                 name=tool_db.name,
+                title=tool_db.title,
                 description=tool_db.description,
                 input_schema=tool_db.input_schema,
                 is_enabled_by_default=is_enabled,  # Effective status after overrides
