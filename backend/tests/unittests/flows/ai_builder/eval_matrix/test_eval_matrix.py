@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import pytest
 
+from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.enums import (
     AIBuilderInputSource,
     AIBuilderOutputMode,
@@ -35,6 +36,14 @@ from intric.flows.flow_authoring_spec import (
     StepSpec,
 )
 
+from .coverage import (
+    composition_ratio,
+    distinct_rows_per_column,
+    http_required_goldens,
+    http_threshold_violations,
+    not_applicable_violations,
+    unsatisfied_required_columns,
+)
 from .derivation import (
     architecture_blockers,
     derive_composition_columns,
@@ -50,7 +59,9 @@ from .taxonomy import (
     MATRIX_ROW_STATES,
     CapabilityRow,
     CompositionColumn,
+    MatrixRowState,
     expected_state,
+    row_complexity_policy,
 )
 
 _BUILDABLE_ROWS = {row for row in CapabilityRow if expected_state(row) == "buildable"}
@@ -253,5 +264,216 @@ def _single_golden(row: CapabilityRow) -> BuildableGoldenCase:
     return matches[0]
 
 
-def _is_docx(step: object) -> bool:
-    return getattr(step, "output_type", None) == FlowOutputType.DOCX
+def _is_docx(step: StepSpec) -> bool:
+    return step.output_type is FlowOutputType.DOCX
+
+
+# --- Row complexity policy (REQUIRED / ALLOWED / NOT_APPLICABLE) ---
+
+
+def test_required_complexity_columns_are_covered() -> None:
+    unsatisfied = unsatisfied_required_columns()
+    assert not unsatisfied, (
+        "rows missing a golden for a REQUIRED complexity column: "
+        + ", ".join(
+            f"{row.value}:{[c.value for c in cols]}"
+            for row, cols in unsatisfied.items()
+        )
+    )
+
+
+def test_no_golden_derives_a_not_applicable_column() -> None:
+    violations = not_applicable_violations()
+    assert not violations, (
+        "goldens deriving a NOT_APPLICABLE complexity column: "
+        + ", ".join(f"{case_id}:{col.value}" for case_id, col in violations)
+    )
+
+
+def test_not_applicable_violation_is_detected() -> None:
+    # A single-step golden on an inherently-multi-step row derives
+    # basic_single_step, which its policy marks NOT_APPLICABLE.
+    degenerate = BuildableGoldenCase(
+        case_id="degenerate_quality_chain",
+        capability_row=CapabilityRow.MULTI_STEP_QUALITY_CHAIN,
+        spec=FlowDraftSpecCore(
+            flow_name="probe",
+            steps=[_probe_step("step_a", "Gör allt i ett steg.")],
+        ),
+        declared_columns=frozenset(),
+    )
+    violations = not_applicable_violations([degenerate])
+    assert (
+        "degenerate_quality_chain",
+        CompositionColumn.BASIC_SINGLE_STEP,
+    ) in violations
+
+
+def test_composition_ratio_uses_buildable_denominator() -> None:
+    basic = BuildableGoldenCase(
+        case_id="basic_probe",
+        capability_row=CapabilityRow.SUMMARIZE_TEXT,
+        spec=FlowDraftSpecCore(
+            flow_name="probe", steps=[_probe_step("step_a", "Sammanfatta texten.")]
+        ),
+        declared_columns=frozenset(),
+    )
+    multi = BuildableGoldenCase(
+        case_id="multi_probe",
+        capability_row=CapabilityRow.SUMMARIZE_TEXT,
+        spec=FlowDraftSpecCore(
+            flow_name="probe",
+            steps=[
+                _probe_step("step_a", "Steg ett över texten."),
+                _probe_step(
+                    "step_b",
+                    "Bygg vidare på {{step_a.output.text}}.",
+                    input_source=InputSource.PREVIOUS_STEP,
+                ),
+            ],
+        ),
+        declared_columns=frozenset(),
+    )
+    # One of two goldens is single-step: the denominator is the golden count.
+    assert composition_ratio(CompositionColumn.BASIC_SINGLE_STEP, [basic, multi]) == 0.5
+
+
+def test_http_threshold_is_deferred_while_gap_and_reactivates() -> None:
+    for row in (CapabilityRow.HTTP_POST_CALL, CapabilityRow.HTTP_GET_CALL):
+        assert expected_state(row) == "gap"
+    # Deferred to zero while the row is a gap; the obligation returns the moment
+    # the row is promoted to buildable.
+    assert http_required_goldens("gap") == 0
+    assert http_required_goldens("buildable") == 2
+
+
+def test_only_buildable_rows_have_a_complexity_policy() -> None:
+    for row in CapabilityRow:
+        policy = row_complexity_policy(row)
+        if expected_state(row) == "buildable":
+            assert policy is not None, f"{row.value} is buildable but has no policy"
+        else:
+            assert policy is None, (
+                f"{row.value} is {expected_state(row)} but carries a policy"
+            )
+
+
+def _probe_golden(
+    case_id: str, row: CapabilityRow, instructions: str
+) -> BuildableGoldenCase:
+    return BuildableGoldenCase(
+        case_id=case_id,
+        capability_row=row,
+        spec=FlowDraftSpecCore(
+            flow_name="probe", steps=[_probe_step("step_a", instructions)]
+        ),
+        declared_columns=frozenset(),
+    )
+
+
+def test_http_threshold_violations_gap_undercoverage_satisfied() -> None:
+    # Gap: requirement deferred to zero, so no violations against the real matrix.
+    assert http_threshold_violations() == []
+
+    def post_is_buildable(row: CapabilityRow) -> MatrixRowState:
+        return "buildable" if row is CapabilityRow.HTTP_POST_CALL else "gap"
+
+    one = [
+        _probe_golden("http_1", CapabilityRow.HTTP_POST_CALL, "Anropa ett externt API.")
+    ]
+    assert CapabilityRow.HTTP_POST_CALL in http_threshold_violations(
+        one, state_of=post_is_buildable
+    )
+
+    two = one + [
+        _probe_golden("http_2", CapabilityRow.HTTP_POST_CALL, "Anropa ett annat API.")
+    ]
+    assert CapabilityRow.HTTP_POST_CALL not in http_threshold_violations(
+        two, state_of=post_is_buildable
+    )
+
+
+def test_distinct_rows_per_column_counts_rows_not_cases() -> None:
+    same_row = [
+        _probe_golden("a", CapabilityRow.SUMMARIZE_TEXT, "Sammanfatta första texten."),
+        _probe_golden("b", CapabilityRow.SUMMARIZE_TEXT, "Sammanfatta andra texten."),
+    ]
+    counts = distinct_rows_per_column(same_row)
+    # Two single-step cases on one row count as one row for the column.
+    assert counts[CompositionColumn.BASIC_SINGLE_STEP] == 1
+
+
+# --- Anti-slop quality + Pattern Registry grounding ---
+
+# Municipality / case-management vocabulary the matrix must stay free of: the
+# builder is general-purpose, so goldens use domain-neutral scenarios.
+_BANNED_DOMAIN_TERMS: tuple[str, ...] = (
+    "tjänsteskrivelse",
+    "tjansteskrivelse",
+    "nämnd",
+    "remiss",
+    "ärende",
+    "arende",
+    "beslutsunderlag",
+    "handläggare",
+    "handlaggare",
+)
+
+_MIN_INSTRUCTION_CHARS = 15
+
+# Capability rows that intentionally have no direct Pattern Registry archetype:
+# DOCX create is the pass-through variant of the docx_template pattern, HTTP is a
+# runtime-only gap, and underlag_till_text is a composition concept rather than a
+# single archetype. Anything else must map to a registered pattern id.
+_ROWS_WITHOUT_DIRECT_PATTERN: frozenset[CapabilityRow] = frozenset(
+    {
+        CapabilityRow.DOCUMENT_TO_DOCX_CREATE,
+        CapabilityRow.HTTP_POST_CALL,
+        CapabilityRow.HTTP_GET_CALL,
+        CapabilityRow.UNDERLAG_TILL_TEXT,
+    }
+)
+
+
+def _quality_violations(case: BuildableGoldenCase) -> list[str]:
+    problems: list[str] = []
+    if len(case.spec.flow_name.strip()) < 6:
+        problems.append(f"{case.case_id}: flow_name is too short to be meaningful")
+    blob = case.spec.flow_name.casefold()
+    for step in case.spec.steps:
+        instructions = step.assistant_spec.instructions.strip()
+        if len(instructions) < _MIN_INSTRUCTION_CHARS:
+            problems.append(
+                f"{case.case_id}/{step.plan_step_ref}: instructions too thin"
+            )
+        if instructions.casefold() in {
+            step.plan_step_ref.casefold(),
+            step.name.casefold(),
+        }:
+            problems.append(
+                f"{case.case_id}/{step.plan_step_ref}: instructions restate the name"
+            )
+        blob += " " + instructions.casefold() + " " + step.name.casefold()
+    for term in _BANNED_DOMAIN_TERMS:
+        if term in blob:
+            problems.append(f"{case.case_id}: uses domain-specific term {term!r}")
+    return problems
+
+
+@pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda case: case.case_id)
+def test_golden_instructions_meet_quality_standards(case: BuildableGoldenCase) -> None:
+    problems = _quality_violations(case)
+    assert not problems, "; ".join(problems)
+
+
+def test_every_capability_row_grounds_to_a_pattern_or_known_exception() -> None:
+    pattern_ids = set(PATTERN_REGISTRY.keys())
+    for row in CapabilityRow:
+        assert row.value in pattern_ids or row in _ROWS_WITHOUT_DIRECT_PATTERN, (
+            f"{row.value} is neither a registered pattern nor a known exception"
+        )
+    # A stale exception (a row that has since gained a pattern) must be removed.
+    for row in _ROWS_WITHOUT_DIRECT_PATTERN:
+        assert row.value not in pattern_ids, (
+            f"{row.value} now has a Pattern Registry archetype; drop the exception"
+        )

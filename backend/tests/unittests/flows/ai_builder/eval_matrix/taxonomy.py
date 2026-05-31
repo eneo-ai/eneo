@@ -17,6 +17,7 @@ row becomes authorable.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum
 from typing import Literal, get_args
 
@@ -71,3 +72,65 @@ _EXPECTED_MATRIX_STATE: dict[CapabilityRow, MatrixRowState] = {
 
 def expected_state(row: CapabilityRow) -> MatrixRowState:
     return _EXPECTED_MATRIX_STATE[row]
+
+
+class CoverageRequirement(str, Enum):
+    """How strongly a buildable row must cover a complexity column.
+
+    - REQUIRED: the row must have a golden whose shape derives this column.
+    - ALLOWED: a golden may cover it (and it still counts toward the global
+      column total) but the row does not have to.
+    - NOT_APPLICABLE: the column is structurally impossible for this row, so a
+      golden that derives it is a hard error (e.g. a single-step
+      `multi_step_quality_chain`, which is a contradiction).
+    """
+
+    REQUIRED = "required"
+    ALLOWED = "allowed"
+    NOT_APPLICABLE = "not_applicable"
+
+
+@dataclass(frozen=True)
+class RowComplexityPolicy:
+    """Per-row coverage policy for the two complexity columns.
+
+    Encodes that some capabilities are inherently single-step (advanced is a
+    forced graft) and some inherently multi-step (a basic single-step version is
+    a contradiction), so "basic AND advanced on every row" is not a uniform
+    contract. The other five composition columns are not complexity-graded and
+    are governed by the global per-column threshold, not this policy.
+    """
+
+    basic_single_step: CoverageRequirement
+    advanced_multi_capability: CoverageRequirement
+
+    def requirement_for(self, column: CompositionColumn) -> CoverageRequirement:
+        if column is CompositionColumn.BASIC_SINGLE_STEP:
+            return self.basic_single_step
+        if column is CompositionColumn.ADVANCED_MULTI_CAPABILITY:
+            return self.advanced_multi_capability
+        # Non-complexity columns are governed globally, never per-row.
+        return CoverageRequirement.ALLOWED
+
+
+_REQ = CoverageRequirement.REQUIRED
+_OPT = CoverageRequirement.ALLOWED
+_NA = CoverageRequirement.NOT_APPLICABLE
+
+# Only buildable rows carry a policy. Gap rows are handled by the gap ratchet;
+# planned rows gain a policy when they are promoted to buildable.
+_ROW_COMPLEXITY_POLICIES: dict[CapabilityRow, RowComplexityPolicy] = {
+    CapabilityRow.SUMMARIZE_TEXT: RowComplexityPolicy(_REQ, _OPT),
+    CapabilityRow.EXTRACT_STRUCTURED_FIELDS: RowComplexityPolicy(_REQ, _OPT),
+    CapabilityRow.DOCUMENT_TO_DOCX_TEMPLATE: RowComplexityPolicy(_REQ, _OPT),
+    CapabilityRow.DOCUMENT_TO_DOCX_CREATE: RowComplexityPolicy(_REQ, _OPT),
+    # The seeded golden covers form_fields_chain, a non-complexity column, so
+    # neither complexity column is row-required yet.
+    CapabilityRow.SECTIONED_FORM_INTAKE: RowComplexityPolicy(_OPT, _OPT),
+    CapabilityRow.MULTI_STEP_QUALITY_CHAIN: RowComplexityPolicy(_NA, _REQ),
+}
+
+
+def row_complexity_policy(row: CapabilityRow) -> RowComplexityPolicy | None:
+    """The complexity policy for a buildable row, or None if it has no policy."""
+    return _ROW_COMPLEXITY_POLICIES.get(row)
