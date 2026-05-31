@@ -4,10 +4,17 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from intric.flows.ai_builder.ai_builder_action_policy import (
     PlannerActionPolicy,
     build_planner_action_policy,
     render_action_policy_prompt_block,
+)
+from intric.flows.ai_builder.ai_builder_slot_classifier import (
+    UNKNOWN_SLOT_VALUE,
+    ClassifiedSlot,
+    SlotClassificationResult,
 )
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
@@ -15,6 +22,7 @@ from intric.flows.ai_builder.planning_state import (
     ResolvedSlot,
     StepTriple,
 )
+from intric.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
 
 
 def _slot_value(slot_name: str) -> str:
@@ -121,6 +129,93 @@ def test_policy_never_exposes_resolved_slots_as_question_targets() -> None:
 
     assert policy.allowed_ask_question_targets == ("terminal_output",)
     assert policy.allowed_action_kinds == ("ask_question",)
+
+
+def test_policy_can_ask_output_after_classifier_uncertainty_clears_guess() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
+        name="primary_runtime_input",
+        value="audio",
+        source="heuristic",
+        evidence=["heuristic:role-aware freeform analysis"],
+        confidence="high",
+    )
+    state.resolved_slots["terminal_output"] = ResolvedSlot(
+        name="terminal_output",
+        value="structured_text",
+        source="model",
+        evidence=["model:terminal_output:" + "a" * 64],
+        confidence="medium",
+    )
+
+    merge_llm_resolved_slots(
+        state,
+        SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="terminal_output",
+                    value=UNKNOWN_SLOT_VALUE,
+                    confidence="high",
+                    reason="user_explicit_uncertain",
+                ),
+            )
+        ),
+        prompt_hash="b" * 64,
+    )
+    policy = build_planner_action_policy(
+        session_state=state,
+        unresolved_architectural_choices=frozenset(),
+        selected_discovery_question_ids=frozenset(),
+    )
+
+    assert "terminal_output" not in state.resolved_slots
+    assert policy.allowed_action_kinds == ("ask_question",)
+    assert policy.allowed_ask_question_targets == ("terminal_output",)
+
+
+@pytest.mark.parametrize("source", ["structured_answer", "flow_default"])
+def test_classifier_uncertainty_keeps_protected_output_sources_resolved(
+    source: str,
+) -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = ResolvedSlot(
+        name="primary_runtime_input",
+        value="audio",
+        source="heuristic",
+        evidence=["heuristic:role-aware freeform analysis"],
+        confidence="high",
+    )
+    state.resolved_slots["terminal_output"] = ResolvedSlot(
+        name="terminal_output",
+        value="docx_document",
+        source=source,
+        evidence=[f"{source}:final_output_mode"],
+        confidence="high",
+    )
+
+    merge_llm_resolved_slots(
+        state,
+        SlotClassificationResult(
+            slots=(
+                ClassifiedSlot(
+                    slot_name="terminal_output",
+                    value=UNKNOWN_SLOT_VALUE,
+                    confidence="high",
+                    reason="user_explicit_uncertain",
+                ),
+            )
+        ),
+        prompt_hash="c" * 64,
+    )
+    policy = build_planner_action_policy(
+        session_state=state,
+        unresolved_architectural_choices=frozenset(),
+        selected_discovery_question_ids=frozenset(),
+    )
+
+    assert state.resolved_slots["terminal_output"].value == "docx_document"
+    assert state.resolved_slots["terminal_output"].source == source
+    assert "terminal_output" not in policy.allowed_ask_question_targets
 
 
 def test_policy_asks_missing_core_slots_even_without_discovery_selection() -> None:

@@ -102,6 +102,32 @@ def test_parse_slot_classification_response_filters_invalid_entries() -> None:
     assert result.contradictions == ("input is ambiguous",)
 
 
+def test_parse_slot_classification_response_accepts_explicit_uncertainty() -> None:
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "unknown",
+                        "confidence": "high",
+                        "reason": "user_explicit_uncertain",
+                    },
+                ],
+            }
+        ),
+        allowed_slot_values={"terminal_output": {"docx_document", "structured_text"}},
+    )
+
+    assert result is not None
+    assert len(result.slots) == 1
+    slot = result.slots[0]
+    assert slot.slot_name == "terminal_output"
+    assert slot.value == "unknown"
+    assert slot.confidence == "high"
+    assert slot.reason == "user_explicit_uncertain"
+
+
 def test_prompt_hash_uses_sorted_names_and_stable_json_serialization() -> None:
     text = "Sammanfatta ärendet"
 
@@ -131,6 +157,7 @@ def test_prompt_hash_uses_sorted_names_and_stable_json_serialization() -> None:
                         "primary_runtime_input": ["audio", "documents"],
                         "terminal_output": ["pdf_document", "structured_text"],
                     },
+                    "schema_version": 2,
                     "text": text,
                     "ui_language": "sv",
                 },
@@ -195,6 +222,26 @@ def test_classification_prompt_emphasizes_the_biased_target_slot() -> None:
     user_prompt = messages[-1]["content"]
     assert "terminal_output" in user_prompt
     assert "en fil jag kan ladda ner" in user_prompt
+
+
+def test_classification_prompt_treats_explicit_uncertainty_as_unknown() -> None:
+    messages = classifier._build_slot_classification_prompt(
+        text=(
+            "Jag vet inte exakt vilket format slutresultatet ska vara ännu, "
+            "men det ska kännas professionellt och lätt att läsa."
+        ),
+        allowed_slot_values={
+            "terminal_output": frozenset({"docx_document", "structured_text"}),
+        },
+        ui_language="sv",
+    )
+
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "explicitly says they do not know" in prompt
+    assert "`unknown`" in prompt
+    assert "`high`" in prompt
+    assert "user_explicit_uncertain" in prompt
+    assert "do not choose the most likely option" in prompt
 
 
 @pytest.mark.asyncio

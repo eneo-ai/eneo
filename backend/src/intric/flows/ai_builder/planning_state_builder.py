@@ -205,10 +205,16 @@ def merge_llm_resolved_slots(
     for classified_slot in classification_result.slots:
         if not _model_slot_is_persistable(classified_slot.slot_name):
             continue
-        if (
-            classified_slot.value == UNKNOWN_SLOT_VALUE
-            or classified_slot.confidence == "low"
-        ):
+        if classified_slot.value == UNKNOWN_SLOT_VALUE:
+            existing_slot = state.resolved_slots.get(classified_slot.slot_name)
+            # Later classifier uncertainty must not revoke explicit choices.
+            if (
+                existing_slot is not None
+                and existing_slot.source not in _MODEL_PROTECTED_SOURCES
+            ):
+                state.resolved_slots.pop(classified_slot.slot_name, None)
+            continue
+        if classified_slot.confidence == "low":
             continue
         if classified_slot.value not in legal_slot_values(classified_slot.slot_name):
             continue

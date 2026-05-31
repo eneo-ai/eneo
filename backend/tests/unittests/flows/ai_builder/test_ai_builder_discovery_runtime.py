@@ -26,6 +26,7 @@ from intric.flows.ai_builder.ai_builder_event_models import (
     StructuredQuestionOptionPayload,
     StructuredQuestionPayload,
 )
+from intric.flows.ai_builder.ai_builder_slot_classifier import UNKNOWN_SLOT_VALUE
 from intric.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
@@ -72,13 +73,19 @@ def _resolved_state() -> PlanningState:
     )
 
 
-def _slot(name: str, value: str) -> ResolvedSlot:
+def _slot(
+    name: str,
+    value: str,
+    *,
+    source: str = "structured_answer",
+    confidence: str = "high",
+) -> ResolvedSlot:
     return ResolvedSlot(
         name=name,
         value=value,
-        source="structured_answer",
+        source=source,
         evidence=[f"question_answer:{name}"],
-        confidence="high",
+        confidence=confidence,
     )
 
 
@@ -243,6 +250,72 @@ async def test_runtime_planning_state_overlays_model_slots() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_planning_state_clears_nonprotected_output_guess_on_uncertainty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    heuristic_state = PlanningState.empty()
+    heuristic_state.phase = "discovering"
+    heuristic_state.resolved_slots = {
+        "primary_runtime_input": _slot(
+            "primary_runtime_input",
+            "audio",
+            source="heuristic",
+            confidence="high",
+        ),
+        "terminal_output": _slot(
+            "terminal_output",
+            "structured_text",
+            source="heuristic",
+            confidence="medium",
+        ),
+    }
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": UNKNOWN_SLOT_VALUE,
+                        "confidence": "high",
+                        "reason": "user_explicit_uncertain",
+                    },
+                ],
+            }
+        )
+    )
+    monkeypatch.setattr(
+        runtime,
+        "build_planning_state_from_conversation",
+        lambda *_args, **_kwargs: heuristic_state,
+    )
+
+    state = await build_runtime_planning_state(
+        [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Jag har en svensk ljudinspelning från ett möte. Jag vet "
+                    "inte exakt vilket format slutresultatet ska vara ännu."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ],
+        litellm_client=litellm_client,
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        tenant_id=uuid4(),
+        ui_language="sv",
+    )
+
+    assert state.resolved_slots["primary_runtime_input"].value == "audio"
+    assert "terminal_output" not in state.resolved_slots
+    messages = litellm_client.acompletion.await_args.kwargs["messages"]
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "terminal_output" in prompt
+
+
+@pytest.mark.asyncio
 async def test_runtime_planning_state_does_not_let_model_override_structured_answer() -> (
     None
 ):
@@ -359,6 +432,62 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
     prompt = "\n".join(message["content"] for message in messages)
     assert "primary_runtime_input" in prompt
     assert "terminal_output" in prompt
+
+
+@pytest.mark.asyncio
+async def test_runtime_discovery_asks_output_question_for_explicitly_uncertain_audio_prompt() -> (
+    None
+):
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "primary_runtime_input",
+                        "value": "audio",
+                        "confidence": "high",
+                        "reason": "the source material is a meeting recording",
+                    },
+                    {
+                        "slot_name": "terminal_output",
+                        "value": UNKNOWN_SLOT_VALUE,
+                        "confidence": "high",
+                        "reason": "user_explicit_uncertain",
+                    },
+                ],
+            }
+        )
+    )
+
+    analysis = await analyze_discovery_runtime(
+        [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Jag har en svensk ljudinspelning från ett möte och vill "
+                    "göra ett flöde av den. Flödet ska ta ljudfilen, förstå "
+                    "vad som sades och skapa något användbart som jag kan dela "
+                    "vidare efteråt. Jag vet inte exakt vilket format "
+                    "slutresultatet ska vara ännu."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ],
+        litellm_client=litellm_client,
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        tenant_id=uuid4(),
+        ui_language="sv",
+    )
+
+    question_ids = {
+        issue.suggestion.question_id
+        for issue in analysis.blocking_issues
+        if issue.suggestion is not None
+    }
+    assert "final_output_mode" in question_ids
+    assert analysis.ready_for_confirmation is False
 
 
 @pytest.mark.asyncio

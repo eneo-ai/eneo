@@ -18,6 +18,7 @@ SlotClassificationConfidence = Literal["high", "medium", "low"]
 _SLOT_CLASSIFICATION_CACHE: dict[str, "SlotClassificationResult"] = {}
 _MAX_CACHE_ENTRIES = 128
 UNKNOWN_SLOT_VALUE = "unknown"
+_SLOT_CLASSIFICATION_SCHEMA_VERSION = 2
 _SLOT_CLASSIFICATION_RESPONSE_FORMAT: dict[str, object] = {"type": "json_object"}
 
 
@@ -289,6 +290,10 @@ def _build_slot_classification_prompt(
         "from the source material and no separate per-run fields are requested. "
         "If the user says values should be derived from source material, do not "
         "classify that as runtime form fields. "
+        "If the user explicitly says they do not know, have not decided, are "
+        "unsure, or want help choosing a slot, emit that slot with value "
+        "`unknown`, confidence `high`, and reason `user_explicit_uncertain`; "
+        "do not choose the most likely option. "
         "If still ambiguous, use value `unknown` with confidence `low` and explain "
         "what question should be asked in contradictions."
     )
@@ -326,6 +331,7 @@ def _classification_cache_payload(
             slot_name: sorted(values)
             for slot_name, values in sorted(normalized_values.items())
         },
+        "schema_version": _SLOT_CLASSIFICATION_SCHEMA_VERSION,
         "text": text,
         "ui_language": ui_language,
     }
