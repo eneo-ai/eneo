@@ -15,7 +15,6 @@ from typing import (
     TypedDict,
     cast,
 )
-from urllib.parse import urlparse
 
 import litellm
 from litellm.exceptions import (
@@ -38,7 +37,6 @@ from intric.completion_models.infrastructure.adapters.base_adapter import (
     CompletionModelAdapter,
 )
 from intric.completion_models.infrastructure.static_prompts import (
-    MCP_TOOL_REFERENCES_CONTEXT_HEADER,
     MCP_TOOL_REFERENCES_INSTRUCTION,
 )
 from intric.files.file_models import File
@@ -56,43 +54,6 @@ logger = get_logger(__name__)
 THINKING_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 
 
-def _pick_resource_title(meta: dict[str, Any], uri: Optional[str]) -> str:
-    """Generic title extraction for an MCP resource block.
-
-    Probes generic title metadata first, then falls back to the URI hostname
-    (for http/https) or the URI itself. Returns a non-empty string suitable
-    for display in the LLM source context.
-    """
-    title = meta.get("title")
-    if isinstance(title, str) and title.strip():
-        return title.strip()
-    if uri:
-        parsed = urlparse(uri)
-        if parsed.hostname:
-            return parsed.hostname
-        return uri
-    return "(unknown source)"
-
-
-def _resource_context_json(ref: McpToolReference) -> str:
-    """Serialize one persisted MCP resource into the LLM source context.
-
-    The shape stays generic: Eneo adds only `source_id` and a derived display
-    `title`; MCP-provided data remains in `uri`, `mime_type`, `metadata`, and
-    `content`.
-    """
-    payload: dict[str, Any] = {
-        "source_id": str(ref.id)[:8],
-        "title": _pick_resource_title(ref.meta, ref.uri),
-        "uri": ref.uri,
-        "mime_type": ref.mime_type,
-        "metadata": ref.meta,
-    }
-    if ref.content:
-        payload["content"] = ref.content
-    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
-
-
 def _build_tool_result_with_references(
     content_list: list[dict[str, Any]],
     tool_call_id: Optional[str],
@@ -103,18 +64,25 @@ def _build_tool_result_with_references(
 
     Two texts are produced because they serve different audiences:
 
-    - ``llm_text`` (forwarded to the LLM): upstream text blocks concatenated
-      verbatim, then a structured MCP source context. The context uses generic
-      MCP resource fields plus Eneo's citation id.
-    - ``display_text`` (persisted on ``ToolCallInfo.result`` for the chat
-      UI's "view tool response" affordance): upstream text blocks only, no
-      source context, no internal markers — what a vanilla MCP client would see.
+    - ``llm_text`` (forwarded to the LLM): upstream text blocks, then each
+      resource rendered as a self-describing, triple-quoted block whose
+      attribution rides in the server-provided ``resource.text``. Eneo prepends
+      only an 8-char ``source_id`` line so the model can cite, mirroring the
+      knowledge-base source format in ``context_builder``. ``_meta`` is not
+      forwarded: per MCP it is implementation metadata, not model-facing.
+    - ``display_text`` (persisted on ``ToolCallInfo.result`` for the chat UI's
+      "view tool response" affordance): upstream text blocks plus each
+      resource's own text, exactly what a vanilla MCP client would render. No
+      source_id markers.
 
     Resource blocks are captured as ``McpToolReference`` rows for separate
-    persistence. ``existing_prefixes`` is mutated in place so multi-tool-call
+    persistence (the structured channel the frontend renders, where ``uri`` and
+    ``meta`` live). ``existing_prefixes`` is mutated in place so multi-tool-call
     turns don't mint colliding 8-char prefixes.
     """
     text_parts: list[str] = []
+    resource_texts: list[str] = []
+    llm_blocks: list[str] = []
     refs: list[McpToolReference] = []
     for ci in content_list:
         block_type = ci.get("type")
@@ -134,6 +102,7 @@ def _build_tool_result_with_references(
                 attempt += 1
             prefix = str(ref_id)[:8]
             existing_prefixes.add(prefix)
+            resource_text = ci.get("text") or ""
             refs.append(
                 McpToolReference(
                     id=ref_id,
@@ -146,16 +115,18 @@ def _build_tool_result_with_references(
                     order=len(refs),
                 )
             )
+            resource_texts.append(resource_text)
+            llm_blocks.append(f'"""source_id: {prefix}\n{resource_text}"""')
 
-    display_text = "".join(text_parts)
+    upstream_text = "".join(text_parts)
     if not refs:
-        return display_text, display_text, refs
+        return upstream_text, upstream_text, refs
 
-    context_lines = [f"\n\n{MCP_TOOL_REFERENCES_CONTEXT_HEADER}"]
-    context_lines.extend(_resource_context_json(ref) for ref in refs)
-    context_lines.append("")
-    context_lines.append(MCP_TOOL_REFERENCES_INSTRUCTION)
-    llm_text = display_text + "\n".join(context_lines)
+    display_text = "\n\n".join(
+        seg.strip() for seg in (upstream_text, *resource_texts) if seg.strip()
+    )
+    llm_segments = [seg for seg in (upstream_text, *llm_blocks) if seg]
+    llm_text = "\n".join(llm_segments) + "\n\n" + MCP_TOOL_REFERENCES_INSTRUCTION
     return llm_text, display_text, refs
 
 

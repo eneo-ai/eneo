@@ -83,7 +83,7 @@ def _make_adapter() -> TenantModelAdapter:
     return adapter
 
 
-def test_build_tool_result_with_references_uses_generic_mcp_source_context():
+def test_build_tool_result_with_references_uses_self_describing_resource_blocks():
     llm_text, display_text, refs = _build_tool_result_with_references(
         content_list=[
             {"type": "text", "text": "Tool summary.\n"},
@@ -91,7 +91,7 @@ def test_build_tool_result_with_references_uses_generic_mcp_source_context():
                 "type": "resource",
                 "uri": "https://example.test/docs/alpha",
                 "mime_type": "text/markdown",
-                "text": "Resource body",
+                "text": "**Alpha document** — Intro\n\nResource body",
                 "meta": {
                     "title": "Alpha document",
                     "pageRange": "3-4",
@@ -104,22 +104,35 @@ def test_build_tool_result_with_references_uses_generic_mcp_source_context():
         existing_prefixes=set(),
     )
 
-    assert display_text == "Tool summary.\n"
+    # Resource fields (uri/mime/content/meta) are persisted for the UI channel.
     assert len(refs) == 1
     source_id = str(refs[0].id)[:8]
     assert refs[0].uri == "https://example.test/docs/alpha"
     assert refs[0].mime_type == "text/markdown"
-    assert refs[0].content == "Resource body"
+    assert refs[0].content == "**Alpha document** — Intro\n\nResource body"
     assert refs[0].meta["customKey"] == {"nested": True}
 
-    assert "MCP referenced resources:" in llm_text
-    assert '"source_id": "' + source_id + '"' in llm_text
-    assert '"uri": "https://example.test/docs/alpha"' in llm_text
-    assert '"mime_type": "text/markdown"' in llm_text
-    assert '"metadata": {' in llm_text
-    assert '"content": "Resource body"' in llm_text
+    # display_text mirrors a vanilla client: upstream text + the resource's own
+    # text, no source_id markers.
+    assert (
+        display_text == "Tool summary.\n\n**Alpha document** — Intro\n\nResource body"
+    )
+
+    # Model channel: each resource is a self-describing, triple-quoted block whose
+    # attribution rides in the server text; Eneo prepends only the source_id.
+    assert (
+        f'"""source_id: {source_id}\n**Alpha document** — Intro\n\nResource body"""'
+        in llm_text
+    )
+    assert "Tool summary." in llm_text
     assert '<inref id="<source_id>"/>' in llm_text
-    assert "Källor" not in llm_text
+
+    # No standalone JSON index, and _meta is not forwarded to the model.
+    assert "MCP referenced resources:" not in llm_text
+    assert '"metadata"' not in llm_text
+    assert '"uri"' not in llm_text
+    assert "pageRange" not in llm_text
+    assert "customKey" not in llm_text
 
 
 def test_build_tool_result_with_references_skips_unciteable_resources():

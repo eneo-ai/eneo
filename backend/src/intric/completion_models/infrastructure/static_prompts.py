@@ -1,19 +1,18 @@
 # flake8: noqa
 
-# Header for the canonical MCP resource context that the adapter appends to a
-# tool result before forwarding it to the LLM. The content under this header is
-# intentionally structured around generic MCP resource fields, not UI wording.
-MCP_TOOL_REFERENCES_CONTEXT_HEADER = "MCP referenced resources:"
-
-# Inline instruction appended to the MCP resource context. Lives next to the
-# data so the model gets the citation rule whenever a tool returns resources —
+# Inline instruction appended after the MCP resource blocks. Lives next to the
+# data so the model gets the citation rule whenever a tool returns resources,
 # without requiring the system-level SHOW_REFERENCES_PROMPT (that one only fires
 # when knowledge/web_search results are present, leaving MCP-only flows untaught).
+# Each resource is a self-describing, triple-quoted block whose attribution rides
+# in the server-provided text; Eneo prepends only a source_id line for citation.
 MCP_TOOL_REFERENCES_INSTRUCTION = (
-    "When using information from an MCP referenced resource above, cite it with "
-    "the matching inline tag immediately after the relevant text: "
-    '<inref id="<source_id>"/>. Use the 8-character source_id value from the '
-    "resource object."
+    "The tool returned one or more sources above, each delimited by triple "
+    "quotes and opening with a source_id line. When you use information from a "
+    "source, cite it with an inline self-closing tag immediately after the "
+    'relevant text: <inref id="<source_id>"/>, using that source\'s 8-character '
+    "source_id. If the user asks about a source, refer to its title, never the "
+    "source_id."
 )
 
 SHOW_REFERENCES_PROMPT = """Use the provided sources delimited by triple quotes to answer questions.
