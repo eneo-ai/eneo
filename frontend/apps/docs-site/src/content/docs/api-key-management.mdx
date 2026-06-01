@@ -16,7 +16,7 @@ Every API key has a type prefix that determines its intended use and security co
 | **Access restriction** | IP allowlist (CIDR notation) | Origin allowlist (scheme required) |
 | **Max permission** | `admin` | `read` |
 | **Resource permissions** | Supported | Supported for `none`/`read` only (`jobs` and `prompts` are not available) |
-| **Origin restrictions** | Not allowed | Required (at least one) |
+| **Origin restrictions** | Not allowed | Required for creation (at least one) |
 | **IP restrictions** | Optional | Not allowed |
 
 <Callout type="info">
@@ -88,7 +88,7 @@ The plain key is extracted from the header and hashed. The system supports two h
 - **HMAC-SHA256** (current standard) using a server-side secret
 - **SHA256** (legacy) as a fallback
 
-If a key is found via the legacy SHA256 hash, it is automatically upgraded to HMAC-SHA256 on use. The key hash is looked up against the `api_keys_v2` table using the `idx_api_keys_v2_key_hash` index.
+The key hash is looked up against the `api_keys_v2` table using the `idx_api_keys_v2_key_hash` index. Existing v2 keys found via the legacy SHA256 hash are upgraded to HMAC-SHA256 on use. Legacy v1 keys are first mirrored into v2 as SHA256-backed keys, then upgrade on the next v2 resolution.
 
 ### 2. State Validation
 
@@ -97,11 +97,12 @@ The key's effective state is computed with the following priority:
 ```
 revoked_at is set    → REVOKED   (permanent, highest priority)
 expires_at < now     → EXPIRED   (time-based)
+rotation grace passed → REVOKED   (old rotated key)
 suspended_at is set  → SUSPENDED (temporary)
 otherwise            → ACTIVE
 ```
 
-Only `ACTIVE` keys proceed. Revoked and expired keys return `401`. Suspended keys return `403`.
+Only `ACTIVE` keys proceed. Revoked, expired, rotation-grace-expired, and suspended keys return `401` during API-key authentication.
 
 ### 3. Ownership Resolution
 
@@ -113,7 +114,7 @@ Based on the `ownership` field:
 ### 4. Guardrail Checks
 
 - **IP validation** (`sk_` keys): If `allowed_ips` is configured, the client IP must match at least one CIDR block
-- **Origin validation** (`pk_` keys): If `allowed_origins` is configured, the request `Origin` header must match
+- **Origin validation** (`pk_` keys): The request must include an `Origin` header. For new keys, the origin must match one of the key's configured `allowed_origins`.
 
 ### 5. Rate Limiting
 
@@ -214,7 +215,7 @@ Scope enforcement distinguishes between **list endpoints** (no resource ID in UR
 Keys are created via `POST /api/v1/api-keys`. The policy service validates:
 
 - Scope and permission compatibility
-- Service key guardrails (admin-only creation, IP/expiry for write/admin tenant scope)
+- Service key guardrails (admin-only creation, IP/expiry for write/admin permission)
 - `pk_` key constraints (origins required, no admin, no IPs)
 - Resource permission shape and scope compatibility
 - `sk_` effective permission derivation from the highest resource permission
@@ -228,7 +229,7 @@ The plain key secret is returned **exactly once** in the response. It is never s
 Rotation creates a new key while keeping the old one temporarily valid:
 
 1. A new key is generated with the same scope, permission, and restrictions
-2. The old key gets a `rotation_grace_until` timestamp (default: 24 hours)
+2. The old key gets a `rotation_grace_until` timestamp (default: 24 hours, configurable via tenant policy)
 3. Both keys work during the grace period
 4. After the grace period, the old key stops working
 
@@ -250,7 +251,7 @@ Revocation is **permanent and irreversible**:
 - Sets `revoked_at` and optional reason code/text
 - Key immediately and permanently stops working
 - Cannot be reactivated
-- If tenant policy has `revocation_cascade_enabled`, all delegated child keys are also revoked
+- Delegated-key cascade fields exist in policy for compatibility, but current key management is session-only and does not create or cascade delegated child keys.
 
 ### Expiration
 
@@ -265,10 +266,10 @@ Keys with an `expires_at` timestamp are checked at runtime:
 When multiple state indicators are present, the most restrictive wins:
 
 ```
-REVOKED > EXPIRED > SUSPENDED > ACTIVE
+revoked_at > expires_at > rotation_grace_until > suspended_at > active
 ```
 
-A key that is both suspended and expired is treated as expired. A key that is both expired and revoked is treated as revoked.
+A key that is both suspended and expired is treated as expired. A key that is both expired and revoked is treated as revoked. A rotated key whose `rotation_grace_until` has passed is treated as revoked.
 
 ---
 
@@ -278,12 +279,80 @@ Tenant administrators can configure API key policies that apply to all keys in t
 
 | Policy | Default | Description |
 |--------|---------|-------------|
-| `max_delegation_depth` | 3 | Maximum nesting for delegated keys |
-| `revocation_cascade_enabled` | false | Revoking a key also revokes its children |
+| `max_delegation_depth` | 3 | Reserved for delegated-key support |
+| `revocation_cascade_enabled` | false | Reserved for delegated-key cascade support |
 | `require_expiration` | false | All new keys must have an expiry date |
 | `max_expiration_days` | null | Maximum days until expiry (null = unlimited) |
 | `auto_expire_unused_days` | null | Auto-revoke after N days of inactivity |
 | `max_rate_limit_override` | null | Absolute ceiling on per-key rate limits |
+| `rotation_grace_hours` | 24 | Grace period for old keys during rotation |
+
+---
+
+## FAQ
+
+### Which key type should I use?
+
+Use an `sk_` key for backend systems, scheduled jobs, MCP servers, and other server-to-server integrations. `sk_` keys can use `read`, `write`, or `admin` permission and may be restricted by client IP.
+
+Use a `pk_` key only for browser-based integrations. `pk_` keys are read-only, must list allowed origins, cannot use IP restrictions, and can only use `none` or `read` resource permissions. `jobs` and `prompts` resource permissions are rejected for `pk_` keys.
+
+### Should integrations use user keys or service keys?
+
+Use a user key when the integration should follow a specific user's lifecycle and memberships. If the user is deactivated, removed from a space, or loses required permissions, the key stops working.
+
+Use a service key for production automation that must outlive an individual employee. Service keys are created by tenant administrators, resolve to a synthetic service identity, and are authorized by their key scope and permission instead of a real user's memberships. The important caveat is that service keys cannot create user-owned resources; they are for operating on supported resources that already exist.
+
+### What new permissions do v2 keys have?
+
+V2 keys add explicit permission levels, scopes, ownership, and optional per-resource permissions. The top-level permission is a method ceiling:
+
+- `read` allows read-style requests such as `GET`
+- `write` allows create/update-style requests such as `POST`, `PUT`, and `PATCH`
+- `admin` allows delete-style requests such as `DELETE`
+
+Routes can override the method mapping when a request is semantically read-only. If `resource_permissions` are set, the key must also have enough permission for that resource type. Resource permissions can be configured for `assistants`, `apps`, `spaces`, `knowledge`, `conversations`, `files`, `jobs`, and `prompts`. For `sk_` keys, the top-level permission is derived from the highest configured resource permission. For `pk_` keys, every resource permission is capped at `read`, and `jobs`/`prompts` are not available.
+
+### How do scopes affect access?
+
+Scope limits where the key can operate:
+
+- `tenant` keys can access tenant-wide resources, subject to permission checks
+- `space` keys are limited to one space
+- `assistant` keys are limited to one assistant and its conversations
+- `app` keys are limited to one app and its runs
+
+Tenant-scoped admin user keys require the owner to remain a tenant administrator. Tenant-scoped read/write user keys inherit the owner's live role permissions through endpoint-level guards. Space-, assistant-, and app-scoped user keys require the owner to remain a member of the target space.
+
+### Can API keys create or manage other API keys?
+
+No. API-key management endpoints require a session login. API-key callers, including tenant-admin service keys, are rejected for API-key mutations.
+
+### Can service keys create resources?
+
+No. This is the main caveat with service keys: they are automation principals, not resource owners. Service keys can operate on supported existing resources within their scope, but endpoints that create new rows owned by `user_id` reject service-key callers with `code: "service_key_cannot_create_resources"`.
+
+Create assistants, apps, spaces, group chats, prompts, collections, websites, files, info blobs, roles, and MCP servers with a user account first. Then use the service key for supported automation around those resources. Files are more restricted than most existing resources: service keys cannot upload files and cannot delete files because files are user-owned today.
+
+### What happens to our old keys?
+
+Legacy keys still resolve through a compatibility path. When a legacy key is used, Eneo mirrors it into `api_keys_v2` where possible:
+
+- Legacy user keys become tenant-scoped `sk_` keys tied to the original owner. They become `admin` only if the owner currently has tenant admin permission; otherwise they become `write`.
+- Legacy assistant keys become assistant-scoped `sk_` keys with read permission.
+- Existing SHA256-backed v2 keys upgrade to HMAC-SHA256 when they resolve through the v2 lookup path.
+
+This keeps existing integrations working while giving resolved keys the v2 lifecycle, audit, scope, and policy machinery. The original plain secret is not changed or shown again.
+
+### When do we need to migrate to the new keys?
+
+Legacy keys are supported through the compatibility path, so existing integrations do not need to stop on release day. Migrate when you want narrower scopes, service-key ownership, explicit resource permissions, rotation, better audit visibility, or browser-safe `pk_` origin restrictions.
+
+The safest migration path is to create a new v2 key with the narrowest practical scope and permission, deploy it to the integration, confirm traffic and audit logs show the new key being used, then revoke the legacy key. For production automations owned by a team rather than a person, prefer a service `sk_` key with an IP allowlist or expiration date.
+
+### Can I retrieve a key secret later?
+
+No. The plain secret is shown exactly once when the key is created or rotated. If a secret is lost, rotate the key and update the integration with the new value.
 
 ---
 
@@ -291,13 +360,13 @@ Tenant administrators can configure API key policies that apply to all keys in t
 
 ### Storage
 
-API key secrets are **never stored in plaintext**. They are hashed with HMAC-SHA256 using a server-side secret (`api_key_hash_secret`). Legacy SHA256-hashed keys are automatically upgraded on use.
+API key secrets are **never stored in plaintext**. They are hashed with HMAC-SHA256 using a server-side secret (`api_key_hash_secret`). Existing v2 SHA256-hashed keys are upgraded when they resolve through the v2 lookup path.
 
 ### Guardrails
 
 - Service keys with write/admin permission **must** have an IP allowlist or expiration date
-- `pk_` keys **cannot** have admin permission and **must** specify allowed origins
-- Each origin must include a scheme (`https://example.com`) or be a localhost address
+- New `pk_` keys **cannot** have admin permission and **must** specify at least one allowed origin
+- Each origin must include an `http://` or `https://` scheme and a host (`http://localhost:3000` is valid)
 
 ### Origin Trust Model
 

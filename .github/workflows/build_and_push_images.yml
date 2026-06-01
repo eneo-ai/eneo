@@ -35,6 +35,7 @@ jobs:
       contents: write
       packages: write
       attestations: write
+      artifact-metadata: write
       id-token: write
 
     steps:
@@ -148,6 +149,7 @@ jobs:
           ./scripts/inject-backend-version.sh "$VERSION"
 
       - name: Build and push backend Docker image
+        id: build-backend
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: ./backend
@@ -159,6 +161,13 @@ jobs:
           labels: ${{ steps.meta-backend.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Attest backend image provenance
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}
+          subject-digest: ${{ steps.build-backend.outputs.digest }}
+          push-to-registry: true
 
       # Frontend build and push
       - name: Extract frontend metadata
@@ -191,6 +200,7 @@ jobs:
           ./scripts/sync-frontend-with-backend.sh "${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:$BACKEND_TAG"
 
       - name: Build and push frontend Docker image
+        id: build-frontend
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: ./frontend
@@ -200,6 +210,13 @@ jobs:
           labels: ${{ steps.meta-frontend.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Attest frontend image provenance
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}
+          subject-digest: ${{ steps.build-frontend.outputs.digest }}
+          push-to-registry: true
 
       # Summary of what was built
       - name: Build Summary
