@@ -350,22 +350,17 @@ export class ChatService {
   }
 
   async renameConversation(conversation: { id: string }, name: string) {
-    try {
-      const trimmed = (name ?? "").trim();
-      if (!trimmed) return;
+    const trimmed = (name ?? "").trim();
+    if (!trimmed) return;
 
-      await this.#intric.conversations.rename(conversation, { name: trimmed });
+    await this.#intric.conversations.rename(conversation, { name: trimmed });
 
-      this.loadedConversations = this.loadedConversations.map((c) =>
-        c.id === conversation.id ? { ...c, name: trimmed } : c
-      );
+    this.loadedConversations = this.loadedConversations.map((c) =>
+      c.id === conversation.id ? { ...c, name: trimmed } : c
+    );
 
-      if (this.currentConversation?.id === conversation.id) {
-        this.currentConversation.name = trimmed;
-      }
-    } catch (e) {
-      if (browser) alert(`Error while renaming conversation with id ${conversation.id}`);
-      console.error(e);
+    if (this.currentConversation?.id === conversation.id) {
+      this.currentConversation.name = trimmed;
     }
   }
 

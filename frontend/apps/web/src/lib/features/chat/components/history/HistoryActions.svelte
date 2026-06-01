@@ -5,6 +5,7 @@
   import { getChatService } from "../../ChatService.svelte";
   import type { ConversationSparse } from "@intric/intric-js";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
 
   export let conversation: ConversationSparse;
   export let onConversationDeleted: ((conversation: ConversationSparse) => void) | undefined =
@@ -16,11 +17,25 @@
   $: newName = conversation?.name ?? "";
 
   const untitled = m.chat_history_untitled();
+
+  let renameOpen: Dialog.OpenState;
+
+  async function submitRename() {
+    const trimmed = (newName ?? "").trim();
+    if (!trimmed) return;
+
+    try {
+      await chat.renameConversation(conversation, trimmed);
+      $renameOpen = false;
+    } catch (e) {
+      toastError(e);
+    }
+  }
 </script>
 
 <div class="flex items-center justify-end gap-2">
   <!-- Rename -->
-  <Dialog.Root>
+  <Dialog.Root bind:isOpen={renameOpen}>
     <Dialog.Trigger asFragment let:trigger>
       <Button is={trigger} label={m.chat_history_rename()} padding="icon">
         <IconEdit />
@@ -48,16 +63,7 @@
       <Dialog.Controls let:close>
         <Button is={close}>{m.cancel()}</Button>
 
-        <Button
-          is={close}
-          disabled={(newName ?? "").trim().length === 0}
-          on:click={async () => {
-            const trimmed = (newName ?? "").trim();
-            if (!trimmed) return;
-
-            await chat.renameConversation(conversation, trimmed);
-          }}
-        >
+        <Button disabled={(newName ?? "").trim().length === 0} on:click={submitRename}>
           {m.save()}
         </Button>
       </Dialog.Controls>
