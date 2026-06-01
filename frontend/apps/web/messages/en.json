@@ -2005,6 +2005,7 @@
   "migration_impact_load_failed": "Failed to load migration impact. Please try again before migrating.",
   "migration_impact_title": "{count} resources will be affected",
   "migration_no_impact": "No resources are using this model. You can delete it directly — migration is only needed if you want to leave a history record that it was replaced by another model.",
+  "migrate_model_transcription_note": "Apps and spaces using this model will be moved to the model you select. Pick a replacement to continue.",
   "migration_spaces_info": "The target model will automatically be enabled on {count} spaces where this model is currently available",
   "migration_impact_owner": "Owner",
   "migration_impact_space": "Space",

@@ -423,6 +423,14 @@
               {/if}
             </div>
           </div>
+        {:else if !sourceAlreadyMigrated && modelType === "transcriptionModel"}
+          <!-- Transcription has no usage-detail endpoint, so we can't show what
+               uses the model. Don't claim "no impact / delete directly" (which
+               would be wrong when an app or space references it); describe what
+               migration does instead. -->
+          <div class="border-border text-muted-foreground rounded-lg border px-4 py-3 text-sm">
+            {m.migrate_model_transcription_note()}
+          </div>
         {:else if !sourceAlreadyMigrated}
           <div class="border-border text-muted-foreground rounded-lg border px-4 py-3 text-sm">
             {m.migration_no_impact()}
