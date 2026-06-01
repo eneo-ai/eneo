@@ -3,6 +3,7 @@ Fixtures for services (mirrors src/intric/services/).
 
 These fixtures create services with completion models.
 """
+
 from uuid import UUID
 
 import pytest
@@ -32,12 +33,9 @@ def service_factory(admin_user):
     Returns:
         Services: The created service
     """
+
     async def _create_service(
-        session,
-        name: str,
-        completion_model_id: UUID,
-        prompt: str = None,
-        **extra
+        session, name: str, completion_model_id: UUID, prompt: str = None, **extra
     ) -> Services:
         """Create a service with the specified model."""
         # Use a default prompt if not provided (required field)
@@ -49,7 +47,7 @@ def service_factory(admin_user):
             prompt=prompt,
             user_id=admin_user.id,
             completion_model_id=completion_model_id,
-            **extra
+            **extra,
         )
 
         session.add(service)

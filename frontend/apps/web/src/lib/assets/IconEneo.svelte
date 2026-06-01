@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { SvelteHTMLElements } from "svelte/elements";
   import { m } from "$lib/paraglide/messages";
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- $$Props is a Svelte compiler convention for typing $$restProps
   type $$Props = SvelteHTMLElements["div"];
 </script>
 
@@ -11,5 +12,7 @@
   style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; font-size: 16px; color: #4f46e5;"
   {...$$restProps}
 >
+  <!-- eslint-disable intric/no-hardcoded-text -- brand mark letter -->
   E
+  <!-- eslint-enable intric/no-hardcoded-text -->
 </div>

@@ -1,5 +1,5 @@
-from uuid import UUID
 from datetime import datetime, timezone
+from uuid import UUID
 
 from sqlalchemy import delete, insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -10,20 +10,21 @@ from intric.database.tables.feature_flag_table import (
     GlobalFeatureFlag,
     TenantFeatureFlag,
 )
-from intric.feature_flag.feature_flag_factory import FeatureFlagFactory
 from intric.feature_flag.feature_flag import FeatureFlag
+from intric.feature_flag.feature_flag_factory import FeatureFlagFactory
 from intric.main.exceptions import NotFoundException
 
 
 class FeatureFlagRepository:
-    def __init__(self, db_session: AsyncSession):
+    def __init__(self, db_session: AsyncSession) -> None:
+        super().__init__()
         self.db_session = db_session
 
     async def _delete_tenant(self, feature_id: UUID, tenant_id: UUID) -> None:
         """Delete a tenant's feature flag preference."""
         stmt = delete(TenantFeatureFlag).where(
             TenantFeatureFlag.feature_id == feature_id,
-            TenantFeatureFlag.tenant_id == tenant_id
+            TenantFeatureFlag.tenant_id == tenant_id,
         )
         await self.db_session.execute(stmt)
 
@@ -34,7 +35,7 @@ class FeatureFlagRepository:
             .returning(GlobalFeatureFlag)
         )
         feature = await self.db_session.execute(stmt)
-        return feature.scalar_one()
+        return feature.scalar_one()  # type: ignore[return-value]
 
     async def update(self, obj: FeatureFlag) -> FeatureFlag:
         """Update tenant preferences for a feature flag.
@@ -47,27 +48,35 @@ class FeatureFlagRepository:
 
         # Upsert all enabled tenant preferences
         for tenant_id in obj.tenant_ids:
-            stmt = pg_insert(TenantFeatureFlag).values(
-                feature_id=obj.feature_id,
-                tenant_id=tenant_id,
-                enabled=True,
-                name=obj.name,
-            ).on_conflict_do_update(
-                index_elements=['feature_id', 'tenant_id'],
-                set_={'enabled': True, 'updated_at': datetime.now(timezone.utc)}
+            stmt = (
+                pg_insert(TenantFeatureFlag)
+                .values(
+                    feature_id=obj.feature_id,
+                    tenant_id=tenant_id,
+                    enabled=True,
+                    name=obj.name,
+                )
+                .on_conflict_do_update(
+                    index_elements=["feature_id", "tenant_id"],
+                    set_={"enabled": True, "updated_at": datetime.now(timezone.utc)},
+                )
             )
             await self.db_session.execute(stmt)
 
         # Upsert all disabled tenant preferences
         for tenant_id in obj.disabled_tenant_ids:
-            stmt = pg_insert(TenantFeatureFlag).values(
-                feature_id=obj.feature_id,
-                tenant_id=tenant_id,
-                enabled=False,
-                name=obj.name,
-            ).on_conflict_do_update(
-                index_elements=['feature_id', 'tenant_id'],
-                set_={'enabled': False, 'updated_at': datetime.now(timezone.utc)}
+            stmt = (
+                pg_insert(TenantFeatureFlag)
+                .values(
+                    feature_id=obj.feature_id,
+                    tenant_id=tenant_id,
+                    enabled=False,
+                    name=obj.name,
+                )
+                .on_conflict_do_update(
+                    index_elements=["feature_id", "tenant_id"],
+                    set_={"enabled": False, "updated_at": datetime.now(timezone.utc)},
+                )
             )
             await self.db_session.execute(stmt)
 
@@ -76,6 +85,8 @@ class FeatureFlagRepository:
         all_new = obj.tenant_ids | obj.disabled_tenant_ids
         removed_tenants = all_current - all_new
 
+        if obj.feature_id is None:
+            raise ValueError("Cannot update a FeatureFlag without a feature_id")
         for tenant_id in removed_tenants:
             await self._delete_tenant(obj.feature_id, tenant_id)
 
@@ -85,7 +96,7 @@ class FeatureFlagRepository:
         pass
 
     async def one_or_none(
-        self, id: UUID | None = None, **filters
+        self, id: UUID | None = None, **filters: object
     ) -> FeatureFlag | None:
         if not filters:
             if id is None:
@@ -109,16 +120,16 @@ class FeatureFlagRepository:
 
         return feature_flag
 
-    async def one(self, id: UUID | None = None, **filters) -> FeatureFlag:
+    async def one(self, id: UUID | None = None, **filters: object) -> FeatureFlag:
         feature_flag = await self.one_or_none(id=id, **filters)
         if not feature_flag:
             raise NotFoundException("FeatureFlag not found")
         return feature_flag
 
-    async def _query_tenants(self, **filters) -> list[TenantFeatureFlag]:
+    async def _query_tenants(self, **filters: object) -> list[TenantFeatureFlag]:
         if not filters:
             return []
 
         query = select(TenantFeatureFlag).filter_by(**filters)
         result = await self.db_session.scalars(query)
-        return result.all()
+        return result.all()  # type: ignore[return-value]

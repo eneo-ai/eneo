@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, AsyncGenerator, Optional
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
+
+import redis.asyncio as aioredis
 
 from intric.ai_models.completion_models.completion_model import (
     Completion,
@@ -16,9 +18,13 @@ from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.main.config import SETTINGS, Settings, get_settings
 from intric.main.exceptions import ProviderInactiveException, ProviderNotFoundException
 from intric.main.logging import get_logger
-from intric.mcp_servers.infrastructure.proxy import MCPProxySession, MCPProxySessionFactory
+from intric.mcp_servers.infrastructure.proxy import (
+    MCPProxySession,
+    MCPProxySessionFactory,
+)
 from intric.mcp_servers.infrastructure.tool_approval import get_approval_manager
 from intric.sessions.session import SessionInDB
+from intric.settings.encryption_service import EncryptionService
 from intric.vision_models.infrastructure.flux_ai import FluxAdapter
 
 if TYPE_CHECKING:
@@ -49,13 +55,23 @@ class CompletionService:
         config: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
+        redis_client: Optional[aioredis.Redis] = None,
     ):
         self.context_builder = context_builder
         self.tenant = tenant
         self.config = config or SETTINGS
+        if encryption_service is None:
+            encryption_settings: Settings | None = (
+                None if self.config.testing else self.config
+            )
+            encryption_service = EncryptionService(encryption_settings)
         self.encryption_service = encryption_service
         self.session = session
-        self._mcp_proxy_factory = MCPProxySessionFactory()
+        self.redis_client = redis_client
+        self._mcp_proxy_factory = MCPProxySessionFactory(
+            encryption_service=self.encryption_service
+        )
+        super().__init__()
 
     async def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
         """
@@ -65,16 +81,17 @@ class CompletionService:
         Uses TenantModelAdapter which routes through LiteLLM.
         """
         import sqlalchemy as sa
+
+        from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
+            TenantModelAdapter,
+        )
         from intric.database.tables.model_providers_table import ModelProviders
         from intric.model_providers.infrastructure.tenant_model_credential_resolver import (
             TenantModelCredentialResolver,
         )
-        from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
-            TenantModelAdapter,
-        )
 
         # All models must have provider_id
-        if not hasattr(model, 'provider_id') or not model.provider_id:
+        if not hasattr(model, "provider_id") or not model.provider_id:
             raise ValueError(
                 f"Model '{model.name}' is missing required provider_id. "
                 "All models must be associated with a ModelProvider."
@@ -85,11 +102,11 @@ class CompletionService:
             logger.error(
                 "Model requires database session but none available",
                 extra={
-                    "model_id": str(model.id) if hasattr(model, 'id') else None,
+                    "model_id": str(model.id) if hasattr(model, "id") else None,
                     "model_name": model.name,
                     "provider_id": str(model.provider_id),
                     "tenant_id": str(self.tenant.id) if self.tenant else None,
-                }
+                },
             )
             raise ValueError(
                 f"Model '{model.name}' requires database session to load provider credentials. "
@@ -114,8 +131,10 @@ class CompletionService:
             )
 
         # Create credential resolver
+        provider_id = provider_db.id
+
         credential_resolver = TenantModelCredentialResolver(
-            provider_id=provider_db.id,
+            provider_id=provider_id,
             provider_type=provider_db.provider_type,
             credentials=provider_db.credentials,
             config=provider_db.config,
@@ -125,12 +144,12 @@ class CompletionService:
         logger.info(
             f"Using TenantModelAdapter for model '{model.name}'",
             extra={
-                "model_id": str(model.id) if hasattr(model, 'id') else None,
+                "model_id": str(model.id) if hasattr(model, "id") else None,
                 "model_name": model.name,
                 "provider_id": str(model.provider_id),
                 "provider_type": provider_db.provider_type,
                 "tenant_id": str(self.tenant.id) if self.tenant else None,
-            }
+            },
         )
 
         return TenantModelAdapter(
@@ -156,6 +175,11 @@ class CompletionService:
         function_called = False
 
         async for chunk in completion:
+            # Pass through stop chunk (carries usage data)
+            if chunk.stop:
+                yield chunk
+                continue
+
             # Pass through MCP tool call events directly
             if chunk.response_type == ResponseType.TOOL_CALL:
                 yield chunk
@@ -165,7 +189,6 @@ class CompletionService:
             if chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
                 yield chunk
                 continue
-
 
             if chunk.tool_call:
                 if chunk.tool_call.name:
@@ -183,7 +206,7 @@ class CompletionService:
                     if name == "generate_image":
                         yield Completion(response_type=ResponseType.INTRIC_EVENT)
 
-                        chunk.image_data = await generate_image(**call_args)
+                        chunk.image_data = await generate_image(**call_args)  # type: ignore[attr-defined]
                         chunk.response_type = ResponseType.FILES
 
                         yield chunk
@@ -200,20 +223,32 @@ class CompletionService:
         model: CompletionModel,
         text_input: str,
         model_kwargs: ModelKwargs | None = None,
-        files: list[File] = [],
+        files: list[File] | None = None,
         prompt: str = "",
-        prompt_files: list[File] = [],
-        transcription_inputs: list[str] = [],
-        info_blob_chunks: list[InfoBlobChunkInDBWithScore] = [],
-        web_search_results: list["WebSearchResult"] = [],
+        prompt_files: list[File] | None = None,
+        transcription_inputs: list[str] | None = None,
+        info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
+        web_search_results: list["WebSearchResult"] | None = None,
         session: SessionInDB | None = None,
         stream: bool = False,
         extended_logging: bool = False,
         version: int = 1,
         use_image_generation: bool = False,
-        mcp_servers: list["MCPServer"] = [],
+        mcp_servers: list["MCPServer"] | None = None,
         require_tool_approval: bool = False,
-    ):
+    ) -> CompletionModelResponse:
+        if files is None:
+            files = []
+        if prompt_files is None:
+            prompt_files = []
+        if transcription_inputs is None:
+            transcription_inputs = []
+        if info_blob_chunks is None:
+            info_blob_chunks = []
+        if web_search_results is None:
+            web_search_results = []
+        if mcp_servers is None:
+            mcp_servers = []
         model_adapter = await self._get_adapter(model)
 
         # Make sure everything fits in the context of the model
@@ -221,11 +256,14 @@ class CompletionService:
 
         # Image generation only works on streaming for now
         # And only if feature flag is turned on
-        use_image_generation = use_image_generation and stream and get_settings().using_image_generation
+        use_image_generation = (
+            use_image_generation and stream and get_settings().using_image_generation
+        )
 
         context = self.context_builder.build_context(
             input_str=text_input,
             max_tokens=max_tokens,
+            model_name=model_adapter.model.name,
             files=files,
             prompt=prompt,
             session=session,
@@ -248,7 +286,9 @@ class CompletionService:
         mcp_proxy: MCPProxySession | None = None
         if mcp_servers:
             mcp_proxy = self._mcp_proxy_factory.create(mcp_servers)
-            logger.debug(f"[MCP] Proxy created with {mcp_proxy.get_tool_count()} tools from {len(mcp_servers)} server(s)")
+            logger.debug(
+                f"[MCP] Proxy created with {mcp_proxy.get_tool_count()} tools from {len(mcp_servers)} server(s)"
+            )
 
         if not stream:
             try:
@@ -265,24 +305,56 @@ class CompletionService:
             # Two-phase streaming pattern:
             # Phase 1: Create stream connection BEFORE returning (can raise exceptions)
             # This happens eagerly, so exceptions propagate before HTTP response starts
-            stream_obj = await model_adapter.prepare_streaming(
-                context=context,
-                model_kwargs=model_kwargs,
-                mcp_proxy=mcp_proxy,
-            )
+            try:
+                stream_obj = await model_adapter.prepare_streaming(
+                    context=context,
+                    model_kwargs=model_kwargs,
+                    mcp_proxy=mcp_proxy,
+                )
+            except BaseException:
+                # If stream prep fails, close the proxy here — the streaming_wrapper's
+                # finally block won't run because the generator is never reached.
+                # Without this, leaked MCP connections accumulate anyio task-group
+                # background tasks and creep CPU toward 100% over the worker's lifetime.
+                if mcp_proxy:
+                    await mcp_proxy.close()
+                raise
 
             # Phase 2: Create generator that iterates the pre-created stream
             # This generator yields error events for mid-stream failures
-            async def streaming_wrapper():
+            async def streaming_wrapper() -> AsyncGenerator[Completion, None]:
                 """
                 Generator that iterates pre-created stream.
                 The stream was already created and validated, so we're past
                 the pre-flight checks. Any errors here are mid-stream failures.
                 Proxy cleanup happens after iteration completes.
                 """
+                approval_manager: Any | None = None
+                pending_approval_ids: set[str] = set()
+                approval_context = None
                 try:
                     # Get approval manager if tool approval is required
-                    approval_manager = get_approval_manager() if require_tool_approval else None
+                    if require_tool_approval:
+                        approval_manager = get_approval_manager(
+                            redis_client=self.redis_client
+                        )
+                    if require_tool_approval:
+                        if session is None:
+                            raise ValueError(
+                                "Tool approval requires an active conversation session"
+                            )
+                        if self.tenant is None:
+                            raise ValueError("Tool approval requires tenant context")
+                        approval_context = {
+                            "tenant_id": self.tenant.id,
+                            "user_id": session.user_id,
+                            "session_id": session.id,
+                            "assistant_id": (
+                                session.assistant.id
+                                if session.assistant is not None
+                                else None
+                            ),
+                        }
 
                     async for chunk in model_adapter.iterate_stream(
                         stream=stream_obj,
@@ -290,9 +362,22 @@ class CompletionService:
                         model_kwargs=model_kwargs,
                         require_tool_approval=require_tool_approval,
                         approval_manager=approval_manager,
+                        approval_context=approval_context,
+                        pending_approval_ids=pending_approval_ids,
                     ):
                         yield chunk
                 finally:
+                    if approval_manager:
+                        for approval_id in list(pending_approval_ids):
+                            try:
+                                await approval_manager.cancel_approval(approval_id)
+                            except Exception:
+                                logger.warning(
+                                    "Failed to cancel pending tool approval",
+                                    extra={"approval_id": approval_id},
+                                    exc_info=True,
+                                )
+
                     # Cleanup proxy after streaming completes
                     if mcp_proxy:
                         await mcp_proxy.close()
@@ -304,9 +389,11 @@ class CompletionService:
             model=model_adapter.model,
             extended_logging=logging_details,
             total_token_count=context.token_count,
+            usage=getattr(completion, "usage", None) if not stream else None,
         )
 
 
 class CompletionServiceFactory:
     def __init__(self, container: Container):
         self.container = container
+        super().__init__()

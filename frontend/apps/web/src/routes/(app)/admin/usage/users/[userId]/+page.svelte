@@ -17,19 +17,23 @@
   import { getIntric } from "$lib/core/Intric";
   import { createRender } from "svelte-headless-table";
   import { CalendarDate } from "@internationalized/date";
+  import { m } from "$lib/paraglide/messages";
   import {
     IntricError,
     type ModelUsage,
     type TokenUsageSummary,
     type UserTokenUsage
   } from "@intric/intric-js";
+  import { buildCostRateMap, type CostRateMap } from "$lib/features/ai-models/costRates";
+  import { estimateCostFromTokens, formatCostUSD } from "$lib/features/ai-models/formatModelStats";
+  import EstimatedCostCell from "../../tokens/EstimatedCostCell.svelte";
 
   const intric = getIntric();
   const userId = $page.params.userId;
 
   // Get date range from URL params or default to last 30 days
   const now = new Date();
-  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getUTCDate());
+  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
   let dateRange = $state({
     start: today.subtract({ days: 30 }),
     end: today
@@ -41,6 +45,18 @@
   let isLoadingBreakdown = $state(false);
   let userError = $state<string | null>(null);
   let breakdownError = $state<string | null>(null);
+
+  // Lazily resolved cost rate map. Fetched once per mount; if the request
+  // fails we silently fall back to "–" cost cells rather than blocking the page.
+  let costRates = $state<CostRateMap>(new Map());
+  void intric.models
+    .list()
+    .then((models) => {
+      costRates = buildCostRateMap(models);
+    })
+    .catch(() => {
+      // Cost column degrades gracefully — see fallback in `estimateCostText`.
+    });
 
   // Load user data and model breakdown
   async function loadUserData() {
@@ -175,21 +191,61 @@
       accessor: "total_token_usage",
       id: "total_tokens",
       cell: (item) => formatNumber(item.value, "compact", 1)
+    }),
+    modelTable.column({
+      header: m.estimated_cost(),
+      accessor: (model) => model,
+      id: "estimated_cost",
+      cell: (item) => {
+        const rates = costRates.get(item.value.model_id);
+        const cost = rates
+          ? estimateCostFromTokens(
+              item.value.input_token_usage,
+              item.value.output_token_usage,
+              rates
+            )
+          : null;
+        return createRender(EstimatedCostCell, { label: formatCostUSD(cost) });
+      }
     })
   ]);
 
-  // Update model table when data changes
+  // Update model table when data or cost rates change. Reading `costRates`
+  // into a dummy local re-runs the effect (and the cell fns inside the
+  // column renderers) once the rate map arrives, so the cost column stops
+  // showing "–" as soon as the model list resolves.
   $effect(() => {
+    void costRates;
     if (modelBreakdown?.models) {
-      modelTable.update(modelBreakdown.models);
+      modelTable.update([...modelBreakdown.models]);
     }
   });
 
-  // Get usage intensity based on requests - using semantic classes
-  function getUsageIntensity(requests: number) {
-    if (requests > 100) return { label: "High Usage", class: "bg-secondary text-error" };
-    if (requests > 20) return { label: "Medium Usage", class: "bg-secondary text-warning" };
-    return { label: "Low Usage", class: "bg-secondary text-success" };
+  // Scale usage thresholds proportionally to the selected date range
+  const BASE_DAYS = 30;
+  const BASE_HIGH_THRESHOLD = 500_000;
+  const BASE_MEDIUM_THRESHOLD = 50_000;
+
+  const thresholds = $derived.by(() => {
+    if (!dateRange.start || !dateRange.end) {
+      return { high: BASE_HIGH_THRESHOLD, medium: BASE_MEDIUM_THRESHOLD };
+    }
+    const startMs = new Date(dateRange.start.toString()).getTime();
+    const endMs = new Date(dateRange.end.toString()).getTime();
+    const days = Math.max(1, Math.round((endMs - startMs) / (1000 * 60 * 60 * 24)));
+    const scale = days / BASE_DAYS;
+    return {
+      high: Math.round(BASE_HIGH_THRESHOLD * scale),
+      medium: Math.round(BASE_MEDIUM_THRESHOLD * scale)
+    };
+  });
+
+  function getUsageIntensity(tokens: number) {
+    if (tokens > thresholds.high)
+      return { label: m.usage_level_high(), class: "bg-secondary text-error" };
+    if (tokens > thresholds.medium)
+      return { label: m.usage_level_medium(), class: "bg-secondary text-warning" };
+    return { label: m.usage_level_low(), class: "bg-secondary text-success" };
   }
 
   // Get top 5 models by token usage
@@ -202,7 +258,7 @@
 </script>
 
 <svelte:head>
-  <title>User Token Usage - {user?.username || "Loading..."}</title>
+  <title>{m.usage_user_token_page_title({ username: user?.username || m.loading() })}</title>
 </svelte:head>
 
 <Page.Root>
@@ -214,7 +270,7 @@
           onclick={() => history.back()}
           class="text-muted hover:text-primary"
         >
-          ← Usage
+          {m.usage_back_to_usage()}
         </Button>
         <span class="text-muted">/</span>
         <h1 class="text-primary text-[1.45rem] font-extrabold">
@@ -232,9 +288,9 @@
     {#if user}
       <!-- User Overview Statistics -->
       <Settings.Page>
-        <Settings.Group title="Overview">
+        <Settings.Group title={m.overview()}>
           <Settings.Row
-            title="User Information"
+            title={m.usage_user_information()}
             description="Profile and usage activity for {user.username}."
           >
             <div class="flex items-center gap-4">
@@ -255,10 +311,10 @@
                 <div class="mt-2">
                   <span
                     class="inline-flex items-center rounded-full px-3 py-1.5 text-sm font-medium {getUsageIntensity(
-                      user.total_requests
+                      user.total_tokens
                     ).class}"
                   >
-                    {getUsageIntensity(user.total_requests).label}
+                    {getUsageIntensity(user.total_tokens).label}
                   </span>
                 </div>
               </div>
@@ -266,7 +322,7 @@
           </Settings.Row>
 
           <Settings.Row
-            title="Token Usage Summary"
+            title={m.usage_token_usage_summary()}
             description="Total tokens consumed by {user.username} in the selected period."
           >
             <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
@@ -274,34 +330,36 @@
                 <div class="text-primary text-2xl font-bold">
                   {formatNumber(user.total_tokens, "compact", 1)}
                 </div>
-                <div class="text-muted text-sm">Total Tokens</div>
+                <div class="text-muted text-sm">{m.usage_total_tokens()}</div>
               </div>
               <div class="text-center">
                 <div class="text-success text-2xl font-bold">
                   {formatNumber(user.total_input_tokens, "compact", 1)}
                 </div>
-                <div class="text-muted text-sm">Input Tokens</div>
+                <div class="text-muted text-sm">{m.usage_input_tokens()}</div>
                 <div class="text-muted mt-1 text-xs">
-                  {formatPercent(user.total_input_tokens / user.total_tokens)} of total
+                  {formatPercent(user.total_input_tokens / user.total_tokens)}
+                  {m.usage_of_total()}
                 </div>
               </div>
               <div class="text-center">
                 <div class="text-warning text-2xl font-bold">
                   {formatNumber(user.total_output_tokens, "compact", 1)}
                 </div>
-                <div class="text-muted text-sm">Output Tokens</div>
+                <div class="text-muted text-sm">{m.usage_output_tokens()}</div>
                 <div class="text-muted mt-1 text-xs">
-                  {formatPercent(user.total_output_tokens / user.total_tokens)} of total
+                  {formatPercent(user.total_output_tokens / user.total_tokens)}
+                  {m.usage_of_total()}
                 </div>
               </div>
               <div class="text-center">
                 <div class="text-info text-2xl font-bold">
                   {formatNumber(user.total_requests)}
                 </div>
-                <div class="text-muted text-sm">Total Requests</div>
+                <div class="text-muted text-sm">{m.usage_total_requests()}</div>
                 <div class="text-muted mt-1 text-xs">
                   {formatNumber(user.total_tokens / Math.max(user.total_requests, 1), "compact", 1)}
-                  tokens avg/request
+                  {m.usage_tokens_avg_per_request()}
                 </div>
               </div>
             </div>
@@ -309,12 +367,12 @@
 
           {#if modelBreakdown && modelBreakdown.models && modelBreakdown.models.length > 0 && modelsByProvider.length > 0}
             <Settings.Row
-              title="Usage by Organization"
+              title={m.usage_by_organization()}
               description="See how token usage is distributed across different AI model providers."
             >
               <div class="flex flex-col gap-4">
                 <div class="bg-secondary flex h-4 w-full overflow-clip rounded-full">
-                  {#each modelsByProvider.filter((org) => org.tokenCount > 0) as org (org.org)}
+                  {#each modelsByProvider.filter((org) => org.tokenCount > 0) as org (org.provider)}
                     <div
                       class="last-of-type:!border-none"
                       style="width: {formatPercent(
@@ -324,7 +382,7 @@
                   {/each}
                 </div>
                 <div class="flex flex-wrap gap-x-6">
-                  {#each modelsByProvider as org (org.org)}
+                  {#each modelsByProvider as org (org.provider)}
                     <div class="flex items-center gap-2">
                       <div
                         style="background: var(--{org.colour})"
@@ -344,17 +402,17 @@
           {/if}
         </Settings.Group>
 
-        <Settings.Group title="Details">
+        <Settings.Group title={m.details()}>
           {#if isLoadingBreakdown}
-            <Settings.Row title="Loading..." description="Loading detailed model breakdown...">
+            <Settings.Row title={m.loading()} description="Loading detailed model breakdown...">
               <div class="text-muted flex items-center gap-2">
                 <div class="h-4 w-4 animate-spin rounded-full border-b-2 border-current"></div>
-                <span>Loading model breakdown...</span>
+                <span>{m.usage_loading_model_breakdown()}</span>
               </div>
             </Settings.Row>
           {:else if breakdownError}
             <Settings.Row
-              title="Error Loading Model Breakdown"
+              title={m.usage_error_loading_model_breakdown()}
               description="Failed to load model usage details."
             >
               <div class="text-center">
@@ -363,7 +421,7 @@
             </Settings.Row>
           {:else if modelBreakdown && modelBreakdown.models && modelBreakdown.models.length > 0}
             <Settings.Row
-              title="Top Models"
+              title={m.usage_top_models()}
               description="Most frequently used AI models by this user."
             >
               <div class="space-y-4">
@@ -381,7 +439,8 @@
                           {formatNumber(model.total_token_usage, "compact", 1)}
                         </p>
                         <p class="text-muted text-xs">
-                          {formatNumber(model.request_count)} requests
+                          {formatNumber(model.request_count)}
+                          {m.usage_requests_label()}
                         </p>
                       </div>
                     </div>
@@ -394,7 +453,9 @@
                           topModels.length > 0
                             ? (model.total_token_usage / topModels[0].total_token_usage) * 100
                             : 0
-                        )}%; background: var(--{getChartColour(model.model_provider ?? model.model_org)})"
+                        )}%; background: var(--{getChartColour(
+                          model.model_provider ?? model.model_org
+                        )})"
                       ></div>
                     </div>
                   </div>
@@ -403,7 +464,7 @@
             </Settings.Row>
 
             <Settings.Row
-              title="Complete Model Breakdown"
+              title={m.usage_complete_model_breakdown()}
               description="Detailed usage statistics for all models used by this user."
               fullWidth
             >
@@ -411,8 +472,8 @@
             </Settings.Row>
           {:else}
             <Settings.Row
-              title="No Model Usage"
-              description="This user has not used any AI models in the selected period."
+              title={m.usage_no_model_usage()}
+              description={m.usage_no_model_usage_description()}
             >
               <div class="py-8 text-center">
                 <div
@@ -432,9 +493,9 @@
                     />
                   </svg>
                 </div>
-                <h3 class="text-primary mb-2 text-lg font-medium">No Model Usage</h3>
+                <h3 class="text-primary mb-2 text-lg font-medium">{m.usage_no_model_usage()}</h3>
                 <p class="text-muted">
-                  This user has not used any AI models in the selected period.
+                  {m.usage_no_model_usage_description()}
                 </p>
               </div>
             </Settings.Row>
@@ -445,7 +506,7 @@
       <div class="bg-secondary/30 border-default rounded-lg border p-8">
         <div class="text-muted flex items-center justify-center gap-2">
           <div class="h-4 w-4 animate-spin rounded-full border-b-2 border-current"></div>
-          <span>Loading user information...</span>
+          <span>{m.usage_loading_user_information()}</span>
         </div>
       </div>
     {:else if userError}
@@ -469,8 +530,8 @@
               />
             </svg>
           </div>
-          <h3 class="text-primary mb-2 text-lg font-medium">User Not Found</h3>
-          <p class="text-muted">The requested user could not be found in the current date range.</p>
+          <h3 class="text-primary mb-2 text-lg font-medium">{m.usage_user_not_found()}</h3>
+          <p class="text-muted">{m.usage_user_not_found_description()}</p>
         </div>
       </div>
     {/if}

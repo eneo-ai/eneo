@@ -4,7 +4,6 @@ from uuid import UUID
 
 from intric.base.base_entity import Entity
 
-
 # Auth method constants
 AUTH_METHOD_TENANT_APP = "tenant_app"
 AUTH_METHOD_SERVICE_ACCOUNT = "service_account"
@@ -73,9 +72,7 @@ class TenantSharePointApp(Entity):
         self.client_secret = client_secret
         self.tenant_domain = tenant_domain
 
-    def update_service_account(
-        self, refresh_token: str, email: str
-    ) -> None:
+    def update_service_account(self, refresh_token: str, email: str) -> None:
         """Update service account credentials."""
         self.auth_method = AUTH_METHOD_SERVICE_ACCOUNT
         self.service_account_refresh_token = refresh_token

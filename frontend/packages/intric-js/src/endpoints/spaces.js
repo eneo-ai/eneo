@@ -8,11 +8,13 @@ export function initSpaces(client) {
   return {
     /**
      * Lists all spaces the user can access.
+     * @param {{include_personal?: boolean, include_applications?: boolean}} [options]
      * @throws {IntricError}
      * */
-    list: async () => {
+    list: async (options) => {
       const res = await client.fetch("/api/v1/spaces/", {
-        method: "get"
+        method: "get",
+        params: { query: options }
       });
 
       return res.items;
@@ -204,8 +206,8 @@ export function initSpaces(client) {
 
       /**
        * Add a user group to a space.
-       * @param {{spaceId: string, group: {id: string, role: string}}} params - Space ID and group with role
-       * @returns Added group member
+       * @param {{spaceId: string, group: {id: string, role: "editor" | "admin" | "viewer"}}} params - Space ID and group with role
+       * @returns `SpaceGroupMember`
        * @throws {IntricError}
        * */
       add: async ({ spaceId, group }) => {
@@ -221,7 +223,7 @@ export function initSpaces(client) {
 
       /**
        * Update the specified user group's role in a space.
-       * @param {{spaceId: string, group: {id: string, role: string}}} params
+       * @param {{spaceId: string, group: {id: string, role: "editor" | "admin" | "viewer"}}} params
        * @returns Updated group member
        * @throws {IntricError}
        * */

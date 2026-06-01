@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
@@ -22,7 +22,7 @@ class AuditLogCreate(BaseModel):
     entity_type: EntityType
     entity_id: UUID
     description: str = Field(min_length=1, max_length=500)
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, object] = Field(default_factory=dict)
     outcome: Outcome = Outcome.SUCCESS
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
@@ -42,7 +42,7 @@ class AuditLogResponse(BaseModel):
     entity_id: UUID
     timestamp: datetime
     description: str
-    metadata: dict
+    metadata: dict[str, object]
     outcome: Outcome
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
@@ -52,8 +52,7 @@ class AuditLogResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AuditLogListRequest(BaseModel):

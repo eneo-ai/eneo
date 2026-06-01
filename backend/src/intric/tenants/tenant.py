@@ -1,11 +1,16 @@
 import re
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, cast
 from uuid import UUID
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from pydantic.networks import HttpUrl
 
+from intric.main.config import (
+    canonicalize_legacy_redirect_path,
+    validate_redirect_path,
+    validate_redirect_uri,
+)
 from intric.main.models import InDB
 from intric.modules.module import ModuleInDB
 
@@ -43,7 +48,7 @@ class TenantBase(BaseModel):
 
 
 class TenantPublic(PrivacyPolicyMixin, TenantBase):
-    pass
+    default_role_id: Optional[UUID] = None
 
 
 class TenantInDB(PrivacyPolicyMixin, InDB):
@@ -56,10 +61,19 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     provisioning: bool = False
     state: TenantState = TenantState.ACTIVE
     security_enabled: bool = False
+    default_role_id: Optional[UUID] = None
     modules: list[ModuleInDB] = []
     api_credentials: dict[str, Any] = Field(default_factory=dict)
     federation_config: dict[str, Any] = Field(default_factory=dict)
     crawler_settings: dict[str, Any] = Field(default_factory=dict)
+    api_key_policy: dict[str, Any] = Field(default_factory=dict)
+    favorite_providers: list[str] = Field(default_factory=list)
+
+    @field_validator("favorite_providers")
+    @classmethod
+    def validate_favorite_providers(cls, v: list[str]) -> list[str]:
+        """Validate that favorite_providers is a list of strings."""
+        return v
 
     @field_validator("slug")
     @classmethod
@@ -89,27 +103,11 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     def validate_api_credentials(cls, v: dict[str, Any]) -> dict[str, Any]:
         """Validate JSONB structure for API credentials.
 
-        Ensures provider keys are valid and credentials have required fields.
-        Azure provider requires additional fields beyond api_key.
+        Ensures credentials have required fields. Provider keys are not
+        restricted to a fixed set since providers are managed dynamically
+        via the LiteLLM provider system.
         """
-        valid_providers = {
-            "openai",
-            "azure",
-            "anthropic",
-            "berget",
-            "gdm",
-            "mistral",
-            "ovhcloud",
-            "gemini",
-            "cohere",
-        }
-
         for provider, cred in v.items():
-            if provider not in valid_providers:
-                raise ValueError(
-                    f"Invalid provider: {provider}. Must be one of: {valid_providers}"
-                )
-
             if not isinstance(cred, dict):
                 raise ValueError(f"Provider {provider} credentials must be a dict")
 
@@ -127,16 +125,32 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         if not v:
             return {}
 
-        # Required fields for federation
         required = {
             "provider",
             "client_id",
             "client_secret",
             "discovery_endpoint",
         }
-        missing = required - set(v.keys())
-        if missing:
-            raise ValueError(f"Federation config missing required fields: {missing}")
+        redirect_only_fields = {
+            "canonical_public_origin",
+            "redirect_path",
+            "additional_redirect_uris",
+        }
+
+        has_full_federation_config = any(field in v for field in required)
+        if has_full_federation_config:
+            missing = required - set(v.keys())
+            if missing:
+                raise ValueError(
+                    f"Federation config missing required fields: {missing}"
+                )
+        else:
+            unexpected_fields = set(v.keys()) - redirect_only_fields
+            if unexpected_fields:
+                raise ValueError(
+                    "Federation config without provider credentials may only contain "
+                    f"{redirect_only_fields}. Unexpected fields: {unexpected_fields}"
+                )
 
         # Provider is just a label - any string is valid (no validation needed)
         # This allows any OIDC-compliant provider (Entra ID, Auth0, Okta, Keycloak, etc.)
@@ -144,6 +158,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         # Validate canonical_public_origin (optional field)
         if "canonical_public_origin" in v:
             from intric.main.config import validate_public_origin
+
             try:
                 v["canonical_public_origin"] = validate_public_origin(
                     v["canonical_public_origin"]
@@ -158,14 +173,42 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
             redirect_path = v["redirect_path"]
             if not isinstance(redirect_path, str):
                 raise ValueError("redirect_path must be a string")
-            if not redirect_path.startswith("/"):
-                raise ValueError("redirect_path must start with /")
+            try:
+                v["redirect_path"] = validate_redirect_path(
+                    canonicalize_legacy_redirect_path(redirect_path)
+                )
+            except ValueError as e:
+                raise ValueError(f"Invalid redirect_path in federation_config: {e}")
+
+        if "additional_redirect_uris" in v:
+            additional_redirect_uris = v["additional_redirect_uris"]
+            if not isinstance(additional_redirect_uris, list):
+                raise ValueError("additional_redirect_uris must be a list")
+
+            normalized_redirect_uris: list[str] = []
+            for redirect_uri in cast(list[object], additional_redirect_uris):
+                if not isinstance(redirect_uri, str):
+                    raise ValueError(
+                        "additional_redirect_uris must contain only strings"
+                    )
+                try:
+                    validated_uri = validate_redirect_uri(redirect_uri)
+                    if validated_uri is not None:
+                        normalized_redirect_uris.append(validated_uri)
+                except ValueError as e:
+                    raise ValueError(
+                        f"Invalid redirect URI in additional_redirect_uris: {e}"
+                    )
+
+            v["additional_redirect_uris"] = normalized_redirect_uris
 
         # Validate allowed_domains (optional but recommended)
         if "allowed_domains" in v:
             if not isinstance(v["allowed_domains"], list):
                 raise ValueError("allowed_domains must be a list")
-            if not all(isinstance(d, str) for d in v["allowed_domains"]):
+            if not all(
+                isinstance(d, str) for d in cast(list[object], v["allowed_domains"])
+            ):
                 raise ValueError("allowed_domains must contain only strings")
 
         return v
@@ -202,6 +245,7 @@ class TenantUpdatePublic(BaseModel):
     provisioning: Optional[bool] = None
     state: Optional[TenantState] = None
     security_enabled: Optional[bool] = None
+    default_role_id: Optional[UUID] = None
 
 
 class TenantUpdate(TenantUpdatePublic):
@@ -252,12 +296,15 @@ class TenantWithMaskedCredentials(TenantInDB):
 
         # Mask the api_credentials - preserve structure but mask api_key field only
         if tenant.api_credentials:
-            masked = {}
-            for provider, cred in tenant.api_credentials.items():
+            masked: dict[str, Any] = {}
+            for provider, cred_raw in tenant.api_credentials.items():
+                cred: object = cred_raw
                 if isinstance(cred, dict):
                     # Preserve structure: copy all fields except mask api_key
-                    masked_cred = cred.copy()
-                    api_key = cred.get("api_key", "")
+                    cred_typed = cast(dict[str, object], cred)
+                    masked_cred: dict[str, object] = dict(cred_typed)
+                    raw_key = cred_typed.get("api_key", "")
+                    api_key = raw_key if isinstance(raw_key, str) else str(raw_key)
 
                     # Mask the api_key field
                     if len(api_key) > 4:

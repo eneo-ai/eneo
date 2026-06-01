@@ -3,24 +3,35 @@ import hashlib
 import secrets
 import string
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from uuid import UUID
 
 import bcrypt
 import jwt
+import sqlalchemy as sa
 from pydantic import ValidationError
 
 from intric.authentication.api_key_repo import ApiKeysRepository
+from intric.authentication.api_key_v2_repo import ApiKeysV2Repository
 from intric.authentication.auth_models import (
     ApiKey,
     ApiKeyCreated,
+    ApiKeyHashVersion,
+    ApiKeyInDB,
+    ApiKeyPermission,
+    ApiKeyScopeType,
+    ApiKeyState,
+    ApiKeyType,
     JWTCreds,
     JWTMeta,
     JWTPayload,
 )
+from intric.database.tables.assistant_table import Assistants
+from intric.database.tables.users_table import Users
 from intric.main.config import get_settings
 from intric.main.exceptions import AuthenticationException
 from intric.main.logging import get_logger
-from intric.users.user import UserBase, UserInDB
+from intric.users.user import UserInDB
 
 logger = get_logger(__name__)
 
@@ -32,8 +43,14 @@ OIDC_CLOCK_LEEWAY_SECONDS = get_settings().oidc_clock_leeway_seconds
 
 
 class AuthService:
-    def __init__(self, api_key_repo: ApiKeysRepository):
+    def __init__(
+        self,
+        api_key_repo: ApiKeysRepository,
+        api_key_v2_repo: ApiKeysV2Repository | None = None,
+    ):
+        super().__init__()
         self.api_key_repo = api_key_repo
+        self.api_key_v2_repo = api_key_v2_repo
 
     # Dummy hash for timing attack mitigation
     # Pre-computed bcrypt hash of a random string to ensure constant-time password verification
@@ -50,11 +67,13 @@ class AuthService:
         return bcrypt.hashpw(password=pwd_bytes, salt=salt).decode("utf-8")
 
     @staticmethod
-    def hash_api_key(api_key: str):
+    def hash_api_key(api_key: str) -> str:
         return hashlib.sha256(api_key.encode()).hexdigest()
 
-    def create_salt_and_hashed_password(self, plaintext_password: str | None):
-        if plaintext_password == None:
+    def create_salt_and_hashed_password(
+        self, plaintext_password: str | None
+    ) -> tuple[str, str]:
+        if plaintext_password is None:
             plaintext_password = ""
         pwd_bytes = plaintext_password.encode("utf-8")
         salt = bcrypt.gensalt()
@@ -70,7 +89,7 @@ class AuthService:
         )
 
     @staticmethod
-    def generate_password(length: int):
+    def generate_password(length: int) -> str:
         alphabet = string.ascii_letters + string.digits
         password = "".join(secrets.choice(alphabet) for _ in range(length))
 
@@ -78,13 +97,15 @@ class AuthService:
 
     def create_access_token_for_user(
         self,
-        user: UserInDB,
-        secret_key: str = str(JWT_SECRET),
+        user: UserInDB | None,
+        secret_key: str | None = None,
         audience: str = JWT_AUDIENCE,
         expires_in: int = JWT_EXPIRY_TIME_MINUTES,
     ) -> str:
-        if not user or not isinstance(user, UserBase):
-            return None
+        if user is None:
+            raise ValueError("user is required to create an access token")
+
+        secret_key = secret_key or str(JWT_SECRET)
 
         jwt_meta = JWTMeta(
             aud=audience,
@@ -110,14 +131,14 @@ class AuthService:
     def _generate_api_key(self) -> str:
         return secrets.token_hex(get_settings().api_key_length)
 
-    def _create_api_key(self, prefix: str):
+    def _create_api_key(self, prefix: str) -> ApiKey:
         api_key = self._generate_api_key()
         prefix_api_key = f"{prefix}_{api_key}"
         truncated_key = prefix_api_key[-4:]
 
         return ApiKey(key=prefix_api_key, truncated_key=truncated_key)
 
-    def _create_and_hash_api_key(self, prefix: str):
+    def _create_and_hash_api_key(self, prefix: str) -> ApiKeyCreated:
         api_key = self._create_api_key(prefix)
         hashed_key = self.hash_api_key(api_key.key)
 
@@ -125,7 +146,7 @@ class AuthService:
 
     async def create_user_api_key(
         self, prefix: str, user_id: UUID, delete_old: bool = True
-    ):
+    ) -> ApiKeyCreated:
         api_key = self._create_and_hash_api_key(prefix=prefix)
         key_to_save = ApiKey(
             key=api_key.hashed_key, truncated_key=api_key.truncated_key
@@ -135,16 +156,19 @@ class AuthService:
             await self.api_key_repo.delete_by_user(user_id)
 
         await self.api_key_repo.add(api_key=key_to_save, user_id=user_id)
+        await self._create_v2_legacy_record_for_user(
+            api_key=api_key, prefix=prefix, user_id=user_id
+        )
 
         return api_key
 
     async def create_assistant_api_key(
         self,
         prefix: str,
-        assistant_id: int,
+        assistant_id: UUID,
         delete_old: bool = True,
         hash_key: bool = True,
-    ):
+    ) -> ApiKeyCreated:
         api_key = self._create_and_hash_api_key(prefix=prefix)
         key = api_key.hashed_key if hash_key else api_key.key
         key_to_save = ApiKey(key=key, truncated_key=api_key.truncated_key)
@@ -153,10 +177,92 @@ class AuthService:
             await self.api_key_repo.delete_by_assistant(assistant_id)
 
         await self.api_key_repo.add(api_key=key_to_save, assistant_id=assistant_id)
+        await self._create_v2_legacy_record_for_assistant(
+            api_key=api_key, prefix=prefix, assistant_id=assistant_id
+        )
 
         return api_key
 
-    async def get_api_key(self, plain_key: str, *, hash_key: bool = True):
+    async def _create_v2_legacy_record_for_user(
+        self, *, api_key: ApiKeyCreated, prefix: str, user_id: UUID
+    ) -> None:
+        if self.api_key_v2_repo is None:
+            return
+        tenant_id = await self._get_user_tenant_id(user_id)
+        await self.api_key_v2_repo.create(
+            tenant_id=tenant_id,
+            owner_user_id=user_id,
+            created_by_user_id=user_id,
+            scope_type=ApiKeyScopeType.TENANT.value,
+            scope_id=None,
+            permission=ApiKeyPermission.ADMIN.value,
+            key_type=ApiKeyType.SK.value,
+            key_hash=api_key.hashed_key,
+            hash_version=ApiKeyHashVersion.SHA256.value,
+            key_prefix=self._normalize_prefix(api_key.key, fallback=prefix),
+            key_suffix=api_key.truncated_key,
+            name="Legacy API key",
+            description=None,
+            state=ApiKeyState.ACTIVE.value,
+        )
+
+    async def _create_v2_legacy_record_for_assistant(
+        self, *, api_key: ApiKeyCreated, prefix: str, assistant_id: UUID
+    ) -> None:
+        if self.api_key_v2_repo is None:
+            return
+        tenant_id, owner_user_id = await self._get_assistant_owner_and_tenant(
+            assistant_id
+        )
+        await self.api_key_v2_repo.create(
+            tenant_id=tenant_id,
+            owner_user_id=owner_user_id,
+            created_by_user_id=owner_user_id,
+            scope_type=ApiKeyScopeType.ASSISTANT.value,
+            scope_id=assistant_id,
+            permission=ApiKeyPermission.READ.value,
+            key_type=ApiKeyType.SK.value,
+            key_hash=api_key.hashed_key,
+            hash_version=ApiKeyHashVersion.SHA256.value,
+            key_prefix=self._normalize_prefix(api_key.key, fallback=prefix),
+            key_suffix=api_key.truncated_key,
+            name="Legacy Assistant API key",
+            description=None,
+            state=ApiKeyState.ACTIVE.value,
+        )
+
+    async def _get_user_tenant_id(self, user_id: UUID) -> UUID:
+        stmt = sa.select(Users.tenant_id).where(Users.id == user_id).limit(1)
+        record = await self.api_key_repo.session.execute(stmt)
+        row = record.first()
+        if row is None:
+            raise AuthenticationException("No authenticated user.")
+        return row.tenant_id
+
+    async def _get_assistant_owner_and_tenant(
+        self, assistant_id: UUID
+    ) -> tuple[UUID, UUID]:
+        stmt = (
+            sa.select(Assistants.user_id, Users.tenant_id)
+            .join(Users, Users.id == Assistants.user_id)
+            .where(Assistants.id == assistant_id)
+            .limit(1)
+        )
+        record = await self.api_key_repo.session.execute(stmt)
+        row = record.first()
+        if row is None:
+            raise AuthenticationException("No authenticated user.")
+        return row.tenant_id, row.user_id
+
+    @staticmethod
+    def _normalize_prefix(plain_key: str, *, fallback: str) -> str:
+        if "_" in plain_key:
+            return f"{plain_key.split('_', 1)[0]}_"
+        return f"{fallback}_"
+
+    async def get_api_key(
+        self, plain_key: str, *, hash_key: bool = True
+    ) -> ApiKeyInDB | None:
         if hash_key:
             key = self.hash_api_key(plain_key)
         else:
@@ -164,7 +270,7 @@ class AuthService:
 
         return await self.api_key_repo.get(key)
 
-    def get_username_from_token(self, token: str, secret_key: str) -> str:
+    def get_username_from_token(self, token: str, secret_key: str) -> str | None:
         return self.get_jwt_payload(token, key=str(secret_key)).username
 
     def get_jwt_payload(
@@ -172,8 +278,9 @@ class AuthService:
         token: str,
         key: str,
         aud: str = JWT_AUDIENCE,
-        algs: list[str] = [JWT_ALGORITHM],
-    ):
+        algs: list[str] | None = None,
+    ) -> JWTPayload:
+        algs = algs or [JWT_ALGORITHM]
         try:
             decoded_token = jwt.decode(token, key=key, audience=aud, algorithms=algs)
             payload = JWTPayload(**decoded_token)
@@ -191,9 +298,9 @@ class AuthService:
         key: jwt.PyJWK,
         signing_algos: list[str],
         client_id: str,
-        options: dict = None,
-        correlation_id: str = None,
-    ):
+        options: dict[str, Any] | None = None,
+        correlation_id: str | None = None,
+    ) -> dict[str, Any]:
         correlation_id = correlation_id or "no-correlation-id"
 
         jwt_options = dict(options or {})
@@ -418,8 +525,8 @@ class AuthService:
         key: jwt.PyJWK,
         signing_algos: list[str],
         client_id: str,
-        options: dict = None,
-        correlation_id: str = None,
+        options: dict[str, Any] | None = None,
+        correlation_id: str | None = None,
     ) -> tuple[str, str]:
         correlation_id = correlation_id or "no-correlation-id"
 

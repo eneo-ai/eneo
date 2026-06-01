@@ -10,7 +10,7 @@ Export functionality has been extracted to AuditExportService.
 
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 from uuid import UUID, uuid4
 
 from intric.audit.application.audit_config_service import AuditConfigService
@@ -21,11 +21,37 @@ from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
 from intric.audit.domain.repositories.audit_log_repository import AuditLogRepository
 from intric.jobs.job_manager import job_manager
+from intric.jobs.job_models import Task
+from intric.jobs.task_models import TaskParams
+from intric.main.request_context import get_request_context
 
 if TYPE_CHECKING:
     from intric.feature_flag.feature_flag_service import FeatureFlagService
+    from intric.users.user import UserInDB
 
 logger = logging.getLogger(__name__)
+
+
+def _fill_request_context(
+    ip_address: Optional[str],
+    user_agent: Optional[str],
+    request_id: Optional[UUID],
+) -> tuple[Optional[str], Optional[str], Optional[UUID]]:
+    """Fall back to per-request contextvars (set by RequestContextMiddleware) for
+    any audit field the caller did not provide. Worker / migration / seeder paths
+    have empty context and naturally write NULL.
+    """
+    if ip_address is not None and user_agent is not None and request_id is not None:
+        return ip_address, user_agent, request_id
+
+    ctx = get_request_context()
+    if ip_address is None:
+        ip_address = ctx.get("ip_address")
+    if user_agent is None:
+        user_agent = ctx.get("user_agent")
+    if request_id is None:
+        request_id = ctx.get("request_id")
+    return ip_address, user_agent, request_id
 
 
 class AuditService:
@@ -37,6 +63,7 @@ class AuditService:
         audit_config_service: Optional[AuditConfigService] = None,
         feature_flag_service: Optional["FeatureFlagService"] = None,
     ):
+        super().__init__()
         self.repository = repository
         self.audit_config_service = audit_config_service
         self.feature_flag_service = feature_flag_service
@@ -84,15 +111,21 @@ class AuditService:
 
     async def log(
         self,
+        *,
         tenant_id: UUID,
-        actor_id: Optional[UUID],
         action: ActionType,
         entity_type: EntityType,
         entity_id: UUID,
         description: str,
-        metadata: dict,
-        outcome: Outcome = Outcome.SUCCESS,
+        metadata: dict[str, Any],
+        # Pass `user` to derive actor_id/actor_type via audit_actor_for so
+        # service-key callers don't FK-violate audit_log.actor_id (their
+        # synthetic UUID has no users row). Sysadmin paths that act without
+        # a user keep using the explicit form with actor_type=SYSTEM.
+        user: Optional["UserInDB"] = None,
+        actor_id: Optional[UUID] = None,
         actor_type: ActorType = ActorType.USER,
+        outcome: Outcome = Outcome.SUCCESS,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
         request_id: Optional[UUID] = None,
@@ -127,8 +160,17 @@ class AuditService:
         if not should_log:
             return None
 
+        if user is not None:
+            from intric.authentication.auth_models import audit_actor_for
+
+            actor_id, actor_type = audit_actor_for(user)
+
         if actor_type != ActorType.SYSTEM and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
+
+        ip_address, user_agent, request_id = _fill_request_context(
+            ip_address, user_agent, request_id
+        )
 
         audit_log = AuditLog(
             id=uuid4(),
@@ -225,15 +267,19 @@ class AuditService:
 
     async def log_async(
         self,
+        *,
         tenant_id: UUID,
-        actor_id: Optional[UUID],
         action: ActionType,
         entity_type: EntityType,
         entity_id: UUID,
         description: str,
-        metadata: dict,
-        outcome: Outcome = Outcome.SUCCESS,
+        metadata: dict[str, Any],
+        # See `log()` for `user` semantics — derives actor_id/actor_type via
+        # audit_actor_for so service-key callers don't FK-violate.
+        user: Optional["UserInDB"] = None,
+        actor_id: Optional[UUID] = None,
         actor_type: ActorType = ActorType.USER,
+        outcome: Outcome = Outcome.SUCCESS,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
         request_id: Optional[UUID] = None,
@@ -275,12 +321,21 @@ class AuditService:
         if not should_log:
             return None
 
+        if user is not None:
+            from intric.authentication.auth_models import audit_actor_for
+
+            actor_id, actor_type = audit_actor_for(user)
+
         if actor_type != ActorType.SYSTEM and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
 
         # Validate
         if outcome == Outcome.FAILURE and not error_message:
             raise ValueError("error_message required when outcome is failure")
+
+        ip_address, user_agent, request_id = _fill_request_context(
+            ip_address, user_agent, request_id
+        )
 
         # Create job ID
         job_id = uuid4()
@@ -303,7 +358,34 @@ class AuditService:
             "error_message": error_message,
         }
 
-        # Enqueue to ARQ
-        await job_manager.enqueue("log_audit_event", job_id, params)
+        # Enqueue to ARQ. Audit is best-effort: if Redis/ARQ is unreachable we
+        # log a warning but do NOT propagate the failure — a 500 on a
+        # successful mutation just because audit couldn't be enqueued would
+        # turn a partial degradation into a full outage.
+        #
+        # Programming errors (TypeError from non-serialisable params,
+        # ValueError from invalid input, AttributeError, AssertionError)
+        # are NOT swallowed — they indicate a bug we want to see in dev/CI
+        # rather than have vanish into a warning log.
+        try:
+            await job_manager.enqueue(
+                cast(Task, "log_audit_event"), job_id, cast(TaskParams, params)
+            )
+        except (TypeError, ValueError, AttributeError, AssertionError):
+            raise
+        except Exception as enqueue_exc:  # noqa: BLE001 — infrastructure failure
+            logger.warning(
+                "Failed to enqueue audit event; mutation succeeded but audit "
+                "trail is missing this entry",
+                extra={
+                    "job_id": str(job_id),
+                    "action": action.value,
+                    "entity_type": entity_type.value,
+                    "entity_id": str(entity_id),
+                    "error_type": type(enqueue_exc).__name__,
+                    "error": str(enqueue_exc),
+                },
+            )
+            return None
 
         return job_id

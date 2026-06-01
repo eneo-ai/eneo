@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union, cast
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, computed_field, model_validator
 
-from intric.ai_models.model_enums import ModelFamily as CompletionModelFamily
-from intric.ai_models.model_enums import ModelHostingLocation, ModelStability
-from intric.ai_models.model_enums import ModelOrg as Orgs
+from intric.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+    coerce_model_kwargs_capabilities,
+    resolve_supported_model_kwargs,
+)
 from intric.files.file_models import File
 from intric.logging.logging import LoggingDetails
 from intric.main.models import NOT_PROVIDED, InDB, ModelId, NotProvided, partial_model
@@ -24,13 +27,23 @@ if TYPE_CHECKING:
     from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 
 
+class TokenUsage(BaseModel):
+    """Actual token usage as reported by the LLM provider."""
+
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    reasoning_tokens: Optional[int] = None
+
+
 class ResponseType(str, Enum):
     TEXT = "text"
     INTRIC_EVENT = "intric_event"
     TOOL_CALL = "tool_call"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
+    TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
     FILES = "image"
     FIRST_CHUNK = "first_chunk"
+    TOKEN_USAGE = "token_usage"
     ERROR = "error"
 
 
@@ -38,7 +51,7 @@ class ResponseType(str, Enum):
 class FunctionDefinition:
     name: str
     description: str
-    schema: dict
+    schema: dict[str, object]
 
 
 @dataclass
@@ -50,11 +63,24 @@ class FunctionCall:
 @dataclass
 class ToolCallMetadata:
     """Metadata for MCP tool calls to be rendered by frontend."""
+
     server_name: str
     tool_name: str
-    arguments: Optional[dict] = None  # The input values provided to the tool
+    arguments: Optional[dict[str, object]] = (
+        None  # The input values provided to the tool
+    )
     tool_call_id: Optional[str] = None  # The tool call ID for approval flow
     approved: Optional[bool] = None  # True=approved, False=denied, None=pending/auto
+    # Additive state field for richer clients; legacy `approved` remains authoritative.
+    result_status: Optional[str] = None
+    # Text extraction of the MCP tool result. Populated once the tool has executed
+    # so it can be persisted on the Question and replayed to the LLM on later turns.
+    result: Optional[str] = None
+    # The prefixed tool identifier the LLM sees when calling (e.g.
+    # `server__tool`). `tool_name` / `server_name` above are the split/display
+    # forms used by the UI; this field preserves the exact identifier needed
+    # to replay the tool_use so it matches the currently-registered tools.
+    mcp_tool_name: Optional[str] = None
 
 
 @dataclass
@@ -71,28 +97,81 @@ class Completion:
     stop: bool = False
     error: Optional[str] = None
     error_code: Optional[int] = None
+    usage: Optional[TokenUsage] = None
 
 
 class CompletionModelBase(BaseModel):
     name: str
-    nickname: str
-    # Allow both enum and string for tenant models with dynamic values
-    family: Union[CompletionModelFamily, str]
-    token_limit: int
+    nickname: Optional[str] = None
+    family: Optional[str] = None
+    max_input_tokens: int
+    max_output_tokens: int
     is_deprecated: bool
     nr_billion_parameters: Optional[int] = None
     hf_link: Optional[str] = None
-    stability: Union[ModelStability, str]
-    hosting: Union[ModelHostingLocation, str]
+    stability: Optional[str] = None
+    hosting: Optional[str] = None
     open_source: Optional[bool] = None
     description: Optional[str] = None
     deployment_name: Optional[str] = None
-    org: Optional[Union[Orgs, str]] = None
+    org: Optional[str] = None
     vision: bool
     reasoning: bool
     supports_tool_calling: bool = False
     base_url: Optional[str] = None
     litellm_model_name: Optional[str] = None
+    model_kwargs_capabilities: Optional[SupportedModelKwargs] = None
+    # Indicative USD ratecard. NULL = unknown / self-hosted.
+    input_cost_per_token: Optional[Decimal] = None
+    output_cost_per_token: Optional[Decimal] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_invalid_stored_model_kwargs_capabilities(cls, data: object) -> object:
+        if isinstance(data, dict):
+            return cast(dict[str, object], data)
+
+        raw_capabilities = getattr(data, "model_kwargs_capabilities", None)
+        if raw_capabilities is None:
+            return data
+
+        capabilities = coerce_model_kwargs_capabilities(
+            raw_capabilities,
+            completion_model_id=getattr(data, "id", None),
+            tenant_id=getattr(data, "tenant_id", None),
+        )
+        if capabilities is not None:
+            return data
+
+        values: dict[str, object] = {}
+        for field_name in cls.model_fields:
+            if hasattr(data, field_name):
+                values[field_name] = getattr(data, field_name)
+        values["model_kwargs_capabilities"] = None
+        return values
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def token_limit(self) -> int:
+        """Backward-compat: exposed in JSON responses for frontend."""
+        return self.max_input_tokens
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def supported_model_kwargs(self) -> SupportedModelKwargs:
+        return resolve_supported_model_kwargs(
+            model_kwargs_capabilities=self.model_kwargs_capabilities,
+            reasoning=self.reasoning,
+            provider_type=self._provider_type(),
+            litellm_model_name=self.litellm_model_name,
+            completion_model_id=getattr(self, "id", None),
+            tenant_id=getattr(self, "tenant_id", None),
+        )
+
+    def _provider_type(self) -> str | None:
+        # Keep provider_type out of create/update schemas; response projections
+        # that know the provider override this method.
+        return None
 
 
 class CompletionModelCreate(CompletionModelBase):
@@ -116,6 +195,11 @@ class CompletionModel(CompletionModelBase, InDB):
     # Tenant model fields (required for provider-based architecture)
     tenant_id: Optional[UUID] = None
     provider_id: Optional[UUID] = None
+    provider_type: Optional[str] = None
+    migrated_to_model_id: Optional[UUID] = None
+
+    def _provider_type(self) -> str | None:
+        return self.provider_type
 
 
 class CompletionModelPublic(CompletionModel):
@@ -124,10 +208,9 @@ class CompletionModelPublic(CompletionModel):
     lock_reason: Optional[str] = None
     credential_provider: Optional[str] = None
     security_classification: Optional[SecurityClassificationPublic] = None
-    # tenant_id and provider_id inherited from CompletionModel
-    # Provider info for grouped display in UI
     provider_name: Optional[str] = None
-    provider_type: Optional[str] = None
+    deprecation_date: Optional[str] = None
+    migrated_to_model_id: Optional[UUID] = None
 
     @classmethod
     def from_domain(cls, completion_model: CompletionModelDomain):
@@ -138,8 +221,9 @@ class CompletionModelPublic(CompletionModel):
             name=completion_model.name,
             nickname=completion_model.nickname,
             family=completion_model.family,
-            token_limit=completion_model.token_limit,
-            is_deprecated=completion_model.is_deprecated,
+            max_input_tokens=completion_model.max_input_tokens,
+            max_output_tokens=completion_model.max_output_tokens,
+            is_deprecated=completion_model.is_effectively_deprecated,
             nr_billion_parameters=completion_model.nr_billion_parameters,
             hf_link=completion_model.hf_link,
             stability=completion_model.stability,
@@ -153,6 +237,13 @@ class CompletionModelPublic(CompletionModel):
             supports_tool_calling=completion_model.supports_tool_calling,
             base_url=completion_model.base_url,
             litellm_model_name=completion_model.litellm_model_name,
+            model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
+            input_cost_per_token=getattr(
+                completion_model, "input_cost_per_token", None
+            ),
+            output_cost_per_token=getattr(
+                completion_model, "output_cost_per_token", None
+            ),
             is_org_enabled=completion_model.is_org_enabled,
             is_org_default=completion_model.is_org_default,
             can_access=completion_model.can_access,
@@ -167,6 +258,10 @@ class CompletionModelPublic(CompletionModel):
             provider_id=completion_model.provider_id,
             provider_name=completion_model.provider_name,
             provider_type=completion_model.provider_type,
+            deprecation_date=completion_model.litellm_deprecation_date,
+            migrated_to_model_id=getattr(
+                completion_model, "migrated_to_model_id", None
+            ),
         )
 
 
@@ -175,10 +270,32 @@ class CompletionModelSecurityStatus(CompletionModelPublic):
 
 
 class CompletionModelResponse(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     completion: Union[str, Any]  # Pydantic doesn't support AsyncIterable
     model: CompletionModel
     extended_logging: Optional[LoggingDetails] = None
     total_token_count: int
+    usage: Optional[TokenUsage] = None
+
+
+class MessageToolCall(BaseModel):
+    """A replayable tool-use record for the LLM-facing Message.
+
+    Carries only the fields needed to reconstruct OpenAI-style tool_calls +
+    role:"tool" result messages in history. The persisted ToolCallInfo
+    (intric.questions.question) is a superset — this type deliberately excludes
+    approval metadata and non-replayable fields.
+
+    `tool_name` here is the LLM-visible prefixed identifier (e.g.
+    `server__tool`) — matching the currently-registered tools — not the
+    split/display form that the UI uses.
+    """
+
+    tool_call_id: str
+    tool_name: str
+    arguments: Optional[dict[str, object]] = None
+    result: str
 
 
 class Message(BaseModel):
@@ -186,6 +303,7 @@ class Message(BaseModel):
     answer: str
     images: list[File] = []
     generated_images: list[File] = []
+    tool_calls: list[MessageToolCall] = []
 
 
 class Context(BaseModel):
@@ -202,11 +320,37 @@ class ModelKwargs(BaseModel):
     top_p: Optional[float] = None
     reasoning_effort: Optional[str] = None
     verbosity: Optional[str] = None
-    response_format: Optional[dict] = None
+    response_format: Optional[dict[str, object]] = None
     presence_penalty: Optional[float] = None
     frequency_penalty: Optional[float] = None
     top_k: Optional[int] = None
 
+    def filter_unsupported(self, supported: SupportedModelKwargs) -> "ModelKwargs":
+        # Strip stored values whose capability is currently disabled so a kwarg
+        # saved while the capability was enabled (e.g. reasoning_effort on a
+        # model whose reasoning flag was later turned off) does not leak to the
+        # provider. response_format is intentionally unmanaged here — it is not
+        # a SupportedModelKwargs field.
+        updates: dict[str, None] = {}
+        for field_name in (
+            "temperature",
+            "top_p",
+            "reasoning_effort",
+            "verbosity",
+            "presence_penalty",
+            "frequency_penalty",
+            "top_k",
+        ):
+            capability = getattr(supported, field_name)
+            if not capability.supported and getattr(self, field_name) is not None:
+                updates[field_name] = None
+        if not updates:
+            return self
+        return self.model_copy(update=updates)
+
 
 class CompletionModelSparse(CompletionModelBase, InDB):
-    pass
+    provider_type: Optional[str] = None
+
+    def _provider_type(self) -> str | None:
+        return self.provider_type

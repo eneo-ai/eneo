@@ -3,17 +3,22 @@
     Uses backend federation router endpoints (/api/v1/auth/initiate and /api/v1/auth/callback).
 */
 
-import { env } from "$env/dynamic/private";
+import { getBackendUrl } from "$lib/core/environment.server";
 import { setFrontendAuthCookie } from "./auth.server";
 import { LoginError } from "./LoginError";
 
-export async function loginWithOidc(code: string, state: string, fetchFn: typeof fetch = fetch): Promise<boolean> {
-  if (!env.INTRIC_BACKEND_URL) {
-    console.error("[OIDC] Missing INTRIC_BACKEND_URL configuration");
+export async function loginWithOidc(
+  code: string,
+  state: string,
+  fetchFn: typeof fetch = fetch
+): Promise<boolean> {
+  const resolvedBackendUrl = getBackendUrl();
+  if (!resolvedBackendUrl) {
+    console.error("[OIDC] Missing ENEO_BACKEND_URL configuration");
     return false;
   }
 
-  const backendUrl = `${env.INTRIC_BACKEND_URL}/api/v1/auth/callback`;
+  const backendUrl = `${resolvedBackendUrl}/api/v1/auth/callback`;
 
   console.debug("[OIDC] Starting backend callback", {
     hasCode: !!code,
@@ -42,65 +47,65 @@ export async function loginWithOidc(code: string, state: string, fetchFn: typeof
         errorDetails = responseText;
       }
 
-      const correlationId = response.headers.get("X-Correlation-ID") || undefined;
-      const rawDetail = typeof errorDetails === 'object' && errorDetails?.detail
-        ? errorDetails.detail
-        : undefined;
+      // Prefer X-Trace-Id; fall back to legacy X-Correlation-ID during the migration period.
+      const traceId =
+        response.headers.get("X-Trace-Id") || response.headers.get("X-Correlation-ID") || undefined;
+      const rawDetail =
+        typeof errorDetails === "object" && errorDetails?.detail ? errorDetails.detail : undefined;
 
       console.error("[OIDC] Backend callback failed", {
         status: response.status,
         statusText: response.statusText,
         error: errorDetails,
-        correlationId
+        traceId
       });
 
       // Map status codes to specific error codes and throw LoginError
       if (response.status === 400) {
         console.error(
           `[OIDC] Invalid or expired state - user took too long to authenticate. ` +
-          `Backend correlation_id: ${correlationId || "N/A"}`
+            `Backend trace_id: ${traceId || "N/A"}`
         );
         throw new LoginError("oidc", "DECODE_ERROR", "", {
-          correlationId,
+          traceId,
           statusCode: response.status,
           rawDetail
         });
       } else if (response.status === 401) {
         console.error(
           `[OIDC] Token validation failed - IdP rejected authentication. ` +
-          `Backend correlation_id: ${correlationId || "N/A"}`
+            `Backend trace_id: ${traceId || "N/A"}`
         );
         throw new LoginError("oidc", "UNAUTHORIZED", "", {
-          correlationId,
+          traceId,
           statusCode: response.status,
           rawDetail
         });
       } else if (response.status === 403) {
         console.error(
           `[OIDC] Access forbidden - domain not allowed or user not found. ` +
-          `Backend correlation_id: ${correlationId || "N/A"}`
+            `Backend trace_id: ${traceId || "N/A"}`
         );
         throw new LoginError("oidc", "FORBIDDEN", "", {
-          correlationId,
+          traceId,
           statusCode: response.status,
           rawDetail
         });
       } else if (response.status === 404) {
         console.error(
-          `[OIDC] User or tenant not found. ` +
-          `Backend correlation_id: ${correlationId || "N/A"}`
+          `[OIDC] User or tenant not found. ` + `Backend trace_id: ${traceId || "N/A"}`
         );
         throw new LoginError("oidc", "NO_TOKEN", "", {
-          correlationId,
+          traceId,
           statusCode: response.status,
           rawDetail
         });
       } else if (response.status === 500) {
         console.error(
-          `[OIDC] Server configuration error - check backend logs for correlation_id: ${correlationId || "N/A"}`
+          `[OIDC] Server configuration error - check backend logs for trace_id: ${traceId || "N/A"}`
         );
         throw new LoginError("oidc", "SERVER_ERROR", "", {
-          correlationId,
+          traceId,
           statusCode: response.status,
           rawDetail
         });
@@ -108,7 +113,7 @@ export async function loginWithOidc(code: string, state: string, fetchFn: typeof
 
       // Fallback for unknown status codes
       throw new LoginError("oidc", "CALLBACK_FAILED", "", {
-        correlationId,
+        traceId,
         statusCode: response.status,
         rawDetail
       });

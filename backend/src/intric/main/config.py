@@ -6,8 +6,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-
-from pydantic import computed_field, field_validator, model_validator
+from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Version manifest lookup:
@@ -89,6 +88,105 @@ def validate_public_origin(origin: str | None) -> str | None:
     return f"{scheme}://{host}{port}"
 
 
+def validate_redirect_uri(uri: str | None) -> str | None:
+    """
+    Validate and normalize a full redirect URI for OIDC flows.
+
+    Rules:
+    - Must be HTTPS (or http://localhost for development)
+    - Must include a hostname and a path
+    - Must not include query parameters or fragment
+    - Must not include wildcard hostnames
+    - Normalize: lowercase scheme + host, strip trailing slash from path
+    """
+    if uri is None:
+        return None
+
+    uri = uri.strip()
+    if not uri:
+        raise ValueError("redirect_uri cannot be an empty string")
+
+    parsed = urlparse(uri)
+    if "*" in (parsed.hostname or ""):
+        raise ValueError(f"redirect_uri must not include wildcards: {uri}")
+
+    is_localhost = parsed.hostname in ("localhost", "127.0.0.1")
+    if parsed.scheme != "https" and not (parsed.scheme == "http" and is_localhost):
+        raise ValueError(
+            "redirect_uri must use https:// "
+            f"(or http://localhost for development), got: {uri}"
+        )
+
+    if not parsed.hostname:
+        raise ValueError(f"redirect_uri missing hostname: {uri}")
+
+    path = parsed.path or ""
+    if not path or not path.startswith("/"):
+        raise ValueError(f"redirect_uri must include an absolute path: {uri}")
+
+    if parsed.query or parsed.fragment:
+        raise ValueError(f"redirect_uri must not include query or fragment: {uri}")
+
+    host = parsed.hostname.lower()
+    scheme = parsed.scheme if is_localhost else "https"
+    default_port = 443 if scheme == "https" else 80
+    port = f":{parsed.port}" if parsed.port and parsed.port != default_port else ""
+    normalized_path = path.rstrip("/") or "/"
+
+    return f"{scheme}://{host}{port}{normalized_path}"
+
+
+def canonicalize_legacy_redirect_path(path: str | None) -> str | None:
+    """Canonicalize legacy redirect paths before strict validation.
+
+    This preserves strict validation for new writes while allowing reads/migrations
+    to normalize old values that previously slipped through, such as trailing slashes
+    or query/fragment suffixes.
+    """
+    if path is None:
+        return None
+
+    path = path.strip()
+    if not path:
+        return path
+
+    parsed = urlparse(path)
+    if parsed.scheme or parsed.netloc:
+        return path
+
+    normalized_path = parsed.path or ""
+    if not normalized_path.startswith("/"):
+        return path
+
+    return normalized_path.rstrip("/") or "/"
+
+
+def validate_redirect_path(path: str | None) -> str | None:
+    """Validate and normalize a redirect path used to build redirect_uri."""
+    if path is None:
+        return None
+
+    path = path.strip()
+    if not path:
+        raise ValueError("redirect_path cannot be an empty string")
+
+    parsed = urlparse(path)
+    if parsed.scheme or parsed.netloc:
+        raise ValueError(f"redirect_path must be a path only, got: {path}")
+
+    normalized_path = parsed.path or ""
+    if not normalized_path.startswith("/"):
+        raise ValueError("redirect_path must start with /")
+
+    if parsed.query or parsed.fragment:
+        raise ValueError("redirect_path must not include query or fragment")
+
+    if normalized_path != "/" and normalized_path.endswith("/"):
+        raise ValueError("redirect_path must not end with /")
+
+    return normalized_path
+
+
 def _set_app_version():
     # Try Docker path first, then local dev path
     manifest_path = _DOCKER_MANIFEST if _DOCKER_MANIFEST.exists() else _LOCAL_MANIFEST
@@ -128,12 +226,8 @@ class Settings(BaseSettings):
     flux_api_key: Optional[str] = None
     tavily_api_key: Optional[str] = None
     vllm_api_key: Optional[str] = None
-    berget_api_key: Optional[str] = None
-    gdm_api_key: Optional[str] = None
-    intric_marketplace_api_key: Optional[str] = None
-    intric_marketplace_url: Optional[str] = None
-    intric_super_api_key: Optional[str] = None
-    intric_super_duper_api_key: Optional[str] = None
+    eneo_super_api_key: Optional[str] = None
+    eneo_super_duper_api_key: Optional[str] = None
 
     # Infrastructure dependencies
     postgres_user: str
@@ -152,6 +246,16 @@ class Settings(BaseSettings):
     redis_socket_keepalive: bool = True
     redis_health_check_interval: int = 30
     redis_max_connections: int | None = None
+    # MCP tool approval configuration
+    mcp_tool_approval_timeout_seconds: int = 300
+    mcp_tool_approval_ttl_seconds: int = 305
+    mcp_tool_approval_denial_reason_max_length: int = 200
+    mcp_client_connect_timeout_seconds: int = 30
+    mcp_client_list_tools_timeout_seconds: int = 30
+    mcp_client_call_timeout_seconds: int = 60
+    mcp_tool_output_max_chars: int = 10000
+    mcp_circuit_breaker_failure_threshold: int = 5
+    mcp_circuit_breaker_cooldown_seconds: int = 60
 
     # Database connection pool configuration
     # Why: Controls PostgreSQL connection pooling behavior for SQLAlchemy async engine
@@ -162,9 +266,7 @@ class Settings(BaseSettings):
         20  # Base pool size (permanent connections) - default: current behavior
     )
     db_pool_max_overflow: int = 10  # Extra connections above pool_size (total max = 30)
-    db_pool_timeout: int = (
-        30  # Seconds to wait for connection before raising error - default: SQLAlchemy default
-    )
+    db_pool_timeout: int = 30  # Seconds to wait for connection before raising error - default: SQLAlchemy default
     db_pool_pre_ping: bool = (
         True  # Verify connections before use - prevents stale connection errors
     )
@@ -218,8 +320,12 @@ class Settings(BaseSettings):
     export_max_concurrent_per_tenant: int = 2  # Max concurrent exports per tenant
     export_progress_interval: int = 5000  # Update progress every N records
 
-    # Federation per tenant feature flag
-    federation_per_tenant_enabled: bool = False
+    # Federation feature flag. Supports both single-tenant and multi-tenant setups.
+    federation_enabled: bool = False
+    federation_per_tenant_enabled: Optional[bool] = Field(
+        default=None,
+        description="Deprecated alias for federation_enabled.",
+    )
 
     # OIDC redirect safety controls
     oidc_state_ttl_seconds: int = 600
@@ -248,12 +354,15 @@ class Settings(BaseSettings):
     mobilityguard_client_secret: Optional[str] = None
     mobilityguard_tenant_id: Optional[str] = None
 
+    # DEPRECATED: INTRIC_* (use ENEO_* instead - will be removed in v3.0)
+    intric_super_api_key: Optional[str] = None
+    intric_super_duper_api_key: Optional[str] = None
+
     # Max sizes
     upload_file_to_session_max_size: int
     upload_image_to_session_max_size: int
     upload_max_file_size: int
     transcription_max_file_size: int
-    max_in_question: int
 
     # Temporary directory for file uploads
     upload_tmp_dir: Path = Path("/tmp")
@@ -277,6 +386,20 @@ class Settings(BaseSettings):
     api_prefix: str
     api_key_length: int
     api_key_header_name: str
+    api_key_hash_secret: Optional[str] = None
+    api_key_last_used_min_interval_seconds: int = 900
+    api_key_used_audit_sample_rate: float = 1.0
+    api_key_rotation_grace_hours: int = 24
+    api_key_legacy_endpoints_enabled: bool = True
+    api_key_rate_limit_window_seconds: int = 3600
+    api_key_rate_limit_fail_open: bool = False
+    api_key_rate_limit_tenant_default: int = 10000
+    api_key_rate_limit_space_default: int = 5000
+    api_key_rate_limit_assistant_default: int = 1000
+    api_key_rate_limit_app_default: int = 1000
+    api_key_enforce_resource_permissions: bool = True
+    trusted_proxy_count: int = 0
+    trusted_proxy_headers: list[str] = ["x-forwarded-for", "x-real-ip"]
     jwt_audience: str
     jwt_issuer: str
     jwt_expiry_time: int
@@ -333,7 +456,7 @@ class Settings(BaseSettings):
     sharepoint_max_download_bytes: int = 50 * 1024 * 1024
 
     # Generic encryption key for sensitive data (HTTP auth, tenant API keys, etc.)
-    # Required when TENANT_CREDENTIALS_ENABLED=true or FEDERATION_PER_TENANT_ENABLED=true
+    # Required when TENANT_CREDENTIALS_ENABLED=true or FEDERATION_ENABLED=true
     # Also needed for worker/crawler HTTP authentication
     # Generate with: uv run python -m intric.cli.generate_encryption_key
     encryption_key: Optional[str] = None
@@ -343,7 +466,7 @@ class Settings(BaseSettings):
 
     @field_validator("export_dir", mode="before")
     @classmethod
-    def validate_export_dir_not_empty(cls, v):
+    def validate_export_dir_not_empty(cls, v: object) -> object:
         """
         Handle empty EXPORT_DIR env var by falling back to default.
 
@@ -363,24 +486,51 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
+    def resolve_deprecated_federation_flag(self):
+        """Support FEDERATION_PER_TENANT_ENABLED as a deprecated fallback alias."""
+        explicit_fields = self.model_fields_set
+        has_primary = "federation_enabled" in explicit_fields
+        has_deprecated = (
+            "federation_per_tenant_enabled" in explicit_fields
+            and self.federation_per_tenant_enabled is not None
+        )
+
+        if not has_deprecated:
+            return self
+
+        logging.warning(
+            "FEDERATION_PER_TENANT_ENABLED is deprecated and will be removed in a future release. "
+            "Use FEDERATION_ENABLED instead."
+        )
+
+        if has_primary:
+            if self.federation_per_tenant_enabled != self.federation_enabled:
+                logging.warning(
+                    "FEDERATION_ENABLED and deprecated FEDERATION_PER_TENANT_ENABLED are both set with "
+                    "different values. Using FEDERATION_ENABLED."
+                )
+            return self
+
+        self.federation_enabled = bool(self.federation_per_tenant_enabled)
+        return self
+
+    @model_validator(mode="after")
     def validate_encryption_key_requirements(self):
         """
         Validate that encryption_key is present and valid when features requiring it are enabled.
 
         Encryption is required for:
         - TENANT_CREDENTIALS_ENABLED=true (tenant-specific API keys)
-        - FEDERATION_PER_TENANT_ENABLED=true (tenant-specific IdPs)
+        - FEDERATION_ENABLED=true (tenant-specific IdPs)
         - Worker/crawler HTTP authentication
         """
-        encryption_required = (
-            self.tenant_credentials_enabled or self.federation_per_tenant_enabled
-        )
+        encryption_required = self.tenant_credentials_enabled or self.federation_enabled
 
         if encryption_required:
             if not self.encryption_key or not self.encryption_key.strip():
                 logging.error(
                     "ENCRYPTION_KEY is required when TENANT_CREDENTIALS_ENABLED=true "
-                    "or FEDERATION_PER_TENANT_ENABLED=true.\n"
+                    "or FEDERATION_ENABLED=true.\n"
                     "Generate key: uv run python -m intric.cli.generate_encryption_key"
                 )
                 sys.exit(1)
@@ -412,13 +562,19 @@ class Settings(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
-    def migrate_legacy_vars(cls, values):
-        """Auto-migrate MOBILITYGUARD_* to OIDC_* with deprecation warnings."""
+    def migrate_legacy_vars(cls, values: dict[str, object]) -> dict[str, object]:
+        """Auto-migrate legacy env vars with deprecation warnings.
+
+        MOBILITYGUARD_* → OIDC_*
+        INTRIC_* → ENEO_*
+        """
         migrations = [
             ("oidc_discovery_endpoint", "mobilityguard_discovery_endpoint"),
             ("oidc_client_id", "mobilityguard_client_id"),
             ("oidc_client_secret", "mobilityguard_client_secret"),
             ("oidc_tenant_id", "mobilityguard_tenant_id"),
+            ("eneo_super_api_key", "intric_super_api_key"),
+            ("eneo_super_duper_api_key", "intric_super_duper_api_key"),
         ]
 
         for new_name, old_name in migrations:
@@ -551,6 +707,77 @@ class Settings(BaseSettings):
             logging.error(
                 "REDIS_MAX_CONNECTIONS must be positive when set. Current value: %s",
                 self.redis_max_connections,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_approval_timeout_seconds <= 0:
+            logging.error(
+                "MCP_TOOL_APPROVAL_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_tool_approval_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_approval_ttl_seconds <= 0:
+            logging.error(
+                "MCP_TOOL_APPROVAL_TTL_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_tool_approval_ttl_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_approval_ttl_seconds < self.mcp_tool_approval_timeout_seconds:
+            logging.error(
+                "MCP_TOOL_APPROVAL_TTL_SECONDS (%s) must be >= MCP_TOOL_APPROVAL_TIMEOUT_SECONDS (%s).",
+                self.mcp_tool_approval_ttl_seconds,
+                self.mcp_tool_approval_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_approval_denial_reason_max_length <= 0:
+            logging.error(
+                "MCP_TOOL_APPROVAL_DENIAL_REASON_MAX_LENGTH must be greater than zero. Current value: %s",
+                self.mcp_tool_approval_denial_reason_max_length,
+            )
+            sys.exit(1)
+
+        if self.mcp_client_connect_timeout_seconds <= 0:
+            logging.error(
+                "MCP_CLIENT_CONNECT_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_client_connect_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_client_list_tools_timeout_seconds <= 0:
+            logging.error(
+                "MCP_CLIENT_LIST_TOOLS_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_client_list_tools_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_client_call_timeout_seconds <= 0:
+            logging.error(
+                "MCP_CLIENT_CALL_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_client_call_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_output_max_chars <= 0:
+            logging.error(
+                "MCP_TOOL_OUTPUT_MAX_CHARS must be greater than zero. Current value: %s",
+                self.mcp_tool_output_max_chars,
+            )
+            sys.exit(1)
+
+        if self.mcp_circuit_breaker_failure_threshold <= 0:
+            logging.error(
+                "MCP_CIRCUIT_BREAKER_FAILURE_THRESHOLD must be greater than zero. Current value: %s",
+                self.mcp_circuit_breaker_failure_threshold,
+            )
+            sys.exit(1)
+
+        if self.mcp_circuit_breaker_cooldown_seconds <= 0:
+            logging.error(
+                "MCP_CIRCUIT_BREAKER_COOLDOWN_SECONDS must be greater than zero. Current value: %s",
+                self.mcp_circuit_breaker_cooldown_seconds,
             )
             sys.exit(1)
 

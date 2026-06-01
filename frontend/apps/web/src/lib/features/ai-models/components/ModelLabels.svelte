@@ -11,6 +11,31 @@
       tooltip: string;
     }[] = [];
 
+    if ("migrated_to_model_id" in model && model.migrated_to_model_id) {
+      labels.push({
+        tooltip: m.model_tooltip_migrated(),
+        label: m.model_label_migrated(),
+        color: "gray"
+      });
+    }
+
+    if ("deprecation_date" in model && model.deprecation_date) {
+      const today = new Date().toISOString().slice(0, 10);
+      if (model.deprecation_date <= today) {
+        labels.push({
+          tooltip: m.model_tooltip_deprecated({ date: model.deprecation_date }),
+          label: m.model_label_deprecated(),
+          color: "red"
+        });
+      } else {
+        labels.push({
+          tooltip: m.model_tooltip_retiring({ date: model.deprecation_date }),
+          label: m.model_label_retiring({ date: model.deprecation_date }),
+          color: "yellow"
+        });
+      }
+    }
+
     if ("reasoning" in model && model.reasoning) {
       labels.push({
         tooltip: m.model_tooltip_reasoning(),
@@ -43,7 +68,7 @@
       });
     }
 
-    if (model.hosting !== null) {
+    if (model.hosting != null) {
       const hostingColorMap: Record<string, Label.LabelColor> = {
         usa: "orange",
         eu: "green",
@@ -55,7 +80,7 @@
         can: "blue",
         isr: "blue",
         kor: "blue",
-        jpn: "blue",
+        jpn: "blue"
       };
       const hostingNameMap: Record<string, () => string> = {
         usa: m.hosting_usa,
@@ -68,7 +93,7 @@
         kor: m.hosting_kor,
         deu: m.hosting_deu,
         fra: m.hosting_fra,
-        jpn: m.hosting_jpn,
+        jpn: m.hosting_jpn
       };
       const hostingName = hostingNameMap[model.hosting]?.() ?? model.hosting.toUpperCase();
       labels.push({

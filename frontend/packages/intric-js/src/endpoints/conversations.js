@@ -116,6 +116,7 @@ export function initConversations(client) {
      * @param {(data: import("../types/resources").SSE.Intric) => void} [params.callbacks.onIntricEvent] Callback to run when an intric event is received
      * @param {(data: import("../types/resources").SSE.ToolCall) => void} [params.callbacks.onToolCall] Callback to run when MCP tools are being executed
      * @param {(data: import("../types/resources").SSE.ToolApprovalRequired) => void} [params.callbacks.onToolApprovalRequired] Callback to run when MCP tools require user approval
+     * @param {(data: import("../types/resources").SSE.ToolApprovalTimeout) => void} [params.callbacks.onToolApprovalTimeout] Callback to run when a pending tool approval expires
      * @param {(response: Response) => Promise<void>} [params.callbacks.onOpen] Callback to run once the initial response of the backend is received
      * @param {AbortController} [params.abortController] Optionally pass in an AbortController that can abort the stream
      * @throws {IntricError}
@@ -196,6 +197,7 @@ export function initConversations(client) {
                   break;
 
                 case "intric_event":
+                case "token_usage":
                   callbacks?.onIntricEvent?.(data);
                   break;
 
@@ -205,6 +207,10 @@ export function initConversations(client) {
 
                 case "tool_approval_required":
                   callbacks?.onToolApprovalRequired?.(data);
+                  break;
+
+                case "tool_approval_timeout":
+                  callbacks?.onToolApprovalTimeout?.(data);
                   break;
               }
             } catch (e) {
@@ -219,6 +225,52 @@ export function initConversations(client) {
     },
 
     /**
+     * Estimate exact token cost a request would add to context, without sending.
+     * Excludes RAG/web-search content (selected at request time).
+     * Caller should debounce; concurrent requests aren't aborted server-side.
+     * @param {Object} params
+     * @param {ChatPartner} [params.chatPartner] Target assistant or group chat (used when no conversation yet)
+     * @param {{id: string} | Conversation} [params.conversation] Existing conversation to continue
+     * @param {string} params.question The pending input
+     * @param {{id: string}[]} [params.files] Pending file attachments
+     * @param {import("../types/resources").ConversationTools} [params.tools] Pending assistant target
+     * @returns {Promise<import('../types/resources').PreflightResponse>}
+     * @throws {IntricError}
+     */
+    preflight: async ({ chatPartner, conversation, question, files, tools }) => {
+      /** @type {{session_id?: string, assistant_id?: string, group_chat_id?: string}} */
+      const target = { session_id: undefined, assistant_id: undefined, group_chat_id: undefined };
+
+      if (conversation?.id && conversation.id.trim() !== "") {
+        target.session_id = conversation.id;
+      } else if (chatPartner?.id) {
+        if (chatPartner.type === "assistant" || chatPartner.type === "default-assistant") {
+          target.assistant_id = chatPartner.id;
+        } else target.group_chat_id = chatPartner.id;
+      } else {
+        throw new IntricError(
+          "Preflight requires one of session, assistant, or groupChat",
+          "CONNECTION",
+          0,
+          0
+        );
+      }
+
+      const res = await client.fetch("/api/v1/conversations/preflight", {
+        method: "post",
+        requestBody: {
+          "application/json": {
+            ...target,
+            question,
+            file_ids: (files ?? []).map((f) => f.id),
+            tools
+          }
+        }
+      });
+      return res;
+    },
+
+    /**
      * Submit approval decisions for pending tool calls.
      * @param {Object} params Approval parameters
      * @param {string} params.approvalId The approval ID from the tool_approval_required event
@@ -227,9 +279,12 @@ export function initConversations(client) {
      * @throws {IntricError}
      * */
     approveTools: async ({ approvalId, decisions }) => {
+      /** @type {{status: string}} */
+      // @ts-ignore - response type is unknown in schema
       const res = await client.fetch("/api/v1/conversations/approve-tools/", {
         method: "post",
         params: { query: { approval_id: approvalId } },
+        // @ts-ignore - requestBody is optional in schema but we always send decisions
         requestBody: {
           "application/json": decisions
         }

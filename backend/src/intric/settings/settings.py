@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from intric.ai_models.completion_models.completion_model import CompletionModelPublic
 from intric.ai_models.embedding_models.embedding_model import EmbeddingModelPublicLegacy
@@ -8,7 +8,7 @@ from intric.main.models import InDB
 
 
 class SettingsBase(BaseModel):
-    chatbot_widget: dict = {}
+    chatbot_widget: dict[str, object] = Field(default_factory=dict)
 
 
 class SettingsUpsert(SettingsBase):
@@ -21,9 +21,16 @@ class SettingsInDB(SettingsUpsert, InDB):
 
 class SettingsPublic(SettingsBase):
     using_templates: bool = False  # Feature flag for template management
-    tenant_credentials_enabled: bool = False  # Global config for tenant credential enforcement
-    audit_logging_enabled: bool = True  # Feature flag for audit logging (default enabled for backward compat)
+    tenant_credentials_enabled: bool = (
+        False  # Global config for tenant credential enforcement
+    )
+    audit_logging_enabled: bool = (
+        True  # Feature flag for audit logging (default enabled for backward compat)
+    )
     provisioning: bool = False  # JIT provisioning - auto-create users on SSO login
+    api_key_expiry_notifications: bool = (
+        True  # Per-tenant API key expiry notifications toggle
+    )
 
 
 class GetModelsResponse(BaseModel):
@@ -31,5 +38,5 @@ class GetModelsResponse(BaseModel):
     embedding_models: list[EmbeddingModelPublicLegacy]
 
 
-class TemplateSettingUpdate(BaseModel):
+class ToggleSettingUpdate(BaseModel):
     enabled: bool

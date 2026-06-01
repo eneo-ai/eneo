@@ -1,6 +1,10 @@
 from uuid import UUID
 
 from intric.apps.app_runs.api.app_run_models import AppRunParams
+from intric.main.logging import get_logger
+
+logger = get_logger(__name__)
+from intric.ai_models.completion_models.completion_model import CompletionModelResponse
 from intric.apps.app_runs.app_run_factory import AppRunFactory
 from intric.apps.app_runs.app_run_repo import AppRunRepository
 from intric.apps.apps.app_service import AppService
@@ -26,6 +30,7 @@ class AppRunService:
         job_service: JobService,
         file_service: FileService,
     ):
+        super().__init__()
         self.user = user
         self.repo = repo
         self.factory = factory
@@ -51,6 +56,11 @@ class AppRunService:
 
         app_run_in_db = await self.repo.add(app_run)
 
+        if app_run_in_db.id is None:
+            raise ValueError("App run must have an id before queueing a job")
+        if app.id is None:
+            raise ValueError("App must have an id before queueing a job")
+
         job = await self.job_service.queue_job(
             Task.RUN_APP,
             name=app.name,
@@ -74,7 +84,15 @@ class AppRunService:
             raise NotFoundException()
 
         if app_run.user_id != self.user.id:
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to read this app run.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "app_run",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         return app_run
 
@@ -97,15 +115,35 @@ class AppRunService:
     ):
         app_run = await self.get_app_run(app_run_id)
 
-        response = await self.app_service.run_app(app_id, file_ids=file_ids, text=text)
+        response: CompletionModelResponse = await self.app_service.run_app(
+            app_id, file_ids=file_ids, text=text
+        )
 
-        # Count the output tokens
-        total_output_tokens = count_tokens(response.completion.text)
+        # Prefer actual provider token counts, fall back to litellm estimates
+        if response.usage and response.usage.prompt_tokens is not None:
+            num_tokens_input = response.usage.prompt_tokens
+            input_source = "provider"
+        else:
+            num_tokens_input = response.total_token_count
+            input_source = "litellm"
+
+        if response.usage and response.usage.completion_tokens is not None:
+            num_tokens_output = response.usage.completion_tokens
+            output_source = "provider"
+        else:
+            num_tokens_output = count_tokens(response.completion.text)  # type: ignore[union-attr]
+            output_source = "litellm"
+
+        logger.info(
+            f"[TokenUsage] app_run={app_run_id} — "
+            f"input={num_tokens_input} ({input_source}), "
+            f"output={num_tokens_output} ({output_source})"
+        )
 
         app_run.update(
-            output=response.completion.text,
-            num_tokens_input=response.total_token_count,
-            num_tokens_output=total_output_tokens,
+            output=response.completion.text,  # type: ignore[union-attr]
+            num_tokens_input=num_tokens_input,
+            num_tokens_output=num_tokens_output,
         )
 
         await self.repo.update(app_run)

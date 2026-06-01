@@ -198,15 +198,34 @@ Once the integration is configured, users can import content from SharePoint int
 
 ### Importing in Shared Spaces
 
-In shared spaces (team or organization spaces), the integration uses the centralized authentication configured by the administrator:
+Importing SharePoint content into shared or organization spaces works differently from personal spaces. The integration uses the centralized authentication (service account or tenant app) configured by the administrator, rather than any individual user's Microsoft account.
 
-1. Navigate to your space in Eneo
+#### Who Can Import
+
+Only users with **administrator permissions** in Eneo can import SharePoint content into shared spaces. Non-admin users will not see SharePoint as an available integration when adding knowledge to a shared space.
+
+This restriction exists because the centralized authentication grants broad access to SharePoint content — either all sites in the organization (tenant app) or all sites the service account has access to (service account). Limiting imports to administrators ensures that content is added intentionally.
+
+#### How It Works
+
+When an administrator imports into a shared space, Eneo uses the centralized credentials — **not** the administrator's personal Microsoft account:
+
+1. Navigate to your shared or organization space in Eneo
 2. Go to **Knowledge** → **Add knowledge** → **SharePoint**
 3. Browse available SharePoint sites and folders
 4. Select the folders you want to import
 5. Click **Import**
 
-Eneo will fetch all documents from the selected folders and process them for use with AI assistants. The content is automatically kept in sync via webhooks.
+The available sites depend on which authentication method is configured:
+
+- **Service Account**: Only sites the service account has been granted access to are shown
+- **Tenant App**: All SharePoint sites in the organization are shown
+
+#### No Person Dependency
+
+Because the import uses centralized credentials, the imported knowledge is not tied to any individual user. If the administrator who performed the import leaves the organization, the integration continues to work — background synchronization and webhook processing are unaffected.
+
+This is the key difference from personal spaces, where the import is tied to the user's own OAuth token.
 
 ### Importing in Personal Spaces
 

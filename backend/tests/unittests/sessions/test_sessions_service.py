@@ -45,7 +45,7 @@ async def test_get_error_when_user_not_owner_of_session(service: SessionService)
         id=TEST_UUID,
     )
 
-    with pytest.raises(UnauthorizedException, match="belongs to other user"):
+    with pytest.raises(UnauthorizedException, match="belongs to other principal"):
         await service.get_session_by_uuid(1)
 
 
@@ -95,7 +95,7 @@ async def test_update_error_when_user_is_not_owner_of_session(service: SessionSe
     )
     session_upsert = SessionUpdate(name="new_test_name", id=TEST_UUID)
 
-    with pytest.raises(UnauthorizedException, match="belongs to other user"):
+    with pytest.raises(UnauthorizedException, match="belongs to other principal"):
         await service.update_session(session_upsert)
 
 
@@ -113,5 +113,5 @@ async def test_delete_error_when_user_not_owner_of_session(service: SessionServi
         id=TEST_UUID,
     )
 
-    with pytest.raises(UnauthorizedException, match="belongs to other user"):
+    with pytest.raises(UnauthorizedException, match="belongs to other principal"):
         await service.delete(1)

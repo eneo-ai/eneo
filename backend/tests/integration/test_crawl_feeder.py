@@ -57,9 +57,7 @@ class TestLeaderElection:
 
         await redis_client.delete("crawl_feeder:leader")
 
-    async def test_leader_lock_has_ttl(
-        self, redis_client: aioredis.Redis
-    ):
+    async def test_leader_lock_has_ttl(self, redis_client: aioredis.Redis):
         """Leader lock should have TTL for automatic failover."""
         await redis_client.delete("crawl_feeder:leader")
 
@@ -74,9 +72,7 @@ class TestLeaderElection:
 
         await redis_client.delete("crawl_feeder:leader")
 
-    async def test_refresh_leader_lock_extends_ttl(
-        self, redis_client: aioredis.Redis
-    ):
+    async def test_refresh_leader_lock_extends_ttl(self, redis_client: aioredis.Redis):
         """Refreshing lock should extend TTL."""
         worker_id = f"test-worker-{uuid4().hex[:8]}"
         election = LeaderElection(redis_client, worker_id)
@@ -111,7 +107,9 @@ class TestCapacityManager:
 
         capacity = await capacity_mgr.get_available_capacity(tenant_id)
 
-        assert capacity == max_concurrent, "Should return full capacity when no active_jobs key"
+        assert capacity == max_concurrent, (
+            "Should return full capacity when no active_jobs key"
+        )
 
     async def test_returns_remaining_capacity(
         self, redis_client: aioredis.Redis, test_settings
@@ -170,9 +168,7 @@ class TestCapacityManager:
 class TestPendingQueue:
     """Tests for pending queue management."""
 
-    async def test_gets_pending_crawls_from_queue(
-        self, redis_client: aioredis.Redis
-    ):
+    async def test_gets_pending_crawls_from_queue(self, redis_client: aioredis.Redis):
         """Should retrieve pending crawl jobs from queue."""
         tenant_id = uuid4()
         queue_key = f"tenant:{tenant_id}:crawl_pending"
@@ -190,9 +186,7 @@ class TestPendingQueue:
 
         await redis_client.delete(queue_key)
 
-    async def test_respects_limit_parameter(
-        self, redis_client: aioredis.Redis
-    ):
+    async def test_respects_limit_parameter(self, redis_client: aioredis.Redis):
         """Should only retrieve up to limit jobs."""
         tenant_id = uuid4()
         queue_key = f"tenant:{tenant_id}:crawl_pending"
@@ -266,17 +260,19 @@ class TestMultiTenantIsolation:
         cap_1 = await capacity_mgr.get_available_capacity(tenant_1)
         cap_2 = await capacity_mgr.get_available_capacity(tenant_2)
 
-        assert cap_1 == max_concurrent - 3, f"Tenant 1 should have {max_concurrent - 3} capacity"
-        assert cap_2 == max_concurrent, f"Tenant 2 should have full {max_concurrent} capacity"
+        assert cap_1 == max_concurrent - 3, (
+            f"Tenant 1 should have {max_concurrent - 3} capacity"
+        )
+        assert cap_2 == max_concurrent, (
+            f"Tenant 2 should have full {max_concurrent} capacity"
+        )
 
         await redis_client.delete(
             f"tenant:{tenant_1}:active_jobs",
             f"tenant:{tenant_2}:active_jobs",
         )
 
-    async def test_pending_queues_are_per_tenant(
-        self, redis_client: aioredis.Redis
-    ):
+    async def test_pending_queues_are_per_tenant(self, redis_client: aioredis.Redis):
         """Pending queues should be isolated per-tenant."""
         tenant_1 = uuid4()
         tenant_2 = uuid4()
@@ -309,9 +305,7 @@ class TestMultiTenantIsolation:
 class TestSplitBrainPrevention:
     """Tests for split-brain leader election scenarios."""
 
-    async def test_lock_acquisition_is_atomic(
-        self, redis_client: aioredis.Redis
-    ):
+    async def test_lock_acquisition_is_atomic(self, redis_client: aioredis.Redis):
         """Verify lock acquisition uses SET NX (atomic operation)."""
         await redis_client.delete("crawl_feeder:leader")
 
@@ -342,9 +336,7 @@ class TestSplitBrainPrevention:
             for _ in range(num_feeders)
         ]
 
-        results = await asyncio.gather(
-            *[e.try_acquire() for e in elections]
-        )
+        results = await asyncio.gather(*[e.try_acquire() for e in elections])
 
         winners = sum(results)
         assert winners == 1, (
@@ -354,9 +346,7 @@ class TestSplitBrainPrevention:
 
         await redis_client.delete("crawl_feeder:leader")
 
-    async def test_lock_value_identifies_leader(
-        self, redis_client: aioredis.Redis
-    ):
+    async def test_lock_value_identifies_leader(self, redis_client: aioredis.Redis):
         """Verify lock contains identifying information about the leader."""
         await redis_client.delete("crawl_feeder:leader")
 
@@ -371,9 +361,7 @@ class TestSplitBrainPrevention:
 
         await redis_client.delete("crawl_feeder:leader")
 
-    async def test_expired_lock_can_be_reacquired(
-        self, redis_client: aioredis.Redis
-    ):
+    async def test_expired_lock_can_be_reacquired(self, redis_client: aioredis.Redis):
         """Verify another feeder can acquire expired lock."""
         await redis_client.delete("crawl_feeder:leader")
 
@@ -395,7 +383,9 @@ class TestSplitBrainPrevention:
             if not await redis_client.exists("crawl_feeder:leader"):
                 break
 
-        assert not await redis_client.exists("crawl_feeder:leader"), "Lock should have expired"
+        assert not await redis_client.exists("crawl_feeder:leader"), (
+            "Lock should have expired"
+        )
 
         result_2_after = await election_2.try_acquire()
         assert result_2_after is True, "Feeder 2 should acquire after lock expires"

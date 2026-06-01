@@ -26,7 +26,10 @@ def mock_redis():
 @pytest.fixture
 def session_service(mock_redis):
     """Create AuditSessionService with mocked Redis."""
-    with patch("intric.audit.infrastructure.audit_session_service.get_redis", return_value=mock_redis):
+    with patch(
+        "intric.audit.infrastructure.audit_session_service.get_redis",
+        return_value=mock_redis,
+    ):
         service = AuditSessionService()
         return service
 
@@ -84,7 +87,9 @@ class TestCreateSession:
         key = call_args[0][0]
         assert key.startswith("audit_session:")
 
-    async def test_create_session_stores_correct_data(self, session_service, mock_redis):
+    async def test_create_session_stores_correct_data(
+        self, session_service, mock_redis
+    ):
         """Verify session data contains all required fields."""
         user_id = uuid4()
         tenant_id = uuid4()
@@ -105,7 +110,9 @@ class TestCreateSession:
         assert stored_data["description"] == "Investigating suspicious activity"
         assert "created_at" in stored_data
 
-    async def test_create_session_created_at_is_utc_iso(self, session_service, mock_redis):
+    async def test_create_session_created_at_is_utc_iso(
+        self, session_service, mock_redis
+    ):
         """Verify created_at timestamp is ISO format with UTC timezone."""
         user_id = uuid4()
         tenant_id = uuid4()
@@ -124,7 +131,9 @@ class TestCreateSession:
         created_at = datetime.fromisoformat(stored_data["created_at"])
         assert created_at.tzinfo is not None  # Has timezone info
 
-    async def test_create_session_redis_error_raises_503(self, session_service, mock_redis):
+    async def test_create_session_redis_error_raises_503(
+        self, session_service, mock_redis
+    ):
         """Verify Redis error raises 503 Service Unavailable."""
         mock_redis.setex.side_effect = redis.exceptions.RedisError("Connection refused")
 
@@ -143,7 +152,9 @@ class TestCreateSession:
 class TestGetSession:
     """Tests for get_session() method."""
 
-    async def test_get_session_returns_data_when_exists(self, session_service, mock_redis):
+    async def test_get_session_returns_data_when_exists(
+        self, session_service, mock_redis
+    ):
         """Verify get_session returns parsed data when session exists."""
         session_data = {
             "user_id": str(uuid4()),
@@ -158,7 +169,9 @@ class TestGetSession:
 
         assert result == session_data
 
-    async def test_get_session_returns_none_when_not_exists(self, session_service, mock_redis):
+    async def test_get_session_returns_none_when_not_exists(
+        self, session_service, mock_redis
+    ):
         """Verify get_session returns None for non-existent session."""
         mock_redis.get.return_value = None
 
@@ -166,7 +179,9 @@ class TestGetSession:
 
         assert result is None
 
-    async def test_get_session_returns_none_when_expired(self, session_service, mock_redis):
+    async def test_get_session_returns_none_when_expired(
+        self, session_service, mock_redis
+    ):
         """Verify get_session returns None for expired session (Redis auto-deletes)."""
         mock_redis.get.return_value = None  # Redis returns None for expired keys
 
@@ -174,7 +189,9 @@ class TestGetSession:
 
         assert result is None
 
-    async def test_get_session_uses_correct_key_format(self, session_service, mock_redis):
+    async def test_get_session_uses_correct_key_format(
+        self, session_service, mock_redis
+    ):
         """Verify get_session uses audit_session:{id} key format."""
         session_id = "test-session-123"
         mock_redis.get.return_value = None
@@ -183,7 +200,9 @@ class TestGetSession:
 
         mock_redis.get.assert_called_once_with(f"audit_session:{session_id}")
 
-    async def test_get_session_redis_error_raises_503(self, session_service, mock_redis):
+    async def test_get_session_redis_error_raises_503(
+        self, session_service, mock_redis
+    ):
         """Verify Redis error raises 503 Service Unavailable."""
         mock_redis.get.side_effect = redis.exceptions.RedisError("Timeout")
 
@@ -196,7 +215,9 @@ class TestGetSession:
 class TestValidateSession:
     """Tests for validate_session() - security-critical validation."""
 
-    async def test_validate_session_returns_data_when_valid(self, session_service, mock_redis):
+    async def test_validate_session_returns_data_when_valid(
+        self, session_service, mock_redis
+    ):
         """Verify valid session returns session data."""
         user_id = uuid4()
         tenant_id = uuid4()
@@ -217,7 +238,9 @@ class TestValidateSession:
 
         assert result == session_data
 
-    async def test_validate_session_returns_none_when_session_missing(self, session_service, mock_redis):
+    async def test_validate_session_returns_none_when_session_missing(
+        self, session_service, mock_redis
+    ):
         """Verify missing session returns None."""
         mock_redis.get.return_value = None
 
@@ -229,7 +252,9 @@ class TestValidateSession:
 
         assert result is None
 
-    async def test_validate_session_returns_none_when_user_mismatch(self, session_service, mock_redis):
+    async def test_validate_session_returns_none_when_user_mismatch(
+        self, session_service, mock_redis
+    ):
         """Verify user ID mismatch returns None (security)."""
         session_user = uuid4()
         different_user = uuid4()
@@ -252,7 +277,9 @@ class TestValidateSession:
 
         assert result is None  # Rejected due to user mismatch
 
-    async def test_validate_session_returns_none_when_tenant_mismatch(self, session_service, mock_redis):
+    async def test_validate_session_returns_none_when_tenant_mismatch(
+        self, session_service, mock_redis
+    ):
         """Verify tenant ID mismatch returns None (tenant isolation)."""
         user_id = uuid4()
         session_tenant = uuid4()
@@ -275,7 +302,9 @@ class TestValidateSession:
 
         assert result is None  # Rejected due to tenant mismatch
 
-    async def test_validate_session_uses_constant_time_comparison(self, session_service, mock_redis):
+    async def test_validate_session_uses_constant_time_comparison(
+        self, session_service, mock_redis
+    ):
         """Verify validation uses secrets.compare_digest for timing attack prevention."""
         # This test verifies the implementation uses constant-time comparison
         # by checking that the code imports and uses secrets.compare_digest
@@ -292,7 +321,9 @@ class TestValidateSession:
         mock_redis.get.return_value = json.dumps(session_data).encode("utf-8")
 
         # Patch secrets.compare_digest to verify it's being called
-        with patch("intric.audit.infrastructure.audit_session_service.secrets.compare_digest") as mock_compare:
+        with patch(
+            "intric.audit.infrastructure.audit_session_service.secrets.compare_digest"
+        ) as mock_compare:
             mock_compare.return_value = True
 
             await session_service.validate_session(
@@ -316,14 +347,18 @@ class TestRevokeSession:
 
         mock_redis.delete.assert_called_once_with(f"audit_session:{session_id}")
 
-    async def test_revoke_session_succeeds_even_if_missing(self, session_service, mock_redis):
+    async def test_revoke_session_succeeds_even_if_missing(
+        self, session_service, mock_redis
+    ):
         """Verify revoking non-existent session doesn't raise error."""
         mock_redis.delete.return_value = 0  # Redis returns 0 when key doesn't exist
 
         # Should not raise
         await session_service.revoke_session("nonexistent-session")
 
-    async def test_revoke_session_redis_error_raises_503(self, session_service, mock_redis):
+    async def test_revoke_session_redis_error_raises_503(
+        self, session_service, mock_redis
+    ):
         """Verify Redis error raises 503 Service Unavailable."""
         mock_redis.delete.side_effect = redis.exceptions.RedisError("Connection lost")
 
@@ -336,7 +371,9 @@ class TestRevokeSession:
 class TestExtendSession:
     """Tests for extend_session() method."""
 
-    async def test_extend_session_returns_true_when_exists(self, session_service, mock_redis):
+    async def test_extend_session_returns_true_when_exists(
+        self, session_service, mock_redis
+    ):
         """Verify extend_session returns True when session exists."""
         mock_redis.expire.return_value = 1  # Key exists and TTL was updated
 
@@ -344,7 +381,9 @@ class TestExtendSession:
 
         assert result is True
 
-    async def test_extend_session_returns_false_when_missing(self, session_service, mock_redis):
+    async def test_extend_session_returns_false_when_missing(
+        self, session_service, mock_redis
+    ):
         """Verify extend_session returns False when session doesn't exist."""
         mock_redis.expire.return_value = 0  # Key doesn't exist
 
@@ -367,9 +406,11 @@ class TestExtendSession:
 
         # Only expire should be called, not exists + expire
         mock_redis.expire.assert_called_once()
-        mock_redis.exists.assert_not_called() if hasattr(mock_redis, 'exists') else None
+        mock_redis.exists.assert_not_called() if hasattr(mock_redis, "exists") else None
 
-    async def test_extend_session_redis_error_raises_503(self, session_service, mock_redis):
+    async def test_extend_session_redis_error_raises_503(
+        self, session_service, mock_redis
+    ):
         """Verify Redis error raises 503 Service Unavailable."""
         mock_redis.expire.side_effect = redis.exceptions.RedisError("Network error")
 
@@ -382,19 +423,23 @@ class TestExtendSession:
 class TestSessionKeyFormat:
     """Tests for Redis key format consistency."""
 
-    async def test_all_methods_use_consistent_key_format(self, session_service, mock_redis):
+    async def test_all_methods_use_consistent_key_format(
+        self, session_service, mock_redis
+    ):
         """Verify all methods use audit_session:{id} key format."""
         session_id = "test-session-uuid"
         user_id = uuid4()
         tenant_id = uuid4()
 
-        mock_redis.get.return_value = json.dumps({
-            "user_id": str(user_id),
-            "tenant_id": str(tenant_id),
-            "category": "test",
-            "description": "Test",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }).encode()
+        mock_redis.get.return_value = json.dumps(
+            {
+                "user_id": str(user_id),
+                "tenant_id": str(tenant_id),
+                "category": "test",
+                "description": "Test",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ).encode()
 
         # Test get_session
         await session_service.get_session(session_id)
@@ -413,12 +458,17 @@ class TestSessionKeyFormat:
 class TestServiceUnavailableErrors:
     """Tests for 503 Service Unavailable handling across all methods."""
 
-    @pytest.mark.parametrize("exception_class", [
-        redis.exceptions.ConnectionError,
-        redis.exceptions.TimeoutError,
-        redis.exceptions.RedisError,
-    ])
-    async def test_create_session_handles_redis_exceptions(self, session_service, mock_redis, exception_class):
+    @pytest.mark.parametrize(
+        "exception_class",
+        [
+            redis.exceptions.ConnectionError,
+            redis.exceptions.TimeoutError,
+            redis.exceptions.RedisError,
+        ],
+    )
+    async def test_create_session_handles_redis_exceptions(
+        self, session_service, mock_redis, exception_class
+    ):
         """Verify create_session handles various Redis exceptions."""
         mock_redis.setex.side_effect = exception_class("Test error")
 
@@ -432,12 +482,17 @@ class TestServiceUnavailableErrors:
 
         assert exc_info.value.status_code == 503
 
-    @pytest.mark.parametrize("exception_class", [
-        redis.exceptions.ConnectionError,
-        redis.exceptions.TimeoutError,
-        redis.exceptions.RedisError,
-    ])
-    async def test_get_session_handles_redis_exceptions(self, session_service, mock_redis, exception_class):
+    @pytest.mark.parametrize(
+        "exception_class",
+        [
+            redis.exceptions.ConnectionError,
+            redis.exceptions.TimeoutError,
+            redis.exceptions.RedisError,
+        ],
+    )
+    async def test_get_session_handles_redis_exceptions(
+        self, session_service, mock_redis, exception_class
+    ):
         """Verify get_session handles various Redis exceptions."""
         mock_redis.get.side_effect = exception_class("Test error")
 

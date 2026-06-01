@@ -6,11 +6,13 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { IconSearch } from "@intric/icons/search";
-  import { IntricError, type IntegrationKnowledgePreview } from "@intric/intric-js";
+  import { type IntegrationKnowledgePreview } from "@intric/intric-js";
   import { Button, Dialog } from "@intric/ui";
   import { createCombobox } from "@melt-ui/svelte";
   import type { IntegrationImportDialogProps } from "../IntegrationData";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   type PreviewOption = {
     label: string;
@@ -39,7 +41,7 @@
     const { id } = integration;
 
     if (!id) {
-      alert(m.you_need_to_configure_this_integration_before_using_it());
+      toast.warning(m.you_need_to_configure_this_integration_before_using_it());
       goBack();
       return;
     }
@@ -87,9 +89,7 @@
       $inputValue = ""; // Reset input in case something else should be added
       $openController = false;
     } catch (error) {
-      const errorMessage =
-        error instanceof IntricError ? error.getReadableMessage() : String(error);
-      alert(errorMessage);
+      toastError(error);
     }
   });
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { getIntric } from "$lib/core/Intric";
   import { IconChevronRight } from "@intric/icons/chevron-right";
@@ -45,9 +46,9 @@
   const intric = getIntric();
 
   let currentItems = $state<TreeItem[]>([]);
-  let navigationStack = $state<Array<{ folderId: string | null; path: string; name: string }>>([
-    { folderId: null, path: "/", name: siteName }
-  ]);
+  let navigationStack = $state<Array<{ folderId: string | null; path: string; name: string }>>(
+    untrack(() => [{ folderId: null, path: "/", name: siteName }])
+  );
   let selectedItemKeySet = $derived.by(() => new Set(selectedItemKeys ?? []));
   const siteRootSelectionKey = buildSharePointSelectionKey({
     id: "",
@@ -85,15 +86,17 @@
           queryParams.folder_path = folderPath;
         }
 
-        const response = await intric.client.fetch(
-          `/api/v1/integrations/${userIntegrationId}/sharepoint/tree/`,
+        /* eslint-disable @typescript-eslint/no-explicit-any */
+        const response = (await intric.client.fetch(
+          `/api/v1/integrations/${userIntegrationId}/sharepoint/tree/` as any,
           {
             method: "get",
             params: {
               query: queryParams
             }
-          }
-        );
+          } as any
+        )) as { items?: TreeItem[] };
+        /* eslint-enable @typescript-eslint/no-explicit-any */
 
         // Ignore stale responses from earlier navigations
         if (thisRequest !== requestId) return;
@@ -152,7 +155,7 @@
   <!-- Breadcrumb -->
   {#if navigationStack.length > 1}
     <nav class="flex min-h-[28px] flex-wrap items-center gap-0.5 text-sm">
-      {#each navigationStack as segment, i}
+      {#each navigationStack as segment, i (i)}
         {#if i > 0}
           <IconChevronRight class="text-secondary h-3 w-3 flex-shrink-0" />
         {/if}

@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Callable, Awaitable, Dict
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
 from uuid import UUID
 
 from intric.integration.domain.entities.oauth_token import SharePointToken
@@ -16,7 +16,10 @@ TokenRefreshCallback = Callable[[UUID], Awaitable[Dict[str, str]]]
 
 
 class SharePointTreeService:
-    def __init__(self, token_refresh_callback: Optional[TokenRefreshCallback] = None):
+    def __init__(
+        self, token_refresh_callback: Optional[TokenRefreshCallback] = None
+    ) -> None:
+        super().__init__()
         self.token_refresh_callback = token_refresh_callback
 
     async def get_folder_tree(
@@ -26,7 +29,7 @@ class SharePointTreeService:
         drive_id: Optional[str] = None,
         folder_id: Optional[str] = None,
         folder_path: str = "",
-    ) -> dict:
+    ) -> Dict[str, Any]:
         """
         Get folder tree for SharePoint site or OneDrive.
 
@@ -52,7 +55,7 @@ class SharePointTreeService:
                 "folder_path": folder_path,
                 "has_token": bool(token.access_token),
                 "token_id": str(token.id) if token.id else None,
-            }
+            },
         )
 
         async with SharePointContentClient(
@@ -68,26 +71,30 @@ class SharePointTreeService:
                     actual_drive_id = await content_client.get_default_drive_id(site_id)
                     if not actual_drive_id:
                         logger.error(
-                            "No drive ID returned for site",
-                            extra={"site_id": site_id}
+                            "No drive ID returned for site", extra={"site_id": site_id}
                         )
                         raise ValueError(f"Could not get drive ID for site {site_id}")
                     logger.info(
                         "Drive ID obtained",
-                        extra={"site_id": site_id, "drive_id": actual_drive_id}
+                        extra={"site_id": site_id, "drive_id": actual_drive_id},
                     )
                 except Exception as e:
                     logger.error(
                         f"Failed to get drive ID: {type(e).__name__}: {str(e)}",
                         extra={"site_id": site_id},
-                        exc_info=True
+                        exc_info=True,
                     )
-                    raise ValueError(f"Failed to get drive ID for site {site_id}: {str(e)}") from e
+                    raise ValueError(
+                        f"Failed to get drive ID for site {site_id}: {str(e)}"
+                    ) from e
             else:
                 logger.info(
                     "Using provided drive ID directly (OneDrive)",
-                    extra={"drive_id": actual_drive_id}
+                    extra={"drive_id": actual_drive_id},
                 )
+
+            if actual_drive_id is None:
+                raise ValueError("Could not resolve drive ID")
 
             if folder_id is None:
                 folder_id = "root"
@@ -99,7 +106,7 @@ class SharePointTreeService:
                     "site_id": site_id,
                     "drive_id": actual_drive_id,
                     "folder_id": folder_id,
-                }
+                },
             )
             try:
                 if site_id:
@@ -110,7 +117,9 @@ class SharePointTreeService:
                     )
                 else:
                     if folder_id == "root":
-                        items = await content_client.get_drive_root_children(actual_drive_id)
+                        items = await content_client.get_drive_root_children(
+                            actual_drive_id
+                        )
                     else:
                         items = await content_client.get_drive_folder_items(
                             drive_id=actual_drive_id,
@@ -121,7 +130,7 @@ class SharePointTreeService:
                     extra={
                         "item_count": len(items),
                         "folder_id": folder_id,
-                    }
+                    },
                 )
             except Exception as e:
                 logger.error(
@@ -131,18 +140,20 @@ class SharePointTreeService:
                         "drive_id": actual_drive_id,
                         "folder_id": folder_id,
                     },
-                    exc_info=True
+                    exc_info=True,
                 )
                 raise ValueError(
                     f"Failed to fetch folder items for folder {folder_id}: {str(e)}"
                 ) from e
 
-            tree_items = []
+            tree_items: List[Dict[str, Any]] = []
             for item in items:
                 item_name = item.get("name", "")
                 item_id = item.get("id", "")
                 is_folder = item.get("folder") is not None
-                item_path = f"{folder_path}/{item_name}" if folder_path else f"/{item_name}"
+                item_path = (
+                    f"{folder_path}/{item_name}" if folder_path else f"/{item_name}"
+                )
                 size = item.get("size")
                 modified = item.get("lastModifiedDateTime")
                 web_url = item.get("webUrl", "")
@@ -161,7 +172,7 @@ class SharePointTreeService:
 
             logger.debug(
                 "Transformed items to tree format",
-                extra={"tree_item_count": len(tree_items)}
+                extra={"tree_item_count": len(tree_items)},
             )
 
             parent_id = None
@@ -169,7 +180,7 @@ class SharePointTreeService:
                 try:
                     logger.debug(
                         "Fetching parent folder metadata",
-                        extra={"folder_id": folder_id}
+                        extra={"folder_id": folder_id},
                     )
                     metadata = await content_client.get_file_metadata(
                         drive_id=actual_drive_id,
@@ -178,16 +189,15 @@ class SharePointTreeService:
                     parent_ref = metadata.get("parentReference", {})
                     parent_id = parent_ref.get("id")
                     logger.debug(
-                        "Parent folder ID obtained",
-                        extra={"parent_id": parent_id}
+                        "Parent folder ID obtained", extra={"parent_id": parent_id}
                     )
                 except Exception as e:
                     logger.warning(
                         f"Could not get parent folder ID: {type(e).__name__}: {str(e)}",
-                        extra={"folder_id": folder_id}
+                        extra={"folder_id": folder_id},
                     )
 
-            result = {
+            result: Dict[str, Any] = {
                 "items": tree_items,
                 "current_path": folder_path or "/",
                 "parent_id": parent_id,
@@ -201,7 +211,7 @@ class SharePointTreeService:
                     "item_count": len(tree_items),
                     "current_path": result["current_path"],
                     "has_parent": parent_id is not None,
-                }
+                },
             )
 
             return result

@@ -35,7 +35,9 @@ class TestTimestampUpdateNoCommit:
         mock_session.begin = AsyncMock()
 
         # Create the statement similar to what crawl_tasks.py creates
-        last_crawled_stmt = sa.text("UPDATE websites SET last_crawled_at = NOW() WHERE id = :id")
+        last_crawled_stmt = sa.text(
+            "UPDATE websites SET last_crawled_at = NOW() WHERE id = :id"
+        )
 
         # Simulate _do_timestamp_update behavior
         async def _do_timestamp_update():
@@ -79,7 +81,9 @@ class TestTimestampUpdateNoCommit:
     async def test_timestamp_update_skips_begin_if_transaction_active(self):
         """If transaction already active, _do_timestamp_update should NOT begin."""
         mock_session = AsyncMock()
-        mock_session.in_transaction = MagicMock(return_value=True)  # Already in transaction
+        mock_session.in_transaction = MagicMock(
+            return_value=True
+        )  # Already in transaction
         mock_session.execute = AsyncMock()
         mock_session.begin = AsyncMock()
 
@@ -115,16 +119,18 @@ class TestTransactionFlowIntegrity:
         operations_executed = []
 
         async def _do_update_size():
-            operations_executed.append('update_size')
+            operations_executed.append("update_size")
             await mock_session.execute(sa.text("UPDATE websites SET size = :size"))
 
         async def _do_timestamp_update():
-            operations_executed.append('timestamp_update')
-            await mock_session.execute(sa.text("UPDATE websites SET last_crawled_at = NOW()"))
+            operations_executed.append("timestamp_update")
+            await mock_session.execute(
+                sa.text("UPDATE websites SET last_crawled_at = NOW()")
+            )
             # No commit - fixed behavior
 
         async def _do_suicide_check():
-            operations_executed.append('suicide_check')
+            operations_executed.append("suicide_check")
             await mock_session.execute(sa.text("SELECT status FROM jobs"))
 
         # Execute operations in sequence
@@ -133,7 +139,11 @@ class TestTransactionFlowIntegrity:
         await _do_suicide_check()
 
         # All operations should have run
-        assert operations_executed == ['update_size', 'timestamp_update', 'suicide_check']
+        assert operations_executed == [
+            "update_size",
+            "timestamp_update",
+            "suicide_check",
+        ]
 
         # Execute should have been called 3 times (once per operation)
         assert mock_session.execute.call_count == 3
@@ -150,7 +160,9 @@ class TestTransactionFlowIntegrity:
         mock_session.commit = AsyncMock()
 
         async def _do_timestamp_update():
-            await mock_session.execute(sa.text("UPDATE websites SET last_crawled_at = NOW()"))
+            await mock_session.execute(
+                sa.text("UPDATE websites SET last_crawled_at = NOW()")
+            )
             # No commit here
 
         async def _do_complete_job():

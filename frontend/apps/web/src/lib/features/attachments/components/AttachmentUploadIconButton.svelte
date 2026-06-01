@@ -10,6 +10,7 @@
 
   export let label = m.select_documents_to_attach();
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   let selectedFiles: FileList;
 
   const {
@@ -23,7 +24,7 @@
     const errors = queueValidUploads([...selectedFiles]);
 
     if (errors) {
-      alert(errors.join("\n"));
+      toast.error(errors.join("\n"));
     }
   }
 </script>

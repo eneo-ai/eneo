@@ -8,7 +8,7 @@
   import { Button, Dialog, Dropdown, Input } from "@intric/ui";
   import { writable } from "svelte/store";
   import { getSecurityClassificationService } from "../SecurityClassificationsService.svelte";
-  import { IntricError, type SecurityClassification } from "@intric/intric-js";
+  import { type SecurityClassification } from "@intric/intric-js";
   import { IconEllipsis } from "@intric/icons/ellipsis";
   import { IconTrash } from "@intric/icons/trash";
   import { IconEdit } from "@intric/icons/edit";
@@ -16,6 +16,7 @@
   import { IconArrowDownToLine } from "@intric/icons/arrow-down-to-line";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
 
   type Props = {
     classification: SecurityClassification;
@@ -47,7 +48,7 @@
       await security.deleteClassification(classification);
       $showDeleteDialog = false;
     } catch (error) {
-      alert(error instanceof IntricError ? error.getReadableMessage() : String(error));
+      toastError(error);
     }
   });
 
@@ -61,7 +62,7 @@
       });
       $showEditDialog = false;
     } catch (error) {
-      alert(error instanceof IntricError ? error.getReadableMessage() : String(error));
+      toastError(error);
     }
   });
 </script>

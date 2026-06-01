@@ -1,19 +1,18 @@
+from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional, Protocol, cast
 
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from intric.ai_models.completion_models.completion_model import (
     Completion,
-    CompletionModel,
+    CompletionModelPublic,
     ResponseType,
 )
-from intric.database.database import AsyncSession
-from intric.database.transaction import gen_transaction
+from intric.completion_models.domain.completion_model import CompletionModel
 from intric.files.file_models import File, FilePublic
 from intric.info_blobs.info_blob import (
     InfoBlobAskAssistantPublic,
-    InfoBlobInDB,
     InfoBlobMetadata,
 )
 from intric.main.logging import get_logger
@@ -23,13 +22,16 @@ from intric.sessions.session import (
     AskResponse,
     IntricEventType,
     SessionInDB,
+    SSEError,
     SSEFiles,
     SSEFirstChunk,
     SSEIntricEvent,
     SSEText,
+    SSETokenUsage,
     SSEToolApprovalRequired,
+    SSEToolApprovalTimeout,
     SSEToolCall,
-    SSEError,
+    TokenUsageEvent,
     ToolCallInfo,
 )
 
@@ -41,15 +43,43 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+class _SupportsModelDump(Protocol):
+    def model_dump(self) -> dict[str, Any]: ...
+
+
+class _SupportsWebSearchResult(Protocol):
+    id: Any
+    title: str
+    url: str
+
+
+class _SupportsToolCallMetadata(Protocol):
+    server_name: str
+    tool_name: str
+    arguments: dict[str, object] | None
+    tool_call_id: str | None
+    approved: bool | None
+    result_status: str | None
+
+
 def to_ask_response(
     question: str,
-    files: list[File],
+    files: Sequence[File],
     session: SessionInDB,
     answer: str,
-    info_blobs: list[InfoBlobInDB],
-    completion_model: Optional[CompletionModel] = None,
-    tools: "UseTools" = None,
-):
+    info_blobs: Sequence[_SupportsModelDump],
+    tools: "UseTools",
+    completion_model: CompletionModel | CompletionModelPublic | None = None,
+) -> AskResponse:
+    public_model = (
+        completion_model
+        if isinstance(completion_model, CompletionModelPublic)
+        else (
+            CompletionModelPublic.from_domain(completion_model)
+            if completion_model is not None
+            else None
+        )
+    )
     return AskResponse(
         question=question,
         files=[FilePublic(**file.model_dump()) for file in files],
@@ -63,7 +93,7 @@ def to_ask_response(
             )
             for blob in info_blobs
         ],
-        model=completion_model,
+        model=public_model,
         tools=tools,
         web_search_references=[],
     )
@@ -71,23 +101,32 @@ def to_ask_response(
 
 def to_ask_conversation_response(
     question: str,
-    files: list[File],
+    files: Sequence[File],
     session: SessionInDB,
     answer: str,
-    info_blobs: list[InfoBlobInDB],
-    tools: "UseTools" = None,
-    completion_model: Optional[CompletionModel] = None,
+    info_blobs: Sequence[_SupportsModelDump],
+    tools: "UseTools",
+    completion_model: CompletionModel | CompletionModelPublic | None = None,
     question_id: Optional["UUID"] = None,
     created_at: Optional[datetime] = None,
     updated_at: Optional[datetime] = None,
-    web_search_results: list[WebSearchResultPublic] = [],
-):
-    return AskChatResponse(
-        created_at=created_at,
-        updated_at=updated_at,
+    web_search_results: Sequence[_SupportsWebSearchResult] | None = None,
+) -> AskChatResponse:
+    public_model = (
+        completion_model
+        if isinstance(completion_model, CompletionModelPublic)
+        else (
+            CompletionModelPublic.from_domain(completion_model)
+            if completion_model is not None
+            else None
+        )
+    )
+    return AskChatResponse(  # type: ignore[call-arg]
+        created_at=created_at,  # type: ignore[call-arg]
+        updated_at=updated_at,  # type: ignore[call-arg]
         session_id=session.id,
-        id=question_id,
-        completion_model=completion_model,
+        id=question_id,  # type: ignore[call-arg]
+        completion_model=public_model,  # type: ignore[call-arg]
         files=[FilePublic(**file.model_dump()) for file in files],
         generated_files=[],
         question=question,
@@ -106,38 +145,42 @@ def to_ask_conversation_response(
                 title=web_search_result.title,
                 url=web_search_result.url,
             )
-            for web_search_result in web_search_results
+            for web_search_result in (web_search_results or [])
         ],
     )
 
 
-def to_sse_response(chunk: Completion, session_id: "UUID"):
+def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
     if chunk.response_type == ResponseType.TEXT:
         data = SSEText(
             session_id=session_id,
-            answer=chunk.text,
+            answer=chunk.text or "",
             references=[
                 InfoBlobAskAssistantPublic(
                     **blob.model_dump(),
                     metadata=InfoBlobMetadata(**blob.model_dump()),
                 )
-                for blob in chunk.reference_chunks
+                for blob in (chunk.reference_chunks or [])
             ],
         )
 
-    if chunk.response_type == ResponseType.FILES:
+    elif chunk.response_type == ResponseType.FILES:
+        assert chunk.generated_file is not None
         data = SSEFiles(
             session_id=session_id,
             generated_files=[FilePublic(**chunk.generated_file.model_dump())],
         )
 
-    if chunk.response_type == ResponseType.INTRIC_EVENT:
+    elif chunk.response_type == ResponseType.INTRIC_EVENT:
         data = SSEIntricEvent(
             session_id=session_id,
             intric_event_type=IntricEventType.GENERATING_IMAGE,
         )
 
-    if chunk.response_type == ResponseType.TOOL_CALL:
+    elif chunk.response_type == ResponseType.TOOL_CALL:
+        tool_calls = cast(
+            Sequence[_SupportsToolCallMetadata], chunk.tool_calls_metadata or []
+        )
         data = SSEToolCall(
             session_id=session_id,
             tools=[
@@ -145,63 +188,119 @@ def to_sse_response(chunk: Completion, session_id: "UUID"):
                     server_name=tc.server_name,
                     tool_name=tc.tool_name,
                     arguments=tc.arguments,
-                    tool_call_id=tc.tool_call_id,
+                    tool_call_id=tc.tool_call_id or "",
                     approved=tc.approved,
+                    result_status=tc.result_status,
                 )
-                for tc in (chunk.tool_calls_metadata or [])
+                for tc in tool_calls
             ],
         )
 
-    if chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
+    elif chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
+        tool_calls = cast(
+            Sequence[_SupportsToolCallMetadata], chunk.tool_calls_metadata or []
+        )
         data = SSEToolApprovalRequired(
             session_id=session_id,
-            approval_id=chunk.approval_id,
+            approval_id=chunk.approval_id or "",
             tools=[
                 ToolCallInfo(
                     server_name=tc.server_name,
                     tool_name=tc.tool_name,
                     arguments=tc.arguments,
-                    tool_call_id=tc.tool_call_id,
+                    tool_call_id=tc.tool_call_id or "",
                     approved=tc.approved,
+                    result_status=tc.result_status,
                 )
-                for tc in (chunk.tool_calls_metadata or [])
+                for tc in tool_calls
             ],
         )
 
-    if chunk.response_type == ResponseType.ERROR:
+    elif chunk.response_type == ResponseType.TOOL_APPROVAL_TIMEOUT:
+        tool_calls = cast(
+            Sequence[_SupportsToolCallMetadata], chunk.tool_calls_metadata or []
+        )
+        data = SSEToolApprovalTimeout(
+            session_id=session_id,
+            approval_id=chunk.approval_id or "",
+            tools=[
+                ToolCallInfo(
+                    server_name=tc.server_name,
+                    tool_name=tc.tool_name,
+                    arguments=tc.arguments,
+                    tool_call_id=tc.tool_call_id or "",
+                    approved=tc.approved,
+                    result_status=tc.result_status,
+                )
+                for tc in tool_calls
+            ],
+        )
+
+    elif chunk.response_type == ResponseType.TOKEN_USAGE:
+        prompt = chunk.usage.prompt_tokens or 0 if chunk.usage else 0
+        completion = chunk.usage.completion_tokens or 0 if chunk.usage else 0
+        data = SSETokenUsage(
+            session_id=session_id,
+            usage=TokenUsageEvent(
+                prompt_tokens=prompt,
+                completion_tokens=completion,
+                turn_tokens=prompt + completion,
+            ),
+        )
+
+    elif chunk.response_type == ResponseType.ERROR:
         data = SSEError(
             session_id=session_id,
-            error=chunk.error,
+            error=chunk.error or "",
             error_code=chunk.error_code,
         )
 
-    return ServerSentEvent(data.model_dump_json(), event=chunk.response_type.value)
+    else:
+        logger.warning(
+            "Unsupported SSE response type",
+            extra={
+                "response_type": chunk.response_type.value
+                if chunk.response_type
+                else None
+            },
+        )
+        data = SSEError(
+            session_id=session_id,
+            error="Unsupported response type",
+            error_code=500,
+        )
+
+    event_name = (
+        chunk.response_type.value
+        if chunk.response_type is not None
+        else ResponseType.ERROR.value
+    )
+    return ServerSentEvent(data.model_dump_json(), event=event_name)
 
 
 async def to_response(
     response: "AssistantResponse",
-    db_session: AsyncSession,
     stream: bool,
-):
+) -> EventSourceResponse | AskResponse:
     if stream:
 
-        @gen_transaction(db_session)
         async def event_stream():
+            assert not isinstance(response.answer, str)
             async for chunk in response.answer:
-
                 if chunk.response_type == ResponseType.TEXT:
                     yield to_ask_response(
                         question=response.question,
                         files=response.files,
                         session=response.session,
-                        answer=chunk.text,
-                        info_blobs=chunk.reference_chunks,
+                        answer=chunk.text or "",
+                        info_blobs=chunk.reference_chunks or [],
                         completion_model=response.completion_model,
                         tools=response.tools,
                     ).model_dump_json()
 
-        return EventSourceResponse(event_stream())
+        return EventSourceResponse(event_stream(), ping=15)
 
+    assert isinstance(response.answer, str)
     return to_ask_response(
         question=response.question,
         files=response.files,
@@ -215,12 +314,10 @@ async def to_response(
 
 async def to_conversation_response(
     response: "AssistantResponse",
-    db_session: AsyncSession,
     stream: bool,
-):
+) -> EventSourceResponse | AskChatResponse:
     if stream:
 
-        @gen_transaction(db_session)
         async def event_stream():
             data = SSEFirstChunk(
                 **to_ask_conversation_response(
@@ -241,11 +338,13 @@ async def to_conversation_response(
                 data.model_dump_json(), event=ResponseType.FIRST_CHUNK.value
             )
 
+            assert not isinstance(response.answer, str)
             async for chunk in response.answer:
                 yield to_sse_response(chunk=chunk, session_id=response.session.id)
 
-        return EventSourceResponse(event_stream())
+        return EventSourceResponse(event_stream(), ping=15)
 
+    assert isinstance(response.answer, str)
     return to_ask_conversation_response(
         question=response.question,
         files=response.files,

@@ -9,8 +9,6 @@
   import { Input } from "@intric/ui";
   import { getAppContext } from "$lib/core/AppContext.js";
   import { getIntric } from "$lib/core/Intric.js";
-  import StorageOverviewBar from "./usage/storage/StorageOverviewBar.svelte";
-  import TokenOverviewBar from "./usage/tokens/TokenOverviewBar.svelte";
   import { m } from "$lib/paraglide/messages";
   import { invalidate, invalidateAll } from "$app/navigation";
 
@@ -18,10 +16,15 @@
   const intric = getIntric();
   let { data } = $props();
 
-  // Initialize from server data
-  let usingTemplates = $state(data.settings.using_templates);
-  let auditLoggingEnabled = $state(data.settings.audit_logging_enabled);
-  let provisioningEnabled = $state(data.settings.provisioning ?? false);
+  // Initialize from server data, re-sync after invalidateAll() refreshes props
+  let usingTemplates = $state<boolean | undefined>(undefined);
+  let auditLoggingEnabled = $state<boolean | undefined>(undefined);
+  let provisioningEnabled = $state(false);
+  $effect.pre(() => {
+    usingTemplates = data.settings.using_templates;
+    auditLoggingEnabled = data.settings.audit_logging_enabled;
+    provisioningEnabled = data.settings.provisioning ?? false;
+  });
 
   // Handle toggle change - receives new value from Switch component
   async function handleToggleTemplates({ current, next }: { current: boolean; next: boolean }) {
@@ -39,8 +42,8 @@
 
       // Invalidate all page data to refresh template visibility across all routes
       await Promise.all([
-        invalidate('app:settings'),  // Trigger template list refresh
-        invalidateAll()              // Refresh all other data
+        invalidate("app:settings"), // Trigger template list refresh
+        invalidateAll() // Refresh all other data
       ]);
     } catch (error) {
       console.error("[Admin] Error updating templates setting:", error);
@@ -57,15 +60,18 @@
 
     try {
       const updatedSettings = await intric.settings.updateAuditLogging(next);
-      console.log(`[Admin] Backend returned audit_logging_enabled:`, updatedSettings.audit_logging_enabled);
+      console.log(
+        `[Admin] Backend returned audit_logging_enabled:`,
+        updatedSettings.audit_logging_enabled
+      );
 
       // Update from server response
       auditLoggingEnabled = updatedSettings.audit_logging_enabled;
 
       // Invalidate all page data to refresh audit logging state
       await Promise.all([
-        invalidate('admin:layout'),  // Trigger audit config refresh
-        invalidateAll()              // Refresh all other data
+        invalidate("admin:layout"), // Trigger audit config refresh
+        invalidateAll() // Refresh all other data
       ]);
     } catch (error) {
       console.error("[Admin] Error updating audit logging setting:", error);
@@ -97,7 +103,7 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai - {tenant.display_name}</title>
+  <title>Eneo.ai – {tenant.display_name}</title>
 </svelte:head>
 
 <Page.Root>
@@ -106,19 +112,20 @@
   </Page.Header>
   <Page.Main>
     <Settings.Page>
-      <Settings.Group title={m.usage()}>
-        <StorageOverviewBar storageStats={data.storageStats}></StorageOverviewBar>
-        <TokenOverviewBar tokenStats={data.tokenStats}></TokenOverviewBar>
-      </Settings.Group>
-
       <Settings.Group title={m.features()}>
         <Settings.Row title={m.enable_templates()} description={m.enable_templates_description()}>
           <Input.Switch bind:value={usingTemplates} sideEffect={handleToggleTemplates} />
         </Settings.Row>
-        <Settings.Row title={m.enable_audit_logging()} description={m.enable_audit_logging_description()}>
+        <Settings.Row
+          title={m.enable_audit_logging()}
+          description={m.enable_audit_logging_description()}
+        >
           <Input.Switch bind:value={auditLoggingEnabled} sideEffect={handleToggleAuditLogging} />
         </Settings.Row>
-        <Settings.Row title={m.enable_provisioning()} description={m.enable_provisioning_description()}>
+        <Settings.Row
+          title={m.enable_provisioning()}
+          description={m.enable_provisioning_description()}
+        >
           <Input.Switch bind:value={provisioningEnabled} sideEffect={handleToggleProvisioning} />
         </Settings.Row>
       </Settings.Group>

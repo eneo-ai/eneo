@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
+from typing import Any, Optional
 from uuid import UUID
-from typing import Optional
+
 import sqlalchemy as sa
 from pydantic import EmailStr
 from sqlalchemy.exc import IntegrityError
@@ -9,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
 from intric.database.tables.assistant_table import Assistants
-from intric.database.tables.roles_table import PredefinedRoles, Roles
+from intric.database.tables.roles_table import Roles
 from intric.database.tables.spaces_table import Spaces
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users
@@ -32,11 +33,11 @@ from intric.users.user import (
 
 logger = get_logger(__name__)
 
-ORG_SPACE_ROLES = {"owner", "ai configurator"}  # Temp, kan bytas senare.
 
 class UsersRepository:
-    def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
+        self.delegate: BaseRepositoryDelegate[UserInDB] = BaseRepositoryDelegate(
             session,
             Users,
             UserInDB,
@@ -47,19 +48,22 @@ class UsersRepository:
     def _get_options(self):
         return [
             selectinload(Users.roles),
-            selectinload(Users.predefined_roles),
             selectinload(Users.tenant).selectinload(Tenants.modules),
             selectinload(Users.api_key),
             selectinload(Users.user_groups),
         ]
 
-    async def _get_model_from_query(self, query, with_deleted: bool = False):
+    async def _get_model_from_query(
+        self, query: sa.Select[tuple[Any]], with_deleted: bool = False
+    ) -> UserInDB | None:
         if not with_deleted:
             query = query.where(Users.deleted_at.is_(None))
 
         return await self.delegate.get_model_from_query(query)
 
-    async def _get_models_from_query(self, query, with_deleted: bool = False):
+    async def _get_models_from_query(
+        self, query: sa.Select[tuple[Any]], with_deleted: bool = False
+    ) -> list[UserInDB]:
         if not with_deleted:
             query = query.where(Users.deleted_at.is_(None))
 
@@ -67,7 +71,7 @@ class UsersRepository:
 
     async def get_user_by_email(
         self, email: EmailStr, with_deleted: bool = False
-    ) -> UserInDB:
+    ) -> UserInDB | None:
         # Allow case-insensitive matching
         query = sa.select(Users).where(
             sa.func.lower(Users.email) == sa.func.lower(email)
@@ -77,36 +81,42 @@ class UsersRepository:
 
     async def get_user_by_username(
         self, username: str, with_deleted: bool = False
-    ) -> UserInDB:
+    ) -> UserInDB | None:
         query = sa.select(Users).where(Users.username == username)
 
         return await self._get_model_from_query(query, with_deleted=with_deleted)
 
-    async def get_user_by_id(self, id: UUID, with_deleted: bool = False) -> UserInDB:
+    async def get_user_by_id(
+        self, id: UUID, with_deleted: bool = False
+    ) -> UserInDB | None:
         query = sa.select(Users).where(Users.id == id)
 
         return await self._get_model_from_query(query, with_deleted=with_deleted)
 
     async def get_user_by_assistant_id(
         self, assistant_id: UUID, with_deleted: bool = False
-    ) -> UserInDB:
+    ) -> UserInDB | None:
         query = sa.select(Users).join(Assistants).where(Assistants.id == assistant_id)
 
         return await self._get_model_from_query(query, with_deleted=with_deleted)
 
-    async def get_user_by_id_and_tenant_id(self, id: UUID, tenant_id: UUID) -> UserInDB:
+    async def get_user_by_id_and_tenant_id(
+        self, id: UUID, tenant_id: UUID
+    ) -> UserInDB | None:
         query = (
             sa.select(Users).where(Users.id == id).where(Users.tenant_id == tenant_id)
         )
 
         return await self._get_model_from_query(query, with_deleted=False)
 
-    async def get_user_by_widget_id(self, widget_id: UUID) -> UserInDB:
+    async def get_user_by_widget_id(self, widget_id: UUID) -> UserInDB | None:
         query = sa.select(Users).join(Widgets).where(Widgets.id == widget_id)
         return await self.delegate.get_model_from_query(query)
 
     async def get_total_count(
-        self, tenant_id: Optional[UUID] = None, filters: Optional[str] = None
+        self,
+        tenant_id: Optional[UUID] = None,
+        filters: Optional[str] = None,
     ):
         query = sa.select(sa.func.count(Users.id)).where(Users.deleted_at.is_(None))
 
@@ -122,7 +132,7 @@ class UsersRepository:
 
     async def get_all_users(
         self,
-        tenant_id: UUID = None,
+        tenant_id: UUID | None = None,
         limit: Optional[int] = None,
         cursor: Optional[str] = None,
         previous: bool = False,
@@ -146,6 +156,7 @@ class UsersRepository:
             if previous:
                 query = query.where(sa.func.lower(Users.email) <= cursor.lower())
                 query = query.order_by(sa.func.lower(Users.email).desc())
+                assert limit is not None
                 query = query.limit(limit + 1)
                 users = await self._get_models_from_query(
                     query=query, with_deleted=False
@@ -162,46 +173,31 @@ class UsersRepository:
 
         return await self._get_models_from_query(query=query, with_deleted=False)
 
-    async def _get_roles(self, roles: list[ModelId] | None, tenant_id: UUID):
+    async def get_roles_by_ids(
+        self, roles: list[ModelId] | None, tenant_id: UUID
+    ) -> list[Roles]:
         if roles is None:
             return []
 
         roles_ids = [role.id for role in roles]
         stmt = sa.select(Roles).filter(
-            Roles.id.in_(roles_ids),
-            Roles.tenant_id == tenant_id
+            Roles.id.in_(roles_ids), Roles.tenant_id == tenant_id
         )
-        roles = await self.session.scalars(stmt)
+        result = await self.session.scalars(stmt)
 
-        return roles.all()
-
-    async def _get_predefined_roles(self, roles: list[ModelId] | None):
-        if roles is None:
-            return []
-
-        roles_ids = [role.id for role in roles]
-        stmt = sa.select(PredefinedRoles).filter(PredefinedRoles.id.in_(roles_ids))
-        roles = await self.session.scalars(stmt)
-
-        return roles.all()
+        return list(result.all())
 
     async def add(self, user: UserAdd):
         try:
             stmt = (
                 sa.insert(Users)
-                .values(
-                    **user.model_dump(
-                        exclude_none=True, exclude={"roles", "predefined_roles"}
-                    )
-                )
+                .values(**user.model_dump(exclude_none=True, exclude={"roles"}))
                 .returning(Users)
             )
             entry_in_db = await self.delegate.get_record_from_query(query=stmt)
+            assert entry_in_db is not None
             # TODO should be refactored when we will remove int id field from tables
-            entry_in_db.roles = await self._get_roles(user.roles, user.tenant_id)
-            entry_in_db.predefined_roles = await self._get_predefined_roles(
-                user.predefined_roles
-            )
+            entry_in_db.roles = await self.get_roles_by_ids(user.roles, user.tenant_id)
 
             return UserInDB.model_validate(entry_in_db)
         except IntegrityError as e:
@@ -210,11 +206,7 @@ class UsersRepository:
     async def update(self, user: UserUpdate):
         stmt = (
             sa.update(Users)
-            .values(
-                **user.model_dump(
-                    exclude_unset=True, exclude={"id", "roles", "predefined_roles"}
-                )
-            )
+            .values(**user.model_dump(exclude_unset=True, exclude={"id", "roles"}))
             .where(Users.id == user.id)
             .returning(Users)
         )
@@ -225,19 +217,16 @@ class UsersRepository:
 
         # TODO should be refactored when we will remove int id field from tables
         if "roles" in user.model_dump(exclude_unset=True):
-            entry_in_db.roles = await self._get_roles(user.roles, entry_in_db.tenant_id)
-
-        if "predefined_roles" in user.model_dump(exclude_unset=True):
-            entry_in_db.predefined_roles = await self._get_predefined_roles(
-                user.predefined_roles
+            entry_in_db.roles = await self.get_roles_by_ids(
+                user.roles, entry_in_db.tenant_id
             )
 
         return UserInDB.model_validate(entry_in_db)
 
-    async def hard_delete(self, id: int):
+    async def hard_delete(self, id: UUID):
         return await self.delegate.delete(id)
 
-    async def soft_delete(self, id: int):
+    async def soft_delete(self, id: UUID):
         # Cleanup personal space
         stmt = sa.delete(Spaces).where(Spaces.user_id == id)
         await self.session.execute(stmt)
@@ -250,7 +239,7 @@ class UsersRepository:
         )
         return await self.delegate.get_model_from_query(stmt)
 
-    async def delete(self, id: int, soft_delete: bool = True):
+    async def delete(self, id: UUID, soft_delete: bool = True):
         if soft_delete:
             return await self.soft_delete(id=id)
 
@@ -284,6 +273,7 @@ class UsersRepository:
             PaginatedResult with items and metadata (total_count, total_pages, etc.)
         """
         import time
+
         start_time = time.time()
 
         # Build base query with tenant isolation (FIRST WHERE condition - security critical!)
@@ -322,12 +312,12 @@ class UsersRepository:
         # Single query, single table scan - O(n) where n = users matching filters
         state_counts_query = (
             sa.select(
-                sa.func.count(1).filter(
-                    Users.state.in_([UserState.ACTIVE, UserState.INVITED])
-                ).label("active_count"),
-                sa.func.count(1).filter(
-                    Users.state == UserState.INACTIVE
-                ).label("inactive_count"),
+                sa.func.count(1)
+                .filter(Users.state.in_([UserState.ACTIVE, UserState.INVITED]))
+                .label("active_count"),
+                sa.func.count(1)
+                .filter(Users.state == UserState.INACTIVE)
+                .label("inactive_count"),
             )
             .select_from(Users)
             .where(Users.tenant_id == tenant_id)
@@ -348,8 +338,8 @@ class UsersRepository:
         counts_result = await self.session.execute(state_counts_query)
         counts_row = counts_result.one()
         state_counts = {
-            'active': int(counts_row.active_count or 0),
-            'inactive': int(counts_row.inactive_count or 0)
+            "active": int(counts_row.active_count or 0),
+            "inactive": int(counts_row.inactive_count or 0),
         }
 
         # Map SortField enum to SQLAlchemy columns
@@ -375,7 +365,6 @@ class UsersRepository:
         # Add eager loading to prevent N+1 queries
         query = query.options(
             selectinload(Users.roles),
-            selectinload(Users.predefined_roles),
             selectinload(Users.tenant).selectinload(Tenants.modules),
             selectinload(Users.api_key),
             selectinload(Users.user_groups),
@@ -409,17 +398,37 @@ class UsersRepository:
         )
         return await self._get_models_from_query(query, with_deleted=False)
 
+    async def count_users_with_admin_permission(
+        self, tenant_id: UUID, exclude_role_id: UUID | None = None
+    ) -> int:
+        """Count active, loginable users in tenant who have 'admin' permission."""
+        q = (
+            sa.select(sa.func.count(sa.distinct(Users.id)))
+            .join(Users.roles)
+            .where(
+                Users.deleted_at.is_(None),
+                Users.state.in_(["active", "invited"]),
+                Users.tenant_id == tenant_id,
+                Roles.permissions.contains(["admin"]),
+            )
+        )
+        if exclude_role_id is not None:
+            q = q.where(Roles.id != exclude_role_id)
+        return await self.session.scalar(q) or 0
+
     async def list_tenant_admins(self, tenant_id: UUID) -> list["UserInDB"]:
         """
-        Returnerar alla users i tenant som har en predefined role som räknas som 'admin'
+        Returns active, loginable users in tenant that have the 'admin' permission
+        via any of their roles. Excludes inactive and deleted users.
         """
         q = (
             sa.select(Users)
-            .join(Users.predefined_roles)
+            .join(Users.roles)
             .where(
                 Users.deleted_at.is_(None),
+                Users.state.in_(["active", "invited"]),
                 Users.tenant_id == tenant_id,
-                sa.func.lower(PredefinedRoles.name).in_(ORG_SPACE_ROLES),
+                Roles.permissions.contains(["admin"]),
             )
         )
         return await self._get_models_from_query(q, with_deleted=False)

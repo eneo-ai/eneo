@@ -2,10 +2,9 @@
 
 import re
 from datetime import datetime, timezone
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import redis.asyncio as aioredis
-
 from intric.main.config import get_settings
 from intric.redis.connection import build_redis_pool_kwargs
 
@@ -19,7 +18,8 @@ def _get_redis_connection() -> aioredis.Redis:
     settings = get_settings()
     redis_url = f"redis://{settings.redis_host}:{settings.redis_port}"
     redis_kwargs = build_redis_pool_kwargs(settings, decode_responses=False)
-    pool = aioredis.ConnectionPool.from_url(redis_url, **redis_kwargs)
+    connection_pool_factory: Any = aioredis.ConnectionPool
+    pool = connection_pool_factory.from_url(redis_url, **redis_kwargs)
     return aioredis.Redis(connection_pool=pool)
 
 
@@ -77,7 +77,7 @@ async def get_worker_health() -> WorkerHealth:
         )
 
 
-def parse_arq_health_string(raw: str) -> dict:
+def parse_arq_health_string(raw: str) -> dict[str, int | str | float | None]:
     """Parse ARQ health-check string into structured data.
 
     Handles two timestamp formats:
@@ -99,7 +99,7 @@ def parse_arq_health_string(raw: str) -> dict:
 
     Returns dict with parsed timestamp and arq_health_age_seconds.
     """
-    result = {
+    result: dict[str, int | str | float | None] = {
         "raw": raw,
         "timestamp": None,
         "timestamp_parsed": None,  # ISO string for debugging

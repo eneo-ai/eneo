@@ -5,6 +5,7 @@
   import { getAppContext, initAppContext } from "$lib/core/AppContext";
   import JobManagerDropdown from "$lib/features/jobs/components/JobManagerDropdownButton.svelte";
   import { initJobManager } from "$lib/features/jobs/JobManager";
+  import { initExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
   import ProfileMenu from "./ProfileMenu.svelte";
   import { initIntric } from "$lib/core/Intric";
   import { initIntricSocket } from "$lib/core/IntricSocket";
@@ -24,6 +25,7 @@
   initIntric(data);
   initAppContext(data);
   initJobManager(data);
+  initExpiringKeysStore(data);
   initAttachmentUrlService(data);
   initFaviconUrlService();
   const socket = initIntricSocket(data);
@@ -48,14 +50,15 @@
   $: isPersonal = currentRoute.startsWith("/spaces/personal");
   $: isOrganization = currentRoute.startsWith("/spaces/organization");
   $: isSpacesGeneric = currentRoute.startsWith("/spaces") && !isPersonal && !isOrganization;
-
 </script>
 
+<!-- eslint-disable svelte/no-navigation-without-resolve -- in-page anchor -->
 <a
   href={contentLink}
   class="bg-primary text-accent-stronger absolute top-1 left-1 z-50 h-0 w-0 overflow-hidden rounded-lg font-medium shadow-lg focus:block focus:h-auto focus:w-auto"
   ><span class="block p-2">{m.jump_to_content()}</span></a
 >
+<!-- eslint-enable svelte/no-navigation-without-resolve -->
 
 <div class="bg-secondary absolute inset-0"></div>
 
@@ -63,6 +66,8 @@
 
 <div
   class="fixed inset-0 z-[100] h-3"
+  role="presentation"
+  aria-hidden="true"
   on:pointerenter={() => {
     $showHeader = true;
   }}
@@ -81,11 +86,13 @@
     <div
       class="border-default hover:bg-accent-dimmer group flex h-[3.25rem] min-w-[3.85rem] items-center justify-between border-r-[0.5px] pr-3 pl-6 md:w-[17rem] md:min-w-[17rem]"
     >
+      <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
       <a href={localizeHref("/")}>
         <EneoWordMark class="text-brand-intric hidden h-[3rem] w-[4.5rem] md:block"></EneoWordMark>
         <IconEneo class="text-brand-intric -ml-0.5 block md:hidden" viewBox="0 0 330 330"
         ></IconEneo>
       </a>
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
       <Button
         unstyled
         class="text-accent-stronger hover:bg-hover-default hidden h-9 w-9 items-center justify-center rounded-lg text-lg md:group-hover:flex"
@@ -97,24 +104,40 @@
       </Button>
     </div>
     <nav class="flex h-[3.25rem] w-full overflow-x-auto">
-      <a href={localizeHref("/spaces/personal/chat")} data-current={isPersonal ? "page" : undefined}>{m.personal()}</a>
-      <a href={localizeHref("/spaces/list")} data-current={isSpacesGeneric ? "page" : undefined}>{m.spaces()}</a>
+      <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
+      <a href={localizeHref("/spaces/personal/chat")} data-current={isPersonal ? "page" : undefined}
+        >{m.personal()}</a
+      >
+      <a href={localizeHref("/spaces/list")} data-current={isSpacesGeneric ? "page" : undefined}
+        >{m.spaces()}</a
+      >
       {#if user.hasPermission("admin")}
-        <a href={localizeHref("/spaces/organization/knowledge")} data-current={isOrganization ? "page" : undefined}>{m.organization()}</a>
+        <a
+          href={localizeHref("/spaces/organization/knowledge")}
+          data-current={isOrganization ? "page" : undefined}>{m.organization()}</a
+        >
       {/if}
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
 
       <div aria-hidden="true" class="flex-grow"></div>
 
       <!-- Toggle -->
       {#if user.hasPermission("admin")}
-        <a href={localizeHref("/admin")} data-current={currentRoute.startsWith("/admin") ? "page" : undefined}
-          >{m.admin()}</a
+        <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
+        <a
+          href={localizeHref("/admin")}
+          data-current={currentRoute.startsWith("/admin") ? "page" : undefined}>{m.admin()}</a
         >
+        <!-- eslint-enable svelte/no-navigation-without-resolve -->
       {/if}
 
       <JobManagerDropdown></JobManagerDropdown>
       <div class="subtle-border h-[3.25rem] w-[0.5px]"></div>
-      <ProfileMenu tenantFederationEnabled={Boolean(data.featureFlags?.federationStatus?.has_multi_tenant_federation)}></ProfileMenu>
+      <ProfileMenu
+        tenantFederationEnabled={Boolean(
+          data.featureFlags?.federationStatus?.has_multi_tenant_federation
+        )}
+      ></ProfileMenu>
     </nav>
   </header>
 

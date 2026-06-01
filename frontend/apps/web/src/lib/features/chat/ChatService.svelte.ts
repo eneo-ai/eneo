@@ -1,5 +1,6 @@
 import { browser } from "$app/environment";
 import { PAGINATION } from "$lib/core/constants";
+import { toastError } from "$lib/core/errors";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import { waitFor } from "$lib/core/waitFor";
@@ -29,11 +30,10 @@ export class ChatService {
   partner = $derived(this.#chatPartner);
   hasCompletionModel = $derived(
     this.#chatPartner &&
-    ('completion_model' in this.#chatPartner
-      ? this.#chatPartner.completion_model !== null &&
-        this.#chatPartner.completion_model !== undefined
-      : 'tools' in this.#chatPartner &&
-        this.#chatPartner.tools?.assistants?.length > 0)
+      ("completion_model" in this.#chatPartner
+        ? this.#chatPartner.completion_model !== null &&
+          this.#chatPartner.completion_model !== undefined
+        : "tools" in this.#chatPartner && this.#chatPartner.tools?.assistants?.length > 0)
   );
   #intric: Intric;
   currentConversation = $state<Conversation>(emptyConversation());
@@ -42,39 +42,78 @@ export class ChatService {
   hasMoreConversations = $derived(this.loadedConversations.length < this.totalConversations);
   #nextCursor = $state<string | null>(null);
 
-  // Track total tokens used in the current conversation
-  historyTokens = $state<number>(0);
-
-  // Track assistant prompt tokens separately so we only count them once
-  promptTokens = $state<number>(0);
-
-  // Track tokens for the message being composed
-  newPromptTokens = $state<number>(0);
-
-  // Separate tracking for text and file tokens to prevent race conditions
-  #textTokensApprox = $state<number>(0);
-  #fileTokensCache = $state<number>(0);
-  #lastCalculatedText = "";
-  #lastCalculatedAttachmentIds = new Set<string>();
-
-  // Track current state to avoid closure issues
-  #currentText = "";
-  #currentAttachmentIdString = "";
-
-  // Learn token density from API responses for better approximations
-  #learnedCharsPerToken = 4.0; // Default approximation, will be refined by API responses
-
-  // Cache token counts per file ID to avoid resets when adding/removing files
-  #fileTokenMap = new Map<string, number>();
-
-  // Debounce timer for token calculations
-  #tokenCalculationTimer: ReturnType<typeof setTimeout> | null = null;
-
-  // Debounce timer for new prompt token calculations
-  #newPromptTokenTimer: ReturnType<typeof setTimeout> | null = null;
-
   // Tool approval state
   pendingToolApproval = $state<PendingToolApproval | null>(null);
+
+  // Context-window usage for the most recent turn. Split into input vs output
+  // so the bar can show what was sent to the LLM (system + MCP + RAG + history
+  // + question, lumped together in the provider's prompt_tokens) separately
+  // from what the model returned. Updated live via SSE token_usage and seeded
+  // from the last persisted message on conversation load.
+  lockedInputTokens = $state<number>(0);
+  lockedOutputTokens = $state<number>(0);
+  contextTokens = $derived(this.lockedInputTokens + this.lockedOutputTokens);
+
+  // Cumulative tokens billed over the entire conversation. Each turn re-sends
+  // the full prompt (system + RAG + history), so per-message prompt_tokens
+  // already include everything sent that turn; summing across messages gives
+  // the true running spend, which grows roughly linearly with turn count even
+  // when the per-turn snapshot looks flat. This is the cost-side view that
+  // complements the headroom-side view shown on the bar itself.
+  cumulativeTokens = $derived.by(() => {
+    const messages = this.currentConversation?.messages;
+    if (!messages?.length) return 0;
+    let total = 0;
+    for (const msg of messages) {
+      total += msg.num_tokens_question ?? 0;
+      total += msg.num_tokens_answer ?? 0;
+    }
+    return total;
+  });
+  turnCount = $derived(this.currentConversation?.messages?.length ?? 0);
+  averageTokensPerTurn = $derived(
+    this.turnCount > 0 ? Math.round(this.cumulativeTokens / this.turnCount) : 0
+  );
+
+  // Forward-looking estimate from the backend preflight endpoint. Set by the
+  // input component as the user types (debounced). Cleared on send and on
+  // conversation/partner switch. The total tokens this pending message will
+  // add equals `pendingInputTokens + pendingFileTokens`.
+  pendingInputTokens = $state<number>(0);
+  pendingFileTokens = $state<number>(0);
+  pendingModelName = $state<string>("");
+  pendingContextWindow = $state<number>(0);
+  #preflightDebounce: ReturnType<typeof setTimeout> | null = null;
+  #preflightGen = 0;
+  // Prefer the pending preflight model/window while the user is composing;
+  // otherwise use the model recorded on the most recent message (covers group
+  // chats where the active model varies per turn), then the partner's own
+  // completion model for fresh assistant conversations.
+  contextLimit = $derived<number>(
+    this.pendingContextWindow ||
+      this.#latestMessageTokenLimit() ||
+      (this.#chatPartner && "completion_model" in this.#chatPartner
+        ? (this.#chatPartner.completion_model?.token_limit ?? 0)
+        : 0)
+  );
+
+  // Single source of truth for "the next message would overflow context".
+  // Both the input (disable Send) and the usage bar (turn red) read from
+  // here so the two surfaces can't disagree.
+  willExceedContext = $derived<boolean>(
+    this.contextLimit > 0 &&
+      this.contextTokens + this.pendingInputTokens + this.pendingFileTokens > this.contextLimit
+  );
+
+  #latestMessageTokenLimit(): number | undefined {
+    const messages = this.currentConversation?.messages;
+    if (!messages?.length) return undefined;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const limit = messages[i].completion_model?.token_limit;
+      if (limit) return limit;
+    }
+    return undefined;
+  }
 
   // Streaming buffer for smoother text rendering (rAF-based for frame alignment)
   #streamBuffer = "";
@@ -88,15 +127,6 @@ export class ChatService {
   constructor(data: Parameters<typeof this.init>[0]) {
     this.#intric = data.intric;
     this.init(data);
-
-    // Automatically calculate history tokens when conversation changes
-    $effect(() => {
-      // This will automatically run whenever currentConversation or its messages change.
-      // The calculateHistoryTokens method is already debounced, so this is safe.
-      if (this.currentConversation?.messages?.length > 0) {
-        this.calculateHistoryTokens();
-      }
-    });
   }
 
   init(data: {
@@ -118,29 +148,104 @@ export class ChatService {
     waitFor(data.initialConversation, {
       onLoaded: (initialConversation) => {
         this.currentConversation = initialConversation;
-
-        // Initialize token count if the conversation has a total_history_tokens field
-        // This would come from backend when loading existing conversations
-        if ((initialConversation as any)?.total_history_tokens) {
-          this.historyTokens = (initialConversation as any).total_history_tokens;
-        } else {
-          // Calculate tokens for the loaded conversation
-          this.calculateHistoryTokens();
-        }
+        this.#seedLockedFromHistory();
+        this.#clearPreflight();
       },
       onNull: () => {
         this.currentConversation = emptyConversation();
-        this.historyTokens = 0;
+        this.#resetLocked();
+        this.#clearPreflight();
       }
     });
   }
 
   newConversation() {
     this.currentConversation = emptyConversation();
-    // Reset token counters for new conversation
-    this.historyTokens = 0;
-    this.newPromptTokens = 0;
-    this.promptTokens = 0;
+    this.#resetLocked();
+    this.#clearPreflight();
+  }
+
+  #seedLockedFromHistory() {
+    const messages = this.currentConversation?.messages;
+    if (!messages?.length) {
+      this.#resetLocked();
+      return;
+    }
+    // Caveat: messages persisted before token measurement was added report
+    // 0 here (backend stores NOT NULL int, no way to distinguish 0 from
+    // "unmeasured"). Loading an old conversation will underreport actual
+    // context fill — fixed when the user sends their next message and we
+    // receive a fresh token_usage SSE event.
+    const last = messages[messages.length - 1];
+    this.lockedInputTokens = last.num_tokens_question ?? 0;
+    this.lockedOutputTokens = last.num_tokens_answer ?? 0;
+  }
+
+  #resetLocked() {
+    this.lockedInputTokens = 0;
+    this.lockedOutputTokens = 0;
+  }
+
+  #clearPreflight() {
+    this.#preflightGen += 1;
+    if (this.#preflightDebounce) {
+      clearTimeout(this.#preflightDebounce);
+      this.#preflightDebounce = null;
+    }
+    this.pendingInputTokens = 0;
+    this.pendingFileTokens = 0;
+    this.pendingModelName = "";
+    this.pendingContextWindow = 0;
+  }
+
+  /**
+   * Estimate the token cost of the pending message. Debounced to avoid
+   * spamming the backend on every keystroke. Race-safe via generation
+   * counter — only the latest in-flight call wins.
+   */
+  requestPreflight(question: string, fileIds: string[], tools?: ConversationTools, delayMs = 400) {
+    if (this.#preflightDebounce) {
+      clearTimeout(this.#preflightDebounce);
+    }
+
+    if (!question && fileIds.length === 0) {
+      this.#clearPreflight();
+      return;
+    }
+
+    const gen = ++this.#preflightGen;
+    const partnerAtStart = this.#chatPartner;
+    const conversationAtStart = this.currentConversation;
+
+    this.#preflightDebounce = setTimeout(async () => {
+      try {
+        const res = await this.#intric.conversations.preflight({
+          chatPartner: partnerAtStart,
+          conversation: conversationAtStart.id ? { id: conversationAtStart.id } : undefined,
+          question,
+          files: fileIds.map((id) => ({ id })),
+          tools
+        });
+
+        // Discard if a newer request started or the user switched context
+        if (gen !== this.#preflightGen) return;
+        if (this.#chatPartner !== partnerAtStart) return;
+        if (this.currentConversation.id !== conversationAtStart.id) return;
+
+        this.pendingInputTokens = res.input_tokens;
+        this.pendingFileTokens = res.file_tokens;
+        this.pendingModelName = res.model_name;
+        this.pendingContextWindow = res.context_window;
+      } catch {
+        // Silent failure — preflight is best-effort, not a blocker
+        if (gen === this.#preflightGen) {
+          this.pendingInputTokens = 0;
+          this.pendingFileTokens = 0;
+          this.pendingModelName = "";
+          this.pendingContextWindow = 0;
+        }
+      }
+    }, delayMs);
   }
 
   // RAF-based flush loop for smooth frame-aligned rendering
@@ -239,12 +344,12 @@ export class ChatService {
         this.newConversation();
       }
     } catch (e) {
-      if (browser) alert(`Error while deleting conversation with id ${conversation.id}`);
+      toastError(e);
       console.error(e);
     }
   }
 
-    async renameConversation(conversation: { id: string }, name: string) {
+  async renameConversation(conversation: { id: string }, name: string) {
     try {
       const trimmed = (name ?? "").trim();
       if (!trimmed) return;
@@ -268,18 +373,11 @@ export class ChatService {
     try {
       const loaded = await this.#intric.conversations.get(conversation);
       this.currentConversation = loaded;
-
-      // Initialize token count if the conversation has a total_history_tokens field
-      // This would come from backend when loading existing conversations
-      if ((loaded as any)?.total_history_tokens) {
-        this.historyTokens = (loaded as any).total_history_tokens;
-      } else {
-        // Calculate tokens for the loaded conversation using the token-estimate endpoint
-        this.calculateHistoryTokens();
-      }
+      this.#seedLockedFromHistory();
+      this.#clearPreflight();
       return loaded;
     } catch (e) {
-      if (browser) alert(`Error while loading conversation with id ${conversation.id}`);
+      toastError(e);
       console.error(e);
     }
   }
@@ -291,9 +389,6 @@ export class ChatService {
     if (oldPartner !== newPartner) {
       this.newConversation();
       this.reloadHistory();
-      // Also reset new prompt tokens when partner changes
-      this.newPromptTokens = 0;
-      this.promptTokens = 0;
     }
   }
 
@@ -306,14 +401,13 @@ export class ChatService {
       requireToolApproval?: boolean,
       abortController?: AbortController
     ) => {
-      this.currentConversation.messages?.push(emptyMessage({ question }));
-
+      // Clear preflight estimate — the message is leaving the input
+      this.#clearPreflight();
       // End any previous stream loop/buffer
       this.#finalizeStream();
       const streamGen = ++this.#streamGen;
       let inrefBuffer = "";
-      const ref =
-        this.currentConversation.messages[this.currentConversation.messages?.length - 1];
+      let ref: ReturnType<typeof emptyMessage> | undefined;
       const isStale = () => this.#streamGen !== streamGen;
 
       const ensureCurrentSession = (event: { session_id: string }) => {
@@ -338,11 +432,16 @@ export class ChatService {
           callbacks: {
             onFirstChunk: (chunk) => {
               if (isStale()) return;
+              // Add the message to the conversation only after backend confirms
+              this.currentConversation.messages?.push(emptyMessage({ question }));
+              ref =
+                this.currentConversation.messages[this.currentConversation.messages?.length - 1];
               Object.assign(ref, chunk);
               this.currentConversation.id = chunk.session_id;
               this.currentConversation.name = question;
             },
             onText: (text) => {
+              if (!ref) return;
               if (isStale()) {
                 abortController?.abort();
                 return;
@@ -383,7 +482,7 @@ export class ChatService {
               ref.references = text.references;
             },
             onImage: (image) => {
-              if (isStale()) return;
+              if (!ref || isStale()) return;
               if (!ensureCurrentSession(image)) return;
               Object.assign(ref, image);
             },
@@ -391,75 +490,130 @@ export class ChatService {
               if (isStale()) return;
               if (!ensureCurrentSession(event)) return;
 
-              // Debug logging for token-related events only
-              if ((event as any).usage || event.intric_event_type === "token_usage") {
-                console.log('[ChatService] Received potential token event:', {
-                  eventType: event.intric_event_type,
-                  hasUsage: !!(event as any).usage,
-                  turnTokens: (event as any).usage?.turn_tokens,
-                  fullEvent: event
-                });
-              }
-
               if (event.intric_event_type === "generating_image") {
+                if (!ref) return;
                 ref.generated_files.push({ id: "", name: "", mimetype: "", size: 0 });
-              }
-
-              // Handle token usage events from backend
-              // The backend should send token count for this conversational turn
-              if ((event as any).usage?.turn_tokens) {
-                const turnTokens = (event as any).usage.turn_tokens;
-                const oldTokens = this.historyTokens;
-                this.historyTokens += turnTokens;
-                console.log('[ChatService] ✅ TOKEN UPDATE RECEIVED:', {
-                  turnTokens,
-                  oldTotal: oldTokens,
-                  newTotal: this.historyTokens
-                });
               } else if (event.intric_event_type === "token_usage") {
-                // Also check for a dedicated token_usage event type
-                console.log('[ChatService] Received token_usage event but no turn_tokens found:', event);
+                // The backend routes token_usage events through the same SSE
+                // channel as intric events. Reflect them on the live message
+                // so reload-from-history matches the in-memory state, then
+                // expose the running context fill for the UI bar.
+                const usage = (
+                  event as unknown as {
+                    usage?: { prompt_tokens: number; completion_tokens: number };
+                  }
+                ).usage;
+                if (!usage) return;
+                if (ref) {
+                  ref.num_tokens_question = usage.prompt_tokens;
+                  ref.num_tokens_answer = usage.completion_tokens;
+                }
+                this.lockedInputTokens = usage.prompt_tokens;
+                this.lockedOutputTokens = usage.completion_tokens;
               }
             },
             onToolCall: (event) => {
-              ensureCurrentSession(event);
+              // Guard order matches the other SSE handlers: ref is only set
+              // after onFirstChunk lands, so an early tool_call event would
+              // otherwise crash trying to read mcp_tool_calls on undefined.
+              if (!ref || isStale()) return;
+              if (!ensureCurrentSession(event)) return;
               // Store tool calls for rendering with translations
               // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
               if (!ref.mcp_tool_calls) {
-                // @ts-expect-error
+                // @ts-expect-error - mcp_tool_calls is not in the static type
                 ref.mcp_tool_calls = [];
               }
               // Update existing tool calls or add new ones (avoid duplicates from approval flow)
-              for (const tool of event.tools) {
-                // @ts-expect-error
+              for (const tool of event.tools as Array<{
+                tool_call_id?: string;
+                [key: string]: unknown;
+              }>) {
+                // @ts-expect-error - mcp_tool_calls is a runtime property
                 const existingIndex = ref.mcp_tool_calls.findIndex(
-                  (t: { tool_call_id?: string }) => t.tool_call_id && t.tool_call_id === tool.tool_call_id
+                  (t: { tool_call_id?: string }) =>
+                    t.tool_call_id && t.tool_call_id === tool.tool_call_id
                 );
                 if (existingIndex >= 0) {
                   // Update existing entry with approval status
-                  // @ts-expect-error
-                  ref.mcp_tool_calls[existingIndex] = { ...ref.mcp_tool_calls[existingIndex], ...tool };
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const mcpCalls = (ref as any).mcp_tool_calls;
+                  mcpCalls[existingIndex] = {
+                    ...mcpCalls[existingIndex],
+                    ...tool
+                  };
                 } else {
-                  // @ts-expect-error
+                  // @ts-expect-error - mcp_tool_calls is a runtime property
                   ref.mcp_tool_calls.push(tool);
                 }
               }
             },
             onToolApprovalRequired: (event) => {
-              ensureCurrentSession(event);
+              if (isStale()) return;
+              if (!ensureCurrentSession(event)) return;
+              // tool_approval_required can race ahead of onFirstChunk when the
+              // model returns a tool call before any text. Dropping the event
+              // would leave pendingToolApproval unset, hiding the approve/deny
+              // buttons forever while the backend keeps waiting. Materialise
+              // the message here so the approval UI has something to attach to.
+              if (!ref) {
+                this.currentConversation.messages?.push(emptyMessage({ question }));
+                ref =
+                  this.currentConversation.messages[this.currentConversation.messages.length - 1];
+                this.currentConversation.id = event.session_id;
+              }
               // Add tools to the message so they display in the UI
               // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
               if (!ref.mcp_tool_calls) {
-                // @ts-expect-error
+                // @ts-expect-error - mcp_tool_calls is not in the static type
                 ref.mcp_tool_calls = [];
               }
-              // @ts-expect-error
+              // @ts-expect-error - mcp_tool_calls is a runtime property
               ref.mcp_tool_calls.push(...event.tools);
               // Set pending approval state - UI will show inline approval buttons
               this.pendingToolApproval = {
                 approvalId: event.approval_id,
                 tools: event.tools
               };
+            },
+            onToolApprovalTimeout: (event) => {
+              if (isStale()) return;
+              if (!ensureCurrentSession(event)) return;
+              // Backend timed out waiting for approval — clear pending state so the
+              // approval UI no longer targets a dead approval_id, and merge the
+              // timeout_denied status into the rendered tool calls so the user sees
+              // what happened instead of stuck "Approve/Deny" buttons.
+              if (
+                this.pendingToolApproval &&
+                this.pendingToolApproval.approvalId === event.approval_id
+              ) {
+                this.pendingToolApproval = null;
+              }
+              if (ref) {
+                // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
+                if (!ref.mcp_tool_calls) {
+                  // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
+                  ref.mcp_tool_calls = [];
+                }
+                for (const tool of event.tools) {
+                  // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
+                  const existingIndex = ref.mcp_tool_calls.findIndex(
+                    (t: { tool_call_id?: string }) =>
+                      t.tool_call_id && t.tool_call_id === tool.tool_call_id
+                  );
+                  if (existingIndex >= 0) {
+                    // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
+                    ref.mcp_tool_calls[existingIndex] = {
+                      // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
+                      ...ref.mcp_tool_calls[existingIndex],
+                      ...tool
+                    };
+                  } else {
+                    // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
+                    ref.mcp_tool_calls.push(tool);
+                  }
+                }
+              }
             }
           }
         });
@@ -468,23 +622,38 @@ export class ChatService {
 
         const streamAborted = error instanceof Error && error.message.includes("aborted");
         if (streamAborted) {
-          // In that case nothing more to do, just return
-          return;
-        }
+          // Backend persists the user's message before stream start and best-effort
+          // saves a partial assistant reply on abort, so the conversation survives a
+          // refresh. Falling through to reloadHistory() (below) syncs the sidebar with
+          // the now-persisted state instead of leaving the new session invisible until
+          // a manual reload.
+        } else if (!ref) {
+          // If the error happened before streaming started (ref is undefined),
+          // no message was added to the conversation — just propagate the error
+          // so ConversationInput can restore the user's input.
+          console.error(error);
+          throw error;
+        } else if (error instanceof IntricError && !ref.answer) {
+          // If streaming started but no content arrived yet, remove the empty message
+          this.currentConversation.messages.pop();
+          console.error(error);
+          throw error;
+        } else {
+          // Error during streaming — show inline in the conversation
+          let message = "We encountered an error processing your request.";
+          if (error instanceof IntricError) {
+            message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
+          } else if (error instanceof Object && "message" in error && "name" in error) {
+            message += `\n\`\`\`\n${error.name}: "${error.message}"\n\`\`\``;
+          }
 
-        let message = "We encountered an error processing your request.";
-        if (error instanceof IntricError) {
-          message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
-        } else if (error instanceof Object && "message" in error && "name" in error) {
-          message += `\n\`\`\`\n$"${error.name}: error.message}"\n\`\`\``;
+          this.currentConversation.messages[this.currentConversation.messages?.length - 1].answer =
+            message;
+          console.error(error);
         }
-
-        this.currentConversation.messages[this.currentConversation.messages?.length - 1].answer =
-          message;
-        console.error(error);
       } finally {
         if (this.#streamGen === streamGen) {
-          if (inrefBuffer) {
+          if (ref && inrefBuffer) {
             ref.answer += inrefBuffer;
             inrefBuffer = "";
           }
@@ -502,255 +671,13 @@ export class ChatService {
     }
   );
 
-  // New method to calculate tokens for the entire conversation history
-  async calculateHistoryTokens() {
-    // Don't calculate if no partner or messages
-    if (!this.#chatPartner?.id || !this.currentConversation?.messages?.length) {
-      return;
-    }
-
-    // Cancel any pending calculation
-    if (this.#tokenCalculationTimer) {
-      clearTimeout(this.#tokenCalculationTimer);
-    }
-
-    // Debounce the calculation
-    this.#tokenCalculationTimer = setTimeout(async () => {
-      try {
-        // Combine all message content (questions and answers)
-        const fullText = this.currentConversation.messages
-          .map(msg => {
-            let text = '';
-            if (msg.question) text += msg.question + '\n';
-            if (msg.answer) text += msg.answer + '\n';
-            return text;
-          })
-          .join('\n');
-
-        // Get file IDs from all messages
-        const fileIds = this.currentConversation.messages
-          .flatMap(msg => msg.files || [])
-          .filter(file => file.id)
-          .map(file => file.id);
-
-
-        // Use the token-estimate endpoint
-        const response = await this.#intric.client.fetch("/api/v1/assistants/{id}/token-estimate", {
-          method: "post",
-          params: {
-            path: { id: this.#chatPartner.id }
-          },
-          requestBody: {
-            "application/json": {
-              text: fullText,
-              file_ids: fileIds
-            }
-          }
-        });
-
-        if (response) {
-          const breakdown = response.breakdown || {};
-          const promptTokens = breakdown.prompt ?? this.promptTokens;
-          const historyTokens = (breakdown.text || 0) + (breakdown.files || 0);
-
-          this.promptTokens = promptTokens;
-          this.historyTokens = historyTokens;
-
-          console.log(
-            `[ChatService] Token usage: ${(promptTokens + historyTokens).toLocaleString()} tokens ` +
-            `(text: ${breakdown.text || 0}, files: ${breakdown.files || 0}, prompt: ${promptTokens})`
-          );
-        }
-      } catch (error) {
-        console.error('[ChatService] Token calculation failed, using fallback');
-        // Fallback to character-based approximation
-        const fallbackTokens = Math.ceil(
-          this.currentConversation.messages
-            .map(msg => (msg.question || '').length + (msg.answer || '').length)
-            .reduce((a, b) => a + b, 0) / 4
-        );
-        this.historyTokens = fallbackTokens;
-      }
-    }, 500); // 500ms debounce
-  }
-
-  // New method to calculate tokens for the message being composed
-  async calculateNewPromptTokens(text: string, attachments: { id: string; size?: number }[]) {
-    if (!this.#chatPartner?.id) {
-      this.newPromptTokens = 0;
-      this.#textTokensApprox = 0;
-      this.#fileTokensCache = 0;
-      return;
-    }
-
-    // Store current text to avoid closure issues
-    this.#currentText = text;
-
-    // --- IMMEDIATE UPDATE FOR RESPONSIVE UI ---
-    // Use learned token density for better approximations
-    this.#textTokensApprox = Math.ceil(text.length / this.#learnedCharsPerToken);
-
-    // Create a stable string representation of attachment IDs for comparison
-    const attachmentIds = attachments.map(a => a.id).filter(Boolean);
-    const attachmentIdString = attachmentIds.sort().join(',');
-
-    // Check if attachments have actually changed based on ID string
-    const attachmentsChanged = attachmentIdString !== this.#currentAttachmentIdString;
-
-    // If attachments changed, recalculate file tokens from cached values
-    if (attachmentsChanged) {
-      const estimateTokensFromSize = (fileSize?: number | null) => {
-        const fallbackSize = 100_000; // ~250 tokens fallback when size is unknown
-        const size = fileSize && fileSize > 0 ? fileSize : fallbackSize;
-        const bytesPerToken = 400; // generous average across supported formats
-        return Math.ceil(size / bytesPerToken);
-      };
-
-      // Calculate total file tokens from cached per-file values
-      let totalFileTokens = 0;
-      for (const fileId of attachmentIds) {
-        if (this.#fileTokenMap.has(fileId)) {
-          // Use cached value for files we've seen before
-          totalFileTokens += this.#fileTokenMap.get(fileId)!;
-        } else {
-          // Rough estimate for new files (will be updated by API)
-          const attachment = attachments.find(file => file.id === fileId);
-          const roughEstimate = estimateTokensFromSize(attachment?.size);
-          this.#fileTokenMap.set(fileId, roughEstimate);
-          totalFileTokens += roughEstimate;
-        }
-      }
-
-      // Remove cached tokens for files that are no longer present
-      const currentFileIdSet = new Set(attachmentIds);
-      for (const cachedFileId of this.#fileTokenMap.keys()) {
-        if (!currentFileIdSet.has(cachedFileId)) {
-          this.#fileTokenMap.delete(cachedFileId);
-        }
-      }
-
-      this.#fileTokensCache = totalFileTokens;
-      this.#currentAttachmentIdString = attachmentIdString;
-      this.#lastCalculatedAttachmentIds = new Set(attachmentIds);
-    }
-
-    // Immediately update with text approximation + cached file tokens
-    this.newPromptTokens = this.#textTokensApprox + this.#fileTokensCache;
-
-    // If no input at all, reset everything
-    if (text.trim().length === 0 && attachments.length === 0) {
-      this.newPromptTokens = 0;
-      this.#textTokensApprox = 0;
-      this.#fileTokensCache = 0;
-      this.#fileTokenMap.clear();
-      this.#lastCalculatedText = "";
-      this.#lastCalculatedAttachmentIds.clear();
-      return;
-    }
-
-    // --- DEBOUNCED API CALL FOR ACCURACY ---
-    if (this.#newPromptTokenTimer) {
-      clearTimeout(this.#newPromptTokenTimer);
-    }
-
-    // Store the request identifiers to check for staleness later
-    const requestText = text;
-    const requestAttachmentIdString = attachmentIdString;
-
-    this.#newPromptTokenTimer = setTimeout(async () => {
-      try {
-        // Check if this request is stale by comparing with CURRENT state (not closure)
-        if (this.#currentText !== requestText || this.#currentAttachmentIdString !== requestAttachmentIdString) {
-          return; // Silently skip stale requests
-        }
-
-        // Use the request attachment IDs that were captured at the time of the request
-        const fileIds = requestAttachmentIdString.split(',').filter(Boolean);
-
-        const response = await this.#intric.client.fetch("/api/v1/assistants/{id}/token-estimate", {
-          method: "post",
-          params: {
-            path: { id: this.#chatPartner.id }
-          },
-          requestBody: {
-            "application/json": {
-              text,
-              file_ids: fileIds
-            }
-          }
-        });
-
-        if (response?.breakdown) {
-          const apiTextTokens = response.breakdown.text || 0;
-          const apiTextLength = text.length;
-
-          if (apiTextTokens > 0 && apiTextLength > 0) {
-            const newCharsPerToken = apiTextLength / apiTextTokens;
-            this.#learnedCharsPerToken = this.#learnedCharsPerToken * 0.8 + newCharsPerToken * 0.2;
-          }
-        }
-
-        // Double-check staleness after API returns using CURRENT state
-        if (this.#currentText !== requestText || this.#currentAttachmentIdString !== requestAttachmentIdString) {
-          return; // Silently skip stale responses
-        }
-
-        const breakdown = response?.breakdown;
-        if (breakdown) {
-
-          // Update per-file token cache with accurate values from API
-          if (response?.breakdown?.file_details) {
-            for (const [fileId, tokenCount] of Object.entries(response.breakdown.file_details)) {
-              this.#fileTokenMap.set(fileId, tokenCount as number);
-            }
-          }
-
-          // Update cached file tokens total
-          this.#fileTokensCache = breakdown.files || 0;
-
-          // Persist prompt tokens separately so we only count them once
-          const promptTokens = breakdown.prompt ?? this.promptTokens;
-          this.promptTokens = promptTokens;
-
-          // Calculate total tokens from breakdown without the assistant prompt
-          const totalNewTokens = (breakdown.text || 0) + (breakdown.files || 0);
-
-          // Update the total with accurate API result
-          this.newPromptTokens = totalNewTokens;
-
-          // Store the text that was calculated
-          this.#lastCalculatedText = requestText;
-        }
-      } catch (error) {
-        console.error('[ChatService] Token calculation failed, keeping approximation:', error);
-        // Keep the current approximation on error
-      }
-    }, 300); // 300ms debounce for API accuracy
-  }
-
-  // Method to cleanly reset all token tracking
-  resetNewPromptTokens() {
-    this.newPromptTokens = 0;
-    this.#textTokensApprox = 0;
-    this.#fileTokensCache = 0;
-    this.#fileTokenMap.clear();
-    this.#lastCalculatedText = "";
-    this.#lastCalculatedAttachmentIds.clear();
-    this.#currentText = "";
-    this.#currentAttachmentIdString = "";
-    // Keep learned ratio - it's useful across messages
-
-    // Cancel any pending API calls
-    if (this.#newPromptTokenTimer) {
-      clearTimeout(this.#newPromptTokenTimer);
-      this.#newPromptTokenTimer = null;
-    }
-  }
-
+  // Fetch prompt tokens and effective limit from backend.
+  // When loading an existing conversation, approximate history tokens from message text.
+  // Actual token counts are updated via SSE token_usage events after each LLM response.
   // Submit approval decisions for pending tool calls
   async submitToolApproval(decisions: Array<{ tool_call_id: string; approved: boolean }>) {
     if (!this.pendingToolApproval) {
-      console.warn('[ChatService] No pending tool approval to submit');
+      console.warn("[ChatService] No pending tool approval to submit");
       return;
     }
 
@@ -760,7 +687,7 @@ export class ChatService {
         decisions
       });
     } catch (error) {
-      console.error('[ChatService] Failed to submit tool approval:', error);
+      console.error("[ChatService] Failed to submit tool approval:", error);
       throw error;
     } finally {
       // Clear pending approval regardless of success/failure
@@ -772,7 +699,7 @@ export class ChatService {
   async approveAllTools() {
     if (!this.pendingToolApproval) return;
 
-    const decisions = this.pendingToolApproval.tools.map(tool => ({
+    const decisions = this.pendingToolApproval.tools.map((tool) => ({
       tool_call_id: tool.tool_call_id!,
       approved: true
     }));
@@ -784,7 +711,7 @@ export class ChatService {
   async rejectAllTools() {
     if (!this.pendingToolApproval) return;
 
-    const decisions = this.pendingToolApproval.tools.map(tool => ({
+    const decisions = this.pendingToolApproval.tools.map((tool) => ({
       tool_call_id: tool.tool_call_id!,
       approved: false
     }));
@@ -804,7 +731,7 @@ export class ChatService {
 
     // Remove the approved tool from pending list
     const remainingTools = this.pendingToolApproval.tools.filter(
-      t => t.tool_call_id !== toolCallId
+      (t) => t.tool_call_id !== toolCallId
     );
 
     if (remainingTools.length === 0) {
@@ -831,7 +758,7 @@ export class ChatService {
 
     // Remove the denied tool from pending list
     const remainingTools = this.pendingToolApproval.tools.filter(
-      t => t.tool_call_id !== toolCallId
+      (t) => t.tool_call_id !== toolCallId
     );
 
     if (remainingTools.length === 0) {
@@ -860,6 +787,9 @@ function emptyMessage(partial?: Partial<ConversationMessage>): ConversationMessa
     tools: {
       assistants: []
     },
+    tool_calls: [],
+    num_tokens_question: 0,
+    num_tokens_answer: 0,
     ...partial
   };
 }

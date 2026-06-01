@@ -15,6 +15,7 @@
   const SKIPPED_PREFIX = "skipped duplicate crawl";
 
   // Set dayjs locale based on paraglide locale
+  // eslint-disable-next-line svelte/no-immutable-reactive-statements
   $: dayjs.locale(getLocale());
   /* TODO colours */
   function statusInfo(): { label: string; color: Label.LabelColor; tooltip?: string } {
@@ -43,25 +44,28 @@
       case "complete": {
         const completed = dayjs(website.latest_crawl?.finished_at);
         const label = m.synced_ago({ timeAgo: dayjs().to(completed) });
-        
+
         // If there are failures, show warning color and include failure info in tooltip
         if (hasFailures) {
           let failureText: string;
           if (pagesFailed > 0 && filesFailed > 0) {
-            failureText = m.pages_and_files_failed({ pages: pagesFailed.toString(), files: filesFailed.toString() });
+            failureText = m.pages_and_files_failed({
+              pages: pagesFailed.toString(),
+              files: filesFailed.toString()
+            });
           } else if (pagesFailed > 0) {
             failureText = m.pages_failed({ count: pagesFailed.toString() });
           } else {
             failureText = m.files_failed({ count: filesFailed.toString() });
           }
-          
+
           return {
             color: "yellow",
             label: m.synced_with_warnings(),
             tooltip: `${m.synced_on({ date: completed.format("YYYY-MM-DD HH:mm") })} - ${failureText}`
           };
         }
-        
+
         return {
           color: dayjs().diff(completed, "days") < 10 ? "green" : "yellow",
           label,

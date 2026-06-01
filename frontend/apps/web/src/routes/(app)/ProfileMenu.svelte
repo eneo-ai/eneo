@@ -9,7 +9,6 @@
   import { fly, fade } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import SelectLanguage from "$lib/components/SelectLanguage.svelte";
   import { goto } from "$app/navigation";
   import { browser } from "$app/environment";
 
@@ -17,17 +16,18 @@
     tenantFederationEnabled?: boolean;
   }
 
-  const { tenantFederationEnabled = false } = $props<Props>();
+  const { tenantFederationEnabled = false }: Props = $props();
 
   function handleSwitchOrganisation() {
     // Clear client-side tenant storage
     if (browser) {
-      sessionStorage.removeItem('eneo-last-tenant-slug');
-      localStorage.removeItem('eneo:last-tenant');
+      sessionStorage.removeItem("eneo-last-tenant-slug");
+      localStorage.removeItem("eneo:last-tenant");
     }
 
-    // Navigate to endpoint
-    goto('/login/switch-organisation');
+    // Navigate to endpoint (not a SvelteKit route — server endpoint)
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- server endpoint, not a typed route
+    goto("/login/switch-organisation");
   }
 
   const {

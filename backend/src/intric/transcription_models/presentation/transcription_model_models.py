@@ -1,14 +1,9 @@
+from decimal import Decimal
 from typing import Optional, Union
 from uuid import UUID
 
 from pydantic import BaseModel
 
-from intric.ai_models.model_enums import (
-    ModelFamily,
-    ModelHostingLocation,
-    ModelOrg,
-    ModelStability,
-)
 from intric.main.models import NOT_PROVIDED, ModelId, NotProvided
 from intric.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
@@ -20,14 +15,15 @@ class TranscriptionModelPublic(BaseModel):
     id: UUID
     name: str
     nickname: str
-    family: ModelFamily
+    family: Optional[str] = None
     is_deprecated: bool
-    stability: ModelStability
-    hosting: ModelHostingLocation
+    stability: Optional[str] = None
+    hosting: Optional[str] = None
     open_source: Optional[bool] = None
     description: Optional[str] = None
     hf_link: Optional[str] = None
-    org: Optional[ModelOrg] = None
+    org: Optional[str] = None
+    cost_per_minute: Optional[Decimal] = None
     can_access: bool = False
     is_locked: bool = True
     lock_reason: Optional[str] = None
@@ -41,21 +37,23 @@ class TranscriptionModelPublic(BaseModel):
     # Provider info for grouped display in UI
     provider_name: Optional[str] = None
     provider_type: Optional[str] = None
+    deprecation_date: Optional[str] = None
 
     @classmethod
     def from_domain(cls, model: TranscriptionModel):
         return cls(
             id=model.id,
             name=model.name,
-            nickname=model.nickname,
+            nickname=model.nickname or "",
             family=model.family,
-            is_deprecated=model.is_deprecated,
+            is_deprecated=model.is_effectively_deprecated,
             stability=model.stability,
             hosting=model.hosting,
             open_source=model.open_source,
             description=model.description,
             hf_link=model.hf_link,
             org=model.org,
+            cost_per_minute=getattr(model, "cost_per_minute", None),
             can_access=model.can_access,
             is_locked=model.is_locked,
             lock_reason=model.lock_reason,
@@ -70,6 +68,7 @@ class TranscriptionModelPublic(BaseModel):
             provider_id=model.provider_id,
             provider_name=model.provider_name,
             provider_type=model.provider_type,
+            deprecation_date=model.litellm_deprecation_date,
         )
 
 

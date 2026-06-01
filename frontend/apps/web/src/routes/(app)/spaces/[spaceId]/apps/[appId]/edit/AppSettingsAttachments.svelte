@@ -72,10 +72,7 @@
     <div class="flex flex-grow items-center justify-between gap-1">
       <AttachmentPreview {file} isTableView={true}>
         {#snippet children({ showFile }: { showFile: () => void })}
-          <button
-            on:click={showFile}
-            class="line-clamp-1 cursor-pointer text-left hover:underline"
-          >
+          <button on:click={showFile} class="line-clamp-1 cursor-pointer text-left hover:underline">
             {file.name}
           </button>
         {/snippet}

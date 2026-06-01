@@ -29,7 +29,7 @@
 			"settings": {
 				"python.defaultInterpreterPath": "/workspace/backend/.venv/bin/python",
 				"python.pythonPath": "/workspace/backend/.venv/bin/python",
-				"python.terminal.activateEnvironment": true,
+				"python.terminal.activateEnvironment": false,
 				"[python]": {
 					"editor.defaultFormatter": "charliermarsh.ruff"
 				}
@@ -38,6 +38,6 @@
 	},
 	"remoteEnv": {
 		"VIRTUAL_ENV": "/workspace/backend/.venv",
-		"PATH": "/workspace/backend/.venv/bin:${containerEnv:PATH}"
+		"PATH": "/home/vscode/.bun/bin:/workspace/backend/.venv/bin:${containerEnv:PATH}"
 	}
 }

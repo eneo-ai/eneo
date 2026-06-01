@@ -1,14 +1,9 @@
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel
 
-from intric.ai_models.model_enums import (
-    ModelFamily,
-    ModelHostingLocation,
-    ModelStability,
-)
-from intric.ai_models.model_enums import ModelOrg as Orgs
 from intric.embedding_models.domain.embedding_model import EmbeddingModel
 from intric.main.models import NOT_PROVIDED, BaseResponse, ModelId, NotProvided
 from intric.security_classifications.presentation.security_classification_models import (
@@ -18,17 +13,20 @@ from intric.security_classifications.presentation.security_classification_models
 
 class EmbeddingModelPublic(BaseResponse):
     name: str
-    family: ModelFamily
+    nickname: Optional[str] = None
+    family: Optional[str] = None
     is_deprecated: bool
     open_source: bool
     dimensions: Optional[int] = None
     max_input: Optional[int] = None
     hf_link: Optional[str] = None
-    stability: ModelStability
-    hosting: ModelHostingLocation
+    stability: Optional[str] = None
+    hosting: Optional[str] = None
     description: Optional[str] = None
-    org: Optional[Orgs] = None
+    org: Optional[str] = None
     litellm_model_name: Optional[str] = None
+    input_cost_per_token: Optional[Decimal] = None
+    output_cost_per_token: Optional[Decimal] = None
     can_access: bool = False
     is_locked: bool = True
     lock_reason: Optional[str] = None
@@ -41,6 +39,7 @@ class EmbeddingModelPublic(BaseResponse):
     # Provider info for grouped display in UI
     provider_name: Optional[str] = None
     provider_type: Optional[str] = None
+    deprecation_date: Optional[str] = None
 
     @classmethod
     def from_domain(cls, model: EmbeddingModel):
@@ -56,8 +55,9 @@ class EmbeddingModelPublic(BaseResponse):
             created_at=model.created_at,
             updated_at=model.updated_at,
             name=model.name,
+            nickname=model.nickname,
             family=model.family,
-            is_deprecated=model.is_deprecated,
+            is_deprecated=model.is_effectively_deprecated,
             open_source=model.open_source,
             max_input=model.max_input,
             hf_link=model.hf_link,
@@ -66,6 +66,8 @@ class EmbeddingModelPublic(BaseResponse):
             description=model.description,
             org=model.org,
             litellm_model_name=model.litellm_model_name,
+            input_cost_per_token=getattr(model, "input_cost_per_token", None),
+            output_cost_per_token=getattr(model, "output_cost_per_token", None),
             dimensions=model.dimensions,
             can_access=model.can_access,
             is_locked=model.is_locked,
@@ -77,6 +79,7 @@ class EmbeddingModelPublic(BaseResponse):
             provider_id=model.provider_id,
             provider_name=model.provider_name,
             provider_type=model.provider_type,
+            deprecation_date=model.litellm_deprecation_date,
         )
 
 

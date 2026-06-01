@@ -6,9 +6,10 @@ Extracted from routes.py for improved testability and separation of concerns.
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional, cast
 from uuid import UUID
 
+import redis.asyncio as aioredis
 import redis.exceptions
 
 logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ def build_rate_limit_key(
 
 
 async def check_rate_limit(
-    redis_client,
+    redis_client: aioredis.Redis,
     key: str,
     config: Optional[RateLimitConfig] = None,
 ) -> RateLimitResult:
@@ -113,11 +114,14 @@ async def check_rate_limit(
     try:
         # NOTE: This is Redis EVAL command for Lua scripts, NOT Python's eval()
         # Redis EVAL is the standard, safe way to run atomic Lua scripts
-        count = await redis_client.eval(
-            RATE_LIMIT_SCRIPT,
-            1,  # number of keys
-            key,  # KEYS[1]
-            config.window_seconds,  # ARGV[1] - TTL in seconds
+        count = cast(
+            int,
+            await cast(Any, redis_client).eval(
+                RATE_LIMIT_SCRIPT,
+                1,  # number of keys
+                key,  # KEYS[1]
+                config.window_seconds,  # ARGV[1] - TTL in seconds
+            ),
         )
 
         return RateLimitResult(
@@ -133,7 +137,7 @@ async def check_rate_limit(
 
 
 async def enforce_rate_limit(
-    redis_client,
+    redis_client: aioredis.Redis,
     user_id: UUID,
     tenant_id: UUID,
     config: Optional[RateLimitConfig] = None,

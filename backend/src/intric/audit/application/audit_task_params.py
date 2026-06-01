@@ -1,8 +1,8 @@
 """Task parameters for audit logging ARQ worker."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -22,9 +22,9 @@ class AuditLogTaskParams(BaseModel):
     action: ActionType
     entity_type: EntityType
     entity_id: UUID
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     description: str = Field(min_length=1, max_length=500)
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     outcome: Outcome = Outcome.SUCCESS
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
@@ -68,7 +68,7 @@ class AuditExportTaskParams(BaseModel):
     format: ExportFormat = ExportFormat.CSV
     max_records: Optional[int] = Field(default=None, ge=1)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for ARQ job serialization."""
         return {
             "tenant_id": str(self.tenant_id),
@@ -82,7 +82,7 @@ class AuditExportTaskParams(BaseModel):
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "AuditExportTaskParams":
+    def from_dict(cls, data: dict[str, Any]) -> "AuditExportTaskParams":
         """Create from dict received by ARQ worker."""
         format_value = data.get("format", "csv")
         if format_value == "json":

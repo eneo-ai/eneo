@@ -1,10 +1,11 @@
 """Fixtures for audit integration tests."""
 
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+
 import pytest
 from sqlalchemy import select
-from uuid import uuid4
-from datetime import datetime, timedelta, timezone
-from dataclasses import dataclass
 
 from intric.database.tables.users_table import Users
 
@@ -14,8 +15,7 @@ async def test_user(db_session, test_tenant):
     """Get the default test user ID."""
     async with db_session() as session:
         query = select(Users.id).where(
-            Users.email == "test@example.com",
-            Users.tenant_id == test_tenant.id
+            Users.email == "test@example.com", Users.tenant_id == test_tenant.id
         )
         result = await session.execute(query)
         user_id = result.scalar_one_or_none()
@@ -76,17 +76,17 @@ async def auth_headers_with_session(client, auth_headers, redis_client, db_conta
         "/api/v1/audit/access-session",
         json={
             "category": "integration_test",
-            "description": "Integration test session for audit API testing"
+            "description": "Integration test session for audit API testing",
         },
-        headers=auth_headers
+        headers=auth_headers,
     )
-    assert response.status_code == 200, f"Failed to create audit session: {response.text}"
+    assert response.status_code == 200, (
+        f"Failed to create audit session: {response.text}"
+    )
 
     # Extract cookie value as simple dict to avoid domain matching issues
     # httpx Cookies objects can fail to send cookies due to domain/path mismatch
-    cookies_dict = {
-        "audit_session_id": response.cookies.get("audit_session_id")
-    }
+    cookies_dict = {"audit_session_id": response.cookies.get("audit_session_id")}
 
     return auth_headers, cookies_dict
 
@@ -94,6 +94,7 @@ async def auth_headers_with_session(client, auth_headers, redis_client, db_conta
 @dataclass
 class TestUser2:
     """Test user from a second tenant for isolation testing."""
+
     id: str
     email: str
     tenant_id: str
@@ -108,10 +109,7 @@ async def test_tenant_2(db_container):
     async with db_container() as container:
         tenant_service = container.tenant_service()
         tenant = await tenant_service.create_tenant(
-            TenantBase(
-                name="test_tenant_2",
-                slug="test-tenant-2"
-            )
+            TenantBase(name="test_tenant_2", slug="test-tenant-2")
         )
         return tenant
 
@@ -122,9 +120,9 @@ async def test_user_2(db_container, test_tenant_2, test_settings):
 
     Returns a TestUser2 object with id, email, tenant_id, and API key.
     """
+    import bcrypt
     import psycopg2
     from psycopg2 import sql
-    import bcrypt
 
     # Create user in tenant 2 via raw SQL (same pattern as main conftest)
     conn = psycopg2.connect(
@@ -140,7 +138,7 @@ async def test_user_2(db_container, test_tenant_2, test_settings):
         tenant_id = test_tenant_2.id
 
         # Create password hash
-        pwd_bytes = "test_password_2".encode('utf-8')
+        pwd_bytes = "test_password_2".encode("utf-8")
         salt = bcrypt.gensalt()
         hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
 
@@ -151,32 +149,53 @@ async def test_user_2(db_container, test_tenant_2, test_settings):
         )
         cur.execute(
             add_user_query,
-            ("test_user_2", "test2@example.com", hashed_password.decode('utf-8'),
-             salt.decode(), tenant_id, 0, "active"),
+            (
+                "test_user_2",
+                "test2@example.com",
+                hashed_password.decode("utf-8"),
+                salt.decode(),
+                tenant_id,
+                0,
+                "active",
+            ),
         )
         user_id = cur.fetchone()[0]
 
-        # Get or create Owner role
-        check_role_query = sql.SQL("SELECT id FROM predefined_roles WHERE name = %s")
-        cur.execute(check_role_query, ("Owner",))
+        # Get or create Owner role (tenant-scoped)
+        check_role_query = sql.SQL(
+            "SELECT id FROM roles WHERE name = %s AND tenant_id = %s"
+        )
+        cur.execute(check_role_query, ("Owner", tenant_id))
         role = cur.fetchone()
 
         if role is None:
-            owner_permissions = ["admin", "assistants", "services", "collections",
-                               "insights", "AI", "editor", "websites"]
+            owner_permissions = [
+                "admin",
+                "assistants",
+                "services",
+                "collections",
+                "insights",
+                "AI",
+                "editor",
+                "websites",
+                "shared_spaces",
+            ]
             add_role_query = sql.SQL(
-                "INSERT INTO predefined_roles (name, permissions) VALUES (%s, %s) RETURNING id"
+                "INSERT INTO roles (name, permissions, tenant_id, predefined_source) "
+                "VALUES (%s, %s, %s, %s) RETURNING id"
             )
-            cur.execute(add_role_query, ("Owner", owner_permissions))
-            predefined_role_id = cur.fetchone()[0]
+            cur.execute(
+                add_role_query, ("Owner", owner_permissions, tenant_id, "Owner")
+            )
+            role_id = cur.fetchone()[0]
         else:
-            predefined_role_id = role[0]
+            role_id = role[0]
 
         # Assign Owner role to user
         assign_role_query = sql.SQL(
-            "INSERT INTO users_predefined_roles (user_id, predefined_role_id) VALUES (%s, %s)"
+            "INSERT INTO users_roles (user_id, role_id) VALUES (%s, %s)"
         )
-        cur.execute(assign_role_query, (user_id, predefined_role_id))
+        cur.execute(assign_role_query, (user_id, role_id))
 
         conn.commit()
         cur.close()
@@ -190,16 +209,14 @@ async def test_user_2(db_container, test_tenant_2, test_settings):
 
         auth_service = container.auth_service()
         api_key = await auth_service.create_user_api_key(
-            prefix="test2",
-            user_id=user.id,
-            delete_old=True
+            prefix="test2", user_id=user.id, delete_old=True
         )
 
         return TestUser2(
             id=str(user.id),
             email=user.email,
             tenant_id=str(tenant_id),
-            token=api_key.key  # Use API key instead of JWT token
+            token=api_key.key,  # Use API key instead of JWT token
         )
 
 
@@ -221,12 +238,12 @@ async def sample_audit_logs(db_session, test_tenant, test_user):
     Creates 55 logs with varied actions, timestamps, and metadata
     to test pagination, filtering, and export functionality.
     """
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-    from intric.audit.domain.audit_log import AuditLog
     from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
     from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.audit_log import AuditLog
+    from intric.audit.domain.entity_types import EntityType
     from intric.audit.domain.outcome import Outcome
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     logs = []
     actions = [
@@ -248,7 +265,9 @@ async def sample_audit_logs(db_session, test_tenant, test_user):
                 actor_id=test_user,
                 actor_type=ActorType.USER,
                 action=action,
-                entity_type=EntityType.USER if "USER" in action.value.upper() else EntityType.ASSISTANT,
+                entity_type=EntityType.USER
+                if "USER" in action.value.upper()
+                else EntityType.ASSISTANT,
                 entity_id=uuid4(),
                 timestamp=datetime.now(timezone.utc) - timedelta(hours=i),
                 description=f"Test audit log {i + 1} - {action.value}",
@@ -273,12 +292,12 @@ async def searchable_audit_logs(db_session, test_tenant, test_user):
 
     Total: 25 logs for comprehensive search testing.
     """
-    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-    from intric.audit.domain.audit_log import AuditLog
     from intric.audit.domain.action_types import ActionType
-    from intric.audit.domain.entity_types import EntityType
     from intric.audit.domain.actor_types import ActorType
+    from intric.audit.domain.audit_log import AuditLog
+    from intric.audit.domain.entity_types import EntityType
     from intric.audit.domain.outcome import Outcome
+    from intric.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
     logs = []
 
@@ -292,7 +311,9 @@ async def searchable_audit_logs(db_session, test_tenant, test_user):
                 tenant_id=test_tenant.id,
                 actor_id=test_user,
                 actor_type=ActorType.USER,
-                action=ActionType.ASSISTANT_CREATED if i % 2 == 0 else ActionType.ASSISTANT_UPDATED,
+                action=ActionType.ASSISTANT_CREATED
+                if i % 2 == 0
+                else ActionType.ASSISTANT_UPDATED,
                 entity_type=EntityType.ASSISTANT,
                 entity_id=uuid4(),
                 timestamp=datetime.now(timezone.utc) - timedelta(hours=i),

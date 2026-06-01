@@ -30,9 +30,22 @@ from intric.tenants.tenant_repo import TenantRepository
 
 
 @pytest.fixture(autouse=True)
-def enable_tenant_credentials(test_settings, monkeypatch):
-    """Enable tenant credentials feature for all tests in this module."""
-    monkeypatch.setattr(test_settings, "tenant_credentials_enabled", True)
+def enable_tenant_credentials(test_settings):
+    """Enable tenant credentials feature for all tests in this module.
+
+    Uses set_settings() with a model_copy so the FastAPI Depends(get_settings)
+    resolution sees the override. Plain monkeypatch on the session-scoped
+    test_settings instance is not enough when another module has swapped the
+    singleton via set_settings(...) earlier in the same xdist worker.
+    """
+    from intric.main.config import set_settings
+
+    enabled_settings = test_settings.model_copy(
+        update={"tenant_credentials_enabled": True}
+    )
+    set_settings(enabled_settings)
+    yield
+    set_settings(test_settings)
 
 
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:
@@ -104,7 +117,9 @@ async def test_encryption_key_rotation_invalidates_old_credentials(
     - Missing key rotation documentation
     - Unclear error messages
     """
-    tenant_data = await _create_tenant(client, super_admin_token, f"tenant-rotate-{uuid4().hex[:6]}")
+    tenant_data = await _create_tenant(
+        client, super_admin_token, f"tenant-rotate-{uuid4().hex[:6]}"
+    )
     tenant_id = UUID(tenant_data["id"])
 
     # Store credential with original encryption key
@@ -131,6 +146,7 @@ async def test_encryption_key_rotation_invalidates_old_credentials(
 
     # Simulate key rotation: create new EncryptionService with different key
     from cryptography.fernet import Fernet
+
     new_encryption_key = Fernet.generate_key().decode()
 
     rotated_encryption_service = EncryptionService(
@@ -182,7 +198,9 @@ async def test_mixed_encryption_states_during_migration(
     # Create 5 tenants
     tenants = []
     for i in range(5):
-        tenant_data = await _create_tenant(client, super_admin_token, f"tenant-migrate-{i}-{uuid4().hex[:6]}")
+        tenant_data = await _create_tenant(
+            client, super_admin_token, f"tenant-migrate-{i}-{uuid4().hex[:6]}"
+        )
         tenants.append(tenant_data)
 
     # Store credentials for first 3 tenants with original key
@@ -200,6 +218,7 @@ async def test_mixed_encryption_states_during_migration(
 
     # Simulate key rotation
     from cryptography.fernet import Fernet
+
     new_encryption_key = Fernet.generate_key().decode()
     rotated_encryption_service = EncryptionService(
         encryption_key=new_encryption_key,
@@ -234,13 +253,19 @@ async def test_mixed_encryption_states_during_migration(
 
         try:
             resolved_key = resolver.get_api_key("openai")
-            decryption_results.append({"tenant_id": tenant_id, "success": True, "key": resolved_key})
+            decryption_results.append(
+                {"tenant_id": tenant_id, "success": True, "key": resolved_key}
+            )
         except ValueError as e:
-            decryption_results.append({"tenant_id": tenant_id, "success": False, "error": str(e)})
+            decryption_results.append(
+                {"tenant_id": tenant_id, "success": False, "error": str(e)}
+            )
 
     # Verify first 3 failed (encrypted with old key)
     failed_count = sum(1 for r in decryption_results if not r["success"])
-    assert failed_count >= 3, f"Expected at least 3 decryption failures, got {failed_count}"
+    assert failed_count >= 3, (
+        f"Expected at least 3 decryption failures, got {failed_count}"
+    )
 
     # Document migration procedure in test
     migration_procedure = """
@@ -290,10 +315,14 @@ async def test_federation_client_secret_rotation_procedure(
     - Encryption state verification
     - Zero-downtime rotation procedure
     """
-    tenant_data = await _create_tenant(client, super_admin_token, f"tenant-fed-rotate-{uuid4().hex[:6]}")
+    tenant_data = await _create_tenant(
+        client, super_admin_token, f"tenant-fed-rotate-{uuid4().hex[:6]}"
+    )
     tenant_id = UUID(tenant_data["id"])
 
-    discovery_endpoint = f"https://idp.{tenant_data['slug']}.local/.well-known/openid-configuration"
+    discovery_endpoint = (
+        f"https://idp.{tenant_data['slug']}.local/.well-known/openid-configuration"
+    )
 
     # Mock OIDC discovery
     oidc_mock(
@@ -390,7 +419,9 @@ async def test_credential_re_encryption_with_new_key(
     - Transaction safety issues
     - Rollback procedure gaps
     """
-    tenant_data = await _create_tenant(client, super_admin_token, f"tenant-reencrypt-{uuid4().hex[:6]}")
+    tenant_data = await _create_tenant(
+        client, super_admin_token, f"tenant-reencrypt-{uuid4().hex[:6]}"
+    )
     tenant_id = UUID(tenant_data["id"])
 
     # Store credential with original key
@@ -417,6 +448,7 @@ async def test_credential_re_encryption_with_new_key(
 
     # Step 2: Generate new encryption key
     from cryptography.fernet import Fernet
+
     new_encryption_key = Fernet.generate_key().decode()
     new_encryption_service = EncryptionService(
         encryption_key=new_encryption_key,
@@ -427,6 +459,7 @@ async def test_credential_re_encryption_with_new_key(
 
     # Step 4: Update database (manual UPDATE to simulate migration script)
     import sqlalchemy as sa
+
     from intric.database.tables.tenant_table import Tenants
 
     # Create new api_credentials with re-encrypted key
@@ -451,7 +484,9 @@ async def test_credential_re_encryption_with_new_key(
         encryption_service=new_encryption_service,
     )
     decrypted_new = resolver_new.get_api_key("openai")
-    assert decrypted_new == original_plaintext, "Re-encrypted credential should decrypt to same plaintext"
+    assert decrypted_new == original_plaintext, (
+        "Re-encrypted credential should decrypt to same plaintext"
+    )
 
     # Verify OLD key can NO LONGER decrypt
     resolver_old_key = CredentialResolver(
@@ -486,7 +521,9 @@ async def test_encryption_service_detects_corrupted_ciphertext(
     - Unclear error messages
     - Missing integrity checks
     """
-    tenant_data = await _create_tenant(client, super_admin_token, f"tenant-corrupt-{uuid4().hex[:6]}")
+    tenant_data = await _create_tenant(
+        client, super_admin_token, f"tenant-corrupt-{uuid4().hex[:6]}"
+    )
     tenant_id = UUID(tenant_data["id"])
 
     # Store valid credential
@@ -512,6 +549,7 @@ async def test_encryption_service_detects_corrupted_ciphertext(
     for corrupted_value in corruptions:
         # Update tenant with corrupted ciphertext
         import sqlalchemy as sa
+
         from intric.database.tables.tenant_table import Tenants
 
         corrupted_credentials = {"openai": {"api_key": corrupted_value}}
@@ -573,7 +611,9 @@ async def test_encryption_disabled_mode_stores_plaintext(
         encryption_key=None,
     )
 
-    tenant_data = await _create_tenant(client, super_admin_token, f"tenant-plaintext-{uuid4().hex[:6]}")
+    tenant_data = await _create_tenant(
+        client, super_admin_token, f"tenant-plaintext-{uuid4().hex[:6]}"
+    )
     tenant_id = UUID(tenant_data["id"])
 
     # Store credential (should be plaintext)
@@ -627,7 +667,9 @@ async def test_credential_deletion_during_key_rotation(
     - Transaction rollbacks during migration
     - Operational recovery procedures
     """
-    tenant_data = await _create_tenant(client, super_admin_token, f"tenant-delete-rotate-{uuid4().hex[:6]}")
+    tenant_data = await _create_tenant(
+        client, super_admin_token, f"tenant-delete-rotate-{uuid4().hex[:6]}"
+    )
 
     # Store credential
     await _put_tenant_credential(

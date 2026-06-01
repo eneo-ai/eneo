@@ -1,230 +1,189 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
+<!--
+  Step 2 — provide credentials for a brand-new provider and create it.
+
+  Field metadata (which fields, required, secret, in credentials/config) comes
+  from `capabilities.providers[providerType].fields`. Labels, placeholders and
+  hints come from the shared `modelProviderCapabilities` helpers so they stay
+  in sync with the standalone ProviderDialog.
+-->
+
 <script lang="ts">
-  import { Button, Input } from "@intric/ui";
-  import { createEventDispatcher, onMount } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
+  import { ArrowLeft, Loader2 } from "lucide-svelte";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
+
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+
   import ProviderGlyph from "../components/ProviderGlyph.svelte";
-  import { ArrowLeft, Loader2 } from "lucide-svelte";
+  import {
+    formatProviderLabel,
+    formatFieldLabel,
+    getFieldPlaceholder,
+    getFieldHint,
+    resolveProviderFields,
+    type ModelProviderCapabilities
+  } from "../modelProviderCapabilities";
 
-  // Auto-focus first input on mount and prefill provider name
-  onMount(() => {
-    if (!providerName) {
-      providerName = providerLabels[providerType] ??
-        providerType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-    }
-    setTimeout(() => {
-      const input = document.getElementById("cred-provider-name") as HTMLInputElement;
-      input?.focus();
-      input?.select();
-    }, 100);
-  });
-
-  export let providerType: string;
-  export let providerName: string = "";
-  export let apiKey: string = "";
-  export let endpoint: string = "";
-  export let apiVersion: string = "";
-  export let deploymentName: string = "";
-
-  const dispatch = createEventDispatcher<{
-    complete: { providerId: string };
-    back: void;
-  }>();
+  let {
+    providerType,
+    capabilities = null,
+    onComplete,
+    onBack
+  }: {
+    providerType: string;
+    capabilities?: ModelProviderCapabilities | null;
+    onComplete: (detail: { providerId: string }) => void;
+    onBack: () => void;
+  } = $props();
 
   const intric = getIntric();
 
-  // Provider type display info
-  const providerLabels: Record<string, string> = {
-    openai: "OpenAI",
-    azure: "Azure OpenAI",
-    anthropic: "Anthropic",
-    gemini: "Google Gemini",
-    cohere: "Cohere",
-    mistral: "Mistral AI",
-    hosted_vllm: "vLLM"
-  };
+  // Field definitions resolve eagerly even before capabilities load — the
+  // helper provides a sensible fallback so the form mounts immediately.
+  const fields = $derived(resolveProviderFields(capabilities, providerType));
 
-  // State
-  let isSubmitting = false;
-  let error: string | null = null;
+  // Seed the editable name once from the provider type. Subsequent changes
+  // to providerType would only happen via a remount (the wizard rekeys steps),
+  // so we explicitly untrack the read to silence the "captures initial value"
+  // warning that $state would otherwise emit.
+  let providerName = $state(untrack(() => formatProviderLabel(providerType)));
+  let fieldValues = $state<Record<string, string>>({});
 
-  // Validation
-  $: isAzure = providerType === "azure";
-  $: isVllm = providerType === "hosted_vllm";
-  $: isKnownProvider = ["openai", "azure", "anthropic", "gemini", "cohere", "mistral", "hosted_vllm"].includes(providerType);
-  $: requiresEndpoint = isAzure || isVllm;
-  $: isValid =
+  let isSubmitting = $state(false);
+  let error = $state<string | null>(null);
+
+  // Seed any new fields the resolved schema introduces. We never delete keys
+  // here — switching provider types is impossible at this step (the wizard
+  // doesn't go back-and-forth between credentials and provider type), so
+  // dangling values would only matter on rapid edits and have no effect on
+  // submission since we only read keys present in `fields`.
+  $effect(() => {
+    for (const field of fields) {
+      if (!(field.name in fieldValues)) {
+        fieldValues[field.name] = "";
+      }
+    }
+  });
+
+  const isValid = $derived(
     providerName.trim() !== "" &&
-    apiKey.trim() !== "" &&
-    (!requiresEndpoint || endpoint.trim() !== "") &&
-    (!isAzure || (apiVersion.trim() !== "" && deploymentName.trim() !== ""));
+      fields.every((f) => !f.required || (fieldValues[f.name] ?? "").trim() !== "")
+  );
 
-  async function handleSubmit() {
-    if (!isValid) return;
+  onMount(async () => {
+    await tick();
+    document.getElementById("cred-provider-name")?.focus();
+  });
+
+  async function submit() {
+    if (!isValid || isSubmitting) return;
 
     isSubmitting = true;
     error = null;
 
     try {
-      const providerData: any = {
+      const credentials: Record<string, string> = {};
+      const config: Record<string, string> = {};
+      for (const field of fields) {
+        const value = (fieldValues[field.name] ?? "").trim();
+        if (!value) continue;
+        if (field.in === "credentials") credentials[field.name] = value;
+        else config[field.name] = value;
+      }
+
+      const provider = await intric.modelProviders.create({
         name: providerName,
         provider_type: providerType,
-        credentials: { api_key: apiKey },
-        config: {},
+        credentials,
+        config,
         is_active: true
-      };
-
-      if (endpoint.trim()) {
-        providerData.config.endpoint = endpoint;
-      }
-
-      if (isAzure) {
-        providerData.config.api_version = apiVersion;
-        providerData.config.deployment_name = deploymentName;
-      }
-
-      const provider = await intric.modelProviders.create(providerData);
+      });
 
       toast.success(m.provider_created_success());
-      dispatch("complete", { providerId: provider.id });
-    } catch (e: any) {
-      error = e.message || m.failed_to_create_provider();
-      toast.error(m.failed_to_create_provider());
+      onComplete({ providerId: provider.id });
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : m.failed_to_create_provider();
+      toastError(e, m.failed_to_create_provider());
     } finally {
       isSubmitting = false;
     }
   }
 
-  function handleBack() {
-    dispatch("back");
+  function handleFormSubmit(event: SubmitEvent) {
+    event.preventDefault();
+    void submit();
   }
 </script>
 
 <div class="flex flex-col gap-6">
-  <!-- Header with Provider Type -->
-  <div class="flex items-center gap-4 rounded-lg bg-surface-dimmer p-4">
-    <ProviderGlyph type={providerType} size="lg" />
+  <div class="border-border flex items-center gap-4 rounded-lg border p-4">
+    <ProviderGlyph {providerType} size="lg" />
     <div>
-      <h3 class="font-medium text-primary">{providerLabels[providerType] || providerType}</h3>
-      <p class="text-sm text-muted">{m.enter_provider_credentials()}</p>
+      <h3 class="text-foreground font-medium">{formatProviderLabel(providerType)}</h3>
+      <p class="text-muted-foreground text-sm">{m.enter_provider_credentials()}</p>
     </div>
   </div>
 
   {#if error}
-    <div class="border-error bg-error-dimmer text-error-stronger border-l-2 px-4 py-2 text-sm">
+    <div
+      class="border-destructive bg-destructive/10 text-destructive border-l-2 px-4 py-2 text-sm"
+      role="alert"
+    >
       {error}
     </div>
   {/if}
 
-  <form on:submit|preventDefault={handleSubmit} class="flex flex-col gap-4 p-4 rounded-lg border border-dimmer bg-surface-dimmer/30">
-    <!-- Provider Name -->
-    <div class="flex flex-col gap-2">
-      <label for="cred-provider-name" class="text-sm font-medium">{m.provider_name()}</label>
-      <Input.Text
+  <form onsubmit={handleFormSubmit} class="flex flex-col gap-4">
+    <Field.Field>
+      <Field.Label for="cred-provider-name">{m.provider_name()}</Field.Label>
+      <Input
         id="cred-provider-name"
         bind:value={providerName}
         placeholder={m.provider_name_placeholder()}
         required
       />
-      <p class="text-muted-foreground text-xs">
-        {m.provider_name_hint()}
-      </p>
-    </div>
+      <Field.Description>{m.provider_name_hint()}</Field.Description>
+    </Field.Field>
 
-    <!-- API Key -->
-    <div class="flex flex-col gap-2">
-      <label for="cred-api-key" class="text-sm font-medium">{m.api_key()}</label>
-      <Input.Text
-        id="cred-api-key"
-        type="password"
-        bind:value={apiKey}
-        placeholder={m.enter_api_key()}
-        required
-      />
-      <p class="text-muted-foreground text-xs">
-        {m.will_be_encrypted()}
-      </p>
-    </div>
-
-    <!-- Endpoint -->
-    {#if requiresEndpoint || providerType === "openai" || !isKnownProvider}
-      <div class="flex flex-col gap-2">
-        <label for="cred-endpoint" class="text-sm font-medium">{m.endpoint_url()}</label>
-        <Input.Text
-          id="cred-endpoint"
-          bind:value={endpoint}
-          placeholder={isAzure
-            ? "https://your-resource.openai.azure.com"
-            : isVllm
-              ? "https://your-vllm-server.com"
-              : !isKnownProvider
-                ? m.endpoint_optional_generic()
-                : "https://api.openai.com/v1 (default)"}
-          required={requiresEndpoint}
-        />
-        <p class="text-muted-foreground text-xs">
-          {#if isAzure}
-            {m.endpoint_required_azure()}
-          {:else if isVllm}
-            {m.endpoint_required_vllm()}
-          {:else if !isKnownProvider}
-            {m.endpoint_optional_generic()}
-          {:else}
-            {m.endpoint_optional_openai()}
+    {#each fields as field (field.name)}
+      {@const hint = getFieldHint(field.name, field.required, providerType, "create")}
+      <Field.Field>
+        <Field.Label for="cred-{field.name}">
+          {formatFieldLabel(field.name)}
+          {#if !field.required}
+            <span class="text-muted-foreground ml-1 text-xs font-normal">({m.optional()})</span>
           {/if}
-        </p>
-      </div>
-    {/if}
-
-    <!-- Azure-specific fields -->
-    {#if isAzure}
-      <div class="flex flex-col gap-2">
-        <label for="cred-api-version" class="text-sm font-medium">{m.api_version()}</label>
-        <Input.Text
-          id="cred-api-version"
-          bind:value={apiVersion}
-          placeholder={m.api_version_placeholder()}
-          required
+        </Field.Label>
+        <Input
+          id="cred-{field.name}"
+          type={field.secret ? "password" : "text"}
+          bind:value={fieldValues[field.name]}
+          placeholder={getFieldPlaceholder(field.name, providerType)}
+          required={field.required}
         />
-        <p class="text-muted-foreground text-xs">
-          {m.api_version_required()}
-        </p>
-      </div>
-
-      <div class="flex flex-col gap-2">
-        <label for="cred-deployment-name" class="text-sm font-medium">{m.deployment_name()}</label>
-        <Input.Text
-          id="cred-deployment-name"
-          bind:value={deploymentName}
-          placeholder={m.deployment_name_placeholder()}
-          required
-        />
-        <p class="text-muted-foreground text-xs">
-          {m.deployment_name_required()}
-        </p>
-      </div>
-    {/if}
-
+        {#if hint}
+          <Field.Description>{hint}</Field.Description>
+        {/if}
+      </Field.Field>
+    {/each}
   </form>
 
-  <!-- Navigation -->
-  <div class="flex items-center justify-between border-t border-dimmer pt-4">
-    <Button variant="ghost" on:click={handleBack} class="gap-2 focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface">
-      <ArrowLeft class="h-4 w-4" />
+  <div class="border-border flex items-center justify-between border-t pt-4">
+    <Button type="button" variant="outline" onclick={onBack}>
+      <ArrowLeft aria-hidden="true" />
       {m.back()}
     </Button>
 
-    <Button
-      variant="primary"
-      on:click={handleSubmit}
-      disabled={!isValid || isSubmitting}
-      class="focus-visible:!outline-none focus-visible:ring-2 focus-visible:ring-accent-default/50 focus-visible:ring-offset-1 focus-visible:ring-offset-surface"
-    >
+    <Button type="button" onclick={() => void submit()} disabled={!isValid || isSubmitting}>
       {#if isSubmitting}
-        <Loader2 class="h-4 w-4 animate-spin mr-2" />
+        <Loader2 class="animate-spin" aria-hidden="true" />
         {m.creating()}
       {:else}
         {m.create_and_continue()}

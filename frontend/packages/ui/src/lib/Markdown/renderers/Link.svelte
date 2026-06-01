@@ -5,6 +5,7 @@
   export let token: Tokens.Link;
 </script>
 
+<!-- eslint-disable svelte/no-navigation-without-resolve -- external URL from markdown token -->
 <a
   href={token.href}
   title={token.title}
@@ -15,3 +16,4 @@
   <slot />
   <IconLinkExternal class="inline -translate-y-[3px] scale-[0.9]"></IconLinkExternal>
 </a>
+<!-- eslint-enable svelte/no-navigation-without-resolve -->

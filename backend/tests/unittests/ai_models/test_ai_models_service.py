@@ -1,10 +1,9 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
 
 from intric.ai_models.ai_models_service import AIModelsService
-from intric.ai_models.completion_models.completion_model import CompletionModelFamily
 from intric.main.config import get_settings
 from intric.roles.permissions import Permission
 from intric.roles.role import RoleInDB
@@ -102,6 +101,51 @@ async def test_user_can_not_access_completion_models(service: AIModelsService):
         assert not model.can_access
 
 
+async def test_completion_models_use_effective_deprecation(
+    service: AIModelsService,
+):
+    service.user = TEST_ADMIN_USER
+    model = TEST_MODEL_CHATGPT.model_copy(
+        update={
+            "name": "gpt-4-0613",
+            "is_org_enabled": True,
+            "is_deprecated": False,
+            "provider_type": "openai",
+        }
+    )
+    service.completion_model_repo.get_models.return_value = [model]
+
+    with patch(
+        "litellm.model_cost",
+        {"openai/gpt-4-0613": {"deprecation_date": "2025-06-13"}},
+    ):
+        models = await service.get_completion_models()
+
+    assert models[0].is_deprecated is True
+    assert models[0].can_access is False
+
+
+async def test_embedding_models_use_effective_deprecation(service: AIModelsService):
+    service.user = TEST_ADMIN_USER
+    model = TEST_EMBEDDING_MODEL.model_copy(
+        update={
+            "name": "text-embedding-ada-002",
+            "is_org_enabled": True,
+            "is_deprecated": False,
+        }
+    )
+    service.embedding_model_repo.get_models.return_value = [model]
+
+    with patch(
+        "litellm.model_cost",
+        {"text-embedding-ada-002": {"deprecation_date": "2025-06-13"}},
+    ):
+        models = await service.get_embedding_models()
+
+    assert models[0].is_deprecated is True
+    assert models[0].can_access is False
+
+
 async def test_completion_models_flags_settings_not_exists(service: AIModelsService):
     service.user = TEST_NO_ADMIN_USER
 
@@ -144,7 +188,7 @@ async def test_azure_models_with_feature_flag_off(service: AIModelsService):
     models = await service.get_completion_models()
 
     assert len(models) == 2
-    assert CompletionModelFamily.AZURE not in [model.family for model in models]
+    assert "azure" not in [model.family for model in models]
 
 
 async def test_azure_models_with_feature_flag_on(service: AIModelsService):
@@ -158,4 +202,4 @@ async def test_azure_models_with_feature_flag_on(service: AIModelsService):
     models = await service.get_completion_models()
 
     assert len(models) == 3
-    assert CompletionModelFamily.AZURE in [model.family for model in models]
+    assert "azure" in [model.family for model in models]

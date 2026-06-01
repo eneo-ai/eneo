@@ -1,292 +1,268 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
+<!--
+  Step 1 — pick a provider.
+
+  Two surfaces:
+    - "Use existing"  — shown when the tenant already has providers configured.
+    - "Create new"    — pick a provider type from a searchable, favouritable
+                        grid populated from `capabilities.providers`.
+
+  The two surfaces are presented as shadcn Tabs (the host page may pre-pick
+  one when there are no existing providers yet, which suppresses the toggle).
+
+  Selection is reported via `onSelect(detail)`. The parent wizard decides
+  what the next step is — picking an existing provider skips Credentials.
+-->
+
 <script lang="ts">
-  import { Dialog } from "@intric/ui";
-  import { createEventDispatcher } from "svelte";
-  import { writable } from "svelte/store";
-  import { m } from "$lib/paraglide/messages";
+  import { untrack } from "svelte";
+  import { Search, Star } from "lucide-svelte";
   import type { ModelProviderPublic } from "@intric/intric-js";
-  import ProviderGlyph from "../components/ProviderGlyph.svelte";
-  import ProviderStatusBadge from "../components/ProviderStatusBadge.svelte";
-  import { ChevronRight, Search, LayoutGrid } from "lucide-svelte";
+  import { m } from "$lib/paraglide/messages";
   import { getIntric } from "$lib/core/Intric";
 
-  export let providers: ModelProviderPublic[] = [];
-  export let selectedProviderId: string | null = null;
+  import * as Tabs from "$lib/components/ui/tabs/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
 
-  const dispatch = createEventDispatcher<{
-    select: { providerId: string | null; isNew: boolean; providerType: string };
-  }>();
+  import ProviderGlyph from "../components/ProviderGlyph.svelte";
+  import {
+    formatProviderLabel,
+    listProviderOptions,
+    type ModelProviderCapabilities
+  } from "../modelProviderCapabilities";
+
+  let {
+    providers = [],
+    favoriteProviders = [],
+    selectedProviderId = null,
+    capabilities = null,
+    onSelect
+  }: {
+    providers?: ModelProviderPublic[];
+    favoriteProviders?: string[];
+    selectedProviderId?: string | null;
+    capabilities?: ModelProviderCapabilities | null;
+    onSelect: (detail: { providerId: string | null; isNew: boolean; providerType: string }) => void;
+  } = $props();
 
   const intric = getIntric();
 
-  // Provider types available for creation
-  // Note: type values must be LiteLLM-compatible provider types
-  const providerTypes = [
-    { type: "openai", label: "OpenAI", description: "OpenAI and compatible cloud APIs (Together, Groq, Fireworks)" },
-    { type: "azure", label: "Azure OpenAI", description: "Enterprise Azure deployments" },
-    { type: "anthropic", label: "Anthropic", description: "Claude 4, Claude 3.5" },
-    { type: "gemini", label: "Google Gemini", description: "Gemini Pro, Gemini Flash" },
-    { type: "cohere", label: "Cohere", description: "Command, Embed models" },
-    { type: "mistral", label: "Mistral AI", description: "Mistral, Mixtral models" },
-    { type: "hosted_vllm", label: "vLLM", description: "Self-hosted vLLM inference server" }
-  ] as const;
+  // --- Tabs --------------------------------------------------------------
 
-  const featuredTypes = new Set(providerTypes.map((p) => p.type));
+  // Two distinct flows: pick existing vs create new. The tab is auto-set
+  // to "create" when the tenant has no providers yet, then hidden. We seed
+  // both pieces of state once from the props — providers/favouriteProviders
+  // can change while the wizard is open (e.g. after creating a provider in
+  // step 2), but those changes shouldn't reset what the user is viewing.
+  let viewMode = $state<"select" | "create">(
+    untrack(() => (providers.length > 0 ? "select" : "create"))
+  );
 
-  type ViewMode = "select" | "create";
-  let viewMode: ViewMode = providers.length > 0 ? "select" : "create";
+  // --- Search & favourites ----------------------------------------------
 
-  // Selection state
-  let hoveredProvider: string | null = null;
-  let selectedNewProviderType: string | null = null;
+  let searchQuery = $state("");
+  let localFavorites = $state<string[]>(untrack(() => [...favoriteProviders]));
 
-  // Browse all providers dialog
-  const browseDialogOpen = writable(false);
-  let allProviders: { type: string; label: string }[] = [];
-  let searchQuery = "";
-  let loadingCapabilities = false;
-  let capabilitiesLoaded = false;
+  const favoritesSet = $derived(new Set(localFavorites));
 
-  $: filteredProviders = searchQuery
-    ? allProviders.filter((p) => p.label.toLowerCase().includes(searchQuery.toLowerCase()))
-    : allProviders;
+  const allCapabilityProviders = $derived(listProviderOptions(capabilities));
+  const loadingCapabilities = $derived(!capabilities);
 
-  async function openBrowseDialog() {
-    browseDialogOpen.set(true);
-    if (!capabilitiesLoaded) {
-      loadingCapabilities = true;
-      try {
-        const capabilities = await intric.modelProviders.getCapabilities();
-        allProviders = Object.entries(capabilities)
-          .filter(([type]) => !featuredTypes.has(type))
-          .map(([type]) => ({
-            type,
-            label: formatProviderName(type)
-          }))
-          .sort((a, b) => a.label.localeCompare(b.label));
-        capabilitiesLoaded = true;
-      } catch {
-        // Silently fail
-      } finally {
-        loadingCapabilities = false;
-      }
-    }
+  const favoriteCards = $derived(
+    localFavorites.map((value) => {
+      const found = allCapabilityProviders.find((p) => p.value === value);
+      return { value, label: found?.label ?? formatProviderLabel(value) };
+    })
+  );
+
+  function matches(label: string, type: string, q: string) {
+    if (!q) return true;
+    const needle = q.toLowerCase();
+    return label.toLowerCase().includes(needle) || type.toLowerCase().includes(needle);
   }
 
-  function selectFromBrowse(type: string) {
-    browseDialogOpen.set(false);
-    searchQuery = "";
-    selectNewProviderType(type);
-  }
+  const filteredFavorites = $derived(
+    favoriteCards.filter((p) => matches(p.label, p.value, searchQuery))
+  );
 
-  function formatProviderName(type: string): string {
-    return type
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, (c) => c.toUpperCase());
-  }
+  const otherProviders = $derived(
+    allCapabilityProviders
+      .filter((p) => !favoritesSet.has(p.value))
+      .filter((p) => matches(p.label, p.value, searchQuery))
+  );
+
+  // --- Selection state for "create new" ---------------------------------
+
+  let selectedNewProviderType = $state<string | null>(null);
 
   function selectExistingProvider(provider: ModelProviderPublic) {
-    dispatch("select", {
-      providerId: provider.id,
-      isNew: false,
-      providerType: provider.provider_type
-    });
+    onSelect({ providerId: provider.id, isNew: false, providerType: provider.provider_type });
   }
 
   function selectNewProviderType(type: string) {
     selectedNewProviderType = type;
-    dispatch("select", {
-      providerId: null,
-      isNew: true,
-      providerType: type
-    });
+    onSelect({ providerId: null, isNew: true, providerType: type });
+  }
+
+  async function toggleFavorite(type: string) {
+    const next = favoritesSet.has(type)
+      ? localFavorites.filter((t) => t !== type)
+      : [...localFavorites, type];
+    const previous = localFavorites;
+    localFavorites = next;
+    try {
+      await intric.modelProviders.setFavorites(next);
+    } catch {
+      localFavorites = previous;
+    }
   }
 </script>
 
 <div class="flex flex-col gap-6">
   {#if providers.length > 0}
-    <!-- View Mode Toggle - Refined underline tabs -->
-    <div class="flex border-b border-dimmer">
-      <button
-        type="button"
-        class="relative px-4 py-2.5 text-sm font-medium transition-all duration-150
-          focus-visible:outline-none focus-visible:text-primary
-          {viewMode === 'select'
-            ? 'text-primary'
-            : 'text-muted hover:text-primary'}"
-        on:click={() => viewMode = "select"}
-      >
-        {m.use_existing_provider()}
-        {#if viewMode === "select"}
-          <span class="absolute bottom-0 left-2 right-2 h-0.5 bg-accent-default rounded-full"></span>
-        {/if}
-      </button>
-      <button
-        type="button"
-        class="relative px-4 py-2.5 text-sm font-medium transition-all duration-150
-          focus-visible:outline-none focus-visible:text-primary
-          {viewMode === 'create'
-            ? 'text-primary'
-            : 'text-muted hover:text-primary'}"
-        on:click={() => viewMode = "create"}
-      >
-        {m.create_new_provider()}
-        {#if viewMode === "create"}
-          <span class="absolute bottom-0 left-2 right-2 h-0.5 bg-accent-default rounded-full"></span>
-        {/if}
-      </button>
-    </div>
-  {/if}
+    <Tabs.Root bind:value={viewMode}>
+      <Tabs.List variant="line" class="w-full justify-start">
+        <Tabs.Trigger value="select">{m.use_existing_provider()}</Tabs.Trigger>
+        <Tabs.Trigger value="create">{m.create_new_provider()}</Tabs.Trigger>
+      </Tabs.List>
 
-  {#if viewMode === "select" && providers.length > 0}
-    <!-- Existing Providers List -->
-    <div class="flex flex-col gap-4">
-      <h3 class="text-sm font-medium text-muted">{m.select_provider()}</h3>
+      <Tabs.Content value="select" class="mt-4 flex flex-col gap-4">
+        <h3 class="text-muted-foreground text-sm font-medium">{m.select_provider()}</h3>
+        <ul class="flex flex-col gap-3">
+          {#each providers as provider (provider.id)}
+            {@const isSelected = provider.id === selectedProviderId}
+            <li>
+              <button
+                type="button"
+                data-selected={isSelected ? "" : undefined}
+                class="
+                  group border-border hover:bg-muted/50
+                  focus-visible:border-ring focus-visible:ring-ring/50
+                  data-[selected]:border-accent-default data-[selected]:bg-accent-dimmer/30 flex w-full items-center gap-4 rounded-lg border
+                  p-4 text-left
+                  transition-colors duration-150
+                  focus-visible:ring-3 focus-visible:outline-none
+                "
+                onclick={() => selectExistingProvider(provider)}
+              >
+                <ProviderGlyph providerType={provider.provider_type} size="md" />
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2">
+                    <span class="text-foreground truncate font-medium">{provider.name}</span>
+                  </div>
+                </div>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      </Tabs.Content>
 
-      <div class="flex flex-col gap-3">
-        {#each providers as provider}
-          {@const isSelected = provider.id === selectedProviderId}
-          <button
-            type="button"
-            class="group flex items-center gap-4 rounded-lg border p-4 text-left transition-all duration-150
-              border-dimmer hover:border-stronger hover:bg-hover-dimmer active:bg-accent-dimmer
-              focus-visible:outline-none focus-visible:border-accent-default focus-visible:ring-1 focus-visible:ring-accent-default/80 focus-visible:ring-offset-0"
-            on:click={() => selectExistingProvider(provider)}
-            on:mouseenter={() => hoveredProvider = provider.id}
-            on:mouseleave={() => hoveredProvider = null}
-          >
-            <div class="transition-transform duration-150 group-hover:scale-105">
-              <ProviderGlyph type={provider.provider_type} size="md" />
-            </div>
-
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="font-medium text-primary truncate">{provider.name}</span>
-                <ProviderStatusBadge {provider} />
-              </div>
-              <span class="text-sm text-muted">{provider.provider_type}</span>
-            </div>
-
-            <ChevronRight
-              class="h-5 w-5 text-muted transition-all duration-150
-                {isSelected ? 'text-accent-default translate-x-0.5' : 'group-hover:text-primary group-hover:translate-x-1'}"
-            />
-          </button>
-        {/each}
-      </div>
-    </div>
+      <Tabs.Content value="create" class="mt-4">
+        {@render createPanel()}
+      </Tabs.Content>
+    </Tabs.Root>
   {:else}
-    <!-- Create New Provider -->
-    <div class="flex flex-col gap-3">
-      <h3 class="text-sm font-medium text-muted">{m.select_provider_type()}</h3>
-
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {#each providerTypes as { type, label, description }}
-          {@const isSelected = selectedNewProviderType === type}
-          <button
-            type="button"
-            class="group flex items-start gap-3 rounded-lg border p-4 text-left transition-all duration-150
-              focus-visible:outline-none focus-visible:border-accent-default focus-visible:ring-1 focus-visible:ring-accent-default/80 focus-visible:ring-offset-0
-              {isSelected
-                ? 'border-accent-default bg-accent-dimmer ring-1 ring-accent-default'
-                : 'border-dimmer hover:border-accent-default/40 hover:bg-hover-dimmer'}"
-            on:click={() => selectNewProviderType(type)}
-          >
-            <div class="transition-transform duration-150 group-hover:scale-105">
-              <ProviderGlyph {type} size="md" />
-            </div>
-
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="font-medium text-primary">{label}</span>
-              </div>
-              <p class="text-sm text-muted mt-0.5">{description}</p>
-            </div>
-
-            <div class="flex h-5 w-5 items-center justify-center rounded-full border transition-all duration-150
-              {isSelected
-                ? 'border-accent-default bg-accent-default'
-                : 'border-dimmer group-hover:border-accent-default/60'}">
-              {#if isSelected}
-                <div class="h-2 w-2 rounded-full bg-white"></div>
-              {/if}
-            </div>
-          </button>
-        {/each}
-        <!-- Browse all providers card -->
-        <button
-          type="button"
-          class="group flex items-start gap-3 rounded-lg border border-dashed p-4 text-left transition-all duration-150
-            focus-visible:outline-none focus-visible:border-accent-default focus-visible:ring-1 focus-visible:ring-accent-default/80 focus-visible:ring-offset-0
-            border-dimmer hover:border-accent-default/40 hover:bg-hover-dimmer"
-          on:click={openBrowseDialog}
-        >
-          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-dimmer text-muted transition-transform duration-150 group-hover:scale-105">
-            <LayoutGrid class="h-5 w-5" />
-          </div>
-
-          <div class="flex-1 min-w-0">
-            <span class="font-medium text-primary">{m.more_providers()}</span>
-            <p class="text-sm text-muted mt-0.5">{m.browse_all_providers_description()}</p>
-          </div>
-        </button>
-      </div>
-    </div>
+    {@render createPanel()}
   {/if}
 </div>
 
-<!-- Browse All Providers Dialog -->
-<Dialog.Root openController={browseDialogOpen}>
-  <Dialog.Content width="large" form>
-    <Dialog.Title>
-      {m.more_providers()}
-    </Dialog.Title>
+{#snippet createPanel()}
+  <div class="flex flex-col gap-5">
+    <div class="relative">
+      <Search
+        class="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2"
+        aria-hidden="true"
+      />
+      <Input
+        type="text"
+        bind:value={searchQuery}
+        placeholder={m.search_providers()}
+        class="pl-9"
+        aria-label={m.search_providers()}
+      />
+    </div>
 
-    <Dialog.Section class="flex flex-col gap-4">
-      <div class="relative">
-        <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
-        <input
-          type="text"
-          bind:value={searchQuery}
-          placeholder={m.search_providers()}
-          class="w-full rounded-lg border border-dimmer bg-surface pl-9 pr-3 py-2 text-sm
-            placeholder:text-muted focus:outline-none focus:border-accent-default focus:ring-1 focus:ring-accent-default/80"
-        />
+    {#if loadingCapabilities}
+      <div class="flex items-center justify-center py-12">
+        <div
+          class="border-accent-default size-6 animate-spin rounded-full border-2 border-t-transparent"
+          role="status"
+          aria-label={m.loading()}
+        ></div>
       </div>
-
-      {#if loadingCapabilities}
-        <div class="flex items-center justify-center py-12">
-          <div class="h-6 w-6 animate-spin rounded-full border-2 border-accent-default border-t-transparent"></div>
-        </div>
-      {:else if filteredProviders.length === 0}
-        <p class="text-sm text-muted text-center py-8">{m.no_providers_found()}</p>
-      {:else}
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-80 overflow-y-auto">
-          {#each filteredProviders as { type, label }}
-            <button
-              type="button"
-              class="group flex items-center gap-3 rounded-lg border p-3 text-left transition-all duration-150
-                focus-visible:outline-none focus-visible:border-accent-default focus-visible:ring-1 focus-visible:ring-accent-default/80
-                border-dimmer hover:border-accent-default/40 hover:bg-hover-dimmer"
-              on:click={() => selectFromBrowse(type)}
-            >
-              <div class="transition-transform duration-150 group-hover:scale-105">
-                <ProviderGlyph {type} size="md" />
-              </div>
-
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2">
-                  <span class="font-medium text-primary text-sm">{label}</span>
-                </div>
-                <p class="text-xs text-muted font-mono">{type}</p>
-              </div>
-
-              <ChevronRight class="h-4 w-4 text-muted group-hover:text-primary transition-colors" />
-            </button>
-          {/each}
-        </div>
+    {:else}
+      {#if filteredFavorites.length > 0}
+        <section class="flex flex-col gap-3" aria-label={m.favorite_providers()}>
+          <h3 class="text-muted-foreground text-sm font-medium">{m.favorite_providers()}</h3>
+          <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {#each filteredFavorites as provider (provider.value)}
+              {@render providerCard(provider, true)}
+            {/each}
+          </div>
+        </section>
       {/if}
-    </Dialog.Section>
-  </Dialog.Content>
-</Dialog.Root>
+
+      {#if otherProviders.length > 0}
+        <section class="flex flex-col gap-3" aria-label={m.all_providers()}>
+          <h3 class="text-muted-foreground text-sm font-medium">{m.all_providers()}</h3>
+          <div class="grid max-h-64 grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
+            {#each otherProviders as provider (provider.value)}
+              {@render providerCard(provider, false)}
+            {/each}
+          </div>
+        </section>
+      {:else if searchQuery && filteredFavorites.length === 0}
+        <p class="text-muted-foreground py-8 text-center text-sm">{m.no_providers_found()}</p>
+      {/if}
+    {/if}
+  </div>
+{/snippet}
+
+{#snippet providerCard(provider: { value: string; label: string }, isFavorite: boolean)}
+  {@const isSelected = selectedNewProviderType === provider.value}
+  <div
+    class="
+      group has-[:focus-visible]:border-ring has-[:focus-visible]:ring-ring/50 relative flex items-center gap-3 rounded-lg
+      border p-3
+      transition-colors duration-150 has-[:focus-visible]:ring-3
+      {isSelected
+      ? 'border-accent-default bg-accent-dimmer ring-accent-default ring-1'
+      : 'border-border hover:border-accent-default/40 hover:bg-muted/40'}
+    "
+  >
+    <!-- Card-level click target. We use a real <button> with an absolute
+         expanding hit area; the favourite toggle floats above it as its own
+         interactive element to avoid nested clickables. -->
+    <button
+      type="button"
+      onclick={() => selectNewProviderType(provider.value)}
+      class="absolute inset-0 rounded-lg outline-none"
+      aria-label={provider.label}
+    ></button>
+
+    <ProviderGlyph providerType={provider.value} size="md" />
+    <div class="pointer-events-none min-w-0 flex-1">
+      <span class="text-foreground text-sm font-medium">{provider.label}</span>
+    </div>
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      class="
+        relative z-10 shrink-0
+        {isFavorite
+        ? ''
+        : 'opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100'}
+      "
+      onclick={() => void toggleFavorite(provider.value)}
+      aria-label={isFavorite ? m.unpin_provider() : m.pin_provider()}
+      title={isFavorite ? m.unpin_provider() : m.pin_provider()}
+    >
+      <Star
+        class={isFavorite ? "fill-warning-default text-warning-default" : "text-muted-foreground"}
+      />
+    </Button>
+  </div>
+{/snippet}

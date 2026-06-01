@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { goto } from "$app/navigation";
+  import { pushState } from "$app/navigation";
   import { Page } from "$lib/components/layout/index.js";
   import { getAppContext } from "$lib/core/AppContext.js";
   import { initChatService } from "$lib/features/chat/ChatService.svelte";
@@ -19,7 +19,9 @@
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
 
-  const { data } = $props();
+  const { data: rawData } = $props();
+  // +page.ts throws when partnerId is missing, so chatPartner is always set here.
+  const data = $derived.by(() => ({ ...rawData, chatPartner: rawData.chatPartner! }));
 
   const {
     state: { userInfo }
@@ -29,9 +31,20 @@
     state: { currentSpace }
   } = getSpacesManager();
 
-  const chat = initChatService(data);
+  const chat = untrack(() => initChatService(data));
 
   let currentTab = writable("chat");
+
+  function startNewConversation() {
+    chat.newConversation();
+    const tab = "chat";
+    const nextUrl = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: chat.partner, tab })}`;
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path with query string
+    pushState(nextUrl, {
+      conversation: undefined,
+      tab
+    });
+  }
 
   $effect(() => {
     chat.init(data);
@@ -91,29 +104,13 @@
       {#if chat.partner.type === "default-assistant"}
         <DefaultAssistantModelSwitcher></DefaultAssistantModelSwitcher>
       {:else if chat.partner.permissions?.includes("edit")}
-        <Button href={localizeHref(`/spaces/${$currentSpace.routeId}/${chat.partner.type}s/${chat.partner.id}/edit`)}
-          >{m.edit()}</Button
+        <Button
+          href={localizeHref(
+            `/spaces/${$currentSpace.routeId}/${chat.partner.type}s/${chat.partner.id}/edit`
+          )}>{m.edit()}</Button
         >
       {/if}
-      <Button
-        variant="primary"
-        on:click={() => {
-          chat.newConversation();
-          const tab = "chat";
-          goto(
-            `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: chat.partner, tab })}`,
-            {
-              replaceState: true,
-              noScroll: true,
-              keepFocus: true,
-              state: {
-                conversation: undefined,
-                tab
-              }
-            }
-          );
-        }}
-        class="!line-clamp-1"
+      <Button variant="primary" on:click={startNewConversation} class="!line-clamp-1"
         >{m.new_conversation()}
       </Button>
     </Page.Flex>
@@ -122,6 +119,7 @@
   <Page.Main>
     <Page.Tab id="chat">
       <ConversationView
+        onNewConversation={startNewConversation}
         children={chat.partner.type === "default-assistant"
           ? defaultAssistantWelcomeMessage
           : undefined}
@@ -141,33 +139,21 @@
 
       <HistoryTable
         onConversationLoaded={(conversation) => {
-          const params = new URLSearchParams(
-            getChatQueryParams({ chatPartner: chat.partner, conversation })
-          );
-          params.set("tab", "chat");
-
-          goto(`/spaces/${$currentSpace.routeId}/chat/?${params.toString()}`, {
-            replaceState: true,
-            noScroll: true,
-            keepFocus: true,
-            state: {
-              conversation,
-              tab: "chat"
-            }
+          const tab = "chat";
+          const nextUrl = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: chat.partner, conversation, tab })}`;
+          // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path with query string
+          pushState(nextUrl, {
+            conversation,
+            tab
           });
         }}
         onConversationDeleted={() => {
-          const params = new URLSearchParams(getChatQueryParams({ chatPartner: chat.partner }));
-          params.set("tab", "history");
-
-          goto(`/spaces/${$currentSpace.routeId}/chat/?${params.toString()}`, {
-            replaceState: true,
-            noScroll: true,
-            keepFocus: true,
-            state: {
-              conversation: undefined,
-              tab: "history"
-            }
+          const tab = "history";
+          const nextUrl = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: chat.partner, tab })}`;
+          // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path with query string
+          pushState(nextUrl, {
+            conversation: undefined,
+            tab
           });
         }}
       />

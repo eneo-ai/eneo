@@ -19,7 +19,9 @@ from intric.integration.infrastructure.auth_service.base_auth_service import (
 from intric.main.config import get_settings
 
 if TYPE_CHECKING:
-    from intric.integration.domain.entities.tenant_sharepoint_app import TenantSharePointApp
+    from intric.integration.domain.entities.tenant_sharepoint_app import (
+        TenantSharePointApp,
+    )
 
 logger = getLogger(__name__)
 
@@ -27,6 +29,7 @@ logger = getLogger(__name__)
 @dataclass
 class ServiceAccountCredentials:
     """Credentials for service account OAuth flow."""
+
     client_id: str
     client_secret: str
     tenant_domain: str
@@ -37,6 +40,7 @@ class ServiceAccountCredentials:
 @dataclass
 class ServiceAccountTokenResult:
     """Result of service account token exchange."""
+
     access_token: str
     refresh_token: str
     email: Optional[str] = None
@@ -56,7 +60,8 @@ class ServiceAccountAuthService:
     # after token exchange (personal OAuth doesn't need this)
     DEFAULT_SCOPES = ["Files.Read.All", "Sites.Read.All", "User.Read"]
 
-    def __init__(self):
+    def __init__(self) -> None:
+        super().__init__()
         self.default_scopes = self.DEFAULT_SCOPES
 
     def _get_redirect_uri(self) -> str:
@@ -120,7 +125,7 @@ class ServiceAccountAuthService:
         client_id: str,
         client_secret: str,
         tenant_domain: str,
-    ) -> dict:
+    ) -> dict[str, str]:
         """Generate OAuth authorization URL for service account login.
 
         Args:

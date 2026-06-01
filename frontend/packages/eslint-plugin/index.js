@@ -1,11 +1,12 @@
-import fs from "fs"
+import fs from "fs";
 
-import noIgnoredUnsub from "./rules/no-ignored-unsubscriber.js"
-import noIgnoredRemoveHandler from "./rules/no-ignored-removehandler.js"
+import noIgnoredUnsub from "./rules/no-ignored-unsubscriber.js";
+import noIgnoredRemoveHandler from "./rules/no-ignored-removehandler.js";
+import noHardcodedText from "./rules/no-hardcoded-text.js";
 
 const pkg = JSON.parse(
-  fs.readFileSync(new URL("./package.json", import.meta.url), "utf8")
-)
+  fs.readFileSync(new URL("./package.json", import.meta.url), "utf8"),
+);
 
 /** @type {import("eslint").ESLint.Plugin} */
 const plugin = {
@@ -17,8 +18,9 @@ const plugin = {
   rules: {
     "no-ignored-unsubscriber": noIgnoredUnsub,
     "no-ignored-removehandler": noIgnoredRemoveHandler,
+    "no-hardcoded-text": noHardcodedText,
   },
-}
+};
 
 Object.assign(plugin.configs, {
   recommended: [
@@ -32,6 +34,6 @@ Object.assign(plugin.configs, {
       },
     },
   ],
-})
+});
 
-export default plugin
+export default plugin;

@@ -15,17 +15,14 @@
     class="text-muted hover:text-secondary flex w-full items-center justify-between gap-2"
   >
     <span>{m.version()}</span>
-    <IconChevronDown
-      size="sm"
-      class="transition-transform {expanded ? 'rotate-180' : ''}"
-    />
+    <IconChevronDown size="sm" class="transition-transform {expanded ? 'rotate-180' : ''}" />
   </button>
 
   {#if expanded}
     <div class="text-muted mt-2 flex flex-col gap-1 font-mono text-[0.65rem]">
-      <span>Frontend: {versions.frontend}</span>
-      <span>Backend: {versions.backend}</span>
-      <span>Client: {versions.client}</span>
+      <span>{m.version_frontend()}: {versions.frontend}</span>
+      <span>{m.version_backend()}: {versions.backend}</span>
+      <span>{m.version_client()}: {versions.client}</span>
       <a
         href="https://eneo.ai/versioner.html"
         target="_blank"

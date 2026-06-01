@@ -10,7 +10,7 @@ export const POST: RequestHandler = async (event) => {
     const { id_token, environment } = event.locals;
 
     if (!id_token || !environment.baseUrl) {
-      throw error(401, new Error("Unauthorized"));
+      throw error(401);
     }
 
     // Parse request body
@@ -24,15 +24,15 @@ export const POST: RequestHandler = async (event) => {
       method: "POST",
       headers: {
         Authorization: `Bearer ${id_token}`,
-        "Content-Type": "application/json",
+        "Content-Type": "application/json"
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(body)
     });
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error("Async export request failed:", response.status, errorText);
-      throw error(response.status, new Error(`Failed to request export: ${response.statusText}`));
+      throw error(response.status);
     }
 
     const result = await response.json();
@@ -42,6 +42,6 @@ export const POST: RequestHandler = async (event) => {
     if (err instanceof Response) {
       throw err;
     }
-    throw error(500, new Error("Failed to request export"));
+    throw error(500);
   }
 };

@@ -32,8 +32,44 @@ Security considerations:
 - Use IDs instead of names where possible for data minimization
 """
 
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 from uuid import UUID
+
+from intric.authentication.auth_models import is_service_api_key
+
+
+def _actor_snapshot(actor: Any) -> dict[str, Any]:
+    """Build the ``actor`` block for audit metadata.
+
+    Service keys resolve to a synthetic UserInDB whose id, email and
+    username are placeholders ("sk-xxxx@service.key", "Service Key (...)").
+    Surfacing those in the audit UI is misleading — there's no real user.
+    For service-key actors we emit a service-shaped block keyed by the
+    actual API key id and name, with no email field.
+
+    For real users we keep the existing shape (id, name, email).
+    """
+    if is_service_api_key(actor):
+        key = actor.active_api_key
+        return {
+            "type": "service_key",
+            "id": str(key.id),
+            "name": key.name,
+            "key_prefix": getattr(key, "key_prefix", None),
+        }
+
+    actor_name = (
+        getattr(actor, "username", None)
+        or getattr(actor, "name", None)
+        or (getattr(actor, "email", "") or "").split("@")[0]
+        or "unknown"
+    )
+    return {
+        "type": "user",
+        "id": str(actor.id),
+        "name": actor_name,
+        "email": getattr(actor, "email", None),
+    }
 
 
 class AuditMetadata:
@@ -43,11 +79,11 @@ class AuditMetadata:
     def standard(
         actor: Any,
         target: Any,
-        changes: Optional[dict] = None,
-        extra: Optional[dict] = None,
+        changes: Optional[Mapping[str, object]] = None,
+        extra: Optional[Mapping[str, object]] = None,
         space: Optional[Any] = None,
         tenant: Optional[Any] = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         Create standard audit metadata with actor and target snapshots.
 
@@ -80,14 +116,6 @@ class AuditMetadata:
                 tenant=tenant,  # Includes tenant_id and tenant_name automatically
             )
         """
-        # Safe actor name: prefer username, fallback to email prefix, then "unknown"
-        actor_name = (
-            getattr(actor, "username", None)
-            or getattr(actor, "name", None)
-            or (getattr(actor, "email", "") or "").split("@")[0]
-            or "unknown"
-        )
-
         # Build target snapshot with all available context
         target_snapshot = {
             "id": str(target.id),
@@ -109,12 +137,8 @@ class AuditMetadata:
             target_snapshot["tenant_id"] = str(tenant.id)
             target_snapshot["tenant_name"] = getattr(tenant, "name", None)
 
-        metadata = {
-            "actor": {
-                "id": str(actor.id),
-                "name": actor_name,
-                "email": getattr(actor, "email", None),
-            },
+        metadata: dict[str, Any] = {
+            "actor": _actor_snapshot(actor),
             "target": target_snapshot,
         }
 
@@ -122,7 +146,7 @@ class AuditMetadata:
             metadata["changes"] = changes
 
         if extra:
-            metadata["extra"] = extra
+            metadata["extra"] = dict(extra)
 
         return metadata
 
@@ -131,8 +155,8 @@ class AuditMetadata:
         actor: Any,
         targets: list[Any],
         operation: str,
-        extra: Optional[dict] = None,
-    ) -> dict:
+        extra: Optional[Mapping[str, object]] = None,
+    ) -> dict[str, Any]:
         """
         Create metadata for operations affecting multiple entities.
 
@@ -159,20 +183,8 @@ class AuditMetadata:
                 extra={"space_id": str(space.id), "space_name": space.name}
             )
         """
-        # Safe actor name: prefer username, fallback to email prefix, then "unknown"
-        actor_name = (
-            getattr(actor, "username", None)
-            or getattr(actor, "name", None)
-            or (getattr(actor, "email", "") or "").split("@")[0]
-            or "unknown"
-        )
-
-        metadata = {
-            "actor": {
-                "id": str(actor.id),
-                "name": actor_name,
-                "email": getattr(actor, "email", None),
-            },
+        metadata: dict[str, Any] = {
+            "actor": _actor_snapshot(actor),
             "operation": operation,
             "targets": [
                 {
@@ -185,7 +197,7 @@ class AuditMetadata:
         }
 
         if extra:
-            metadata["extra"] = extra
+            metadata["extra"] = dict(extra)
 
         return metadata
 
@@ -194,8 +206,8 @@ class AuditMetadata:
         description: str,
         target: Optional[Any] = None,
         affected_count: Optional[int] = None,
-        extra: Optional[dict] = None,
-    ) -> dict:
+        extra: Optional[Mapping[str, object]] = None,
+    ) -> dict[str, Any]:
         """
         Create metadata for system-initiated actions.
 
@@ -222,7 +234,7 @@ class AuditMetadata:
                 extra={"retention_days": 365, "policy_id": str(policy.id)}
             )
         """
-        metadata = {
+        metadata: dict[str, Any] = {
             "system_action": description,
         }
 
@@ -236,7 +248,7 @@ class AuditMetadata:
             metadata["affected_count"] = affected_count
 
         if extra:
-            metadata["extra"] = extra
+            metadata["extra"] = dict(extra)
 
         return metadata
 
@@ -246,8 +258,8 @@ class AuditMetadata:
         method: str,
         success: bool,
         failure_reason: Optional[str] = None,
-        extra: Optional[dict] = None,
-    ) -> dict:
+        extra: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         """
         Create metadata for authentication events.
 
@@ -277,20 +289,8 @@ class AuditMetadata:
                 extra={"ip_address": request.client.host, "attempts": 3}
             )
         """
-        # Safe actor name: prefer username, fallback to email prefix, then "unknown"
-        actor_name = (
-            getattr(actor, "username", None)
-            or getattr(actor, "name", None)
-            or (getattr(actor, "email", "") or "").split("@")[0]
-            or "unknown"
-        )
-
-        metadata = {
-            "actor": {
-                "id": str(actor.id),
-                "name": actor_name,
-                "email": getattr(actor, "email", None),
-            },
+        metadata: dict[str, Any] = {
+            "actor": _actor_snapshot(actor),
             "authentication_method": method,
             "success": success,
         }
@@ -299,7 +299,7 @@ class AuditMetadata:
             metadata["failure_reason"] = failure_reason
 
         if extra:
-            metadata["extra"] = extra
+            metadata["extra"] = dict(extra)
 
         return metadata
 
@@ -307,8 +307,8 @@ class AuditMetadata:
     def minimal(
         actor_id: UUID,
         target_id: UUID,
-        extra: Optional[dict] = None,
-    ) -> dict:
+        extra: Optional[Mapping[str, object]] = None,
+    ) -> Mapping[str, object]:
         """
         Create minimal metadata with just IDs (data minimization).
 
@@ -325,17 +325,17 @@ class AuditMetadata:
 
         Example:
             metadata = AuditMetadata.minimal(
-                actor_id=user.id,
+                user=user,
                 target_id=file.id,
                 extra={"size_bytes": file.size}
             )
         """
-        metadata = {
+        metadata: dict[str, Any] = {
             "actor": {"id": str(actor_id)},
             "target": {"id": str(target_id)},
         }
 
         if extra:
-            metadata["extra"] = extra
+            metadata["extra"] = dict(extra)
 
         return metadata

@@ -95,7 +95,7 @@ export function initWebsites(client) {
     /**
      * Delete a website by its id.
      * @param {{id: string} | Website} website Website to delete
-     * @returns {Promise<Website>} Returns deleted website
+     * @returns {Promise<any>} Returns deleted website
      * @throws {IntricError}
      * */
     delete: async (website) => {
@@ -178,7 +178,7 @@ export function initWebsites(client) {
      * Trigger crawls for multiple websites at once (bulk operation).
      * Maximum 50 websites per request.
      * @param {{website_ids: string[]}} params List of website IDs to crawl
-     * @returns {Promise<{total: number, queued: number, failed: number, crawl_runs: CrawlRun[], errors: Array<{website_id: string, error: string}>}>}
+     * @returns {Promise<{total: number, queued: number, failed: number, crawl_runs: any[], errors: any[]}>}
      * @throws {IntricError}
      * */
     bulkRun: async (params) => {

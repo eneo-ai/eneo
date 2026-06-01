@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 
 from intric.ai_models.completion_models.completion_model import CompletionModelSparse
-from intric.completion_models.presentation.completion_model_models import (
+from intric.completion_models.presentation import (
     CompletionModelPublic,
 )
 from intric.security_classifications.presentation.security_classification_models import (
@@ -20,8 +20,9 @@ class CompletionModelAssembler:
             created_at=completion_model.created_at,
             updated_at=completion_model.updated_at,
             name=completion_model.name,
-            nickname=completion_model.nickname,
-            token_limit=completion_model.token_limit,
+            nickname=completion_model.nickname or completion_model.name,
+            max_input_tokens=completion_model.max_input_tokens,
+            max_output_tokens=completion_model.max_output_tokens,
             vision=completion_model.vision,
             family=completion_model.family,
             hosting=completion_model.hosting,
@@ -31,7 +32,7 @@ class CompletionModelAssembler:
             description=completion_model.description,
             nr_billion_parameters=completion_model.nr_billion_parameters,
             hf_link=completion_model.hf_link,
-            is_deprecated=completion_model.is_deprecated,
+            is_deprecated=completion_model.is_effectively_deprecated,
             deployment_name=completion_model.deployment_name,
             is_org_enabled=completion_model.is_org_enabled,
             is_org_default=completion_model.is_org_default,
@@ -41,6 +42,14 @@ class CompletionModelAssembler:
             reasoning=completion_model.reasoning,
             supports_tool_calling=completion_model.supports_tool_calling,
             base_url=completion_model.base_url,
+            litellm_model_name=completion_model.litellm_model_name,
+            model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
+            input_cost_per_token=getattr(
+                completion_model, "input_cost_per_token", None
+            ),
+            output_cost_per_token=getattr(
+                completion_model, "output_cost_per_token", None
+            ),
             security_classification=SecurityClassificationPublic.from_domain(
                 completion_model.security_classification,
                 return_none_if_not_enabled=False,
@@ -49,10 +58,14 @@ class CompletionModelAssembler:
             provider_id=completion_model.provider_id,
             provider_name=completion_model.provider_name,
             provider_type=completion_model.provider_type,
+            deprecation_date=completion_model.litellm_deprecation_date,
+            migrated_to_model_id=completion_model.migrated_to_model_id,
         )
 
     @staticmethod
-    def from_completion_model_to_sparse(completion_model: "CompletionModel"):
+    def from_completion_model_to_sparse(
+        completion_model: "CompletionModel | CompletionModelSparse",
+    ) -> CompletionModelSparse:
         """
         Converts a domain CompletionModel to a CompletionModelSparse instance.
         CompletionModelSparse is used for lightweight representations where
@@ -63,9 +76,10 @@ class CompletionModelAssembler:
             updated_at=completion_model.updated_at,
             id=completion_model.id,
             name=completion_model.name,
-            nickname=completion_model.nickname,
+            nickname=completion_model.nickname or completion_model.name,
             family=completion_model.family,
-            token_limit=completion_model.token_limit,
+            max_input_tokens=completion_model.max_input_tokens,
+            max_output_tokens=completion_model.max_output_tokens,
             is_deprecated=completion_model.is_deprecated,
             nr_billion_parameters=completion_model.nr_billion_parameters,
             hf_link=completion_model.hf_link,
@@ -79,9 +93,14 @@ class CompletionModelAssembler:
             reasoning=completion_model.reasoning,
             supports_tool_calling=completion_model.supports_tool_calling,
             base_url=completion_model.base_url,
+            litellm_model_name=completion_model.litellm_model_name,
+            model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
+            provider_type=completion_model.provider_type,
         )
 
-    def from_completion_models_to_models(self, completion_models: list["CompletionModel"]):
+    def from_completion_models_to_models(
+        self, completion_models: list["CompletionModel"]
+    ):
         completion_models_public = [
             self.from_completion_model_to_model(completion_model=completion_model)
             for completion_model in completion_models

@@ -1,17 +1,29 @@
+import unicodedata
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Optional, cast
+from urllib.parse import unquote
 from uuid import UUID
 
 import sqlalchemy as sa
+from html2text import html2text
 
-from intric.embedding_models.infrastructure.datastore import Datastore
 from intric.database.tables.info_blob_chunk_table import InfoBlobChunks
+from intric.embedding_models.infrastructure.datastore import Datastore
 from intric.info_blobs.info_blob import InfoBlobAdd
-from intric.integration.domain.entities.oauth_token import SharePointToken
+from intric.integration.domain.entities.oauth_token import OauthToken
 from intric.integration.domain.entities.sync_log import SyncLog
+from intric.integration.domain.entities.tenant_sharepoint_app import (
+    TenantSharePointApp,
+)
 from intric.integration.infrastructure.clients.sharepoint_content_client import (
     DeltaTokenExpiredException,
     SharePointContentClient,
+)
+from intric.integration.infrastructure.content_service.types import (
+    SharePointItem,
+    SharePointTokenProtocol,
+    SyncMetadata,
+    SyncStats,
 )
 from intric.integration.infrastructure.content_service.utils import (
     file_extension_to_type,
@@ -21,24 +33,22 @@ from intric.integration.infrastructure.office_change_key_service import (
 )
 from intric.main.logging import get_logger
 
-from html2text import html2text
 
-
-def _extract_text_from_canvas_layout(content: dict) -> str:
+def _extract_text_from_canvas_layout(content: dict[str, Any]) -> str:
     """Extract plain text from a SharePoint page's canvasLayout structure.
 
     Parses horizontalSections and verticalSection to find textWebPart
     elements and converts their innerHtml to plain text.
     """
-    texts = []
-    canvas = content.get("canvasLayout", {})
+    texts: list[str] = []
+    canvas: dict[str, Any] = content.get("canvasLayout", {})
     if not canvas:
         return ""
 
-    def _extract_from_webparts(webparts: list):
+    def _extract_from_webparts(webparts: list[dict[str, Any]]) -> None:
         for wp in webparts:
             if wp.get("@odata.type") == "#microsoft.graph.textWebPart":
-                inner_html = wp.get("innerHtml", "")
+                inner_html = cast(str, wp.get("innerHtml", ""))
                 if inner_html:
                     texts.append(html2text(inner_html).strip())
 
@@ -83,6 +93,12 @@ def _safe_int(value: Any) -> int:
         return 0
 
 
+def _require_text(value: Optional[str], field_name: str) -> str:
+    if not value:
+        raise ValueError(f"{field_name} is required")
+    return value
+
+
 if TYPE_CHECKING:
     from intric.database.database import AsyncSession
     from intric.info_blobs.info_blob_service import InfoBlobService
@@ -98,17 +114,17 @@ if TYPE_CHECKING:
     from intric.integration.domain.repositories.sync_log_repo import (
         SyncLogRepository,
     )
-    from intric.integration.domain.repositories.user_integration_repo import (
-        UserIntegrationRepository,
-    )
     from intric.integration.domain.repositories.tenant_sharepoint_app_repo import (
         TenantSharePointAppRepository,
     )
-    from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
-        TenantAppAuthService,
+    from intric.integration.domain.repositories.user_integration_repo import (
+        UserIntegrationRepository,
     )
     from intric.integration.infrastructure.auth_service.service_account_auth_service import (
         ServiceAccountAuthService,
+    )
+    from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
+        TenantAppAuthService,
     )
     from intric.integration.infrastructure.oauth_token_service import (
         OauthTokenService,
@@ -121,21 +137,63 @@ logger = get_logger(__name__)
 
 # File extensions that cannot produce useful text content.
 # These are skipped before download to save bandwidth and avoid database pollution.
-_UNSUPPORTED_EXTENSIONS: frozenset[str] = frozenset({
-    # Images
-    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".ico", ".webp", ".tiff", ".tif",
-    ".heic", ".heif", ".raw", ".cr2", ".nef", ".arw", ".psd",
-    # Video
-    ".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv", ".m4v",
-    # Audio
-    ".mp3", ".wav", ".ogg", ".flac", ".aac", ".wma", ".m4a",
-    # Archives
-    ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2",
-    # Executables / binaries
-    ".exe", ".dll", ".msi", ".bin", ".iso",
-    # Other non-text
-    ".ttf", ".otf", ".woff", ".woff2",
-})
+_UNSUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        # Images
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".bmp",
+        ".svg",
+        ".ico",
+        ".webp",
+        ".tiff",
+        ".tif",
+        ".heic",
+        ".heif",
+        ".raw",
+        ".cr2",
+        ".nef",
+        ".arw",
+        ".psd",
+        # Video
+        ".mp4",
+        ".avi",
+        ".mov",
+        ".wmv",
+        ".mkv",
+        ".webm",
+        ".flv",
+        ".m4v",
+        # Audio
+        ".mp3",
+        ".wav",
+        ".ogg",
+        ".flac",
+        ".aac",
+        ".wma",
+        ".m4a",
+        # Archives
+        ".zip",
+        ".rar",
+        ".7z",
+        ".tar",
+        ".gz",
+        ".bz2",
+        # Executables / binaries
+        ".exe",
+        ".dll",
+        ".msi",
+        ".bin",
+        ".iso",
+        # Other non-text
+        ".ttf",
+        ".otf",
+        ".woff",
+        ".woff2",
+    }
+)
 
 
 def _unsupported_file_reason(filename: str) -> Optional[str]:
@@ -144,8 +202,25 @@ def _unsupported_file_reason(filename: str) -> Optional[str]:
     for ext in _UNSUPPORTED_EXTENSIONS:
         if name.endswith(ext):
             # Determine a human-readable category
-            if ext in {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".ico", ".webp", ".tiff", ".tif",
-                       ".heic", ".heif", ".raw", ".cr2", ".nef", ".arw", ".psd"}:
+            if ext in {
+                ".jpg",
+                ".jpeg",
+                ".png",
+                ".gif",
+                ".bmp",
+                ".svg",
+                ".ico",
+                ".webp",
+                ".tiff",
+                ".tif",
+                ".heic",
+                ".heif",
+                ".raw",
+                ".cr2",
+                ".nef",
+                ".arw",
+                ".psd",
+            }:
                 return "Unsupported file type (image)"
             if ext in {".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv", ".m4v"}:
                 return "Unsupported file type (video)"
@@ -162,8 +237,30 @@ class SimpleSharePointToken:
     in the database, but need a token object with access_token attribute.
     """
 
-    def __init__(self, access_token: str):
+    def __init__(self, access_token: str) -> None:
+        super().__init__()
         self.access_token = access_token
+        self.base_url = "https://graph.microsoft.com"
+
+
+def _require_sharepoint_token(
+    token: OauthToken | SimpleSharePointToken,
+) -> SharePointTokenProtocol:
+    if isinstance(token, SimpleSharePointToken):
+        return token
+    if token.is_sharepoint:
+        return cast(SharePointTokenProtocol, token)
+    raise ValueError("Expected a SharePoint token")
+
+
+def _summary_counts(stats: SyncStats) -> dict[str, int]:
+    return {
+        "files_processed": stats.get("files_processed", 0),
+        "files_deleted": stats.get("files_deleted", 0),
+        "pages_processed": stats.get("pages_processed", 0),
+        "folders_processed": stats.get("folders_processed", 0),
+        "skipped_items": stats.get("skipped_items", 0),
+    }
 
 
 class SharePointContentService:
@@ -180,10 +277,11 @@ class SharePointContentService:
         session: "AsyncSession",
         tenant_sharepoint_app_repo: "TenantSharePointAppRepository",
         tenant_app_auth_service: "TenantAppAuthService",
-        service_account_auth_service: "ServiceAccountAuthService" = None,
-        sync_log_repo: "SyncLogRepository" = None,
-        change_key_service: "OfficeChangeKeyService" = None,
-    ):
+        service_account_auth_service: "ServiceAccountAuthService | None" = None,
+        sync_log_repo: "SyncLogRepository | None" = None,
+        change_key_service: "OfficeChangeKeyService | None" = None,
+    ) -> None:
+        super().__init__()
         self.job_service = job_service
         self.oauth_token_repo = oauth_token_repo
         self.user_integration_repo = user_integration_repo
@@ -199,7 +297,9 @@ class SharePointContentService:
         self.sync_log_repo = sync_log_repo
         self.change_key_service = change_key_service
 
-    async def _refresh_service_account_access_token(self, tenant_app) -> str:
+    async def _refresh_service_account_access_token(
+        self, tenant_app: TenantSharePointApp
+    ) -> str:
         """Refresh service account token and persist refresh-token rotation."""
         if not self.service_account_auth_service:
             raise ValueError("ServiceAccountAuthService not configured")
@@ -227,8 +327,8 @@ class SharePointContentService:
         self,
         token_id: Optional[UUID] = None,
         tenant_app_id: Optional[UUID] = None,
-        integration_knowledge_id: UUID = None,
-        site_id: str = None,
+        integration_knowledge_id: UUID | None = None,
+        site_id: Optional[str] = None,
         drive_id: Optional[str] = None,
         folder_id: Optional[str] = None,
         folder_path: Optional[str] = None,
@@ -236,6 +336,7 @@ class SharePointContentService:
     ) -> str:
         sync_log = None
         started_at = datetime.now(timezone.utc)
+        resolved_integration_knowledge_id: UUID | None = integration_knowledge_id
 
         try:
             if tenant_app_id:
@@ -270,6 +371,9 @@ class SharePointContentService:
             integration_knowledge = await self.integration_knowledge_repo.one(
                 id=integration_knowledge_id
             )
+            resolved_integration_knowledge_id = integration_knowledge.id
+            resolved_site_id = site_id or integration_knowledge.site_id
+            resolved_drive_id = drive_id or integration_knowledge.drive_id
             if site_id and not getattr(integration_knowledge, "site_id", None):
                 integration_knowledge.site_id = site_id
 
@@ -287,30 +391,30 @@ class SharePointContentService:
             await self.integration_knowledge_repo.update(obj=integration_knowledge)
 
             await self._pull_content(
-                token=token,
+                token=_require_sharepoint_token(token),
                 oauth_token_id=oauth_token_id,
-                integration_knowledge_id=integration_knowledge_id,
-                site_id=site_id,
-                drive_id=drive_id,
+                integration_knowledge_id=resolved_integration_knowledge_id,
+                site_id=resolved_site_id,
+                drive_id=resolved_drive_id,
                 resource_type=resource_type,
                 stats=stats,
             )
             summary_stats = self._build_summary_stats(stats)
 
             integration_knowledge = await self.integration_knowledge_repo.one(
-                id=integration_knowledge_id
+                id=resolved_integration_knowledge_id
             )
 
             files_processed = summary_stats.get("files_processed", 0)
             files_deleted = summary_stats.get("files_deleted", 0)
 
-            integration_knowledge.last_sync_summary = summary_stats
+            integration_knowledge.last_sync_summary = _summary_counts(summary_stats)
             if files_processed > 0 or files_deleted > 0:
                 integration_knowledge.last_synced_at = datetime.now(timezone.utc)
 
             if not integration_knowledge.delta_token:
                 try:
-                    base_url = getattr(token, "base_url", "https://graph.microsoft.com")
+                    base_url = _require_sharepoint_token(token).base_url
                     async with SharePointContentClient(
                         base_url=base_url,
                         api_token=token.access_token,
@@ -319,10 +423,10 @@ class SharePointContentService:
                             self.token_refresh_callback if oauth_token_id else None
                         ),
                     ) as content_client:
-                        actual_drive_id = drive_id
-                        if not actual_drive_id and site_id:
+                        actual_drive_id = resolved_drive_id
+                        if not actual_drive_id and resolved_site_id:
                             actual_drive_id = await content_client.get_default_drive_id(
-                                site_id
+                                resolved_site_id
                             )
                         if actual_drive_id:
                             delta_token = await content_client.initialize_delta_token(
@@ -331,11 +435,11 @@ class SharePointContentService:
                             if delta_token:
                                 integration_knowledge.delta_token = delta_token
                                 logger.info(
-                                    f"Initialized delta token for integration knowledge {integration_knowledge_id}"
+                                    f"Initialized delta token for integration knowledge {resolved_integration_knowledge_id}"
                                 )
                 except Exception as e:
                     logger.warning(
-                        f"Failed to initialize delta token for integration knowledge {integration_knowledge_id}: {e}"
+                        f"Failed to initialize delta token for integration knowledge {resolved_integration_knowledge_id}: {e}"
                     )
 
             await self.integration_knowledge_repo.update(obj=integration_knowledge)
@@ -347,17 +451,24 @@ class SharePointContentService:
 
                 if files_processed > 0 or files_deleted > 0 or skipped_items > 0:
                     sync_log = SyncLog(
-                        integration_knowledge_id=integration_knowledge_id,
+                        integration_knowledge_id=resolved_integration_knowledge_id,
                         sync_type="full",
                         status="success",
                         started_at=started_at,
                         completed_at=datetime.now(timezone.utc),
-                        metadata=summary_stats,
+                        metadata=SyncMetadata(
+                            files_processed=summary_stats.get("files_processed", 0),
+                            files_deleted=summary_stats.get("files_deleted", 0),
+                            pages_processed=summary_stats.get("pages_processed", 0),
+                            folders_processed=summary_stats.get("folders_processed", 0),
+                            skipped_items=summary_stats.get("skipped_items", 0),
+                            skipped_details=summary_stats.get("skipped_details", []),
+                        ),
                     )
                     await self.sync_log_repo.add(sync_log)
                 else:
                     logger.info(
-                        f"Skipping sync log creation for integration knowledge {integration_knowledge_id}: "
+                        f"Skipping sync log creation for integration knowledge {resolved_integration_knowledge_id}: "
                         "no files processed or deleted"
                     )
 
@@ -365,9 +476,9 @@ class SharePointContentService:
 
         except Exception as e:
             # Log failed sync
-            if self.sync_log_repo:
+            if self.sync_log_repo and resolved_integration_knowledge_id is not None:
                 sync_log = SyncLog(
-                    integration_knowledge_id=integration_knowledge_id,
+                    integration_knowledge_id=resolved_integration_knowledge_id,
                     sync_type="full",
                     status="error",
                     started_at=started_at,
@@ -383,12 +494,13 @@ class SharePointContentService:
         self,
         token_id: Optional[UUID] = None,
         tenant_app_id: Optional[UUID] = None,
-        integration_knowledge_id: UUID = None,
-        site_id: str = None,
+        integration_knowledge_id: UUID | None = None,
+        site_id: Optional[str] = None,
         drive_id: Optional[str] = None,
         resource_type: str = "site",
     ) -> str:
         started_at = datetime.now(timezone.utc)
+        resolved_integration_knowledge_id: UUID | None = integration_knowledge_id
 
         try:
             if tenant_app_id:
@@ -423,6 +535,12 @@ class SharePointContentService:
             integration_knowledge = await self.integration_knowledge_repo.one(
                 id=integration_knowledge_id
             )
+            resolved_integration_knowledge_id = integration_knowledge.id
+            resolved_site_id = site_id or integration_knowledge.site_id
+            resolved_drive_id = drive_id or integration_knowledge.drive_id
+            if integration_knowledge.delta_token is None:
+                site_id = resolved_site_id
+                drive_id = resolved_drive_id
 
             if not integration_knowledge.delta_token:
                 logger.warning(
@@ -432,9 +550,9 @@ class SharePointContentService:
                 return await self.pull_content(
                     token_id=token_id,
                     tenant_app_id=tenant_app_id,
-                    integration_knowledge_id=integration_knowledge_id,
-                    site_id=site_id,
-                    drive_id=drive_id or integration_knowledge.drive_id,
+                    integration_knowledge_id=resolved_integration_knowledge_id,
+                    site_id=resolved_site_id,
+                    drive_id=resolved_drive_id,
                     resource_type=resource_type
                     or integration_knowledge.resource_type
                     or "site",
@@ -442,7 +560,7 @@ class SharePointContentService:
 
             stats = self._initialize_stats()
 
-            base_url = getattr(token, "base_url", "https://graph.microsoft.com")
+            base_url = _require_sharepoint_token(token).base_url
             async with SharePointContentClient(
                 base_url=base_url,
                 api_token=token.access_token,
@@ -451,12 +569,15 @@ class SharePointContentService:
                     self.token_refresh_callback if oauth_token_id else None
                 ),
             ) as content_client:
-                actual_drive_id = drive_id or integration_knowledge.drive_id
-                if not actual_drive_id and site_id:
-                    actual_drive_id = await content_client.get_default_drive_id(site_id)
+                actual_drive_id = resolved_drive_id
+                if not actual_drive_id and resolved_site_id:
+                    actual_drive_id = await content_client.get_default_drive_id(
+                        resolved_site_id
+                    )
                 if not actual_drive_id:
-                    logger.error(f"Could not get drive ID for site {site_id}")
-                    return "Error: Could not find drive"
+                    raise ValueError(
+                        f"Could not resolve drive ID for site {resolved_site_id}"
+                    )
 
                 logger.info(
                     f"Starting delta sync with token: {integration_knowledge.delta_token[:20]}..."
@@ -472,7 +593,7 @@ class SharePointContentService:
                     logger.warning(
                         "Delta token expired (410 Gone) for integration knowledge %s, "
                         "clearing token and falling back to full sync",
-                        integration_knowledge_id,
+                        resolved_integration_knowledge_id,
                     )
                     integration_knowledge.delta_token = None
                     await self.integration_knowledge_repo.update(
@@ -481,9 +602,9 @@ class SharePointContentService:
                     return await self.pull_content(
                         token_id=token_id,
                         tenant_app_id=tenant_app_id,
-                        integration_knowledge_id=integration_knowledge_id,
-                        site_id=site_id,
-                        drive_id=drive_id or integration_knowledge.drive_id,
+                        integration_knowledge_id=resolved_integration_knowledge_id,
+                        site_id=resolved_site_id,
+                        drive_id=resolved_drive_id,
                         resource_type=resource_type
                         or integration_knowledge.resource_type
                         or "site",
@@ -533,7 +654,7 @@ class SharePointContentService:
                     except Exception as exc:
                         logger.warning(
                             "Could not resolve folder_path for delta scope (integration_knowledge=%s, folder_id=%s): %s",
-                            integration_knowledge_id,
+                            resolved_integration_knowledge_id,
                             integration_knowledge.folder_id,
                             exc,
                         )
@@ -547,15 +668,18 @@ class SharePointContentService:
                     if new_delta_token:
                         integration_knowledge.delta_token = new_delta_token
 
-                    summary_stats = {
+                    summary_stats: SyncStats = {
                         "files_processed": 0,
                         "files_deleted": 0,
                         "pages_processed": 0,
                         "folders_processed": 0,
                         "skipped_items": 0,
+                        "skipped_details": [],
                     }
 
-                    integration_knowledge.last_sync_summary = summary_stats
+                    integration_knowledge.last_sync_summary = _summary_counts(
+                        summary_stats
+                    )
                     await self.integration_knowledge_repo.update(
                         obj=integration_knowledge
                     )
@@ -574,6 +698,16 @@ class SharePointContentService:
                     logger.debug(
                         f"  - Item: {item_name} (deleted={is_deleted}, folder={is_folder}, changeKey={change_key})"
                     )
+
+                    if not item_id:
+                        stats["skipped_items"] += 1
+                        stats["skipped_details"].append(
+                            {
+                                "file": item_name or "unknown",
+                                "reason": "Missing item id",
+                            }
+                        )
+                        continue
 
                     # Skip scope check for deleted items — they may lack
                     # parentReference data.  The DB delete queries already
@@ -603,18 +737,20 @@ class SharePointContentService:
                             if item_id:
                                 deleted_blobs = await self.info_blob_service.repo.delete_by_sharepoint_item_and_integration_knowledge(
                                     sharepoint_item_id=item_id,
-                                    integration_knowledge_id=integration_knowledge.id,
+                                    integration_knowledge_id=resolved_integration_knowledge_id,
                                 )
                             else:
                                 deleted_blobs = await self.info_blob_service.repo.delete_by_title_and_integration_knowledge(
                                     title=item_name,
-                                    integration_knowledge_id=integration_knowledge.id,
+                                    integration_knowledge_id=resolved_integration_knowledge_id,
                                 )
 
                             # Update integration knowledge size to reflect deletion
                             # Filter out None values before accessing blob.size
                             valid_deleted_blobs = [
-                                blob for blob in deleted_blobs if blob is not None
+                                blob
+                                for blob in deleted_blobs
+                                if blob is not None  # pyright: ignore[reportUnnecessaryComparison]  # defensive guard
                             ]
                             if valid_deleted_blobs:
                                 current_size = _safe_int(
@@ -641,7 +777,7 @@ class SharePointContentService:
                             # Invalidate ChangeKey cache for deleted item
                             if self.change_key_service and item_id:
                                 await self.change_key_service.invalidate_change_key(
-                                    integration_knowledge_id=integration_knowledge_id,
+                                    integration_knowledge_id=resolved_integration_knowledge_id,
                                     item_id=item_id,
                                 )
                         except Exception as e:
@@ -661,7 +797,7 @@ class SharePointContentService:
                     should_process = True
                     if self.change_key_service and item_id and change_key:
                         should_process = await self.change_key_service.should_process(
-                            integration_knowledge_id=integration_knowledge_id,
+                            integration_knowledge_id=resolved_integration_knowledge_id,
                             item_id=item_id,
                             change_key=change_key,
                         )
@@ -705,14 +841,17 @@ class SharePointContentService:
                             # Update ChangeKey cache after successful processing
                             if self.change_key_service and item_id and change_key:
                                 await self.change_key_service.update_change_key(
-                                    integration_knowledge_id=integration_knowledge_id,
+                                    integration_knowledge_id=resolved_integration_knowledge_id,
                                     item_id=item_id,
                                     change_key=change_key,
                                 )
                         else:
                             stats["skipped_items"] += 1
                             stats["skipped_details"].append(
-                                {"file": item_name, "reason": "Empty or unreadable content"}
+                                {
+                                    "file": item_name,
+                                    "reason": "Empty or unreadable content",
+                                }
                             )
 
                     except ValueError as e:
@@ -735,7 +874,7 @@ class SharePointContentService:
                 integration_knowledge.delta_token = new_delta_token
 
                 summary_stats = self._build_summary_stats(stats)
-                integration_knowledge.last_sync_summary = summary_stats
+                integration_knowledge.last_sync_summary = _summary_counts(summary_stats)
 
                 files_processed = summary_stats.get("files_processed", 0)
                 files_deleted = summary_stats.get("files_deleted", 0)
@@ -747,7 +886,7 @@ class SharePointContentService:
                 await self.integration_knowledge_repo.update(obj=integration_knowledge)
 
                 logger.info(
-                    f"Processed {len(changes)} delta changes for integration knowledge {integration_knowledge_id}"
+                    f"Processed {len(changes)} delta changes for integration knowledge {resolved_integration_knowledge_id}"
                 )
 
                 if self.sync_log_repo:
@@ -757,12 +896,23 @@ class SharePointContentService:
 
                     if files_processed > 0 or files_deleted > 0 or skipped_items > 0:
                         sync_log = SyncLog(
-                            integration_knowledge_id=integration_knowledge_id,
+                            integration_knowledge_id=resolved_integration_knowledge_id,
                             sync_type="delta",
                             status="success",
                             started_at=started_at,
                             completed_at=datetime.now(timezone.utc),
-                            metadata=summary_stats,
+                            metadata=SyncMetadata(
+                                files_processed=summary_stats.get("files_processed", 0),
+                                files_deleted=summary_stats.get("files_deleted", 0),
+                                pages_processed=summary_stats.get("pages_processed", 0),
+                                folders_processed=summary_stats.get(
+                                    "folders_processed", 0
+                                ),
+                                skipped_items=summary_stats.get("skipped_items", 0),
+                                skipped_details=summary_stats.get(
+                                    "skipped_details", []
+                                ),
+                            ),
                         )
                         await self.sync_log_repo.add(sync_log)
                     else:
@@ -775,9 +925,9 @@ class SharePointContentService:
 
         except Exception as e:
             # Log failed delta sync
-            if self.sync_log_repo:
+            if self.sync_log_repo and resolved_integration_knowledge_id is not None:
                 sync_log = SyncLog(
-                    integration_knowledge_id=integration_knowledge_id,
+                    integration_knowledge_id=resolved_integration_knowledge_id,
                     sync_type="delta",
                     status="error",
                     started_at=started_at,
@@ -791,14 +941,14 @@ class SharePointContentService:
 
     async def _pull_content(
         self,
-        token,
+        token: SharePointTokenProtocol,
         oauth_token_id: Optional[UUID],
         integration_knowledge_id: UUID,
         site_id: Optional[str],
         drive_id: Optional[str],
         resource_type: str,
-        stats: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        stats: SyncStats,
+    ) -> SyncStats:
         """
         Process content from SharePoint site or OneDrive.
 
@@ -815,7 +965,11 @@ class SharePointContentService:
         )
 
         try:
-            base_url = getattr(token, "base_url", "https://graph.microsoft.com")
+            site_id_value = site_id
+            if resource_type != "onedrive":
+                site_id_value = _require_text(site_id_value, "site_id")
+
+            base_url = token.base_url
             async with SharePointContentClient(
                 base_url=base_url,
                 api_token=token.access_token,
@@ -825,8 +979,10 @@ class SharePointContentService:
                 ),
             ) as content_client:
                 actual_drive_id = drive_id
-                if not actual_drive_id and site_id:
-                    actual_drive_id = await content_client.get_default_drive_id(site_id)
+                if not actual_drive_id and site_id_value:
+                    actual_drive_id = await content_client.get_default_drive_id(
+                        site_id_value
+                    )
 
                 if not actual_drive_id:
                     raise ValueError(
@@ -834,9 +990,12 @@ class SharePointContentService:
                     )
 
                 if integration_knowledge.folder_id:
+                    folder_id_value = _require_text(
+                        integration_knowledge.folder_id, "folder_id"
+                    )
                     item_info = await content_client.get_file_metadata(
                         drive_id=actual_drive_id,
-                        item_id=integration_knowledge.folder_id,
+                        item_id=folder_id_value,
                     )
 
                     is_folder = item_info.get("folder") is not None
@@ -844,19 +1003,19 @@ class SharePointContentService:
 
                     if is_folder:
                         logger.info(
-                            f"Processing folder '{item_name}' (ID: {integration_knowledge.folder_id}) "
+                            f"Processing folder '{item_name}' (ID: {folder_id_value}) "
                             f"for integration knowledge {integration_knowledge_id}"
                         )
                         integration_knowledge.selected_item_type = "folder"
-                        processed_items = set()
+                        processed_items: set[str] = set()
                         await self._fetch_and_process_content(
-                            site_id=site_id,
+                            site_id=site_id_value,
                             drive_id=actual_drive_id,
                             resource_type=resource_type,
                             client=content_client,
                             token=token,
                             integration_knowledge_id=integration_knowledge_id,
-                            folder_id=integration_knowledge.folder_id,
+                            folder_id=folder_id_value,
                             processed_items=processed_items,
                             stats=stats,
                             is_root_call=True,
@@ -864,7 +1023,7 @@ class SharePointContentService:
                         return stats
                     else:
                         logger.info(
-                            f"Processing single file '{item_name}' (ID: {integration_knowledge.folder_id}) "
+                            f"Processing single file '{item_name}' (ID: {folder_id_value}) "
                             f"for integration knowledge {integration_knowledge_id}"
                         )
                         integration_knowledge.selected_item_type = "file"
@@ -877,10 +1036,20 @@ class SharePointContentService:
                             )
                             return stats
 
-                        content, _ = await content_client.get_file_content_by_id(
-                            drive_id=actual_drive_id,
-                            item_id=integration_knowledge.folder_id,
-                        )
+                        try:
+                            content, _ = await content_client.get_file_content_by_id(
+                                drive_id=actual_drive_id,
+                                item_id=folder_id_value,
+                            )
+                        except Exception as e:
+                            logger.error(
+                                f"Error getting file content for {item_name}: {e}"
+                            )
+                            stats["skipped_items"] += 1
+                            stats["skipped_details"].append(
+                                {"file": item_name, "reason": f"Error: {e}"}
+                            )
+                            return stats
 
                         if content:
                             await self._process_info_blob(
@@ -894,7 +1063,10 @@ class SharePointContentService:
                         else:
                             stats["skipped_items"] += 1
                             stats["skipped_details"].append(
-                                {"file": item_name, "reason": "Empty or unreadable content"}
+                                {
+                                    "file": item_name,
+                                    "reason": "Empty or unreadable content",
+                                }
                             )
 
                         return stats
@@ -907,7 +1079,7 @@ class SharePointContentService:
                         )
                     else:
                         data = await content_client.get_documents_in_drive(
-                            site_id=site_id
+                            site_id=_require_text(site_id_value, "site_id")
                         )
 
                     if data:
@@ -920,8 +1092,10 @@ class SharePointContentService:
                             stats=stats,
                         )
 
-                    if resource_type != "onedrive" and site_id:
-                        pages = await content_client.get_site_pages(site_id=site_id)
+                    if resource_type != "onedrive" and site_id_value:
+                        pages = await content_client.get_site_pages(
+                            site_id=_require_text(site_id_value, "site_id")
+                        )
                         if data := pages.get("value", []):
                             await self._process_pages(
                                 pages=data,
@@ -938,21 +1112,23 @@ class SharePointContentService:
 
     async def _process_documents(
         self,
-        documents: list[dict],
+        documents: list[SharePointItem],
         client: SharePointContentClient,
         integration_knowledge: "IntegrationKnowledge",
-        token: "SharePointToken",
+        token: SharePointTokenProtocol,
         resource_type: str,
-        stats: Dict[str, Any],
+        stats: SyncStats,
     ):
         for document in documents:
             drive_id = document.get("parentReference", {}).get("driveId")
             site_id = document.get("parentReference", {}).get("siteId")
             item_id = document.get("id")
             if document.get("folder", {}):
+                if not drive_id or not item_id:
+                    continue
                 stats["folders_processed"] += 1
                 # Recursively process all items in the folder
-                processed_items = set()
+                processed_items: set[str] = set()
                 await self._fetch_and_process_content(
                     site_id=site_id,
                     drive_id=drive_id,
@@ -967,6 +1143,8 @@ class SharePointContentService:
                 )
             else:
                 # file
+                if not drive_id or not item_id:
+                    continue
                 doc_name = document.get("name", "")
                 unsupported_reason = _unsupported_file_reason(doc_name)
                 if unsupported_reason:
@@ -975,9 +1153,18 @@ class SharePointContentService:
                         {"file": doc_name, "reason": unsupported_reason}
                     )
                     continue
-                content, _ = await client.get_file_content_by_id(
-                    drive_id=drive_id, item_id=item_id
-                )
+                try:
+                    content, _ = await client.get_file_content_by_id(
+                        drive_id=drive_id, item_id=item_id
+                    )
+                except Exception as e:
+                    logger.error(f"Error getting file content for {doc_name}: {e}")
+                    stats["skipped_items"] += 1
+                    stats["skipped_details"].append(
+                        {"file": doc_name, "reason": f"Error: {e}"}
+                    )
+                    continue
+
                 if content:
                     await self._process_info_blob(
                         title=doc_name,
@@ -995,16 +1182,17 @@ class SharePointContentService:
 
     async def _process_pages(
         self,
-        pages: list,
+        pages: list[SharePointItem],
         client: SharePointContentClient,
         integration_knowledge: "IntegrationKnowledge",
-        stats: Dict[str, Any],
+        stats: SyncStats,
     ):
         for page in pages:
             site_id = page.get("parentReference", {}).get("siteId")
-            content = await client.get_page_content(
-                site_id=site_id, page_id=page.get("id")
-            )
+            page_id = page.get("id")
+            if not site_id or not page_id:
+                continue
+            content = await client.get_page_content(site_id=site_id, page_id=page_id)
             if content:
                 page_text = _extract_text_from_canvas_layout(content)
                 if not page_text:
@@ -1018,7 +1206,11 @@ class SharePointContentService:
                 )
                 stats["pages_processed"] += 1
             else:
-                page_name = page.get("name", "") or page.get("title", "") or f"Page {page.get('id', 'unknown')}"
+                page_name = (
+                    page.get("name", "")
+                    or page.get("title", "")
+                    or f"Page {page.get('id', 'unknown')}"
+                )
                 stats["skipped_items"] += 1
                 stats["skipped_details"].append(
                     {"file": page_name, "reason": "Empty or unreadable content"}
@@ -1097,18 +1289,25 @@ class SharePointContentService:
     async def _fetch_and_process_content(
         self,
         site_id: Optional[str],
-        drive_id: str,
+        drive_id: Optional[str],
         resource_type: str,
-        token: "SharePointToken",
+        token: SharePointTokenProtocol,
         integration_knowledge_id: UUID,
         client: SharePointContentClient,
-        stats: Dict[str, Any],
+        stats: SyncStats,
         folder_id: Optional[str] = None,
-        processed_items: set = None,
+        processed_items: set[str] | None = None,
         is_root_call: bool = True,
     ):
         if processed_items is None:
             processed_items = set()
+
+        if not drive_id:
+            logger.warning(
+                "Missing drive_id for SharePoint content fetch (integration_knowledge_id=%s)",
+                integration_knowledge_id,
+            )
+            return
 
         if resource_type == "onedrive":
             if not folder_id:
@@ -1125,11 +1324,14 @@ class SharePointContentService:
                     drive_id,
                 )
                 return
-            results = await client.get_folder_items(
-                site_id=site_id,
-                drive_id=drive_id,
-                folder_id=folder_id,
-            )
+            if not folder_id:
+                results = await client.get_documents_in_drive(site_id=site_id)
+            else:
+                results = await client.get_folder_items(
+                    site_id=site_id,
+                    drive_id=drive_id,
+                    folder_id=folder_id,
+                )
 
         if not results:
             return
@@ -1153,11 +1355,11 @@ class SharePointContentService:
         drive_id: str,
         resource_type: str,
         client: SharePointContentClient,
-        results: List[Dict[str, Any]],
+        results: list[SharePointItem],
         integration_knowledge_id: UUID,
-        token: "SharePointToken",
-        processed_items: set,
-        stats: Dict[str, Any],
+        token: SharePointTokenProtocol,
+        processed_items: set[str],
+        stats: SyncStats,
         is_root_call: bool = True,
     ) -> None:
         integration_knowledge = await self.integration_knowledge_repo.one(
@@ -1170,7 +1372,8 @@ class SharePointContentService:
             if item_id in processed_items:
                 continue
 
-            processed_items.add(item_id)
+            if item_id:
+                processed_items.add(item_id)
 
             item_name = item.get("name", "")
             item_type = self._get_item_type(item)
@@ -1211,7 +1414,7 @@ class SharePointContentService:
                         {"file": item_name, "reason": skip_reason}
                     )
 
-    def _initialize_stats(self) -> Dict[str, Any]:
+    def _initialize_stats(self) -> SyncStats:
         return {
             "files_processed": 0,
             "files_deleted": 0,
@@ -1221,27 +1424,28 @@ class SharePointContentService:
             "skipped_details": [],
         }
 
-    def _build_summary_stats(self, stats: Dict[str, Any]) -> Dict[str, Any]:
-        summary: Dict[str, Any] = {
+    def _build_summary_stats(self, stats: SyncStats) -> SyncStats:
+        summary: SyncStats = {
             "files_processed": stats.get("files_processed", 0),
             "files_deleted": stats.get("files_deleted", 0),
             "pages_processed": stats.get("pages_processed", 0),
             "folders_processed": stats.get("folders_processed", 0),
             "skipped_items": stats.get("skipped_items", 0),
+            "skipped_details": [],
         }
         skipped_details = stats.get("skipped_details", [])
         if skipped_details:
             summary["skipped_details"] = skipped_details[:50]
         return summary
 
-    def _format_summary_for_job(self, summary: Dict[str, int]) -> str:
+    def _format_summary_for_job(self, summary: SyncStats) -> str:
         files = summary.get("files_processed", 0) or 0
         deleted = summary.get("files_deleted", 0) or 0
         pages = summary.get("pages_processed", 0) or 0
         folders = summary.get("folders_processed", 0) or 0
         skipped = summary.get("skipped_items", 0) or 0
 
-        processed_parts = []
+        processed_parts: list[str] = []
         if files:
             processed_parts.append(f"{files} file{'s' if files != 1 else ''}")
         if deleted:
@@ -1253,7 +1457,7 @@ class SharePointContentService:
         if not processed_parts:
             processed_parts.append("0 files")
 
-        extra_parts = []
+        extra_parts: list[str] = []
         if folders:
             extra_parts.append(f"{folders} folder{'s' if folders != 1 else ''} scanned")
         if skipped:
@@ -1266,7 +1470,7 @@ class SharePointContentService:
 
     def _is_item_in_folder_scope(
         self,
-        item: Dict[str, Any],
+        item: SharePointItem,
         scope_folder_id: Optional[str],
         scope_folder_path: Optional[str] = None,
         known_subfolder_ids: Optional[set[str]] = None,
@@ -1316,9 +1520,13 @@ class SharePointContentService:
                 parent_ref.get("path", "")
             )
 
-            # Item is in scope if its parent path starts with or equals the folder path
-            normalized_scope = scope_folder_path.rstrip("/")
-            normalized_parent = relative_path.rstrip("/")
+            # Item is in scope if its parent path starts with or equals the folder
+            # path. SharePoint paths are case-insensitive and may arrive
+            # percent-encoded (e.g. "%20", encoded å/ä/ö), so normalize both sides
+            # before comparing — otherwise folders with spaces or non-ASCII names
+            # silently fail the scope check and never get indexed.
+            normalized_scope = self._normalize_path(scope_folder_path)
+            normalized_parent = self._normalize_path(relative_path)
             if normalized_scope and (
                 normalized_parent == normalized_scope
                 or normalized_parent.startswith(normalized_scope + "/")
@@ -1326,6 +1534,19 @@ class SharePointContentService:
                 return True
 
         return False
+
+    @staticmethod
+    def _normalize_path(path: str) -> str:
+        """Normalize a SharePoint path for case- and encoding-insensitive comparison.
+
+        URL-decodes percent-encoding, normalizes Unicode to NFC (so å/ä/ö in NFC
+        vs NFD forms compare equal), strips a trailing slash, and casefolds.
+        """
+        if not path:
+            return ""
+        decoded = unquote(path)
+        nfc = unicodedata.normalize("NFC", decoded)
+        return nfc.rstrip("/").casefold()
 
     @staticmethod
     def _extract_relative_graph_path(parent_path: str) -> str:
@@ -1342,14 +1563,14 @@ class SharePointContentService:
         self,
         content_client: SharePointContentClient,
         site_id: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[SharePointItem]:
         """
         Recursively collect all file names from SharePoint for comparison with database.
         Returns a flat list of all files (not folders) in the drive, including files in subfolders.
 
         This is used during delta recovery to accurately detect deleted files.
         """
-        all_files = []
+        all_files: list[SharePointItem] = []
 
         try:
             # Get default drive for the site
@@ -1385,7 +1606,7 @@ class SharePointContentService:
         site_id: str,
         drive_id: str,
         folder_id: Optional[str],
-        all_files: List[Dict[str, Any]],
+        all_files: list[SharePointItem],
     ) -> None:
         """
         Recursively collect all files from a folder and its subfolders.
@@ -1429,16 +1650,16 @@ class SharePointContentService:
             logger.warning(f"Error collecting files from folder {folder_id}: {e}")
             # Continue with other folders on error
 
-    def _flatten_files(self, items: list[dict]) -> List[Dict[str, Any]]:
+    def _flatten_files(self, items: list[SharePointItem]) -> list[SharePointItem]:
         """Extract all files from a list of items (excluding folders)."""
-        files = []
+        files: list[SharePointItem] = []
         for item in items:
             if not item.get("folder", {}):
                 # It's a file
                 files.append(item)
         return files
 
-    async def token_refresh_callback(self, token_id: UUID) -> Dict[str, str]:
+    async def token_refresh_callback(self, token_id: UUID) -> dict[str, str]:
         token = await self.oauth_token_service.refresh_and_update_token(
             token_id=token_id
         )
@@ -1447,15 +1668,15 @@ class SharePointContentService:
             "refresh_token": token.refresh_token,
         }
 
-    def _get_item_type(self, item: Dict[str, Any]) -> str:
+    def _get_item_type(self, item: SharePointItem) -> str:
         if item.get("folder"):
             return "folder"
 
         return file_extension_to_type(item.get("name", ""))
 
     async def _get_file_content(
-        self, client: SharePointContentClient, item: Dict[str, Any]
-    ) -> Tuple[Optional[str], Optional[str]]:
+        self, client: SharePointContentClient, item: SharePointItem
+    ) -> tuple[Optional[str], Optional[str]]:
         item_id = item.get("id")
         item_name = item.get("name", "").lower()
         item_type = self._get_item_type(item)

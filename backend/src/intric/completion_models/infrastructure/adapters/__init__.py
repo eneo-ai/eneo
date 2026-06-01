@@ -6,3 +6,5 @@ from intric.completion_models.infrastructure.adapters.base_adapter import (
 from intric.completion_models.infrastructure.adapters.tenant_model_adapter import (
     TenantModelAdapter,
 )
+
+__all__ = ["CompletionModelAdapter", "TenantModelAdapter"]

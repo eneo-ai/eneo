@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import selectinload
+from typing_extensions import override
 
 from intric.database.tables.integration_table import (
     TenantIntegration as TenantIntegrationDBModel,
@@ -35,5 +36,6 @@ class UserIntegrationRepoImpl(
             )
         ]
 
+    @override
     async def remove(self, id: "UUID") -> None:
         await self.delete(id=id)

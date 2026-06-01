@@ -1,6 +1,10 @@
+import logging
+from typing import cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing_extensions import TypedDict
 
 from intric.apps.app_runs.api.app_run_models import (
     AppRunPublic,
@@ -8,19 +12,32 @@ from intric.apps.app_runs.api.app_run_models import (
     RunAppRequest,
 )
 from intric.apps.apps.api.app_models import AppPublic, AppUpdateRequest
-from intric.main.container.container import Container
-from intric.main.models import NOT_PROVIDED, PaginatedResponse
-from intric.prompts.api.prompt_models import PromptSparse
-from intric.server import protocol
-from intric.server.dependencies.container import get_container
-from intric.server.protocol import responses
 
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.authentication.api_key_notification_auto_follow import (
+    auto_follow_on_publish,
+)
+from intric.authentication.auth_models import ApiKeyNotificationTargetType
+from intric.files.file_models import File
+from intric.main.container.container import Container
+from intric.main.models import NOT_PROVIDED, PaginatedResponse, is_provided
+from intric.prompts.api.prompt_models import PromptSparse
+from intric.server import protocol
+from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+WITH_USER_CONTAINER = get_container(with_user=True)
+USER_CONTAINER = Depends(WITH_USER_CONTAINER)
+
+
+class AttachmentChange(TypedDict):
+    id: str
+    name: str
 
 
 @router.get(
@@ -30,7 +47,7 @@ router = APIRouter()
 )
 async def get_app(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     service = container.app_service()
     assembler = container.app_assembler()
@@ -48,7 +65,7 @@ async def get_app(
 async def update_app(
     id: UUID,
     update_service_req: AppUpdateRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     service = container.app_service()
     assembler = container.app_assembler()
@@ -68,9 +85,15 @@ async def update_app(
         if update_service_req.transcription_model is not None
         else None
     )
-    prompt_text = update_service_req.prompt.text if update_service_req.prompt is not None else None
+    prompt_text = (
+        update_service_req.prompt.text
+        if update_service_req.prompt is not None
+        else None
+    )
     prompt_description = (
-        update_service_req.prompt.description if update_service_req.prompt is not None else None
+        update_service_req.prompt.description
+        if update_service_req.prompt is not None
+        else None
     )
 
     # Handle icon_id: check if it was provided in the request
@@ -104,19 +127,30 @@ async def update_app(
             space = None
 
     # Helper function to track attachment changes
-    def get_attachment_changes(old_attachments, new_attachments):
+    def get_attachment_changes(
+        old_attachments: list[File] | None,
+        new_attachments: list[File] | None,
+    ) -> tuple[list[AttachmentChange], list[AttachmentChange]]:
         """Compare attachment lists and return added/removed items."""
-        old_items = {str(att.id): att.name for att in (old_attachments or [])}
-        new_items = {str(att.id): att.name for att in (new_attachments or [])}
+        old_items: dict[str, str] = {
+            str(att.id): att.name for att in (old_attachments or [])
+        }
+        new_items: dict[str, str] = {
+            str(att.id): att.name for att in (new_attachments or [])
+        }
 
-        added = [{"id": k, "name": new_items[k]} for k in new_items if k not in old_items]
-        removed = [{"id": k, "name": old_items[k]} for k in old_items if k not in new_items]
+        added: list[AttachmentChange] = [
+            {"id": k, "name": new_items[k]} for k in new_items if k not in old_items
+        ]
+        removed: list[AttachmentChange] = [
+            {"id": k, "name": old_items[k]} for k in old_items if k not in new_items
+        ]
 
         return added, removed
 
     # Track comprehensive changes
-    changes = {}
-    change_summary = []
+    changes: dict[str, object] = {}
+    change_summary: list[str] = []
 
     # Name change
     if update_service_req.name and update_service_req.name != old_app.name:
@@ -124,7 +158,10 @@ async def update_app(
         change_summary.append("name")
 
     # Description change (with preview for long text)
-    if update_service_req.description is not None and update_service_req.description != old_app.description:
+    if (
+        update_service_req.description is not None
+        and update_service_req.description != old_app.description
+    ):
         old_desc = old_app.description or ""
         new_desc = update_service_req.description or ""
 
@@ -134,7 +171,7 @@ async def update_app(
 
         changes["description"] = {
             "old": old_preview if old_desc else None,
-            "new": new_preview if new_desc else None
+            "new": new_preview if new_desc else None,
         }
         change_summary.append("description")
 
@@ -145,31 +182,42 @@ async def update_app(
 
         if new_prompt_text != old_prompt_text:
             # Create preview of prompt text
-            prompt_preview = new_prompt_text[:50] + "..." if len(new_prompt_text) > 50 else new_prompt_text
+            prompt_preview = (
+                new_prompt_text[:50] + "..."
+                if len(new_prompt_text) > 50
+                else new_prompt_text
+            )
             changes["prompt"] = {
                 "changed": True,
-                "preview": prompt_preview if new_prompt_text else "Removed prompt"
+                "preview": prompt_preview if new_prompt_text else "Removed prompt",
             }
             change_summary.append("prompt")
 
     # Model changes
-    if completion_model_id and completion_model_id != old_app.completion_model.id:
+    old_completion_model = old_app.completion_model
+    new_completion_model = app.completion_model
+    if (
+        completion_model_id
+        and old_completion_model is not None
+        and completion_model_id != old_completion_model.id
+    ):
         changes["model"] = {
-            "old": old_app.completion_model.nickname if old_app.completion_model else None,
-            "new": app.completion_model.nickname if app.completion_model else None,
-            "old_id": str(old_app.completion_model.id) if old_app.completion_model else None,
-            "new_id": str(completion_model_id)
+            "old": old_completion_model.nickname,
+            "new": new_completion_model.nickname if new_completion_model else None,
+            "old_id": str(old_completion_model.id),
+            "new_id": str(completion_model_id),
         }
         change_summary.append("model")
 
     # Model behavior parameters (temperature, top_p)
     if update_service_req.completion_model_kwargs is not None:
-        old_kwargs = old_app.completion_model_kwargs or {}
-        new_kwargs = update_service_req.completion_model_kwargs or {}
-
         # Temperature
-        old_temperature = old_kwargs.get('temperature') if isinstance(old_kwargs, dict) else getattr(old_kwargs, 'temperature', None)
-        new_temperature = new_kwargs.get('temperature') if isinstance(new_kwargs, dict) else getattr(new_kwargs, 'temperature', None)
+        old_temperature = (
+            old_app.completion_model_kwargs.temperature
+            if old_app.completion_model_kwargs
+            else None
+        )
+        new_temperature = update_service_req.completion_model_kwargs.temperature
 
         if old_temperature != new_temperature and new_temperature is not None:
             changes["temperature"] = {"old": old_temperature, "new": new_temperature}
@@ -177,8 +225,12 @@ async def update_app(
                 change_summary.append("parameters")
 
         # Top-p
-        old_top_p = old_kwargs.get('top_p') if isinstance(old_kwargs, dict) else getattr(old_kwargs, 'top_p', None)
-        new_top_p = new_kwargs.get('top_p') if isinstance(new_kwargs, dict) else getattr(new_kwargs, 'top_p', None)
+        old_top_p = (
+            old_app.completion_model_kwargs.top_p
+            if old_app.completion_model_kwargs
+            else None
+        )
+        new_top_p = update_service_req.completion_model_kwargs.top_p
 
         if old_top_p != new_top_p and new_top_p is not None:
             changes["top_p"] = {"old": old_top_p, "new": new_top_p}
@@ -191,16 +243,26 @@ async def update_app(
         new_fields = update_service_req.input_fields or []
 
         # Compare input fields
-        old_field_dict = {i: {"type": f.type.value if hasattr(f.type, 'value') else str(f.type),
-                               "description": f.description} for i, f in enumerate(old_fields)}
-        new_field_dict = {i: {"type": f.type.value if hasattr(f.type, 'value') else str(f.type),
-                               "description": f.description} for i, f in enumerate(new_fields)}
+        old_field_dict = {
+            i: {
+                "type": f.type.value if hasattr(f.type, "value") else str(f.type),
+                "description": f.description,
+            }
+            for i, f in enumerate(old_fields)
+        }
+        new_field_dict = {
+            i: {
+                "type": f.type.value if hasattr(f.type, "value") else str(f.type),
+                "description": f.description,
+            }
+            for i, f in enumerate(new_fields)
+        }
 
         if old_field_dict != new_field_dict:
             changes["input_fields"] = {
                 "old_count": len(old_fields),
                 "new_count": len(new_fields),
-                "modified": True
+                "modified": True,
             }
             change_summary.append("input fields")
 
@@ -220,37 +282,46 @@ async def update_app(
             change_summary.append("attachments")
 
     # Data retention changes
-    if update_service_req.data_retention_days is not NOT_PROVIDED:
+    if is_provided(update_service_req.data_retention_days):
         old_retention = old_app.data_retention_days
         new_retention = update_service_req.data_retention_days
 
         if old_retention != new_retention:
             changes["data_retention_days"] = {
                 "old": old_retention,
-                "new": new_retention
+                "new": new_retention,
             }
             change_summary.append("retention")
 
     # Transcription model changes
     if transcription_model_id and (
-        (old_app.transcription_model and transcription_model_id != old_app.transcription_model.id) or
-        (not old_app.transcription_model)
+        (
+            old_app.transcription_model
+            and transcription_model_id != old_app.transcription_model.id
+        )
+        or (not old_app.transcription_model)
     ):
         changes["transcription_model"] = {
-            "old": old_app.transcription_model.nickname if old_app.transcription_model else None,
-            "new": app.transcription_model.nickname if app.transcription_model else None
+            "old": old_app.transcription_model.nickname
+            if old_app.transcription_model
+            else None,
+            "new": app.transcription_model.nickname
+            if app.transcription_model
+            else None,
         }
         change_summary.append("transcription model")
 
     # Build extra context
     extra = {
-        "summary": f"Modified {', '.join(change_summary)}" if change_summary else "No changes detected",
+        "summary": f"Modified {', '.join(change_summary)}"
+        if change_summary
+        else "No changes detected",
     }
 
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.APP_UPDATED,
         entity_type=EntityType.APP,
         entity_id=id,
@@ -274,7 +345,7 @@ async def update_app(
 )
 async def delete_app(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     service = container.app_service()
     current_user = container.user()
@@ -295,7 +366,9 @@ async def delete_app(
     # Build extra context capturing what was deleted
     extra = {
         "model": app.completion_model.nickname if app.completion_model else None,
-        "created_at": app.created_at.isoformat() if hasattr(app, 'created_at') and app.created_at else None,
+        "created_at": app.created_at.isoformat()
+        if hasattr(app, "created_at") and app.created_at
+        else None,
     }
 
     # Delete app
@@ -304,7 +377,7 @@ async def delete_app(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.APP_DELETED,
         entity_type=EntityType.APP,
         entity_id=id,
@@ -327,7 +400,7 @@ async def delete_app(
 async def run_app(
     id: UUID,
     run_app_req: RunAppRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     service = container.app_run_service()
     assembler = container.app_run_assembler()
@@ -358,14 +431,16 @@ async def run_app(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.APP_EXECUTED,
         entity_type=EntityType.APP,
         entity_id=id,
         description=f"Executed app '{app_info.name if app_info else 'unknown'}' (run_id: {app_run.id})",
         metadata=AuditMetadata.standard(
             actor=current_user,
-            target=app_info if app_info else type("FallbackTarget", (), {"id": id, "name": None})(),
+            target=app_info
+            if app_info
+            else type("FallbackTarget", (), {"id": id, "name": None})(),
             space=space,
             extra=extra,
         ),
@@ -381,13 +456,15 @@ async def run_app(
 )
 async def get_app_runs(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     service = container.app_run_service()
     assembler = container.app_run_assembler()
 
     app_runs = await service.get_app_runs(app_id=id)
-    app_runs_public = [assembler.from_app_run_to_sparse_model(app_run) for app_run in app_runs]
+    app_runs_public = [
+        assembler.from_app_run_to_sparse_model(app_run) for app_run in app_runs
+    ]
 
     return protocol.to_paginated_response(app_runs_public)
 
@@ -399,7 +476,7 @@ async def get_app_runs(
 )
 async def get_prompts(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     service = container.app_service()
     assembler = container.prompt_assembler()
@@ -418,7 +495,7 @@ async def get_prompts(
 async def publish_app(
     id: UUID,
     published: bool,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = USER_CONTAINER,
 ):
     service = container.app_service()
     assembler = container.app_assembler()
@@ -446,7 +523,7 @@ async def publish_app(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.APP_PUBLISHED,
         entity_type=EntityType.APP,
         entity_id=id,
@@ -458,5 +535,20 @@ async def publish_app(
             extra=extra,
         ),
     )
+
+    if published:
+        try:
+            session = cast(AsyncSession, container.session())
+            await auto_follow_on_publish(
+                session=session,
+                user=user,
+                target_type=ApiKeyNotificationTargetType.APP,
+                target_id=id,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to auto-follow API key expiry notifications for published app %s",
+                id,
+            )
 
     return assembler.from_app_to_model(app=app, permissions=permissions)

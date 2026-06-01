@@ -1,7 +1,12 @@
-from typing import Any, Generic, Literal, Optional, TypeVar
+from typing import Any, Generic, Literal, Optional, TypeVar, Union
 from uuid import UUID
 
 from pydantic import AnyHttpUrl, BaseModel, computed_field
+
+from intric.main.models import NOT_PROVIDED, ModelId, NotProvided
+from intric.security_classifications.presentation.security_classification_models import (
+    SecurityClassificationPublic,
+)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -21,11 +26,13 @@ class MCPServerPublic(BaseModel):
     name: str
     description: Optional[str]
     http_url: str
-    http_auth_type: str  # "none", "bearer", "api_key", "custom_headers"
-    http_auth_config_schema: Optional[dict[str, Any]]
+    http_auth_type: str  # "none", "bearer"
+    has_credentials: bool
+    credential_preview: Optional[str] = None  # masked token, e.g. "••••••••sk12"
     tags: Optional[list[str]]
     icon_url: Optional[str]
     documentation_url: Optional[str]
+    security_classification: Optional[SecurityClassificationPublic] = None
 
 
 class MCPServerList(BaseListModel[MCPServerPublic]):
@@ -37,12 +44,13 @@ class MCPServerCreate(BaseModel):
 
     name: str
     http_url: AnyHttpUrl
-    http_auth_type: Literal["none", "bearer", "api_key", "custom_headers"] = "none"
+    http_auth_type: Literal["none", "bearer"] = "none"
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
     tags: Optional[list[str]] = None
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None
+    security_classification: Optional[ModelId] = None
 
 
 class MCPServerUpdate(BaseModel):
@@ -50,14 +58,13 @@ class MCPServerUpdate(BaseModel):
 
     name: Optional[str] = None
     http_url: Optional[AnyHttpUrl] = None
-    http_auth_type: Optional[Literal["none", "bearer", "api_key", "custom_headers"]] = (
-        None
-    )
+    http_auth_type: Optional[Literal["none", "bearer"]] = None
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
     tags: Optional[list[str]] = None
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None
+    security_classification: Union[ModelId, None, NotProvided] = NOT_PROVIDED
 
 
 class MCPServerSettingsPublic(MCPServerPublic):
@@ -65,7 +72,6 @@ class MCPServerSettingsPublic(MCPServerPublic):
 
     mcp_server_id: UUID  # ID in global catalog
     is_org_enabled: bool
-    has_credentials: bool  # Whether env_vars are configured
     tools: list["MCPServerToolPublic"] = []
 
     @computed_field
@@ -123,6 +129,10 @@ class MCPServerToolPublic(BaseModel):
     description: Optional[str]
     input_schema: Optional[dict[str, Any]]
     is_enabled_by_default: bool
+    pending_description: Optional[str] = None
+    pending_input_schema: Optional[dict[str, Any]] = None
+    requires_approval: bool = False
+    removed_from_remote: bool = False
 
 
 class MCPServerToolList(BaseListModel[MCPServerToolPublic]):
@@ -150,12 +160,40 @@ class MCPServerCreateResponse(BaseModel):
     connection: MCPConnectionStatus
 
 
-class MCPServerToolSyncResponse(BaseModel):
-    """Response for tool sync operation including connection status."""
+class ToolChangePublic(BaseModel):
+    """DTO for a tool change detected during sync."""
 
-    tools: list[MCPServerToolPublic]
+    tool: MCPServerToolPublic
+    change_type: str  # "new", "changed", "removed"
+    current_description: Optional[str] = None
+    current_input_schema: Optional[dict[str, Any]] = None
+    pending_description: Optional[str] = None
+    pending_input_schema: Optional[dict[str, Any]] = None
+
+
+class MCPServerToolSyncResponse(BaseModel):
+    """Response for tool sync operation with changeset for review."""
+
     connection: MCPConnectionStatus
+    new_tools: list[ToolChangePublic] = []
+    changed_tools: list[ToolChangePublic] = []
+    removed_tools: list[ToolChangePublic] = []
+    unchanged_count: int = 0
 
     @computed_field
-    def count(self) -> int:
-        return len(self.tools)
+    def has_pending_changes(self) -> bool:
+        return bool(self.new_tools or self.changed_tools or self.removed_tools)
+
+
+class ToolReviewRequest(BaseModel):
+    """DTO for reviewing (approving/rejecting) tool changes."""
+
+    tool_ids: list[UUID]
+
+
+class ToolReviewResponse(BaseModel):
+    """Response after reviewing tool changes."""
+
+    approved_tools: list[MCPServerToolPublic] = []
+    rejected_tools: list[MCPServerToolPublic] = []
+    deleted_count: int = 0

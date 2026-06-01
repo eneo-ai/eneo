@@ -6,8 +6,11 @@ import io
 import re
 import zipfile
 from logging import getLogger
-from typing import Dict, Optional, Tuple
+from typing import Any, Optional
+
 import pandas as pd
+
+from intric.integration.infrastructure.content_service.types import SharePointItem
 
 logger = getLogger(__name__)
 
@@ -42,7 +45,7 @@ def binary_to_text(binary_data: bytes) -> str:
                     return extract_text_from_pptx(binary_data, zip_file)
 
                 # Generic XML extraction as a fallback for unknown Office formats
-                all_text = []
+                all_text: list[str] = []
                 for filename in zip_file.namelist():
                     if filename.endswith(".xml"):
                         try:
@@ -70,7 +73,7 @@ def binary_to_text(binary_data: bytes) -> str:
             # Fall back to the standard method if ZIP extraction fails
 
     # Standard method for non-Office documents or if Office parsing failed
-    result = []
+    result: list[str] = []
     current_text = ""
 
     # Filter out null bytes (cause PostgreSQL UTF-8 encoding errors)
@@ -138,7 +141,7 @@ def extract_text_from_docx(
             # Look for text between <w:t> tags
             text_matches = re.findall(b"<w:t[^>]*>(.*?)</w:t>", xml_content, re.DOTALL)
             if text_matches:
-                clean_text = []
+                clean_text: list[str] = []
                 for match in text_matches:
                     try:
                         decoded = match.decode("utf-8", errors="replace")
@@ -191,18 +194,18 @@ def extract_text_from_pptx(
                 presentation = Presentation(temp_pptx)
 
                 # Extract text from each slide
-                slide_texts = []
+                slide_texts: list[str] = []
 
                 for slide_num, slide in enumerate(presentation.slides, 1):
                     # Extract text from all shapes on the slide
-                    slide_content = []
+                    slide_content: list[str] = []
 
                     # Process each shape
                     for shape in slide.shapes:
                         # Extract text from text frames
-                        if hasattr(shape, "text") and shape.text.strip():
+                        if hasattr(shape, "text") and shape.text.strip():  # type: ignore[attr-defined]
                             # Skip template placeholders
-                            text = shape.text.strip()
+                            text: str = str(shape.text).strip()  # type: ignore[attr-defined]
 
                             # Skip common placeholders and formatting text
                             skip_phrases = [
@@ -240,7 +243,7 @@ def extract_text_from_pptx(
             logger.warning(f"Error extracting PPTX with python-pptx: {e}")
 
         # If python-pptx extraction failed, try a simpler approach
-        slide_texts = []
+        slide_texts: list[str] = []
         slide_files = sorted(
             [
                 name
@@ -252,17 +255,17 @@ def extract_text_from_pptx(
         for i, slide_file in enumerate(slide_files, 1):
             try:
                 with zip_file.open(slide_file) as f:
-                    slide_content = f.read()
+                    slide_bytes: bytes = f.read()
 
                     # Extract paragraph text using more precise targeting
                     # This focuses on actual content and avoids placeholders
-                    paragraphs = []
+                    paragraphs: list[str] = []
 
                     # Extract actual slide content from more specific XML paths
                     # 1. Extract text from title placeholders
-                    title_matches = re.findall(
+                    title_matches: list[bytes] = re.findall(
                         b"<p:title[^>]*>.*?<a:t[^>]*>(.*?)</a:t>",
-                        slide_content,
+                        slide_bytes,
                         re.DOTALL,
                     )
                     for match in title_matches:
@@ -274,9 +277,9 @@ def extract_text_from_pptx(
                             pass
 
                     # 2. Extract text from actual content placeholders
-                    body_matches = re.findall(
+                    body_matches: list[bytes] = re.findall(
                         b"<p:bodyPr[^>]*>.*?<a:t[^>]*>(.*?)</a:t>",
-                        slide_content,
+                        slide_bytes,
                         re.DOTALL,
                     )
                     for match in body_matches:
@@ -309,10 +312,10 @@ def extract_text_from_xlsx(binary_data: bytes) -> str:
     try:
         excel_file = io.BytesIO(binary_data)
         xls = pd.ExcelFile(excel_file)
-        csv_data = []
+        csv_data: list[str] = []
         for sheet_name in xls.sheet_names:
-            df = pd.read_excel(xls, sheet_name=sheet_name)
-            csv_text = df.to_csv(index=False, sep="|")
+            df: pd.DataFrame = pd.read_excel(xls, sheet_name=sheet_name)  # type: ignore[assignment]  # pandas stubs return broad type
+            csv_text = df.to_csv(index=False, sep="|")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs incomplete
             csv_data.append(f"### {sheet_name} ###\n{csv_text}")
         return "Excel sheet data: " + "\n\n".join(csv_data)
     except Exception as e:
@@ -322,8 +325,7 @@ def extract_text_from_xlsx(binary_data: bytes) -> str:
 
 def extract_text_from_pdf(binary_data: bytes) -> str:
     """
-    Attempt to extract text from a PDF file.
-    Falls back to basic text extraction if PDF-specific extraction fails.
+    Extract text from a PDF file using pdfplumber.
 
     Args:
         binary_data: The binary data of the PDF file
@@ -331,43 +333,25 @@ def extract_text_from_pdf(binary_data: bytes) -> str:
     Returns:
         Extracted text from the PDF
     """
-    # Check if the file looks like a PDF (starts with %PDF)
-    if binary_data.startswith(b"%PDF"):
-        try:
-            # Try to extract text using a simple method that doesn't require additional libraries
-            # This extracts all strings from the PDF that are likely to be text content
-            result = []
+    import pdfplumber
 
-            # Look for text objects in the PDF
-            # PDF text is often in the format: BT ... (text) ... ET
-            text_chunks = re.findall(rb"BT.*?ET", binary_data, re.DOTALL)
+    try:
+        with pdfplumber.open(io.BytesIO(binary_data)) as pdf:
+            extracted_text = " ".join(page.extract_text() or "" for page in pdf.pages)
 
-            for chunk in text_chunks:
-                # Extract text strings in parentheses - these are usually content
-                strings = re.findall(rb"\((.*?)\)", chunk, re.DOTALL)
-                for s in strings:
-                    try:
-                        # Decode PDF-encoded strings
-                        decoded = (
-                            s.replace(b"\\(", b"(")
-                            .replace(b"\\)", b")")
-                            .decode("latin-1", errors="replace")
-                        )
-                        # Only keep strings that seem like real text (not just single characters)
-                        if len(decoded.strip()) > 3 and not decoded.strip().isdigit():
-                            result.append(decoded.strip())
-                    except Exception:
-                        pass
+        # Remove null bytes (cause PostgreSQL UTF-8 encoding errors)
+        sanitized = extracted_text.replace("\x00", "")
 
-            # If we found text in the PDF, return it
-            if result:
-                return "\n".join(result)
+        if not sanitized.strip():
+            logger.warning(
+                "No text extracted from PDF - file may be image-only or scanned"
+            )
 
-        except Exception as e:
-            logger.warning(f"Error extracting text from PDF using direct method: {e}")
+        return sanitized
 
-    # Fall back to regular text extraction if PDF-specific extraction fails
-    return binary_to_text(binary_data)
+    except Exception as e:
+        logger.warning(f"Error extracting text from PDF: {e}")
+        return binary_to_text(binary_data)
 
 
 def file_extension_to_type(filename: str) -> str:
@@ -442,7 +426,7 @@ def detect_content_type(content_type: str, filename: str) -> str:
 
 def process_sharepoint_response(
     response_content: bytes, content_type: str, filename: str
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """
     Process a SharePoint API response based on content type.
 
@@ -460,7 +444,7 @@ def process_sharepoint_response(
         try:
             import json
 
-            data = json.loads(response_content.decode("utf-8"))
+            data: Any = json.loads(response_content.decode("utf-8"))
             return json.dumps(data, indent=2), "application/json"
         except Exception as e:
             logger.warning(f"Failed to parse JSON: {e}")
@@ -501,7 +485,7 @@ def process_sharepoint_response(
         return binary_to_text(response_content), content_type
 
 
-def get_metadata_from_sharepoint_item(item: Dict) -> Dict:
+def get_metadata_from_sharepoint_item(item: SharePointItem) -> dict[str, Any]:
     """
     Extract useful metadata from a SharePoint item.
 
@@ -511,7 +495,7 @@ def get_metadata_from_sharepoint_item(item: Dict) -> Dict:
     Returns:
         Dictionary of metadata
     """
-    metadata = {
+    metadata: dict[str, Any] = {
         "id": item.get("id", ""),
         "name": item.get("name", ""),
         "type": "folder"

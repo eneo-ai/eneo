@@ -36,7 +36,9 @@ async def _create_tenant(client, super_api_key: str, name: str):
     return response.json()
 
 
-async def _create_user(client, super_api_key: str, tenant_id: str, email: str, password: str):
+async def _create_user(
+    client, super_api_key: str, tenant_id: str, email: str, password: str
+):
     payload = {
         "email": email,
         "username": email.split("@")[0],
@@ -248,7 +250,11 @@ async def test_multi_tenant_oidc_login_isolated(
     assert callback_cross.status_code == 400  # Domain mismatch returns 400 Bad Request
     # Check for domain validation error message
     detail = callback_cross.json()["detail"]
-    assert "invalid" in detail.lower() or "expired" in detail.lower() or "not allowed" in detail.lower()
+    assert (
+        "invalid" in detail.lower()
+        or "expired" in detail.lower()
+        or "not allowed" in detail.lower()
+    )
 
     # Ensure tests never escape to the real network
     requests = oidc_calls()["requests"]

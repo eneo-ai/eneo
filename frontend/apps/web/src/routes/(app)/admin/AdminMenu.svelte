@@ -14,7 +14,7 @@
   import { IconHistory } from "@intric/icons/history";
   import { page } from "$app/stores";
   import { Navigation } from "$lib/components/layout";
-  import { ChartPie, LayoutTemplate, Cloud, Plug } from "lucide-svelte";
+  import { ChartPie, LayoutTemplate, Cloud, Plug, ShieldCheck } from "lucide-svelte";
   import { IconKey } from "@intric/icons/key";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
@@ -59,11 +59,17 @@
   <Navigation.Link
     href={localizeHref("/admin/security-classifications")}
     isActive={isSelected("/admin/security-classifications", currentRoute)}
-    icon={IconKey}
+    icon={ShieldCheck}
     label={m.security()}
   />
   <Navigation.Link
-    href="/admin/mcp-servers"
+    href={localizeHref("/admin/api-keys")}
+    isActive={isSelected("/admin/api-keys", currentRoute)}
+    icon={IconKey}
+    label={m.api_keys()}
+  />
+  <Navigation.Link
+    href={localizeHref("/admin/mcp-servers")}
     isActive={isSelected("/admin/mcp-servers", currentRoute)}
     icon={Plug}
     label={m.mcp()}
@@ -92,12 +98,7 @@
     isActive={isSelected("/admin/insights", currentRoute)}
     icon={IconBulb}
     label={m.insights()}
-  >
-    <span
-      class="hidden rounded-md border border-[var(--beta-indicator)] px-1 py-0.5 text-xs font-normal !tracking-normal text-[var(--beta-indicator)] md:block"
-      >{m.beta()}</span
-    >
-  </Navigation.Link>
+  />
   <div class="border-default my-2 border-b-[0.5px]"></div>
   <Navigation.Link
     href={localizeHref("/admin/users")}

@@ -6,14 +6,10 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from intric.ai_models.completion_models.completion_model import (
-    CompletionModelPublic,
-    CompletionModelUpdateFlags,
-)
-
 
 class ModelUsageStatistics(BaseModel):
     """Pre-aggregated usage statistics for a completion model."""
+
     model_id: UUID
     total_usage: int
     assistants_count: int
@@ -28,9 +24,12 @@ class ModelUsageStatistics(BaseModel):
 
 class ModelUsageDetail(BaseModel):
     """Detailed information about a specific entity using a completion model."""
+
     entity_id: UUID
     entity_name: str
-    entity_type: str  # 'assistant', 'app', 'service', 'assistant_template', 'app_template'
+    entity_type: (
+        str  # 'assistant', 'app', 'service', 'assistant_template', 'app_template'
+    )
     space_id: Optional[UUID] = None
     space_name: Optional[str] = None
     owner_id: Optional[UUID] = None
@@ -42,6 +41,7 @@ class ModelUsageDetail(BaseModel):
 
 class ModelMigrationRequest(BaseModel):
     """Request to migrate usage from one model to another."""
+
     to_model_id: UUID
     entity_types: Optional[List[str]] = None  # If None, migrate all types
     confirm_migration: bool = False
@@ -49,6 +49,7 @@ class ModelMigrationRequest(BaseModel):
 
 class MigrationResult(BaseModel):
     """Result of a model migration operation."""
+
     success: bool
     migrated_count: int
     failed_count: int
@@ -56,20 +57,27 @@ class MigrationResult(BaseModel):
     duration: float  # Duration in seconds
     migration_id: UUID
     warnings: List[str] = []
-    auto_recalculated: bool = False  # Whether usage stats were automatically recalculated
-    requires_manual_recalculation: bool = False  # Whether manual recalculation is needed
+    auto_recalculated: bool = (
+        False  # Whether usage stats were automatically recalculated
+    )
+    requires_manual_recalculation: bool = (
+        False  # Whether manual recalculation is needed
+    )
 
 
 class ValidationResult(BaseModel):
     """Result of migration compatibility validation."""
+
     compatible: bool
-    warnings: List[str]
+    warnings: List[str]  # Human-readable warning messages
+    warning_codes: List[str] = []  # Machine-readable codes for frontend translation
     requires_confirmation: bool
     user_confirmed: bool = False
 
 
 class ModelUsageSummary(BaseModel):
     """Summary of usage for a single model."""
+
     model_id: UUID
     model_name: str
     model_nickname: str
@@ -80,6 +88,7 @@ class ModelUsageSummary(BaseModel):
 
 class MigrationPreview(BaseModel):
     """Preview of what would be migrated."""
+
     total_count: int
     assistants_count: int
     apps_count: int
@@ -92,6 +101,7 @@ class MigrationPreview(BaseModel):
 
 class PaginatedResponse(BaseModel):
     """Generic paginated response with cursor-based pagination."""
+
     items: List[ModelUsageDetail]
     total: int
     has_more: bool
@@ -101,10 +111,11 @@ class PaginatedResponse(BaseModel):
 
 class ModelMigrationHistory(BaseModel):
     """Historical record of a model migration."""
+
     id: UUID
-    from_model_id: UUID
+    from_model_id: Optional[UUID] = None
     from_model_name: str
-    to_model_id: UUID
+    to_model_id: Optional[UUID] = None
     to_model_name: str
     migrated_count: int
     status: str  # 'pending', 'in_progress', 'completed', 'failed'
@@ -114,3 +125,5 @@ class ModelMigrationHistory(BaseModel):
     completed_at: Optional[datetime] = None
     duration: Optional[float] = None  # Duration in seconds
     error_message: Optional[str] = None
+    migration_details: Optional[Dict[str, int]] = None  # Breakdown per entity type
+    warnings: Optional[List[str]] = None

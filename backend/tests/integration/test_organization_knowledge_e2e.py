@@ -6,6 +6,7 @@ to retrieval and deletion across the entire system stack.
 
 Marked with pytest.mark.integration to be run separately if needed.
 """
+
 import pytest
 from sqlalchemy import select
 
@@ -63,7 +64,9 @@ class TestOrganizationKnowledgeE2E:
 
             # Step 2: Create knowledge on org space
             embedding_model = await embedding_model_factory(session)
-            user_integration = await user_integration_factory(session, tenant_id=tenant.id)
+            user_integration = await user_integration_factory(
+                session, tenant_id=tenant.id
+            )
 
             knowledge = IntegrationKnowledge(
                 name="Distributed Knowledge",
@@ -99,9 +102,9 @@ class TestOrganizationKnowledgeE2E:
                 (IntegrationKnowledge.space_id == org_space.id)
                 | (
                     IntegrationKnowledge.id.in_(
-                        select(IntegrationKnowledgesSpaces.integration_knowledge_id).where(
-                            IntegrationKnowledgesSpaces.space_id == child_space.id
-                        )
+                        select(
+                            IntegrationKnowledgesSpaces.integration_knowledge_id
+                        ).where(IntegrationKnowledgesSpaces.space_id == child_space.id)
                     )
                 )
             )
@@ -168,7 +171,9 @@ class TestOrganizationKnowledgeE2E:
 
             # Step 2: Create knowledge
             embedding_model = await embedding_model_factory(session)
-            user_integration = await user_integration_factory(session, tenant_id=tenant.id)
+            user_integration = await user_integration_factory(
+                session, tenant_id=tenant.id
+            )
 
             knowledge = IntegrationKnowledge(
                 name="Early Knowledge",
@@ -247,7 +252,9 @@ class TestOrganizationKnowledgeE2E:
 
             # Step 2: Create multiple knowledge items
             embedding_model = await embedding_model_factory(session)
-            user_integration = await user_integration_factory(session, tenant_id=tenant.id)
+            user_integration = await user_integration_factory(
+                session, tenant_id=tenant.id
+            )
 
             knowledge_items = []
             for i in range(5):
@@ -277,9 +284,9 @@ class TestOrganizationKnowledgeE2E:
                 (IntegrationKnowledge.space_id == org_space.id)
                 | (
                     IntegrationKnowledge.id.in_(
-                        select(IntegrationKnowledgesSpaces.integration_knowledge_id).where(
-                            IntegrationKnowledgesSpaces.space_id == child_space.id
-                        )
+                        select(
+                            IntegrationKnowledgesSpaces.integration_knowledge_id
+                        ).where(IntegrationKnowledgesSpaces.space_id == child_space.id)
                     )
                 )
             )

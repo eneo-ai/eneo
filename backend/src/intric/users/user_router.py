@@ -1,27 +1,47 @@
-from typing import Optional, cast
-from uuid import UUID, uuid4
 import json
 import secrets
 import time
 import traceback
+from typing import Annotated, Optional, Protocol, cast
+from urllib.parse import urlparse
+from uuid import UUID, uuid4
 
 import aiohttp
 import jwt
-from fastapi import APIRouter, Depends, Query, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
-from starlette.exceptions import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
+# Audit logging - module level imports for consistency
+from intric.audit.application.audit_metadata import AuditMetadata
+from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.entity_types import EntityType
 from intric.authentication import auth_dependencies
-from intric.authentication.auth_models import AccessToken, ApiKey, OpenIdConnectLogin
+from intric.authentication.api_key_router_helpers import (
+    error_responses as api_key_error_responses,
+)
+from intric.authentication.auth_dependencies import (
+    require_api_key_permission,
+    require_api_key_scope_check,
+    require_permission,
+    require_user_identity,
+)
+from intric.authentication.auth_models import (
+    AccessToken,
+    ApiKey,
+    ApiKeyPermission,
+    OpenIdConnectLogin,
+)
 from intric.main import config
-from intric.main.exceptions import AuthenticationException
 from intric.main.aiohttp_client import aiohttp_client
+from intric.main.config import validate_public_origin
 from intric.main.container.container import Container
+from intric.main.exceptions import AuthenticationException
 from intric.main.logging import get_logger
 from intric.main.models import CursorPaginatedResponse
 from intric.main.request_context import set_request_context
+from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.tenants.tenant import TenantPublic
@@ -37,14 +57,175 @@ from intric.users.user import (
     UserUpdatePublic,
 )
 
-# Audit logging - module level imports for consistency
-from intric.audit.application.audit_metadata import AuditMetadata
-from intric.audit.domain.action_types import ActionType
-from intric.audit.domain.entity_types import EntityType
-
 logger = get_logger(__name__)
 
 router = APIRouter()
+users_admin_router = APIRouter()
+
+
+class _ProvisioningService(Protocol):
+    """Minimal protocol for the user provisioning service (container.user_creation_service)."""
+
+    async def provision_user(self, *, access_token: str) -> None: ...
+
+
+_LEGACY_USER_API_KEY_EXAMPLE = {
+    "key": "inp_3f5f2f7f7f...d9a1",
+    "truncated_key": "d9a1",
+}
+
+
+async def _load_single_tenant_allowed_origins(
+    *,
+    container: Container,
+    tenant_id: UUID,
+    correlation_id: str,
+) -> set[str]:
+    origins: set[str] = set()
+
+    class _AllowedOriginRepoProtocol:
+        async def get_by_tenant(self, tenant_id: UUID): ...
+
+    get_allowed_origin_repo = getattr(container, "allowed_origin_repo", None)
+    if not callable(get_allowed_origin_repo):
+        return origins
+
+    try:
+        allowed_origin_repo = cast(
+            Optional[_AllowedOriginRepoProtocol], get_allowed_origin_repo()
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to initialize allowed origin repository during single-tenant OIDC redirect validation",
+            extra={
+                "tenant_id": str(tenant_id),
+                "correlation_id": correlation_id,
+                "error": str(exc),
+            },
+        )
+        return origins
+
+    if allowed_origin_repo is None:
+        return origins
+
+    try:
+        allowed_origins = await allowed_origin_repo.get_by_tenant(tenant_id)
+    except Exception as exc:
+        logger.warning(
+            "Failed to load allowed origins during single-tenant OIDC redirect validation",
+            extra={
+                "tenant_id": str(tenant_id),
+                "correlation_id": correlation_id,
+                "error": str(exc),
+            },
+        )
+        return origins
+
+    if allowed_origins is None:
+        return origins
+
+    allowed_origins_list = cast(list[object], allowed_origins)
+    for allowed_origin in allowed_origins_list:
+        raw_origin = getattr(allowed_origin, "url", None)
+        if not raw_origin:
+            continue
+
+        try:
+            normalized_origin = validate_public_origin(raw_origin)
+        except ValueError:
+            logger.warning(
+                "Skipping invalid allowed origin during single-tenant OIDC redirect validation",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "correlation_id": correlation_id,
+                    "origin": raw_origin,
+                },
+            )
+            continue
+        if normalized_origin is None:
+            continue
+
+        origins.add(normalized_origin.rstrip("/"))
+
+    return origins
+
+
+async def _resolve_single_tenant_redirect_uri(
+    *,
+    container: Container,
+    settings: config.Settings,
+    redirect_uri: str,
+    request_origin: str | None,
+    correlation_id: str,
+) -> str:
+    if not request_origin:
+        return redirect_uri
+
+    try:
+        normalized_request_origin = validate_public_origin(request_origin)
+    except ValueError:
+        return redirect_uri
+    if normalized_request_origin is None:
+        return redirect_uri
+    normalized_request_origin = normalized_request_origin.rstrip("/")
+
+    parsed_redirect = urlparse(redirect_uri)
+    if not parsed_redirect.scheme or not parsed_redirect.hostname:
+        return redirect_uri
+
+    default_port = 443 if parsed_redirect.scheme == "https" else 80
+    parsed_port = (
+        f":{parsed_redirect.port}"
+        if parsed_redirect.port and parsed_redirect.port != default_port
+        else ""
+    )
+    canonical_origin = (
+        f"{parsed_redirect.scheme}://{parsed_redirect.hostname}{parsed_port}".rstrip(
+            "/"
+        )
+    )
+    if normalized_request_origin == canonical_origin:
+        return redirect_uri
+
+    if not settings.oidc_tenant_id:
+        return redirect_uri
+
+    try:
+        oidc_tenant_id = UUID(settings.oidc_tenant_id)
+    except ValueError:
+        logger.warning(
+            "OIDC_TENANT_ID is invalid - skipping allowed origin override for single-tenant OIDC redirect",
+            extra={
+                "correlation_id": correlation_id,
+                "oidc_tenant_id": settings.oidc_tenant_id,
+            },
+        )
+        return redirect_uri
+
+    allowed_origins = await _load_single_tenant_allowed_origins(
+        container=container,
+        tenant_id=oidc_tenant_id,
+        correlation_id=correlation_id,
+    )
+    if normalized_request_origin not in allowed_origins:
+        return redirect_uri
+
+    redirect_path = parsed_redirect.path or "/login/callback"
+    if not redirect_path.startswith("/"):
+        redirect_path = "/login/callback"
+
+    resolved_redirect_uri = f"{normalized_request_origin}{redirect_path}"
+    logger.info(
+        "Using allowed request origin for single-tenant OIDC redirect URI",
+        extra={
+            "tenant_id": str(oidc_tenant_id),
+            "correlation_id": correlation_id,
+            "request_origin": normalized_request_origin,
+            "redirect_uri": resolved_redirect_uri,
+        },
+    )
+
+    return resolved_redirect_uri
 
 
 @router.post(
@@ -55,8 +236,8 @@ router = APIRouter()
 )
 async def user_login_with_email_and_password(
     request: Request,
-    form_data: OAuth2PasswordRequestForm = Depends(OAuth2PasswordRequestForm),
-    container: Container = Depends(get_container()),
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends(OAuth2PasswordRequestForm)],
+    container: Annotated[Container, Depends(get_container())],
 ) -> AccessToken:
     """OAuth2 Login with comprehensive error handling and logging"""
 
@@ -163,8 +344,9 @@ async def user_login_with_email_and_password(
 
 @router.post("/login/openid-connect/mobilityguard/", response_model=AccessToken)
 async def login_with_mobilityguard(
+    request: Request,
     openid_connect_login: OpenIdConnectLogin,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ):
     """OpenID Connect Login (generic OIDC provider)."""
     correlation_id = str(uuid4())
@@ -207,6 +389,14 @@ async def login_with_mobilityguard(
             500,
             "OIDC redirect_uri not configured. Set PUBLIC_ORIGIN environment variable.",
         )
+
+    redirect_uri = await _resolve_single_tenant_redirect_uri(
+        container=container,
+        settings=settings,
+        redirect_uri=redirect_uri,
+        request_origin=request.headers.get("origin"),
+        correlation_id=correlation_id,
+    )
 
     # Override frontend-provided redirect_uri with server-computed value (defense in depth)
     if openid_connect_login.redirect_uri != redirect_uri:
@@ -492,17 +682,42 @@ async def login_with_mobilityguard(
     return intric_token
 
 
-@router.get("/", response_model=CursorPaginatedResponse[UserSparse])
+@router.get(
+    "/",
+    response_model=CursorPaginatedResponse[UserSparse],
+    dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+        Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    ],
+)
 async def get_tenant_users(
-    email: Optional[str] = Query(None, description="Email of user"),
-    limit: int = Query(None, description="Users per page", ge=1),
-    cursor: Optional[str] = Query(None, description="Current cursor"),
-    previous: Optional[bool] = Query(False, description="Show previous page"),
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    email: Annotated[Optional[str], Query(description="Email of user")] = None,
+    limit: Annotated[
+        Optional[int], Query(description="Users per page", ge=1, le=100)
+    ] = None,
+    cursor: Annotated[Optional[str], Query(description="Current cursor")] = None,
+    previous: Annotated[
+        Optional[bool], Query(description="Show previous page")
+    ] = False,
 ):
+    """List tenant members for member/group pickers.
+
+    Returns `UserSparse` (id, email, username, timestamps) — a strict subset
+    of the information any authenticated tenant member can retrieve via
+    Microsoft 365 / Outlook GAL. Tenant-scoped at the repo layer; mutations
+    on /users/admin/* remain gated on Permission.ADMIN.
+
+    Bearer tokens: any authenticated tenant member may list. API keys: must
+    be tenant-scoped with admin permission — the route-level guards above
+    stash deferred-enforcement state consumed by `_resolve_api_key`, which
+    is a no-op for bearer auth where `request.state.api_key` is unset.
+    """
     user = container.user()
     user_assembler = container.user_assembler()
     user_service = container.user_service()
+
+    previous = bool(previous)
 
     paginated_users = await user_service.get_all_users(
         tenant_id=user.tenant_id,
@@ -532,24 +747,78 @@ async def get_tenant_users(
     responses=responses.get_responses([404]),
 )
 async def get_currently_authenticated_user(
-    current_user: UserInDB = Depends(
-        auth_dependencies.get_current_active_user_with_quota
-    ),
+    current_user: Annotated[
+        UserInDB, Depends(auth_dependencies.get_current_active_user_with_quota)
+    ],
+    container: Annotated[Container, Depends(get_container())],
+    _user_identity_guard: None = Depends(require_user_identity),
 ):
-    truncated_key = (
+    api_key_repo = container.api_key_v2_repo()
+    latest_key = await api_key_repo.get_latest_active_by_owner(
+        tenant_id=current_user.tenant_id, owner_user_id=current_user.id
+    )
+    truncated_key = latest_key.key_suffix if latest_key is not None else None
+    if truncated_key is None and current_user.api_key is not None:
+        truncated_key = current_user.api_key.truncated_key
+    legacy_suffix = (
         current_user.api_key.truncated_key if current_user.api_key is not None else None
     )
-    return UserPublic(**current_user.model_dump(), truncated_api_key=truncated_key)
+    return UserPublic(
+        **current_user.model_dump(),
+        truncated_api_key=truncated_key,
+        legacy_api_key_suffix=legacy_suffix,
+    )
 
 
-@router.get("/api-keys/", response_model=ApiKey)
+@users_admin_router.post(
+    "/api-keys/",
+    response_model=ApiKey,
+    tags=["Legacy API Keys"],
+    summary="Generate legacy user API key",
+    deprecated=True,
+    description=(
+        "Legacy API key endpoint. Use `/api/v1/api-keys` for scoped v2 keys. "
+        "This endpoint rotates the old legacy key immediately."
+    ),
+    responses={
+        200: {
+            "description": "Legacy API key created and returned once.",
+            "content": {"application/json": {"example": _LEGACY_USER_API_KEY_EXAMPLE}},
+        },
+        410: {
+            "description": "Legacy endpoint disabled. Migrate to v2 endpoint.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": "deprecated_endpoint",
+                        "message": "Legacy API key endpoint is disabled. Use /api/v1/api-keys.",
+                    }
+                }
+            },
+        },
+        **api_key_error_responses([401, 403]),
+    },
+)
 async def generate_api_key(
-    current_user: UserInDB = Depends(auth_dependencies.get_current_active_user),
-    container: Container = Depends(get_container()),
+    current_user: Annotated[
+        UserInDB, Depends(auth_dependencies.get_current_active_user)
+    ],
+    container: Annotated[Container, Depends(get_container())],
+    _user_identity_guard: None = Depends(require_user_identity),
 ):
     """Generating a new api key will delete the old key.
     Make sure to copy the key since it will only be showed once,
     after which only the truncated key will be shown."""
+    validate_permission(current_user, Permission.ADMIN)
+    settings = config.get_settings()
+    if not settings.api_key_legacy_endpoints_enabled:
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "code": "deprecated_endpoint",
+                "message": "Legacy API key endpoint is disabled. Use /api/v1/api-keys.",
+            },
+        )
     service = container.user_service()
 
     # Generate API key
@@ -569,7 +838,7 @@ async def generate_api_key(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.API_KEY_GENERATED,
         entity_type=EntityType.API_KEY,
         entity_id=current_user.id,  # Use user ID as entity ID for user API keys
@@ -584,6 +853,50 @@ async def generate_api_key(
     return api_key
 
 
+@users_admin_router.delete(
+    "/api-keys/legacy",
+    status_code=204,
+    tags=["Legacy API Keys"],
+    summary="Revoke legacy user API key",
+    description="Permanently revokes the caller's legacy (v1) API key.",
+    responses={
+        404: {"description": "No legacy API key found."},
+        **api_key_error_responses([401]),
+    },
+)
+async def revoke_legacy_api_key(
+    current_user: Annotated[
+        UserInDB, Depends(auth_dependencies.get_current_active_user)
+    ],
+    container: Annotated[Container, Depends(get_container())],
+    _user_identity_guard: None = Depends(require_user_identity),
+):
+    if current_user.api_key is None:
+        raise HTTPException(status_code=404, detail="No legacy API key found.")
+
+    api_key_repo = container.api_key_repo()
+    await api_key_repo.delete_by_user(current_user.id)
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        user=current_user,
+        action=ActionType.API_KEY_REVOKED,
+        entity_type=EntityType.API_KEY,
+        entity_id=current_user.id,
+        description=f"Revoked legacy API key for user '{current_user.email}'",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=current_user,
+            extra={
+                "key_type": "legacy",
+                "truncated_key": current_user.api_key.truncated_key,
+                "tenant_id": str(current_user.tenant_id),
+            },
+        ),
+    )
+
+
 @router.get(
     "/tenant/",
     response_model=TenantPublic,
@@ -591,17 +904,25 @@ async def generate_api_key(
     responses=responses.get_responses([404]),
 )
 async def get_current_user_tenant(
-    current_user: UserInDB = Depends(auth_dependencies.get_current_active_user),
+    current_user: Annotated[
+        UserInDB, Depends(auth_dependencies.get_current_active_user)
+    ],
 ):
     tenant = current_user.tenant
     return TenantPublic(**tenant.model_dump())
 
 
-@router.post("/admin/invite/", response_model=UserAdminView, status_code=201)
+@users_admin_router.post(
+    "/admin/invite/",
+    response_model=UserAdminView,
+    status_code=201,
+    dependencies=[Depends(require_permission(Permission.ADMIN))],
+)
 async def invite_user(
     user_invite: PropUserInvite,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
+    validate_permission(container.user(), Permission.ADMIN)
     user_service = container.user_service()
     current_user = container.user()
     session = cast(AsyncSession, container.session())
@@ -612,7 +933,7 @@ async def invite_user(
     )
 
     # Build comprehensive extra context for user creation
-    extra = {
+    extra: dict[str, object] = {
         "email": new_user.email,
         "username": new_user.username,
         "state": user_invite.state.value if user_invite.state else "invited",
@@ -622,26 +943,22 @@ async def invite_user(
         else None,
     }
 
-    # Fetch predefined role details if role was assigned
-    if user_invite.predefined_role:
-        from intric.database.tables.roles_table import PredefinedRoles
+    # Fetch role details if role was assigned
+    if user_invite.role:
         import sqlalchemy as sa
 
-        # Query for the predefined role details
-        role_query = sa.select(PredefinedRoles).where(
-            PredefinedRoles.id == user_invite.predefined_role.id
-        )
-        role_result = await session.execute(role_query)
-        predefined_role = role_result.scalar_one_or_none()
+        from intric.database.tables.roles_table import Roles
 
-        if predefined_role:
-            extra["predefined_role"] = predefined_role.name
-            extra["permissions"] = sorted(predefined_role.permissions)
+        # Query for the role details
+        role_query = sa.select(Roles).where(Roles.id == user_invite.role.id)
+        role_result = await session.execute(role_query)
+        assigned_role = role_result.scalar_one_or_none()
+
+        if assigned_role:
+            extra["role"] = assigned_role.name
+            extra["permissions"] = sorted(assigned_role.permissions)
 
     # Include role/group information if available
-    if hasattr(new_user, "predefined_roles") and new_user.predefined_roles:
-        extra["predefined_roles"] = [role.name for role in new_user.predefined_roles]
-
     if hasattr(new_user, "roles") and new_user.roles:
         extra["roles"] = [role.name for role in new_user.roles]
 
@@ -655,7 +972,7 @@ async def invite_user(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.USER_CREATED,
         entity_type=EntityType.USER,
         entity_id=new_user.id,
@@ -670,32 +987,38 @@ async def invite_user(
     return new_user
 
 
-@router.patch("/admin/{id}/", response_model=UserAdminView)
+@users_admin_router.patch(
+    "/admin/{id}/",
+    response_model=UserAdminView,
+    dependencies=[Depends(require_permission(Permission.ADMIN))],
+)
 async def update_user(
     id: UUID,
     user_update: PropUserUpdate,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
+    validate_permission(container.user(), Permission.ADMIN)
     user_service = container.user_service()
     current_user = container.user()
 
-    # Get old state for change tracking
+    # Get old state for change tracking — tenant-scoped
     old_user = await user_service.get_user(id)
-
-    update_kwargs = {}
-    if user_update.predefined_role:
-        update_kwargs["predefined_roles"] = [user_update.predefined_role]
-    if user_update.state:
-        update_kwargs["state"] = user_update.state
+    if old_user.tenant_id != current_user.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
 
     # Update user
     updated_user = await user_service.update_user(
         user_id=id,
-        user_update_public=UserUpdatePublic(**update_kwargs),
+        user_update_public=UserUpdatePublic(
+            roles=[user_update.role] if user_update.role else None,
+            state=user_update.state if user_update.state else None,
+        ),
     )
 
     # Track comprehensive changes
-    changes = {}
+    changes: dict[str, object] = {}
 
     # State change
     if user_update.state:
@@ -703,19 +1026,19 @@ async def update_user(
         if old_state and user_update.state.value != old_state:
             changes["state"] = {"old": old_state, "new": user_update.state.value}
 
-    # Predefined role change (PropUserUpdate has single predefined_role)
-    if user_update.predefined_role:
+    # Role change (PropUserUpdate has single role)
+    if user_update.role:
         old_roles = []
-        if hasattr(old_user, "predefined_roles") and old_user.predefined_roles:
-            old_roles = [role.name for role in old_user.predefined_roles]
+        if hasattr(old_user, "roles") and old_user.roles:
+            old_roles = [role.name for role in old_user.roles]
 
         # After update, get the new roles
         new_roles = []
-        if hasattr(updated_user, "predefined_roles") and updated_user.predefined_roles:
-            new_roles = [role.name for role in updated_user.predefined_roles]
+        if hasattr(updated_user, "roles") and updated_user.roles:
+            new_roles = [role.name for role in updated_user.roles]
 
         if old_roles != new_roles:
-            changes["predefined_roles"] = {"old": old_roles, "new": new_roles}
+            changes["roles"] = {"old": old_roles, "new": new_roles}
 
     # Track permission changes (computed from role changes)
     old_permissions = (
@@ -740,7 +1063,7 @@ async def update_user(
                 changes["permissions"]["removed"] = sorted(removed_perms)
 
     # Build extra context with current user state
-    extra = {
+    extra: dict[str, object] = {
         "email": updated_user.email,
         "username": updated_user.username,
         "state": updated_user.state.value if hasattr(updated_user, "state") else None,
@@ -751,11 +1074,6 @@ async def update_user(
     }
 
     # Include current role/group information
-    if hasattr(updated_user, "predefined_roles") and updated_user.predefined_roles:
-        extra["predefined_roles"] = [
-            role.name for role in updated_user.predefined_roles
-        ]
-
     if hasattr(updated_user, "roles") and updated_user.roles:
         extra["roles"] = [role.name for role in updated_user.roles]
 
@@ -772,7 +1090,7 @@ async def update_user(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.USER_UPDATED,
         entity_type=EntityType.USER,
         entity_id=id,
@@ -789,18 +1107,28 @@ async def update_user(
     return updated_user
 
 
-@router.delete("/admin/{id}/", status_code=204)
+@users_admin_router.delete(
+    "/admin/{id}/",
+    status_code=204,
+    dependencies=[Depends(require_permission(Permission.ADMIN))],
+)
 async def delete_user(
-    id: UUID, container: Container = Depends(get_container(with_user=True))
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
+    validate_permission(container.user(), Permission.ADMIN)
     user_service = container.user_service()
     current_user = container.user()
 
-    # Get user details BEFORE deletion (snapshot pattern)
+    # Get user details BEFORE deletion (snapshot pattern) — tenant-scoped
     user_to_delete = await user_service.get_user(id)
+    if user_to_delete.tenant_id != current_user.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
 
     # Build extra context capturing what was deleted
-    extra = {
+    extra: dict[str, object] = {
         "email": user_to_delete.email,
         "username": user_to_delete.username,
         "state": user_to_delete.state.value
@@ -816,11 +1144,6 @@ async def delete_user(
     }
 
     # Include full context of what was deleted
-    if hasattr(user_to_delete, "predefined_roles") and user_to_delete.predefined_roles:
-        extra["predefined_roles"] = [
-            role.name for role in user_to_delete.predefined_roles
-        ]
-
     if hasattr(user_to_delete, "roles") and user_to_delete.roles:
         extra["roles"] = [role.name for role in user_to_delete.roles]
 
@@ -840,7 +1163,7 @@ async def delete_user(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.USER_DELETED,
         entity_type=EntityType.USER,
         entity_id=id,
@@ -860,8 +1183,8 @@ async def delete_user(
 )
 async def provision_user(
     user_provision: UserProvision,
-    container: Container = Depends(get_container()),
+    container: Annotated[Container, Depends(get_container())],
 ):
-    user_service = container.user_creation_service()
+    user_service = cast(_ProvisioningService, container.user_creation_service())  # pyright: ignore[reportUnknownMemberType]  # not yet in container's typed interface
 
     await user_service.provision_user(access_token=user_provision.zitadel_token)

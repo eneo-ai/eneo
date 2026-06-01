@@ -21,14 +21,19 @@ if TYPE_CHECKING:
 
 
 class TranscriptionModelRepository:
-    def __init__(self, session: "AsyncSession", user: "UserInDB"):
+    def __init__(self, session: "AsyncSession", user: "UserInDB") -> None:
+        super().__init__()
         self.session = session
         self.user = user
 
     async def all(self, with_deprecated: bool = False):
         stmt = (
-            sa.select(TranscriptionModels, ModelProviders.name, ModelProviders.provider_type)
-            .outerjoin(ModelProviders, TranscriptionModels.provider_id == ModelProviders.id)
+            sa.select(
+                TranscriptionModels, ModelProviders.name, ModelProviders.provider_type
+            )
+            .outerjoin(
+                ModelProviders, TranscriptionModels.provider_id == ModelProviders.id
+            )
             .options(
                 selectinload(TranscriptionModels.security_classification),
                 selectinload(TranscriptionModels.security_classification).options(
@@ -41,7 +46,7 @@ class TranscriptionModelRepository:
                 # UI filtering happens at the presentation layer
                 sa.or_(
                     TranscriptionModels.tenant_id.is_(None),
-                    TranscriptionModels.tenant_id == self.user.tenant_id
+                    TranscriptionModels.tenant_id == self.user.tenant_id,
                 )
             )
             .order_by(
@@ -70,8 +75,12 @@ class TranscriptionModelRepository:
     async def one_or_none(self, model_id: "UUID") -> Optional["TranscriptionModel"]:
         # When fetching by ID, return ANY model (global or tenant) that the user can access
         stmt = (
-            sa.select(TranscriptionModels, ModelProviders.name, ModelProviders.provider_type)
-            .outerjoin(ModelProviders, TranscriptionModels.provider_id == ModelProviders.id)
+            sa.select(
+                TranscriptionModels, ModelProviders.name, ModelProviders.provider_type
+            )
+            .outerjoin(
+                ModelProviders, TranscriptionModels.provider_id == ModelProviders.id
+            )
             .options(
                 selectinload(TranscriptionModels.security_classification),
                 selectinload(TranscriptionModels.security_classification).options(
@@ -83,8 +92,8 @@ class TranscriptionModelRepository:
                 # Allow both global models (tenant_id IS NULL) and tenant models (tenant_id = user.tenant_id)
                 sa.or_(
                     TranscriptionModels.tenant_id.is_(None),
-                    TranscriptionModels.tenant_id == self.user.tenant_id
-                )
+                    TranscriptionModels.tenant_id == self.user.tenant_id,
+                ),
             )
         )
 

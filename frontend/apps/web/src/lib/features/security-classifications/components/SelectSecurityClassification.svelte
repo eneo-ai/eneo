@@ -24,7 +24,9 @@
   };
 
   let { classifications, value = $bindable(), onSelectedChange, dryrun }: Props = $props();
-  classifications.sort((a, b) => b.security_level - a.security_level);
+  const sortedClassifications = $derived(
+    [...classifications].sort((a, b) => b.security_level - a.security_level)
+  );
 
   const {
     elements: { trigger, menu, option },
@@ -53,7 +55,7 @@
 <button
   {...$trigger}
   use:trigger
-  class="border-default hover:bg-hover-default flex h-16 items-center justify-between border-b px-4"
+  class="border-default hover:bg-hover-default flex h-16 w-full items-center justify-between border-b px-4"
 >
   <span class="truncate capitalize">{$selected?.value?.name ?? m.no_classification()}</span>
   <IconChevronDown />
@@ -69,7 +71,7 @@
   >
     {m.select_security_classification()}
   </div>
-  {#each classifications as classification (classification.id)}
+  {#each sortedClassifications as classification (classification.id)}
     <div
       class="border-default hover:bg-hover-stronger flex flex-col items-stretch justify-between overflow-visible border-b px-4 py-4 hover:cursor-pointer"
       {...$option({ value: classification })}

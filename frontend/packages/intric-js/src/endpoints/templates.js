@@ -133,8 +133,9 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       updateAssistant: async (id, data) => {
-        const res = await client.fetch(`/api/v1/admin/templates/assistants/${id}`, {
+        const res = await client.fetch("/api/v1/admin/templates/assistants/{template_id}", {
           method: "patch",
+          params: { path: { template_id: id } },
           requestBody: { "application/json": data }
         });
         return res;
@@ -147,8 +148,9 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       updateApp: async (id, data) => {
-        const res = await client.fetch(`/api/v1/admin/templates/apps/${id}`, {
+        const res = await client.fetch("/api/v1/admin/templates/apps/{template_id}", {
           method: "patch",
+          params: { path: { template_id: id } },
           requestBody: { "application/json": data }
         });
         return res;
@@ -160,8 +162,9 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       deleteAssistant: async (id) => {
-        const res = await client.fetch(`/api/v1/admin/templates/assistants/${id}`, {
-          method: "delete"
+        const res = await client.fetch("/api/v1/admin/templates/assistants/{template_id}", {
+          method: "delete",
+          params: { path: { template_id: id } }
         });
         return res;
       },
@@ -172,8 +175,9 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       deleteApp: async (id) => {
-        const res = await client.fetch(`/api/v1/admin/templates/apps/${id}`, {
-          method: "delete"
+        const res = await client.fetch("/api/v1/admin/templates/apps/{template_id}", {
+          method: "delete",
+          params: { path: { template_id: id } }
         });
         return res;
       },
@@ -184,9 +188,13 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       rollbackAssistant: async (id) => {
-        const res = await client.fetch(`/api/v1/admin/templates/assistants/${id}/rollback`, {
-          method: "post"
-        });
+        const res = await client.fetch(
+          "/api/v1/admin/templates/assistants/{template_id}/rollback",
+          {
+            method: "post",
+            params: { path: { template_id: id } }
+          }
+        );
         return res;
       },
 
@@ -196,8 +204,9 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       rollbackApp: async (id) => {
-        const res = await client.fetch(`/api/v1/admin/templates/apps/${id}/rollback`, {
-          method: "post"
+        const res = await client.fetch("/api/v1/admin/templates/apps/{template_id}/rollback", {
+          method: "post",
+          params: { path: { template_id: id } }
         });
         return res;
       },
@@ -208,8 +217,9 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       restoreAssistant: async (id) => {
-        const res = await client.fetch(`/api/v1/admin/templates/assistants/${id}/restore`, {
-          method: "post"
+        const res = await client.fetch("/api/v1/admin/templates/assistants/{template_id}/restore", {
+          method: "post",
+          params: { path: { template_id: id } }
         });
         return res;
       },
@@ -220,8 +230,9 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       restoreApp: async (id) => {
-        const res = await client.fetch(`/api/v1/admin/templates/apps/${id}/restore`, {
-          method: "post"
+        const res = await client.fetch("/api/v1/admin/templates/apps/{template_id}/restore", {
+          method: "post",
+          params: { path: { template_id: id } }
         });
         return res;
       },
@@ -232,9 +243,13 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       permanentDeleteAssistant: async (id) => {
-        const res = await client.fetch(`/api/v1/admin/templates/assistants/${id}/permanent`, {
-          method: "delete"
-        });
+        const res = await client.fetch(
+          "/api/v1/admin/templates/assistants/{template_id}/permanent",
+          {
+            method: "delete",
+            params: { path: { template_id: id } }
+          }
+        );
         return res;
       },
 
@@ -244,8 +259,9 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       permanentDeleteApp: async (id) => {
-        const res = await client.fetch(`/api/v1/admin/templates/apps/${id}/permanent`, {
-          method: "delete"
+        const res = await client.fetch("/api/v1/admin/templates/apps/{template_id}/permanent", {
+          method: "delete",
+          params: { path: { template_id: id } }
         });
         return res;
       },
@@ -257,8 +273,9 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       toggleDefaultAssistant: async (id, isDefault) => {
-        const res = await client.fetch(`/api/v1/admin/templates/assistants/${id}/default`, {
+        const res = await client.fetch("/api/v1/admin/templates/assistants/{template_id}/default", {
           method: "patch",
+          params: { path: { template_id: id } },
           requestBody: { "application/json": { is_default: isDefault } }
         });
         return res;
@@ -271,8 +288,9 @@ export function initTemplates(client) {
        * @throws {IntricError}
        */
       toggleDefaultApp: async (id, isDefault) => {
-        const res = await client.fetch(`/api/v1/admin/templates/apps/${id}/default`, {
+        const res = await client.fetch("/api/v1/admin/templates/apps/{template_id}/default", {
           method: "patch",
+          params: { path: { template_id: id } },
           requestBody: { "application/json": { is_default: isDefault } }
         });
         return res;

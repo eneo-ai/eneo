@@ -112,7 +112,7 @@ your public URL.
    These indicate whether `PUBLIC_ORIGIN` was read from the environment.
 
 2. **Verify environment configuration** – ensure `PUBLIC_ORIGIN` (or its
-   fallback `ORIGIN` / `INTRIC_BACKEND_URL`) is set in the backend `.env` file
+   fallback `ORIGIN` / `ENEO_BACKEND_URL`) is set in the backend `.env` file
    to the externally reachable URL (the one your users see in their browser).
 
 3. **Inspect the allowlist manually**:
@@ -621,8 +621,8 @@ your public URL.
 1. **Check backend URL configuration**:
    ```bash
    # In frontend/.env
-   INTRIC_BACKEND_URL=http://localhost:8000
-   INTRIC_BACKEND_SERVER_URL=http://localhost:8000
+   ENEO_BACKEND_URL=http://localhost:8000
+   ENEO_BACKEND_SERVER_URL=http://localhost:8000
    ```
 
 2. **Verify backend is running**:
@@ -1081,6 +1081,12 @@ When reporting issues, include:
    - Exact commands that cause the issue
    - Expected vs actual behavior
    - Screenshots if relevant
+
+5. **Trace ID (when reporting an API error)**:
+   - From the browser: read the `X-Trace-Id` response header for the failing request (DevTools → Network → Response Headers). On error pages it is also available as `$page.error.traceId`.
+   - From the backend: every log line emitted during the request shares the same `trace_id` top-level field; filter your log aggregator by `trace_id="<value>"`.
+   - For unhandled 500 errors, the response body also contains a short `error_id` that appears on the originating exception log line. Quoting either ID lets support locate the exact failure.
+   - For the full ID contract and log schema, see [OBSERVABILITY.md](./OBSERVABILITY.md).
 
 ---
 

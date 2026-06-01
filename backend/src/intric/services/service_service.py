@@ -3,13 +3,13 @@ from uuid import UUID
 
 from intric.groups_legacy.group_service import GroupService
 from intric.main.exceptions import BadRequestException, UnauthorizedException
+from intric.main.models import ResourcePermission
 from intric.questions.questions_repo import QuestionRepository
 from intric.roles.permissions import Permission, validate_permissions
 from intric.services.output_parsing.pydantic_model_factory import PydanticModelFactory
 from intric.services.service import (
     CreateSpaceService,
     Service,
-    ServiceBase,
     ServiceCreate,
     ServiceCreatePublic,
     ServiceUpdate,
@@ -37,7 +37,8 @@ class ServiceService:
         completion_model_crud_service: "CompletionModelCRUDService",
         space_service: SpaceService,
         actor_manager: "ActorManager",
-    ):
+    ) -> None:
+        super().__init__()
         self.repo = repo
         self.space_repo = space_repo
         self.question_repo = question_repo
@@ -47,35 +48,38 @@ class ServiceService:
         self.completion_model_crud_service = completion_model_crud_service
         self.actor_manager = actor_manager
 
-    async def _validate(self, service: ServiceBase):
+    async def _validate(self, service: ServiceCreate | ServiceUpdate):
         if service.json_schema is not None:
             PydanticModelFactory(service.json_schema).validate_schema()
 
-        if service.completion_model_id is not None:
+        if service.completion_model_id is not None:  # pyright: ignore[reportUnnecessaryComparison]  # @partial_model makes fields Optional at runtime
             await self.completion_model_crud_service.get_completion_model(
                 service.completion_model_id
             )
 
-    async def _validate_same_embedding_model(self, service: ServiceCreate | ServiceUpdate):
+    async def _validate_same_embedding_model(
+        self, service: ServiceCreate | ServiceUpdate | Service
+    ) -> None:
         if not service.groups:
             return
 
-        embedding_model_ids = set()
+        embedding_model_ids: set[UUID] = set()
         if service.groups:
             groups_in_db = await self.group_service.get_groups_by_ids(
                 [group.id for group in service.groups]
             )
 
-            embedding_model_ids.update([group.embedding_model_id for group in groups_in_db])
+            embedding_model_ids.update(
+                [group.embedding_model_id for group in groups_in_db]
+            )
 
         if len(embedding_model_ids) > 1:
             raise BadRequestException("All groups must have the same embedding model")
 
-    async def validate_space_service(self, service: Service, space: "Space"):
+    async def validate_space_service(self, service: Service, space: "Space") -> None:
         # validate completion mode
-        if service.completion_model_id is not None:
-            if not space.is_completion_model_in_space(service.completion_model_id):
-                raise BadRequestException("Completion model is not in space.")
+        if not space.is_completion_model_available(service.completion_model_id):
+            raise BadRequestException("Completion model is not in space.")
 
         # validate groups
         for group in service.groups:
@@ -124,9 +128,11 @@ class ServiceService:
 
         return service_in_db, permissions
 
-    async def update_service(self, service_update_pub: ServiceUpdatePublic, service_id: UUID):
+    async def update_service(
+        self, service_update_pub: ServiceUpdatePublic, service_id: UUID
+    ) -> tuple[Service | None, list[ResourcePermission]]:
         space = await self.space_repo.get_space_by_service(service_id=service_id)
-        service_in_db = space.get_service(service_id=service_id)
+        _service_in_db = space.get_service(service_id=service_id)
 
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_edit_services():
@@ -142,14 +148,17 @@ class ServiceService:
 
         service_in_db = await self.repo.update(service_update)
 
-        await self.validate_space_service(service_in_db, space=space)
+        if service_in_db is not None:
+            await self.validate_space_service(service_in_db, space=space)
 
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_app_permissions()
 
         return service_in_db, permissions
 
-    async def get_service(self, service_id: UUID):
+    async def get_service(
+        self, service_id: UUID
+    ) -> tuple[Service, list[ResourcePermission]]:
         space = await self.space_repo.get_space_by_service(service_id=service_id)
         service = space.get_service(service_id=service_id)
 
@@ -163,7 +172,7 @@ class ServiceService:
 
         return service, permissions
 
-    async def get_services(self, name: str):
+    async def get_services(self, name: str | None = None) -> list[Service | None]:
         return await self.repo.get_for_user(self.user.id, search_query=name)
 
     async def delete_service(self, service_id: UUID):
@@ -175,7 +184,7 @@ class ServiceService:
 
         await self.repo.delete(service_id)
 
-    async def get_service_runs(self, service_id: str):
+    async def get_service_runs(self, service_id: UUID):
         space = await self.space_repo.get_space_by_service(service_id=service_id)
         service = space.get_service(service_id=service_id)
 
@@ -184,10 +193,12 @@ class ServiceService:
         if not actor.can_read_services():
             raise UnauthorizedException()
 
-        runs = await self.question_repo.get_by_service(service.id)
+        runs = await self.question_repo.get_by_service(service.id)  # pyright: ignore[reportArgumentType]  # questions_repo.get_by_service has wrong int annotation; actual column is UUID
         return service, runs
 
-    async def move_service_to_space(self, service_id: UUID, space_id: UUID, move_resources: bool):
+    async def move_service_to_space(
+        self, service_id: UUID, space_id: UUID, move_resources: bool
+    ):
         source_space = await self.space_repo.get_space_by_service(service_id=service_id)
         service = source_space.get_service(service_id)
 
@@ -196,13 +207,16 @@ class ServiceService:
         target_space_actor = self.actor_manager.get_space_actor_from_space(target_space)
 
         if not source_space_actor.can_delete_services():
-            raise UnauthorizedException("User does not have permission to move service from space")
+            raise UnauthorizedException(
+                "User does not have permission to move service from space"
+            )
 
         if not target_space_actor.can_create_services():
             raise UnauthorizedException(
                 "User does not have permission to create service in the space"
             )
 
+        assert service.completion_model is not None
         if not target_space.is_completion_model_in_space(service.completion_model.id):
             raise BadRequestException(
                 f"Space does not have completion model {service.completion_model.name} enabled"

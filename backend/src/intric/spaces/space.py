@@ -5,10 +5,14 @@ from uuid import UUID
 
 from intric.main.exceptions import (
     BadRequestException,
+    KnowledgeModelUnavailableException,
+    ModelNotAvailableException,
+    NoModelSelectedException,
     NotFoundException,
+    SecurityClassificationMismatchException,
     UnauthorizedException,
 )
-from intric.main.models import NOT_PROVIDED, NotProvided
+from intric.main.models import NOT_PROVIDED, NotProvided, is_provided
 from intric.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -55,22 +59,23 @@ class Space:
         completion_models: list["CompletionModel"],
         transcription_models: list[TranscriptionModel],
         mcp_servers: list["MCPServer"],
-        default_assistant: "Assistant",
-        assistants: list["Assistant"],
-        apps: list["App"],
-        services: list["Service"],
-        websites: list["Website"],
-        collections: list["Collection"],
-        integration_knowledge_list: list["IntegrationKnowledge"],
-        members: dict[UUID, SpaceMember],
-        created_at: datetime = None,
-        updated_at: datetime = None,
-        group_chats: Optional[list["GroupChat"]] = [],
+        default_assistant: Optional["Assistant"],
+        assistants: Optional[list["Assistant"]],
+        apps: Optional[list["App"]],
+        services: Optional[list["Service"]],
+        websites: Optional[list["Website"]],
+        collections: Optional[list["Collection"]],
+        integration_knowledge_list: Optional[list["IntegrationKnowledge"]],
+        members: dict[UUID, SpaceMember] | None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        group_chats: list["GroupChat"] | None = None,
         security_classification: Optional[SecurityClassification] = None,
         data_retention_days: Optional[int] = None,
         icon_id: Optional[UUID] = None,
-        group_members: Optional[dict[UUID, SpaceGroupMember]] = None,
+        group_members: dict[UUID, SpaceGroupMember] | None = None,
     ):
+        super().__init__()
         self.id = id
         self.tenant_id = tenant_id
         self.tenant_space_id = tenant_space_id
@@ -82,14 +87,14 @@ class Space:
         self._transcription_models = transcription_models
         self._mcp_servers = mcp_servers
         self.default_assistant = default_assistant
-        self.assistants = assistants
-        self.group_chats = group_chats
-        self.apps = apps
-        self.services = services
-        self.websites = websites
-        self.collections = collections
-        self.integration_knowledge_list = integration_knowledge_list
-        self.members = members
+        self.assistants = assistants or []
+        self.group_chats = group_chats or []
+        self.apps = apps or []
+        self.services = services or []
+        self.websites = websites or []
+        self.collections = collections or []
+        self.integration_knowledge_list = integration_knowledge_list or []
+        self.members = members or {}
         self.created_at = created_at
         self.updated_at = updated_at
         self.security_classification = security_classification
@@ -105,6 +110,10 @@ class Space:
 
     def is_organization(self):
         return (self.user_id is None) and (self.tenant_space_id is None)
+
+    def is_shared(self) -> bool:
+        """Collaborative Delat-tab space (not personal, not the org hub)."""
+        return (not self.is_personal()) and (not self.is_organization())
 
     def is_embedding_model_in_space(self, embedding_model_id: UUID | None) -> bool:
         return embedding_model_id in [model.id for model in self.embedding_models]
@@ -156,7 +165,7 @@ class Space:
     def get_member(self, member_id: UUID) -> SpaceMember:
         return self.members[member_id]
 
-    def get_latest_embedding_model(self) -> "EmbeddingModel":
+    def get_latest_embedding_model(self) -> "EmbeddingModel | None":
         if not self.embedding_models:
             return
 
@@ -166,7 +175,7 @@ class Space:
                 for embedding_model in self.embedding_models
                 if embedding_model.can_access
             ],
-            key=lambda model: model.created_at,
+            key=lambda model: model.created_at or datetime.min,
             reverse=True,
         )
 
@@ -178,7 +187,7 @@ class Space:
 
         return sorted_embedding_models[0]  # type: ignore
 
-    def get_latest_completion_model(self) -> "CompletionModel":
+    def get_latest_completion_model(self) -> "CompletionModel | None":
         if not self.completion_models:
             return
 
@@ -188,7 +197,7 @@ class Space:
                 for completion_model in self.completion_models
                 if completion_model.can_access
             ],
-            key=lambda model: model.created_at,
+            key=lambda model: model.created_at or datetime.min,
             reverse=True,
         )
 
@@ -210,7 +219,7 @@ class Space:
                 for transcription_model in self.transcription_models
                 if transcription_model.can_access
             ],
-            key=lambda model: model.created_at,
+            key=lambda model: model.created_at or datetime.min,
             reverse=True,
         )
 
@@ -298,18 +307,18 @@ class Space:
 
     @mcp_servers.setter
     def mcp_servers(self, mcp_servers: list["MCPServer"]):
-        # For MCP servers, we may want to add similar validation
-        # For now, just set them directly
+        for server in mcp_servers:
+            self.validate_mcp_server_security_compatibility(server)
         self._mcp_servers = mcp_servers
 
     def update(
         self,
-        name: str = None,
-        description: str = None,
-        embedding_models: list["EmbeddingModel"] = None,
-        completion_models: list["CompletionModel"] = None,
-        transcription_models: list[TranscriptionModel] = None,
-        mcp_servers: list["MCPServer"] = None,
+        name: str | None = None,
+        description: str | None = None,
+        embedding_models: list["EmbeddingModel"] | None = None,
+        completion_models: list["CompletionModel"] | None = None,
+        transcription_models: list[TranscriptionModel] | None = None,
+        mcp_servers: list["MCPServer"] | None = None,
         security_classification: Union[
             SecurityClassification, NotProvided, None
         ] = NOT_PROVIDED,
@@ -330,7 +339,7 @@ class Space:
 
             self.description = description
         # Only if security_classification_enabled on tenant (checked in service layer)
-        if security_classification is not NOT_PROVIDED:
+        if is_provided(security_classification):
             if self.is_personal():
                 raise BadRequestException(
                     "Can not change security classification of personal space"
@@ -356,6 +365,13 @@ class Space:
                     for model in self.transcription_models
                     if not self.security_classification.is_greater_than(
                         model.security_classification
+                    )
+                ]
+                self._mcp_servers = [
+                    server
+                    for server in self._mcp_servers
+                    if not self.security_classification.is_greater_than(
+                        server.security_classification
                     )
                 ]
 
@@ -389,10 +405,10 @@ class Space:
 
             self.mcp_servers = mcp_servers
 
-        if data_retention_days is not NOT_PROVIDED:
+        if is_provided(data_retention_days):
             self.data_retention_days = data_retention_days
 
-        if icon_id is not NOT_PROVIDED:
+        if is_provided(icon_id):
             self.icon_id = icon_id
 
     def add_member(self, user: SpaceMember):
@@ -466,9 +482,11 @@ class Space:
         self.websites.remove(website)
 
     def add_group_chat(self, group_chat: "GroupChat"):
+        assert self.group_chats is not None
         self.group_chats.append(group_chat)
 
     def remove_group_chat(self, group_chat: "GroupChat"):
+        assert self.group_chats is not None
         self.group_chats.remove(group_chat)
 
     def add_assistant(self, assistant: "Assistant"):
@@ -484,9 +502,10 @@ class Space:
         self.assistants.append(assistant)
 
     def remove_assistant(self, assistant: "Assistant"):
-        for group_chat in self.group_chats:
-            if assistant.id in [a.assistant.id for a in group_chat.assistants]:
-                group_chat.assistants.remove(assistant)
+        for group_chat in self.group_chats or []:
+            group_chat.assistants = [
+                a for a in group_chat.assistants if a.assistant.id != assistant.id
+            ]
 
         self.assistants.remove(assistant)
 
@@ -522,41 +541,66 @@ class Space:
 
         return True
 
-    def can_ask_assistant(self, assistant: "Assistant") -> bool:
+    def can_ask_assistant(self, assistant: "Assistant"):
+        if assistant.completion_model is None:
+            raise NoModelSelectedException(
+                "No AI model is configured for this assistant. "
+                "Please select a model in the assistant settings."
+            )
         if not self.is_completion_model_available(assistant.completion_model.id):
-            return False
+            raise ModelNotAvailableException(
+                "The selected AI model is not available in this space. "
+                "Please choose a different model or contact your administrator."
+            )
         if not self.can_use_knowledge(
             assistant.collections
             + assistant.websites
             + assistant.integration_knowledge_list
         ):
-            return False
+            raise KnowledgeModelUnavailableException(
+                "This assistant uses knowledge sources with unavailable embedding models. "
+                "Please review the assistant's knowledge settings."
+            )
         if self.security_classification is not None:
             if self.security_classification.is_greater_than(
                 assistant.completion_model.security_classification
             ):
-                return False
-
-        return True
+                raise SecurityClassificationMismatchException(
+                    "The assistant's model does not meet this space's "
+                    "security classification requirements."
+                )
 
     def can_run_app(self, app: "App") -> bool:
-        if not self.is_completion_model_available(app.completion_model.id):
+        completion_model = app.completion_model
+        if completion_model is None:
             return False
-        if not self.is_transcription_model_available(app.transcription_model.id):
+        if not self.is_completion_model_available(completion_model.id):
+            return False
+        transcription_model = app.transcription_model
+        if transcription_model is None:
+            return False
+        if not self.is_transcription_model_available(transcription_model.id):
             return False
         if self.security_classification is not None:
+            # App.completion_model is typed as CompletionModel | CompletionModelSparse | None;
+            # domain CompletionModel always has security_classification at this call site.
             if self.security_classification.is_greater_than(
-                app.completion_model.security_classification
+                completion_model.security_classification  # pyright: ignore[reportAttributeAccessIssue,reportUnknownMemberType,reportUnknownArgumentType] -- CompletionModelSparse lacks security_classification but domain model always has it at this call site
             ):
                 return False
-            if self.security_classification.is_greater_than(
-                app.transcription_model.security_classification
+            if (
+                transcription_model.security_classification is not None
+                and self.security_classification.is_greater_than(
+                    transcription_model.security_classification
+                )
             ):
                 return False
 
         return True
 
     def can_use_service(self, service: "Service") -> bool:
+        if service.completion_model is None:
+            return False
         if not self.is_completion_model_available(service.completion_model.id):
             return False
         if self.security_classification is not None:
@@ -623,8 +667,18 @@ class Space:
         if self.security_classification.is_greater_than(model.security_classification):
             raise BadRequestException(SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE)
 
+    def validate_mcp_server_security_compatibility(
+        self, mcp_server: "MCPServer"
+    ) -> None:
+        if not self.security_classification:
+            return
+        if self.security_classification.is_greater_than(
+            mcp_server.security_classification
+        ):
+            raise BadRequestException(SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE)
+
     def add_completion_model(self, model: "CompletionModel"):
-        if model is None or getattr(model, "id", None) is None:
+        if getattr(model, "id", None) is None:
             raise BadRequestException("Invalid completion model")
 
         if hasattr(model, "can_access") and not model.can_access:

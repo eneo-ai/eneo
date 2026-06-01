@@ -11,6 +11,11 @@
   import AppSettingsAttachments from "./AppSettingsAttachments.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
+  import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
+  import {
+    filterSupportedModelKwargs,
+    hasModelSpecificSettings
+  } from "$lib/features/ai-models/ModelKwargCapabilities";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import dayjs from "dayjs";
   import PublishingSetting from "$lib/features/publishing/components/PublishingSetting.svelte";
@@ -18,6 +23,8 @@
   import { m } from "$lib/paraglide/messages";
   import RetentionPolicyInput from "$lib/components/settings/RetentionPolicyInput.svelte";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
+  import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
+  import { untrack } from "svelte";
 
   let { data } = $props();
   const {
@@ -29,18 +36,33 @@
     state: { resource, update, currentChanges, isSaving },
     saveChanges,
     discardChanges
-  } = initAppEditor({
-    app: data.app,
-    intric: data.intric,
-    onUpdateDone() {
-      refreshCurrentSpace("applications");
+  } = untrack(() =>
+    initAppEditor({
+      app: data.app,
+      intric: data.intric,
+      onUpdateDone() {
+        refreshCurrentSpace("applications");
+      }
+    })
+  );
+
+  let cancelUploadsAndClearQueue = $state<() => void>(() => {});
+
+  let hasBehaviorChanges = $derived.by(() => {
+    if (!$currentChanges.diff.completion_model_kwargs) return false;
+
+    if (hasModelSpecificSettings($update.completion_model)) {
+      const original = $resource.completion_model_kwargs || {};
+      const updated = $update.completion_model_kwargs || {};
+
+      return original.temperature !== updated.temperature;
     }
+
+    return true;
   });
 
-  let cancelUploadsAndClearQueue: () => void;
-
   // Icon state
-  let currentIconId = $state<string | null>($resource.icon_id);
+  let currentIconId = $state<string | null>($resource.icon_id ?? null);
   let iconUploading = $state(false);
   let iconError = $state<string | null>(null);
 
@@ -98,13 +120,13 @@
     discardChanges();
   });
 
-  let previousRoute = `/spaces/${$currentSpace.routeId}/apps/${data.app.id}`;
+  let previousRoute = $state(untrack(() => `/spaces/${$currentSpace.routeId}/apps/${data.app.id}`));
   afterNavigate(({ from }) => {
     if (page.url.searchParams.get("next") === "default") return;
     if (from) previousRoute = from.url.toString();
   });
 
-  let showSavesChangedNotice = false;
+  let showSavesChangedNotice = $state(false);
 </script>
 
 <svelte:head>
@@ -137,6 +159,10 @@
           class="w-32"
           on:click={async () => {
             cancelUploadsAndClearQueue();
+            $update.completion_model_kwargs = filterSupportedModelKwargs(
+              $update.completion_model_kwargs,
+              $update.completion_model
+            );
             await saveChanges();
             showSavesChangedNotice = true;
             setTimeout(() => {
@@ -242,7 +268,7 @@
             rows={4}
             {...aria}
             bind:value={$update.prompt.text}
-            on:change={() => {
+            onchange={() => {
               $update.prompt.description = "";
             }}
             class="border-stronger bg-primary text-primary ring-default min-h-24 rounded-lg border px-6 py-4 text-lg shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2"
@@ -276,6 +302,7 @@
             <SelectAIModelV2
               bind:selectedModel={$update.transcription_model}
               availableModels={$currentSpace.transcription_models}
+              showCost={false}
               {aria}
             ></SelectAIModelV2>
           </Settings.Row>
@@ -293,6 +320,7 @@
           <SelectAIModelV2
             bind:selectedModel={$update.completion_model}
             availableModels={$currentSpace.completion_models}
+            showCost={false}
             {aria}
           ></SelectAIModelV2>
         </Settings.Row>
@@ -300,15 +328,35 @@
         <Settings.Row
           title={m.model_behaviour()}
           description={m.model_behaviour_description()}
-          hasChanges={$currentChanges.diff.completion_model_kwargs !== undefined}
+          hasChanges={hasBehaviorChanges}
           revertFn={() => {
             discardChanges("completion_model_kwargs");
           }}
           let:aria
         >
-          <SelectBehaviourV2 bind:kwArgs={$update.completion_model_kwargs} isDisabled={false} {aria}
+          <SelectBehaviourV2
+            bind:kwArgs={$update.completion_model_kwargs}
+            selectedModel={$update.completion_model}
+            isDisabled={!$update.completion_model}
+            {aria}
           ></SelectBehaviourV2>
         </Settings.Row>
+
+        {#if hasModelSpecificSettings($update.completion_model)}
+          <Settings.Row
+            title={m.model_settings()}
+            description={m.model_settings_description()}
+            hasChanges={$currentChanges.diff.completion_model_kwargs !== undefined}
+            revertFn={() => {
+              discardChanges("completion_model_kwargs");
+            }}
+          >
+            <SelectModelSpecificSettings
+              bind:kwArgs={$update.completion_model_kwargs}
+              selectedModel={$update.completion_model}
+            ></SelectModelSpecificSettings>
+          </Settings.Row>
+        {/if}
       </Settings.Group>
 
       <Settings.Group title={m.security_and_privacy()}>
@@ -332,6 +380,17 @@
           />
         </Settings.Row>
       </Settings.Group>
+      {#if data.app.permissions?.includes("edit")}
+        <Settings.Group title={m.api_access()}>
+          <Settings.Row title={m.api_keys()} description={m.api_keys_app_settings_desc()} fullWidth>
+            <ApiKeysSettingsSection
+              scopeType="app"
+              scopeId={data.app.id}
+              scopeName={$resource.name}
+            />
+          </Settings.Row>
+        </Settings.Group>
+      {/if}
     </Settings.Page>
   </Page.Main>
 </Page.Root>

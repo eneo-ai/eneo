@@ -8,11 +8,11 @@ export const load = async (event) => {
     intric.groups.listInfoBlobs({ id: selectedCollectionId })
   ]);
 
-   const isNotSpaceOwner = group.space_id !== currentSpace.id;
+  const isNotSpaceOwner = group.space_id !== currentSpace.id;
 
-  return { 
-    collection: group, 
-    blobs, 
+  return {
+    collection: group,
+    blobs,
     selectedCollectionId,
     readonly: isNotSpaceOwner
   };

@@ -5,8 +5,11 @@ import { getFeatureFlags } from "$lib/core/flags.server";
 import { authenticateUser, clearFrontendCookies } from "$lib/features/auth/auth.server";
 import { IntricError, type IntricErrorCode } from "@intric/intric-js";
 import { redirect, type Handle, type HandleFetch, type HandleServerError } from "@sveltejs/kit";
-import { env } from "$env/dynamic/private";
-import { getEnvironmentConfig } from "./lib/core/environment.server";
+import {
+  getEnvironmentConfig,
+  getBackendUrl,
+  getBackendServerUrl
+} from "./lib/core/environment.server";
 import { sequence } from "@sveltejs/kit/hooks";
 import { paraglideMiddleware } from "$lib/paraglide/server";
 
@@ -65,7 +68,7 @@ const paraglideHandle: Handle = ({ event, resolve }) =>
 
 const headerFilterHandle: Handle = async ({ event, resolve }) => {
   const response = await resolve(event, {
-    preload: () => false,
+    preload: () => false
   });
   return response;
 };
@@ -74,33 +77,32 @@ export const handle = sequence(paraglideHandle, authHandle, headerFilterHandle);
 
 export const handleError: HandleServerError = async ({ error, status, message }) => {
   let code: IntricErrorCode = 0;
+  let traceId: string | undefined;
   if (error instanceof IntricError) {
     status = error.status;
     message = error.getReadableMessage();
     code = error.code;
+    traceId = error.getTraceId();
   }
 
   if (dev) {
-    console.error("server error", error);
+    console.error("server error", { status, code, traceId, error });
   }
 
   return {
     status,
     message,
-    code
+    code,
+    traceId
   };
 };
 
 export const handleFetch: HandleFetch = async ({ request, fetch }) => {
-  if (
-    env.INTRIC_BACKEND_SERVER_URL &&
-    env.INTRIC_BACKEND_URL &&
-    request.url.startsWith(env.INTRIC_BACKEND_URL)
-  ) {
-    request = new Request(
-      request.url.replace(env.INTRIC_BACKEND_URL, env.INTRIC_BACKEND_SERVER_URL),
-      request
-    );
+  const serverUrl = getBackendServerUrl();
+  const backendUrl = getBackendUrl();
+
+  if (serverUrl && backendUrl && request.url.startsWith(backendUrl)) {
+    request = new Request(request.url.replace(backendUrl, serverUrl), request);
   }
 
   return fetch(request);

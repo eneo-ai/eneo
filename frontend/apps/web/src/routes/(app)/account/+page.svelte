@@ -5,15 +5,12 @@
   import { getAppContext } from "$lib/core/AppContext.js";
   import UpdateUserName from "./UpdateUserName.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { getLocale } from "$lib/paraglide/runtime";
   const {
     user,
     versions,
     featureFlags,
     state: { userInfo }
   } = getAppContext();
-
-  const currentLocale = getLocale();
 </script>
 
 <svelte:head>
@@ -76,7 +73,7 @@
     <div class="border-dimmer hover:bg-hover-dimmer flex flex-col gap-1 border-b py-4 pr-4 pl-2">
       <h3 class="font-medium">{m.version()}</h3>
       <pre
-        class="">Frontend: {versions.frontend} · Client: {versions.client} · Backend: {versions.backend}</pre>
+        class="">{m.account_version_frontend()} {versions.frontend} {m.account_version_client()} {versions.client} {m.account_version_backend()} {versions.backend}</pre>
     </div>
     {#if versions.preview}
       <div class="border-dimmer hover:bg-hover-dimmer flex flex-col gap-1 border-b py-4 pr-4 pl-2">

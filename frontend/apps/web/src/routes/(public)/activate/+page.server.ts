@@ -1,5 +1,5 @@
 import { redirect } from "@sveltejs/kit";
-import { env } from "$env/dynamic/private";
+import { getBackendUrl } from "$lib/core/environment.server";
 import { DEFAULT_LANDING_PAGE } from "$lib/core/constants.js";
 
 export const load = async (event) => {
@@ -10,7 +10,7 @@ export const load = async (event) => {
     redirect(302, "/login");
   }
 
-  const response = await event.fetch(env.INTRIC_BACKEND_URL + "/api/v1/users/provision/", {
+  const response = await event.fetch(getBackendUrl() + "/api/v1/users/provision/", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"

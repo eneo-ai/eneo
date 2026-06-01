@@ -30,6 +30,7 @@ class UploadTask(InfoBlobTask):
 
 class UpdateUsageStatsTaskParams(TaskParams):
     """Parameters for updating completion model usage statistics."""
+
     tenant_id: UUID
     model_id: Optional[UUID] = None
     full_recalc: bool = False
@@ -41,3 +42,12 @@ class UploadInfoBlob(UploadTask):
 
 class Transcription(UploadTask):
     pass
+
+
+class AnalyzeConversationInsightsTask(TaskParams):
+    question: str
+    from_date: str
+    to_date: str
+    include_followups: bool = False
+    assistant_id: UUID | None = None
+    group_chat_id: UUID | None = None

@@ -1,12 +1,9 @@
 import asyncio
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import Any
 
 from intric.libs.clients import AsyncClient
 from intric.main.config import get_settings
-
-if TYPE_CHECKING:
-    pass
 
 
 class FluxModel(str, Enum):
@@ -20,9 +17,14 @@ class FluxAdapter:
     BASE_URL = "https://api.us1.bfl.ai/v1"
 
     def __init__(self):
+        super().__init__()
+        api_key = get_settings().flux_api_key
+        if api_key is None:
+            raise ValueError("FLUX_API_KEY is not configured")
+
         self.client = AsyncClient(base_url=self.BASE_URL)
-        self.headers = {
-            "x-key": get_settings().flux_api_key,
+        self.headers: dict[str, str] = {
+            "x-key": api_key,
             "Content-Type": "application/json",
         }
 
@@ -32,28 +34,26 @@ class FluxAdapter:
         model: FluxModel = FluxModel.FLUX_1_DEV,
         width: int = 800,
         height: int = 608,
-    ):
+    ) -> bytes:
         async with self.client as client:
             data = {"prompt": prompt, "width": width, "height": height}
 
-            res = await client.post(
+            res: dict[str, Any] = await client.post(
                 endpoint=model.value, data=data, headers=self.headers
             )
 
-            request_id = res["id"]
-
-            data = {}
+            request_id = str(res["id"])
 
             while True:
                 await asyncio.sleep(0.5)
 
-                result = await client.get(
+                result: dict[str, Any] = await client.get(
                     endpoint="get_result",
                     params={"id": request_id},
                     headers=self.headers,
                 )
 
                 if result["status"] == "Ready":
-                    image_url = result["result"]["sample"]
+                    image_url = str(result["result"]["sample"])
 
                     return await client.download(url=image_url)

@@ -25,7 +25,9 @@ export function initUser(client) {
      * */
     tenant: async () => {
       const res = await client.fetch("/api/v1/users/tenant/", { method: "get" });
-      return res;
+      // Backend's TenantPublic schema omits `id`, but the actual response includes it.
+      // The Tenant type extends the schema with `id`, so we cast through unknown.
+      return /** @type {Tenant} */ (/** @type {unknown} */ (res));
     },
 
     /**
@@ -40,16 +42,26 @@ export function initUser(client) {
     },
 
     /**
+     * Revoke the caller's legacy (v1) API key. Permanent action.
+     * @returns {Promise<boolean>} Returns true on success
+     * @throws {IntricError}
+     * */
+    revokeLegacyApiKey: async () => {
+      await client.fetch("/api/v1/users/api-keys/legacy", { method: "delete" });
+      return true;
+    },
+
+    /**
      * Lists all users on this tenant.
      * @overload `{includeDetails: true}` requires super user privileges.
-     * @param {{includeDetails: true, search_email?: string, search_name?: string, page?: number, page_size?: number, state_filter?: string}} options
+     * @param {{includeDetails: true, search_email?: string, search_name?: string, page?: number, page_size?: number, state_filter?: "active" | "inactive"}} options
      * @return {Promise<import('../types/resources').Paginated<User>>}
      *
      * @overload
      * @param {{includeDetails?: false, filter?: string, limit?: number, cursor?: string}} [options]
      * @return {Promise<import('../types/resources').Paginated<UserSparse>> }
      *
-     * @param {{includeDetails: boolean, filter?: string, limit?: number, cursor?: string, search_email?: string, search_name?: string, page?: number, page_size?: number, state_filter?: string}} [options]
+     * @param {{includeDetails: boolean, filter?: string, limit?: number, cursor?: string, search_email?: string, search_name?: string, page?: number, page_size?: number, state_filter?: "active" | "inactive"}} [options]
      * @throws {IntricError}
      * */
     list: async (options) => {
@@ -75,7 +87,11 @@ export function initUser(client) {
       const res = await client.fetch("/api/v1/users/", {
         method: "get",
         params: {
-          query: { email: options?.filter, limit: options?.limit, cursor: options?.cursor }
+          query: {
+            email: options?.filter,
+            limit: options?.limit,
+            cursor: options?.cursor
+          }
         }
       });
       return res;

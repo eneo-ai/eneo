@@ -29,17 +29,23 @@
 
     try {
       console.log("Calling API to delete SharePoint app...");
-      await intric.client.fetch("/api/v1/admin/sharepoint/app", {
-        method: "delete",
-        params: {}
-      });
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      await intric.client.fetch(
+        "/api/v1/admin/sharepoint/app" as any,
+        {
+          method: "delete"
+        } as any
+      );
+      /* eslint-enable @typescript-eslint/no-explicit-any */
       console.log("API call successful");
       $openController = false;
       // Reload page to refresh state
       window.location.reload();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error deleting SharePoint app:", error);
-      errorMessage = error.message || m.failed_to_delete_sharepoint_app();
+      errorMessage =
+        (error instanceof Error ? error.message : String(error)) ||
+        m.failed_to_delete_sharepoint_app();
     } finally {
       isLoading = false;
     }
@@ -54,7 +60,7 @@
   });
 </script>
 
-<Dialog.Root openController={openController}>
+<Dialog.Root {openController}>
   <Dialog.Content>
     <Dialog.Title>{m.delete_sharepoint_app()}</Dialog.Title>
     <Dialog.Description>
@@ -63,20 +69,20 @@
 
     <Dialog.Section class="p-6">
       <!-- Warning box -->
-      <div class="rounded-lg border border-negative-default bg-negative-default/15 px-6 py-4 mb-6">
+      <div class="border-negative-default bg-negative-default/15 mb-6 rounded-lg border px-6 py-4">
         <div class="flex items-start gap-3">
           <AlertTriangle class="text-negative-default shrink-0" size={20} />
           <div class="flex flex-col gap-2 text-sm">
-            <div class="font-semibold text-default">
+            <div class="text-default font-semibold">
               {m.warning_permanent_deletion()}
             </div>
-            <ul class="list-disc list-inside text-secondary space-y-1">
+            <ul class="text-secondary list-inside list-disc space-y-1">
               <li>{m.sharepoint_delete_warning_knowledge()}</li>
               <li>{m.sharepoint_delete_warning_assistants()}</li>
               <li>{m.sharepoint_delete_warning_webhooks()}</li>
               <li>{m.sharepoint_delete_warning_tokens()}</li>
             </ul>
-            <div class="font-medium text-negative-default mt-2">
+            <div class="text-negative-default mt-2 font-medium">
               {m.this_cannot_be_undone()}
             </div>
           </div>
@@ -85,7 +91,7 @@
 
       <!-- Confirmation input -->
       <div class="flex flex-col gap-3">
-        <label for="confirm-delete" class="text-sm font-medium text-default">
+        <label for="confirm-delete" class="text-default text-sm font-medium">
           {m.type_to_confirm({ word: CONFIRMATION_WORD })}
         </label>
         <Input.Text
@@ -99,7 +105,7 @@
       </div>
 
       {#if errorMessage}
-        <div class="rounded-lg bg-negative-default/10 px-3 py-2 text-sm text-negative-default mt-4">
+        <div class="bg-negative-default/10 text-negative-default mt-4 rounded-lg px-3 py-2 text-sm">
           {errorMessage}
         </div>
       {/if}
@@ -107,11 +113,7 @@
 
     <Dialog.Controls let:close>
       <Button is={close} disabled={isLoading}>{m.cancel()}</Button>
-      <Button
-        variant="destructive"
-        onclick={handleDelete}
-        disabled={!isConfirmed || isLoading}
-      >
+      <Button variant="destructive" onclick={handleDelete} disabled={!isConfirmed || isLoading}>
         {isLoading ? m.deleting() : m.permanent_delete()}
       </Button>
     </Dialog.Controls>

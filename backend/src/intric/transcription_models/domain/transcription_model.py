@@ -1,12 +1,7 @@
-from typing import TYPE_CHECKING, Optional, Union
+from decimal import Decimal
+from typing import TYPE_CHECKING, Optional
 
 from intric.ai_models.ai_model import AIModel
-from intric.ai_models.model_enums import (
-    ModelFamily,
-    ModelHostingLocation,
-    ModelOrg,
-    ModelStability,
-)
 from intric.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -30,10 +25,10 @@ class TranscriptionModel(AIModel):
         updated_at: "datetime",
         nickname: str,
         name: str,
-        family: Union[ModelFamily, str],
-        hosting: Union[ModelHostingLocation, str],
-        org: Optional[Union[ModelOrg, str]],
-        stability: Union[ModelStability, str],
+        family: Optional[str],
+        hosting: Optional[str],
+        org: Optional[str],
+        stability: Optional[str],
         open_source: bool,
         description: Optional[str],
         hf_link: Optional[str],
@@ -41,6 +36,7 @@ class TranscriptionModel(AIModel):
         is_deprecated: bool,
         is_org_enabled: bool,
         is_org_default: bool,
+        cost_per_minute: Optional[Decimal] = None,
         security_classification: Optional["SecurityClassification"] = None,
         tenant_id: Optional["UUID"] = None,
         provider_id: Optional["UUID"] = None,
@@ -67,6 +63,7 @@ class TranscriptionModel(AIModel):
 
         self.base_url = base_url
         self.is_org_default = is_org_default
+        self.cost_per_minute = cost_per_minute
         self.security_classification = security_classification
         self.tenant_id = tenant_id
         self.provider_id = provider_id
@@ -102,13 +99,14 @@ class TranscriptionModel(AIModel):
             hosting=transcription_model_db.hosting,
             org=transcription_model_db.org,
             stability=transcription_model_db.stability,
-            open_source=transcription_model_db.open_source,
+            open_source=transcription_model_db.open_source or False,
             description=transcription_model_db.description,
             hf_link=transcription_model_db.hf_link,
             base_url=transcription_model_db.base_url,
             is_deprecated=transcription_model_db.is_deprecated,
             is_org_enabled=transcription_model_db.is_enabled,
             is_org_default=transcription_model_db.is_default,
+            cost_per_minute=transcription_model_db.cost_per_minute,
             security_classification=SecurityClassification.to_domain(
                 db_security_classification=transcription_model_db.security_classification
             ),

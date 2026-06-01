@@ -6,7 +6,8 @@ class IntegrationPreview:
         type: str,
         key: str,
         category: str | None = None,
-    ):
+    ) -> None:
+        super().__init__()
         self.name = name
         self.url = url
         self.type = type

@@ -130,9 +130,7 @@ class TestWatchdogPhase1KillExpired:
         watchdog = OrphanWatchdog(redis_mock, settings_mock)
 
         session_mock = MagicMock()
-        session_mock.execute = AsyncMock(
-            return_value=MagicMock(fetchall=lambda: [])
-        )
+        session_mock.execute = AsyncMock(return_value=MagicMock(fetchall=lambda: []))
 
         now = datetime.now(timezone.utc)
         result = await watchdog._kill_expired_jobs(session_mock, now=now)
@@ -231,9 +229,7 @@ class TestWatchdogPhase2RescueStuck:
 
         session_mock = MagicMock()
         # Query should filter these out, returning empty
-        session_mock.execute = AsyncMock(
-            return_value=MagicMock(fetchall=lambda: [])
-        )
+        session_mock.execute = AsyncMock(return_value=MagicMock(fetchall=lambda: []))
 
         result = await watchdog._rescue_stuck_jobs(
             session_mock, now=now, stale_threshold_minutes=5
@@ -355,21 +351,27 @@ class TestWatchdogOrchestration:
         async def mock_phase1(*args, **kwargs):
             execution_order.append("phase1")
             from intric.worker.feeder.watchdog import Phase1Result
-            return Phase1Result(expired_job_ids=[], slots_to_release=[], orphaned_job_ids=[])
+
+            return Phase1Result(
+                expired_job_ids=[], slots_to_release=[], orphaned_job_ids=[]
+            )
 
         async def mock_phase2(*args, **kwargs):
             execution_order.append("phase2")
             from intric.worker.feeder.watchdog import Phase2Result
+
             return Phase2Result(jobs_to_requeue=[], rescued_count=0)
 
         async def mock_phase3_5(*args, **kwargs):
             execution_order.append("phase3.5")
             from intric.worker.feeder.watchdog import Phase3_5Result
+
             return Phase3_5Result(failed_job_ids=[], slots_to_release=[])
 
         async def mock_phase3(*args, **kwargs):
             execution_order.append("phase3")
             from intric.worker.feeder.watchdog import Phase3Result
+
             return Phase3Result(failed_job_ids=[], slots_to_release=[])
 
         watchdog._run_phase0_reconciliation = mock_phase0
@@ -382,14 +384,18 @@ class TestWatchdogOrchestration:
         with patch("intric.database.database.sessionmanager") as mock_sm:
             mock_session = MagicMock()
             mock_session.execute = AsyncMock(return_value=MagicMock(rowcount=0))
-            mock_session.begin = MagicMock(return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=None),
-                __aexit__=AsyncMock(return_value=None),
-            ))
-            mock_sm.session = MagicMock(return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=mock_session),
-                __aexit__=AsyncMock(return_value=None),
-            ))
+            mock_session.begin = MagicMock(
+                return_value=AsyncMock(
+                    __aenter__=AsyncMock(return_value=None),
+                    __aexit__=AsyncMock(return_value=None),
+                )
+            )
+            mock_sm.session = MagicMock(
+                return_value=AsyncMock(
+                    __aenter__=AsyncMock(return_value=mock_session),
+                    __aexit__=AsyncMock(return_value=None),
+                )
+            )
 
             await watchdog.run_cleanup()
 
@@ -469,10 +475,12 @@ class TestWatchdogOrchestration:
             mock_begin.__aexit__ = track_commit
             mock_session.begin = MagicMock(return_value=mock_begin)
 
-            mock_sm.session = MagicMock(return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=mock_session),
-                __aexit__=AsyncMock(return_value=None),
-            ))
+            mock_sm.session = MagicMock(
+                return_value=AsyncMock(
+                    __aenter__=AsyncMock(return_value=mock_session),
+                    __aexit__=AsyncMock(return_value=None),
+                )
+            )
 
             await watchdog.run_cleanup()
 

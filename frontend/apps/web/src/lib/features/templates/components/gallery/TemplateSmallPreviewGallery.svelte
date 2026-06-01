@@ -12,7 +12,7 @@
 </script>
 
 <div class="grid max-h-[220px] w-full grid-cols-3 gap-2 overflow-hidden p-1">
-  {#each allTemplates.filter(t => t.is_default).slice(0, 3) as template (template.id)}
+  {#each allTemplates.filter((t) => t.is_default).slice(0, 3) as template (template.id)}
     <button
       onclick={(e) => {
         e.preventDefault();

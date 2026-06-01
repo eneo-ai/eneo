@@ -133,6 +133,11 @@ function parseUrl(baseUrl, endpoint, params) {
 
   if (params?.path) {
     Object.entries(params.path).forEach(([param, value]) => {
+      if (value === undefined || value === null || value === "undefined" || value === "null") {
+        throw new Error(
+          `Missing path parameter "${param}" for endpoint "${endpoint}" (got ${value === undefined ? "undefined" : JSON.stringify(value)}).`
+        );
+      }
       endpoint = endpoint.replace(`{${param}}`, value);
     });
   }
@@ -225,11 +230,23 @@ export class PartialError extends Error {
    * @param {Headers} [headers] Response headers
    */
   constructor(stage, status, parsedResponse, headers) {
-    const detail = typeof parsedResponse?.detail === "string" ? parsedResponse.detail : undefined;
+    // Structured 4xx responses use `detail: {code, message}` (see
+    // require_user_for_creation / require_user_identity in the backend).
+    // Validation errors use `detail: [...]`. Fall back to string detail for
+    // older shapes.
+    const detailRaw = parsedResponse?.detail;
+    const detailObjectMessage =
+      detailRaw && typeof detailRaw === "object" && !Array.isArray(detailRaw)
+        ? detailRaw.message
+        : undefined;
+    const detailString = typeof detailRaw === "string" ? detailRaw : undefined;
     const message =
       status === 500
         ? "Upstream server error"
-        : (parsedResponse?.message ?? detail ?? "See details for more info.");
+        : (parsedResponse?.message ??
+          detailObjectMessage ??
+          detailString ??
+          "See details for more info.");
     super(message);
     /** @type {any | undefined} Server response parsed as JSON object (if possible). */
     this.detail = parsedResponse;
@@ -289,6 +306,20 @@ export class IntricError extends Error {
   }
 
   /**
+   * Return the backend trace ID for this error, suitable for support reports.
+   *
+   * Reads ``X-Trace-Id`` (set by TraceIdResponseMiddleware on every response,
+   * including 4xx/5xx) and falls back to the legacy ``X-Correlation-ID``
+   * during the migration period when both headers are emitted in parallel.
+   *
+   * @returns {string | undefined} 32-char hex trace ID, or undefined if no
+   *   span was active when the response was produced.
+   */
+  getTraceId() {
+    return this.headers?.get("x-trace-id") ?? this.headers?.get("x-correlation-id") ?? undefined;
+  }
+
+  /**
    * Rethrow an error as an IntricError
    * @param {unknown} error
    * @param {{endpoint: string; payload?: object;}} requestInfo
@@ -299,7 +330,7 @@ export class IntricError extends Error {
         error.message,
         error.stage,
         error.status,
-        error.code,
+        /** @type {import("../types/resources").IntricErrorCode | 0} */ (error.code),
         error.detail,
         requestInfo,
         error.headers

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Table, Input } from "@intric/ui";
+  import { Table } from "@intric/ui";
   import WebsiteActions from "./WebsiteActions.svelte";
   import { createRender } from "svelte-headless-table";
   import WebsiteStatus from "./WebsiteStatus.svelte";
@@ -18,12 +18,7 @@
   } = getSpacesManager();
 
   const ownedWebsites = derived(currentSpace, ($currentSpace) =>
-    $currentSpace.knowledge.websites.filter(c => c.space_id === $currentSpace.id)
-  );
-
-  //Kan användas för att visa länkade knowledge(websites) men då måste det vara readOnly för att inte ändra org baserad knowledge.
-  const linkedCollections = derived(currentSpace, ($currentSpace) =>
-    $currentSpace.knowledge.groups.filter(c => c.space_id !== $currentSpace.id)
+    $currentSpace.knowledge.websites.filter((c) => c.space_id === $currentSpace.id)
   );
 
   const websites = ownedWebsites;
@@ -65,13 +60,9 @@
     if ($selectedWebsiteIds.size === $websites.length && $websites.length > 0) {
       $selectedWebsiteIds = new Set();
     } else {
-      $selectedWebsiteIds = new Set($websites.map(w => w.id));
+      $selectedWebsiteIds = new Set($websites.map((w) => w.id));
     }
   }
-
-  // Selection state helpers
-  $: isAllSelected = $selectedWebsiteIds.size > 0 && $selectedWebsiteIds.size === $websites.length;
-  $: isSomeSelected = $selectedWebsiteIds.size > 0 && $selectedWebsiteIds.size < $websites.length;
 
   const table = Table.createWithStore(websites);
 

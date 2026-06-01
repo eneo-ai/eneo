@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from intric.main.exceptions import (
     BadRequestException,
+    MCPAuthenticationError,
     NotFoundException,
     UnauthorizedException,
 )
@@ -75,6 +76,57 @@ class TestMCPClientListToolsErrorPropagation:
             await client.list_tools()
 
         assert "Not connected" in str(exc_info.value)
+
+
+# =============================================================================
+# P1b: Behavior-driven auth error mapping
+# =============================================================================
+
+
+class TestMCPClientAuthenticationErrorMapping:
+    """Test that upstream auth errors map to MCPAuthenticationError."""
+
+    @pytest.mark.asyncio
+    async def test_list_tools_maps_upstream_401_to_authentication_error(self):
+        server = MagicMock()
+        server.name = "test-server"
+        server.http_url = "http://localhost:8080"
+        server.http_auth_type = "none"
+
+        client = MCPClient(server)
+        client.session = AsyncMock()
+        client.session.list_tools.side_effect = Exception("HTTP 401 Unauthorized")
+
+        with pytest.raises(MCPAuthenticationError):
+            await client.list_tools()
+
+    @pytest.mark.asyncio
+    async def test_call_tool_maps_upstream_403_to_authentication_error(self):
+        server = MagicMock()
+        server.name = "test-server"
+        server.http_url = "http://localhost:8080"
+        server.http_auth_type = "none"
+
+        client = MCPClient(server)
+        client.session = AsyncMock()
+        client.session.call_tool.side_effect = Exception("HTTP 403 Forbidden")
+
+        with pytest.raises(MCPAuthenticationError):
+            await client.call_tool("tool", {})
+
+    @pytest.mark.asyncio
+    async def test_non_auth_upstream_error_does_not_map_to_authentication_error(self):
+        server = MagicMock()
+        server.name = "test-server"
+        server.http_url = "http://localhost:8080"
+        server.http_auth_type = "none"
+
+        client = MCPClient(server)
+        client.session = AsyncMock()
+        client.session.list_tools.side_effect = Exception("HTTP 404 Not Found")
+
+        with pytest.raises(MCPClientError):
+            await client.list_tools()
 
 
 # =============================================================================
@@ -413,7 +465,7 @@ class TestMCPServerURLValidation:
             description=None,
             http_url="localhost:3000",
             http_auth_type="none",
-            http_auth_config_schema=None,
+            has_credentials=False,
             tags=None,
             icon_url=None,
             documentation_url=None,
@@ -428,7 +480,7 @@ class TestMCPServerURLValidation:
             description=None,
             http_url="192.168.1.100:8080",
             http_auth_type="none",
-            http_auth_config_schema=None,
+            has_credentials=False,
             tags=None,
             icon_url=None,
             documentation_url=None,

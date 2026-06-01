@@ -21,33 +21,42 @@
   import ChangeSecurityClassification from "./ChangeSecurityClassification.svelte";
   import EditRetentionPolicy from "./EditRetentionPolicy.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
   import IconUpload from "$lib/features/icons/IconUpload.svelte";
+  import ApiKeysSettingsSection from "$lib/features/api-keys/ApiKeysSettingsSection.svelte";
   import { fade } from "svelte/transition";
+  import { untrack } from "svelte";
 
   const intric = getIntric();
 
   let { data } = $props();
-  let models = $state(data.models);
-  let completionModels = $derived(models.completionModels.filter((model) => model.is_org_enabled));
-  let embeddingModels = $derived(models.embeddingModels.filter((model) => model.is_org_enabled));
+  let models = $state(untrack(() => data.models));
+  let completionModels = $derived(
+    models.completionModels.filter(
+      (model) => model.is_org_enabled && !model.is_deprecated && !model.migrated_to_model_id
+    )
+  );
+  let embeddingModels = $derived(
+    models.embeddingModels.filter((model) => model.is_org_enabled && !model.is_deprecated)
+  );
   let transcriptionModels = $derived(
-    models.transcriptionModels.filter((model) => model.is_org_enabled)
+    models.transcriptionModels.filter((model) => model.is_org_enabled && !model.is_deprecated)
   );
 
   const spaces = getSpacesManager();
   const currentSpace = spaces.state.currentSpace;
 
-  // Get tenant-enabled MCP servers from space data
-  let mcpServers = $derived($currentSpace.mcp_servers ?? []);
   // Initialize the Space Settings Editor for page-level save
   const {
     state: { update, currentChanges, isSaving },
     saveChanges,
     discardChanges
   } = initSpaceSettingsEditor({
-    space: $currentSpace,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    space: $currentSpace as any,
     intric,
-    onUpdateDone: async (updatedSpace) => {
+    onUpdateDone: async () => {
       // Sync with SpacesManager so sidebar and other components update
       await spaces.refreshCurrentSpace();
     }
@@ -60,7 +69,8 @@
   // Navigation guard for unsaved changes
   beforeNavigate((navigate) => {
     if ($currentChanges.hasUnsavedChanges) {
-      const confirmMessage = m.unsaved_changes_warning?.() ?? "Du har osparade ändringar. Vill du lämna sidan?";
+      const confirmMessage =
+        m.unsaved_changes_warning?.() ?? "Du har osparade ändringar. Vill du lämna sidan?";
       if (!confirm(confirmMessage)) {
         navigate.cancel();
         return;
@@ -131,7 +141,7 @@
   async function deleteSpace() {
     if (deleteConfirmation === "") return;
     if (deleteConfirmation !== $currentSpace.name) {
-      alert(m.wrong_space_name());
+      toast.warning(m.wrong_space_name());
       return;
     }
     isDeleting = true;
@@ -141,7 +151,7 @@
     try {
       await spaces.deleteSpace($currentSpace);
     } catch (e) {
-      alert(m.error_deleting_space());
+      toastError(e, m.error_deleting_space());
       console.error(e);
     }
     clearTimeout(deletionMessageTimeout);
@@ -159,22 +169,22 @@
     <Page.Title title={m.settings()}></Page.Title>
     <Page.Flex>
       {#if $currentChanges.hasUnsavedChanges}
-        <Button
-          variant="destructive"
-          disabled={$isSaving}
-          on:click={() => discardChanges()}
-        >{m.discard_all_changes()}</Button>
+        <Button variant="destructive" disabled={$isSaving} on:click={() => discardChanges()}
+          >{m.discard_all_changes()}</Button
+        >
         <Button
           variant="positive"
           class="h-8 w-32 whitespace-nowrap"
           disabled={$isSaving}
-          on:click={handleSave}
-        >{$isSaving ? m.loading() : m.save_changes()}</Button>
+          on:click={handleSave}>{$isSaving ? m.loading() : m.save_changes()}</Button
+        >
       {:else}
         {#if showSaveSuccess}
           <p class="text-positive-stronger px-4" transition:fade>{m.all_changes_saved()}</p>
         {/if}
-        <Button variant="primary" class="w-32" href={`/spaces/${$currentSpace.routeId}`}>{m.done()}</Button>
+        <Button variant="primary" class="w-32" href={`/spaces/${$currentSpace.routeId}`}
+          >{m.done()}</Button
+        >
       {/if}
     </Page.Flex>
   </Page.Header>
@@ -182,24 +192,24 @@
   <Page.Main>
     <Settings.Page>
       {#if !isOrgSpace}
-      <Settings.Group title={m.general()}>
-        <EditNameAndDescription></EditNameAndDescription>
-        <Settings.Row
-          title={m.avatar()}
-          description={m.avatar_description()}
-          hasChanges={$currentChanges.diff.icon_id !== undefined}
-          revertFn={() => discardChanges("icon_id")}
-        >
-          <IconUpload
-            {iconUrl}
-            uploading={iconUploading}
-            error={iconError}
-            on:upload={handleIconUpload}
-            on:delete={handleIconDelete}
-          />
-        </Settings.Row>
-        <SpaceStorageOverview></SpaceStorageOverview>
-      </Settings.Group>
+        <Settings.Group title={m.general()}>
+          <EditNameAndDescription></EditNameAndDescription>
+          <Settings.Row
+            title={m.avatar()}
+            description={m.avatar_description()}
+            hasChanges={$currentChanges.diff.icon_id !== undefined}
+            revertFn={() => discardChanges("icon_id")}
+          >
+            <IconUpload
+              {iconUrl}
+              uploading={iconUploading}
+              error={iconError}
+              on:upload={handleIconUpload}
+              on:delete={handleIconDelete}
+            />
+          </Settings.Row>
+          <SpaceStorageOverview></SpaceStorageOverview>
+        </Settings.Group>
       {/if}
       {#if !isOrgSpace}
         <Settings.Group title={m.security_and_privacy()}>
@@ -227,6 +237,22 @@
 
         <SelectMCPServers selectableServers={data.mcpServers}></SelectMCPServers>
       </Settings.Group>
+
+      {#if !isOrgSpace && $currentSpace.permissions?.includes("edit")}
+        <Settings.Group title={m.api_access()}>
+          <Settings.Row
+            title={m.api_keys()}
+            description={m.api_keys_space_settings_desc()}
+            fullWidth
+          >
+            <ApiKeysSettingsSection
+              scopeType="space"
+              scopeId={$currentSpace.id}
+              scopeName={$currentSpace.name}
+            />
+          </Settings.Row>
+        </Settings.Group>
+      {/if}
 
       {#if !isOrgSpace && $currentSpace.permissions?.includes("delete")}
         <Settings.Group title={m.danger_zone()}>

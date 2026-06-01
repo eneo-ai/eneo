@@ -21,7 +21,7 @@ def to_session_public(session: SessionInDB):
     return SessionPublic(
         **session.model_dump(),
         messages=[to_question_public(question) for question in session.questions],
-        feedback=feedback
+        feedback=feedback,
     )
 
 
@@ -33,7 +33,7 @@ def to_sessions_paginated_response(
     sessions: list[SessionInDB],
     total_count: int,
     limit: int | None = None,
-    cursor: datetime = None,
+    cursor: datetime | None = None,
     previous: bool = False,
 ):
     # If no limit is provided, return all session data.
@@ -87,6 +87,49 @@ def to_sessions_paginated_response(
         sessions_public = [to_session_metadata_public(session) for session in sessions]
         return CursorPaginatedResponse(
             items=sessions_public,
+            total_count=total_count,
+            next_cursor=cursor,
+            limit=limit,
+        )
+
+
+def to_session_metadata_paginated_response(
+    sessions: list[SessionMetadataPublic],
+    total_count: int,
+    limit: int | None = None,
+    cursor: datetime | None = None,
+    previous: bool = False,
+):
+    if limit is None:
+        return CursorPaginatedResponse(items=sessions, total_count=total_count)
+
+    if not previous:
+        if len(sessions) > limit:
+            return CursorPaginatedResponse(
+                items=sessions[:-1],
+                total_count=total_count,
+                previous_cursor=cursor,
+                next_cursor=sessions[limit].created_at,
+                limit=limit,
+            )
+        return CursorPaginatedResponse(
+            items=sessions,
+            total_count=total_count,
+            previous_cursor=cursor,
+            limit=limit,
+        )
+    else:
+        if len(sessions) > limit:
+            return CursorPaginatedResponse(
+                items=sessions[1:],
+                total_count=total_count,
+                next_cursor=cursor,
+                previous_cursor=sessions[1].created_at,
+                limit=limit,
+            )
+
+        return CursorPaginatedResponse(
+            items=sessions,
             total_count=total_count,
             next_cursor=cursor,
             limit=limit,

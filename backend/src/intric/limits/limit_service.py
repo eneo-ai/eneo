@@ -8,7 +8,7 @@ from intric.main.config import get_settings
 
 class LimitService:
     def _get_info_blob_limits(self) -> InfoBlobLimits:
-        formats = []
+        formats: list[FormatLimit] = []
 
         for item in TextMimeTypes.values():
             formats.append(
@@ -33,7 +33,7 @@ class LimitService:
         return InfoBlobLimits(formats=formats)
 
     def _get_attachment_limits(self) -> AttachmentLimits:
-        formats = []
+        formats: list[FormatLimit] = []
 
         for item in TextMimeTypes.values():
             formats.append(
@@ -57,7 +57,6 @@ class LimitService:
 
         return AttachmentLimits(
             formats=formats,
-            max_in_question=get_settings().max_in_question,
         )
 
     def get_limits(self) -> Limits:

@@ -6,11 +6,10 @@
 
 const behaviours = Object.freeze({
   creative: {
-    temperature: 1.25,
-    top_p: null
+    temperature: 1.25
   },
-  default: { temperature: null, top_p: null },
-  deterministic: { temperature: 0.25, top_p: null },
+  default: { temperature: null },
+  deterministic: { temperature: 0.25 },
   custom: null
 });
 
@@ -46,15 +45,9 @@ export function getBehaviour(
     return "custom";
   }
 
-  // Extract only the fields that are relevant for behavior detection
-  const relevantKwargs = {
-    temperature: kwargs.temperature,
-    top_p: kwargs.top_p
-  };
-
   for (const behaviour of behaviourList) {
     const behaviourKwargs = behaviours[behaviour];
-    if (JSON.stringify(behaviourKwargs) === JSON.stringify(relevantKwargs)) {
+    if (behaviourKwargs?.temperature === kwargs.temperature) {
       return behaviour;
     }
   }

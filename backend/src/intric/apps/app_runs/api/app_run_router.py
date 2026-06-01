@@ -3,16 +3,17 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from intric.apps.app_runs.api.app_run_models import AppRunPublic
-from intric.main.container.container import Container
-from intric.server.dependencies.container import get_container
-from intric.server.protocol import responses
 
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.main.container.container import Container
+from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 
 router = APIRouter()
+_WITH_USER = Depends(get_container(with_user=True))
 
 
 @router.get(
@@ -22,7 +23,7 @@ router = APIRouter()
 )
 async def get_app_run(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     service = container.app_run_service()
     assembler = container.app_run_assembler()
@@ -39,7 +40,7 @@ async def get_app_run(
 )
 async def delete_app_run(
     id: UUID,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = _WITH_USER,
 ):
     service = container.app_run_service()
     user = container.user()
@@ -54,7 +55,7 @@ async def delete_app_run(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.APP_RUN_DELETED,
         entity_type=EntityType.APP_RUN,
         entity_id=id,

@@ -18,12 +18,14 @@ class MCPServerToolAssembler:
             description=tool.description,
             input_schema=tool.input_schema,
             is_enabled_by_default=tool.is_enabled_by_default,
+            pending_description=tool.pending_description,
+            pending_input_schema=tool.pending_input_schema,
+            requires_approval=tool.requires_approval,
+            removed_from_remote=tool.removed_from_remote,
         )
 
     @staticmethod
     def to_paginated_response(tools: list[MCPServerTool]) -> MCPServerToolList:
         """Convert list of MCPServerTool entities to paginated response."""
-        items = [
-            MCPServerToolAssembler.from_domain_to_model(tool) for tool in tools
-        ]
+        items = [MCPServerToolAssembler.from_domain_to_model(tool) for tool in tools]
         return MCPServerToolList(items=items)

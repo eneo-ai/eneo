@@ -1,8 +1,11 @@
+from typing import Annotated
+
 from fastapi import Request, Security
 from fastapi.security import APIKeyHeader
+
+from intric.main.config import get_settings
 from intric.main.exceptions import AuthenticationException
 from intric.main.logging import get_logger
-from intric.main.config import get_settings
 
 logger = get_logger(__name__)
 
@@ -24,7 +27,7 @@ def _resolve_api_key(request: Request, provided: str | None) -> str | None:
 
 def authenticate_super_api_key(
     request: Request,
-    api_key_header: str | None = Security(SUPER_API_KEY_SCHEME),
+    api_key_header: Annotated[str | None, Security(SUPER_API_KEY_SCHEME)],
 ):
     """
     Authenticate using super admin API key.
@@ -33,7 +36,7 @@ def authenticate_super_api_key(
     the header name is resolved at request time, not at module import time.
     This is crucial for tests that override settings.
     """
-    super_api_key = get_settings().intric_super_api_key
+    super_api_key = get_settings().eneo_super_api_key
 
     resolved_key = _resolve_api_key(request, api_key_header)
 
@@ -45,7 +48,7 @@ def authenticate_super_api_key(
 
 def authenticate_super_duper_api_key(
     request: Request,
-    api_key_header: str | None = Security(SUPER_API_KEY_SCHEME),
+    api_key_header: Annotated[str | None, Security(SUPER_API_KEY_SCHEME)],
 ):
     """
     Authenticate using super duper admin API key.
@@ -54,7 +57,7 @@ def authenticate_super_duper_api_key(
     the header name is resolved at request time, not at module import time.
     This is crucial for tests that override settings.
     """
-    super_duper_api_key = get_settings().intric_super_duper_api_key
+    super_duper_api_key = get_settings().eneo_super_duper_api_key
 
     resolved_key = _resolve_api_key(request, api_key_header)
 

@@ -20,7 +20,7 @@ from intric.database.tables.websites_table import Websites
 
 class Assistants(BasePublic):
     name: Mapped[str] = mapped_column()
-    completion_model_kwargs: Mapped[Optional[dict]] = mapped_column(JSONB)
+    completion_model_kwargs: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
     guardrail_active: Mapped[Optional[bool]] = mapped_column()
     logging_enabled: Mapped[bool] = mapped_column()
     is_default: Mapped[bool] = mapped_column()
@@ -28,7 +28,7 @@ class Assistants(BasePublic):
     description: Mapped[Optional[str]] = mapped_column()
     insight_enabled: Mapped[bool] = mapped_column(default=False)
     data_retention_days: Mapped[Optional[int]] = mapped_column()
-    metadata_json: Mapped[Optional[dict]] = mapped_column(JSONB)
+    metadata_json: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
     # TODO: refactor since this is a somewhat weird solution having a
     # type column. The reason is bc front-end wants a non-nullable
     # "type" field in a bunch of models. Thus a field with a default
@@ -74,12 +74,16 @@ class Assistants(BasePublic):
     template: Mapped[Optional[AssistantTemplates]] = relationship(viewonly=True)
 
     assistant_groups: Mapped[list["AssistantsGroups"]] = relationship(viewonly=True)
-    assistant_integration_knowledge: Mapped[list["AssistantIntegrationKnowledge"]] = relationship(
-        viewonly=True
+    assistant_integration_knowledge: Mapped[list["AssistantIntegrationKnowledge"]] = (
+        relationship(viewonly=True)
     )
     assistant_websites: Mapped[list["AssistantsWebsites"]] = relationship(viewonly=True)
-    assistant_mcp_servers: Mapped[list["AssistantMCPServers"]] = relationship(viewonly=True)
-    assistant_mcp_server_tools: Mapped[list["AssistantMCPServerTools"]] = relationship(viewonly=True)
+    assistant_mcp_servers: Mapped[list["AssistantMCPServers"]] = relationship(
+        viewonly=True
+    )
+    assistant_mcp_server_tools: Mapped[list["AssistantMCPServerTools"]] = relationship(
+        viewonly=True
+    )
 
     __table_args__ = {"extend_existing": True}  # Temporary
 
@@ -115,9 +119,11 @@ class AssistantsFiles(BaseCrossReference):
 
 
 class AssistantIntegrationKnowledge(BasePublic):
-    __tablename__ = "assistant_integration_knowledge"
+    __tablename__ = "assistant_integration_knowledge"  # type: ignore[assignment]
 
-    assistant_id: Mapped[UUID] = mapped_column(ForeignKey(Assistants.id, ondelete="CASCADE"))
+    assistant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Assistants.id, ondelete="CASCADE")
+    )
     integration_knowledge_id: Mapped[UUID] = mapped_column(
         ForeignKey(IntegrationKnowledge.id, ondelete="CASCADE")
     )
@@ -129,6 +135,7 @@ class AssistantMCPServers(BaseCrossReference):
     Note: MCP servers are accessed via `Assistants.mcp_servers` (direct many-to-many).
     This association table follows the same pattern as AssistantsGroups/AssistantsWebsites.
     """
+
     __tablename__ = "assistant_mcp_servers"  # type: ignore[assignment]
 
     assistant_id: Mapped[UUID] = mapped_column(
@@ -141,6 +148,7 @@ class AssistantMCPServers(BaseCrossReference):
 
 class AssistantMCPServerTools(BaseCrossReference):
     """Assistant-level tool permissions."""
+
     __tablename__ = "assistant_mcp_server_tools"  # type: ignore[assignment]
 
     assistant_id: Mapped[UUID] = mapped_column(

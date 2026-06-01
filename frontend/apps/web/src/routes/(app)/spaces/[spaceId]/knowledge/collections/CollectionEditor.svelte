@@ -5,6 +5,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { Dialog, Button, Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
 
   const intric = getIntric();
   const {
@@ -30,7 +31,7 @@
       refreshCurrentSpace();
       $showDialog = false;
     } catch (error) {
-      alert(error);
+      toastError(error);
       console.error(error);
     }
     isProcessing = false;
@@ -50,9 +51,10 @@
       collectionName = "";
       embeddingModel = undefined;
       $showDialog = false;
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path with routeId and collection id
       await goto(`/spaces/${routeId}/knowledge/collections/${newCollection.id}`);
     } catch (error) {
-      alert(error);
+      toastError(error);
       console.error(error);
     }
     isProcessing = false;

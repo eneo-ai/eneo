@@ -1,6 +1,6 @@
 # MIT License
 
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
@@ -26,7 +26,8 @@ class UserGroupsRepository:
     UNIQUE_EXCEPTION_MSG = "User group name already exists."
 
     def __init__(self, session: AsyncSession):
-        self.delegate = BaseRepositoryDelegate(
+        super().__init__()
+        self.delegate: BaseRepositoryDelegate[UserGroupInDB] = BaseRepositoryDelegate(
             session,
             UserGroups,
             UserGroupInDB,
@@ -36,14 +37,13 @@ class UserGroupsRepository:
     def _get_options(self):
         return [
             selectinload(UserGroups.users).selectinload(Users.roles),
-            selectinload(UserGroups.users).selectinload(Users.predefined_roles),
             selectinload(UserGroups.users)
             .selectinload(Users.tenant)
             .selectinload(Tenants.modules),
             selectinload(UserGroups.users).selectinload(Users.api_key),
         ]
 
-    async def get_user_group(self, id: UUID) -> UserGroupInDB:
+    async def get_user_group(self, id: UUID) -> UserGroupInDB | None:
         return await self.delegate.get(id)
 
     async def create_user_group(self, user_group: UserGroupCreate) -> UserGroupInDB:
@@ -60,14 +60,15 @@ class UserGroupsRepository:
                 table=Users,
                 options=[
                     selectinload(Users.roles),
-                    selectinload(Users.predefined_roles),
                     selectinload(Users.tenant).selectinload(Tenants.modules),
                     selectinload(Users.api_key),
                 ],
             ),
         ]
 
-    async def update_user_group(self, user_group: UserGroupUpdate) -> UserGroupInDB:
+    async def update_user_group(
+        self, user_group: UserGroupUpdate
+    ) -> UserGroupInDB | None:
         try:
             return await self.delegate.update(
                 user_group,
@@ -77,10 +78,12 @@ class UserGroupsRepository:
         except IntegrityError as e:
             raise UniqueException(self.UNIQUE_EXCEPTION_MSG) from e
 
-    async def delete_user_group(self, id: UUID) -> UserGroupInDB:
+    async def delete_user_group(self, id: UUID) -> UserGroupInDB | None:
         return await self.delegate.delete(id)
 
-    async def get_all_user_groups(self, tenant_id: UUID = None) -> List[UserGroupInDB]:
+    async def get_all_user_groups(
+        self, tenant_id: Optional[UUID] = None
+    ) -> List[UserGroupInDB]:
         return await self.delegate.filter_by(
             conditions={UserGroups.tenant_id: tenant_id}
         )

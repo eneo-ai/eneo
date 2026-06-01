@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from intric.audit.domain.action_types import ActionType
@@ -56,7 +56,7 @@ class AuditLog:
     entity_id: UUID
     timestamp: datetime
     description: str
-    metadata: dict
+    metadata: dict[str, Any]
     outcome: Outcome
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None

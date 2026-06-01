@@ -1,6 +1,18 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
+<!--
+  Edit a single existing model. Reuses the same `ModelDraftForm` that the
+  AddWizard's Step 3 uses, so cost/description/lookup-defaults stay in one
+  place. The component owns:
+    - converting the API model into the form's draft shape on open
+    - building the right Tenant*Update body on submit (a single round-trip;
+      the legacy intric.models.update fallback for security_classification
+      and is_default no longer exists — those fields live on the tenant
+      update contract now).
+-->
+
 <script lang="ts">
+  import { onMount, untrack } from "svelte";
   import type {
     CompletionModel,
     EmbeddingModel,
@@ -9,313 +21,246 @@
     TenantEmbeddingModelUpdate,
     TenantTranscriptionModelUpdate
   } from "@intric/intric-js";
-  import { Button, Dialog, Input } from "@intric/ui";
   import { invalidate } from "$app/navigation";
-  import { getIntric } from "$lib/core/Intric";
-  import { writable, type Writable } from "svelte/store";
-  import { m } from "$lib/paraglide/messages";
+  import type { Writable } from "svelte/store";
   import { Loader2 } from "lucide-svelte";
+  import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
+  import { getIntric } from "$lib/core/Intric";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
 
-  export let openController: Writable<boolean>;
-  export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
-  export let type: "completionModel" | "embeddingModel" | "transcriptionModel";
+  import ModelDraftForm from "./AddWizard/models/ModelDraftForm.svelte";
+  import {
+    createEmptyDraft,
+    findDraftCostOverflow,
+    hasValidCompletionTokenBudgets,
+    MAX_COST_INPUT,
+    modelToDraft,
+    rawCostToNumber,
+    tokenCostFromPerMillion,
+    type ModelDraftState,
+    type ModelType
+  } from "./AddWizard/models/draft";
+
+  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel";
+
+  let {
+    openController,
+    model,
+    type
+  }: {
+    openController: Writable<boolean>;
+    model: CompletionModel | EmbeddingModel | TranscriptionModel;
+    type: ModelTypeKey;
+  } = $props();
 
   const intric = getIntric();
 
-  // Form state - initialized from model
-  let modelIdentifier = "";
-  let displayName = "";
-  let description = "";
-  let tokenLimitStr = "128000";
-  let vision = false;
-  let reasoning = false;
-  let supportsToolCalling = false;
-  let family = "";
-  let hosting: "swe" | "eu" | "usa" = "swe";
-  let openSource = false;
-  let isSubmitting = false;
-  let error: string | null = null;
+  // --- Open-state bridge (Writable<boolean> ↔ runes) --------------------
+  let dialogOpen = $state(false);
+  onMount(() => openController.subscribe((v) => (dialogOpen = v)));
+  $effect(() => {
+    openController.set(dialogOpen);
+  });
 
-  // Hosting options
-  const hostingOptions = [
-    { value: "swe", label: m.hosting_swe() },
-    { value: "eu", label: m.hosting_eu() },
-    { value: "usa", label: m.hosting_usa() },
-    { value: "chn", label: m.hosting_chn() },
-    { value: "can", label: m.hosting_can() },
-    { value: "gbr", label: m.hosting_gbr() },
-    { value: "isr", label: m.hosting_isr() },
-    { value: "kor", label: m.hosting_kor() },
-    { value: "deu", label: m.hosting_deu() },
-    { value: "fra", label: m.hosting_fra() },
-    { value: "jpn", label: m.hosting_jpn() }
-  ];
+  // --- Draft state ------------------------------------------------------
+  const modelType: ModelType = $derived(
+    type === "completionModel"
+      ? "completion"
+      : type === "embeddingModel"
+        ? "embedding"
+        : "transcription"
+  );
 
-  // Initialize form values when dialog opens or model changes
-  $: if ($openController && model) {
-    initializeForm();
+  let draft = $state<ModelDraftState>(untrack(() => createEmptyDraft(modelType, "openai")));
+  let isDefault = $state(false);
+  let openSource = $state(false);
+  let isSubmitting = $state(false);
+  let error = $state<string | null>(null);
+
+  // Re-seed every time the dialog opens or the underlying record changes.
+  // We seed on the falling edge of dialogOpen too so a closed-then-reopened
+  // dialog forgets unsaved edits — matches the wizard's behaviour.
+  let lastSeededFor: { id: string; open: boolean } | null = null;
+  $effect(() => {
+    if (!dialogOpen) {
+      lastSeededFor = null;
+      return;
+    }
+    if (lastSeededFor?.id === model.id && lastSeededFor.open) return;
+    draft = modelToDraft(model, modelType);
+    isDefault = "is_org_default" in model ? Boolean(model.is_org_default) : false;
+    openSource = model.open_source ?? false;
+    error = null;
+    lastSeededFor = { id: model.id, open: true };
+  });
+
+  // --- Submit -----------------------------------------------------------
+
+  // `is_default` is only edited via the dialog for model types that surface
+  // an `is_org_default` field (completion + embedding today). Including it
+  // in the payload when the checkbox wasn't rendered would let a stale UI
+  // state silently demote a tenant default.
+  const hasDefaultToggle = $derived("is_org_default" in model);
+
+  // Send security_classification only when it actually changed — and use
+  // explicit null (rather than omission) when the user cleared it, since
+  // the backend distinguishes "field omitted" from "field set to null".
+  function securityClassificationPatch():
+    | { security_classification: { id: string } | null }
+    | Record<string, never> {
+    const next = draft.securityClassification?.id ?? null;
+    const prev = model.security_classification?.id ?? null;
+    if (next === prev) return {};
+    return { security_classification: next ? { id: next } : null };
   }
 
-  function initializeForm() {
-    modelIdentifier = model.name;
-    displayName = "nickname" in model ? (model.nickname || "") : model.name;
-    description = model.description || "";
-    hosting = model.hosting as "swe" | "eu" | "usa";
-    openSource = model.open_source ?? false;
+  function buildCompletionUpdate(): TenantCompletionModelUpdate {
+    return {
+      name: draft.name.trim(),
+      display_name: draft.displayName.trim(),
+      description: draft.description.trim() || null,
+      hosting: draft.hosting,
+      open_source: openSource,
+      max_input_tokens: draft.maxInputTokensStr ? parseInt(draft.maxInputTokensStr, 10) : null,
+      max_output_tokens: draft.maxOutputTokensStr ? parseInt(draft.maxOutputTokensStr, 10) : null,
+      vision: draft.vision,
+      reasoning: draft.reasoning,
+      supports_tool_calling: draft.supportsToolCalling,
+      input_cost_per_token: tokenCostFromPerMillion(draft.inputCostPerTokenStr),
+      output_cost_per_token: tokenCostFromPerMillion(draft.outputCostPerTokenStr),
+      ...(hasDefaultToggle ? { is_default: isDefault } : {}),
+      ...securityClassificationPatch()
+    };
+  }
 
-    if ("token_limit" in model && model.token_limit !== null) {
-      tokenLimitStr = String(model.token_limit);
-    }
-    if ("vision" in model) {
-      vision = model.vision;
-    }
-    if ("reasoning" in model) {
-      reasoning = model.reasoning;
-    }
-    if ("supports_tool_calling" in model) {
-      supportsToolCalling = model.supports_tool_calling;
-    }
-    if ("family" in model) {
-      family = model.family || "";
-    }
+  function buildEmbeddingUpdate(): TenantEmbeddingModelUpdate {
+    return {
+      display_name: draft.displayName.trim(),
+      description: draft.description.trim() || null,
+      family: draft.family.trim() || null,
+      dimensions: draft.dimensionsStr ? parseInt(draft.dimensionsStr, 10) : null,
+      max_input: draft.maxInputStr ? parseInt(draft.maxInputStr, 10) : null,
+      hosting: draft.hosting,
+      open_source: openSource,
+      input_cost_per_token: tokenCostFromPerMillion(draft.inputCostPerTokenStr),
+      output_cost_per_token: tokenCostFromPerMillion(draft.outputCostPerTokenStr),
+      ...(hasDefaultToggle ? { is_default: isDefault } : {}),
+      ...securityClassificationPatch()
+    };
+  }
+
+  function buildTranscriptionUpdate(): TenantTranscriptionModelUpdate {
+    return {
+      display_name: draft.displayName.trim(),
+      description: draft.description.trim() || null,
+      hosting: draft.hosting,
+      open_source: openSource,
+      cost_per_minute: rawCostToNumber(draft.costPerMinuteStr),
+      ...(hasDefaultToggle ? { is_default: isDefault } : {}),
+      ...securityClassificationPatch()
+    };
   }
 
   async function handleSubmit() {
     error = null;
-
-    if (!displayName.trim()) {
+    if (!draft.displayName.trim()) {
       error = m.display_name_required();
       return;
     }
-
+    // Mirror the AddWizard guard: completion models cannot persist with
+    // null/0 token budgets — the backend rejects them and downstream code
+    // would divide by zero on context-window math.
+    if (modelType === "completion" && !hasValidCompletionTokenBudgets(draft)) {
+      error = m.completion_token_budgets_required();
+      return;
+    }
+    if (findDraftCostOverflow(draft) !== null) {
+      error = m.cost_value_too_large({ max: MAX_COST_INPUT.toLocaleString("en-US") });
+      return;
+    }
     isSubmitting = true;
-
     try {
       if (type === "completionModel") {
-        const update: TenantCompletionModelUpdate = {
-          name: modelIdentifier.trim(),
-          display_name: displayName.trim(),
-          description: description.trim(),
-          hosting,
-          open_source: openSource,
-          token_limit: parseInt(tokenLimitStr, 10),
-          vision,
-          reasoning,
-          supports_tool_calling: supportsToolCalling
-        };
-        await intric.tenantModels.updateCompletion({ id: model.id }, update);
+        await intric.tenantModels.updateCompletion({ id: model.id }, buildCompletionUpdate());
       } else if (type === "embeddingModel") {
-        const update: TenantEmbeddingModelUpdate = {
-          display_name: displayName.trim(),
-          description: description.trim(),
-          hosting,
-          open_source: openSource,
-          family: family.trim() || undefined
-        };
-        await intric.tenantModels.updateEmbedding({ id: model.id }, update);
-      } else if (type === "transcriptionModel") {
-        const update: TenantTranscriptionModelUpdate = {
-          display_name: displayName.trim(),
-          description: description.trim(),
-          hosting,
-          open_source: openSource
-        };
-        await intric.tenantModels.updateTranscription({ id: model.id }, update);
+        await intric.tenantModels.updateEmbedding({ id: model.id }, buildEmbeddingUpdate());
+      } else {
+        await intric.tenantModels.updateTranscription({ id: model.id }, buildTranscriptionUpdate());
       }
 
-      // Invalidate to reload data
       await invalidate("admin:model-providers:load");
-
-      // Show success toast
       toast.success(m.model_updated_success());
-
-      // Close dialog
-      openController.set(false);
-    } catch (e: any) {
-      error = e.message || m.failed_to_update_model();
-      toast.error(m.failed_to_update_model());
+      dialogOpen = false;
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : m.failed_to_update_model();
+      toastError(e, m.failed_to_update_model());
     } finally {
       isSubmitting = false;
     }
   }
 
   function handleCancel() {
-    openController.set(false);
+    dialogOpen = false;
     error = null;
   }
 </script>
 
-<Dialog.Root {openController}>
-  <Dialog.Content width="large" form>
-    <Dialog.Title>{m.edit_model()}</Dialog.Title>
+<Dialog.Root bind:open={dialogOpen}>
+  <Dialog.Content class="flex max-h-[90vh] flex-col gap-0 p-0 sm:max-w-3xl">
+    <Dialog.Header class="px-6 pt-6 pb-2">
+      <Dialog.Title>{m.edit_model()}</Dialog.Title>
+    </Dialog.Header>
 
-    <Dialog.Section>
-      <form on:submit|preventDefault={handleSubmit} class="flex flex-col gap-4 p-4">
-        {#if error}
-          <div class="border-negative-default bg-negative-dimmer text-negative-stronger border-l-2 px-4 py-2 text-sm rounded-r">
-            {error}
-          </div>
-        {/if}
-
-        <!-- Model identifier (editable for completion models, read-only for others) -->
-        <div class="flex flex-col gap-2">
-          <label for="model-identifier" class="text-sm font-medium text-secondary">{m.model_identifier()}</label>
-          {#if type === "completionModel"}
-            <Input.Text
-              id="model-identifier"
-              bind:value={modelIdentifier}
-              required
-            />
-          {:else}
-            <div class="flex items-center rounded-lg px-4 py-3 border border-dimmer bg-secondary transition-colors duration-150 hover:border-default">
-              <span class="text-sm font-mono text-muted">{model.name}</span>
-            </div>
-            <p class="text-muted-foreground text-xs mt-1">
-              {m.model_identifier_readonly()}
-            </p>
-          {/if}
+    <div class="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+      {#if error}
+        <div
+          class="border-destructive bg-destructive/10 text-destructive mb-4 border-l-2 px-4 py-2 text-sm"
+          role="alert"
+        >
+          {error}
         </div>
+      {/if}
 
-        <!-- Display name (editable) -->
-        <div class="flex flex-col gap-2">
-          <label for="display-name" class="text-sm font-medium text-secondary">{m.display_name()}</label>
-          <Input.Text
-            id="display-name"
-            bind:value={displayName}
-            placeholder={m.display_name_placeholder_completion()}
-            required
-          />
-          <p class="text-muted-foreground text-xs mt-1">
-            {m.display_name_hint()}
-          </p>
-        </div>
+      <div class="flex flex-col gap-4">
+        <ModelDraftForm
+          bind:draft
+          {modelType}
+          providerType={"provider_type" in model ? (model.provider_type ?? undefined) : undefined}
+          showAddAnotherButton={false}
+          nameReadOnly={type !== "completionModel"}
+        />
 
-        <!-- Description -->
-        <div class="flex flex-col gap-2">
-          <label for="description" class="text-sm font-medium text-secondary">{m.description()}</label>
-          <textarea
-            id="description"
-            bind:value={description}
-            placeholder={m.model_description_placeholder()}
-            rows="3"
-            class="rounded-lg border border-stronger bg-primary px-3 py-2 text-sm resize-none shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2 ring-default transition-shadow"
-          ></textarea>
-        </div>
-
-        <!-- Completion model specific fields -->
-        {#if type === "completionModel"}
-          <div class="flex flex-col gap-2">
-            <label for="token-limit" class="text-sm font-medium text-secondary">{m.token_limit()}</label>
-            <Input.Text
-              id="token-limit"
-              type="number"
-              bind:value={tokenLimitStr}
-              min="1024"
-              max="1000000"
-              required
-            />
-            <p class="text-muted-foreground text-xs mt-1">
-              {m.token_limit_hint()}
-            </p>
+        <fieldset class="border-border/40 mt-2 border-t pt-4">
+          <legend class="sr-only">{m.model_details()}</legend>
+          <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
+            <Field.Field orientation="horizontal" class="w-fit">
+              <Checkbox id="open-source" bind:checked={openSource} />
+              <Field.Label for="open-source">{m.model_label_open_source()}</Field.Label>
+            </Field.Field>
+            {#if "is_org_default" in model}
+              <Field.Field orientation="horizontal" class="w-fit">
+                <Checkbox id="is-default" bind:checked={isDefault} />
+                <Field.Label for="is-default">{m.default_model()}</Field.Label>
+              </Field.Field>
+            {/if}
           </div>
+        </fieldset>
+      </div>
+    </div>
 
-          <div class="flex gap-6">
-            <label class="flex items-center gap-2 text-sm cursor-pointer group">
-              <input
-                type="checkbox"
-                bind:checked={vision}
-                class="h-4 w-4 rounded border-stronger accent-accent-default cursor-pointer"
-              />
-              <span class="group-hover:text-primary transition-colors">{m.vision_support()}</span>
-            </label>
-
-            <label class="flex items-center gap-2 text-sm cursor-pointer group">
-              <input
-                type="checkbox"
-                bind:checked={reasoning}
-                class="h-4 w-4 rounded border-stronger accent-accent-default cursor-pointer"
-              />
-              <span class="group-hover:text-primary transition-colors">{m.reasoning_support()}</span>
-            </label>
-
-            <label class="flex items-center gap-2 text-sm cursor-pointer group">
-              <input
-                type="checkbox"
-                bind:checked={supportsToolCalling}
-                class="h-4 w-4 rounded border-stronger accent-accent-default cursor-pointer"
-              />
-              <span class="group-hover:text-primary transition-colors">{m.tool_calling_support()}</span>
-            </label>
-          </div>
-        {/if}
-
-        <!-- Embedding model specific fields -->
-        {#if type === "embeddingModel"}
-          <div class="flex flex-col gap-2">
-            <label for="family" class="text-sm font-medium text-secondary">{m.model_family()}</label>
-            <select
-              id="family"
-              bind:value={family}
-              class="rounded-lg border border-stronger bg-primary px-3 py-2.5 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2 ring-default transition-shadow cursor-pointer"
-            >
-              <option value="openai">{m.model_family_openai()}</option>
-              <option value="e5">{m.model_family_e5()}</option>
-            </select>
-            <p class="text-muted-foreground text-xs mt-1">
-              {m.model_family_hint()}
-            </p>
-          </div>
-        {/if}
-
-        <!-- Common detail fields -->
-        <div class="border-t border-dimmer pt-5 mt-4">
-          <h3 class="text-sm font-semibold mb-4 text-secondary">{m.model_details()}</h3>
-
-          <!-- Hosting -->
-          <div class="flex flex-col gap-2">
-            <label for="hosting" class="text-sm font-medium text-secondary">{m.hosting_region()}</label>
-            <select
-              id="hosting"
-              bind:value={hosting}
-              class="rounded-lg border border-stronger bg-primary px-3 py-2.5 text-sm shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2 ring-default transition-shadow cursor-pointer"
-            >
-              {#each hostingOptions as option}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </div>
-
-          <!-- Open source -->
-          <div class="mt-4">
-            <label class="flex items-center gap-2 text-sm cursor-pointer group">
-              <input
-                type="checkbox"
-                bind:checked={openSource}
-                class="h-4 w-4 rounded border-stronger accent-accent-default cursor-pointer"
-              />
-              <span class="group-hover:text-primary transition-colors">{m.model_label_open_source()}</span>
-            </label>
-          </div>
-        </div>
-      </form>
-    </Dialog.Section>
-
-    <Dialog.Controls>
-      <Button variant="outlined" on:click={handleCancel}>{m.cancel()}</Button>
-      <Button
-        variant="primary"
-        on:click={handleSubmit}
-        disabled={isSubmitting}
-        class="min-w-[120px]"
-      >
+    <div class="border-border flex justify-end gap-2 border-t px-6 py-4">
+      <Button variant="outline" onclick={handleCancel}>{m.cancel()}</Button>
+      <Button onclick={handleSubmit} disabled={isSubmitting}>
         {#if isSubmitting}
-          <Loader2 class="w-4 h-4 mr-2 animate-spin" />
-          {m.saving()}
-        {:else}
-          {m.save()}
+          <Loader2 class="animate-spin" aria-hidden="true" />
         {/if}
+        {isSubmitting ? m.saving() : m.save()}
       </Button>
-    </Dialog.Controls>
+    </div>
   </Dialog.Content>
 </Dialog.Root>

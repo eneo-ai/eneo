@@ -6,17 +6,15 @@
 
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
-  import MultipleModelsClassificationDialog from "$lib/features/security-classifications/components/MultipleModelsClassificationDialog.svelte";
   import SecurityClassificationEnabledSetting from "$lib/features/security-classifications/components/SecurityClassificationEnabledSetting.svelte";
   import SecurityClassificationListSetting from "$lib/features/security-classifications/components/SecurityClassificationListSetting.svelte";
   import { initSecurityClassificationService } from "$lib/features/security-classifications/SecurityClassificationsService.svelte.js";
   import { m } from "$lib/paraglide/messages";
+  import { untrack } from "svelte";
 
   const { data } = $props();
 
-  initSecurityClassificationService(data.intric, data.securityClassifications);
-  // Using a JS string so we can have a newline in this
-  const description = m.classify_models_description();
+  untrack(() => initSecurityClassificationService(data.intric, data.securityClassifications));
 </script>
 
 <svelte:head>
@@ -34,23 +32,6 @@
       </Settings.Group>
       <Settings.Group title={m.configuration()}>
         <SecurityClassificationListSetting></SecurityClassificationListSetting>
-
-        <Settings.Row title={m.classify_models()} {description} fullWidth>
-          <div class="grid gap-4">
-            <MultipleModelsClassificationDialog
-              models={data.models.completionModels}
-              type="completionModel"
-            ></MultipleModelsClassificationDialog>
-            <MultipleModelsClassificationDialog
-              models={data.models.embeddingModels}
-              type="embeddingModel"
-            ></MultipleModelsClassificationDialog>
-            <MultipleModelsClassificationDialog
-              models={data.models.transcriptionModels}
-              type="transcriptionModel"
-            ></MultipleModelsClassificationDialog>
-          </div>
-        </Settings.Row>
       </Settings.Group>
     </Settings.Page>
   </Page.Main>

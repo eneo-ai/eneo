@@ -1,5 +1,6 @@
 # MIT License
 
+import contextlib
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -41,6 +42,7 @@ class Transcriber:
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
     ):
+        super().__init__()
         self.file_repo = file_repo
         self.tenant = tenant
         self.config = config or SETTINGS
@@ -48,17 +50,19 @@ class Transcriber:
         self.session = session
 
     async def transcribe(self, file: File, transcription_model: "TranscriptionModel"):
-        if file.blob is None or not AudioMimeTypes.has_value(file.mimetype):
+        mimetype: str = file.mimetype or ""
+        if file.blob is None or not AudioMimeTypes.has_value(mimetype):
             raise ValueError("File needs to be an audio file")
 
         # If file already has a transcription, return it
         if file.transcription:
             return file.transcription
 
+        temp_file_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
-                temp_file.write(file.blob)
                 temp_file_path = Path(temp_file.name)
+                temp_file.write(file.blob)
 
             result = await self.transcribe_from_filepath(
                 filepath=temp_file_path, transcription_model=transcription_model
@@ -71,7 +75,9 @@ class Transcriber:
             if self.file_repo:
                 await self.file_repo.update(file)
         finally:
-            temp_file_path.unlink()  # Clean up the temporary file
+            if temp_file_path is not None:
+                with contextlib.suppress(FileNotFoundError):
+                    temp_file_path.unlink()
 
         return result
 
@@ -123,6 +129,13 @@ class Transcriber:
                 "Please contact your administrator to enable the provider."
             )
 
+        if self.encryption_service is None:
+            raise ValueError(
+                f"Transcription model '{model.name}' requires an encryption service "
+                "to decrypt provider credentials. Please ensure the Transcriber is "
+                "initialized with an encryption_service."
+            )
+
         # Create credential resolver
         credential_resolver = TenantModelCredentialResolver(
             provider_id=provider_db.id,
@@ -154,5 +167,5 @@ class Transcriber:
     ):
         adapter = await self._get_adapter(transcription_model)
 
-        async with audio.to_wav(filepath) as wav_file:
+        async with audio.to_wav(str(filepath)) as wav_file:
             return await adapter.get_text_from_file(wav_file)

@@ -9,7 +9,13 @@ from intric.ai_models.completion_models.completion_model import (
     ModelKwargs,
 )
 from intric.files.file_models import FilePublic, FileRestrictions
-from intric.main.models import NOT_PROVIDED, InDB, ModelId, NotProvided, ResourcePermissionsMixin
+from intric.main.models import (
+    NOT_PROVIDED,
+    InDB,
+    ModelId,
+    NotProvided,
+    ResourcePermissionsMixin,
+)
 from intric.prompts.api.prompt_models import PromptCreate, PromptPublic
 from intric.transcription_models.presentation import TranscriptionModelPublic
 

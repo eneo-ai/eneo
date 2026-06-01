@@ -5,6 +5,7 @@
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import PublishingStatusChip from "./PublishingStatusChip.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
 
   export let resource: PublishableResource;
   export let endpoints: PublishableResourceEndpoints;
@@ -18,7 +19,7 @@
       try {
         resource = await endpoints.publish(resource);
       } catch (e) {
-        alert(m.could_not_publish({ name: resource.name }));
+        toastError(e, m.could_not_publish({ name: resource.name }));
       }
       isLoading = false;
       return resource;
@@ -28,7 +29,7 @@
       try {
         resource = await endpoints.unpublish(resource);
       } catch (e) {
-        alert(m.could_not_unpublish({ name: resource.name }));
+        toastError(e, m.could_not_unpublish({ name: resource.name }));
       }
       isLoading = false;
       return resource;

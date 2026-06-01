@@ -1,16 +1,14 @@
+from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union, cast
 from uuid import UUID
 
-from intric.ai_models.completion_models.completion_model import (
-    CompletionModelPublic,
-    ModelKwargs,
-)
+from intric.ai_models.completion_models.completion_model import ModelKwargs
 from intric.assistants.api.assistant_models import AssistantType
 from intric.base.base_entity import Entity
 from intric.completion_models.domain.completion_model import CompletionModel
 from intric.completion_models.infrastructure.completion_service import CompletionService
-from intric.files.file_models import File, FileInfo, FileType
+from intric.files.file_models import File, FileType
 from intric.files.text import TextMimeTypes
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.main.exceptions import (
@@ -18,12 +16,19 @@ from intric.main.exceptions import (
     NoModelSelectedException,
     UnauthorizedException,
 )
-from intric.main.models import NOT_PROVIDED, NotProvided
+from intric.main.models import NOT_PROVIDED, NotProvided, is_provided
 from intric.prompts.prompt import Prompt
+from intric.services.service import DatastoreResult
 from intric.sessions.session import SessionInDB
 from intric.users.user import UserSparse
 
 if TYPE_CHECKING:
+    from intric.ai_models.completion_models.completion_model import (
+        CompletionModel as AICompletionModel,
+    )
+    from intric.ai_models.completion_models.completion_model import (
+        CompletionModelResponse,
+    )
     from intric.assistants.references import ReferencesService
     from intric.collections.domain.collection import Collection
     from intric.completion_models.infrastructure.web_search import WebSearchResult
@@ -38,7 +43,7 @@ if TYPE_CHECKING:
 UNAUTHORIZED_EXCEPTION_MESSAGE = "Unauthorized. User has no permissions to access."
 
 
-_KnowledgeItemList = List[Union["Collection", "Website", "IntegrationKnowledge"]]
+_KnowledgeItemList = Sequence[Union["Collection", "Website", "IntegrationKnowledge"]]
 
 
 class Assistant(Entity):
@@ -54,19 +59,19 @@ class Assistant(Entity):
         logging_enabled: bool,
         websites: list["Website"],
         collections: list["Collection"],
-        attachments: list[FileInfo],
+        attachments: list[File],
         published: bool,
-        integration_knowledge_list: list["IntegrationKnowledge"] = [],
-        mcp_servers: list["MCPServer"] = [],
-        created_at: datetime = None,
-        updated_at: datetime = None,
+        integration_knowledge_list: list["IntegrationKnowledge"] | None = None,
+        mcp_servers: list["MCPServer"] | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
         source_template: Optional["AssistantTemplate"] = None,
         is_default: bool = False,
-        tool_assistants: list["Assistant"] = None,
+        tool_assistants: list["Assistant"] | None = None,
         description: Optional[str] = None,
         insight_enabled: bool = False,
         data_retention_days: Optional[int] = None,
-        metadata_json: Optional[dict] = {},
+        metadata_json: dict[str, object] | None = None,
         icon_id: Optional[UUID] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
@@ -80,8 +85,8 @@ class Assistant(Entity):
         self.logging_enabled = logging_enabled
         self._websites = websites
         self._collections = collections
-        self._integration_knowledge_list = integration_knowledge_list
-        self.mcp_servers = mcp_servers
+        self._integration_knowledge_list = integration_knowledge_list or []
+        self.mcp_servers = mcp_servers or []
         self.created_at = created_at
         self.updated_at = updated_at
         self._attachments = attachments
@@ -92,13 +97,15 @@ class Assistant(Entity):
         self.description = description
         self.insight_enabled = insight_enabled
         self.data_retention_days = data_retention_days
-        self.type = AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
+        self.type = (
+            AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
+        )
         self._metadata_json = metadata_json
         self.icon_id = icon_id
 
         # Temporary attributes for update flow - not persisted directly
         self._mcp_server_ids: list[UUID] | None = None
-        self._mcp_tool_settings: list | None = None
+        self._mcp_tool_settings: list[tuple[UUID, bool]] | None = None
 
     def _validate_embedding_model(self, items: _KnowledgeItemList):
         embedding_model_id_set = set([item.embedding_model.id for item in items])
@@ -131,11 +138,11 @@ class Assistant(Entity):
             self.websites = websites
 
     @property
-    def completion_model(self):
+    def completion_model(self) -> CompletionModel | None:
         return self._completion_model
 
     @completion_model.setter
-    def completion_model(self, model: CompletionModelPublic):
+    def completion_model(self, model: CompletionModel) -> None:
         if not model.can_access:
             raise UnauthorizedException(UNAUTHORIZED_EXCEPTION_MESSAGE)
 
@@ -157,9 +164,10 @@ class Assistant(Entity):
         return self._attachments
 
     @attachments.setter
-    def attachments(self, attachments: list[FileInfo]):
+    def attachments(self, attachments: list[File]):
         for attachment in attachments:
-            if not TextMimeTypes.has_value(attachment.mimetype):
+            mimetype = attachment.mimetype or ""
+            if mimetype.split(";")[0].strip() not in TextMimeTypes.values():
                 raise BadRequestException("Attachements can only be text files")
 
         if sum(attachment.size for attachment in attachments) > 26214400:
@@ -198,22 +206,29 @@ class Assistant(Entity):
         return self._integration_knowledge_list
 
     @integration_knowledge_list.setter
-    def integration_knowledge_list(self, integration_knowledge_list: list["IntegrationKnowledge"]):
+    def integration_knowledge_list(
+        self, integration_knowledge_list: list["IntegrationKnowledge"]
+    ):
         if integration_knowledge_list:
             self._validate_embedding_model(integration_knowledge_list)
 
         self._integration_knowledge_list = integration_knowledge_list
 
     @property
-    def metadata_json(self):
+    def metadata_json(self) -> dict[str, object] | None:
         return self._metadata_json
 
     @metadata_json.setter
-    def metadata_json(self, metadata_json: dict):
+    def metadata_json(self, metadata_json: dict[str, object] | None):
         self._metadata_json = metadata_json
 
     def has_knowledge(self) -> bool:
-        return self.collections or self.websites or self.integration_knowledge_list
+        return bool(
+            self.collections or self.websites or self.integration_knowledge_list
+        )
+
+    def has_mcp(self) -> bool:
+        return bool(self.mcp_servers)
 
     def update(
         self,
@@ -221,7 +236,7 @@ class Assistant(Entity):
         prompt: Prompt | None = None,
         completion_model: CompletionModel | None = None,
         completion_model_kwargs: ModelKwargs | None = None,
-        attachments: list[FileInfo] | None = None,
+        attachments: list[File] | None = None,
         logging_enabled: bool | None = None,
         collections: list["Collection"] | None = None,
         websites: list["Website"] | None = None,
@@ -231,7 +246,7 @@ class Assistant(Entity):
         description: Union[str, None, NotProvided] = NOT_PROVIDED,
         insight_enabled: bool | None = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
-        metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
+        metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ):
         if name is not None:
@@ -241,7 +256,7 @@ class Assistant(Entity):
             self.prompt = prompt
 
         if completion_model is not None:
-            self.completion_model = completion_model
+            self.completion_model = completion_model  # type: ignore[assignment]
 
         if completion_model_kwargs is not None:
             self.completion_model_kwargs = completion_model_kwargs
@@ -263,19 +278,19 @@ class Assistant(Entity):
         if mcp_servers is not None:
             self.mcp_servers = mcp_servers
 
-        if description is not NOT_PROVIDED:
+        if is_provided(description):
             self.description = description
 
         if insight_enabled is not None:
             self.insight_enabled = insight_enabled
 
-        if data_retention_days is not NOT_PROVIDED:
+        if is_provided(data_retention_days):
             self.data_retention_days = data_retention_days
 
-        if metadata_json is not NOT_PROVIDED:
-            self.metadata_json = metadata_json
+        if is_provided(metadata_json):
+            self.metadata_json = metadata_json  # type: ignore[assignment]
 
-        if icon_id is not NOT_PROVIDED:
+        if is_provided(icon_id):
             self.icon_id = icon_id
 
     def get_prompt_text(self):
@@ -289,23 +304,24 @@ class Assistant(Entity):
         question: str,
         completion_service: "CompletionService",
         model_kwargs: ModelKwargs | None = None,
-        files: list[File] = [],
-        info_blob_chunks: list[InfoBlobChunkInDBWithScore] = [],
+        files: list[File] | None = None,
+        info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
         session: SessionInDB | None = None,
         stream: bool = False,
         extended_logging: bool = False,
         prompt: str | None = None,
-    ):
+    ) -> "CompletionModelResponse":
         if self.completion_model is None:
             raise NoModelSelectedException()
 
+        completion_model = cast("AICompletionModel", self.completion_model)
         return await completion_service.get_response(
-            model=self.completion_model,
+            model=completion_model,
             text_input=question,
-            files=files,
+            files=files or [],
             prompt=prompt or self.get_prompt_text(),
             prompt_files=self.attachments,
-            info_blob_chunks=info_blob_chunks,
+            info_blob_chunks=info_blob_chunks or [],
             session=session,
             stream=stream,
             extended_logging=extended_logging,
@@ -318,35 +334,47 @@ class Assistant(Entity):
         completion_service: "CompletionService",
         references_service: "ReferencesService",
         session: Optional["SessionInDB"] = None,
-        files: list["File"] = [],
+        files: list["File"] | None = None,
         stream: bool = False,
         version: int = 1,
-        web_search_results: list["WebSearchResult"] = [],
+        web_search_results: Sequence["WebSearchResult"] | None = None,
         require_tool_approval: bool = False,
-    ):
-        if any([file.file_type == FileType.IMAGE for file in files]):
+    ) -> tuple["CompletionModelResponse", DatastoreResult]:
+        if self.completion_model is None:
+            raise NoModelSelectedException()
+
+        completion_model = cast("AICompletionModel", self.completion_model)
+
+        if any(file.file_type == FileType.IMAGE for file in files or []):
             if not self.completion_model.vision:
                 raise BadRequestException(
                     f"Completion model {self.completion_model.name} do not support vision."
                 )
 
         # Fill half the context
-        num_chunks = self.completion_model.token_limit // 200 // 2 if version == 2 else 30
-
-        datastore_result = await references_service.get_references(
-            question=question,
-            session=session,
-            collections=self.collections,
-            websites=self.websites,
-            integration_knowledge_list=self.integration_knowledge_list,
-            num_chunks=num_chunks,
-            version=version,
+        num_chunks = (
+            self.completion_model.max_input_tokens // 200 // 2 if version == 2 else 30
         )
 
+        if self.has_knowledge():
+            datastore_result = await references_service.get_references(
+                question=question,
+                session=session,
+                collections=self.collections,
+                websites=self.websites,
+                integration_knowledge_list=self.integration_knowledge_list,
+                num_chunks=num_chunks,
+                version=version,
+            )
+        else:
+            datastore_result = DatastoreResult(
+                chunks=[], no_duplicate_chunks=[], info_blobs=[]
+            )
+
         response = await completion_service.get_response(
-            model=self.completion_model,
+            model=completion_model,
             text_input=question,
-            files=files,
+            files=files or [],
             prompt=self.get_prompt_text(),
             prompt_files=self.attachments,
             info_blob_chunks=datastore_result.chunks,
@@ -356,8 +384,8 @@ class Assistant(Entity):
             model_kwargs=self.completion_model_kwargs,
             version=version,
             use_image_generation=self.is_default,
-            web_search_results=web_search_results,
-            mcp_servers=self.mcp_servers,
+            web_search_results=list(web_search_results or []),
+            mcp_servers=[] if self.has_knowledge() else self.mcp_servers,
             require_tool_approval=require_tool_approval,
         )
 

@@ -4,7 +4,7 @@
   import { Button, Dialog, Input } from "@intric/ui";
   import { getChatService } from "../../ChatService.svelte";
   import type { ConversationSparse } from "@intric/intric-js";
-  import * as m from "$lib/paraglide/messages";
+  import { m } from "$lib/paraglide/messages";
 
   export let conversation: ConversationSparse;
   export let onConversationDeleted: ((conversation: ConversationSparse) => void) | undefined =
@@ -22,11 +22,9 @@
   <!-- Rename -->
   <Dialog.Root>
     <Dialog.Trigger asFragment let:trigger>
-      <span on:click|stopPropagation>
-        <Button is={trigger} label={m.chat_history_rename()} padding="icon">
-          <IconEdit />
-        </Button>
-      </span>
+      <Button is={trigger} label={m.chat_history_rename()} padding="icon">
+        <IconEdit />
+      </Button>
     </Dialog.Trigger>
 
     <Dialog.Content width="small">
@@ -35,7 +33,7 @@
 
       <Dialog.Section class="p-6">
         <div class="flex flex-col gap-3">
-          <label for="rename-name" class="text-sm font-medium text-default">
+          <label for="rename-name" class="text-default text-sm font-medium">
             {m.chat_history_name_label()}
           </label>
 
@@ -46,7 +44,7 @@
           />
         </div>
       </Dialog.Section>
-      
+
       <Dialog.Controls let:close>
         <Button is={close}>{m.cancel()}</Button>
 
@@ -69,11 +67,9 @@
   <!-- Delete -->
   <Dialog.Root alert>
     <Dialog.Trigger asFragment let:trigger>
-      <span on:click|stopPropagation>
-        <Button variant="destructive" is={trigger} label={m.delete_conversation()} padding="icon">
-          <IconTrash />
-        </Button>
-      </span>
+      <Button variant="destructive" is={trigger} label={m.delete_conversation()} padding="icon">
+        <IconTrash />
+      </Button>
     </Dialog.Trigger>
 
     <Dialog.Content width="small">

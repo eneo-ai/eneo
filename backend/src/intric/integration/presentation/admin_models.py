@@ -1,8 +1,16 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+
+def _empty_uuid_list() -> list[UUID]:
+    return []
+
+
+def _empty_failed_list() -> list[dict[str, Any]]:
+    return []
 
 
 class TenantSharePointAppCreate(BaseModel):
@@ -11,21 +19,21 @@ class TenantSharePointAppCreate(BaseModel):
     client_id: str = Field(
         ...,
         description="Microsoft Entra ID Application (Client) ID",
-        json_schema_extra={"example": "12345678-1234-1234-1234-123456789012"}
+        json_schema_extra={"example": "12345678-1234-1234-1234-123456789012"},
     )
     client_secret: str = Field(
         ...,
         description="Microsoft Entra ID Application Client Secret",
-        json_schema_extra={"example": "abc123~xyz789"}
+        json_schema_extra={"example": "abc123~xyz789"},
     )
     tenant_domain: str = Field(
         ...,
         description="Microsoft Entra ID Tenant Domain (e.g., contoso.onmicrosoft.com)",
-        json_schema_extra={"example": "contoso.onmicrosoft.com"}
+        json_schema_extra={"example": "contoso.onmicrosoft.com"},
     )
     certificate_path: Optional[str] = Field(
         None,
-        description="Optional path to certificate for certificate-based authentication"
+        description="Optional path to certificate for certificate-based authentication",
     )
 
 
@@ -38,26 +46,25 @@ class TenantSharePointAppPublic(BaseModel):
     client_secret_masked: str = Field(
         ...,
         description="Masked client secret (last 4 chars visible)",
-        example="********xyz789"
+        json_schema_extra={"example": "********xyz789"},
     )
     tenant_domain: str
     is_active: bool
     auth_method: str = Field(
         ...,
         description="Authentication method: 'tenant_app' or 'service_account'",
-        example="service_account"
+        json_schema_extra={"example": "service_account"},
     )
     service_account_email: Optional[str] = Field(
         None,
-        description="Email of the service account (only for service_account auth method)"
+        description="Email of the service account (only for service_account auth method)",
     )
     certificate_path: Optional[str]
     created_by: Optional[UUID]
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TenantAppTestResult(BaseModel):
@@ -67,20 +74,17 @@ class TenantAppTestResult(BaseModel):
     error_message: Optional[str] = None
     details: Optional[str] = Field(
         None,
-        description="Additional details about the test (e.g., token acquired successfully)"
+        description="Additional details about the test (e.g., token acquired successfully)",
     )
 
 
 class TenantAppMigrationRequest(BaseModel):
     """Request to migrate existing integrations to tenant app auth."""
 
-    tenant_id: UUID = Field(
-        ...,
-        description="Tenant ID to migrate integrations for"
-    )
+    tenant_id: UUID = Field(..., description="Tenant ID to migrate integrations for")
     dry_run: bool = Field(
         False,
-        description="If true, returns what would be migrated without making changes"
+        description="If true, returns what would be migrated without making changes",
     )
 
 
@@ -90,16 +94,16 @@ class TenantAppMigrationResult(BaseModel):
     dry_run: bool
     total_integrations_found: int
     migrated: list[UUID] = Field(
-        default_factory=list,
-        description="List of integration IDs successfully migrated"
+        default_factory=_empty_uuid_list,
+        description="List of integration IDs successfully migrated",
     )
-    failed: list[dict] = Field(
-        default_factory=list,
-        description="List of failed migrations with error details"
+    failed: list[dict[str, Any]] = Field(
+        default_factory=_empty_failed_list,
+        description="List of failed migrations with error details",
     )
-    skipped: list[dict] = Field(
-        default_factory=list,
-        description="List of integrations skipped (e.g., already using tenant app)"
+    skipped: list[dict[str, Any]] = Field(
+        default_factory=_empty_failed_list,
+        description="List of integrations skipped (e.g., already using tenant app)",
     )
 
 
@@ -114,52 +118,40 @@ class SharePointSubscriptionPublic(BaseModel):
     expires_at: datetime
     created_at: datetime
     is_expired: bool = Field(
-        ...,
-        description="True if subscription has already expired"
+        ..., description="True if subscription has already expired"
     )
     expires_in_hours: int = Field(
-        ...,
-        description="Hours until expiration (0 if already expired)"
+        ..., description="Hours until expiration (0 if already expired)"
     )
     owner_email: Optional[str] = Field(
         None,
-        description="Email of subscription owner (None for organization integrations)"
+        description="Email of subscription owner (None for organization integrations)",
     )
-    owner_type: str = Field(
-        ...,
-        description="Type of owner: 'user' or 'organization'"
-    )
+    owner_type: str = Field(..., description="Type of owner: 'user' or 'organization'")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SubscriptionRenewalResult(BaseModel):
     """Result of subscription renewal operation."""
 
     total_subscriptions: int = Field(
-        ...,
-        description="Total number of subscriptions found"
+        ..., description="Total number of subscriptions found"
     )
-    expired_count: int = Field(
-        ...,
-        description="Number of expired subscriptions"
-    )
+    expired_count: int = Field(..., description="Number of expired subscriptions")
     recreated: int = Field(
-        default=0,
-        description="Number of subscriptions successfully recreated"
+        default=0, description="Number of subscriptions successfully recreated"
     )
     failed: int = Field(
-        default=0,
-        description="Number of subscriptions that failed to recreate"
+        default=0, description="Number of subscriptions that failed to recreate"
     )
     errors: list[str] = Field(
-        default_factory=list,
-        description="Error messages for failed renewals"
+        default_factory=list, description="Error messages for failed renewals"
     )
 
 
 # Service Account OAuth Models
+
 
 class ServiceAccountAuthStart(BaseModel):
     """Request model to start service account OAuth flow."""
@@ -167,17 +159,17 @@ class ServiceAccountAuthStart(BaseModel):
     client_id: str = Field(
         ...,
         description="Microsoft Entra ID Application (Client) ID",
-        json_schema_extra={"example": "12345678-1234-1234-1234-123456789012"}
+        json_schema_extra={"example": "12345678-1234-1234-1234-123456789012"},
     )
     client_secret: str = Field(
         ...,
         description="Microsoft Entra ID Application Client Secret",
-        json_schema_extra={"example": "abc123~xyz789"}
+        json_schema_extra={"example": "abc123~xyz789"},
     )
     tenant_domain: str = Field(
         ...,
         description="Microsoft Entra ID Tenant Domain (e.g., contoso.onmicrosoft.com)",
-        json_schema_extra={"example": "contoso.onmicrosoft.com"}
+        json_schema_extra={"example": "contoso.onmicrosoft.com"},
     )
 
 
@@ -186,22 +178,15 @@ class ServiceAccountAuthStartResponse(BaseModel):
 
     auth_url: str = Field(
         ...,
-        description="Microsoft OAuth authorization URL. Redirect the admin to this URL."
+        description="Microsoft OAuth authorization URL. Redirect the admin to this URL.",
     )
-    state: str = Field(
-        ...,
-        description="OAuth state parameter for CSRF protection"
-    )
+    state: str = Field(..., description="OAuth state parameter for CSRF protection")
 
 
 class ServiceAccountAuthCallback(BaseModel):
     """Request model for service account OAuth callback."""
 
     auth_code: str = Field(
-        ...,
-        description="OAuth authorization code from Microsoft callback"
+        ..., description="OAuth authorization code from Microsoft callback"
     )
-    state: str = Field(
-        ...,
-        description="OAuth state parameter for verification"
-    )
+    state: str = Field(..., description="OAuth state parameter for verification")

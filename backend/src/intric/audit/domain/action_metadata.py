@@ -1,12 +1,20 @@
-"""Action metadata registry - Swedish names and descriptions for all 65 actions.
+"""Action metadata registry - Swedish names and descriptions for all actions.
 
 Used by the audit configuration UI to display human-readable action names.
 """
 
+from typing_extensions import TypedDict
+
 from intric.audit.domain.action_types import ActionType
 
+
+class ActionMetadata(TypedDict):
+    name_sv: str
+    description_sv: str
+
+
 # Maps action type values to Swedish display metadata
-ACTION_METADATA = {
+ACTION_METADATA: dict[str, ActionMetadata] = {
     # Admin Actions (13)
     ActionType.USER_CREATED.value: {
         "name_sv": "Användare skapad",
@@ -51,6 +59,46 @@ ACTION_METADATA = {
     ActionType.API_KEY_GENERATED.value: {
         "name_sv": "API-nyckel genererad",
         "description_sv": "Loggar när nya API-nycklar skapas",
+    },
+    ActionType.API_KEY_CREATED.value: {
+        "name_sv": "API-nyckel skapad",
+        "description_sv": "Loggar när en API-nyckel skapas",
+    },
+    ActionType.API_KEY_UPDATED.value: {
+        "name_sv": "API-nyckel uppdaterad",
+        "description_sv": "Loggar när en API-nyckel uppdateras",
+    },
+    ActionType.API_KEY_REVOKED.value: {
+        "name_sv": "API-nyckel revokerad",
+        "description_sv": "Loggar när en API-nyckel revokeras",
+    },
+    ActionType.API_KEY_SUSPENDED.value: {
+        "name_sv": "API-nyckel pausad",
+        "description_sv": "Loggar när en API-nyckel suspenderas",
+    },
+    ActionType.API_KEY_REACTIVATED.value: {
+        "name_sv": "API-nyckel återaktiverad",
+        "description_sv": "Loggar när en API-nyckel återaktiveras",
+    },
+    ActionType.API_KEY_ROTATED.value: {
+        "name_sv": "API-nyckel roterad",
+        "description_sv": "Loggar när en API-nyckel roteras",
+    },
+    ActionType.API_KEY_EXPIRED.value: {
+        "name_sv": "API-nyckel utgången",
+        "description_sv": "Loggar när en API-nyckel löper ut",
+    },
+    ActionType.API_KEY_USED.value: {
+        "name_sv": "API-nyckel använd",
+        "description_sv": "Loggar när en API-nyckel används",
+    },
+    ActionType.API_KEY_AUTH_FAILED.value: {
+        "name_sv": "API-nyckel misslyckad",
+        "description_sv": "Loggar misslyckade API-nyckelautentiseringar",
+    },
+    ActionType.TENANT_POLICY_UPDATED.value: {
+        "name_sv": "API-nyckelpolicy uppdaterad",
+        "description_sv": "Loggar ändringar av API-nyckelpolicy per tenant",
     },
     ActionType.MODULE_ADDED.value: {
         "name_sv": "Modul tillagd",
@@ -133,6 +181,10 @@ ACTION_METADATA = {
         "name_sv": "Session avslutad",
         "description_sv": "Loggar när en användarsession avslutas",
     },
+    ActionType.TOOL_APPROVAL_SUBMITTED.value: {
+        "name_sv": "Verktygsgodkännande inskickat",
+        "description_sv": "Loggar när användaren godkänner eller nekar MCP-verktyg",
+    },
     ActionType.FILE_UPLOADED.value: {
         "name_sv": "Fil uppladdad",
         "description_sv": "Loggar när filer laddas upp",
@@ -205,17 +257,45 @@ ACTION_METADATA = {
         "name_sv": "Integrationskälla synkad",
         "description_sv": "Loggar när en full synkning startas för en integrationskälla",
     },
+    ActionType.COMPLETION_MODEL_CREATED.value: {
+        "name_sv": "Kompletteringsmodell skapad",
+        "description_sv": "Loggar när en AI-kompletteringsmodell läggs till i tenanten",
+    },
     ActionType.COMPLETION_MODEL_UPDATED.value: {
         "name_sv": "Kompletteringsmodell uppdaterad",
         "description_sv": "Loggar ändringar av AI-kompletteringsmodell",
+    },
+    ActionType.COMPLETION_MODEL_DELETED.value: {
+        "name_sv": "Kompletteringsmodell raderad",
+        "description_sv": "Loggar när en AI-kompletteringsmodell tas bort från tenanten",
+    },
+    ActionType.COMPLETION_MODEL_MIGRATED.value: {
+        "name_sv": "Kompletteringsmodell migrerad",
+        "description_sv": "Loggar när användning flyttas mellan AI-kompletteringsmodeller",
+    },
+    ActionType.EMBEDDING_MODEL_CREATED.value: {
+        "name_sv": "Embedding-modell skapad",
+        "description_sv": "Loggar när en embedding-modell läggs till i tenanten",
     },
     ActionType.EMBEDDING_MODEL_UPDATED.value: {
         "name_sv": "Embedding-modell uppdaterad",
         "description_sv": "Loggar ändringar av embedding-modell",
     },
+    ActionType.EMBEDDING_MODEL_DELETED.value: {
+        "name_sv": "Embedding-modell raderad",
+        "description_sv": "Loggar när en embedding-modell tas bort från tenanten",
+    },
+    ActionType.TRANSCRIPTION_MODEL_CREATED.value: {
+        "name_sv": "Transkriptionsmodell skapad",
+        "description_sv": "Loggar när en transkriptionsmodell läggs till i tenanten",
+    },
     ActionType.TRANSCRIPTION_MODEL_UPDATED.value: {
         "name_sv": "Transkriptionsmodell uppdaterad",
         "description_sv": "Loggar ändringar av transkriptionsmodell",
+    },
+    ActionType.TRANSCRIPTION_MODEL_DELETED.value: {
+        "name_sv": "Transkriptionsmodell raderad",
+        "description_sv": "Loggar när en transkriptionsmodell tas bort från tenanten",
     },
     ActionType.TEMPLATE_CREATED.value: {
         "name_sv": "Mall skapad",
@@ -254,6 +334,35 @@ ACTION_METADATA = {
         "name_sv": "Säkerhetsklassificering inaktiverad",
         "description_sv": "Loggar när säkerhetsklassificering inaktiveras",
     },
+    # MCP Server Actions (7)
+    ActionType.MCP_SERVER_CREATED.value: {
+        "name_sv": "MCP-server skapad",
+        "description_sv": "Loggar när en ny MCP-server skapas",
+    },
+    ActionType.MCP_SERVER_UPDATED.value: {
+        "name_sv": "MCP-server uppdaterad",
+        "description_sv": "Loggar ändringar av MCP-serverinställningar",
+    },
+    ActionType.MCP_SERVER_DELETED.value: {
+        "name_sv": "MCP-server raderad",
+        "description_sv": "Loggar när en MCP-server tas bort",
+    },
+    ActionType.MCP_SERVER_ENABLED.value: {
+        "name_sv": "MCP-server aktiverad",
+        "description_sv": "Loggar när en MCP-server aktiveras för organisationen",
+    },
+    ActionType.MCP_SERVER_DISABLED.value: {
+        "name_sv": "MCP-server inaktiverad",
+        "description_sv": "Loggar när en MCP-server inaktiveras för organisationen",
+    },
+    ActionType.MCP_SERVER_TOOL_ENABLED.value: {
+        "name_sv": "MCP-verktyg aktiverat",
+        "description_sv": "Loggar när ett MCP-verktyg aktiveras",
+    },
+    ActionType.MCP_SERVER_TOOL_DISABLED.value: {
+        "name_sv": "MCP-verktyg inaktiverat",
+        "description_sv": "Loggar när ett MCP-verktyg inaktiveras",
+    },
     # System Actions (3)
     ActionType.RETENTION_POLICY_APPLIED.value: {
         "name_sv": "Retentionspolicy tillämpades",
@@ -279,7 +388,7 @@ ACTION_METADATA = {
 }
 
 
-def get_action_metadata(action: str) -> dict:
+def get_action_metadata(action: str) -> ActionMetadata:
     """Get Swedish metadata for an action.
 
     Args:

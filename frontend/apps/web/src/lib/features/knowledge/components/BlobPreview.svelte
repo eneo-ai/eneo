@@ -5,6 +5,7 @@
   import { Button, Dialog, Markdown } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
   import * as m from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   export let blob: InfoBlob;
   export let index: number | undefined = undefined;
   export let isTableView = false;
@@ -15,7 +16,7 @@
   let loadedBlobText: string | undefined = blob.text;
   let loadingBlob = false;
   let loadError = false;
-  
+
   async function loadBlob() {
     if (!loadedBlobText) {
       loadingBlob = true;
@@ -26,7 +27,7 @@
       } catch (e) {
         loadError = true;
         console.error("Error retrieving blob content:", e);
-        alert("Error retrieving reference, see console for details.");
+        toast.error("Error retrieving reference, see console for details.");
       }
       loadingBlob = false;
     }
@@ -109,9 +110,9 @@
     <Dialog.Section scrollable>
       <div class="p-4">
         {#if loadingBlob}
-          <pre>Loading...</pre>
+          <pre>{m.loading()}</pre>
         {:else if loadError}
-          <pre>Error loading content. Please try again.</pre>
+          <pre>{m.attachment_error_loading_content()}</pre>
         {:else}
           <Markdown source={loadedBlobText ?? ""}></Markdown>
         {/if}

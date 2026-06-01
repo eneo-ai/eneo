@@ -3,17 +3,20 @@
   import { Button, Tooltip } from "@intric/ui";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { getIntric } from "$lib/core/Intric";
-  import { IntricError, type App, type AppRunInput } from "@intric/intric-js";
+  import { type App, type AppRunInput } from "@intric/intric-js";
   import AppIcon from "$lib/features/apps/components/AppIcon.svelte";
   import AttachmentDropArea from "$lib/features/attachments/components/AttachmentDropArea.svelte";
   import { getAppAttachmentRulesStore } from "$lib/features/attachments/getAttachmentRules";
   import { derived, type Readable } from "svelte/store";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import AppInput from "./AppInput.svelte";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
+  import { toastError } from "$lib/core/errors";
 
   const intric = getIntric();
   const {
@@ -49,7 +52,7 @@
   let isSubmitting = false;
   async function createRun() {
     if (inputs.files.length === 0 && !inputs.text) {
-      alert(m.input_required_to_run_app());
+      toast.warning(m.input_required_to_run_app());
       return;
     }
 
@@ -69,11 +72,10 @@
       clearUploads();
       isSubmitting = false;
       // Forward to the newly created run
-      goto(`/spaces/${$currentSpace.routeId}/apps/${$app.id}/results/${result.id}`);
+      goto(resolve(`/spaces/${$currentSpace.routeId}/apps/${$app.id}/results/${result.id}`));
     } catch (err) {
-      const msg = err instanceof IntricError ? err.getReadableMessage() : err;
       console.error(err);
-      alert(m.error_running_app({ msg }));
+      toastError(err);
       isSubmitting = false;
     }
   }
@@ -95,7 +97,7 @@
     <div class="-mt-[2.5rem] flex flex-grow flex-col items-center justify-center rounded pb-2">
       <div class="bg-primary flex items-center gap-4 rounded-2xl pr-6 pl-4">
         <AppIcon app={$app} size="medium"></AppIcon>
-        <span class="text-2xl md:text-4xl font-extrabold">{formatEmojiTitle($app.name)}</span>
+        <span class="text-2xl font-extrabold md:text-4xl">{formatEmojiTitle($app.name)}</span>
       </div>
     </div>
 

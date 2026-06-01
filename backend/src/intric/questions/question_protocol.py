@@ -10,8 +10,8 @@ from intric.questions.question import (
 )
 
 
-def to_question_public(question: Question):
-    assistants = []
+def to_question_public(question: Question) -> Message:
+    assistants: list[ToolAssistant] = []
 
     # Add assistant if it exists
     if question.assistant_id and question.assistant_name:
@@ -42,8 +42,10 @@ def to_question_public(question: Question):
     )
 
 
-def to_question_logging(question: Question):
+def to_question_logging(question: Question) -> MessageLogging:
     question_public = to_question_public(question)
+    # Caller guarantees logging_details is not None before calling this function
+    assert question.logging_details is not None
     return MessageLogging(
         **question_public.model_dump(),
         logging_details=logging_protocol.from_domain(question.logging_details),

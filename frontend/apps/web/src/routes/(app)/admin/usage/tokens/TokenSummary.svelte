@@ -6,25 +6,46 @@
 
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
-  import type { TokenUsageSummary } from "@intric/intric-js";
+  import type {
+    CompletionModel,
+    EmbeddingModel,
+    TokenUsageSummary,
+    TranscriptionModel
+  } from "@intric/intric-js";
   import TokenOverviewBar from "./TokenOverviewBar.svelte";
   import TokenOverviewTable from "./TokenOverviewTable.svelte";
-  import { CalendarDate } from "@internationalized/date";
+  import UserTokenSummary from "../users/UserTokenSummary.svelte";
+  import { CalendarDate, type DateValue } from "@internationalized/date";
   import { getIntric } from "$lib/core/Intric";
   import { Input } from "@intric/ui";
   import { m } from "$lib/paraglide/messages";
+  import { untrack } from "svelte";
+  import { buildCostRateMap } from "$lib/features/ai-models/costRates";
+
+  type ModelsList = {
+    completionModels: CompletionModel[];
+    embeddingModels: EmbeddingModel[];
+    transcriptionModels: TranscriptionModel[];
+  };
 
   type Props = {
     tokenStats: TokenUsageSummary;
+    models: ModelsList;
   };
 
-  const { tokenStats }: Props = $props();
-  let detailedStats = $state(tokenStats);
+  const { tokenStats, models }: Props = $props();
+  let detailedStats = $state(untrack(() => tokenStats));
+
+  // Cost map is stable for the page lifetime — models change rarely. Building
+  // once here avoids re-walking the list on every row render. We untrack the
+  // read so $state doesn't warn that the initial value is captured (it is —
+  // intentionally; reactivity for live model edits is out of scope here).
+  const costRates = untrack(() => buildCostRateMap(models));
 
   const intric = getIntric();
 
   const now = new Date();
-  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getUTCDate());
+  const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
   let dateRange = $state({
     start: today.subtract({ days: 30 }),
     end: today
@@ -38,11 +59,10 @@
     });
   }
 
-  $effect(() => {
-    if (dateRange.start && dateRange.end) {
-      update(dateRange);
-    }
-  });
+  function handleDateChange(range: { start: DateValue; end: DateValue }) {
+    dateRange = range as { start: CalendarDate; end: CalendarDate };
+    update(dateRange);
+  }
 </script>
 
 <Settings.Page>
@@ -52,9 +72,10 @@
   <Settings.Group title={m.details()}>
     <Settings.Row title={m.usage_by_model()} description={m.see_token_usage_by_model()} fullWidth>
       <div slot="toolbar">
-        <Input.DateRange bind:value={dateRange}></Input.DateRange>
+        <Input.DateRange bind:value={dateRange} onValueCommit={handleDateChange}></Input.DateRange>
       </div>
-      <TokenOverviewTable tokenStats={detailedStats}></TokenOverviewTable>
+      <TokenOverviewTable tokenStats={detailedStats} {costRates}></TokenOverviewTable>
     </Settings.Row>
   </Settings.Group>
+  <UserTokenSummary {costRates} />
 </Settings.Page>

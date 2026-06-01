@@ -131,10 +131,10 @@ Add these to `backend/.env` for full admin capabilities:
 USING_ACCESS_MANAGEMENT=True
 
 # Access to system admin endpoints
-INTRIC_SUPER_API_KEY=your-secure-api-key
+ENEO_SUPER_API_KEY=your-secure-api-key
 
 # Access to modules endpoint (higher privilege)
-INTRIC_SUPER_DUPER_API_KEY=your-other-secure-api-key
+ENEO_SUPER_DUPER_API_KEY=your-other-secure-api-key
 
 # Increase file upload limits (in bytes, 10MB example)
 UPLOAD_MAX_FILE_SIZE=10485760
@@ -205,6 +205,30 @@ lsof -i :6379   # Redis
    ```
 4. **Apply Migrations** - `cd backend && uv run python init_db.py`
 5. **Start Services** - Run the 3 terminal commands
+
+### Install Local Git Hooks
+
+Install the full local hook set once per clone:
+
+```bash
+pre-commit install --install-hooks --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
+```
+
+This enables:
+
+- staged-file preflight checks before commit
+- backend Pyright checks before commit when backend source changed
+- commit-message validation
+- push-time branch safety
+- route metadata checks when route files changed
+
+Full backend tests, frontend type checks/lint/build, and Docker validation run in
+CI. The local pre-push hook stays focused on branch safety and route metadata, so
+the backend type check is not repeated at both commit and push time. For a WIP
+push or a CI rerun on a feature branch where you intentionally want to skip local
+hooks, use `git push --no-verify`; do not use it to bypass a real failure before
+opening or merging a PR, and do not use it for protected branches such as
+`develop` or `main`.
 
 ### Testing Your Changes
 

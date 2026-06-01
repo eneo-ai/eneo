@@ -9,6 +9,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
   import { localizeHref } from "$lib/paraglide/runtime";
 
   export let service: ServiceSparse;
@@ -19,8 +20,6 @@
   } = getSpacesManager();
 
   const intric = getIntric();
-  $: isOrgSpace = $currentSpace.organization === true;
-
   async function deleteService() {
     isProcessing = true;
     try {
@@ -28,7 +27,7 @@
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
-      alert(m.could_not_delete_service());
+      toastError(e, m.could_not_delete_service());
       console.error(e);
     }
     isProcessing = false;
@@ -46,7 +45,7 @@
       refreshCurrentSpace();
       $showMoveDialog = false;
     } catch (e) {
-      alert(e);
+      toastError(e);
       console.error(e);
     }
     isProcessing = false;

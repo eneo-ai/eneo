@@ -1,5 +1,7 @@
 import { createContext } from "$lib/core/context";
 import { m } from "$lib/paraglide/messages";
+import { toast } from "$lib/components/toast";
+import { toastError } from "$lib/core/errors";
 import { type GroupSparse, type TemplateAdditionalField } from "@intric/intric-js";
 import { derived, get, writable } from "svelte/store";
 import { type Attachment } from "../attachments/AttachmentManager";
@@ -89,7 +91,7 @@ function createTemplateController(data: TemplateControllerParams) {
         const res = await adapter.createNew({ name: $name });
         onResourceCreated(res);
       } catch (e) {
-        alert(`Error: Couldn't create ${$name}\n${e}`);
+        toastError(e);
       }
       return;
     }
@@ -106,19 +108,18 @@ function createTemplateController(data: TemplateControllerParams) {
       // 1. check if required things have been provided
       const additional_fields: TemplateAdditionalField[] = [];
 
-      if ($template.wizard.collections?.required) {
-        if ($selectedCollections.length > 0) {
+      // Collections wizard: required=true means show picker and send data to backend.
+      // Non-required means show hint only, no data sent (backend rejects non-required).
+      if ($template.wizard.collections) {
+        if ($selectedCollections.length > 0 && $template.wizard.collections.required) {
           additional_fields.push({
             type: "groups",
             value: $selectedCollections.map((collection) => {
               return { id: collection.id };
             })
           });
-        } else {
-          alert(
-            "This template can only create relevant responses if you supply the required knowledge. Please configure the knowledge below or choose a different template."
-          );
-          return;
+        } else if ($template.wizard.collections.required && $selectedCollections.length === 0) {
+          toast.info(m.template_knowledge_recommendation());
         }
       }
 
@@ -126,9 +127,7 @@ function createTemplateController(data: TemplateControllerParams) {
         const isUploadRunning = $selectedAttachments.some((attachment) => !attachment.fileRef);
 
         if (isUploadRunning) {
-          alert(
-            "Please wait until all uploads are finished or cancel running uploads berfore proceeding."
-          );
+          toast.warning(m.template_uploads_in_progress());
           return;
         }
 
@@ -140,9 +139,7 @@ function createTemplateController(data: TemplateControllerParams) {
             })
           });
         } else {
-          alert(
-            "This template can only create relevant responses if you upload the required attachments. Please add relevant attachments or choose a different template."
-          );
+          toast.warning(m.template_attachments_required());
           return;
         }
       }
@@ -158,7 +155,7 @@ function createTemplateController(data: TemplateControllerParams) {
       selectedAttachments.set([]);
       onResourceCreated(res);
     } catch (e) {
-      alert(`Error: Couldn't create ${$name} from template ${$template.name}\n${e}`);
+      toastError(e);
     }
   }
 

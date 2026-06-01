@@ -27,11 +27,20 @@ if TYPE_CHECKING:
     from intric.completion_models.infrastructure.completion_service import (
         CompletionService,
     )
+    from intric.icons.icon_repo import IconRepository
     from intric.sessions.session import SessionInDB
     from intric.sessions.session_service import SessionService
     from intric.spaces.space_repo import SpaceRepository
     from intric.spaces.space_service import SpaceService
     from intric.users.user import UserInDB
+
+
+# Strict contract with the selector model: a routing decision is the whole
+# response and nothing else. Anything that isn't an exact `ASSISTANT=<n>` line
+# is treated as clarification prose and surfaced to the user — including
+# digits embedded in clarification text, which previously caused false-positive
+# routing or crashes.
+_ASSISTANT_SENTINEL = re.compile(r"\s*ASSISTANT\s*=\s*(\d+)\s*", re.IGNORECASE)
 
 
 @dataclass
@@ -51,7 +60,9 @@ class GroupChatService:
         assistant_service: "AssistantService",
         session_service: "SessionService",
         completion_service: "CompletionService",
-    ):
+        icon_repo: "IconRepository",
+    ) -> None:
+        super().__init__()
         self.user = user
         self.space_service = space_service
         self.space_repo = space_repo
@@ -59,31 +70,57 @@ class GroupChatService:
         self.assistant_service = assistant_service
         self.session_service = session_service
         self.completion_service = completion_service
+        self.icon_repo = icon_repo
 
     async def create_group_chat(self, space_id: "UUID", name: str) -> "GroupChat":
         space = await self.space_service.get_space(id=space_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_create_group_chats():
-            raise UnauthorizedException
+            raise UnauthorizedException(
+                "You do not have permission to create group chats in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "group_chat",
+                    "action": "create",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
-        group_chat = GroupChat.create(name=name, space_id=space_id, user_id=self.user.id)
+        group_chat = GroupChat.create(
+            name=name, space_id=space_id, user_id=self.user.id
+        )
 
         space.add_group_chat(group_chat)
         updated_space = await self.space_repo.update(space=space)
 
         return updated_space.get_group_chat(group_chat_id=group_chat.id)
 
-    async def delete_group_chat(self, group_chat_id: "UUID") -> "GroupChat":
-        space = await self.space_service.get_space_by_group_chat(group_chat_id=group_chat_id)
+    async def delete_group_chat(self, group_chat_id: "UUID") -> "GroupChat | None":
+        space = await self.space_service.get_space_by_group_chat(
+            group_chat_id=group_chat_id
+        )
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_delete_group_chats():
-            raise UnauthorizedException
+            raise UnauthorizedException(
+                "You do not have permission to delete this group chat.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "group_chat",
+                    "action": "delete",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         group_chat = space.get_group_chat(group_chat_id=group_chat_id)
+        icon_id = group_chat.icon_id
+
         space.remove_group_chat(group_chat)
         await self.space_repo.update(space=space)
+
+        if icon_id:
+            await self.icon_repo.delete(icon_id)
 
     async def update_group_chat(
         self,
@@ -95,13 +132,22 @@ class GroupChatService:
         show_response_label: Optional[bool] = None,
         published: Optional[bool] = None,
         insight_enabled: Optional[bool] = None,
-        metadata_json: Union[dict, None, NotProvided] = NOT_PROVIDED,
+        metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
+        icon_id: Union["UUID", None, NotProvided] = NOT_PROVIDED,
     ) -> "GroupChat":
         space = await self.space_service.get_space_by_group_chat(group_chat_id=id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_edit_group_chats():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to edit this group chat.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "group_chat",
+                    "action": "update",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         # Check if user has permission to toggle insights
         if insight_enabled is not None:
@@ -131,6 +177,7 @@ class GroupChatService:
             new_assistants=assistants,
             insight_enabled=insight_enabled,
             metadata_json=metadata_json,
+            icon_id=icon_id,
         )
 
         updated_space = await self.space_repo.update(space=space)
@@ -146,18 +193,30 @@ class GroupChatService:
         self,
         group_chat_id: "UUID",
     ) -> "GroupChat":
-        space = await self.space_service.get_space_by_group_chat(group_chat_id=group_chat_id)
+        space = await self.space_service.get_space_by_group_chat(
+            group_chat_id=group_chat_id
+        )
         actor = self.actor_manager.get_space_actor_from_space(space)
         group_chat = space.get_group_chat(group_chat_id=group_chat_id)
 
         if not actor.can_read_group_chat(group_chat=group_chat):
-            raise UnauthorizedException
+            raise UnauthorizedException(
+                "You do not have permission to read this group chat.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "group_chat",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         group_chat.permissions = actor.get_group_chat_permissions(group_chat=group_chat)
 
         return group_chat
 
-    async def _find_suitable_completion_model(self, assistants: list[GroupChatAssistant]):
+    async def find_suitable_completion_model(
+        self, assistants: list[GroupChatAssistant]
+    ):
         """Return the completion model of the first assistant in the list"""
         if not assistants:
             raise BadRequestException("No assistants in the group chat")
@@ -166,12 +225,17 @@ class GroupChatService:
         first_assistant = assistants[0].assistant
         return first_assistant.completion_model
 
-    def _create_assistant_selection_prompt(
+    async def _find_suitable_completion_model(
+        self, assistants: list[GroupChatAssistant]
+    ):
+        return await self.find_suitable_completion_model(assistants)
+
+    def create_assistant_selection_prompt(
         self, question: str, assistants: list[GroupChatAssistant]
     ) -> str:
         """Create a prompt for the model to select the most appropriate assistant"""
 
-        assistant_info = []
+        assistant_info: list[str] = []
         for i, assistant in enumerate(assistants):
             description = (
                 assistant.user_description
@@ -183,46 +247,53 @@ class GroupChatService:
         assistant_list = "\n".join(assistant_info)
 
         return f"""
-                Given a user question and a list of AI assistants, you need to determine the most
-                appropriate assistant to answer the question.
+                You are routing a user question to one of {len(assistants)} AI assistants.
+
                 User Question: {question}
+
                 Available Assistants:
                 {assistant_list}
 
-                Based only on the descriptions above, which assistant number (1-{len(assistants)})
-                would be most appropriate to answer this question?
+                Reply with EXACTLY ONE of:
+                - The literal line `ASSISTANT=<n>` where <n> is an integer in
+                  1-{len(assistants)}, when one assistant is the clear best match. Nothing
+                  else on the line. No commentary, no quotes, no punctuation.
+                - A friendly clarification in the language of the question when the
+                  question is ambiguous or spans multiple assistants. Never include the
+                  token `ASSISTANT=` anywhere in clarification text.
 
-                Follow these guidelines:
-                - Choose ONE assistant from the list. Return only a single number.
-                - Select the assistant whose expertise best matches the question.
-                - Always be decisive - do not suggest multiple assistants.
-
-                If and only if there is a clear answer respond ONLY with the assistant number
-                (e.g., "1"), otherwise you should tell the user to be more
-                specific in a friendly tone.
-                Answer in the language of the question.
-
-                Take earlier questions in the context into account.
+                Take earlier questions in the conversation into account.
                 """
 
-    def _is_match(self, response_text: str, assistants: list[GroupChatAssistant]) -> int | None:
-        """Parse the model's response to determine which assistant to use"""
-        response_text = response_text.strip().upper()
+    def _create_assistant_selection_prompt(
+        self, question: str, assistants: list[GroupChatAssistant]
+    ) -> str:
+        return self.create_assistant_selection_prompt(question, assistants)
 
-        # Look for a number in the response
-        match = re.search(r"(\d+)", response_text)
+    def _is_match(
+        self, response_text: str, assistants: list[GroupChatAssistant]
+    ) -> int | None:
+        """Parse the model's response to a 1-indexed assistant number, or None.
 
-        if match:
-            return int(match.group(1))
-        else:
+        Routing requires the response to be exactly `ASSISTANT=<n>` (with
+        flexible whitespace and case). Anything else — including bare digits,
+        prose containing numbers, or out-of-range sentinels — returns None and
+        the caller surfaces the text as a clarification reply.
+        """
+        match = _ASSISTANT_SENTINEL.fullmatch(response_text)
+        if match is None:
             return None
+        n = int(match.group(1))
+        if 1 <= n <= len(assistants):
+            return n
+        return None
 
     async def _select_assistant_with_completion_model(
         self,
         question: str,
         assistants: list[GroupChatAssistant],
         session: Optional["SessionInDB"] = None,
-    ) -> GroupChatAssistantSelectionResult:
+    ) -> GroupChatAssistantSelectionResult | None:
         """Select the most appropriate assistant using a completion model to analyze the question"""
 
         # if no assistants, no need for completion model
@@ -236,37 +307,38 @@ class GroupChatService:
                 assistant_selector_tokens=0,
             )
 
-        completion_model = await self._find_suitable_completion_model(assistants)
+        completion_model = await self.find_suitable_completion_model(assistants)
+        assert (
+            completion_model is not None
+        )  # _find_suitable_completion_model raises if no assistants
 
         # create the prompt for assistant selection
-        selection_prompt = self._create_assistant_selection_prompt(question, assistants)
-        assistant_selector_tokens = count_tokens(selection_prompt)
+        selection_prompt = self.create_assistant_selection_prompt(question, assistants)
+        model_name = completion_model.name if completion_model else ""
+        assistant_selector_tokens = count_tokens(selection_prompt, model_name)
         # get model's response
         response = await self.completion_service.get_response(
-            model=completion_model,
+            model=completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
             prompt=selection_prompt,
             stream=False,
             session=session,
             text_input=question,
         )
-        # parse the response to determine which assistant to use
         assistant_match = self._is_match(
-            response.completion.text,
+            response.completion.text,  # type: ignore[union-attr]
             assistants,
         )
-        if assistant_match:
-            if 1 <= assistant_match <= len(assistants):
-                return GroupChatAssistantSelectionResult(
-                    assistant=assistants[assistant_match - 1],
-                    response_str=response.completion.text,
-                    assistant_selector_tokens=assistant_selector_tokens,
-                )
-        else:
+        if assistant_match is not None:
             return GroupChatAssistantSelectionResult(
-                assistant=None,
-                response_str=response.completion.text,
+                assistant=assistants[assistant_match - 1],
+                response_str=response.completion.text,  # type: ignore[union-attr]
                 assistant_selector_tokens=assistant_selector_tokens,
             )
+        return GroupChatAssistantSelectionResult(
+            assistant=None,
+            response_str=response.completion.text,  # type: ignore[union-attr]
+            assistant_selector_tokens=assistant_selector_tokens,
+        )
 
     async def _handle_response(
         self,
@@ -275,61 +347,88 @@ class GroupChatService:
         completion_model: "CompletionModel",
         session: "SessionInDB",
         stream: bool,
+        question_id: "UUID",
         assistant_selector_tokens: int = 0,
     ):
         """Handle response for group chat selector, matching assistant_service"""
 
+        # Capture tenant_id outside the generator so the abort-path background save
+        # doesn't depend on self.user being safely accessible during teardown.
+        tenant_id = self.user.tenant_id
+
         if stream:
 
             async def response_stream():
-                chunk_response = response.split()
                 response_string = ""
-                for i, chunk in enumerate(chunk_response):
-                    if i < len(chunk_response):
-                        chunk_text = chunk + " "
-                    else:
-                        chunk_text = chunk
+                completed = False
 
-                    response_string += chunk_text
-                    # yield empty references and chunk text, matching assistant_service format
-                    yield Completion(
-                        text=chunk_text,
-                        response_type=ResponseType.TEXT,
-                        reference_chunks=[],
+                try:
+                    chunk_response = response.split()
+                    for i, chunk in enumerate(chunk_response):
+                        if i < len(chunk_response):
+                            chunk_text = chunk + " "
+                        else:
+                            chunk_text = chunk
+
+                        response_string += chunk_text
+                        # yield empty references and chunk text, matching assistant_service format
+                        yield Completion(
+                            text=chunk_text,
+                            response_type=ResponseType.TEXT,
+                            reference_chunks=[],
+                        )
+                        await asyncio.sleep(0.05)
+
+                    # NOTE: refactor question_token_count to include the whole contructed prompt.
+                    question_token_count = count_tokens(question, completion_model.name)
+                    token_count = count_tokens(response, completion_model.name)
+                    await self.session_service.complete_question_with_answer(
+                        question_id=question_id,
+                        answer=response,
+                        num_tokens_question=question_token_count
+                        + assistant_selector_tokens,
+                        num_tokens_answer=token_count,
+                        completion_model=completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
+                        info_blob_chunks=[],
+                        logging_details=None,
                     )
-                    await asyncio.sleep(0.05)
+                    completed = True
+                finally:
+                    # Selector-echo stream did not reach normal completion. The
+                    # placeholder already captures the question; only schedule a
+                    # background UPDATE when there's actual content to persist.
+                    if not completed and response_string:
+                        from intric.sessions.session_service import (
+                            persist_partial_question_answer,
+                            safe_count_tokens,
+                            schedule_background_save,
+                        )
 
-                # NOTE: refactor question_token_count to include the whole contructed prompt.
-                question_token_count = count_tokens(question)
-                token_count = count_tokens(response)
-                await self.session_service.add_question_to_session(
-                    question=question,
-                    answer=response,
-                    num_tokens_question=question_token_count + assistant_selector_tokens,
-                    num_tokens_answer=token_count,
-                    session=session,
-                    completion_model=completion_model,
-                    info_blob_chunks=[],
-                    files=[],
-                    logging_details=None,
-                )
+                        partial_tokens_answer = safe_count_tokens(
+                            response_string, completion_model.name
+                        )
+                        schedule_background_save(
+                            persist_partial_question_answer(
+                                tenant_id=tenant_id,
+                                question_id=question_id,
+                                answer=response_string,
+                                num_tokens_answer=partial_tokens_answer,
+                            )
+                        )
 
             return response_stream()
         else:
             # NOTE: refactor question_token_count to include the whole contructed prompt.
-            question_token_count = count_tokens(question)
-            token_count = count_tokens(response)
-            await self.session_service.add_question_to_session(
-                question=question,
+            question_token_count = count_tokens(question, completion_model.name)
+            token_count = count_tokens(response, completion_model.name)
+            await self.session_service.complete_question_with_answer(
+                question_id=question_id,
                 answer=response,
                 num_tokens_question=question_token_count + assistant_selector_tokens,
                 num_tokens_answer=token_count,
-                session=session,
-                completion_model=completion_model,
+                completion_model=completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
                 info_blob_chunks=[],
-                files=[],
                 logging_details=None,
-                assistant_id=None,
             )
             return response
 
@@ -337,8 +436,8 @@ class GroupChatService:
         self,
         question: str,
         group_chat_id: "UUID",
-        session_id: "UUID" = None,
-        file_ids: list["UUID"] = [],
+        session_id: Optional["UUID"] = None,
+        file_ids: Optional[list["UUID"]] = None,
         stream: bool = False,
         version: int = 1,
         tool_assistant_id: Optional["UUID"] = None,
@@ -376,7 +475,9 @@ class GroupChatService:
                 assistant.assistant.id for assistant in group_chat.assistants
             ]
             if tool_assistant_id not in group_chat_assistant_ids:
-                raise BadRequestException("The specified assistant is not part of this group chat")
+                raise BadRequestException(
+                    "The specified assistant is not part of this group chat"
+                )
 
             assistant_to_ask = tool_assistant_id
         else:
@@ -385,6 +486,7 @@ class GroupChatService:
             selection_result = await self._select_assistant_with_completion_model(
                 question, group_chat.assistants, session
             )
+            assert selection_result is not None
             response_from_selector = selection_result.response_str
             if selection_result.assistant:
                 assistant_to_ask = selection_result.assistant.assistant.id
@@ -392,12 +494,30 @@ class GroupChatService:
                 assistant_to_ask = None
 
         if assistant_to_ask is None:
+            assert selection_result is not None
+            assert (
+                response_from_selector is not None
+            )  # set above whenever selection_result is set
+            first_completion_model = group_chat.assistants[0].assistant.completion_model
+            assert (
+                first_completion_model is not None
+            )  # assistant must have a model to be usable
+            # Persist a placeholder Question row before the selector echo streams out, so
+            # the user's question survives even if the stream is aborted.
+            question_id = await self.session_service.create_question_placeholder(
+                question=question,
+                session=session,
+                files=[],
+                assistant_id=None,
+                completion_model=first_completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
+            )
             final_response = await self._handle_response(
                 response=response_from_selector,
                 question=question,
-                completion_model=group_chat.assistants[0].assistant.completion_model,
+                completion_model=first_completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
                 session=session,
                 stream=stream,
+                question_id=question_id,
                 assistant_selector_tokens=selection_result.assistant_selector_tokens,
             )
             response = AssistantResponse(
@@ -406,10 +526,11 @@ class GroupChatService:
                 session=session,
                 answer=final_response,
                 info_blobs=[],
-                completion_model=group_chat.assistants[0].assistant.completion_model,
+                completion_model=first_completion_model,  # pyright: ignore[reportArgumentType]  # domain.CompletionModel vs ai_models.CompletionModel; structurally compatible at runtime
                 tools=UseTools(assistants=[]),
                 description=None,
                 web_search_results=[],
+                question_id=question_id,
             )
         else:
             response = await self.assistant_service.ask(
@@ -417,7 +538,7 @@ class GroupChatService:
                 assistant_id=assistant_to_ask,
                 group_chat_id=group_chat_id,
                 session_id=session_id,
-                file_ids=file_ids,
+                file_ids=file_ids or [],
                 stream=stream,
                 version=version,
                 assistant_selector_tokens=selection_result.assistant_selector_tokens
@@ -428,19 +549,32 @@ class GroupChatService:
             # ensure the response tools contain which assistant answered
             # get the assistant name for the handle
             selected_assistant = group_chat.get_assistant_by_id(assistant_to_ask)
+            assert selected_assistant is not None
             assistant_name = selected_assistant.assistant.name
 
             # set assistant info in tools
-            response.tools.assistants = [ToolAssistant(id=assistant_to_ask, handle=assistant_name)]
+            response.tools.assistants = [
+                ToolAssistant(id=assistant_to_ask, handle=assistant_name)
+            ]
 
         return response
 
     async def publish_group_chat(self, group_chat_id: "UUID", publish: bool):
-        space = await self.space_repo.get_space_by_group_chat(group_chat_id=group_chat_id)
+        space = await self.space_repo.get_space_by_group_chat(
+            group_chat_id=group_chat_id
+        )
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_publish_group_chats():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "Publishing group chats is not allowed for your current space role.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "group_chat",
+                    "action": "publish",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         group_chat = space.get_group_chat(group_chat_id=group_chat_id)
 

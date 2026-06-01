@@ -14,19 +14,27 @@
  * }
  * ```
  */
+/**
+ * Helper type to extract the non-null, non-undefined part of a type.
+ * This allows CompareOptions to work with nullable fields like `{ id: string } | null`.
+ */
+type StripNullish<T> = T extends null | undefined ? never : T;
+
 export type CompareOptions<T> = {
   [K in keyof T]?:  // For primitive values or when comparing the whole value
     | true
 
     // For arrays of objects: specify which fields to compare in each item
-    | (T[K] extends Array<infer ArrayItem>
+    | (StripNullish<T[K]> extends Array<infer ArrayItem>
         ? ArrayItem extends Record<string, unknown>
           ? (keyof ArrayItem)[]
           : never
         : never)
 
     // For nested objects: recursive structure
-    | (T[K] extends Record<string, unknown> ? CompareOptions<T[K]> : never);
+    | (StripNullish<T[K]> extends Record<string, unknown>
+        ? CompareOptions<StripNullish<T[K]>>
+        : never);
 };
 
 /**

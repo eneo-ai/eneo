@@ -16,6 +16,8 @@
   import { IconLoadingSpinner } from "@intric/icons/loading-spinner";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
+  import { untrack } from "svelte";
 
   type Member = Space["members"]["items"][number];
   type RoleOption = { label: string; value: SpaceRole["value"] };
@@ -44,7 +46,7 @@
       fitViewport: true,
       sameWidth: false
     },
-    defaultSelected: { value: member.role }
+    defaultSelected: untrack(() => ({ value: member.role }))
   });
 
   // After changing the role we update with the passed prop as source of truth
@@ -59,7 +61,7 @@
       // Will cause an update in the parent page and remove this component instance form the tree
       refreshCurrentSpace();
     } catch (e) {
-      alert(m.couldnt_remove_user());
+      toastError(e, m.couldnt_remove_user());
       console.error(e);
     }
   });
@@ -73,7 +75,7 @@
       // Await refreshing as that will update the actual label
       await refreshCurrentSpace();
     } catch (e) {
-      alert(m.couldnt_change_role());
+      toastError(e, m.couldnt_change_role());
       console.error(e);
       // Reset selected
       $selected = { value: member.role };

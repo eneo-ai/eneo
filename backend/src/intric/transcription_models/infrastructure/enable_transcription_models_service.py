@@ -15,7 +15,8 @@ if TYPE_CHECKING:
 
 
 class TranscriptionModelEnableService:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__()
         self.session = session
 
     async def get_model_id_by_name(self, model_name: str) -> "TranscriptionModel":
@@ -28,7 +29,7 @@ class TranscriptionModelEnableService:
         if not result:
             raise ValueError(f"Transcription model with name '{model_name}' not found")
 
-        return result.id
+        return result.id  # type: ignore[return-value]
 
     async def enable_transcription_model(
         self,

@@ -3,6 +3,7 @@ Fixtures for assistants (mirrors src/intric/assistants/).
 
 These fixtures create assistants with completion models.
 """
+
 from typing import Any, Dict
 from uuid import UUID
 
@@ -38,12 +39,13 @@ def assistant_factory(admin_user):
     Returns:
         Assistants: The created assistant
     """
+
     async def _create_assistant(
         session,
         name: str,
         completion_model_id: UUID,
         kwargs: Dict[str, Any] = None,
-        **extra
+        **extra,
     ) -> Assistants:
         """Create an assistant with the specified model."""
         if kwargs is None:
@@ -62,7 +64,7 @@ def assistant_factory(admin_user):
             user_id=admin_user.id,
             completion_model_id=completion_model_id,
             completion_model_kwargs=kwargs,
-            **defaults
+            **defaults,
         )
 
         session.add(assistant)

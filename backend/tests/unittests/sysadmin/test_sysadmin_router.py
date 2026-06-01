@@ -16,9 +16,9 @@ import pytest
 
 from intric.main.exceptions import NotFoundException
 from intric.sysadmin.sysadmin_router import (
+    delete_user,
     get_access_token,
     get_user,
-    delete_user,
     update_user,
 )
 from intric.users.user import UserUpdatePublic

@@ -11,7 +11,7 @@
 </script>
 
 <Input.Checkbox
-  checked={checked}
+  {checked}
   onCheckedChange={() => onToggle(websiteId)}
   ariaLabel={`Select ${websiteName}`}
 />

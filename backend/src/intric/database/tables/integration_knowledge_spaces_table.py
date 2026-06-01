@@ -15,7 +15,8 @@ class IntegrationKnowledgesSpaces(BaseCrossReference):
     it can be distributed to all child spaces (tenant_space_id = org_space_id)
     via this many-to-many relationship, similar to GroupsSpaces and WebsitesSpaces.
     """
-    __tablename__ = "integration_knowledge_spaces"
+
+    __tablename__ = "integration_knowledge_spaces"  # type: ignore[assignment]
 
     integration_knowledge_id: Mapped[UUID] = mapped_column(
         ForeignKey(IntegrationKnowledge.id, ondelete="CASCADE"),

@@ -64,9 +64,7 @@ class HttpAuthCredentials:
             raise ValueError(f"Cannot extract domain from URL: {website_url}")
 
         return cls(
-            username=username.strip(),
-            password=password,
-            auth_domain=auth_domain
+            username=username.strip(), password=password, auth_domain=auth_domain
         )
 
     def to_scrapy_kwargs(self) -> dict[str, str]:

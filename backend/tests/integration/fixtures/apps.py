@@ -3,6 +3,7 @@ Fixtures for apps (mirrors src/intric/apps/).
 
 These fixtures create apps with completion models.
 """
+
 from uuid import UUID
 
 import pytest
@@ -32,12 +33,9 @@ def app_factory(admin_user, space_factory):
     Returns:
         Apps: The created app
     """
+
     async def _create_app(
-        session,
-        name: str,
-        completion_model_id: UUID,
-        space_id: UUID = None,
-        **extra
+        session, name: str, completion_model_id: UUID, space_id: UUID = None, **extra
     ) -> Apps:
         """Create an app with the specified model."""
         # Create a default space if not provided (Apps require a space)
@@ -57,7 +55,7 @@ def app_factory(admin_user, space_factory):
             user_id=admin_user.id,
             space_id=space_id,
             completion_model_id=completion_model_id,
-            **defaults
+            **defaults,
         )
 
         session.add(app)

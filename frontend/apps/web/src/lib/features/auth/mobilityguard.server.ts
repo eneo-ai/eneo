@@ -10,6 +10,7 @@
 
 import { dev } from "$app/environment";
 import { env } from "$env/dynamic/private";
+import { getBackendUrl } from "$lib/core/environment.server";
 import type { Cookies } from "@sveltejs/kit";
 import { createCodePair, encodeState, setFrontendAuthCookie } from "./auth.server";
 import { getRequestEvent } from "$app/server";
@@ -27,24 +28,24 @@ const scopes = ["openid", "email"];
  * @throws Error if PUBLIC_ORIGIN is not configured
  */
 function getPublicOrigin(): string {
-  if (!env.PUBLIC_ORIGIN) {
+  const publicOrigin = (env as Record<string, string | undefined>).PUBLIC_ORIGIN;
+  if (!publicOrigin) {
     throw new Error(
-      '[OIDC] PUBLIC_ORIGIN environment variable is required for OIDC authentication. ' +
-      'Set it to the externally-reachable URL for this application. ' +
-      'Example: PUBLIC_ORIGIN=https://eneo.sundsvall.se'
+      "[OIDC] PUBLIC_ORIGIN environment variable is required for OIDC authentication. " +
+        "Set it to the externally-reachable URL for this application. " +
+        "Example: PUBLIC_ORIGIN=https://eneo.sundsvall.se"
     );
   }
 
   // Validate format (basic check)
-  if (!env.PUBLIC_ORIGIN.startsWith('https://')) {
+  if (!publicOrigin.startsWith("https://")) {
     throw new Error(
-      '[OIDC] PUBLIC_ORIGIN must be an https:// URL for security. ' +
-      `Got: ${env.PUBLIC_ORIGIN}`
+      "[OIDC] PUBLIC_ORIGIN must be an https:// URL for security. " + `Got: ${publicOrigin}`
     );
   }
 
   // Remove trailing slash if present
-  return env.PUBLIC_ORIGIN.replace(/\/$/, '');
+  return publicOrigin.replace(/\/$/, "");
 }
 
 export async function getMobilityguardLink(event: { url: URL; cookies: Cookies }) {
@@ -115,7 +116,7 @@ export async function loginWithMobilityguard(code: string): Promise<boolean> {
     hasCode: !!code,
     hasCodeVerifier: !!code_verifier,
     redirectUri: `${getPublicOrigin()}/login/callback`,
-    backendUrl: env.INTRIC_BACKEND_URL
+    backendUrl: getBackendUrl()
   });
 
   const body = JSON.stringify({
@@ -126,7 +127,7 @@ export async function loginWithMobilityguard(code: string): Promise<boolean> {
     client_id: env.MOBILITYGUARD_CLIENT_ID
   });
 
-  const backendUrl = `${env.INTRIC_BACKEND_URL}/api/v1/users/login/openid-connect/mobilityguard/`;
+  const backendUrl = `${getBackendUrl()}/api/v1/users/login/openid-connect/mobilityguard/`;
   console.debug("[OIDC] Calling backend (MobilityGuard)", {
     url: backendUrl,
     redirectUri: `${getPublicOrigin()}/login/callback`

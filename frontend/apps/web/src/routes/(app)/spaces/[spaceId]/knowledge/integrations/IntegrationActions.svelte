@@ -8,6 +8,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
 
   export let knowledgeItem: IntegrationKnowledge;
 
@@ -32,7 +33,7 @@
       refreshCurrentSpace();
       $showDeleteDialog = false;
     } catch (e) {
-      alert(m.integration_delete_error());
+      toastError(e, m.integration_delete_error());
       console.error(e);
     }
     isDeleting = false;
@@ -49,7 +50,7 @@
       refreshCurrentSpace();
       $showRenameDialog = false;
     } catch (e) {
-      alert(m.integration_rename_error());
+      toastError(e, m.integration_rename_error());
       console.error(e);
     }
     isRenaming = false;

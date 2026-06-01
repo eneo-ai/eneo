@@ -25,11 +25,13 @@ import asyncio
 import logging
 import random
 import time
-from typing import TYPE_CHECKING, Any, Callable, TypedDict
+from collections.abc import Awaitable
+from typing import TYPE_CHECKING, Any, Callable, TypeVar, cast
 from uuid import UUID
 
 from dependency_injector import providers
 from sqlalchemy.exc import InvalidRequestError, PendingRollbackError
+from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
     import redis.asyncio as aioredis
@@ -38,6 +40,7 @@ if TYPE_CHECKING:
     from intric.main.container.container import Container
 
 logger = logging.getLogger(__name__)
+TResult = TypeVar("TResult")
 
 __all__ = [
     # Type definitions
@@ -61,7 +64,7 @@ class SessionHolder(TypedDict):
     reference without changing function signatures.
     """
 
-    session: Any  # AsyncSession - using Any to avoid import issues
+    session: "AsyncSession | None"
     uploader: Any  # TextProcessor
 
 
@@ -176,7 +179,8 @@ async def recover_session(
     created_sessions.append(new_session)
 
     # 4. Update container to use new session
-    container.session.override(providers.Object(new_session))
+    session_provider: Any = container.session
+    session_provider.override(providers.Object(new_session))
 
     # Get fresh uploader with new session
     new_uploader = container.text_processor()
@@ -194,8 +198,8 @@ async def execute_with_recovery(
     session_holder: SessionHolder,
     created_sessions: list["AsyncSession"],
     operation_name: str,
-    operation: Callable[..., Any],
-) -> Any:
+    operation: Callable[["AsyncSession"], Awaitable[TResult]],
+) -> TResult:
     """Execute a database operation with its own short-lived session.
 
     NEW ARCHITECTURE (Session-per-Operation Pattern):
@@ -460,25 +464,39 @@ async def update_job_retry_stats(
             else:
                 pipe.get(count_key)  # Just read current value
 
-            results = await pipe.execute()
+            results: list[object] = cast(list[object], await pipe.execute())
 
         # Parse results
         # results[0] = True/False (whether SET succeeded)
         # results[1] = start_time (bytes)
         # results[2] = retry_count (int if incr, bytes if get)
 
-        start_time_bytes = results[1]
-        retry_count_val = results[2]
+        start_time_raw: object | None = results[1] if len(results) > 1 else None
+        retry_count_raw: object | None = results[2] if len(results) > 2 else None
 
         # Decode Redis bytes to Python types
-        start_ts = float(start_time_bytes.decode()) if start_time_bytes else now
+        if isinstance(start_time_raw, bytes):
+            start_ts = float(start_time_raw.decode())
+        elif isinstance(start_time_raw, str):
+            start_ts = float(start_time_raw)
+        else:
+            start_ts = now
 
         if is_actual_failure:
             # INCR returns int
-            retry_count = int(retry_count_val) if retry_count_val else 1
+            retry_count = (
+                int(retry_count_raw) if isinstance(retry_count_raw, int) else 1
+            )
         else:
             # GET returns bytes or None
-            retry_count = int(retry_count_val.decode()) if retry_count_val else 0
+            if isinstance(retry_count_raw, bytes):
+                retry_count = int(retry_count_raw.decode())
+            elif isinstance(retry_count_raw, str):
+                retry_count = int(retry_count_raw)
+            elif isinstance(retry_count_raw, int):
+                retry_count = retry_count_raw
+            else:
+                retry_count = 0
 
         age_seconds = now - start_ts
         return retry_count, age_seconds

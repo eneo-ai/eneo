@@ -23,7 +23,7 @@
     isProcessing = true;
     try {
       await intric.users.delete(user);
-      invalidate("admin:users");  // Stable dependency key
+      invalidate("admin:users"); // Stable dependency key
       $showDeleteDialog = false;
     } catch (e) {
       console.error(e);
@@ -34,7 +34,7 @@
   async function deactivateUser() {
     try {
       await intric.users.deactivate({ user: { username: user.username } });
-      invalidate("admin:users");  // Stable dependency key
+      invalidate("admin:users"); // Stable dependency key
     } catch (e) {
       console.error(e);
     }
@@ -43,7 +43,7 @@
   async function reactivateUser() {
     try {
       await intric.users.reactivate({ user: { username: user.username } });
-      invalidate("admin:users");  // Stable dependency key
+      invalidate("admin:users"); // Stable dependency key
     } catch (e) {
       console.error(e);
     }
@@ -52,21 +52,17 @@
   const { user: currentUser } = getAppContext();
 
   // Determine button visibility based on user state
-  const isActive = $derived(user.state === 'active' || user.state === 'invited');
-  const isInactive = $derived(user.state === 'inactive');
+  const isActive = $derived(user.state === "active" || user.state === "invited");
+  const isInactive = $derived(user.state === "inactive");
 
-  let isProcessing = false;
-  let showEditDialog: Dialog.OpenState;
-  let showDeleteDialog: Dialog.OpenState;
+  let isProcessing = $state(false);
+  let showEditDialog = $state<Dialog.OpenState | undefined>(undefined);
+  let showDeleteDialog = $state<Dialog.OpenState | undefined>(undefined);
 </script>
 
 <Dropdown.Root>
   <Dropdown.Trigger asFragment let:trigger>
-    <Button
-      is={trigger}
-      padding="icon"
-      aria-label={m.actions()}
-    >
+    <Button is={trigger} padding="icon" aria-label={m.actions()}>
       <MoreVertical size={16} />
     </Button>
   </Dropdown.Trigger>
@@ -99,11 +95,7 @@
 
     <!-- Reactivate - only for inactive users -->
     {#if isInactive}
-      <Button
-        is={item}
-        padding="icon-leading"
-        on:click={reactivateUser}
-      >
+      <Button is={item} padding="icon-leading" on:click={reactivateUser}>
         <UserPlus size={16} />
         {m.reactivate_user()}
       </Button>

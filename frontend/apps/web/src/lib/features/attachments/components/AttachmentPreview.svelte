@@ -5,6 +5,7 @@
   import { Button, Dialog, Markdown } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
 
   import type { Snippet } from "svelte";
 
@@ -24,11 +25,12 @@
   // Text files include plain text, PDFs, DOCX, PPTX, etc. (all are returned as text from backend)
   const isTextFile =
     (file.mimetype?.includes("text") ||
-    file.mimetype?.includes("pdf") ||
-    file.mimetype?.includes("document") ||
-    file.mimetype?.includes("presentation") ||
-    file.mimetype?.includes("msword") ||
-    file.mimetype?.includes("officedocument")) ?? false;
+      file.mimetype?.includes("pdf") ||
+      file.mimetype?.includes("document") ||
+      file.mimetype?.includes("presentation") ||
+      file.mimetype?.includes("msword") ||
+      file.mimetype?.includes("officedocument")) ??
+    false;
   const isImageFile = file.mimetype?.includes("image") ?? false;
   const isAudioFile = file.mimetype?.includes("audio") ?? false;
 
@@ -58,7 +60,7 @@
     } catch (e) {
       loadError = true;
       console.error("Error loading file:", e);
-      alert(m.error_loading_file());
+      toast.error(m.error_loading_file());
     } finally {
       loadingFile = false;
     }
@@ -80,7 +82,7 @@
       window.open(response.url, "_blank");
     } catch (e) {
       console.error("Error generating download URL:", e);
-      alert(m.error_downloading_file());
+      toast.error(m.error_downloading_file());
     }
   }
 
@@ -129,23 +131,24 @@
 
   <Dialog.Content width="medium">
     <Dialog.Title>{file.name}</Dialog.Title>
-    <Dialog.Description hidden>File preview for {file.name}</Dialog.Description>
+    <Dialog.Description hidden
+      >{m.attachment_file_preview_for({ name: file.name })}</Dialog.Description
+    >
 
     <Dialog.Section scrollable>
       <div class="p-4">
         {#if loadingFile}
-          <pre>Loading...</pre>
+          <pre>{m.loading()}</pre>
         {:else if loadError}
-          <pre>Error loading content. Please try again.</pre>
+          <pre>{m.attachment_error_loading_content()}</pre>
         {:else if isTextFile && loadedContent}
           <Markdown source={loadedContent}></Markdown>
         {:else if isImageFile && signedUrl}
           <img src={signedUrl} alt={file.name} class="max-w-full rounded-lg" />
         {:else if isAudioFile && signedUrl}
-          <!-- svelte-ignore a11y-media-has-caption -->
           <audio controls class="w-full">
             <source src={signedUrl} type={file.mimetype} />
-            Your browser does not support the audio element.
+            {m.attachment_audio_not_supported()}
           </audio>
         {:else}
           <div class="text-center">

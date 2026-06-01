@@ -2,17 +2,26 @@ import logging
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from intric.integration.application.tenant_sharepoint_app_service import TenantSharePointAppService
+from intric.integration.application.tenant_sharepoint_app_service import (
+    TenantSharePointAppService,
+)
 from intric.integration.domain.entities.oauth_token import SharePointToken
 from intric.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountAuthService,
 )
-from intric.integration.infrastructure.auth_service.sharepoint_auth_service import SharepointAuthService
-from intric.integration.infrastructure.auth_service.tenant_app_auth_service import TenantAppAuthService
+from intric.integration.infrastructure.auth_service.sharepoint_auth_service import (
+    SharepointAuthService,
+)
+from intric.integration.infrastructure.auth_service.tenant_app_auth_service import (
+    TenantAppAuthService,
+)
 from intric.integration.infrastructure.oauth_token_service import OauthTokenService
+from intric.integration.presentation.models import IntegrationType
 
 if TYPE_CHECKING:
-    from intric.integration.domain.entities.tenant_sharepoint_app import TenantSharePointApp
+    from intric.integration.domain.entities.tenant_sharepoint_app import (
+        TenantSharePointApp,
+    )
     from intric.integration.domain.entities.user_integration import UserIntegration
     from intric.spaces.space import Space
 
@@ -39,18 +48,19 @@ class SharePointAuthRouter:
         tenant_app_auth_service: TenantAppAuthService,
         oauth_token_service: OauthTokenService,
         service_account_auth_service: Optional[ServiceAccountAuthService] = None,
-    ):
+    ) -> None:
+        super().__init__()
         self.user_oauth_service = user_oauth_service
         self.tenant_app_service = tenant_app_service
         self.tenant_app_auth_service = tenant_app_auth_service
         self.oauth_token_service = oauth_token_service
-        self.service_account_auth_service = service_account_auth_service or ServiceAccountAuthService()
+        self.service_account_auth_service = (
+            service_account_auth_service or ServiceAccountAuthService()
+        )
 
     async def get_token_for_integration(
-        self,
-        user_integration: "UserIntegration",
-        space: "Space"
-    ) -> SharePointToken:
+        self, user_integration: "UserIntegration", space: "Space"
+    ) -> SharePointToken | None:
         """Get an appropriate SharePoint token based on space type and integration config.
 
         Args:
@@ -87,9 +97,7 @@ class SharePointAuthRouter:
                 return await self._get_user_oauth_token(user_integration)
 
     async def get_token_by_auth_type(
-        self,
-        user_integration: "UserIntegration",
-        auth_type: str
+        self, user_integration: "UserIntegration", auth_type: str
     ) -> SharePointToken:
         """Get token based on explicit auth type (for migrations and admin operations).
 
@@ -102,16 +110,20 @@ class SharePointAuthRouter:
         """
         if auth_type == "tenant_app":
             if not user_integration.tenant_app_id:
-                raise ValueError(f"Integration {user_integration.id} has no tenant_app_id")
+                raise ValueError(
+                    f"Integration {user_integration.id} has no tenant_app_id"
+                )
 
             # Note: This is a bit hacky - ideally we'd inject the repo
-            if hasattr(user_integration, 'tenant_app') and user_integration.tenant_app:
+            if hasattr(user_integration, "tenant_app") and user_integration.tenant_app:  # type: ignore[attr-defined]
                 return await self._get_tenant_app_token(
-                    user_integration.tenant_app,
-                    user_integration
+                    user_integration.tenant_app,  # type: ignore[attr-defined]
+                    user_integration,
                 )
             else:
-                raise ValueError(f"Cannot load tenant_app for integration {user_integration.id}")
+                raise ValueError(
+                    f"Cannot load tenant_app for integration {user_integration.id}"
+                )
 
         elif auth_type == "user_oauth":
             return await self._get_user_oauth_token(user_integration)
@@ -119,24 +131,25 @@ class SharePointAuthRouter:
             raise ValueError(f"Invalid auth_type: {auth_type}")
 
     async def _get_user_oauth_token(
-        self,
-        user_integration: "UserIntegration"
+        self, user_integration: "UserIntegration"
     ) -> SharePointToken:
         """Get token using user OAuth (delegated permissions)."""
         logger.debug(
             "Fetching user OAuth token",
-            extra={"user_integration_id": str(user_integration.id)}
+            extra={"user_integration_id": str(user_integration.id)},
         )
 
         try:
-            oauth_token = await self.oauth_token_service.get_oauth_token_by_user_integration(
-                user_integration.id
+            oauth_token = (
+                await self.oauth_token_service.get_oauth_token_by_user_integration(
+                    user_integration.id
+                )
             )
         except Exception as e:
             logger.error(
                 f"Failed to fetch OAuth token from database: {type(e).__name__}: {str(e)}",
                 extra={"user_integration_id": str(user_integration.id)},
-                exc_info=True
+                exc_info=True,
             )
             raise ValueError(
                 f"Failed to retrieve OAuth token for user integration {user_integration.id}"
@@ -148,7 +161,7 @@ class SharePointAuthRouter:
                 extra={
                     "user_integration_id": str(user_integration.id),
                     "auth_type": user_integration.auth_type,
-                }
+                },
             )
             raise ValueError(
                 f"No OAuth token found for user integration {user_integration.id}. "
@@ -160,8 +173,10 @@ class SharePointAuthRouter:
             extra={
                 "token_id": str(oauth_token.id),
                 "has_resources": bool(oauth_token.resources),
-                "resource_count": len(oauth_token.resources) if oauth_token.resources else 0,
-            }
+                "resource_count": len(oauth_token.resources)
+                if oauth_token.resources
+                else 0,
+            },
         )
 
         return SharePointToken(
@@ -176,9 +191,7 @@ class SharePointAuthRouter:
         )
 
     async def _get_tenant_app_token(
-        self,
-        tenant_app: "TenantSharePointApp",
-        user_integration: "UserIntegration"
+        self, tenant_app: "TenantSharePointApp", user_integration: "UserIntegration"
     ) -> SharePointToken:
         """Get token using tenant app or service account based on auth_method.
 
@@ -191,14 +204,16 @@ class SharePointAuthRouter:
                 "tenant_app_id": str(tenant_app.id),
                 "auth_method": tenant_app.auth_method,
                 "tenant_id": str(tenant_app.tenant_id),
-            }
+            },
         )
 
         try:
             if tenant_app.is_service_account():
                 # Service account: delegated permissions via refresh token
-                token_response = await self.service_account_auth_service.refresh_access_token(
-                    tenant_app
+                token_response = (
+                    await self.service_account_auth_service.refresh_access_token(
+                        tenant_app
+                    )
                 )
                 access_token = token_response["access_token"]
 
@@ -217,17 +232,19 @@ class SharePointAuthRouter:
                     extra={
                         "tenant_app_id": str(tenant_app.id),
                         "service_account_email": tenant_app.service_account_email,
-                    }
+                    },
                 )
             else:
                 # Tenant app: application permissions via client credentials
-                access_token = await self.tenant_app_auth_service.get_access_token(tenant_app)
+                access_token = await self.tenant_app_auth_service.get_access_token(
+                    tenant_app
+                )
                 logger.info(
                     "Tenant app token acquired successfully",
                     extra={
                         "tenant_app_id": str(tenant_app.id),
                         "has_token": bool(access_token),
-                    }
+                    },
                 )
         except Exception as e:
             logger.error(
@@ -236,7 +253,7 @@ class SharePointAuthRouter:
                     "tenant_app_id": str(tenant_app.id),
                     "auth_method": tenant_app.auth_method,
                 },
-                exc_info=True
+                exc_info=True,
             )
             raise ValueError(
                 f"Failed to acquire access token for tenant app {tenant_app.id} "
@@ -246,19 +263,15 @@ class SharePointAuthRouter:
         return SharePointToken(
             access_token=access_token,
             refresh_token="",
-            token_type=user_integration.tenant_integration.integration.integration_type,
+            token_type=IntegrationType.Sharepoint,
             user_integration=user_integration,
-            resources={},
+            resources=[],
             id=None,
             created_at=None,
             updated_at=None,
         )
 
-    async def should_use_tenant_app(
-        self,
-        tenant_id: UUID,
-        space: "Space"
-    ) -> bool:
+    async def should_use_tenant_app(self, tenant_id: UUID, space: "Space") -> bool:
         """Check if tenant app auth should be used for a space.
 
         Returns:

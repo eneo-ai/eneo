@@ -38,7 +38,7 @@ graph LR
 
     LiteLLM["LiteLLM Adapter<br/>Unified AI Interface"]
 
-    AI["AI Providers<br/>(OpenAI, Anthropic, Azure,<br/>vLLM, Berget, Local Models)"]
+    AI["AI Providers<br/>(OpenAI, Anthropic, Azure,<br/>vLLM, any LiteLLM provider)"]
     IdP["Identity Providers<br/>(Optional: Entra ID,<br/>Auth0, MobilityGuard)"]
 
     Users -->|Create spaces,<br/>ask questions| Eneo
@@ -476,7 +476,7 @@ Eneo supports enterprise multi-tenancy with complete data isolation, per-tenant 
 
 **Federation Configuration:**
 ```bash
-# Example: Entra ID for a municipality
+# Example: Entra ID for a municipality (full replacement / new federation)
 PUT /api/v1/sysadmin/tenants/{tenant_id}/federation
 {
   "provider": "entra_id",
@@ -486,7 +486,13 @@ PUT /api/v1/sysadmin/tenants/{tenant_id}/federation
   "allowed_domains": ["municipality.gov"]
 }
 
-# Example: MobilityGuard
+# Example: Update the current federation without resending all fields
+PATCH /api/v1/sysadmin/tenants/{tenant_id}/federation
+{
+  "allowed_domains": ["municipality.gov", "municipality.se"]
+}
+
+# Example: MobilityGuard (full replacement / new federation)
 PUT /api/v1/sysadmin/tenants/{tenant_id}/federation
 {
   "provider": "mobilityguard",
@@ -502,16 +508,20 @@ PUT /api/v1/sysadmin/tenants/{tenant_id}/federation
 - **Shared Mode** (`TENANT_CREDENTIALS_ENABLED=false`) - All tenants use global API keys
 - **Strict Mode** (`TENANT_CREDENTIALS_ENABLED=true`) - Each tenant configures encrypted credentials
 
-Supported providers: OpenAI, Anthropic, Azure, vLLM, Berget, Mistral. All credentials encrypted with Fernet using `ENCRYPTION_KEY`. Additional encrypted data includes crawler HTTP auth and custom integration secrets.
+Any LiteLLM-supported provider can be used (OpenAI, Anthropic, Azure, vLLM, Mistral, and [100+ others](https://docs.litellm.ai/docs/providers)). Custom providers can be added via provider classes. All credentials encrypted with Fernet using `ENCRYPTION_KEY`. Additional encrypted data includes crawler HTTP auth and custom integration secrets.
 
 Configure via: `PUT /api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}`
 
 **See Also:**
 - [Federation Per Tenant](./FEDERATION_PER_TENANT.md) - IdP architecture
-- [Multi-Tenant Credentials](./MULTI_TENANT_CREDENTIALS.md) - Detailed credential management
+- [AI Providers](https://docs.eneo.ai/guides/ai-providers) - Provider configuration & credential management
 - [Multi-Tenant OIDC Setup](./MULTITENANT_OIDC_SETUP_GUIDE.md) - Provisioning guide
 
 ### Observability & Debugging
+
+**Structured logs and distributed tracing:**
+
+Eneo emits OpenTelemetry-shaped NDJSON logs to STDOUT with `trace_id` / `span_id` / `severity_number` per the OTel Logs Data Model. FastAPI, SQLAlchemy, Redis, `httpx`, and `aiohttp` are auto-instrumented; the W3C `traceparent` header is honored on inbound requests and propagated on outbound backend-to-backend calls. `X-Trace-Id` is set on every HTTP response (including 4xx and 5xx) for end-to-end support correlation. See [OBSERVABILITY.md](./OBSERVABILITY.md) for the full schema, ID contract, and Kubernetes log-collection reference setup.
 
 **OIDC Debug Toggle:**
 
@@ -526,9 +536,11 @@ POST /api/v1/sysadmin/observability/oidc-debug/
 }
 ```
 
-**Workflow:** Enable toggle → Reproduce issue → Capture `correlationId` from UI → Filter logs: `journalctl | jq 'select(.correlation_id=="abc123")'` → Identify misconfiguration → Disable toggle
+**Workflow:** Enable toggle → Reproduce issue → Capture `trace_id` from `X-Trace-Id` response header (or legacy `X-Correlation-ID`) → Filter logs: `journalctl | jq 'select(.trace_id=="abc123")'` → Identify misconfiguration → Disable toggle
 
-**See Also:** [Multi-Tenant OIDC Setup Guide](./MULTITENANT_OIDC_SETUP_GUIDE.md#3-runtime-debugging-correlation-id-based)
+**See Also:**
+- [OBSERVABILITY.md](./OBSERVABILITY.md) for trace flow, log format, and redaction policy
+- [Multi-Tenant OIDC Setup Guide](./MULTITENANT_OIDC_SETUP_GUIDE.md#3-runtime-debugging-correlation-id-based)
 
 ---
 
@@ -616,21 +628,22 @@ sequenceDiagram
 
 ## AI Integration
 
-### Multi-Provider Architecture
+### LiteLLM-Based Provider Management
 
-Eneo supports multiple AI providers through a unified interface, allowing organizations to choose providers based on their needs, compliance requirements, and budget.
+Eneo routes all AI requests through **LiteLLM**, supporting 60+ providers (OpenAI, Anthropic, Azure, Google Gemini, Mistral, Cohere, and many more) with a unified API. Providers are managed per-tenant through the Admin UI and API — no environment variables or restarts needed.
 
-**Supported Providers:**
-- **OpenAI**: GPT models for general-purpose AI
-- **Anthropic**: Claude models for advanced reasoning
-- **Azure OpenAI**: Enterprise-grade OpenAI models
-- **Local Models**: Self-hosted models for data sovereignty
+**How It Works:**
+- Eneo reads LiteLLM's model registry to discover available providers and models
+- Admins add providers via an Admin UI wizard: select provider type, enter credentials, pick models
+- Each tenant can configure multiple providers with isolated, encrypted credentials
+- For self-hosted or unlisted providers, the `hosted_vllm` type supports any OpenAI-compatible API
 
 **Key Features:**
-- **Provider Switching**: Change AI providers without code changes
-- **Cost Optimization**: Automatic model selection based on cost/performance
-- **Fallback Support**: Automatic failover if primary provider is unavailable
-- **Usage Tracking**: Monitor costs and performance across providers
+- **Dynamic Configuration**: Add/remove providers and models through UI without restarts
+- **Per-Tenant Isolation**: Each tenant manages their own providers and credentials
+- **Model Discovery**: Automatic model listing from provider APIs
+- **Connection Testing**: Validate credentials and connectivity before going live
+- **Encrypted Credentials**: All API keys encrypted at rest with Fernet
 
 ---
 

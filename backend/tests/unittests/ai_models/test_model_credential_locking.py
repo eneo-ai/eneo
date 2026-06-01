@@ -12,12 +12,6 @@ from uuid import uuid4
 
 
 from intric.completion_models.domain.completion_model import CompletionModel
-from intric.ai_models.model_enums import (
-    ModelFamily,
-    ModelHostingLocation,
-    ModelOrg,
-    ModelStability,
-)
 
 
 class MockSettings:
@@ -49,7 +43,9 @@ class MockUser:
 class TestModelCredentialLocking:
     """Test suite for model credential status tracking via lock_reason."""
 
-    def test_openai_model_shows_credential_warning_when_no_credentials(self, monkeypatch):
+    def test_openai_model_shows_credential_warning_when_no_credentials(
+        self, monkeypatch
+    ):
         """
         OpenAI model should report missing credentials via lock_reason for UI display,
         but should not be locked (is_locked=False) to allow space initialization.
@@ -68,12 +64,13 @@ class TestModelCredentialLocking:
             updated_at=datetime.now(),
             nickname="GPT-4",
             name="gpt-4",
-            token_limit=8000,
+            max_input_tokens=8000,
+            max_output_tokens=4096,
             vision=False,
-            family=ModelFamily.OPEN_AI,
-            hosting=ModelHostingLocation.USA,
-            org=ModelOrg.OPENAI,
-            stability=ModelStability.STABLE,
+            family="openai",
+            hosting="usa",
+            org="OpenAI",
+            stability="stable",
             open_source=False,
             description="OpenAI GPT-4",
             nr_billion_parameters=None,
@@ -90,17 +87,13 @@ class TestModelCredentialLocking:
         assert model.lock_reason == "credentials"  # UI can show warning
         assert model.can_access is False  # Can't access because not org_enabled
 
-    def test_openai_model_no_warning_when_credentials_exist(
-        self, monkeypatch
-    ):
+    def test_openai_model_no_warning_when_credentials_exist(self, monkeypatch):
         """
         OpenAI model should have no lock_reason when tenant has OpenAI credentials.
         """
         # Arrange
         settings = MockSettings(tenant_credentials_enabled=True)
-        tenant = MockTenant(
-            api_credentials={"openai": {"api_key": "sk-test-key"}}
-        )
+        tenant = MockTenant(api_credentials={"openai": {"api_key": "sk-test-key"}})
         user = MockUser(tenant=tenant)
 
         monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
@@ -112,12 +105,13 @@ class TestModelCredentialLocking:
             updated_at=datetime.now(),
             nickname="GPT-4",
             name="gpt-4",
-            token_limit=8000,
+            max_input_tokens=8000,
+            max_output_tokens=4096,
             vision=False,
-            family=ModelFamily.OPEN_AI,
-            hosting=ModelHostingLocation.USA,
-            org=ModelOrg.OPENAI,
-            stability=ModelStability.STABLE,
+            family="openai",
+            hosting="usa",
+            org="OpenAI",
+            stability="stable",
             open_source=False,
             description="OpenAI GPT-4",
             nr_billion_parameters=None,
@@ -135,7 +129,7 @@ class TestModelCredentialLocking:
 
     def test_claude_model_uses_anthropic_provider_name(self, monkeypatch):
         """
-        Claude models (ModelFamily.CLAUDE) should check for 'anthropic' credentials
+        Claude models ("claude") should check for 'anthropic' credentials
         when reporting lock_reason for UI display.
         """
         # Arrange
@@ -152,12 +146,13 @@ class TestModelCredentialLocking:
             updated_at=datetime.now(),
             nickname="Claude",
             name="claude-3-opus",
-            token_limit=200000,
+            max_input_tokens=200000,
+            max_output_tokens=4096,
             vision=False,
-            family=ModelFamily.CLAUDE,
-            hosting=ModelHostingLocation.USA,
-            org=ModelOrg.ANTHROPIC,
-            stability=ModelStability.STABLE,
+            family="claude",
+            hosting="usa",
+            org="Anthropic",
+            stability="stable",
             open_source=False,
             description="Anthropic Claude 3 Opus",
             nr_billion_parameters=None,
@@ -198,12 +193,13 @@ class TestModelCredentialLocking:
             updated_at=datetime.now(),
             nickname="GPT-4",
             name="gpt-4",
-            token_limit=8000,
+            max_input_tokens=8000,
+            max_output_tokens=4096,
             vision=False,
-            family=ModelFamily.OPEN_AI,
-            hosting=ModelHostingLocation.USA,
-            org=ModelOrg.OPENAI,
-            stability=ModelStability.STABLE,
+            family="openai",
+            hosting="usa",
+            org="OpenAI",
+            stability="stable",
             open_source=False,
             description="OpenAI GPT-4",
             nr_billion_parameters=None,
@@ -239,12 +235,13 @@ class TestModelCredentialLocking:
             updated_at=datetime.now(),
             nickname="Azure GPT-4",
             name="gpt-4",
-            token_limit=8000,
+            max_input_tokens=8000,
+            max_output_tokens=4096,
             vision=False,
-            family=ModelFamily.AZURE,
-            hosting=ModelHostingLocation.USA,
-            org=ModelOrg.MICROSOFT,
-            stability=ModelStability.STABLE,
+            family="azure",
+            hosting="usa",
+            org="Microsoft",
+            stability="stable",
             open_source=False,
             description="Azure OpenAI GPT-4",
             nr_billion_parameters=None,
@@ -280,12 +277,12 @@ class TestModelCredentialLocking:
 
         # Test mapping: ModelFamily -> expected credential provider key
         test_cases = [
-            (ModelFamily.OPEN_AI, "openai"),
-            (ModelFamily.CLAUDE, "anthropic"),
-            (ModelFamily.AZURE, "azure"),
-            (ModelFamily.MISTRAL, "mistral"),
-            (ModelFamily.VLLM, "vllm"),
-            (ModelFamily.OVHCLOUD, "ovhcloud"),
+            ("openai", "openai"),
+            ("claude", "anthropic"),
+            ("azure", "azure"),
+            ("mistral", "mistral"),
+            ("vllm", "vllm"),
+            ("ovhcloud", "ovhcloud"),
         ]
 
         monkeypatch.setattr("intric.ai_models.ai_model.get_settings", lambda: settings)
@@ -300,16 +297,17 @@ class TestModelCredentialLocking:
                 id=uuid4(),
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
-                nickname=f"Test {family.value}",
-                name=f"test-{family.value}",
-                token_limit=8000,
+                nickname=f"Test {family}",
+                name=f"test-{family}",
+                max_input_tokens=8000,
+                max_output_tokens=4096,
                 vision=False,
                 family=family,
-                hosting=ModelHostingLocation.USA,
+                hosting="usa",
                 org=None,
-                stability=ModelStability.STABLE,
+                stability="stable",
                 open_source=False,
-                description=f"Test {family.value}",
+                description=f"Test {family}",
                 nr_billion_parameters=None,
                 hf_link=None,
                 is_deprecated=False,
@@ -319,8 +317,12 @@ class TestModelCredentialLocking:
                 reasoning=False,
             )
 
-            assert model_no_creds.is_locked is False, f"{family.value} should not be locked (missing credentials only)"
-            assert model_no_creds.lock_reason == "credentials", f"{family.value} lock_reason should be credentials"
+            assert model_no_creds.is_locked is False, (
+                f"{family} should not be locked (missing credentials only)"
+            )
+            assert model_no_creds.lock_reason == "credentials", (
+                f"{family} lock_reason should be credentials"
+            )
 
             # Model with credentials - should have no warning
             tenant_with_creds = MockTenant(
@@ -333,16 +335,17 @@ class TestModelCredentialLocking:
                 id=uuid4(),
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
-                nickname=f"Test {family.value}",
-                name=f"test-{family.value}",
-                token_limit=8000,
+                nickname=f"Test {family}",
+                name=f"test-{family}",
+                max_input_tokens=8000,
+                max_output_tokens=4096,
                 vision=False,
                 family=family,
-                hosting=ModelHostingLocation.USA,
+                hosting="usa",
                 org=None,
-                stability=ModelStability.STABLE,
+                stability="stable",
                 open_source=False,
-                description=f"Test {family.value}",
+                description=f"Test {family}",
                 nr_billion_parameters=None,
                 hf_link=None,
                 is_deprecated=False,
@@ -352,5 +355,9 @@ class TestModelCredentialLocking:
                 reasoning=False,
             )
 
-            assert model_with_creds.is_locked is False, f"{family.value} should not be locked with credentials"
-            assert model_with_creds.lock_reason is None, f"{family.value} should have no lock_reason"
+            assert model_with_creds.is_locked is False, (
+                f"{family} should not be locked with credentials"
+            )
+            assert model_with_creds.lock_reason is None, (
+                f"{family} should have no lock_reason"
+            )

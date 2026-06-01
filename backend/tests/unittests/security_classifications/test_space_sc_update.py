@@ -44,16 +44,30 @@ def test_update_space_with_high_sc():
         name="god", tenant_id=MagicMock(), security_level=2, security_enabled=True
     )
 
-    completion_model_low_1 = MagicMock(security_classification=security_classification_low)
-    completion_model_low_2 = MagicMock(security_classification=security_classification_low)
-    completion_model_high = MagicMock(security_classification=security_classification_high)
-    completion_model_god = MagicMock(security_classification=security_classification_god)
+    completion_model_low_1 = MagicMock(
+        security_classification=security_classification_low
+    )
+    completion_model_low_2 = MagicMock(
+        security_classification=security_classification_low
+    )
+    completion_model_high = MagicMock(
+        security_classification=security_classification_high
+    )
+    completion_model_god = MagicMock(
+        security_classification=security_classification_god
+    )
 
     embedding_model_low = MagicMock(security_classification=security_classification_low)
-    embedding_model_high = MagicMock(security_classification=security_classification_high)
+    embedding_model_high = MagicMock(
+        security_classification=security_classification_high
+    )
 
-    transcription_model_low = MagicMock(security_classification=security_classification_low)
-    transcription_model_high = MagicMock(security_classification=security_classification_high)
+    transcription_model_low = MagicMock(
+        security_classification=security_classification_low
+    )
+    transcription_model_high = MagicMock(
+        security_classification=security_classification_high
+    )
 
     space.completion_models = [
         completion_model_low_1,
@@ -165,7 +179,7 @@ def test_adding_models_with_lower_sc_than_space():
         id=uuid.uuid4(),
         tenant_id=uuid.uuid4(),
         user_id=None,
-        tenant_space_id= uuid.uuid4(),
+        tenant_space_id=uuid.uuid4(),
         name="Test Space",
         description="Test Description",
         embedding_models=[],
@@ -214,7 +228,10 @@ def test_adding_models_with_lower_sc_than_space():
     assert len(space.completion_models) == 1
 
     security_classification_happy_easter = SecurityClassification(
-        name="happy easter", tenant_id=MagicMock(), security_level=2, security_enabled=True
+        name="happy easter",
+        tenant_id=MagicMock(),
+        security_level=2,
+        security_enabled=True,
     )
     space.update(security_classification=security_classification_happy_easter)
 

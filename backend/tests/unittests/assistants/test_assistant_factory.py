@@ -1,10 +1,13 @@
 from datetime import datetime
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 
+from intric.ai_models.completion_models.completion_model import ModelKwargs
 from intric.assistants.assistant_factory import AssistantFactory
 from intric.templates.app_template.app_template import AppTemplate
+from intric.users.user import UserSparse
 
 
 @pytest.fixture
@@ -17,7 +20,11 @@ def factory():
 
 def test_create_assistant_from_template(factory: AssistantFactory):
     completion_model = MagicMock()
-    user = MagicMock()
+    user = UserSparse(
+        id=uuid4(),
+        email="assistant-factory@example.com",
+        username="assistant-factory",
+    )
 
     prompt = MagicMock()
     template = AppTemplate(
@@ -39,9 +46,9 @@ def test_create_assistant_from_template(factory: AssistantFactory):
     app = factory.create_assistant(
         name=template.name,
         user=user,
-        space_id="fake-space-id",
+        space_id=uuid4(),
         completion_model=completion_model,
-        completion_model_kwargs={},
+        completion_model_kwargs=ModelKwargs(),
         prompt=prompt,
         logging_enabled=True,
         template=template,

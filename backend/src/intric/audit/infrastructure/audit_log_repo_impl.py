@@ -9,13 +9,17 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing_extensions import override
 
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.audit_log import AuditLog
 from intric.audit.domain.entity_types import EntityType
 from intric.audit.domain.outcome import Outcome
-from intric.audit.domain.repositories.audit_log_repository import AuditLogRepository
+from intric.audit.domain.repositories.audit_log_repository import (
+    AuditLogRawRow,
+    AuditLogRepository,
+)
 from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
 
 logger = logging.getLogger(__name__)
@@ -48,9 +52,10 @@ class AuditLogRepositoryImpl(AuditLogRepository):
     """SQLAlchemy implementation of audit log repository."""
 
     def __init__(self, session: AsyncSession):
+        super().__init__()
         self.session = session
 
-    def _to_domain(self, table: AuditLogTable) -> AuditLog:
+    def _to_domain(self, table: Any) -> AuditLog:
         """Convert SQLAlchemy table to domain model."""
         ip_address = cast(Optional[str], table.ip_address)
         return AuditLog(
@@ -74,6 +79,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
             updated_at=table.updated_at,
         )
 
+    @override
     async def create(self, audit_log: AuditLog) -> AuditLog:
         """Create a new audit log entry."""
         query = (
@@ -99,8 +105,10 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         )
 
         result = await self.session.scalar(query)
+        assert result is not None
         return self._to_domain(result)
 
+    @override
     async def get_by_id(
         self, audit_log_id: UUID, tenant_id: UUID
     ) -> Optional[AuditLog]:
@@ -118,6 +126,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
 
         return self._to_domain(result)
 
+    @override
     async def get_logs(
         self,
         tenant_id: UUID,
@@ -178,8 +187,8 @@ class AuditLogRepositoryImpl(AuditLogRepository):
 
         # Execute query with performance logging
         query_start = time.time()
-        results = await self.session.scalars(query)
-        logs = [self._to_domain(result) for result in results]
+        results: list[AuditLogTable] = list(await self.session.scalars(query))
+        logs: list[AuditLog] = [self._to_domain(result) for result in results]
         query_time = (time.time() - query_start) * 1000  # ms
 
         logger.debug(
@@ -192,6 +201,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
 
         return logs, total_count or 0
 
+    @override
     async def get_user_logs(
         self,
         tenant_id: UUID,
@@ -247,10 +257,10 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         # Execute query with performance logging
         query_start = time.time()
         results = await self.session.execute(query)
-        # Convert Row objects to domain models (subquery returns rows, not ORM objects)
-        logs = []
-        for row in results:
-            # Reconstruct AuditLogTable from row columns
+        # Convert row mappings to domain models (subquery returns mappings, not ORM objects)
+        logs: list[AuditLog] = []
+        for row in results.mappings():
+            # Reconstruct AuditLogTable from mapping columns
             # Note: Column is named "metadata" in DB, but "log_metadata" in ORM
             table_obj = cast(Any, AuditLogTable)(
                 id=row.id,
@@ -262,7 +272,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                 entity_id=row.entity_id,
                 timestamp=row.timestamp,
                 description=row.description,
-                log_metadata=row._mapping["metadata"],
+                log_metadata=row["metadata"],
                 outcome=row.outcome,
                 ip_address=row.ip_address,
                 user_agent=row.user_agent,
@@ -283,6 +293,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
 
         return logs, total_count or 0
 
+    @override
     async def soft_delete_by_user(
         self,
         tenant_id: UUID,
@@ -310,6 +321,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         result = await self.session.execute(query)
         return result.rowcount
 
+    @override
     async def hard_delete_old_logs(
         self,
         tenant_id: UUID,
@@ -425,6 +437,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         async for row in await self.session.stream_scalars(query):
             yield self._to_domain(row)
 
+    @override
     async def stream_logs_raw(
         self,
         tenant_id: UUID,
@@ -433,7 +446,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         from_date: Optional[datetime] = None,
         to_date: Optional[datetime] = None,
         batch_size: int = 20000,
-    ) -> AsyncIterator[dict]:
+    ) -> AsyncIterator[AuditLogRawRow]:
         """Stream audit logs as raw dicts using SQLAlchemy Core (no ORM hydration).
 
         Performance optimization: Bypasses ORM object creation and domain conversion,
@@ -573,8 +586,8 @@ class AuditLogRepositoryImpl(AuditLogRepository):
 
         # Stream results using direct iteration pattern (per SQLAlchemy async docs)
         # Pattern: `async for row in await session.stream(query):` - WITH await, NO context manager
-        async for row in await self.session.stream(query):
-            # Reconstruct domain model from row
+        async for row in (await self.session.stream(query)).mappings():
+            # Reconstruct domain model from mapping
             table_obj = cast(Any, AuditLogTable)(
                 id=row.id,
                 tenant_id=row.tenant_id,
@@ -585,7 +598,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                 entity_id=row.entity_id,
                 timestamp=row.timestamp,
                 description=row.description,
-                log_metadata=row._mapping["metadata"],
+                log_metadata=row["metadata"],
                 outcome=row.outcome,
                 ip_address=row.ip_address,
                 user_agent=row.user_agent,
@@ -597,6 +610,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
             )
             yield self._to_domain(table_obj)
 
+    @override
     async def stream_user_logs_raw(
         self,
         tenant_id: UUID,
@@ -604,7 +618,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         from_date: Optional[datetime] = None,
         to_date: Optional[datetime] = None,
         batch_size: int = 20000,
-    ) -> AsyncIterator[dict]:
+    ) -> AsyncIterator[AuditLogRawRow]:
         """Stream user logs (GDPR export) as raw dicts using SQLAlchemy Core.
 
         Performance optimization: Bypasses ORM object creation and domain conversion,
@@ -707,6 +721,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                 "error_message": row.error_message,
             }
 
+    @override
     async def count_logs(
         self,
         tenant_id: UUID,
@@ -752,6 +767,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
 
         return await self.session.scalar(query) or 0
 
+    @override
     async def count_user_logs(
         self,
         tenant_id: UUID,

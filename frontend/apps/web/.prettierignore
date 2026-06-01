@@ -15,6 +15,9 @@ package-lock.json
 yarn.lock
 vite.config.*.timestamp-*
 
-# Ignore auto-generated changelog
+# Ignore auto-generated files
 CHANGELOG.md
 README.md
+src/lib/paraglide
+project.inlang/.meta.json
+project.inlang/cache

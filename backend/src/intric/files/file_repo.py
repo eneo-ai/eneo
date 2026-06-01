@@ -8,17 +8,19 @@ from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
 from intric.database.tables.files_table import Files
 from intric.files.file_models import File, FileCreate, FileInfo
+from intric.main.exceptions import NotFoundException
 
 
 class FileRepository:
     def __init__(self, session: AsyncSession):
-        self._delegate = BaseRepositoryDelegate(
+        super().__init__()
+        self._delegate: BaseRepositoryDelegate[File] = BaseRepositoryDelegate(
             session=session, table=Files, in_db_model=File
         )
         self.session = session
 
     async def add(self, file: FileCreate) -> File:
-        return cast(File, await self._delegate.add(file))
+        return await self._delegate.add(file)
 
     async def get_list_by_id_and_user(
         self, ids: list[UUID], user_id: UUID, include_transcription: bool = True
@@ -39,32 +41,14 @@ class FileRepository:
 
         return files
 
-    async def get_list_by_id_and_tenant(
-        self, ids: list[UUID], tenant_id: UUID, include_transcription: bool = True
-    ) -> list[File]:
-        stmt = (
-            sa.select(Files)
-            .where(Files.id.in_(ids))
-            .where(Files.tenant_id == tenant_id)
-            .order_by(Files.created_at)
-        )
-
-        if not include_transcription:
-            stmt = stmt.options(defer(Files.transcription, raiseload=True))
-
-        files_in_db = await self.session.scalars(stmt)
-
-        return [File.model_validate(file) for file in files_in_db]
-
     async def get_by_id(self, file_id: UUID) -> File:
         file = await self._delegate.get(id=file_id)
+        if file is None:
+            raise NotFoundException()
         return File.model_validate(file)
 
     async def get_list_by_user(self, user_id: UUID) -> list[File]:
-        return cast(
-            list[File],
-            await self._delegate.filter_by(conditions={Files.user_id: user_id}),
-        )
+        return await self._delegate.filter_by(conditions={Files.user_id: user_id})
 
     async def get_by_checksum(self, checksum: str) -> File:
         return cast(
@@ -74,6 +58,25 @@ class FileRepository:
 
     async def delete(self, id: UUID) -> File:
         return cast(File, await self._delegate.delete(id))
+
+    async def delete_by_owner(
+        self, id: UUID, user_id: UUID, tenant_id: UUID
+    ) -> File | None:
+        """Atomic tenant- and owner-bound delete. Returns None if no row matches."""
+        stmt = (
+            sa.delete(Files)
+            .where(
+                Files.id == id,
+                Files.user_id == user_id,
+                Files.tenant_id == tenant_id,
+            )
+            .returning(Files)
+        )
+        result = await self.session.execute(stmt)
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        return File.model_validate(row)
 
     async def update(self, file: File) -> File:
         return cast(File, await self._delegate.update(file))

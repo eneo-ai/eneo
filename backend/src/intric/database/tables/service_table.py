@@ -16,8 +16,8 @@ class Services(BasePublic):
     name: Mapped[str] = mapped_column()
     prompt: Mapped[str] = mapped_column()
     output_format: Mapped[Optional[str]] = mapped_column()
-    json_schema: Mapped[Optional[dict]] = mapped_column(JSONB)
-    completion_model_kwargs: Mapped[Optional[dict]] = mapped_column(JSONB)
+    json_schema: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
+    completion_model_kwargs: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
 
     # Foreign keys
     user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="CASCADE"))
