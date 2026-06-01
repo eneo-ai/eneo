@@ -309,6 +309,8 @@ def _triple_summary(
 ) -> str:
     if output_mode == "transcribe_only":
         return "Transkribera ljud" if locale == "sv" else "Transcribe audio"
+    if input_type == "json" and output_type == "json":
+        return "JSON till JSON" if locale == "sv" else "JSON to JSON"
     if output_type == "json":
         return "Strukturera underlag" if locale == "sv" else "Structure source material"
     if output_type == "docx":
@@ -327,7 +329,7 @@ def _step_type_label(value: str, locale: Locale) -> str:
         "audio": "ljud",
         "document": "dokument",
         "file": "fil",
-        "json": "struktur",
+        "json": "JSON",
         "text": "text",
         "docx": "DOCX",
         "pdf": "PDF",
@@ -336,7 +338,7 @@ def _step_type_label(value: str, locale: Locale) -> str:
         "audio": "audio",
         "document": "document",
         "file": "file",
-        "json": "structured data",
+        "json": "JSON",
         "text": "text",
         "docx": "DOCX",
         "pdf": "PDF",

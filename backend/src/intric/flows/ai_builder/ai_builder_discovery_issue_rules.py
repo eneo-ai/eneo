@@ -30,6 +30,7 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
 from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
     detect_planner_pattern_signals,
 )
+from intric.flows.ai_builder.planning_state import ResolvedSlot
 
 EXTERNAL_DELIVERY_UNSUPPORTED_ISSUE_ID: Final = "external_delivery_unsupported"
 
@@ -227,17 +228,44 @@ def ultra_vague_output_choice_is_vague(profile: DiscoveryProfile) -> bool:
 def post_processing_goal_is_vague(profile: DiscoveryProfile) -> bool:
     if _family_inactive(profile, "post_processing_goal"):
         return False
-    if profile.planning_state.resolved_slots.get("post_processing_goal") is not None:
+    resolved_goal = _resolved_slot(profile, "post_processing_goal")
+    if resolved_goal is not None and resolved_goal.source != "model":
         return False
-    if "post_processing_goal" in profile.answers:
+    if resolved_goal is None and "post_processing_goal" in profile.answers:
         return False
     if _explicit_post_processing_goal_present(profile.text):
         return False
-    if profile.output_intent.terminal_output == "structured_json":
-        return False
     if needs_pdf_generation_mode_choice(profile):
         return False
-    if mentions_any(
+    if _json_transform_goal_is_vague(profile):
+        return True
+    if _outcome_wording_is_vague(profile):
+        return True
+    return (
+        profile.audio_like_input
+        or profile.document_like_input
+        or profile.case_like_flow
+        or profile.final_output_text_or_docx
+    )
+
+
+def _explicit_post_processing_goal_present(text: str) -> bool:
+    return infer_post_processing_goal(text) is not None
+
+
+def _resolved_slot(profile: DiscoveryProfile, slot_name: str) -> ResolvedSlot | None:
+    return profile.resolved_slot(slot_name)
+
+
+def _json_transform_goal_is_vague(profile: DiscoveryProfile) -> bool:
+    return (
+        profile.input_intent.primary_runtime_input == "json"
+        and profile.output_intent.terminal_output == "structured_json"
+    )
+
+
+def _outcome_wording_is_vague(profile: DiscoveryProfile) -> bool:
+    return mentions_any(
         profile.text,
         (
             "något användbart",
@@ -251,18 +279,7 @@ def post_processing_goal_is_vague(profile: DiscoveryProfile) -> bool:
             "processa dokument",
             "bearbeta dokument",
         ),
-    ):
-        return True
-    return (
-        profile.audio_like_input
-        or profile.document_like_input
-        or profile.case_like_flow
-        or profile.final_output_text_or_docx
     )
-
-
-def _explicit_post_processing_goal_present(text: str) -> bool:
-    return infer_post_processing_goal(text) is not None
 
 
 def needs_docx_mode_choice(profile: DiscoveryProfile) -> bool:
@@ -382,7 +399,7 @@ def has_same_run_comparison_contradiction(
 def document_cardinality_is_vague(profile: DiscoveryProfile) -> bool:
     if _family_inactive(profile, "document_material_scope"):
         return False
-    if profile.planning_state.resolved_slots.get("document_material_scope") is not None:
+    if profile.resolved_slot("document_material_scope") is not None:
         return False
     answers = profile.answers
     text = profile.text
@@ -489,9 +506,7 @@ def document_kind_is_vague(profile: DiscoveryProfile) -> bool:
         and not profile.comparison_requested
     ):
         return False
-    resolved_document_scope = profile.planning_state.resolved_slots.get(
-        "document_material_scope"
-    )
+    resolved_document_scope = profile.resolved_slot("document_material_scope")
     if (
         resolved_document_scope is not None
         and resolved_document_scope.value == "single_document_case"
@@ -641,10 +656,7 @@ def final_pdf_type_is_vague(profile: DiscoveryProfile) -> bool:
 
 
 def structured_analysis_need_is_vague(profile: DiscoveryProfile) -> bool:
-    if (
-        profile.planning_state.resolved_slots.get("structured_analysis_need")
-        is not None
-    ):
+    if profile.resolved_slot("structured_analysis_need") is not None:
         return False
     answers = profile.answers
     text = profile.text
@@ -653,9 +665,7 @@ def structured_analysis_need_is_vague(profile: DiscoveryProfile) -> bool:
         return False
     if "structured_json" in answers.get("final_output_mode", set()):
         return False
-    post_processing_goal = profile.planning_state.resolved_slots.get(
-        "post_processing_goal"
-    )
+    post_processing_goal = profile.resolved_slot("post_processing_goal")
     if post_processing_goal is not None and post_processing_goal.value in {
         "action_followup",
         "compare_or_validate",
@@ -694,7 +704,7 @@ def runtime_metadata_is_vague(profile: DiscoveryProfile) -> bool:
         return False
     if not profile.case_like_flow:
         return False
-    if profile.planning_state.resolved_slots.get("runtime_metadata_fields") is not None:
+    if profile.resolved_slot("runtime_metadata_fields") is not None:
         return False
     answers = profile.answers
     text = profile.text
@@ -721,7 +731,7 @@ def _runtime_metadata_prerequisites_resolved(profile: DiscoveryProfile) -> bool:
         return False
     if (
         profile.document_like_input
-        and profile.planning_state.resolved_slots.get("document_material_scope") is None
+        and profile.resolved_slot("document_material_scope") is None
         and "document_material_scope" not in profile.answers
         and "document_material_scope" not in profile.flow_defaults
     ):

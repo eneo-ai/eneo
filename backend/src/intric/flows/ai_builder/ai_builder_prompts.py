@@ -312,6 +312,14 @@ def build_clarification_hints(
                 "så att 'Ta emot filer vid körning' aktiveras."
             )
 
+    if input_intent.primary_runtime_input == "json":
+        hints.append(
+            "- Implementationshint: eftersom användaren skickar in JSON vid körning "
+            'ska första steget använda `input_type="json"` och hålla JSON-payloaden '
+            "som primär indata; blanda inte ihop detta med JSON som mellanformat "
+            "eller terminalt svar."
+        )
+
     if input_intent.audio_requested:
         if flow is None:
             hints.append(

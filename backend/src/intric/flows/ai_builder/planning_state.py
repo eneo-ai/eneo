@@ -222,4 +222,6 @@ class PlanningState(_PlanningModel):
         Pydantic's field validators. The save path calls this before
         writing so drift fails loudly instead of persisting.
         """
-        return type(self).model_validate(self.model_dump(mode="json"))
+        # Use Python objects, not JSON serialization, so drift inside nested
+        # model containers fails during re-validation instead of serializing.
+        return type(self).model_validate(dict(self))

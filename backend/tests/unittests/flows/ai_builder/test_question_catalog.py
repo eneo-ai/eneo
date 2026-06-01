@@ -342,6 +342,13 @@ class TestCatalogInvariants:
                 option.value for option in template.options
             )
 
+    def test_primary_runtime_input_exposes_json_as_legal_source_material(self) -> None:
+        values = legal_slot_values("primary_runtime_input")
+        rendered = render_question("primary_runtime_input", "sv")
+
+        assert "json" in values
+        assert "json" in {option.value for option in rendered.options}
+
     def test_legal_slot_values_fails_loudly_for_unknown_slot(self) -> None:
         with pytest.raises(KeyError):
             legal_slot_values("unknown_slot")

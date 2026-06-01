@@ -157,7 +157,7 @@ def test_prompt_hash_uses_sorted_names_and_stable_json_serialization() -> None:
                         "primary_runtime_input": ["audio", "documents"],
                         "terminal_output": ["pdf_document", "structured_text"],
                     },
-                    "schema_version": 4,
+                    "schema_version": 5,
                     "text": text,
                     "ui_language": "sv",
                 },

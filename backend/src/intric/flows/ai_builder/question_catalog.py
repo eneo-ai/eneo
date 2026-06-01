@@ -206,6 +206,14 @@ _PRIMARY_RUNTIME_INPUT = QuestionTemplate(
             value="documents",
         ),
         _option(
+            id="json",
+            label_sv="JSON",
+            label_en="JSON",
+            description_sv="Ta emot en strukturerad JSON-payload vid körning.",
+            description_en="Accept a structured JSON payload at runtime.",
+            value="json",
+        ),
+        _option(
             id="text",
             label_sv="Text",
             label_en="Text",
@@ -225,10 +233,12 @@ _PRIMARY_RUNTIME_INPUT = QuestionTemplate(
     worked_examples_sv=(
         "Uppladdning av mötesinspelning för transkribering.",
         "Användaren klistrar in en rapport som text.",
+        "Ett annat system skickar in en JSON-payload.",
     ),
     worked_examples_en=(
         "Uploading a meeting recording for transcription.",
         "The user pastes a report as text.",
+        "Another system sends in a JSON payload.",
     ),
 )
 

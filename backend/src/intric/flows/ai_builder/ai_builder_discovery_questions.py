@@ -96,6 +96,15 @@ def input_material_mode_question(
             ),
             _option(
                 language=language,
+                id="json",
+                swedish_label="JSON",
+                english_label="JSON",
+                swedish_description="Ta emot en strukturerad JSON-payload vid körning.",
+                english_description="Accept a structured JSON payload at runtime.",
+                value="json",
+            ),
+            _option(
+                language=language,
                 id="text",
                 swedish_label="Text",
                 english_label="Text",
@@ -331,6 +340,57 @@ def post_processing_goal_question(
                 swedish_description="Jämför mot annat underlag, regler, schema eller checklista.",
                 english_description="Compare against other material, rules, a schema, or a checklist.",
                 value="compare_or_validate",
+            ),
+        ),
+    )
+
+
+def json_transform_goal_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return DiscoveryQuestionSuggestion(
+        question_id="post_processing_goal",
+        question=localized_text(
+            language,
+            "Vad ska flödet göra mellan input-JSON och output-JSON?",
+            "What should the flow do between input JSON and output JSON?",
+        ),
+        options=(
+            _option(
+                language=language,
+                id="stop_after_primary_operation",
+                swedish_label="Skicka vidare grundpayloaden",
+                english_label="Pass through the base payload",
+                swedish_description="Behåll JSON nära indata och gör bara en enkel vidareföring eller lätt konvertering.",
+                english_description="Keep the JSON close to the input and only pass it through or lightly convert it.",
+                value="stop_after_primary_operation",
+            ),
+            _option(
+                language=language,
+                id="extract_key_information",
+                swedish_label="Plocka ut eller mappa fält",
+                english_label="Extract or map fields",
+                swedish_description="Välj, döp om, beräkna eller flytta fält till en ny JSON-struktur.",
+                english_description="Select, rename, compute, or move fields into a new JSON shape.",
+                value="extract_key_information",
+            ),
+            _option(
+                language=language,
+                id="compare_or_validate",
+                swedish_label="Validera mot regler eller schema",
+                english_label="Validate against rules or schema",
+                swedish_description="Kontrollera payloaden mot regler, schema, krav eller referensdata.",
+                english_description="Check the payload against rules, schema, requirements, or reference data.",
+                value="compare_or_validate",
+            ),
+            _option(
+                language=language,
+                id="risk_or_issue_review",
+                swedish_label="Flagga risker eller problem",
+                english_label="Flag risks or issues",
+                swedish_description="Identifiera avvikelser, osäkerheter, saknade värden eller andra problem i JSON.",
+                english_description="Identify deviations, uncertainty, missing values, or other issues in the JSON.",
+                value="risk_or_issue_review",
             ),
         ),
     )

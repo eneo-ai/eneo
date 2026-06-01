@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -143,6 +144,55 @@ async def test_backend_selected_question_dispatch_uses_typed_discovery_followup(
     assert events is not None
     assert [event["event"] for event in events] == ["text"]
     repo.commit_turn.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_backend_selected_question_prefers_contextual_discovery_question() -> (
+    None
+):
+    repo = AsyncMock()
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Jag vill bygga ett flöde som tar emot JSON och returnerar JSON.",
+        )
+    ]
+    output = _planner_output(
+        AskQuestionAction(
+            kind="ask_question",
+            payload=AskQuestionPayload(
+                question_id="post_processing_goal",
+                slot_name="post_processing_goal",
+                prompt="Vad ska flödet hjälpa dig göra med materialet?",
+            ),
+        )
+    )
+
+    with patch(
+        "intric.flows.ai_builder.ai_builder_planner_action_dispatch."
+        "persist_backend_question",
+        new=AsyncMock(return_value=SimpleNamespace(events=[])),
+    ) as persist_question:
+        events = await dispatch_backend_selected_question_if_any(
+            BackendSelectedQuestionDispatchRequest(
+                repo=repo,
+                turn=_turn(),
+                server_output=output,
+                conversation=conversation,
+                new_messages_start=len(conversation),
+                flow=None,
+            )
+        )
+
+    assert events == []
+    question = persist_question.await_args.kwargs["question"].question_data
+    assert question.question == "Vad ska flödet göra mellan input-JSON och output-JSON?"
+    assert [option.value for option in question.options] == [
+        "stop_after_primary_operation",
+        "extract_key_information",
+        "compare_or_validate",
+        "risk_or_issue_review",
+    ]
 
 
 @pytest.mark.asyncio

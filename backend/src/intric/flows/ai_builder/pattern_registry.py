@@ -43,7 +43,7 @@ from typing import Literal
 from intric.flows.ai_builder.question_catalog import QUESTION_CATALOG, QuestionTemplate
 from intric.flows.flow_capability_manifest import CAPABILITY_REGISTRY, FlowCapability
 
-PATTERN_REGISTRY_VERSION: int = 7
+PATTERN_REGISTRY_VERSION: int = 8
 
 PatternId = str
 ChainStepToken = str
@@ -230,6 +230,63 @@ _POSITIVE_PATTERNS: tuple[Pattern, ...] = (
         retrieval_hints=(
             "extract fields form structured json schema",
             "input_type=text output_type=json output_mode=pass_through",
+        ),
+        required_architectural_slots=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
+        question_template_ids=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
+    ),
+    _pattern(
+        id="json_to_structured_payload",
+        examples=(
+            "JSON in, JSON out transformation",
+            "normalize or enrich a runtime JSON payload",
+        ),
+        retrieval_hints=(
+            "json payload transform normalize map schema",
+            "input_type=json output_type=json output_mode=pass_through",
+        ),
+        required_architectural_slots=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
+        question_template_ids=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
+    ),
+    _pattern(
+        id="json_to_text_summary",
+        examples=(
+            "JSON in, readable text out",
+            "summarize a runtime JSON payload for a human reader",
+        ),
+        retrieval_hints=(
+            "json payload summarize readable text",
+            "input_type=json output_type=text output_mode=pass_through",
+        ),
+        required_architectural_slots=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
+        question_template_ids=(
+            "primary_runtime_input",
+            "terminal_output",
+        ),
+    ),
+    _pattern(
+        id="json_to_artifact_report",
+        examples=(
+            "JSON in, generated PDF or DOCX report out",
+            "turn a runtime JSON payload into a document artifact",
+        ),
+        retrieval_hints=(
+            "json payload report artifact pdf docx",
+            "input_type=json output_type=pdf docx output_mode=pass_through",
         ),
         required_architectural_slots=(
             "primary_runtime_input",

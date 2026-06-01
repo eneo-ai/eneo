@@ -249,8 +249,62 @@ async def test_runtime_planning_state_overlays_model_slots() -> None:
 
     messages = litellm_client.acompletion.await_args.kwargs["messages"]
     prompt = "\n".join(message["content"] for message in messages)
-    assert "primary_runtime_input" not in prompt
+    assert "\n- primary_runtime_input:" not in prompt
     assert "terminal_output" in prompt
+
+
+@pytest.mark.asyncio
+async def test_runtime_planning_state_accepts_model_classified_json_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "primary_runtime_input",
+                        "value": "json",
+                        "confidence": "high",
+                        "reason": "the runtime source is a JSON payload",
+                    },
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "structured_json",
+                        "confidence": "high",
+                        "reason": "the user asks for JSON output",
+                    },
+                ]
+            }
+        )
+    )
+    monkeypatch.setattr(
+        runtime,
+        "build_planning_state_from_conversation",
+        lambda *_args, **_kwargs: PlanningState.empty(),
+    )
+
+    state = await build_runtime_planning_state(
+        [
+            ConversationMessage(
+                role="user",
+                content="Jag vill bygga ett flöde som tar emot JSON och returnerar JSON.",
+            )
+        ],
+        litellm_client=litellm_client,
+        litellm_model="gpt-test",
+        litellm_kwargs={},
+        tenant_id=uuid4(),
+        ui_language="sv",
+    )
+
+    assert state.resolved_slots["primary_runtime_input"].value == "json"
+    assert state.resolved_slots["terminal_output"].value == "structured_json"
+
+    messages = litellm_client.acompletion.await_args.kwargs["messages"]
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "\n- primary_runtime_input:" in prompt
+    assert "json" in prompt
 
 
 @pytest.mark.asyncio
@@ -374,7 +428,7 @@ async def test_runtime_planning_state_does_not_let_model_override_structured_ans
 
     messages = litellm_client.acompletion.await_args.kwargs["messages"]
     prompt = "\n".join(message["content"] for message in messages)
-    assert "primary_runtime_input" not in prompt
+    assert "\n- primary_runtime_input:" not in prompt
 
 
 @pytest.mark.asyncio

@@ -68,6 +68,9 @@ from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
 )
 from intric.flows.ai_builder.ai_builder_discovery_models import (
     BackendQuestion,
+    ClarificationAction,
+    ClarificationDecisionTrace,
+    ClarificationReason,
     DiscoveryAnalysis,
     DiscoveryCandidate,
     DiscoveryIssue,
@@ -99,6 +102,7 @@ from intric.flows.ai_builder.ai_builder_discovery_questions import (
     final_pdf_type_question,
     flow_input_architecture_question,
     input_material_mode_question,
+    json_transform_goal_question,
     localized_text,
     output_reader_question,
     pdf_generation_mode_question,
@@ -112,7 +116,10 @@ from intric.flows.ai_builder.ai_builder_discovery_questions import (
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
-from intric.flows.ai_builder.ai_builder_event_models import StructuredQuestionPayload
+from intric.flows.ai_builder.ai_builder_event_models import (
+    StructuredQuestionOptionPayload,
+    StructuredQuestionPayload,
+)
 from intric.flows.ai_builder.ai_builder_framework_policy import (
     canonical_question_id,
     has_explicit_structured_answer,
@@ -126,7 +133,7 @@ from intric.flows.ai_builder.ai_builder_signal_confidence import (
     score_conversation_signals,
 )
 from intric.flows.ai_builder.ai_builder_slot_classifier import SlotClassificationResult
-from intric.flows.ai_builder.planning_state import PlanningState
+from intric.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
 from intric.flows.domain.flow import Flow
 
 
@@ -293,6 +300,10 @@ def analyze_discovery(
         )
 
     if _post_processing_goal_is_vague(profile):
+        json_transform_question = (
+            profile.input_intent.primary_runtime_input == "json"
+            and profile.output_intent.terminal_output == "structured_json"
+        )
         raw_issues.append(
             DiscoveryIssue(
                 issue_id="post_processing_goal",
@@ -300,10 +311,18 @@ def analyze_discovery(
                 severity="blocking",
                 message=localized_text(
                     profile.language,
+                    "Det är fortfarande oklart hur input-JSON ska omvandlas till output-JSON.",
+                    "It is still unclear how input JSON should be transformed into output JSON.",
+                )
+                if json_transform_question
+                else localized_text(
+                    profile.language,
                     "Det är fortfarande oklart vad flödet ska hjälpa användaren göra med materialet.",
                     "It is still unclear what the flow should help the user do with the material.",
                 ),
-                suggestion=post_processing_goal_question(profile.language),
+                suggestion=json_transform_goal_question(profile.language)
+                if json_transform_question
+                else post_processing_goal_question(profile.language),
                 question_level="high_value",
             )
         )
@@ -517,7 +536,123 @@ def analyze_discovery(
         selected_question_ids=tuple(selected_question_ids),
         suppressed_candidates=tuple(suppressed_candidates),
         candidates=tuple(candidates),
+        decision_trace=_build_decision_trace(
+            mvs_met=mvs_met,
+            selected_issues=selected_issues,
+            selected_question_ids=selected_question_ids,
+            candidates=candidates,
+            suppressed_candidates=suppressed_candidates,
+            assumptions=assumptions,
+            profile=profile,
+        ),
     )
+
+
+def _build_decision_trace(
+    *,
+    mvs_met: bool,
+    selected_issues: list[DiscoveryIssue],
+    selected_question_ids: list[str],
+    candidates: list[DiscoveryCandidate],
+    suppressed_candidates: list[DiscoveryCandidate],
+    assumptions: list[str],
+    profile: DiscoveryProfile,
+) -> ClarificationDecisionTrace:
+    selected_issue = selected_issues[0] if selected_issues else None
+    selected_candidate = (
+        _candidate_for_issue(candidates, selected_issue.issue_id)
+        if selected_issue is not None
+        else None
+    )
+    selected_question_id = (
+        selected_question_ids[0]
+        if selected_question_ids
+        else (
+            selected_issue.suggestion.question_id
+            if selected_issue is not None and selected_issue.suggestion is not None
+            else None
+        )
+    )
+    return ClarificationDecisionTrace(
+        mvs_met=mvs_met,
+        selected_action=_trace_action(
+            mvs_met=mvs_met,
+            selected_issue=selected_issue,
+            assumptions=assumptions,
+        ),
+        selected_question_id=selected_question_id,
+        selected_slot=selected_question_id,
+        selected_reason=_trace_reason(
+            selected_issue=selected_issue,
+            profile=profile,
+        ),
+        selected_candidate=selected_candidate,
+        candidates=tuple(candidates),
+        suppressed_candidates=tuple(suppressed_candidates),
+        assumptions=tuple(dict.fromkeys(assumptions)),
+    )
+
+
+def _candidate_for_issue(
+    candidates: list[DiscoveryCandidate],
+    issue_id: str,
+) -> DiscoveryCandidate | None:
+    for candidate in candidates:
+        if candidate.issue_id == issue_id:
+            return candidate
+    return None
+
+
+def _trace_action(
+    *,
+    mvs_met: bool,
+    selected_issue: DiscoveryIssue | None,
+    assumptions: list[str],
+) -> ClarificationAction:
+    if selected_issue is not None:
+        return "ask"
+    if mvs_met:
+        return "confirm"
+    if assumptions:
+        return "assume"
+    return "ask"
+
+
+def _trace_reason(
+    *,
+    selected_issue: DiscoveryIssue | None,
+    profile: DiscoveryProfile,
+) -> ClarificationReason:
+    if selected_issue is None:
+        return (
+            "all_blockers_resolved" if profile.text else "build_intent_and_sufficient"
+        )
+    if selected_issue.issue_id == "post_processing_goal" and _model_owned_slot(
+        profile, "post_processing_goal"
+    ):
+        return "model_slot_not_sufficient"
+    if selected_issue.issue_id == "post_processing_goal":
+        return "missing_outcome_requirement"
+    if selected_issue.issue_id == "comparison_scope":
+        return "missing_reference_source"
+    if selected_issue.issue_id in {
+        "input_material_mode",
+        "flow_input_architecture",
+        "final_output_mode",
+        "docx_output_mode",
+        "pdf_generation_mode",
+    }:
+        return "missing_architecture_requirement"
+    return "missing_architecture_requirement"
+
+
+def _model_owned_slot(profile: DiscoveryProfile, slot_name: str) -> bool:
+    slot = _resolved_slot(profile, slot_name)
+    return slot is not None and slot.source == "model"
+
+
+def _resolved_slot(profile: DiscoveryProfile, slot_name: str) -> ResolvedSlot | None:
+    return profile.resolved_slot(slot_name)
 
 
 def _dedupe_issues(issues: list[DiscoveryIssue]) -> list[DiscoveryIssue]:
@@ -639,22 +774,20 @@ def build_registry_question_followup(
 def _structured_question_payload_from_suggestion(
     suggestion: DiscoveryQuestionSuggestion,
 ) -> StructuredQuestionPayload:
-    return StructuredQuestionPayload.model_validate(
-        {
-            "question_id": suggestion.question_id,
-            "question": suggestion.question,
-            "options": [
-                {
-                    "id": option.id,
-                    "label": option.label,
-                    "description": option.description,
-                    "value": option.value,
-                }
-                for option in suggestion.options
-            ],
-            "selection_mode": suggestion.selection_mode,
-            "allow_custom": suggestion.allow_custom,
-        }
+    return StructuredQuestionPayload(
+        question_id=suggestion.question_id,
+        question=suggestion.question,
+        options=[
+            StructuredQuestionOptionPayload(
+                id=option.id,
+                label=option.label,
+                description=option.description,
+                value=option.value,
+            )
+            for option in suggestion.options
+        ],
+        selection_mode=suggestion.selection_mode,
+        allow_custom=suggestion.allow_custom,
     )
 
 
@@ -825,8 +958,7 @@ def _should_surface_structured_analysis_question(profile: DiscoveryProfile) -> b
     return (
         pattern.rich_document_workflow
         and not profile.edit_mode
-        and profile.planning_state.resolved_slots.get("structured_analysis_need")
-        is None
+        and profile.resolved_slot("structured_analysis_need") is None
         and "structured_analysis_need" not in profile.answers
     )
 

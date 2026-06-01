@@ -268,6 +268,22 @@ class TestPolicyDefaults:
         output_slot = state.resolved_slots["terminal_output"]
         assert output_slot.value == "structured_text"
 
+    def test_json_runtime_input_is_inferred_as_json_not_text(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Jag vill bygga ett flöde som tar emot JSON och "
+                        "returnerar JSON."
+                    ),
+                )
+            ]
+        )
+
+        assert state.resolved_slots["primary_runtime_input"].value == "json"
+        assert state.resolved_slots["terminal_output"].value == "structured_json"
+
     def test_document_input_defaults_to_flexible_document_scope(self) -> None:
         state = build_planning_state_from_conversation(
             [
@@ -1006,6 +1022,29 @@ class TestModelSlotMerge:
         assert "post_processing_goal" not in state.resolved_slots
         assert "structured_analysis_need" not in state.resolved_slots
 
+    def test_replay_drops_newly_blocked_model_value(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Jag vill bygga ett flöde som hjälper mig med dokument "
+                        "jag laddar upp. Det ska läsa dokumentet och skapa "
+                        "något användbart av det."
+                    ),
+                    metadata=_slot_classification_metadata(
+                        _classified(
+                            "post_processing_goal",
+                            "structure_key_information",
+                            "high",
+                        ),
+                    ),
+                )
+            ]
+        )
+
+        assert "post_processing_goal" not in state.resolved_slots
+
     def test_model_raw_post_processing_goal_rejects_empty_evidence_text(
         self,
     ) -> None:
@@ -1173,6 +1212,25 @@ class TestModelSlotMerge:
         assert state.resolved_slots["terminal_output"].value == "pdf_document"
         assert state.resolved_slots["primary_runtime_input"].value == "text"
         assert state.phase == "discovering"
+
+    def test_model_output_accepts_json_primary_runtime_input(self) -> None:
+        state = _state(phase="awaiting_input")
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(
+                    _classified("primary_runtime_input", "json", "high"),
+                    _classified("terminal_output", "structured_json", "high"),
+                )
+            ),
+            prompt_hash="d" * 64,
+            freeform_text="",
+        )
+
+        assert state.resolved_slots["primary_runtime_input"].value == "json"
+        assert state.resolved_slots["primary_runtime_input"].source == "model"
+        assert state.resolved_slots["terminal_output"].value == "structured_json"
 
     def test_model_output_cannot_displace_high_confidence_input_heuristic(
         self,

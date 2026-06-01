@@ -91,6 +91,7 @@ def _input_type_from_state(state: PlanningState) -> FlowInputType | None:
     return {
         "audio": FlowInputType.AUDIO,
         "documents": FlowInputType.DOCUMENT,
+        "json": FlowInputType.JSON,
         "text": FlowInputType.TEXT,
         # The runtime has one primary input type. `file` is the closest
         # engine primitive for mixed pasted/uploaded material.
@@ -194,6 +195,15 @@ def _primary_pattern_id(
 ) -> str | None:
     if output_mode is FlowOutputMode.TEMPLATE_FILL:
         return "document_to_docx_template"
+    if input_type is FlowInputType.JSON and output_type is FlowOutputType.JSON:
+        return "json_to_structured_payload"
+    if input_type is FlowInputType.JSON and output_type is FlowOutputType.TEXT:
+        return "json_to_text_summary"
+    if input_type is FlowInputType.JSON and output_type in {
+        FlowOutputType.DOCX,
+        FlowOutputType.PDF,
+    }:
+        return "json_to_artifact_report"
     if input_type is FlowInputType.AUDIO and output_type is FlowOutputType.TEXT:
         return "audio_transcription"
     if input_type is FlowInputType.AUDIO:

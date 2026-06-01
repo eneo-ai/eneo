@@ -86,9 +86,11 @@ def _text_evidences_stop_after_primary_operation(text: str) -> bool:
     return infer_post_processing_goal(text) == "stop_after_primary_operation"
 
 
-_MODEL_VALUE_ACCEPTANCE_POLICIES: dict[
-    tuple[str, str], _ModelValueAcceptancePolicy
-] = {
+def _text_evidences_structure_key_information(text: str) -> bool:
+    return infer_post_processing_goal(text) == "structure_key_information"
+
+
+_MODEL_VALUE_ACCEPTANCE_POLICIES: dict[tuple[str, str], _ModelValueAcceptancePolicy] = {
     # Register model values that need explicit user-text evidence before they
     # can become settled requirements; list values to drop with them as dependents.
     (
@@ -96,9 +98,13 @@ _MODEL_VALUE_ACCEPTANCE_POLICIES: dict[
         "stop_after_primary_operation",
     ): _ModelValueAcceptancePolicy(
         requires_text_evidence=_text_evidences_stop_after_primary_operation,
-        dependent_model_values=(
-            ("structured_analysis_need", "text_only_analysis"),
-        ),
+        dependent_model_values=(("structured_analysis_need", "text_only_analysis"),),
+    ),
+    (
+        "post_processing_goal",
+        "structure_key_information",
+    ): _ModelValueAcceptancePolicy(
+        requires_text_evidence=_text_evidences_structure_key_information,
     ),
 }
 
@@ -640,9 +646,7 @@ def _resolve_slots(
         )
     else:
         structured_analysis_default = (
-            _structured_analysis_default_for_post_processing_goal(
-                post_processing_goal
-            )
+            _structured_analysis_default_for_post_processing_goal(post_processing_goal)
         )
         if structured_analysis_default is not None:
             slots["structured_analysis_need"] = ResolvedSlot(
@@ -870,6 +874,8 @@ def _heuristic_slot_confidence(
             and not input_intent.audio_requested
             else "medium"
         )
+    if slot_value == "json":
+        return "high" if input_intent.primary_runtime_input == "json" else "medium"
     if slot_value == "text":
         return "high"
     return "medium"

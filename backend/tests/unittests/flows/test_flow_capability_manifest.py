@@ -1398,6 +1398,18 @@ class TestResolveCapabilityForTuple:
         ids = [cap.id for cap in caps]
         assert ids == ["input_text", "output_mode_pass_through"]
 
+    def test_json_to_json_flow_input_tuple_returns_owning_caps(self) -> None:
+        caps = resolve_capability_for_tuple(
+            input_source=FlowInputSource.FLOW_INPUT,
+            input_type=FlowInputType.JSON,
+            output_type=FlowOutputType.JSON,
+            output_mode=FlowOutputMode.PASS_THROUGH,
+        )
+
+        assert caps is not None
+        ids = [cap.id for cap in caps]
+        assert ids == ["input_json", "output_mode_pass_through"]
+
     def test_illegal_io_triple_returns_none(self) -> None:
         # TEMPLATE_FILL is only legal on DOCX output.
         assert (

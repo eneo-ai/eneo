@@ -18,7 +18,7 @@ SlotClassificationConfidence = Literal["high", "medium", "low"]
 _SLOT_CLASSIFICATION_CACHE: dict[str, "SlotClassificationResult"] = {}
 _MAX_CACHE_ENTRIES = 128
 UNKNOWN_SLOT_VALUE = "unknown"
-_SLOT_CLASSIFICATION_SCHEMA_VERSION = 4
+_SLOT_CLASSIFICATION_SCHEMA_VERSION = 5
 _SLOT_CLASSIFICATION_RESPONSE_FORMAT: dict[str, object] = {"type": "json_object"}
 
 
@@ -277,6 +277,10 @@ def _build_slot_classification_prompt(
         "Distinguish runtime source material from intermediate work and final "
         "deliverables. Uploaded files are document input; pasted or typed prose is "
         "text input; uploaded or recorded speech for transcription is audio input. "
+        "If the runtime source material itself is a JSON payload, classify "
+        "primary_runtime_input as json. Do not classify JSON as runtime input "
+        "when the user asks to extract JSON from documents or only requests JSON "
+        "as the final output. "
         "A requested final document is terminal_output, not primary input. "
         "If the final deliverable is a DOCX, Word, PDF, or document artifact, choose "
         "that artifact as terminal_output even when the document contains a readable "

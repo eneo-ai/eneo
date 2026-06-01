@@ -53,6 +53,9 @@ _EXPECTED_POSITIVE_IDS: frozenset[str] = frozenset(
     {
         "summarize_text",
         "extract_structured_fields",
+        "json_to_structured_payload",
+        "json_to_text_summary",
+        "json_to_artifact_report",
         "document_to_structured_report",
         "document_to_docx_template",
         "document_to_pdf_report",
@@ -141,8 +144,8 @@ _NEGATIVE_FCM_ASSERTIONS: dict[str, Callable[[], None]] = {
 
 
 class TestPatternDataclass:
-    def test_pattern_version_is_seven(self) -> None:
-        assert PATTERN_REGISTRY_VERSION == 7
+    def test_pattern_version_is_eight(self) -> None:
+        assert PATTERN_REGISTRY_VERSION == 8
 
     def test_pattern_is_frozen_with_structural_fields(self) -> None:
         pattern = Pattern(
@@ -300,6 +303,24 @@ class TestRegistryInvariants:
             f"(uses_previous_fields / previous_step); got "
             f"{pattern.retrieval_hints!r}"
         )
+
+    def test_json_source_patterns_are_seeded_as_first_class_runtime_inputs(
+        self,
+    ) -> None:
+        for pattern_id, structural_hint in {
+            "json_to_structured_payload": "input_type=json output_type=json",
+            "json_to_text_summary": "input_type=json output_type=text",
+            "json_to_artifact_report": "input_type=json output_type=pdf docx",
+        }.items():
+            pattern = PATTERN_REGISTRY.get(pattern_id)
+            assert pattern is not None, f"{pattern_id} must be registered"
+            assert pattern.polarity == "positive"
+            assert "primary_runtime_input" in pattern.required_architectural_slots
+            assert "terminal_output" in pattern.required_architectural_slots
+            assert any(structural_hint in hint for hint in pattern.retrieval_hints), (
+                f"{pattern_id}: expected structural JSON input hint "
+                f"{structural_hint!r}; got {pattern.retrieval_hints!r}"
+            )
 
 
 class TestPositivePatternContract:

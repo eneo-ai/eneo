@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from intric.flows.domain.flow import Flow
 
 PrimaryRuntimeInput = Literal[
-    "audio", "documents", "text", "text_and_documents", "unknown"
+    "audio", "documents", "json", "text", "text_and_documents", "unknown"
 ]
 
 _AUDIO_PREFIX_MARKERS: tuple[str, ...] = (
@@ -84,6 +84,9 @@ _DOCUMENT_UPLOAD_MARKERS: tuple[str, ...] = (
 )
 
 _DOCUMENT_REFERENCE_PREFIXES: tuple[str, ...] = (
+    "avtal",
+    "agreement",
+    "contract",
     "pdf",
     "docx",
     "word",
@@ -95,6 +98,20 @@ _DOCUMENT_REFERENCE_PREFIXES: tuple[str, ...] = (
     "bilag",
     "attachment",
 )
+
+_SPECIFIC_DOCUMENT_REFERENCE_PREFIXES: tuple[str, ...] = (
+    "avtal",
+    "agreement",
+    "contract",
+    "pdf",
+    "docx",
+    "word",
+    "dokument",
+    "document",
+    "underlag",
+)
+
+_JSON_REFERENCE_PREFIXES: tuple[str, ...] = ("json",)
 
 _AUDIO_REFERENCE_PREFIXES: tuple[str, ...] = (
     "audio",
@@ -154,7 +171,10 @@ _RUNTIME_FILE_ACTION_PREFIXES: tuple[str, ...] = (
     "attach",
     "lämn",
     "lamn",
+    "läs",
+    "las",
     "provide",
+    "read",
     "receiv",
     "skick",
 )
@@ -164,11 +184,14 @@ _RUNTIME_FILE_ACTION_PHRASES: tuple[str, ...] = (
     "skicka in",
     "lämna in",
     "lamna in",
+    "läs",
+    "las",
     "spela in",
     "spelar in",
     "record",
     "ta emot",
     "tar emot",
+    "read",
     "send in",
     "runtime input",
     "primary input",
@@ -456,6 +479,8 @@ def _resolve_primary_from_answers(
     input_modes = answer_signals.get("input_material_mode", set())
     if "text_and_documents" in input_modes:
         return "text_and_documents"
+    if "json" in input_modes:
+        return "json"
     if "audio" in input_modes:
         return "audio"
     if "documents" in input_modes:
@@ -475,6 +500,8 @@ def _resolve_primary_from_defaults(
     defaults: dict[str, set[str]],
 ) -> PrimaryRuntimeInput:
     input_modes = defaults.get("input_material_mode", set())
+    if "json" in input_modes:
+        return "json"
     if "audio" in input_modes:
         return "audio"
     if "text_and_documents" in input_modes:
@@ -491,9 +518,15 @@ def _infer_primary_runtime_input(text: str) -> PrimaryRuntimeInput:
         return "unknown"
 
     text_requested = _text_runtime_input_requested(text)
+    json_requested = _json_runtime_input_requested(text)
     audio_requested = _audio_runtime_input_requested(text)
     document_requested = _document_runtime_input_requested(text)
+    specific_document_requested = _specific_document_runtime_input_requested(text)
 
+    if json_requested and document_requested and specific_document_requested:
+        return "documents"
+    if json_requested and not audio_requested:
+        return "json"
     if audio_requested and not document_requested and not text_requested:
         return "audio"
     if document_requested and text_requested and not audio_requested:
@@ -605,6 +638,31 @@ def _document_runtime_input_requested(text: str) -> bool:
         reference_prefixes=_DOCUMENT_REFERENCE_PREFIXES,
         action_prefixes=_RUNTIME_FILE_ACTION_PREFIXES,
         action_phrases=_RUNTIME_FILE_ACTION_PHRASES,
+    )
+
+
+def _specific_document_runtime_input_requested(text: str) -> bool:
+    if not text:
+        return False
+    return _reference_has_nearby_runtime_action(
+        text,
+        reference_prefixes=_SPECIFIC_DOCUMENT_REFERENCE_PREFIXES,
+        action_prefixes=_RUNTIME_FILE_ACTION_PREFIXES,
+        action_phrases=_RUNTIME_FILE_ACTION_PHRASES,
+    )
+
+
+def _json_runtime_input_requested(text: str) -> bool:
+    if not text:
+        return False
+    return _reference_has_nearby_runtime_action(
+        text,
+        reference_prefixes=_JSON_REFERENCE_PREFIXES,
+        action_prefixes=_RUNTIME_FILE_ACTION_PREFIXES + _RUNTIME_TEXT_ACTION_PREFIXES,
+        action_phrases=_RUNTIME_FILE_ACTION_PHRASES + _RUNTIME_TEXT_ACTION_PHRASES,
+        # Keep JSON tighter than document references so a later phrase like
+        # "returnera JSON" does not turn an uploaded document into JSON input.
+        window=3,
     )
 
 

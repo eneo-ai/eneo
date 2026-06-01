@@ -100,31 +100,33 @@ async def dispatch_backend_selected_question_if_any(
         return None
 
     question_id = _discovery_question_id_for_server_slot(action.payload.slot_name)
-    followup = build_registry_question_followup(
-        question_id,
+    discovery_followup = build_discovery_followup(
         request.conversation,
         flow=request.flow,
+        analysis=request.discovery_analysis,
     )
-    if followup is None:
-        discovery_followup = build_discovery_followup(
+    if (
+        discovery_followup is not None
+        and discovery_followup.question_data.question_id == question_id
+    ):
+        followup = discovery_followup
+    else:
+        followup = build_registry_question_followup(
+            question_id,
             request.conversation,
             flow=request.flow,
-            analysis=request.discovery_analysis,
         )
-        if discovery_followup is not None:
-            if discovery_followup.question_data.question_id == question_id:
-                followup = discovery_followup
-            else:
-                logger.warning(
-                    "AI Builder server question fallback selected a different "
-                    "discovery question.",
-                    extra={
-                        "requested_question_id": question_id,
-                        "fallback_question_id": (
-                            discovery_followup.question_data.question_id
-                        ),
-                    },
-                )
+        if followup is None and discovery_followup is not None:
+            logger.warning(
+                "AI Builder server question fallback selected a different "
+                "discovery question.",
+                extra={
+                    "requested_question_id": question_id,
+                    "fallback_question_id": (
+                        discovery_followup.question_data.question_id
+                    ),
+                },
+            )
 
     if followup is None:
         return [build_text_event(action.payload.prompt)]

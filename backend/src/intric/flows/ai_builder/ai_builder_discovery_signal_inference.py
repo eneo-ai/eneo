@@ -281,6 +281,8 @@ def _document_signals_apply(
     input_intent: InputIntentResolution,
     input_material_mode: str | None,
 ) -> bool:
+    if input_material_mode == "json":
+        return False
     if input_material_mode in {"documents", "text_and_documents"}:
         return True
     return (

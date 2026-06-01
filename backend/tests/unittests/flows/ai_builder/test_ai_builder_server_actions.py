@@ -228,3 +228,46 @@ def test_server_confirmation_summarizes_processing_goal() -> None:
         "Beslut, nästa steg och uppföljning",
         "Ja, använd strukturerad analys där det förbättrar kvaliteten",
     }
+
+
+def test_server_confirmation_names_json_to_json_architecture() -> None:
+    state = _state(
+        primary_runtime_input="json",
+        terminal_output="structured_json",
+        post_processing_goal="extract_key_information",
+        structured_analysis_need="use_structured_analysis",
+        runtime_metadata_fields="no_extra_metadata",
+    )
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="json",
+                output_type="json",
+                output_mode="pass_through",
+            ),
+        ],
+        chosen_patterns=["json_to_structured_payload"],
+        required_capabilities=[],
+        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
+        architecture_hash="c" * 64,
+    )
+    policy = build_planner_action_policy(
+        session_state=state,
+        unresolved_architectural_choices=frozenset(),
+        selected_discovery_question_ids=(),
+    )
+
+    output = build_server_planner_output(
+        action_policy=policy,
+        session_state=state,
+        base_planning_state_version=11,
+        ui_language="sv",
+    )
+
+    assert output is not None
+    assert output.planner_action.kind == "confirm_requirements"
+    payload = output.planner_action.payload
+    decisions = {
+        decision.topic: decision.decision for decision in payload.key_decisions
+    }
+    assert decisions["Planerad bearbetning"] == "JSON till JSON"

@@ -17,7 +17,7 @@ from intric.flows.ai_builder.ai_builder_event_models import StructuredQuestionPa
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     InputIntentResolution,
 )
-from intric.flows.ai_builder.planning_state import PlanningState
+from intric.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
 from intric.flows.ai_builder.question_catalog import QuestionExposure
 
 DiscoverySeverity = Literal["blocking", "info"]
@@ -31,6 +31,16 @@ DiscoveryResolvedBy = Literal[
     "llm_semantic_inference",
     "flow_default",
     "heuristic_assumption",
+]
+ClarificationAction = Literal["ask", "assume", "confirm", "plan"]
+ClarificationReason = Literal[
+    "model_slot_not_sufficient",
+    "missing_architecture_requirement",
+    "missing_outcome_requirement",
+    "missing_reference_source",
+    "missing_structured_payload_contract",
+    "build_intent_and_sufficient",
+    "all_blockers_resolved",
 ]
 
 
@@ -84,6 +94,19 @@ class DiscoveryCandidate:
 
 
 @dataclass(frozen=True)
+class ClarificationDecisionTrace:
+    mvs_met: bool
+    selected_action: ClarificationAction
+    selected_question_id: str | None
+    selected_slot: str | None
+    selected_reason: ClarificationReason
+    selected_candidate: DiscoveryCandidate | None
+    candidates: tuple[DiscoveryCandidate, ...]
+    suppressed_candidates: tuple[DiscoveryCandidate, ...]
+    assumptions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class DiscoveryAnalysis:
     issues: tuple[DiscoveryIssue, ...]
     mvs_met: bool = True
@@ -91,6 +114,7 @@ class DiscoveryAnalysis:
     selected_question_ids: tuple[str, ...] = ()
     suppressed_candidates: tuple[DiscoveryCandidate, ...] = ()
     candidates: tuple[DiscoveryCandidate, ...] = ()
+    decision_trace: ClarificationDecisionTrace | None = None
 
     @property
     def blocking_issues(self) -> tuple[DiscoveryIssue, ...]:
@@ -125,3 +149,6 @@ class DiscoveryProfile:
     audio_like_input: bool
     final_output_text_or_docx: bool
     prefer_structured_intermediate: bool = False
+
+    def resolved_slot(self, slot_name: str) -> ResolvedSlot | None:
+        return self.planning_state.resolved_slots.get(slot_name)

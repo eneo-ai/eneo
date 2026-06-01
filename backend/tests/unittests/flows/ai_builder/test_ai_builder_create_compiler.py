@@ -370,6 +370,49 @@ _CREATE_COMPILER_ARCHETYPE_CASES: tuple[_CreateCompilerArchetypeCase, ...] = (
         expected_output_modes=("pass_through",),
     ),
     _case(
+        pattern_id="json_to_structured_payload",
+        steps=(
+            CreateStepDraft(
+                name="Transformera JSON",
+                instructions="Normalisera inkommande JSON till det önskade schemat.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.JSON,
+                output_type=OutputType.JSON,
+                output_fields=(
+                    _field("customer_name", "string", description="Kundens namn."),
+                    _field("risk_flags", "array", description="Identifierade risker."),
+                ),
+            ),
+        ),
+        expected_output_modes=("pass_through",),
+    ),
+    _case(
+        pattern_id="json_to_text_summary",
+        steps=(
+            CreateStepDraft(
+                name="Sammanfatta JSON",
+                instructions="Skriv en läsbar sammanfattning av JSON-payloaden.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.JSON,
+                output_type=OutputType.TEXT,
+            ),
+        ),
+        expected_output_modes=("pass_through",),
+    ),
+    _case(
+        pattern_id="json_to_artifact_report",
+        steps=(
+            CreateStepDraft(
+                name="Skapa JSON-baserad rapport",
+                instructions="Skapa en DOCX-rapport från inkommande JSON.",
+                input_source=InputSource.FLOW_INPUT,
+                input_type=InputType.JSON,
+                output_type=OutputType.DOCX,
+            ),
+        ),
+        expected_output_modes=("pass_through",),
+    ),
+    _case(
         pattern_id="document_to_structured_report",
         steps=(
             CreateStepDraft(
@@ -4784,9 +4827,7 @@ def test_compile_outline_audio_docx_body_step_auto_authors_targeted_refs_when_js
     assert validation.valid
 
 
-def test_auto_bind_targeted_underlag_rewrites_aggregate_but_not_compare() -> (
-    None
-):
+def test_auto_bind_targeted_underlag_rewrites_aggregate_but_not_compare() -> None:
     """`compare` retains broad fan-in, but `aggregate` still gets targeted
     underlag because aggregate classification is intentionally conservative.
     """
@@ -5788,15 +5829,14 @@ def test_auto_bind_targeted_underlag_routes_single_json_source_to_section_writer
         for step in result
     }
     assert "nulage_och_problem" in refs_by_step["Skriv Problem och nuläge"]
-    assert "losningsinriktning" in refs_by_step[
-        "Skriv Lösningsförslag och nyläge"
-    ]
+    assert "losningsinriktning" in refs_by_step["Skriv Lösningsförslag och nyläge"]
     assert "resursbehov" in refs_by_step["Skriv Resursåtgång"]
     assert "tidplan" in refs_by_step["Skriv Planerad tidplan"]
     assert "finansieringsmojligheter" in refs_by_step["Skriv Finansiering"]
-    assert "ansvarig_nyttorealisering" in refs_by_step[
-        "Skriv Ansvarig för nyttorealisering"
-    ]
+    assert (
+        "ansvarig_nyttorealisering"
+        in refs_by_step["Skriv Ansvarig för nyttorealisering"]
+    )
     assert refs_by_step["Skriv oklar specialrubrik"] == {
         "sammanfattning_av_underlag"
     }, "unmatched section writers should not all reuse the first declared fields"
@@ -5881,22 +5921,25 @@ def test_compile_create_draft_section_writers_use_json_schema_as_underlag() -> N
     assert problem_step.input_type == InputType.TEXT
     assert problem_step.input_contract is None
     assert problem_step.input_bindings is not None
-    assert "step_b.output.structured.nulage_och_problem" in problem_step.input_bindings[
-        "question"
-    ]
+    assert (
+        "step_b.output.structured.nulage_och_problem"
+        in problem_step.input_bindings["question"]
+    )
 
     assert solution_step.input_type == InputType.TEXT
     assert solution_step.input_contract is None
     assert solution_step.input_bindings is not None
-    assert "step_b.output.structured.losningsinriktning" in solution_step.input_bindings[
-        "question"
-    ]
+    assert (
+        "step_b.output.structured.losningsinriktning"
+        in solution_step.input_bindings["question"]
+    )
 
     assert benefit_plan_step.input_type == InputType.TEXT
     assert benefit_plan_step.input_contract is None
     assert benefit_plan_step.input_bindings is not None
-    assert "step_b.output.structured.sammanfattning_av_underlag" in (
-        benefit_plan_step.input_bindings["question"]
+    assert (
+        "step_b.output.structured.sammanfattning_av_underlag"
+        in (benefit_plan_step.input_bindings["question"])
     )
 
 
@@ -6062,9 +6105,7 @@ def test_compile_create_draft_section_writers_do_not_duplicate_full_json_schema(
     assert "{{ step_c.output.text }}" in final_question
 
 
-def test_compile_create_draft_section_writers_ignore_passing_broad_markers() -> (
-    None
-):
+def test_compile_create_draft_section_writers_ignore_passing_broad_markers() -> None:
     extraction_fields = [
         _field("nulage", "string", description="Nuläge, problem och behov."),
         _field(
@@ -6275,13 +6316,16 @@ def test_targeted_underlag_predicate_binds_single_json_prior_with_primary_source
         ),
     ]
 
-    assert _targeted_underlag_binding_mode(
-        steps=steps,
-        composer_index=2,
-        all_previous_candidate_indexes=set(),
-        primary_source_ref=source_ref,
-        aggregation_intent="linear",
-    ) != "skip"
+    assert (
+        _targeted_underlag_binding_mode(
+            steps=steps,
+            composer_index=2,
+            all_previous_candidate_indexes=set(),
+            primary_source_ref=source_ref,
+            aggregation_intent="linear",
+        )
+        != "skip"
+    )
 
 
 def test_targeted_underlag_predicate_skips_single_json_prior_without_primary_source_ref() -> (
@@ -6309,13 +6353,16 @@ def test_targeted_underlag_predicate_skips_single_json_prior_without_primary_sou
         ),
     ]
 
-    assert _targeted_underlag_binding_mode(
-        steps=steps,
-        composer_index=1,
-        all_previous_candidate_indexes=set(),
-        primary_source_ref=None,
-        aggregation_intent="linear",
-    ) == "skip"
+    assert (
+        _targeted_underlag_binding_mode(
+            steps=steps,
+            composer_index=1,
+            all_previous_candidate_indexes=set(),
+            primary_source_ref=None,
+            aggregation_intent="linear",
+        )
+        == "skip"
+    )
 
 
 def test_targeted_underlag_predicate_binds_two_json_priors_without_source_ref() -> None:
@@ -6349,13 +6396,16 @@ def test_targeted_underlag_predicate_binds_two_json_priors_without_source_ref() 
         ),
     ]
 
-    assert _targeted_underlag_binding_mode(
-        steps=steps,
-        composer_index=2,
-        all_previous_candidate_indexes=set(),
-        primary_source_ref=None,
-        aggregation_intent="linear",
-    ) != "skip"
+    assert (
+        _targeted_underlag_binding_mode(
+            steps=steps,
+            composer_index=2,
+            all_previous_candidate_indexes=set(),
+            primary_source_ref=None,
+            aggregation_intent="linear",
+        )
+        != "skip"
+    )
 
 
 def test_targeted_underlag_predicate_skips_prebound_composer() -> None:
@@ -6393,13 +6443,16 @@ def test_targeted_underlag_predicate_skips_prebound_composer() -> None:
         ),
     ]
 
-    assert _targeted_underlag_binding_mode(
-        steps=steps,
-        composer_index=2,
-        all_previous_candidate_indexes={2},
-        primary_source_ref=None,
-        aggregation_intent="linear",
-    ) == "skip"
+    assert (
+        _targeted_underlag_binding_mode(
+            steps=steps,
+            composer_index=2,
+            all_previous_candidate_indexes={2},
+            primary_source_ref=None,
+            aggregation_intent="linear",
+        )
+        == "skip"
+    )
 
 
 def test_targeted_underlag_predicate_skips_renderer() -> None:
@@ -6425,13 +6478,16 @@ def test_targeted_underlag_predicate_skips_renderer() -> None:
         ),
     ]
 
-    assert _targeted_underlag_binding_mode(
-        steps=steps,
-        composer_index=1,
-        all_previous_candidate_indexes={1},
-        primary_source_ref=None,
-        aggregation_intent="linear",
-    ) == "skip"
+    assert (
+        _targeted_underlag_binding_mode(
+            steps=steps,
+            composer_index=1,
+            all_previous_candidate_indexes={1},
+            primary_source_ref=None,
+            aggregation_intent="linear",
+        )
+        == "skip"
+    )
 
 
 @pytest.mark.parametrize(
@@ -6472,13 +6528,16 @@ def test_targeted_underlag_predicate_handles_aggregation_intents(
         ),
     ]
 
-    assert _targeted_underlag_binding_mode(
-        steps=steps,
-        composer_index=2,
-        all_previous_candidate_indexes={2},
-        primary_source_ref=None,
-        aggregation_intent=intent,
-    ) == expected_mode
+    assert (
+        _targeted_underlag_binding_mode(
+            steps=steps,
+            composer_index=2,
+            all_previous_candidate_indexes={2},
+            primary_source_ref=None,
+            aggregation_intent=intent,
+        )
+        == expected_mode
+    )
 
 
 def test_auto_bind_is_idempotent_for_all_previous_steps_composer() -> None:

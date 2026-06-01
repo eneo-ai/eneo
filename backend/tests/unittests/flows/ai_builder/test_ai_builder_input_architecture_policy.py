@@ -218,9 +218,7 @@ def test_resolve_input_intent_uses_role_scoped_input_clause_for_uploaded_pdf() -
     assert intent.audio_requested is False
 
 
-def test_resolve_input_intent_treats_word_meeting_minutes_as_document_input() -> (
-    None
-):
+def test_resolve_input_intent_treats_word_meeting_minutes_as_document_input() -> None:
     intent = resolve_input_intent(
         (
             "Skapa ett flöde som tar emot ett Word-dokument med ett mötesprotokoll "
@@ -297,6 +295,43 @@ def test_resolve_input_intent_treats_provided_underlag_as_documents(
         prompt,
         {},
     )
+
+    assert intent.primary_runtime_input == "documents"
+    assert intent.document_runtime_input_requested is True
+    assert intent.audio_requested is False
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Jag vill bygga ett flöde som tar emot JSON och returnerar JSON.",
+        "Bygg ett flöde där användaren laddar upp en JSON-payload vid körning.",
+        "Build a flow that receives a JSON payload and returns normalized JSON.",
+    ],
+)
+def test_resolve_input_intent_treats_runtime_json_payload_as_json(
+    prompt: str,
+) -> None:
+    intent = resolve_input_intent(prompt, {})
+
+    assert intent.primary_runtime_input == "json"
+    assert intent.document_runtime_input_requested is False
+    assert intent.audio_requested is False
+    assert intent.needs_architecture_clarification is False
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Läs en PDF och extrahera resultatet som JSON.",
+        "Användaren laddar upp ett avtal och flödet ska returnera strukturerad JSON.",
+        "Extract JSON fields from the uploaded document.",
+    ],
+)
+def test_resolve_input_intent_does_not_treat_json_output_as_json_input(
+    prompt: str,
+) -> None:
+    intent = resolve_input_intent(prompt, {})
 
     assert intent.primary_runtime_input == "documents"
     assert intent.document_runtime_input_requested is True

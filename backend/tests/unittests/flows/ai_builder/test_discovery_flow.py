@@ -1692,6 +1692,141 @@ class TestExtendedClarificationHints:
         assert analysis.next_issue.suggestion is not None
         assert analysis.next_issue.suggestion.question_id == "post_processing_goal"
 
+    def test_vague_document_outcome_asks_post_processing_goal(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Jag vill bygga ett flöde som hjälper mig med dokument jag "
+                    "laddar upp. Det ska läsa dokumentet och skapa något "
+                    "användbart av det."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "post_processing_goal"
+        assert analysis.next_issue.suggestion is not None
+        assert analysis.next_issue.suggestion.question_id == "post_processing_goal"
+        assert analysis.decision_trace is not None
+        assert analysis.decision_trace.selected_action == "ask"
+        assert analysis.decision_trace.selected_question_id == "post_processing_goal"
+
+    @pytest.mark.asyncio
+    async def test_model_owned_goal_does_not_suppress_vague_outcome_question(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Jag vill bygga ett flöde som hjälper mig med dokument jag "
+                    "laddar upp. Det ska läsa dokumentet och skapa något "
+                    "användbart av det."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        async def fake_classify_slots(**kwargs: Any) -> SlotClassificationResult:
+            return SlotClassificationResult(
+                slots=(
+                    ClassifiedSlot(
+                        slot_name="post_processing_goal",
+                        value="summarize_or_overview",
+                        confidence="high",
+                        reason="The model guessed a useful document summary.",
+                    ),
+                )
+            )
+
+        with patch(
+            "intric.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            side_effect=fake_classify_slots,
+        ):
+            context = await build_runtime_discovery_context(
+                conversation,
+                litellm_client=object(),
+                litellm_model="test-model",
+                tenant_id=uuid4(),
+            )
+
+        assert context.planning_state.resolved_slots["post_processing_goal"].source == (
+            "model"
+        )
+
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=context.planning_state,
+            slot_classification_result=context.slot_classification_result,
+        )
+
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "post_processing_goal"
+        assert analysis.next_issue.suggestion is not None
+        assert analysis.next_issue.suggestion.question_id == "post_processing_goal"
+        assert analysis.decision_trace is not None
+        assert analysis.decision_trace.selected_action == "ask"
+        assert analysis.decision_trace.selected_question_id == "post_processing_goal"
+        assert analysis.decision_trace.selected_reason == "model_slot_not_sufficient"
+
+    @pytest.mark.asyncio
+    async def test_vague_transcription_asks_output_or_outcome_before_confirmation(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Jag vill ha ett transkriberingsflöde.",
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        async def fake_classify_slots(**kwargs: Any) -> SlotClassificationResult:
+            return SlotClassificationResult(
+                slots=(
+                    ClassifiedSlot(
+                        slot_name="post_processing_goal",
+                        value="summarize_or_overview",
+                        confidence="high",
+                        reason="The model guessed a transcript summary.",
+                    ),
+                )
+            )
+
+        with patch(
+            "intric.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            side_effect=fake_classify_slots,
+        ):
+            context = await build_runtime_discovery_context(
+                conversation,
+                litellm_client=object(),
+                litellm_model="test-model",
+                tenant_id=uuid4(),
+            )
+
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=context.planning_state,
+            slot_classification_result=context.slot_classification_result,
+        )
+
+        assert analysis.ready_for_confirmation is False
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id in {
+            "final_output_mode",
+            "post_processing_goal",
+        }
+        assert analysis.decision_trace is not None
+        assert analysis.decision_trace.selected_action == "ask"
+        assert analysis.decision_trace.selected_question_id in {
+            "final_output_mode",
+            "post_processing_goal",
+        }
+
     def test_exact_json_flow_does_not_ask_post_processing_goal(self) -> None:
         conversation = [
             ConversationMessage(
@@ -1701,6 +1836,49 @@ class TestExtendedClarificationHints:
                     "och får tillbaka strikt JSON enligt det här schemat: "
                     "{name: string, amount: number, deadline: string}. "
                     "Returnera bara giltig JSON."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+        assert "post_processing_goal" not in question_ids
+
+    def test_bare_json_to_json_prompt_asks_outcome_question(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Jag vill bygga ett flöde som tar emot JSON och returnerar JSON."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "post_processing_goal"
+        assert analysis.next_issue.suggestion is not None
+        assert analysis.next_issue.suggestion.question_id == "post_processing_goal"
+        assert "input-JSON" in analysis.next_issue.suggestion.question
+
+    def test_document_to_json_extraction_does_not_ask_post_processing_goal(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Användaren laddar upp ett PDF-avtal. Flödet ska extrahera "
+                    "kundnamn, datum, riskflaggor och saknad information som "
+                    "strukturerad JSON."
                 ),
                 metadata={"ui_language": "sv"},
             )
@@ -1903,9 +2081,7 @@ class TestExtendedClarificationHints:
         assert "runtime_metadata_fields" in captured_allowed_values
         assert context.planning_state.resolved_slots[
             "structured_analysis_need"
-        ].value == (
-            "use_structured_analysis"
-        )
+        ].value == ("use_structured_analysis")
 
     @pytest.mark.asyncio
     async def test_classifier_resolved_outcome_still_asks_input_for_unknown_input(
