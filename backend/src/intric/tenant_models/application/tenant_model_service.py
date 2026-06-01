@@ -21,6 +21,9 @@ from uuid import UUID
 
 import sqlalchemy as sa
 
+from intric.ai_models.display_name_validation import (
+    validate_unique_display_name as _validate_unique_display_name,
+)
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
@@ -175,6 +178,12 @@ class TenantCompletionModelService:
         await _validate_active_provider(
             self.session, payload.provider_id, self.user.tenant_id
         )
+        await _validate_unique_display_name(
+            self.session,
+            CompletionModels,
+            tenant_id=self.user.tenant_id,
+            nickname=payload.display_name,
+        )
 
         if payload.is_default:
             await _unset_other_defaults(
@@ -252,6 +261,13 @@ class TenantCompletionModelService:
         if payload.name is not None:
             model.name = payload.name
         if payload.display_name is not None:
+            await _validate_unique_display_name(
+                self.session,
+                CompletionModels,
+                tenant_id=self.user.tenant_id,
+                nickname=payload.display_name,
+                exclude_id=model.id,
+            )
             model.nickname = payload.display_name
         if "description" in provided:
             model.description = payload.description
@@ -360,6 +376,12 @@ class TenantEmbeddingModelService:
         await _validate_active_provider(
             self.session, payload.provider_id, self.user.tenant_id
         )
+        await _validate_unique_display_name(
+            self.session,
+            EmbeddingModels,
+            tenant_id=self.user.tenant_id,
+            nickname=payload.display_name,
+        )
 
         if payload.is_default:
             await _unset_other_defaults(
@@ -429,6 +451,13 @@ class TenantEmbeddingModelService:
 
         provided = payload.model_fields_set
         if payload.display_name is not None:
+            await _validate_unique_display_name(
+                self.session,
+                EmbeddingModels,
+                tenant_id=self.user.tenant_id,
+                nickname=payload.display_name,
+                exclude_id=model.id,
+            )
             model.nickname = payload.display_name
         if "description" in provided:
             model.description = payload.description
@@ -559,6 +588,12 @@ class TenantTranscriptionModelService:
         await _validate_active_provider(
             self.session, payload.provider_id, self.user.tenant_id
         )
+        await _validate_unique_display_name(
+            self.session,
+            TranscriptionModels,
+            tenant_id=self.user.tenant_id,
+            nickname=payload.display_name,
+        )
 
         if payload.is_default:
             await _unset_other_defaults(
@@ -574,6 +609,10 @@ class TenantTranscriptionModelService:
                 tenant_id=self.user.tenant_id,
                 provider_id=payload.provider_id,
                 name=payload.display_name,
+                # Keep nickname in sync with the display name (which still lives
+                # in `name` for transcription). Lets the read path source the
+                # display from nickname uniformly with completion/embedding.
+                nickname=payload.display_name,
                 model_name=payload.name,
                 family=payload.family,
                 hosting=payload.hosting,
@@ -624,7 +663,15 @@ class TenantTranscriptionModelService:
 
         provided = payload.model_fields_set
         if payload.display_name is not None:
+            await _validate_unique_display_name(
+                self.session,
+                TranscriptionModels,
+                tenant_id=self.user.tenant_id,
+                nickname=payload.display_name,
+                exclude_id=model.id,
+            )
             model.name = payload.display_name
+            model.nickname = payload.display_name
         if "description" in provided:
             model.description = payload.description
         if payload.hosting is not None:

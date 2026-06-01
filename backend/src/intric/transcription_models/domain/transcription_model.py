@@ -93,7 +93,11 @@ class TranscriptionModel(AIModel):
             id=transcription_model_db.id,
             created_at=transcription_model_db.created_at,
             updated_at=transcription_model_db.updated_at,
-            nickname=transcription_model_db.name,
+            # Display name now lives in `nickname` (parity with
+            # completion/embedding); fall back to `name` for rows written
+            # before nickname was synced. The DB `name`/`model_name` inversion
+            # is left untouched until a later normalization phase.
+            nickname=transcription_model_db.nickname or transcription_model_db.name,
             name=transcription_model_db.model_name,
             family=transcription_model_db.family,
             hosting=transcription_model_db.hosting,

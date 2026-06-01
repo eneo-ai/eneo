@@ -16,6 +16,7 @@ from intric.ai_models.completion_models.completion_model import (
 from intric.ai_models.completion_models.completion_models_repo import (
     CompletionModelsRepository,
 )
+from intric.ai_models.display_name_validation import validate_unique_display_name
 from intric.ai_models.embedding_models.embedding_model import (
     EmbeddingModelCreate,
     EmbeddingModelLegacy,
@@ -44,6 +45,10 @@ from intric.completion_models.presentation.completion_model_models import (
     ModelMigrationRequest,
 )
 from intric.database.database import AsyncSession
+from intric.database.tables.ai_models_table import (
+    CompletionModels,
+    EmbeddingModels,
+)
 from intric.database.tables.collections_table import CollectionsTable
 from intric.database.tables.integration_table import IntegrationKnowledge
 from intric.database.tables.websites_table import Websites
@@ -1250,6 +1255,12 @@ async def create_completion_model(
     # sysadmin_audit store; tracked as follow-up.
     session = cast(AsyncSession, container.session())
     async with session.begin():
+        await validate_unique_display_name(
+            session,
+            CompletionModels,
+            tenant_id=None,
+            nickname=getattr(model_data, "nickname", None),
+        )
         repo = CompletionModelsRepository(session=session)
         model = await repo.create_model(model_data)
 
@@ -1278,6 +1289,14 @@ async def update_completion_model_metadata(
     session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = CompletionModelsRepository(session=session)
+
+        await validate_unique_display_name(
+            session,
+            CompletionModels,
+            tenant_id=None,
+            nickname=getattr(model_data, "nickname", None),
+            exclude_id=id,
+        )
 
         # Ensure model_data has the id
         update_with_id = CompletionModelUpdate(
@@ -1361,6 +1380,12 @@ async def create_embedding_model(
     # global model row, so no audit_log entry is emitted today.
     session = cast(AsyncSession, container.session())
     async with session.begin():
+        await validate_unique_display_name(
+            session,
+            EmbeddingModels,
+            tenant_id=None,
+            nickname=getattr(model_data, "nickname", None),
+        )
         repo = AdminEmbeddingModelsService(session=session)
         model = await repo.create_model(model_data)
 
@@ -1389,6 +1414,14 @@ async def update_embedding_model_metadata(
     session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = AdminEmbeddingModelsService(session=session)
+
+        await validate_unique_display_name(
+            session,
+            EmbeddingModels,
+            tenant_id=None,
+            nickname=getattr(model_data, "nickname", None),
+            exclude_id=id,
+        )
 
         # Ensure model_data has the id
         update_with_id = EmbeddingModelMetadataUpdate(
