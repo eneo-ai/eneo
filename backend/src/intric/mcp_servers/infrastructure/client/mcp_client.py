@@ -83,6 +83,25 @@ def _extract_error_message(exc: BaseException) -> str:
     return str(exc)
 
 
+def _is_session_not_found(exc: BaseException) -> bool:
+    """True when an error means the server no longer knows our session id.
+
+    Per the MCP streamable-HTTP transport, a request bearing an unknown
+    ``Mcp-Session-Id`` is answered with HTTP 404 and the client is expected to
+    start a fresh session. We treat only this definitive signal as grounds to
+    abandon a resumed (sticky) session: transient errors must NOT, or we would
+    orphan per-session server state such as a user's attached files.
+    """
+    msg = (_extract_error_message(exc) or str(exc)).lower()
+    return (
+        "404" in msg
+        or "session not found" in msg
+        or "no valid session" in msg
+        or "session has been terminated" in msg
+        or "invalid session id" in msg
+    )
+
+
 async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
     """Quick HTTP request to diagnose the real error when MCP protocol fails.
 
@@ -325,8 +344,52 @@ class MCPClient:
             # acceptable for a resumed session).
             transport.session_id = self.resume_mcp_session_id
             self.assigned_mcp_session_id = self.resume_mcp_session_id
+
+            # Validate the resumed session before handing it back. We keep one
+            # logical Mcp-Session-Id across turns so server-side per-session
+            # state — notably files a user attached on an earlier turn
+            # (file-workbench MCP) — stays reachable. If the server restarted,
+            # redeployed, or evicted this idle session, the id is dead (HTTP 404
+            # per the streamable-HTTP spec) and that state is already gone, so
+            # mint a fresh session. Reconnect fresh ONLY on that definitive
+            # signal: a transient error must keep the sticky id, or we would
+            # orphan a still-valid session and its attached files.
+            try:
+                await self.session.send_ping()
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except BaseException as exc:
+                if _is_session_not_found(exc):
+                    logger.warning(
+                        "Resumed MCP session for %s is gone server-side "
+                        "(session_id=%s); dropping the dead id and reconnecting "
+                        "fresh: %s",
+                        self.mcp_server.name,
+                        self.resume_mcp_session_id,
+                        _extract_error_message(exc) or exc,
+                    )
+                    await self._cleanup_contexts()
+                    self.resume_mcp_session_id = None
+                    self.assigned_mcp_session_id = None
+                    # resume_mcp_session_id is now None, so this takes the
+                    # fresh-connect path and the proxy persists the new id.
+                    await self._connect_internal()
+                    return
+                # Transient or ambiguous failure: keep the sticky session id and
+                # proceed. The session is probably still valid, and real tool
+                # calls carry their own error handling.
+                logger.info(
+                    "Ping on resumed MCP session for %s failed transiently; "
+                    "keeping sticky session_id=%s: %s",
+                    self.mcp_server.name,
+                    self.resume_mcp_session_id,
+                    _extract_error_message(exc) or exc,
+                )
+                return
+
             logger.info(
-                "Resumed MCP session for %s (session_id=%s, skipped initialize)",
+                "Resumed MCP session for %s (session_id=%s, validated, "
+                "skipped initialize)",
                 self.mcp_server.name,
                 self.resume_mcp_session_id,
             )
