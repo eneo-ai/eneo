@@ -42,6 +42,7 @@ class TranscriptionModel(AIModel):
         provider_id: Optional["UUID"] = None,
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
+        migrated_to_model_id: Optional["UUID"] = None,
     ):
         super().__init__(
             user=user,
@@ -69,6 +70,7 @@ class TranscriptionModel(AIModel):
         self.provider_id = provider_id
         self.provider_name = provider_name
         self.provider_type = provider_type
+        self.migrated_to_model_id = migrated_to_model_id
 
     @property
     def model_name(self) -> str:
@@ -118,4 +120,5 @@ class TranscriptionModel(AIModel):
             provider_id=transcription_model_db.provider_id,
             provider_name=provider_name,
             provider_type=provider_type,
+            migrated_to_model_id=transcription_model_db.migrated_to_model_id,
         )

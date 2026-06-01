@@ -2054,6 +2054,7 @@
   "migration_history_by": "Av",
   "migration_history_count": "Migrerade",
   "migration_history_status": "Status",
+  "migration_history_type": "Typ",
   "migration_history_duration": "Varaktighet",
   "migration_history_warnings": "Varningar",
   "migration_history_expand": "Visa detaljer",

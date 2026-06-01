@@ -14,7 +14,7 @@
 
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import type { CompletionModel } from "@intric/intric-js";
+  import type { CompletionModel, TranscriptionModel } from "@intric/intric-js";
   import type { Writable } from "svelte/store";
   import { invalidate } from "$app/navigation";
   import { getIntric } from "$lib/core/Intric";
@@ -39,14 +39,21 @@
   import { bumpModelMigrationHistoryVersion } from "./migrationHistoryRefresh";
   import { isSecurityBlockerCode, translateMigrationWarning } from "./migrationWarnings";
 
+  type MigratableModel = CompletionModel | TranscriptionModel;
+
   let {
     openController,
     sourceModel,
-    models = []
+    models = [],
+    modelType = "completionModel"
   }: {
     openController: Writable<boolean>;
-    sourceModel: CompletionModel;
-    models?: CompletionModel[];
+    sourceModel: MigratableModel;
+    models?: MigratableModel[];
+    // The dialog is identical for both types; only the SDK calls differ, and
+    // transcription has no usage-preview endpoints (its impact is just
+    // apps/spaces, repointed without recomputation).
+    modelType?: "completionModel" | "transcriptionModel";
   } = $props();
 
   const intric = getIntric();
@@ -89,7 +96,7 @@
       .filter((mod) => !mod.migrated_to_model_id)
   );
 
-  function labelFor(mod: CompletionModel): string {
+  function labelFor(mod: MigratableModel): string {
     return mod.nickname ? mod.nickname : mod.name;
   }
 
@@ -150,10 +157,9 @@
     hasSecurityBlocker = false;
     validationError = false;
     try {
-      const result = (await intric.models.validateMigration({
-        fromId: sourceModel.id,
-        toId
-      })) as {
+      const result = (await (modelType === "transcriptionModel"
+        ? intric.models.validateTranscriptionMigration({ fromId: sourceModel.id, toId })
+        : intric.models.validateMigration({ fromId: sourceModel.id, toId }))) as {
         compatible: boolean;
         warnings: string[];
         warning_codes: string[];
@@ -211,6 +217,18 @@
   // surface it and block migration until the admin retries, since the
   // impact summary is what they'd otherwise be acknowledging blindly.
   async function loadImpact() {
+    if (modelType === "transcriptionModel") {
+      // No usage stats/details endpoints for transcription — skip the preview.
+      // The migrate engine still repoints apps + spaces; warnings come from the
+      // validate call. Security blockers (the only hard gate) still apply.
+      impactTotal = 0;
+      impactDetails = [];
+      spacesCount = 0;
+      hasLoadedImpact = true;
+      isLoadingImpact = false;
+      impactLoadError = null;
+      return;
+    }
     isLoadingImpact = true;
     hasLoadedImpact = false;
     impactLoadError = null;
@@ -243,13 +261,21 @@
     submitError = null;
     isSubmitting = true;
     try {
-      await intric.models.migrateCompletion({
-        fromId: sourceModel.id,
-        toId: targetModelId,
-        // Match the UI gate: spaces-only warning cases are allowed without
-        // a manual acknowledgement because no resources are rebound.
-        confirmMigration: shouldConfirmMigration
-      });
+      // Match the UI gate: spaces-only warning cases are allowed without a
+      // manual acknowledgement because no resources are rebound.
+      if (modelType === "transcriptionModel") {
+        await intric.models.migrateTranscription({
+          fromId: sourceModel.id,
+          toId: targetModelId,
+          confirmMigration: shouldConfirmMigration
+        });
+      } else {
+        await intric.models.migrateCompletion({
+          fromId: sourceModel.id,
+          toId: targetModelId,
+          confirmMigration: shouldConfirmMigration
+        });
+      }
       toast.success(m.migration_success());
       bumpModelMigrationHistoryVersion();
       await invalidate("admin:model-providers:load");

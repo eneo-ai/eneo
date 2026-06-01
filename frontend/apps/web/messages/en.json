@@ -2020,6 +2020,7 @@
   "migration_history_by": "By",
   "migration_history_count": "Migrated",
   "migration_history_status": "Status",
+  "migration_history_type": "Type",
   "migration_history_duration": "Duration",
   "migration_history_warnings": "Warnings",
   "migration_history_expand": "Show details",

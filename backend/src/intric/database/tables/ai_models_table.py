@@ -147,8 +147,12 @@ class TranscriptionModels(BasePublic):
         relationship(back_populates="transcription_models")
     )
 
-    # Soft-delete parity with completion_models (added in phase 1 of the
-    # model-table alignment; unused until a later phase wires it up).
+    # Lifecycle parity with completion_models (model-table alignment).
+    migrated_to_model_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("transcription_models.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     deleted_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )

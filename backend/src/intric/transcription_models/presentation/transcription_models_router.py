@@ -1,14 +1,23 @@
-from typing import Annotated
+import logging
+from typing import Annotated, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 # Audit logging - module level imports for consistency
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
 from intric.authentication.auth_dependencies import get_current_active_user
+from intric.completion_models.presentation.completion_model_models import (
+    MigrationResult,
+    ModelMigrationHistory,
+    ModelMigrationRequest,
+    ValidationResult,
+)
+from intric.database.database import AsyncSession
 from intric.main.container.container import Container
+from intric.main.exceptions import ValidationException
 from intric.main.models import PaginatedResponse, is_provided
 from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
@@ -20,6 +29,8 @@ from intric.transcription_models.presentation.transcription_model_models import 
 from intric.users.user import UserInDB
 
 CurrentUser = Annotated[UserInDB, Depends(get_current_active_user)]
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -126,3 +137,169 @@ async def update_transcription_model(
         )
 
     return TranscriptionModelPublic.from_domain(transcription_model)
+
+
+@router.get(
+    "/{model_id}/migration-validate",
+    response_model=ValidationResult,
+    responses=responses.get_responses([400, 404]),
+    description="Validate transcription migration compatibility without executing.",
+)
+async def validate_transcription_migration(
+    model_id: UUID,
+    user: CurrentUser,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    to_model_id: UUID = Query(..., description="Target model ID"),
+) -> ValidationResult:
+    """Validate transcription migration compatibility without executing."""
+    validate_permission(user, Permission.ADMIN)
+    migration_service = container.transcription_model_migration_service()
+    return await migration_service.validate_migration(
+        model_id, to_model_id, user.tenant_id
+    )
+
+
+@router.post(
+    "/{model_id}/migrate",
+    response_model=MigrationResult,
+    responses=responses.get_responses([400, 403, 404]),
+    description="Migrate all usage from one transcription model to another.",
+)
+async def migrate_transcription_model_usage(
+    model_id: UUID,
+    migration_request: ModelMigrationRequest,
+    user: CurrentUser,
+    container: Annotated[
+        Container, Depends(get_container(with_user=True, with_transaction=False))
+    ],
+) -> MigrationResult:
+    """Migrate all usage from one transcription model to another.
+
+    Validity, same-model rejection, tenant ownership and entity-type
+    whitelisting all live in the shared migration engine; the router only
+    enforces admin permission and writes the audit log on success.
+    """
+    validate_permission(user, Permission.ADMIN)
+
+    session = cast(AsyncSession, container.session())
+    migration_service = container.transcription_model_migration_service()
+    migration_error: ValidationException | None = None
+    result: MigrationResult | None = None
+
+    async with session.begin():
+        try:
+            result = await migration_service.migrate_model_usage(
+                from_model_id=model_id,
+                to_model_id=migration_request.to_model_id,
+                entity_types=migration_request.entity_types,
+                user=user,
+                confirm_migration=migration_request.confirm_migration,
+            )
+        except ValidationException as exc:
+            # The engine records the failure in migration_history before raising;
+            # catch inside the transaction so that record commits, then re-raise.
+            migration_error = exc
+
+    if migration_error is not None:
+        raise migration_error
+
+    assert result is not None
+
+    try:
+        async with session.begin():
+            audit_service = container.audit_service()
+            repo = container.transcription_model_repo()
+            from_model = await repo.one(model_id=model_id)
+            to_model = await repo.one(model_id=migration_request.to_model_id)
+            to_model_label = (
+                to_model.name if to_model else str(migration_request.to_model_id)
+            )
+            await audit_service.log_async(
+                tenant_id=user.tenant_id,
+                actor_id=user.id,
+                action=ActionType.TRANSCRIPTION_MODEL_MIGRATED,
+                entity_type=EntityType.TRANSCRIPTION_MODEL,
+                entity_id=model_id,
+                description=(
+                    f"Migrated model usage from {from_model.name} to "
+                    f"{to_model_label} ({result.migrated_count} entities)"
+                ),
+                metadata=AuditMetadata.standard(
+                    actor=user,
+                    target=from_model,
+                    changes={
+                        "from_model_id": str(model_id),
+                        "to_model_id": str(migration_request.to_model_id),
+                        "migrated_count": result.migrated_count,
+                        "failed_count": result.failed_count,
+                        "duration": result.duration,
+                        "details": result.details,
+                        "warnings": result.warnings,
+                    },
+                ),
+            )
+    except Exception as audit_err:
+        logger.warning(
+            "Failed to create audit log for transcription migration: %s", audit_err
+        )
+
+    return result
+
+
+@router.get(
+    "/migration-history",
+    response_model=list[ModelMigrationHistory],
+    responses=responses.get_responses([400]),
+    description="List all transcription migration history for the tenant.",
+)
+async def get_all_transcription_migration_history(
+    user: CurrentUser,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> list[ModelMigrationHistory]:
+    """Get all transcription migration history for the tenant."""
+    validate_permission(user, Permission.ADMIN)
+    service = container.transcription_model_migration_history_service()
+    return await service.get_migration_history_for_tenant(user.tenant_id, limit, offset)
+
+
+@router.get(
+    "/migration-history/{migration_id}",
+    response_model=ModelMigrationHistory,
+    responses=responses.get_responses([404]),
+    description="Get a specific transcription migration history record by ID.",
+)
+async def get_transcription_migration_history_by_id(
+    migration_id: UUID,
+    user: CurrentUser,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> ModelMigrationHistory:
+    """Get a specific transcription migration history record by ID."""
+    validate_permission(user, Permission.ADMIN)
+    service = container.transcription_model_migration_history_service()
+    history = await service.get_migration_history_by_id(migration_id, user.tenant_id)
+    if not history:
+        raise HTTPException(status_code=404, detail="Migration history not found")
+    return history
+
+
+@router.get(
+    "/{model_id}/migration-history",
+    response_model=list[ModelMigrationHistory],
+    responses=responses.get_responses([404]),
+    description="Get migration history for a specific transcription model.",
+)
+async def get_transcription_model_migration_history(
+    model_id: UUID,
+    user: CurrentUser,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> list[ModelMigrationHistory]:
+    """Get migration history for a specific transcription model (from or to)."""
+    validate_permission(user, Permission.ADMIN)
+    service = container.transcription_model_migration_history_service()
+    return await service.get_migration_history_for_model(
+        model_id, user.tenant_id, limit, offset
+    )

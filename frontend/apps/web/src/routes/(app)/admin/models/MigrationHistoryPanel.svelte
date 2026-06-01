@@ -1,10 +1,11 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <!--
-  Read-only history of completion-model migrations. Each row expands to show
-  per-entity-type counts, warnings, and any error message — driven by an
-  expander button rather than a click-anywhere row so keyboard navigation
-  works without custom key handlers.
+  Read-only history of model migrations (completion + transcription, merged and
+  sorted by date with a type column). Each row expands to show per-entity-type
+  counts, warnings, and any error message — driven by an expander button rather
+  than a click-anywhere row so keyboard navigation works without custom key
+  handlers.
 -->
 
 <script lang="ts">
@@ -37,6 +38,9 @@
     error_message: string | null;
     migration_details: Record<string, number> | null;
     warnings: string[] | null;
+    // Client-side tag: which model type this row came from (the two histories
+    // live in separate backend endpoints and are merged here).
+    model_type: "completion" | "transcription";
   };
 
   type StatusVariant = "default" | "secondary" | "destructive" | "outline";
@@ -53,8 +57,22 @@
     loading = true;
     error = null;
     try {
-      const result = await intric.models.getAllMigrationHistory();
-      history = result as MigrationRecord[];
+      const [completion, transcription] = await Promise.all([
+        intric.models.getAllMigrationHistory(),
+        intric.models.getAllTranscriptionMigrationHistory()
+      ]);
+      const tag = (
+        records: unknown,
+        model_type: "completion" | "transcription"
+      ): MigrationRecord[] =>
+        (records as Omit<MigrationRecord, "model_type">[]).map((r) => ({ ...r, model_type }));
+      history = [...tag(completion, "completion"), ...tag(transcription, "transcription")].sort(
+        (a, b) => {
+          const da = new Date(a.completed_at ?? a.started_at ?? 0).getTime();
+          const db = new Date(b.completed_at ?? b.started_at ?? 0).getTime();
+          return db - da;
+        }
+      );
     } catch (e: unknown) {
       error = e instanceof Error ? e.message : m.migration_history_load_failed();
     } finally {
@@ -167,6 +185,7 @@
           <Table.Head>{m.migration_history_to()}</Table.Head>
           <Table.Head class="text-right">{m.migration_history_count()}</Table.Head>
           <Table.Head>{m.migration_history_by()}</Table.Head>
+          <Table.Head>{m.migration_history_type()}</Table.Head>
           <Table.Head>{m.migration_history_status()}</Table.Head>
         </Table.Row>
       </Table.Header>
@@ -201,13 +220,20 @@
             <Table.Cell class="text-right tabular-nums">{record.migrated_count}</Table.Cell>
             <Table.Cell class="text-muted">{record.initiated_by_name}</Table.Cell>
             <Table.Cell>
+              <Badge variant="secondary">
+                {record.model_type === "transcription"
+                  ? m.transcription_models()
+                  : m.completion_models()}
+              </Badge>
+            </Table.Cell>
+            <Table.Cell>
               <Badge variant={statusVariant(record.status)}>{statusLabel(record.status)}</Badge>
             </Table.Cell>
           </Table.Row>
 
           {#if isExpanded}
             <Table.Row id="migration-detail-{record.id}">
-              <Table.Cell colspan={7} class="bg-muted/40 p-0">
+              <Table.Cell colspan={8} class="bg-muted/40 p-0">
                 <div class="px-8 py-4">
                   <dl class="grid max-w-lg grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5 text-sm">
                     <dt class="text-muted whitespace-nowrap">

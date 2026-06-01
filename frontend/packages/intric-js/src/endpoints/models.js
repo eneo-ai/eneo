@@ -196,6 +196,87 @@ export function initModels(client) {
       });
 
       return res;
+    },
+
+    /**
+     * Validate transcription migration compatibility without executing.
+     * @param {Object} params
+     * @param {string} params.fromId Source model ID
+     * @param {string} params.toId Target model ID
+     * @returns {Promise<import("../types/schema").components["schemas"]["ValidationResult"]>}
+     * @throws {IntricError}
+     * */
+    validateTranscriptionMigration: async ({ fromId, toId }) => {
+      const res = await client.fetch("/api/v1/transcription-models/{model_id}/migration-validate", {
+        method: "get",
+        params: {
+          path: { model_id: fromId },
+          query: { to_model_id: toId }
+        }
+      });
+
+      return res;
+    },
+
+    /**
+     * Migrate transcription model usage to another model.
+     * @param {Object} params
+     * @param {string} params.fromId Source model ID
+     * @param {string} params.toId Target model ID
+     * @param {string[]} [params.entityTypes] Optional list of entity types to migrate
+     * @param {boolean} [params.confirmMigration] Proceed even if compatibility warnings exist
+     * @returns {Promise<import("../types/schema").components["schemas"]["MigrationResult"]>}
+     * @throws {IntricError}
+     * */
+    migrateTranscription: async ({ fromId, toId, entityTypes, confirmMigration }) => {
+      const res = await client.fetch("/api/v1/transcription-models/{model_id}/migrate", {
+        method: "post",
+        params: { path: { model_id: fromId } },
+        requestBody: {
+          "application/json": {
+            to_model_id: toId,
+            entity_types: entityTypes,
+            confirm_migration: confirmMigration
+          }
+        }
+      });
+
+      return res;
+    },
+
+    /**
+     * Get migration history for a specific transcription model.
+     * @param {Object} params
+     * @param {string} params.modelId Model ID
+     * @param {number} [params.limit=50] Number of results
+     * @param {number} [params.offset=0] Offset for pagination
+     * @returns {Promise<import("../types/schema").components["schemas"]["ModelMigrationHistory"][]>}
+     * @throws {IntricError}
+     * */
+    getTranscriptionMigrationHistory: async ({ modelId, limit = 50, offset = 0 }) => {
+      const res = await client.fetch("/api/v1/transcription-models/{model_id}/migration-history", {
+        method: "get",
+        params: { path: { model_id: modelId }, query: { limit, offset } }
+      });
+
+      return res;
+    },
+
+    /**
+     * Get all transcription migration history for the tenant.
+     * @param {Object} [params]
+     * @param {number} [params.limit=50] Number of results
+     * @param {number} [params.offset=0] Offset for pagination
+     * @returns {Promise<import("../types/schema").components["schemas"]["ModelMigrationHistory"][]>}
+     * @throws {IntricError}
+     * */
+    getAllTranscriptionMigrationHistory: async ({ limit = 50, offset = 0 } = {}) => {
+      const res = await client.fetch("/api/v1/transcription-models/migration-history", {
+        method: "get",
+        params: { query: { limit, offset } }
+      });
+
+      return res;
     }
   };
 }
