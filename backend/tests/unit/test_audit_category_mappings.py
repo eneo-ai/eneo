@@ -1,5 +1,6 @@
 """Unit tests for audit category mappings."""
 
+from intric.audit.domain.action_metadata import ACTION_METADATA
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.category_mappings import (
     CATEGORY_DESCRIPTIONS,
@@ -191,6 +192,39 @@ class TestCategoryMappings:
             assert CATEGORY_MAPPINGS[action_type] == "audit_access", (
                 f"{action_type} should be mapped to 'audit_access'"
             )
+
+
+class TestActionMetadata:
+    """Test suite for ACTION_METADATA completeness."""
+
+    def test_all_action_types_have_metadata(self):
+        """Every ActionType must have a Swedish display entry in ACTION_METADATA.
+
+        Without this guard, a new action gets an auto-generated English-ish
+        fallback label in the audit config UI and is skipped by
+        ensure_all_actions_configured(), which keys off ACTION_METADATA.
+        """
+        all_action_values = set(action.value for action in ActionType)
+        documented_actions = set(ACTION_METADATA.keys())
+
+        missing = all_action_values - documented_actions
+        assert not missing, (
+            f"The following action types are missing from ACTION_METADATA: {missing}"
+        )
+
+    def test_all_metadata_keys_are_valid_action_types(self):
+        """Every ACTION_METADATA key must be a valid ActionType string value."""
+        all_action_values = set(action.value for action in ActionType)
+        for action in ACTION_METADATA.keys():
+            assert action in all_action_values, (
+                f"{action} is not a valid ActionType value"
+            )
+
+    def test_all_metadata_entries_are_non_empty(self):
+        """Every entry must provide non-empty Swedish name and description."""
+        for action, metadata in ACTION_METADATA.items():
+            assert metadata["name_sv"], f"{action} has empty name_sv"
+            assert metadata["description_sv"], f"{action} has empty description_sv"
 
 
 class TestGetCategoryForAction:

@@ -84,6 +84,14 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "API-nyckel roterad",
         "description_sv": "Loggar när en API-nyckel roteras",
     },
+    ActionType.API_KEY_EXPIRATION_EXTENDED.value: {
+        "name_sv": "API-nyckels giltighet förlängd",
+        "description_sv": "Loggar när en API-nyckels giltighetstid förlängs",
+    },
+    ActionType.API_KEY_PURGED.value: {
+        "name_sv": "API-nyckel rensad",
+        "description_sv": "Loggar när en utgången API-nyckel rensas permanent",
+    },
     ActionType.API_KEY_EXPIRED.value: {
         "name_sv": "API-nyckel utgången",
         "description_sv": "Loggar när en API-nyckel löper ut",
@@ -297,6 +305,10 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "Transkriptionsmodell raderad",
         "description_sv": "Loggar när en transkriptionsmodell tas bort från tenanten",
     },
+    ActionType.TRANSCRIPTION_MODEL_MIGRATED.value: {
+        "name_sv": "Transkriptionsmodell migrerad",
+        "description_sv": "Loggar när användning flyttas mellan transkriptionsmodeller",
+    },
     ActionType.TEMPLATE_CREATED.value: {
         "name_sv": "Mall skapad",
         "description_sv": "Loggar när en ny mall skapas",
@@ -376,7 +388,11 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "Systemunderhåll",
         "description_sv": "Loggar planerat systemunderhåll",
     },
-    # Audit Access (2)
+    # Audit Access (3)
+    ActionType.AUDIT_SESSION_CREATED.value: {
+        "name_sv": "Granskningssession skapad",
+        "description_sv": "Loggar när en session för granskningsåtkomst skapas",
+    },
     ActionType.AUDIT_LOG_VIEWED.value: {
         "name_sv": "Granskningsloggar visade",
         "description_sv": "Loggar när granskningsloggar visas",
