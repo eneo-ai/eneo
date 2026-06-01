@@ -15,12 +15,10 @@
   import "@xyflow/svelte/dist/style.css";
   import dagre from "dagre";
   import type { Flow, FlowStep } from "@intric/intric-js";
-  import type { Readable } from "svelte/store";
   import FlowNodeLlm from "./FlowNodeLlm.svelte";
   import FlowNodeIO from "./FlowNodeIO.svelte";
   import FlowEdgeInteractive from "./FlowEdgeInteractive.svelte";
-  import FlowGraphAutoFit from "./FlowGraphAutoFit.svelte";
-  import { getFlowUserMode, type FlowUserMode } from "$lib/features/flows/FlowUserMode";
+  import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
   import { getEdgePayloadKind } from "$lib/features/flows/flowStepPresentation";
   import { IconDownload } from "@intric/icons/download";
@@ -33,39 +31,16 @@
     type FlowStepMcpSummary
   } from "$lib/features/flows/flowStepMcpConfig";
 
-  // Draft canvases (the AI builder) have no flow-editor context, so FlowGraph
-  // accepts the user mode and an assistant source as optional props. When they
-  // are omitted (the flow editor), it falls back to the page-level contexts.
-  interface FlowGraphAssistantSource {
-    assistantRevision: Readable<number>;
-    loadAssistant: (assistantId: string) => Promise<unknown>;
-    insertStepAfter?: (afterOrder: number) => Promise<void>;
-  }
-
   interface Props {
     flow: Flow;
     activeStepId: string | null;
     onnodeclick?: (id: string) => void;
-    mode?: Readable<FlowUserMode>;
-    assistantSource?: FlowGraphAssistantSource;
-    autoFit?: boolean;
-    direction?: "LR" | "TB";
   }
-  let {
-    flow,
-    activeStepId,
-    onnodeclick,
-    mode = getFlowUserMode(),
-    assistantSource = getFlowEditor(),
-    autoFit = false,
-    direction = "LR"
-  }: Props = $props();
+  let { flow, activeStepId, onnodeclick }: Props = $props();
 
-  // assistantSource is stable for the component's lifetime (a context singleton on the
-  // flow editor, a const draft source on the builder canvas), so capturing its revision
-  // store once is safe and is required for the `$assistantRevision` subscription below.
-  // svelte-ignore state_referenced_locally
-  const assistantRevision = assistantSource.assistantRevision;
+  const mode = getFlowUserMode();
+  const flowEditor = getFlowEditor();
+  const assistantRevision = flowEditor.assistantRevision;
 
   let doFitView = $state(false);
 
@@ -114,12 +89,10 @@
     }
   });
 
-  // Memoize layout — only rebuild when step structure, mode, or layout direction
-  // changes, not on activeStepId alone
+  // Memoize layout — only rebuild when step structure or mode changes, not on activeStepId alone
   let lastStepsJson = "";
   let lastMode = "";
   let lastMetaJson = "";
-  let lastDirection = "";
   let cachedLayout: { nodes: Node[]; edges: Edge[] } = { nodes: [], edges: [] };
 
   $effect(() => {
@@ -144,17 +117,11 @@
     );
     const currentMode = $mode;
 
-    if (
-      stepsJson !== lastStepsJson ||
-      currentMode !== lastMode ||
-      metaJson !== lastMetaJson ||
-      direction !== lastDirection
-    ) {
+    if (stepsJson !== lastStepsJson || currentMode !== lastMode || metaJson !== lastMetaJson) {
       lastStepsJson = stepsJson;
       lastMode = currentMode;
       lastMetaJson = metaJson;
-      lastDirection = direction;
-      cachedLayout = buildLayout(flow?.steps ?? [], activeStepId, currentMode, direction);
+      cachedLayout = buildLayout(flow?.steps ?? [], activeStepId, currentMode);
       nodes = cachedLayout.nodes;
       edges = cachedLayout.edges;
     } else {
@@ -212,7 +179,7 @@
     const revision = $assistantRevision;
     loadingAssistantIds.add(assistantId);
     try {
-      const assistant = await assistantSource.loadAssistant(assistantId);
+      const assistant = await flowEditor.loadAssistant(assistantId);
       const parsed = parseAssistantMeta(assistant);
       assistantMetaById.set(assistantId, parsed);
       lastLoadedRevisionByAssistant.set(assistantId, revision);
@@ -260,7 +227,7 @@
   async function handleEdgeInsert(sourceStepOrder: number): Promise<void> {
     if ($mode !== "power_user") return;
     if (flow.published_version != null) return;
-    await assistantSource.insertStepAfter?.(sourceStepOrder);
+    await flowEditor.insertStepAfter(sourceStepOrder);
   }
 
   function handleEdgeInspect(params: {
@@ -279,15 +246,11 @@
   function buildLayout(
     steps: FlowStep[],
     activeId: string | null,
-    userMode: string,
-    layoutDirection: "LR" | "TB"
+    userMode: string
   ): { nodes: Node[]; edges: Edge[] } {
     const orderedSteps = structuredClone(steps).sort((a, b) => a.step_order - b.step_order);
     const isPowerUser = userMode === "power_user";
-    const isVertical = layoutDirection === "TB";
-    const sourcePos = isVertical ? Position.Bottom : Position.Right;
-    const targetPos = isVertical ? Position.Top : Position.Left;
-    const nodeWidth = isPowerUser ? 300 : isVertical ? 260 : 160;
+    const nodeWidth = isPowerUser ? 300 : 160;
     const nodeHeight = isPowerUser ? 150 : 48;
     const inputNodeSize = { width: 160, height: 74 };
     const outputNodeSize = { width: 170, height: 78 };
@@ -295,7 +258,7 @@
     const g = new dagre.graphlib.Graph();
     g.setDefaultEdgeLabel(() => ({}));
     g.setGraph({
-      rankdir: layoutDirection,
+      rankdir: "LR",
       ranksep: isPowerUser ? 140 : 80,
       nodesep: isPowerUser ? 50 : 30,
       marginx: 20,
@@ -307,14 +270,9 @@
       {
         id: "input",
         type: "input",
-        sourcePosition: sourcePos,
+        sourcePosition: Position.Right,
         position: { x: 0, y: 0 },
-        data: {
-          label: m.flow_graph_node_input(),
-          nodeType: "input",
-          mode: userMode,
-          direction: layoutDirection
-        }
+        data: { label: m.flow_graph_node_input(), nodeType: "input", mode: userMode }
       }
     ];
 
@@ -324,15 +282,14 @@
       resultNodes.push({
         id,
         type: step.output_mode === "template_fill" ? "assembly" : "llm",
-        sourcePosition: sourcePos,
-        targetPosition: targetPos,
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
         position: { x: 0, y: 0 },
         data: {
           label: step.user_description ?? `Step ${step.step_order}`,
           step,
           isActive: id === activeId,
           mode: userMode,
-          direction: layoutDirection,
           modelName: assistantMetaById.get(step.assistant_id)?.modelName ?? null,
           assistantClassLevel:
             assistantMetaById.get(step.assistant_id)?.assistantClassificationLevel ?? null,
@@ -347,14 +304,9 @@
     resultNodes.push({
       id: "output",
       type: "output",
-      targetPosition: targetPos,
+      targetPosition: Position.Left,
       position: { x: 0, y: 0 },
-      data: {
-        label: m.flow_graph_node_output(),
-        nodeType: "output",
-        mode: userMode,
-        direction: layoutDirection
-      }
+      data: { label: m.flow_graph_node_output(), nodeType: "output", mode: userMode }
     });
 
     type EdgeSpec = {
@@ -593,7 +545,6 @@
     {edgeTypes}
     fitView={doFitView}
     fitViewOptions={{ padding: 0.3 }}
-    minZoom={autoFit ? (direction === "TB" ? 0.5 : 0.2) : 0.5}
     proOptions={{ hideAttribution: true }}
     nodesDraggable={false}
     nodesConnectable={false}
@@ -602,9 +553,6 @@
     zoomOnScroll={true}
     onnodeclick={handleNodeClick}
   >
-    {#if autoFit}
-      <FlowGraphAutoFit />
-    {/if}
     {#if $mode === "power_user"}
       <Background variant={BackgroundVariant.Dots} />
       <MiniMap width={140} height={90} nodeColor={minimapNodeColor} />

@@ -1,10 +1,6 @@
 <script lang="ts">
-  import { readable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
-  import FlowGraph from "$lib/features/flows/components/FlowGraph.svelte";
-  import { type FlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
-  import { draftSpecToFlow } from "./aiBuilderDraftFlow";
   import type { FlowDraftSpecCore } from "./protocol";
 
   interface Props {
@@ -13,29 +9,43 @@
   }
   let { spec, isStreaming = false }: Props = $props();
 
-  // The builder canvas is comprehension-first and read-only: it always renders in
-  // user mode and supplies a no-op assistant source, so FlowGraph never reaches
-  // for the flow-editor context that only exists on the editor page.
-  const userMode = readable<FlowUserMode>("user");
-  const draftAssistants = {
-    assistantRevision: readable(0),
-    loadAssistant: async (): Promise<unknown> => null
-  };
-
-  const flow = $derived(draftSpecToFlow(spec));
-  const hasSteps = $derived(flow.steps.length > 0);
+  const steps = $derived(spec.steps);
+  const hasSteps = $derived(steps.length > 0);
 </script>
 
 {#if hasSteps}
-  <div class="h-[340px] w-full md:h-[420px]">
-    <FlowGraph
-      {flow}
-      mode={userMode}
-      assistantSource={draftAssistants}
-      activeStepId={null}
-      autoFit
-      direction="TB"
-    />
+  <div class="bg-secondary/15 flex h-[340px] w-full overflow-y-auto px-4 py-5 md:h-[420px] md:px-6">
+    <ol
+      class="mx-auto flex w-full max-w-[480px] flex-col items-stretch"
+      data-testid="ai-builder-draft-canvas"
+      aria-label={m.flow_steps()}
+    >
+      {#each steps as step, index (step.plan_step_ref)}
+        <li class="flex flex-col items-center">
+          <div
+            class="border-default bg-primary flex min-h-14 w-full items-center gap-3 rounded-lg border px-4 py-3"
+            data-testid="ai-builder-draft-step"
+            data-step-ref={step.plan_step_ref}
+          >
+            <span
+              class="bg-accent-dimmer text-accent-default flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold tabular-nums"
+            >
+              {index + 1}
+            </span>
+            <span class="text-primary min-w-0 text-sm leading-snug font-medium break-words">
+              {step.name}
+            </span>
+          </div>
+          {#if index < steps.length - 1}
+            <div
+              class="border-default h-7 w-px shrink-0 border-l"
+              data-testid="ai-builder-draft-edge"
+              aria-hidden="true"
+            ></div>
+          {/if}
+        </li>
+      {/each}
+    </ol>
   </div>
 {:else if isStreaming}
   <div
