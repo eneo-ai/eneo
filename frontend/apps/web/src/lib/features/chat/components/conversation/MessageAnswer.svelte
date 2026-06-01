@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Markdown } from "@intric/ui";
   import MessageIntricInfoBlob from "./MessageIntricInfoBlob.svelte";
+  import McpImageAttachments from "./McpImageAttachments.svelte";
   import ToolCallRow from "./ToolCallRow.svelte";
   import * as Separator from "$lib/components/ui/separator/index.js";
   import { dynamicColour } from "$lib/core/colours";
@@ -219,6 +220,8 @@
     }}
   />
 </div>
+
+<McpImageAttachments />
 
 {#each message.generated_files as file (file.id)}
   {@const url = attachmentUrls.getUrl(file) ?? null}

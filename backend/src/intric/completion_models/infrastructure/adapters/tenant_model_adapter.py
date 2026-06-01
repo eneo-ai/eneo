@@ -15,6 +15,7 @@ from typing import (
     TypedDict,
     cast,
 )
+from urllib.parse import urlsplit, urlunsplit
 
 import litellm
 from litellm.exceptions import (
@@ -53,6 +54,53 @@ logger = get_logger(__name__)
 # Regex to match Qwen3 thinking blocks: <think>...</think>
 THINKING_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 
+# Markdown image token: ![alt](url "optional title"). Captures the url only.
+_MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[[^\]]*\]\(\s*<?([^)\s>]+)>?[^)]*\)")
+
+
+def _canonical_resource_key(uri: str) -> str:
+    """Signature-independent identity for an MCP resource URL.
+
+    Signed URLs for the same object differ only in the query (HMAC/expiry) and
+    sometimes the fragment, so dedup must ignore those; identity lives in
+    scheme+host+path. The path extension is deliberately preserved: crawl-origin
+    images distinguish themselves by extension (``a.png`` vs ``a.jpg`` are
+    different assets), and for uploaded-doc images the inline and resource_link
+    surfaces carry the same path verbatim, so query-stripping alone collapses
+    them. For opaque uris (custom scheme, no host) the whole string is the key.
+    """
+    if not uri:
+        return ""
+    parts = urlsplit(uri)
+    if not parts.scheme or not parts.netloc:
+        return uri.strip()
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, "", ""))
+
+
+def _inline_image_keys(text: str) -> set[str]:
+    """Canonical keys of every Markdown image already embedded in ``text``."""
+    if not text:
+        return set()
+    return {
+        _canonical_resource_key(m.group(1))
+        for m in _MARKDOWN_IMAGE_PATTERN.finditer(text)
+    }
+
+
+def _mint_ref_id(existing_prefixes: set[str]) -> uuid.UUID:
+    """Mint a UUID whose 8-char hex prefix is unique within this Message.
+
+    ``existing_prefixes`` is mutated in place so frontend prefix lookup stays
+    unambiguous across multi-tool-call turns.
+    """
+    ref_id = uuid.uuid4()
+    attempt = 0
+    while str(ref_id)[:8] in existing_prefixes and attempt < 8:
+        ref_id = uuid.uuid4()
+        attempt += 1
+    existing_prefixes.add(str(ref_id)[:8])
+    return ref_id
+
 
 def _build_tool_result_with_references(
     content_list: list[dict[str, Any]],
@@ -79,11 +127,28 @@ def _build_tool_result_with_references(
     persistence (the structured channel the frontend renders, where ``uri`` and
     ``meta`` live). ``existing_prefixes`` is mutated in place so multi-tool-call
     turns don't mint colliding 8-char prefixes.
+
+    Image ``resource_link`` blocks (MCP spec, 2025-11-25) are also captured as
+    rows, but display-only: no text, no source_id, absent from ``llm_text``.
+    They are audience-gated (``user`` or unstated) and de-duplicated against
+    inline Markdown images by signature-independent URL identity, so a server
+    that emits both an inline ``![](url)`` and a ``resource_link`` for the same
+    object renders it once (inline wins).
     """
     text_parts: list[str] = []
     resource_texts: list[str] = []
     llm_blocks: list[str] = []
     refs: list[McpToolReference] = []
+
+    # Inline Markdown wins. Collect every image url already embedded in any
+    # text/resource block so a resource_link for the same object is suppressed
+    # (a host that renders both surfaces would otherwise show it twice).
+    inline_image_keys: set[str] = set()
+    for ci in content_list:
+        if ci.get("type") in ("text", "resource"):
+            inline_image_keys |= _inline_image_keys(ci.get("text") or "")
+    seen_link_keys: set[str] = set()
+
     for ci in content_list:
         block_type = ci.get("type")
         if block_type == "text":
@@ -93,15 +158,8 @@ def _build_tool_result_with_references(
             if not uri:
                 # Resource without a URI has nothing to cite. Skip.
                 continue
-            # Mint a UUID whose 8-char hex prefix is unique within this Message
-            # so frontend prefix lookup is unambiguous.
-            ref_id = uuid.uuid4()
-            attempt = 0
-            while str(ref_id)[:8] in existing_prefixes and attempt < 8:
-                ref_id = uuid.uuid4()
-                attempt += 1
+            ref_id = _mint_ref_id(existing_prefixes)
             prefix = str(ref_id)[:8]
-            existing_prefixes.add(prefix)
             resource_text = ci.get("text") or ""
             refs.append(
                 McpToolReference(
@@ -117,6 +175,39 @@ def _build_tool_result_with_references(
             )
             resource_texts.append(resource_text)
             llm_blocks.append(f'"""source_id: {prefix}\n{resource_text}"""')
+        elif block_type == "resource_link":
+            # Typed image block (MCP spec, 2025-11-25). Display-only: it carries
+            # no citable text, so it rides the structured channel (the
+            # McpToolReference row the frontend renders as a thumbnail) and is
+            # not added to the LLM-facing text.
+            uri = ci.get("uri") or ""
+            mime = ci.get("mime_type") or ""
+            if not uri or not mime.startswith("image/"):
+                # Scope: only image resource_links get a display surface today.
+                continue
+            audience = ci.get("audience")
+            if audience is not None and "user" not in audience:
+                # Marked for the model only; not a user-facing figure.
+                # Absent audience == default == render.
+                continue
+            key = _canonical_resource_key(uri)
+            if key in inline_image_keys or key in seen_link_keys:
+                # Inline Markdown already renders this image (inline wins), or a
+                # prior resource_link covered it. Suppress to avoid double-render.
+                continue
+            seen_link_keys.add(key)
+            refs.append(
+                McpToolReference(
+                    id=_mint_ref_id(existing_prefixes),
+                    tool_call_id=tool_call_id,
+                    mcp_tool_name=mcp_tool_name,
+                    uri=uri,
+                    mime_type=ci.get("mime_type"),
+                    content=None,
+                    meta=ci.get("meta") or {},
+                    order=len(refs),
+                )
+            )
 
     upstream_text = "".join(text_parts)
     if not refs:

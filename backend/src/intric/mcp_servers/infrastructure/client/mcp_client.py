@@ -169,13 +169,19 @@ class MCPClient:
         self._get_session_id_callable: Optional[Any] = None
 
     async def _build_auth_headers(self) -> dict[str, str]:
-        """Build authentication + session-resume headers for this connection.
+        """Build authentication headers for this connection.
 
-        ``Mcp-Session-Id`` is the MCP-protocol session id. Sending a previously
-        stored value asks the server to resume that logical session — the SDK
-        will then propagate the server's response value (which may be the same
-        or a fresh one) on every subsequent request automatically.
+        This intentionally does NOT set ``Mcp-Session-Id``. Session resume is
+        carried solely by seeding the SDK transport's ``session_id`` field (see
+        ``_connect_internal``), which the SDK then sends on every request and
+        keeps in sync with the server's response value.
 
+        Setting the header here as well would duplicate it: the dict passed to
+        ``streamablehttp_client`` becomes both the httpx client's default
+        headers and the per-request base, and the SDK independently re-adds
+        ``mcp-session-id`` from ``session_id``. httpx then folds the two copies
+        into a single comma-joined value (``id, id``), which servers validating
+        the session-id shape reject with HTTP 400.
         """
         headers: dict[str, str] = {}
 
@@ -185,9 +191,6 @@ class MCPClient:
 
         if token:
             headers["Authorization"] = f"Bearer {token}"
-
-        if self.resume_mcp_session_id:
-            headers["Mcp-Session-Id"] = self.resume_mcp_session_id
 
         return headers
 
@@ -311,8 +314,11 @@ class MCPClient:
 
         if self.resume_mcp_session_id:
             # Resume path: pre-seed the SDK's session_id so every outgoing
-            # request carries the persisted Mcp-Session-Id, and DO NOT call
-            # initialize(). serverInfo/protocol_version stay None on this
+            # request carries the persisted Mcp-Session-Id exactly once (the
+            # SDK adds it from session_id; we must NOT also pass it in the
+            # headers dict, or httpx folds the two copies into one rejected
+            # comma-joined value). DO NOT call initialize() —
+            # serverInfo/protocol_version stay None on this
             # transport — that's fine because the server negotiated them on
             # the original turn for this logical session, and the SDK only
             # sends MCP-Protocol-Version when it has a value (skipping is
@@ -476,6 +482,31 @@ class MCPClient:
                             ),
                             "mime_type": getattr(resource, "mimeType", None),
                             "meta": _truncate_meta(raw_meta, RESOURCE_META_MAX_BYTES),
+                        }
+                    )
+                elif content_item.type == "resource_link":
+                    # Typed resource reference (MCP spec, 2025-11-25): a URL plus
+                    # mimeType, no embedded bytes. `annotations.audience` marks
+                    # who the block is for; downstream gates display on it.
+                    annotations = getattr(content_item, "annotations", None)
+                    audience = (
+                        getattr(annotations, "audience", None) if annotations else None
+                    )
+                    raw_uri = getattr(content_item, "uri", None)
+                    content_list.append(
+                        {
+                            "type": "resource_link",
+                            "uri": str(raw_uri) if raw_uri is not None else None,
+                            "mime_type": getattr(content_item, "mimeType", None),
+                            "meta": _truncate_meta(
+                                getattr(content_item, "_meta", None) or {},
+                                RESOURCE_META_MAX_BYTES,
+                            ),
+                            # Normalize the Role enum to plain strings;
+                            # None == "no audience stated".
+                            "audience": [str(a) for a in audience]
+                            if audience
+                            else None,
                         }
                     )
 

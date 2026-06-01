@@ -17,7 +17,12 @@
   const faviconService = getFaviconUrlService();
   import { m } from "$lib/paraglide/messages";
 
-  const mcpRefs = $derived(message.mcp_tool_references ?? []);
+  // Image references (resource_link blocks with an image mimeType) render as a
+  // thumbnail strip in MessageAnswer, not as text-snippet chips here. Exclude
+  // them so they neither show as "unknown source" rows nor inflate the count.
+  const mcpRefs = $derived(
+    (message.mcp_tool_references ?? []).filter((ref) => !(ref.mime_type ?? "").startsWith("image/"))
+  );
 
   type MetaBag = Record<string, unknown> & {
     sourceType?: string;
