@@ -12,6 +12,7 @@ from intric.database.tables.users_table import Users
 from intric.database.tables.users_table import (
     usergroups_users_table as usergroups_users,
 )
+from intric.scim.domain.errors import ScimInvalidFilterError
 from intric.scim.schemas.common import ScimFilter, ScimSort
 from intric.user_groups.user_group import UserGroupState
 
@@ -32,7 +33,11 @@ def _apply_filter(
         return query
     col = _GROUP_ATTR_MAP.get(scim_filter.attribute.lower())
     if col is None:
-        return query
+        # RFC 7644 §3.4.2.2: reject unsupported filter attributes with 400
+        # invalidFilter rather than silently returning the whole tenant.
+        raise ScimInvalidFilterError(
+            f"Unsupported filter attribute: '{scim_filter.attribute}'"
+        )
     op = scim_filter.operator
     v = scim_filter.value
     if op == "eq":

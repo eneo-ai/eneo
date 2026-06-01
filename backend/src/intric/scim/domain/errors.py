@@ -18,6 +18,13 @@ class ScimValidationError(Exception):
     pass
 
 
+class ScimInvalidFilterError(Exception):
+    """RFC 7644 §3.4.2.2: server returns 400 invalidFilter for filter
+    expressions that are unparseable or reference unsupported attributes."""
+
+    pass
+
+
 class ScimHttpError(Exception):
     def __init__(
         self, status_code: int, detail: str, scim_type: str | None = None

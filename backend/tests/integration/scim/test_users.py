@@ -71,17 +71,29 @@ async def test_list_filter_eq_username(db_session, test_tenant):
     """list() with eq filter on userName returns only the matching user."""
     async with db_session() as session:
         session.add(
-            Users(email="filter-a@example.com", username="filter.alpha", state="active", tenant_id=test_tenant.id)
+            Users(
+                email="filter-a@example.com",
+                username="filter.alpha",
+                state="active",
+                tenant_id=test_tenant.id,
+            )
         )
         session.add(
-            Users(email="filter-b@example.com", username="filter.beta", state="active", tenant_id=test_tenant.id)
+            Users(
+                email="filter-b@example.com",
+                username="filter.beta",
+                state="active",
+                tenant_id=test_tenant.id,
+            )
         )
 
     async with db_session() as session:
         repo = ScimUserRepository(session)
         users = await repo.list(
             tenant_id=test_tenant.id,
-            scim_filter=ScimFilter(attribute="userName", operator="eq", value="filter.alpha"),
+            scim_filter=ScimFilter(
+                attribute="userName", operator="eq", value="filter.alpha"
+            ),
         )
         count = len(users)
         username = users[0].username if users else None
@@ -96,17 +108,29 @@ async def test_list_filter_co_email(db_session, test_tenant):
     """list() with co (contains) filter on email performs case-insensitive substring match."""
     async with db_session() as session:
         session.add(
-            Users(email="scim-match@corp.example.com", username="match.user", state="active", tenant_id=test_tenant.id)
+            Users(
+                email="scim-match@corp.example.com",
+                username="match.user",
+                state="active",
+                tenant_id=test_tenant.id,
+            )
         )
         session.add(
-            Users(email="other@different.com", username="other.user", state="active", tenant_id=test_tenant.id)
+            Users(
+                email="other@different.com",
+                username="other.user",
+                state="active",
+                tenant_id=test_tenant.id,
+            )
         )
 
     async with db_session() as session:
         repo = ScimUserRepository(session)
         users = await repo.list(
             tenant_id=test_tenant.id,
-            scim_filter=ScimFilter(attribute="email", operator="co", value="corp.example"),
+            scim_filter=ScimFilter(
+                attribute="email", operator="co", value="corp.example"
+            ),
         )
         emails = {u.email for u in users}
 
@@ -120,10 +144,20 @@ async def test_list_filter_sw_username(db_session, test_tenant):
     """list() with sw (starts with) filter matches prefix correctly."""
     async with db_session() as session:
         session.add(
-            Users(email="sw-match@example.com", username="john.doe", state="active", tenant_id=test_tenant.id)
+            Users(
+                email="sw-match@example.com",
+                username="john.doe",
+                state="active",
+                tenant_id=test_tenant.id,
+            )
         )
         session.add(
-            Users(email="sw-no-match@example.com", username="jane.doe", state="active", tenant_id=test_tenant.id)
+            Users(
+                email="sw-no-match@example.com",
+                username="jane.doe",
+                state="active",
+                tenant_id=test_tenant.id,
+            )
         )
 
     async with db_session() as session:
@@ -144,10 +178,21 @@ async def test_list_filter_pr_external_id(db_session, test_tenant):
     """list() with pr (present) filter returns only users that have externalId set."""
     async with db_session() as session:
         session.add(
-            Users(email="has-ext@example.com", username="has.ext", state="active", external_id="ext-999", tenant_id=test_tenant.id)
+            Users(
+                email="has-ext@example.com",
+                username="has.ext",
+                state="active",
+                external_id="ext-999",
+                tenant_id=test_tenant.id,
+            )
         )
         session.add(
-            Users(email="no-ext@example.com", username="no.ext", state="active", tenant_id=test_tenant.id)
+            Users(
+                email="no-ext@example.com",
+                username="no.ext",
+                state="active",
+                tenant_id=test_tenant.id,
+            )
         )
 
     async with db_session() as session:
@@ -164,12 +209,77 @@ async def test_list_filter_pr_external_id(db_session, test_tenant):
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_list_filter_emails_value_maps_to_email(db_session, test_tenant):
+    """Azure Entra ID sends `emails.value eq "x@y"` as its primary de-dup
+    filter. The previous code path silently dropped this filter and returned
+    every user in the tenant, which could cause IdPs to provision duplicates
+    when they relied on the filter for existence checks. Now it must map to
+    the email column."""
+    async with db_session() as session:
+        session.add(
+            Users(
+                email="azure-match@example.com",
+                username="azure.match",
+                state="active",
+                tenant_id=test_tenant.id,
+            )
+        )
+        session.add(
+            Users(
+                email="azure-other@example.com",
+                username="azure.other",
+                state="active",
+                tenant_id=test_tenant.id,
+            )
+        )
+
+    async with db_session() as session:
+        repo = ScimUserRepository(session)
+        users = await repo.list(
+            tenant_id=test_tenant.id,
+            scim_filter=ScimFilter(
+                attribute="emails.value", operator="eq", value="azure-match@example.com"
+            ),
+        )
+        emails = {u.email for u in users}
+
+    assert emails == {"azure-match@example.com"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_list_filter_unsupported_attribute_raises_invalid_filter(
+    db_session, test_tenant
+):
+    """RFC 7644 §3.4.2.2: unsupported filter attributes must surface as 400
+    invalidFilter. Silently returning unfiltered results would mislead IdPs
+    that depend on the filter for de-dup."""
+    from intric.scim.domain.errors import ScimInvalidFilterError
+
+    async with db_session() as session:
+        repo = ScimUserRepository(session)
+        with pytest.raises(ScimInvalidFilterError, match="phoneNumbers.value"):
+            await repo.list(
+                tenant_id=test_tenant.id,
+                scim_filter=ScimFilter(
+                    attribute="phoneNumbers.value", operator="eq", value="+46"
+                ),
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_list_sort_ascending_by_username(db_session, test_tenant):
     """list() with sort ascending on userName returns results in ascending order."""
     async with db_session() as session:
         for name in ("charlie", "alice", "bob"):
             session.add(
-                Users(email=f"{name}@example.com", username=name, state="active", tenant_id=test_tenant.id)
+                Users(
+                    email=f"{name}@example.com",
+                    username=name,
+                    state="active",
+                    tenant_id=test_tenant.id,
+                )
             )
 
     async with db_session() as session:
@@ -178,7 +288,9 @@ async def test_list_sort_ascending_by_username(db_session, test_tenant):
             tenant_id=test_tenant.id,
             scim_sort=ScimSort(attribute="userName", order="ascending"),
         )
-        usernames = [u.username for u in users if u.username in ("alice", "bob", "charlie")]
+        usernames = [
+            u.username for u in users if u.username in ("alice", "bob", "charlie")
+        ]
 
     assert usernames == sorted(usernames)
 
@@ -190,7 +302,12 @@ async def test_list_sort_descending_by_username(db_session, test_tenant):
     async with db_session() as session:
         for name in ("charlie", "alice", "bob"):
             session.add(
-                Users(email=f"{name}@example.com", username=name, state="active", tenant_id=test_tenant.id)
+                Users(
+                    email=f"{name}@example.com",
+                    username=name,
+                    state="active",
+                    tenant_id=test_tenant.id,
+                )
             )
 
     async with db_session() as session:
@@ -199,7 +316,9 @@ async def test_list_sort_descending_by_username(db_session, test_tenant):
             tenant_id=test_tenant.id,
             scim_sort=ScimSort(attribute="userName", order="descending"),
         )
-        usernames = [u.username for u in users if u.username in ("alice", "bob", "charlie")]
+        usernames = [
+            u.username for u in users if u.username in ("alice", "bob", "charlie")
+        ]
 
     assert usernames == sorted(usernames, reverse=True)
 
@@ -246,7 +365,9 @@ async def test_get_by_username_returns_correct_user(db_session, scim_user):
     """get_by_username() returns the user with the given username."""
     async with db_session() as session:
         repo = ScimUserRepository(session)
-        result = await repo.get_by_username(scim_user.username, tenant_id=scim_user.tenant_id)
+        result = await repo.get_by_username(
+            scim_user.username, tenant_id=scim_user.tenant_id
+        )
         found_username = result.username if result else None
 
     assert found_username == scim_user.username
@@ -288,6 +409,7 @@ async def test_soft_delete_via_state_inactive(db_session, scim_user):
 
     async with db_session() as session:
         from sqlalchemy import select as sel
+
         result = await session.execute(sel(Users).where(Users.id == scim_user.id))
         still_exists = result.scalar_one_or_none()
         row_exists = still_exists is not None
@@ -311,7 +433,12 @@ async def test_list_filters_by_tenant(db_session, test_tenant):
             TenantBase(name="tenant_b_scim", slug="tenant-b-scim")
         )
         session.add(
-            Users(email="tenant-b-user@example.com", username="tenant.b.user", state="active", tenant_id=tenant_b.id)
+            Users(
+                email="tenant-b-user@example.com",
+                username="tenant.b.user",
+                state="active",
+                tenant_id=tenant_b.id,
+            )
         )
         tenant_b_id = tenant_b.id
 
@@ -322,7 +449,9 @@ async def test_list_filters_by_tenant(db_session, test_tenant):
         emails_a = {u.email for u in users_a}
         emails_b = {u.email for u in users_b}
 
-    assert "tenant-b-user@example.com" not in emails_a, "Tenant A must not see Tenant B's users"
+    assert "tenant-b-user@example.com" not in emails_a, (
+        "Tenant A must not see Tenant B's users"
+    )
     assert "tenant-b-user@example.com" in emails_b
 
 
@@ -340,6 +469,46 @@ async def test_list_users_http(client, bypass_scim_auth):
     body = response.json()
     assert "totalResults" in body
     assert "Resources" in body
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_list_users_http_unsupported_filter_returns_400_invalid_filter(
+    client, bypass_scim_auth
+):
+    """RFC 7644 §3.4.2.2: unsupported filter attribute returns 400 with
+    scimType=invalidFilter, not 200 with the whole tenant."""
+    response = await client.get('/scim/v2/Users?filter=phoneNumbers.value eq "+46123"')
+    assert response.status_code == 400
+    body = response.json()
+    assert body.get("scimType") == "invalidFilter"
+    assert "phoneNumbers.value" in body.get("detail", "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_list_users_http_emails_value_filter_returns_match(
+    client, bypass_scim_auth, db_session, test_tenant
+):
+    """Azure Entra ID's primary de-dup filter (`emails.value eq "x"`) must
+    return only the matching user, not the entire tenant."""
+    async with db_session() as session:
+        session.add(
+            Users(
+                email="http-azure@example.com",
+                username="http.azure",
+                state="active",
+                tenant_id=test_tenant.id,
+            )
+        )
+
+    response = await client.get(
+        '/scim/v2/Users?filter=emails.value eq "http-azure@example.com"'
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["totalResults"] == 1
+    assert body["Resources"][0]["userName"] == "http.azure"
 
 
 @pytest.mark.asyncio
@@ -366,7 +535,9 @@ async def test_get_user_http(client, bypass_scim_auth, scim_user):
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_delete_user_sets_deleted_state_and_timestamp(db_session, client, bypass_scim_auth, scim_user):
+async def test_delete_user_sets_deleted_state_and_timestamp(
+    db_session, client, bypass_scim_auth, scim_user
+):
     """DELETE /scim/v2/Users/{id} soft-deletes: state='deleted' and deleted_at set."""
     from sqlalchemy import select
 
@@ -382,7 +553,9 @@ async def test_delete_user_sets_deleted_state_and_timestamp(db_session, client, 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_delete_user_is_idempotent(db_session, client, bypass_scim_auth, scim_user):
+async def test_delete_user_is_idempotent(
+    db_session, client, bypass_scim_auth, scim_user
+):
     """A second DELETE returns 204 and does not overwrite the original deleted_at."""
     from sqlalchemy import select
 
@@ -405,7 +578,9 @@ async def test_delete_user_is_idempotent(db_session, client, bypass_scim_auth, s
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_patch_active_false_soft_deletes_user(db_session, client, bypass_scim_auth, scim_user):
+async def test_patch_active_false_soft_deletes_user(
+    db_session, client, bypass_scim_auth, scim_user
+):
     """PATCH active=false maps to state='deleted' and stamps deleted_at."""
     from sqlalchemy import select
 
@@ -426,7 +601,9 @@ async def test_patch_active_false_soft_deletes_user(db_session, client, bypass_s
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_patch_active_true_reactivates_deleted_user(db_session, client, bypass_scim_auth, scim_user):
+async def test_patch_active_true_reactivates_deleted_user(
+    db_session, client, bypass_scim_auth, scim_user
+):
     """PATCH active=true on a soft-deleted user clears deleted_at and restores state='active'."""
     from sqlalchemy import select
 
@@ -434,7 +611,9 @@ async def test_patch_active_true_reactivates_deleted_user(db_session, client, by
         "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
         "Operations": [{"op": "replace", "path": "active", "value": False}],
     }
-    assert (await client.patch(f"/scim/v2/Users/{scim_user.id}", json=deactivate)).status_code == 200
+    assert (
+        await client.patch(f"/scim/v2/Users/{scim_user.id}", json=deactivate)
+    ).status_code == 200
 
     reactivate = {
         "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
@@ -498,7 +677,8 @@ async def test_create_logs_warning_when_tenant_has_no_default_role(
 
     assert created_id is not None  # user creation still succeeds
     matching_warns = [
-        r for r in caplog.records
+        r
+        for r in caplog.records
         if r.levelname == "WARNING" and "No default role configured" in r.getMessage()
     ]
     assert matching_warns, (

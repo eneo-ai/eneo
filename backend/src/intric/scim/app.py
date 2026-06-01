@@ -3,7 +3,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from intric.main.logging import get_logger
-from intric.scim.domain.errors import ScimHttpError, ScimValidationError
+from intric.scim.domain.errors import (
+    ScimHttpError,
+    ScimInvalidFilterError,
+    ScimValidationError,
+)
 from intric.scim.router import router as scim_router
 
 _SCIM_ERROR_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:Error"
@@ -43,6 +47,13 @@ async def scim_validation_error_handler(
     request: Request, exc: ScimValidationError
 ) -> JSONResponse:
     return _scim_error_json(400, str(exc), scim_type="invalidValue")
+
+
+@scim_app.exception_handler(ScimInvalidFilterError)
+async def scim_invalid_filter_error_handler(
+    request: Request, exc: ScimInvalidFilterError
+) -> JSONResponse:
+    return _scim_error_json(400, str(exc), scim_type="invalidFilter")
 
 
 @scim_app.exception_handler(RequestValidationError)

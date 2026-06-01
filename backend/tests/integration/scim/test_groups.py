@@ -63,7 +63,9 @@ async def test_list_filter_displayname_eq(db_session, test_tenant):
         repo = ScimGroupRepository(session)
         groups = await repo.list(
             tenant_id=test_tenant.id,
-            scim_filter=ScimFilter(attribute="displayName", operator="eq", value="Engineering"),
+            scim_filter=ScimFilter(
+                attribute="displayName", operator="eq", value="Engineering"
+            ),
         )
         count = len(groups)
         first_name = groups[0].name if groups else None
@@ -85,13 +87,35 @@ async def test_list_filter_displayname_co(db_session, test_tenant):
         repo = ScimGroupRepository(session)
         groups = await repo.list(
             tenant_id=test_tenant.id,
-            scim_filter=ScimFilter(attribute="displayName", operator="co", value="Product"),
+            scim_filter=ScimFilter(
+                attribute="displayName", operator="co", value="Product"
+            ),
         )
         names = {g.name for g in groups}
 
     assert "Product Owners" in names
     assert "Product Managers" in names
     assert "Sales" not in names
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_list_filter_unsupported_attribute_raises_invalid_filter(
+    db_session, test_tenant
+):
+    """RFC 7644 §3.4.2.2: unsupported filter attributes must surface as 400
+    invalidFilter rather than silently returning all groups in the tenant."""
+    from intric.scim.domain.errors import ScimInvalidFilterError
+
+    async with db_session() as session:
+        repo = ScimGroupRepository(session)
+        with pytest.raises(ScimInvalidFilterError, match="members.value"):
+            await repo.list(
+                tenant_id=test_tenant.id,
+                scim_filter=ScimFilter(
+                    attribute="members.value", operator="eq", value="some-user-id"
+                ),
+            )
 
 
 @pytest.mark.asyncio
@@ -274,10 +298,16 @@ async def test_set_members_replaces_all_members(db_session, test_tenant, scim_gr
     """set_members() replaces the full member list atomically."""
     async with db_session() as session:
         user_a = Users(
-            email="member-a@example.com", username="member.a", state="active", tenant_id=test_tenant.id
+            email="member-a@example.com",
+            username="member.a",
+            state="active",
+            tenant_id=test_tenant.id,
         )
         user_b = Users(
-            email="member-b@example.com", username="member.b", state="active", tenant_id=test_tenant.id
+            email="member-b@example.com",
+            username="member.b",
+            state="active",
+            tenant_id=test_tenant.id,
         )
         session.add(user_a)
         session.add(user_b)
@@ -307,7 +337,9 @@ async def test_set_members_replaces_all_members(db_session, test_tenant, scim_gr
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_set_members_with_empty_list_removes_all(db_session, scim_user, scim_group):
+async def test_set_members_with_empty_list_removes_all(
+    db_session, scim_user, scim_group
+):
     """set_members([]) removes all members from the group."""
     async with db_session() as session:
         repo = ScimGroupRepository(session)
@@ -319,7 +351,9 @@ async def test_set_members_with_empty_list_removes_all(db_session, scim_user, sc
 
     async with db_session() as session:
         result = await session.execute(
-            select(func.count()).where(usergroups_users_table.c.user_group_id == scim_group.id)
+            select(func.count()).where(
+                usergroups_users_table.c.user_group_id == scim_group.id
+            )
         )
         count = result.scalar_one()
 
@@ -408,7 +442,10 @@ async def test_create_group_http_rejects_other_tenant_member(
         container = Container(session=providers.Object(session))
         tenant_service = container.tenant_service()
         other_tenant = await tenant_service.create_tenant(
-            TenantBase(name="tenant_http_member_scope_scim", slug="tenant-http-member-scope-scim")
+            TenantBase(
+                name="tenant_http_member_scope_scim",
+                slug="tenant-http-member-scope-scim",
+            )
         )
         other_tenant_user = Users(
             email="http-other-tenant-member@example.com",
@@ -449,7 +486,9 @@ async def test_get_group_http(client, bypass_scim_auth, scim_group):
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_create_group_with_active_duplicate_returns_409(client, bypass_scim_auth, scim_group):
+async def test_create_group_with_active_duplicate_returns_409(
+    client, bypass_scim_auth, scim_group
+):
     """POST /Groups with displayName matching an active group → 409 uniqueness."""
     payload = {
         "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
@@ -463,7 +502,9 @@ async def test_create_group_with_active_duplicate_returns_409(client, bypass_sci
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_delete_group_is_idempotent(db_session, client, bypass_scim_auth, scim_group):
+async def test_delete_group_is_idempotent(
+    db_session, client, bypass_scim_auth, scim_group
+):
     """A second DELETE on a soft-deleted group returns 204 (idempotent)."""
     first = await client.delete(f"/scim/v2/Groups/{scim_group.id}")
     assert first.status_code == 204
@@ -472,7 +513,9 @@ async def test_delete_group_is_idempotent(db_session, client, bypass_scim_auth, 
     assert second.status_code == 204
 
     async with db_session() as session:
-        result = await session.execute(select(UserGroups).where(UserGroups.id == scim_group.id))
+        result = await session.execute(
+            select(UserGroups).where(UserGroups.id == scim_group.id)
+        )
         assert result.scalar_one().state == "deleted"
 
 
@@ -486,13 +529,17 @@ async def test_delete_group_returns_404_for_unknown_id(client, bypass_scim_auth)
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_create_group_reactivates_soft_deleted_group(db_session, client, bypass_scim_auth, scim_group):
+async def test_create_group_reactivates_soft_deleted_group(
+    db_session, client, bypass_scim_auth, scim_group
+):
     """POST /Groups with displayName matching a soft-deleted group reactivates it (201)."""
     delete_response = await client.delete(f"/scim/v2/Groups/{scim_group.id}")
     assert delete_response.status_code == 204
 
     async with db_session() as session:
-        result = await session.execute(select(UserGroups).where(UserGroups.id == scim_group.id))
+        result = await session.execute(
+            select(UserGroups).where(UserGroups.id == scim_group.id)
+        )
         assert result.scalar_one().state == "deleted"
 
     payload = {
@@ -504,10 +551,14 @@ async def test_create_group_reactivates_soft_deleted_group(db_session, client, b
     response = await client.post("/scim/v2/Groups", json=payload)
     assert response.status_code == 201
     body = response.json()
-    assert body["id"] == str(scim_group.id), "Re-activation should reuse the existing row, not create a new one"
+    assert body["id"] == str(scim_group.id), (
+        "Re-activation should reuse the existing row, not create a new one"
+    )
     assert body["externalId"] == "ext-reactivated-001"
 
     async with db_session() as session:
-        result = await session.execute(select(UserGroups).where(UserGroups.id == scim_group.id))
+        result = await session.execute(
+            select(UserGroups).where(UserGroups.id == scim_group.id)
+        )
         group = result.scalar_one()
         assert group.state is None, "state should be cleared (NULL) after reactivation"

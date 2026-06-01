@@ -7,16 +7,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users, users_roles_table
 from intric.main.logging import get_logger
+from intric.scim.domain.errors import ScimInvalidFilterError
 from intric.scim.schemas.common import ScimFilter, ScimSort
 
 logger = get_logger(__name__)
 
 UserModel = Users
 
+# Keys are SCIM attribute paths lowercased (RFC 7644 paths are case-insensitive).
+# `emails.value` is Azure Entra ID's primary filter form for de-dup lookups;
+# we map it to the single email column since Eneo's user model is flat.
 _ATTR_MAP = {
     "username": Users.username,
     "externalid": Users.external_id,
     "email": Users.email,
+    "emails.value": Users.email,
 }
 
 
@@ -25,9 +30,14 @@ def _apply_filter(
 ) -> Select[tuple[Users]]:
     if scim_filter is None:
         return query
-    col = _ATTR_MAP.get(scim_filter.attribute.lower().replace(".", ""))
+    col = _ATTR_MAP.get(scim_filter.attribute.lower())
     if col is None:
-        return query
+        # RFC 7644 §3.4.2.2: reject unsupported filter attributes with 400
+        # invalidFilter rather than silently returning the whole tenant — that
+        # would break IdP de-dup logic and could cause duplicate provisioning.
+        raise ScimInvalidFilterError(
+            f"Unsupported filter attribute: '{scim_filter.attribute}'"
+        )
     op = scim_filter.operator
     v = scim_filter.value
     if op == "eq":
@@ -167,7 +177,9 @@ class ScimUserRepository:
     ) -> list[UserModel]:
         query = self._base_list_query(tenant_id, scim_filter)
         if scim_sort is not None:
-            sort_col = _ATTR_MAP.get(scim_sort.attribute.lower().replace(".", ""))
+            # RFC 7644 §3.4.2.3: unsupported sortBy falls back to default order
+            # (no error). Filter validation is stricter than sort validation.
+            sort_col = _ATTR_MAP.get(scim_sort.attribute.lower())
             if sort_col is not None:
                 query = query.order_by(
                     asc(sort_col) if scim_sort.order == "ascending" else desc(sort_col)

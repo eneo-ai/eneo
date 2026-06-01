@@ -11,6 +11,7 @@ from intric.main.logging import get_logger
 from intric.scim.domain.errors import (
     ScimGroupConflictError,
     ScimGroupNotFoundError,
+    ScimInvalidFilterError,
     ScimValidationError,
 )
 from intric.scim.repositories.group_repository import ScimGroupRepository
@@ -210,7 +211,13 @@ class ScimGroupService:
         start_index: int = 1,
         count: int | None = None,
     ) -> tuple[list[ScimGroup], int]:
-        scim_filter = ScimFilter.parse(filter_str) if filter_str else None
+        scim_filter = None
+        if filter_str:
+            scim_filter = ScimFilter.parse(filter_str)
+            if scim_filter is None:
+                raise ScimInvalidFilterError(
+                    f"Filter expression could not be parsed: '{filter_str}'"
+                )
         scim_sort = ScimSort.parse(sort_by, sort_order)
         offset = max(0, start_index - 1)
         total = await self._repository.count(
