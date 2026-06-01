@@ -78,6 +78,19 @@ class TranscriptionModelSecurityStatus(TranscriptionModelPublic):
     meets_security_classification: Optional[bool] = None
 
 
+class TranscriptionModelUsageStats(BaseModel):
+    """Live count of what a transcription model migration would move.
+
+    Transcription has no pre-aggregated usage-stats table (unlike completion);
+    these counts come straight from the migration engine's entity counters.
+    """
+
+    model_id: UUID
+    apps_count: int = 0
+    spaces_count: int = 0
+    total_count: int = 0
+
+
 class TranscriptionModelUpdate(BaseModel):
     is_org_enabled: Optional[bool] = None
     is_org_default: Optional[bool] = None

@@ -3219,6 +3219,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/transcription-models/{model_id}/usage": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Transcription Model Usage
+     * @description Count apps and spaces that would be moved by migrating this model.
+     */
+    get: operations["get_transcription_model_usage_api_v1_transcription_models__model_id__usage_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/transcription-models/{model_id}/migration-validate": {
     parameters: {
       query?: never;
@@ -3251,10 +3271,6 @@ export interface paths {
     /**
      * Migrate Transcription Model Usage
      * @description Migrate all usage from one transcription model to another.
-     *
-     *     Validity, same-model rejection, tenant ownership and entity-type
-     *     whitelisting all live in the shared migration engine; the router only
-     *     enforces admin permission and writes the audit log on success.
      */
     post: operations["migrate_transcription_model_usage_api_v1_transcription_models__model_id__migrate_post"];
     delete?: never;
@@ -3272,7 +3288,7 @@ export interface paths {
     };
     /**
      * Get All Transcription Migration History
-     * @description Get all transcription migration history for the tenant.
+     * @description List all transcription migration history for the tenant.
      */
     get: operations["get_all_transcription_migration_history_api_v1_transcription_models_migration_history_get"];
     put?: never;
@@ -3312,7 +3328,7 @@ export interface paths {
     };
     /**
      * Get Transcription Model Migration History
-     * @description Get migration history for a specific transcription model (from or to).
+     * @description Get migration history for a specific transcription model.
      */
     get: operations["get_transcription_model_migration_history_api_v1_transcription_models__model_id__migration_history_get"];
     put?: never;
@@ -15756,6 +15772,35 @@ export interface components {
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
+    /**
+     * TranscriptionModelUsageStats
+     * @description Live count of what a transcription model migration would move.
+     *
+     *     Transcription has no pre-aggregated usage-stats table (unlike completion);
+     *     these counts come straight from the migration engine's entity counters.
+     */
+    TranscriptionModelUsageStats: {
+      /**
+       * Model Id
+       * Format: uuid
+       */
+      model_id: string;
+      /**
+       * Apps Count
+       * @default 0
+       */
+      apps_count?: number;
+      /**
+       * Spaces Count
+       * @default 0
+       */
+      spaces_count?: number;
+      /**
+       * Total Count
+       * @default 0
+       */
+      total_count?: number;
+    };
     /** TransferApplicationRequest */
     TransferApplicationRequest: {
       /**
@@ -27661,6 +27706,46 @@ export interface operations {
       };
     };
   };
+  get_transcription_model_usage_api_v1_transcription_models__model_id__usage_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptionModelUsageStats"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   validate_transcription_migration_api_v1_transcription_models__model_id__migration_validate_get: {
     parameters: {
       query: {
@@ -27794,6 +27879,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ModelMigrationHistory"][];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */

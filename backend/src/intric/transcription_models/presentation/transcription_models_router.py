@@ -25,6 +25,7 @@ from intric.server.protocol import responses
 from intric.transcription_models.presentation.transcription_model_models import (
     TranscriptionModelPublic,
     TranscriptionModelUpdate,
+    TranscriptionModelUsageStats,
 )
 from intric.users.user import UserInDB
 
@@ -137,6 +138,30 @@ async def update_transcription_model(
         )
 
     return TranscriptionModelPublic.from_domain(transcription_model)
+
+
+@router.get(
+    "/{model_id}/usage",
+    response_model=TranscriptionModelUsageStats,
+    responses=responses.get_responses([404]),
+    description="Count apps and spaces that would be moved by migrating this model.",
+)
+async def get_transcription_model_usage(
+    model_id: UUID,
+    user: CurrentUser,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> TranscriptionModelUsageStats:
+    """Live impact counts for the migrate dialog (transcription has no
+    pre-aggregated usage-stats table, so these are computed on demand)."""
+    validate_permission(user, Permission.ADMIN)
+    service = container.transcription_model_migration_service()
+    counts = await service.count_affected_per_type(model_id, user.tenant_id)
+    return TranscriptionModelUsageStats(
+        model_id=model_id,
+        apps_count=counts.get("apps", 0),
+        spaces_count=counts.get("spaces", 0),
+        total_count=counts.get("total", 0),
+    )
 
 
 @router.get(

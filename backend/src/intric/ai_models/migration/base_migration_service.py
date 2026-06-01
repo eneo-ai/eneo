@@ -107,6 +107,21 @@ class BaseModelMigrationService:
             from_model_id, to_model_id, tenant_id
         )
 
+    async def count_affected_per_type(
+        self, model_id: UUID, tenant_id: UUID
+    ) -> dict[str, int]:
+        """Per-entity-type count of what a migration would move, plus a "total".
+
+        Powers the migrate dialog's impact preview for model types that have no
+        dedicated usage-stats service (e.g. transcription)."""
+        counts: dict[str, int] = {}
+        for entity_type in self._migratable_entity_types:
+            counts[entity_type] = await self._count_entities_by_type(
+                entity_type, model_id, tenant_id
+            )
+        counts["total"] = sum(counts.values())
+        return counts
+
     async def migrate_model_usage(
         self,
         from_model_id: UUID,

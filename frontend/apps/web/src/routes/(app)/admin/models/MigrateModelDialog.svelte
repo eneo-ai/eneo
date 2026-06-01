@@ -84,6 +84,8 @@
   let impactTotal = $state(0);
   let impactDetails = $state<UsageDetail[]>([]);
   let spacesCount = $state(0);
+  // Transcription has no usage-details endpoint, only aggregate counts.
+  let appsCount = $state(0);
   let expandedSections = $state<Record<string, boolean>>({});
 
   // --- Target eligibility -----------------------------------------------
@@ -218,15 +220,29 @@
   // impact summary is what they'd otherwise be acknowledging blindly.
   async function loadImpact() {
     if (modelType === "transcriptionModel") {
-      // No usage stats/details endpoints for transcription — skip the preview.
-      // The migrate engine still repoints apps + spaces; warnings come from the
-      // validate call. Security blockers (the only hard gate) still apply.
+      // Transcription has aggregate usage counts only (no per-entity details).
+      // Fetch them so the dialog shows real impact (apps + spaces) instead of a
+      // guess. impactDetails stays empty; we render a compact count box below.
+      isLoadingImpact = true;
+      hasLoadedImpact = false;
+      impactLoadError = null;
       impactTotal = 0;
       impactDetails = [];
       spacesCount = 0;
-      hasLoadedImpact = true;
-      isLoadingImpact = false;
-      impactLoadError = null;
+      appsCount = 0;
+      try {
+        const stats = (await intric.models.getTranscriptionUsageStats({
+          modelId: sourceModel.id
+        })) as { apps_count?: number; spaces_count?: number; total_count?: number };
+        appsCount = stats.apps_count ?? 0;
+        spacesCount = stats.spaces_count ?? 0;
+        impactTotal = stats.total_count ?? appsCount + spacesCount;
+        hasLoadedImpact = true;
+      } catch (err: unknown) {
+        impactLoadError = err instanceof Error ? err.message : m.migration_impact_load_failed();
+      } finally {
+        isLoadingImpact = false;
+      }
       return;
     }
     isLoadingImpact = true;
@@ -350,6 +366,12 @@
               <Button variant="outline" size="sm" onclick={loadImpact}>{m.retry()}</Button>
             </div>
           </div>
+        {:else if !sourceAlreadyMigrated && modelType === "transcriptionModel" && impactTotal > 0}
+          <!-- Transcription has aggregate counts only (no per-entity details),
+               so show a compact apps + spaces summary rather than the table. -->
+          <div class="border-border text-muted-foreground rounded-lg border px-4 py-3 text-sm">
+            {m.migration_impact_transcription({ apps: appsCount, spaces: spacesCount })}
+          </div>
         {:else if !sourceAlreadyMigrated && impactTotal > 0}
           <div class="border-border overflow-hidden rounded-lg border">
             <div class="border-border bg-muted/30 flex items-center gap-4 border-b px-4 py-3">
@@ -422,14 +444,6 @@
                 </div>
               {/if}
             </div>
-          </div>
-        {:else if !sourceAlreadyMigrated && modelType === "transcriptionModel"}
-          <!-- Transcription has no usage-detail endpoint, so we can't show what
-               uses the model. Don't claim "no impact / delete directly" (which
-               would be wrong when an app or space references it); describe what
-               migration does instead. -->
-          <div class="border-border text-muted-foreground rounded-lg border px-4 py-3 text-sm">
-            {m.migrate_model_transcription_note()}
           </div>
         {:else if !sourceAlreadyMigrated}
           <div class="border-border text-muted-foreground rounded-lg border px-4 py-3 text-sm">

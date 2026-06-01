@@ -277,6 +277,22 @@ export function initModels(client) {
       });
 
       return res;
+    },
+
+    /**
+     * Get migration impact counts (apps + spaces) for a transcription model.
+     * @param {Object} params
+     * @param {string} params.modelId Model ID
+     * @returns {Promise<import("../types/schema").components["schemas"]["TranscriptionModelUsageStats"]>}
+     * @throws {IntricError}
+     * */
+    getTranscriptionUsageStats: async ({ modelId }) => {
+      const res = await client.fetch("/api/v1/transcription-models/{model_id}/usage", {
+        method: "get",
+        params: { path: { model_id: modelId } }
+      });
+
+      return res;
     }
   };
 }
