@@ -196,6 +196,7 @@ def test_policy_can_ask_output_after_classifier_uncertainty_clears_guess() -> No
             )
         ),
         prompt_hash="b" * 64,
+        freeform_text="",
     )
     policy = build_planner_action_policy(
         session_state=state,
@@ -241,6 +242,7 @@ def test_classifier_uncertainty_keeps_protected_output_sources_resolved(
             )
         ),
         prompt_hash="c" * 64,
+        freeform_text="",
     )
     policy = build_planner_action_policy(
         session_state=state,

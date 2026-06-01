@@ -43,11 +43,13 @@ from intric.flows.ai_builder.planning_state import (
     StepTriple,
 )
 from intric.flows.ai_builder.planning_state_builder import (
+    _MODEL_VALUE_ACCEPTANCE_POLICIES,
     apply_policy_defaults_from_resolved_slots,
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
     merge_llm_resolved_slots,
 )
+from intric.flows.ai_builder.question_catalog import legal_slot_values
 
 
 def _state(
@@ -123,6 +125,13 @@ def _slot_classification_metadata(
     result = metadata_with_slot_classification(None, metadata)
     assert result is not None
     return result
+
+
+def test_model_value_acceptance_policies_reference_legal_slot_values() -> None:
+    for (slot_name, value), policy in _MODEL_VALUE_ACCEPTANCE_POLICIES.items():
+        assert value in legal_slot_values(slot_name)
+        for dependent_slot_name, dependent_value in policy.dependent_model_values:
+            assert dependent_value in legal_slot_values(dependent_slot_name)
 
 
 class TestPersistedNone:
@@ -649,6 +658,7 @@ class TestRuntimeMetadataClassificationBoundaries:
                 )
             ),
             prompt_hash="f" * 64,
+            freeform_text="",
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
@@ -687,6 +697,7 @@ class TestRuntimeMetadataClassificationBoundaries:
                 )
             ),
             prompt_hash="a" * 64,
+            freeform_text="",
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
@@ -729,6 +740,7 @@ class TestRuntimeMetadataClassificationBoundaries:
                 )
             ),
             prompt_hash="b" * 64,
+            freeform_text="",
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
@@ -904,6 +916,7 @@ class TestModelSlotMerge:
                 )
             ),
             prompt_hash="a" * 64,
+            freeform_text="",
         )
 
         assert state.resolved_slots["primary_runtime_input"].value == "documents"
@@ -913,6 +926,107 @@ class TestModelSlotMerge:
         assert state.resolved_slots["runtime_metadata_fields"].value == (
             "no_extra_metadata"
         )
+
+    def test_model_raw_post_processing_goal_needs_explicit_text_evidence(
+        self,
+    ) -> None:
+        state = _state()
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(
+                    _classified(
+                        "post_processing_goal",
+                        "stop_after_primary_operation",
+                        "high",
+                    ),
+                    _classified(
+                        "structured_analysis_need",
+                        "text_only_analysis",
+                        "high",
+                    ),
+                )
+            ),
+            prompt_hash="a" * 64,
+            freeform_text="Jag vill ha ett transkriberingsflöde.",
+        )
+
+        assert "post_processing_goal" not in state.resolved_slots
+        assert "structured_analysis_need" not in state.resolved_slots
+
+    def test_model_raw_post_processing_goal_commits_when_explicit(
+        self,
+    ) -> None:
+        state = _state()
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(
+                    _classified(
+                        "post_processing_goal",
+                        "stop_after_primary_operation",
+                        "high",
+                    ),
+                )
+            ),
+            prompt_hash="a" * 64,
+            freeform_text="Transkribera ljudet ordagrant utan sammanfattning.",
+        )
+
+        slot = state.resolved_slots["post_processing_goal"]
+        assert slot.value == "stop_after_primary_operation"
+        assert slot.source == "model"
+
+    def test_replayed_model_raw_post_processing_goal_is_rechecked(
+        self,
+    ) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content="Jag vill ha ett transkriberingsflöde.",
+                    metadata=_slot_classification_metadata(
+                        _classified(
+                            "post_processing_goal",
+                            "stop_after_primary_operation",
+                            "high",
+                        ),
+                        _classified(
+                            "structured_analysis_need",
+                            "text_only_analysis",
+                            "high",
+                        ),
+                    ),
+                )
+            ]
+        )
+
+        assert "post_processing_goal" not in state.resolved_slots
+        assert "structured_analysis_need" not in state.resolved_slots
+
+    def test_model_raw_post_processing_goal_rejects_empty_evidence_text(
+        self,
+    ) -> None:
+        state = _state()
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                slots=(
+                    _classified(
+                        "post_processing_goal",
+                        "stop_after_primary_operation",
+                        "high",
+                    ),
+                )
+            ),
+            prompt_hash="a" * 64,
+            freeform_text="",
+        )
+
+        assert "post_processing_goal" not in state.resolved_slots
 
     def test_medium_model_output_does_not_replace_requirements_summary(self) -> None:
         state = _state()
@@ -930,6 +1044,7 @@ class TestModelSlotMerge:
                 slots=(_classified("terminal_output", "pdf_document", "medium"),)
             ),
             prompt_hash="a" * 64,
+            freeform_text="",
         )
 
         assert state.resolved_slots["terminal_output"].value == "structured_text"
@@ -992,6 +1107,7 @@ class TestModelSlotMerge:
                 )
             ),
             prompt_hash="b" * 64,
+            freeform_text="",
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
@@ -1023,6 +1139,7 @@ class TestModelSlotMerge:
                 )
             ),
             prompt_hash="c" * 64,
+            freeform_text="",
         )
 
         slot = state.resolved_slots["runtime_metadata_fields"]
@@ -1050,6 +1167,7 @@ class TestModelSlotMerge:
                 )
             ),
             prompt_hash="d" * 64,
+            freeform_text="",
         )
 
         assert state.resolved_slots["terminal_output"].value == "pdf_document"
@@ -1084,6 +1202,7 @@ class TestModelSlotMerge:
                 )
             ),
             prompt_hash="d" * 64,
+            freeform_text="",
         )
 
         assert state.resolved_slots["primary_runtime_input"].value == "audio"
@@ -1098,6 +1217,7 @@ class TestModelSlotMerge:
                 slots=(_classified("terminal_output", "pdf_document", "low"),)
             ),
             prompt_hash="e" * 64,
+            freeform_text="",
         )
 
         assert state.resolved_slots == {}
@@ -1111,6 +1231,7 @@ class TestModelSlotMerge:
                 slots=(_classified("primary_runtime_input", "unknown", "high"),)
             ),
             prompt_hash="f" * 64,
+            freeform_text="",
         )
 
         assert state.resolved_slots == {}
@@ -1131,6 +1252,7 @@ class TestModelSlotMerge:
                 slots=(_classified("terminal_output", "structured_text", "high"),)
             ),
             prompt_hash="f" * 64,
+            freeform_text="",
             model_blocked_slots=frozenset({"terminal_output"}),
         )
 
@@ -1152,6 +1274,7 @@ class TestModelSlotMerge:
                 slots=(_classified("terminal_output", "structured_text", "high"),)
             ),
             prompt_hash="f" * 64,
+            freeform_text="",
             model_blocked_slots=frozenset({"terminal_output"}),
         )
 
@@ -1174,6 +1297,7 @@ class TestModelSlotMerge:
                 )
             ),
             prompt_hash="g" * 64,
+            freeform_text="",
         )
 
         assert state.resolved_slots == {}
@@ -1188,4 +1312,5 @@ class TestModelSlotMerge:
                     slots=(_classified("primary_runtime_input", "text", "high"),)
                 ),
                 prompt_hash="",
+                freeform_text="",
             )

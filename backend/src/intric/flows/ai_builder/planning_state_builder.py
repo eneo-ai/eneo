@@ -72,8 +72,35 @@ class _PolicyDefaultRule:
     has_explicit_text: Callable[[str], bool]
 
 
+@dataclass(frozen=True, slots=True)
+class _ModelValueAcceptancePolicy:
+    requires_text_evidence: Callable[[str], bool]
+    dependent_model_values: tuple[tuple[str, str], ...] = ()
+
+
 def _never_explicit_text(_: str) -> bool:
     return False
+
+
+def _text_evidences_stop_after_primary_operation(text: str) -> bool:
+    return infer_post_processing_goal(text) == "stop_after_primary_operation"
+
+
+_MODEL_VALUE_ACCEPTANCE_POLICIES: dict[
+    tuple[str, str], _ModelValueAcceptancePolicy
+] = {
+    # Register model values that need explicit user-text evidence before they
+    # can become settled requirements; list values to drop with them as dependents.
+    (
+        "post_processing_goal",
+        "stop_after_primary_operation",
+    ): _ModelValueAcceptancePolicy(
+        requires_text_evidence=_text_evidences_stop_after_primary_operation,
+        dependent_model_values=(
+            ("structured_analysis_need", "text_only_analysis"),
+        ),
+    ),
+}
 
 
 _POLICY_DEFAULT_RULES: dict[str, _PolicyDefaultRule] = {
@@ -158,6 +185,7 @@ def _replay_slot_classification_metadata(
             state,
             classification.to_result(),
             prompt_hash=classification.prompt_hash,
+            freeform_text=freeform_text,
             model_blocked_slots=model_blocked_slots,
         )
         replayed = True
@@ -219,6 +247,7 @@ def merge_llm_resolved_slots(
     classification_result: SlotClassificationResult,
     *,
     prompt_hash: str,
+    freeform_text: str,
     model_blocked_slots: frozenset[str] = frozenset(),
 ) -> None:
     """Overlay model slots without displacing explicit user or flow evidence."""
@@ -226,11 +255,18 @@ def merge_llm_resolved_slots(
         raise ValueError("prompt_hash must be non-empty")
 
     apply_model_blocked_slots(state, model_blocked_slots=model_blocked_slots)
+    blocked_model_values = _blocked_model_values(
+        classification_result=classification_result,
+        freeform_text=freeform_text,
+    )
 
     for classified_slot in classification_result.slots:
         if not _model_slot_is_persistable(classified_slot.slot_name):
             continue
         if classified_slot.slot_name in model_blocked_slots:
+            _clear_nonprotected_model_slot(state, classified_slot.slot_name)
+            continue
+        if (classified_slot.slot_name, classified_slot.value) in blocked_model_values:
             _clear_nonprotected_model_slot(state, classified_slot.slot_name)
             continue
         if classified_slot.value == UNKNOWN_SLOT_VALUE:
@@ -260,6 +296,24 @@ def merge_llm_resolved_slots(
 
     if state.resolved_slots and state.phase == "awaiting_input":
         state.phase = "discovering"
+
+
+def _blocked_model_values(
+    *,
+    classification_result: SlotClassificationResult,
+    freeform_text: str,
+) -> frozenset[tuple[str, str]]:
+    blocked: set[tuple[str, str]] = set()
+    for classified_slot in classification_result.slots:
+        key = (classified_slot.slot_name, classified_slot.value)
+        policy = _MODEL_VALUE_ACCEPTANCE_POLICIES.get(key)
+        if policy is None:
+            continue
+        if policy.requires_text_evidence(freeform_text):
+            continue
+        blocked.add(key)
+        blocked.update(policy.dependent_model_values)
+    return frozenset(blocked)
 
 
 def apply_model_blocked_slots(

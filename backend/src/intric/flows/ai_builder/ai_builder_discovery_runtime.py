@@ -212,6 +212,7 @@ async def build_runtime_discovery_context(
         state,
         result,
         prompt_hash=prompt_hash,
+        freeform_text=text,
         model_blocked_slots=model_blocked_slots,
     )
     apply_policy_defaults_from_resolved_slots(state, freeform_text=text)

@@ -1959,6 +1959,72 @@ class TestExtendedClarificationHints:
         assert analysis.next_issue.suggestion is not None
         assert analysis.next_issue.suggestion.question_id == "input_material_mode"
 
+    @pytest.mark.asyncio
+    async def test_classifier_raw_outcome_does_not_skip_bare_transcription_followup(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Jag vill ha ett transkriberingsflöde.",
+                metadata={"ui_language": "sv"},
+            ),
+            ConversationMessage(
+                role="user",
+                content="PDF-dokument",
+                metadata={
+                    "question_answer": {
+                        "question_id": "final_output_mode",
+                        "selected_values": ["pdf_document"],
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+        ]
+
+        async def fake_classify_slots(**kwargs: Any) -> SlotClassificationResult:
+            return SlotClassificationResult(
+                slots=(
+                    ClassifiedSlot(
+                        slot_name="post_processing_goal",
+                        value="stop_after_primary_operation",
+                        confidence="high",
+                        reason="transcription flow",
+                    ),
+                    ClassifiedSlot(
+                        slot_name="structured_analysis_need",
+                        value="text_only_analysis",
+                        confidence="high",
+                        reason="raw transcription",
+                    ),
+                )
+            )
+
+        with patch(
+            "intric.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            side_effect=fake_classify_slots,
+        ):
+            context = await build_runtime_discovery_context(
+                conversation,
+                litellm_client=object(),
+                litellm_model="test-model",
+                tenant_id=uuid4(),
+            )
+
+        assert "post_processing_goal" not in context.planning_state.resolved_slots
+        assert "structured_analysis_need" not in context.planning_state.resolved_slots
+
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=context.planning_state,
+            slot_classification_result=context.slot_classification_result,
+        )
+
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "post_processing_goal"
+        assert analysis.next_issue.suggestion is not None
+        assert analysis.next_issue.suggestion.question_id == "post_processing_goal"
+
     def test_complex_multi_document_compare_prompt_skips_document_kind_and_comparison_scope(
         self,
     ) -> None:
