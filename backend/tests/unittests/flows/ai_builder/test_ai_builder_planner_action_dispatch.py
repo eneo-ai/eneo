@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -142,9 +141,8 @@ async def test_backend_selected_question_dispatch_uses_typed_discovery_followup(
     )
 
     assert events is not None
-    assert [event["event"] for event in events] == ["text", "question"]
-    assert json.loads(events[1]["data"])["question_id"] == "structured_analysis_need"
-    repo.commit_turn.assert_awaited_once()
+    assert [event["event"] for event in events] == ["text"]
+    repo.commit_turn.assert_not_awaited()
 
 
 @pytest.mark.asyncio

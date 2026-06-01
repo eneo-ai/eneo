@@ -18,7 +18,7 @@ SlotClassificationConfidence = Literal["high", "medium", "low"]
 _SLOT_CLASSIFICATION_CACHE: dict[str, "SlotClassificationResult"] = {}
 _MAX_CACHE_ENTRIES = 128
 UNKNOWN_SLOT_VALUE = "unknown"
-_SLOT_CLASSIFICATION_SCHEMA_VERSION = 2
+_SLOT_CLASSIFICATION_SCHEMA_VERSION = 4
 _SLOT_CLASSIFICATION_RESPONSE_FORMAT: dict[str, object] = {"type": "json_object"}
 
 
@@ -286,6 +286,17 @@ def _build_slot_classification_prompt(
         "Readable summaries, memos, and reports are structured_text terminal output; "
         "machine-readable records or downstream integration payloads are "
         "structured_json terminal output. "
+        "For post_processing_goal, classify what the user wants done with the "
+        "source material after the primary read/transcription/conversion. "
+        "Use stop_after_primary_operation only for explicit transcript-only, "
+        "verbatim, no-summary, or conversion-only intent. Meeting decisions, "
+        "next steps, owners, deadlines, and open questions are action_followup. "
+        "Extracting fields/facts is extract_key_information; creating notes, "
+        "memos, or reports from material is structure_key_information; comparing "
+        "or validating against another source, schema, rule, or checklist is "
+        "compare_or_validate. Summaries and overviews are summarize_or_overview. "
+        "Recommendations or possible choices are decision_support. Risk, issue, "
+        "deviation, or red-flag review is risk_or_issue_review. "
         "For runtime metadata, choose no_extra_metadata when all needed data comes "
         "from the source material and no separate per-run fields are requested. "
         "If the user says values should be derived from source material, do not "

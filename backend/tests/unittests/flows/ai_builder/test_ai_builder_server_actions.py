@@ -179,3 +179,52 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
     assert "Docx Output Mode" not in {
         decision.topic for decision in payload.key_decisions
     }
+
+
+def test_server_confirmation_summarizes_processing_goal() -> None:
+    state = _state(
+        primary_runtime_input="audio",
+        terminal_output="docx_document",
+        docx_output_mode="generated_docx",
+        post_processing_goal="action_followup",
+        structured_analysis_need="use_structured_analysis",
+        runtime_metadata_fields="no_extra_metadata",
+    )
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="audio",
+                output_type="docx",
+                output_mode="pass_through",
+            ),
+        ],
+        chosen_patterns=["audio_to_artifact_report"],
+        required_capabilities=[],
+        committed_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
+        architecture_hash="b" * 64,
+    )
+    policy = build_planner_action_policy(
+        session_state=state,
+        unresolved_architectural_choices=frozenset(),
+        selected_discovery_question_ids=(),
+    )
+
+    output = build_server_planner_output(
+        action_policy=policy,
+        session_state=state,
+        base_planning_state_version=10,
+        ui_language="sv",
+    )
+
+    assert output is not None
+    assert output.planner_action.kind == "confirm_requirements"
+    payload = output.planner_action.payload
+    assert "Resultatet ska hjälpa till med: Beslut, nästa steg" in payload.summary
+    assert {decision.topic for decision in payload.key_decisions} >= {
+        "Syfte med bearbetningen",
+        "Strukturerad analys",
+    }
+    assert {decision.decision for decision in payload.key_decisions} >= {
+        "Beslut, nästa steg och uppföljning",
+        "Ja, använd strukturerad analys där det förbättrar kvaliteten",
+    }

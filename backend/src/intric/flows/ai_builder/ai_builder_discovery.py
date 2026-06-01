@@ -49,6 +49,9 @@ from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     needs_pdf_generation_mode_choice as _needs_pdf_generation_mode_choice,
 )
 from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
+    post_processing_goal_is_vague as _post_processing_goal_is_vague,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     question_category as _question_category,
 )
 from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
@@ -99,6 +102,7 @@ from intric.flows.ai_builder.ai_builder_discovery_questions import (
     localized_text,
     output_reader_question,
     pdf_generation_mode_question,
+    post_processing_goal_question,
     processing_scope_question,
     question_exposure_for_id,
     question_suggestion_for_id,
@@ -283,6 +287,22 @@ def analyze_discovery(
                 ),
                 suggestion=external_delivery_internal_output_question(profile.language),
                 question_level="blocking",
+            )
+        )
+
+    if _post_processing_goal_is_vague(profile):
+        raw_issues.append(
+            DiscoveryIssue(
+                issue_id="post_processing_goal",
+                category="outcome",
+                severity="blocking",
+                message=localized_text(
+                    profile.language,
+                    "Det är fortfarande oklart vad flödet ska hjälpa användaren göra med materialet.",
+                    "It is still unclear what the flow should help the user do with the material.",
+                ),
+                suggestion=post_processing_goal_question(profile.language),
+                question_level="high_value",
             )
         )
 
@@ -730,6 +750,12 @@ def build_discovery_followup_text(
             language,
             "Jag behöver förstå vilken typ av slut-PDF användaren vill ha innan jag kan sammanfatta lösningen.",
             "I need to understand what kind of final PDF the user wants before I can summarize the solution.",
+        )
+    if issue.issue_id == "post_processing_goal":
+        return localized_text(
+            language,
+            "Jag behöver förstå vad resultatet ska hjälpa dig göra innan jag kan bekräfta lösningen.",
+            "I need to understand what the result should help you do before I can confirm the solution.",
         )
     if issue.issue_id == EXTERNAL_DELIVERY_UNSUPPORTED_ISSUE_ID:
         return localized_text(

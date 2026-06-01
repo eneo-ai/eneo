@@ -249,6 +249,93 @@ def document_material_scope_question(
     )
 
 
+def post_processing_goal_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return DiscoveryQuestionSuggestion(
+        question_id="post_processing_goal",
+        question=localized_text(
+            language,
+            "Vad ska flödet hjälpa dig göra med materialet?",
+            "What should the flow help you do with the material?",
+        ),
+        options=(
+            _option(
+                language=language,
+                id="stop_after_primary_operation",
+                swedish_label="Bara grundresultatet",
+                english_label="Only the primary result",
+                swedish_description="Stanna efter exempelvis transkription eller konvertering.",
+                english_description="Stop after the transcript, conversion, or other primary result.",
+                value="stop_after_primary_operation",
+            ),
+            _option(
+                language=language,
+                id="summarize_or_overview",
+                swedish_label="Sammanfatta eller ge överblick",
+                english_label="Summarize or give an overview",
+                swedish_description="Skapa en kortare sammanfattning eller översikt.",
+                english_description="Create a shorter summary or overview.",
+                value="summarize_or_overview",
+            ),
+            _option(
+                language=language,
+                id="extract_key_information",
+                swedish_label="Plocka ut nyckeluppgifter",
+                english_label="Extract key information",
+                swedish_description="Hämta ut viktiga fakta, fält, datum, belopp eller liknande.",
+                english_description="Extract important facts, fields, dates, amounts, or similar details.",
+                value="extract_key_information",
+            ),
+            _option(
+                language=language,
+                id="structure_key_information",
+                swedish_label="Strukturera materialet",
+                english_label="Structure the material",
+                swedish_description="Gör materialet till tydliga anteckningar, memo eller rapport.",
+                english_description="Turn the material into clear notes, a memo, or a report.",
+                value="structure_key_information",
+            ),
+            _option(
+                language=language,
+                id="action_followup",
+                swedish_label="Beslut, nästa steg och uppföljning",
+                english_label="Decisions, next steps, and follow-up",
+                swedish_description="Plocka ut beslut, åtgärder, ansvariga, deadlines och öppna frågor.",
+                english_description="Extract decisions, actions, owners, deadlines, and open questions.",
+                value="action_followup",
+            ),
+            _option(
+                language=language,
+                id="decision_support",
+                swedish_label="Rekommendationer och vägval",
+                english_label="Recommendations and guidance",
+                swedish_description="Ta fram rekommendationer eller nästa möjliga vägval.",
+                english_description="Create recommendations or next possible choices.",
+                value="decision_support",
+            ),
+            _option(
+                language=language,
+                id="risk_or_issue_review",
+                swedish_label="Granska risker eller problem",
+                english_label="Review risks or issues",
+                swedish_description="Identifiera risker, avvikelser, osäkerheter eller problem.",
+                english_description="Identify risks, deviations, uncertainty, or problems.",
+                value="risk_or_issue_review",
+            ),
+            _option(
+                language=language,
+                id="compare_or_validate",
+                swedish_label="Jämföra eller validera",
+                english_label="Compare or validate",
+                swedish_description="Jämför mot annat underlag, regler, schema eller checklista.",
+                english_description="Compare against other material, rules, a schema, or a checklist.",
+                value="compare_or_validate",
+            ),
+        ),
+    )
+
+
 def comparison_scope_conflict_question(
     language: DiscoveryLanguage,
 ) -> DiscoveryQuestionSuggestion:
@@ -686,6 +773,7 @@ def question_suggestion_for_id(
         "flow_input_architecture": flow_input_architecture_question,
         "document_kind": document_kind_question,
         "document_material_scope": document_material_scope_question,
+        "post_processing_goal": post_processing_goal_question,
         "comparison_scope": comparison_scope_question,
         "final_output_mode": final_output_mode_question,
         "docx_output_mode": docx_output_mode_question,

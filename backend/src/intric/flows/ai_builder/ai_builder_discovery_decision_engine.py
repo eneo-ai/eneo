@@ -45,6 +45,7 @@ _QUESTION_IMPACT: dict[str, DiscoveryImpact] = {
     "document_kind": "quality",
     "document_material_scope": "quality",
     "comparison_scope": "architecture",
+    "post_processing_goal": "architecture",
     "final_output_mode": "architecture",
     "docx_output_mode": "architecture",
     "pdf_generation_mode": "architecture",

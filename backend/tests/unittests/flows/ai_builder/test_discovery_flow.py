@@ -63,6 +63,9 @@ from intric.flows.ai_builder.ai_builder_tools import (
     CONFIRM_REQUIREMENTS_TOOL_NAME,
     OUTLINE_FLOW_TOOL_NAME,
 )
+from intric.flows.ai_builder.planning_state_builder import (
+    build_planning_state_from_conversation,
+)
 from intric.flows.flow import Flow, FlowStep
 
 # ---------------------------------------------------------------------------
@@ -857,12 +860,7 @@ class TestExtendedClarificationHints:
     def test_rich_prompt_uses_full_question_budget_when_slots_remain(
         self,
     ) -> None:
-        """Rich prompts no longer get fewer questions than short ones.
-
-        Budget is 3 for any prompt without an explicit step plan. With 2
-        structured answers already given, the 3rd slot is still available
-        and the engine proposes the next architecture-impact question.
-        """
+        """Rich prompts with clear outcome intent do not ask a meta question."""
         conversation = [
             ConversationMessage(
                 role="user",
@@ -898,10 +896,10 @@ class TestExtendedClarificationHints:
             ),
         ]
 
+        analysis = analyze_discovery(conversation)
+        assert analysis.ready_for_confirmation
         followup = build_discovery_followup(conversation)
-        assert followup is not None
-        question_data = followup.question_data
-        assert question_data.question_id == "structured_analysis_need"
+        assert followup is None
 
     def test_vague_case_analysis_prompt_is_resolved_after_full_answers(self) -> None:
         """After 5 explicit answers covering scope, input, output mode, and
@@ -978,18 +976,22 @@ class TestExtendedClarificationHints:
         followup = build_discovery_followup(conversation)
         assert followup is not None
         question = followup.question_data
-        assert question.question == "Vad ska flödet producera som slutresultat?"
+        assert question.question == "Vad ska flödet hjälpa dig göra med materialet?"
         first_option = question.options[0]
-        assert first_option.label == "Strukturerat textresultat"
+        assert first_option.label == "Bara grundresultatet"
         assert all(
             option.label != english
             for option, english in zip(
                 question.options,
                 [
-                    "Structured text result",
-                    "PDF document",
-                    "DOCX document",
-                    "Structured JSON",
+                    "Only the primary result",
+                    "Summarize or give an overview",
+                    "Extract key information",
+                    "Structure the material",
+                    "Decisions, next steps, and follow-up",
+                    "Recommendations and guidance",
+                    "Review risks or issues",
+                    "Compare or validate",
                 ],
                 strict=True,
             )
@@ -1483,7 +1485,7 @@ class TestExtendedClarificationHints:
         assert "document_kind" not in question_ids
         assert "docx_output_mode" not in question_ids
 
-    def test_structured_analysis_question_is_asked_for_audio_docx_extraction(
+    def test_structured_analysis_is_derived_for_audio_docx_extraction(
         self,
     ) -> None:
         conversation = [
@@ -1498,11 +1500,15 @@ class TestExtendedClarificationHints:
         ]
 
         analysis = analyze_discovery(conversation)
+        state = build_planning_state_from_conversation(conversation)
 
-        assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "structured_analysis_need"
-        assert analysis.next_issue.suggestion is not None
-        assert analysis.next_issue.suggestion.question_id == "structured_analysis_need"
+        assert analysis.next_issue is None
+        assert state.resolved_slots["post_processing_goal"].value == (
+            "extract_key_information"
+        )
+        assert state.resolved_slots["structured_analysis_need"].value == (
+            "use_structured_analysis"
+        )
 
     def test_structured_analysis_plain_text_optout_wins_for_audio_docx_extraction(
         self,
@@ -1550,6 +1556,51 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
         assert "structured_analysis_need" not in question_ids
+
+    def test_vague_audio_prompt_asks_outcome_before_output_format(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Jag har en svensk ljudinspelning från ett möte och vill "
+                    "göra ett flöde av den. Flödet ska ta ljudfilen, förstå "
+                    "vad som sades och skapa något användbart som jag kan dela "
+                    "vidare efteråt. Jag vet inte exakt vilket format "
+                    "slutresultatet ska vara ännu."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "post_processing_goal"
+        assert analysis.next_issue.suggestion is not None
+        assert analysis.next_issue.suggestion.question_id == "post_processing_goal"
+
+    def test_exact_json_flow_does_not_ask_post_processing_goal(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde där användaren klistrar in en JSON payload "
+                    "och får tillbaka strikt JSON enligt det här schemat: "
+                    "{name: string, amount: number, deadline: string}. "
+                    "Returnera bara giltig JSON."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+        assert "post_processing_goal" not in question_ids
 
     def test_structured_analysis_answer_resolves_audio_docx_extraction_question(
         self,
@@ -1629,9 +1680,10 @@ class TestExtendedClarificationHints:
 
         assert "structured_analysis_need" not in captured_allowed_values
         assert "runtime_metadata_fields" in captured_allowed_values
-        assert (
-            context.planning_state.resolved_slots.get("structured_analysis_need")
-            is None
+        assert context.planning_state.resolved_slots[
+            "structured_analysis_need"
+        ].value == (
+            "use_structured_analysis"
         )
 
     def test_complex_multi_document_compare_prompt_skips_document_kind_and_comparison_scope(
@@ -2477,7 +2529,7 @@ class TestPlannerConversationEncoding:
 
 class TestPlannerDiscoveryQuestionDispatch:
     @pytest.mark.asyncio
-    async def test_server_question_dispatch_uses_typed_discovery_followup_for_planner_internal_question(
+    async def test_server_question_dispatch_skips_redundant_planner_internal_question(
         self,
     ) -> None:
         repo = AsyncMock()
@@ -2516,10 +2568,8 @@ class TestPlannerDiscoveryQuestionDispatch:
         )
 
         assert events is not None
-        assert [event["event"] for event in events] == ["text", "question"]
-        question_payload = json.loads(events[1]["data"])
-        assert question_payload["question_id"] == "structured_analysis_need"
-        repo.commit_turn.assert_awaited_once()
+        assert [event["event"] for event in events] == ["text"]
+        repo.commit_turn.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_uses_backend_followup_after_llm_slot_classification_for_blocking_discovery(
@@ -2567,7 +2617,7 @@ class TestPlannerDiscoveryQuestionDispatch:
         repo.commit_turn.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_audio_docx_extraction_structured_question_emits_typed_event_before_proposal(
+    async def test_audio_docx_extraction_derives_structured_analysis_before_proposal(
         self,
     ) -> None:
         repo = AsyncMock()
@@ -2611,9 +2661,7 @@ class TestPlannerDiscoveryQuestionDispatch:
             ):
                 events.append(event)
 
-        assert [event["event"] for event in events] == ["text", "question", "done"]
-        question_payload = json.loads(events[1]["data"])
-        assert question_payload["question_id"] == "structured_analysis_need"
+        assert [event["event"] for event in events] == ["status", "done"]
         repo.commit_turn.assert_awaited_once()
 
 

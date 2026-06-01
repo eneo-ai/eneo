@@ -18,6 +18,9 @@ from intric.flows.ai_builder.ai_builder_conversation_metadata import (
 from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_discovery_defaults,
 )
+from intric.flows.ai_builder.ai_builder_discovery_signal_inference import (
+    infer_post_processing_goal,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
@@ -91,6 +94,17 @@ _POLICY_DEFAULT_RULES: dict[str, _PolicyDefaultRule] = {
         has_explicit_text=has_explicit_pdf_mode_text,
     ),
 }
+
+_STRUCTURE_PROMOTING_POST_PROCESSING_GOALS: frozenset[str] = frozenset(
+    {
+        "action_followup",
+        "compare_or_validate",
+        "decision_support",
+        "extract_key_information",
+        "risk_or_issue_review",
+        "structure_key_information",
+    }
+)
 
 
 def build_planning_state_from_conversation(
@@ -330,8 +344,33 @@ def apply_policy_defaults_from_resolved_slots(
                 confidence="medium",
             )
 
+    _apply_structured_analysis_default_from_post_processing_goal(state)
+
     if state.resolved_slots and state.phase == "awaiting_input":
         state.phase = "discovering"
+
+
+def _apply_structured_analysis_default_from_post_processing_goal(
+    state: PlanningState,
+) -> None:
+    if "structured_analysis_need" in state.resolved_slots:
+        return
+    post_processing_goal = state.resolved_slots.get("post_processing_goal")
+    value = _structured_analysis_default_for_post_processing_goal(
+        post_processing_goal.value if post_processing_goal is not None else None
+    )
+    if value is None:
+        return
+    state.resolved_slots["structured_analysis_need"] = ResolvedSlot(
+        name="structured_analysis_need",
+        value=value,
+        source="policy_default",
+        evidence=[
+            "policy_default:structured_analysis_need=post_processing_goal:"
+            f"{post_processing_goal.value if post_processing_goal is not None else ''}",
+        ],
+        confidence="medium",
+    )
 
 
 def llm_resolvable_slot_values_for_state(
@@ -373,6 +412,9 @@ def _model_slot_can_replace(
     if existing_slot.source == "requirements_summary":
         return model_confidence == "high"
     if existing_slot.source == "policy_default":
+        # The post-processing-goal default is a policy contract, not a guess.
+        if existing_slot.name == "structured_analysis_need":
+            return False
         return model_confidence == "high"
     if existing_slot.source == "heuristic":
         if (
@@ -507,6 +549,24 @@ def _resolve_slots(
             slot_value=comparison_scope,
         )
 
+    post_processing_goal = _single_slot_value(
+        answer_signals=answer_signals,
+        flow_defaults=flow_defaults,
+        question_id="post_processing_goal",
+    )
+    if post_processing_goal is not None:
+        slots["post_processing_goal"] = _build_slot(
+            name="post_processing_goal",
+            value=post_processing_goal,
+            question_id="post_processing_goal",
+            conversation=conversation,
+            flow_defaults=flow_defaults,
+            requirements_state=requirements_state,
+            freeform_text=freeform_text,
+            summary_field=None,
+            slot_value=post_processing_goal,
+        )
+
     structured_analysis_need = _single_slot_value(
         answer_signals=answer_signals,
         flow_defaults=flow_defaults,
@@ -524,6 +584,23 @@ def _resolve_slots(
             summary_field=None,
             slot_value=structured_analysis_need,
         )
+    else:
+        structured_analysis_default = (
+            _structured_analysis_default_for_post_processing_goal(
+                post_processing_goal
+            )
+        )
+        if structured_analysis_default is not None:
+            slots["structured_analysis_need"] = ResolvedSlot(
+                name="structured_analysis_need",
+                value=structured_analysis_default,
+                source="policy_default",
+                evidence=[
+                    "policy_default:structured_analysis_need=post_processing_goal:"
+                    f"{post_processing_goal}",
+                ],
+                confidence="medium",
+            )
 
     runtime_metadata_fields = _single_slot_value(
         answer_signals=answer_signals,
@@ -689,6 +766,14 @@ def _requirements_summary_supports_slot(
     return False
 
 
+def _structured_analysis_default_for_post_processing_goal(
+    post_processing_goal: str | None,
+) -> str | None:
+    if post_processing_goal in _STRUCTURE_PROMOTING_POST_PROCESSING_GOALS:
+        return "use_structured_analysis"
+    return None
+
+
 def _heuristic_slot_confidence(
     *,
     question_id: str,
@@ -701,6 +786,12 @@ def _heuristic_slot_confidence(
         and infer_runtime_metadata_slot(freeform_text) == NO_EXTRA_RUNTIME_METADATA
     ):
         return "high"
+    if question_id == "post_processing_goal":
+        return (
+            "high"
+            if infer_post_processing_goal(freeform_text) == slot_value
+            else "medium"
+        )
     if question_id != "input_material_mode" or not freeform_text:
         return "medium"
 

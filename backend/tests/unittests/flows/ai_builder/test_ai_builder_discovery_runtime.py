@@ -61,6 +61,10 @@ def _resolved_state() -> PlanningState:
                 "document_material_scope",
                 "single_uploaded_document",
             ),
+            "post_processing_goal": _slot(
+                "post_processing_goal",
+                "summarize_or_overview",
+            ),
             "structured_analysis_need": _slot(
                 "structured_analysis_need",
                 "text_only_analysis",

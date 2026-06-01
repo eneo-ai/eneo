@@ -7,6 +7,7 @@ from intric.flows.ai_builder.ai_builder_clause_segmenter import (
 )
 from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
+    contains_any_token_prefix,
     normalize_discovery_text,
 )
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
@@ -51,6 +52,7 @@ def infer_answer_signals_from_text(text: str) -> dict[str, set[str]]:
     )
     _add_signal(signals, "comparison_scope", _infer_comparison_scope(normalized))
     _add_signal(signals, "processing_scope", _infer_processing_scope(normalized))
+    _add_signal(signals, "post_processing_goal", infer_post_processing_goal(normalized))
     _add_signal(
         signals,
         "structured_analysis_need",
@@ -81,6 +83,10 @@ def _add_signal(
 
 def _contains_any(text: str, phrases: Iterable[str]) -> bool:
     return contains_any_phrase(text, phrases)
+
+
+def _contains_any_prefix(text: str, prefixes: Iterable[str]) -> bool:
+    return contains_any_token_prefix(text, prefixes)
 
 
 _MULTI_SOURCE_FILE_PHRASES: tuple[str, ...] = (
@@ -372,6 +378,237 @@ def _infer_processing_scope(text: str) -> str | None:
     ):
         return "single_case"
     return None
+
+
+def infer_post_processing_goal(text: str) -> str | None:
+    normalized = normalize_signal_text(text)
+    if not normalized:
+        return None
+    # Richer workflow-shaping goals win before broad report/summary fallbacks.
+    if _contains_any(
+        normalized,
+        (
+            "bara transkrib",
+            "only transcrib",
+            "only transcript",
+            "transcript only",
+            "bara konvertera",
+            "only convert",
+            "ordagrant",
+            "verbatim",
+            "ingen sammanfattning",
+            "no summary",
+            "ingen analys",
+            "no analysis",
+        ),
+    ):
+        return "stop_after_primary_operation"
+    if _contains_any(
+        normalized,
+        (
+            "jämför",
+            "jamfor",
+            "jämföra",
+            "jamfora",
+            "jämförelse",
+            "jamforelse",
+            "compare",
+            "comparison",
+            "validera",
+            "validate",
+            "validation",
+            "checklista",
+            "checklist",
+            "enligt schema",
+            "against a schema",
+            "mot schema",
+        ),
+    ):
+        return "compare_or_validate"
+    if _contains_any(
+        normalized,
+        (
+            "risk",
+            "risker",
+            "risks",
+            "avvikelse",
+            "avvikelser",
+            "deviation",
+            "deviations",
+            "issue",
+            "issues",
+            "problem",
+            "problem",
+            "red flag",
+            "red flags",
+        ),
+    ):
+        return "risk_or_issue_review"
+    if _contains_any(
+        normalized,
+        (
+            "beslut",
+            "decisions",
+            "decision",
+            "nästa steg",
+            "nasta steg",
+            "next steps",
+            "next step",
+            "åtgärder",
+            "atgarder",
+            "actions",
+            "ansvarig",
+            "ansvariga",
+            "owner",
+            "owners",
+            "deadline",
+            "deadlines",
+            "öppna frågor",
+            "oppna fragor",
+            "open questions",
+            "follow-up",
+            "follow up",
+            "uppfölj",
+            "uppfolj",
+        ),
+    ):
+        return "action_followup"
+    if _contains_any(
+        normalized,
+        (
+            "extrahera",
+            "extract",
+            "extracts",
+            "extracted",
+            "extracting",
+            "plocka ut",
+            "hämta ut",
+            "hamta ut",
+            "nyckeluppgifter",
+            "key information",
+            "key details",
+            "fält",
+            "falt",
+            "fields",
+            "datum",
+            "dates",
+            "belopp",
+            "amounts",
+            "returnera fält",
+            "return fields",
+        ),
+    ):
+        return "extract_key_information"
+    if _contains_any(
+        normalized,
+        (
+            "beslutsunderlag",
+            "decision support",
+            "rekommendation",
+            "rekommendationer",
+            "recommendation",
+            "recommendations",
+            "vägval",
+            "vagval",
+            "next possible choices",
+            "föreslå",
+            "foresla",
+            "suggest",
+        ),
+    ):
+        return "decision_support"
+    if _contains_any(
+        normalized,
+        (
+            "sammanfatta",
+            "sammanfattning",
+            "summarize",
+            "summary",
+            "överblick",
+            "overblick",
+            "overview",
+            "kortare version",
+            "shorter version",
+        ),
+    ):
+        return "summarize_or_overview"
+    if _contains_any(
+        normalized,
+        (
+            "strukturera",
+            "structured notes",
+            "tydliga anteckningar",
+            "clear notes",
+            "memo",
+            "notat",
+            "mötesrapport",
+            "motesrapport",
+        ),
+    ):
+        return "structure_key_information"
+    if _looks_like_report_creation_goal(normalized):
+        return "structure_key_information"
+    if _looks_like_transcript_only_goal(normalized):
+        return "stop_after_primary_operation"
+    return None
+
+
+def _looks_like_report_creation_goal(text: str) -> bool:
+    return _contains_any_prefix(
+        text,
+        (
+            "skapa",
+            "skriv",
+            "generer",
+            "producer",
+            "create",
+            "write",
+            "generate",
+            "produce",
+        ),
+    ) and _contains_any(
+        text,
+        (
+            "rapport",
+            "slutrapport",
+            "report",
+            "final report",
+            "memo",
+            "notat",
+            "anteckningar",
+            "notes",
+        ),
+    )
+
+
+def _looks_like_transcript_only_goal(text: str) -> bool:
+    if not _contains_any_prefix(text, ("transkrib", "transcrib")):
+        return False
+    return not _contains_any(
+        text,
+        (
+            "analysera",
+            "analyze",
+            "analys",
+            "analysis",
+            "sammanfatta",
+            "summarize",
+            "rapport",
+            "report",
+            "memo",
+            "extrahera",
+            "extract",
+            "beslut",
+            "decision",
+            "nästa steg",
+            "next step",
+            "risk",
+            "jämför",
+            "compare",
+            "validera",
+            "validate",
+        ),
+    )
 
 
 def _infer_structured_analysis_need(text: str) -> str | None:

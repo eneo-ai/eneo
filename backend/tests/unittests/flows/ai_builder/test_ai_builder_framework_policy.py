@@ -6,6 +6,7 @@ import pytest
 
 from intric.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from intric.flows.ai_builder.ai_builder_discovery_signal_inference import (
+    infer_post_processing_goal,
     is_high_confidence_source_to_source_comparison,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
@@ -1156,6 +1157,34 @@ def test_extract_answer_signals_infers_structured_analysis_from_rich_docx_workfl
 
 
 @pytest.mark.parametrize(
+    ("text", "expected_goal"),
+    [
+        (
+            "Strukturera materialet till tydliga anteckningar och ett kort memo.",
+            "structure_key_information",
+        ),
+        (
+            "Ta fram rekommendationer och möjliga vägval från underlaget.",
+            "decision_support",
+        ),
+        (
+            "Granska dokumentet och identifiera risker, avvikelser och problem.",
+            "risk_or_issue_review",
+        ),
+        (
+            "Jämför underlaget mot checklistan och validera att kraven följs.",
+            "compare_or_validate",
+        ),
+    ],
+)
+def test_infer_post_processing_goal_reaches_richer_goal_values(
+    text: str,
+    expected_goal: str,
+) -> None:
+    assert infer_post_processing_goal(text) == expected_goal
+
+
+@pytest.mark.parametrize(
     "text",
     [
         (
@@ -2021,6 +2050,7 @@ def test_rejects_unsupported_structured_question_ids() -> None:
     assert is_supported_structured_question_id("final_output_mode")
     assert is_supported_structured_question_id("upload_mode")
     assert is_supported_structured_question_id("final_output_type")
+    assert is_supported_structured_question_id("post_processing_goal")
     assert is_supported_structured_question_id("structured_analysis_need")
     assert is_supported_structured_question_id("output_style")
     assert is_supported_structured_question_id("output_tone")

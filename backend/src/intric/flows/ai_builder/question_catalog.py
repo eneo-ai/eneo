@@ -436,6 +436,97 @@ _DOCUMENT_MATERIAL_SCOPE = QuestionTemplate(
 )
 
 
+_POST_PROCESSING_GOAL = QuestionTemplate(
+    id="post_processing_goal",
+    question_sv="Vad ska flödet hjälpa dig göra med materialet?",
+    question_en="What should the flow help you do with the material?",
+    help_sv=(
+        "Välj vad som ska hända efter att flödet har läst, transkriberat "
+        "eller tolkat indata. Det avgör om flödet ska stanna vid "
+        "grundresultatet eller bearbeta materialet vidare."
+    ),
+    help_en=(
+        "Choose what should happen after the flow has read, transcribed, "
+        "or interpreted the input. This determines whether the flow stops "
+        "at the primary result or processes the material further."
+    ),
+    options=(
+        _option(
+            id="stop_after_primary_operation",
+            label_sv="Bara grundresultatet",
+            label_en="Only the primary result",
+            description_sv="Stanna efter exempelvis transkription eller konvertering.",
+            description_en="Stop after the transcript, conversion, or other primary result.",
+            value="stop_after_primary_operation",
+        ),
+        _option(
+            id="summarize_or_overview",
+            label_sv="Sammanfatta eller ge överblick",
+            label_en="Summarize or give an overview",
+            description_sv="Skapa en kortare sammanfattning eller översikt.",
+            description_en="Create a shorter summary or overview.",
+            value="summarize_or_overview",
+        ),
+        _option(
+            id="extract_key_information",
+            label_sv="Plocka ut nyckeluppgifter",
+            label_en="Extract key information",
+            description_sv="Hämta ut viktiga fakta, fält, datum, belopp eller liknande.",
+            description_en="Extract important facts, fields, dates, amounts, or similar details.",
+            value="extract_key_information",
+        ),
+        _option(
+            id="structure_key_information",
+            label_sv="Strukturera materialet",
+            label_en="Structure the material",
+            description_sv="Gör materialet till tydliga anteckningar, memo eller rapport.",
+            description_en="Turn the material into clear notes, a memo, or a report.",
+            value="structure_key_information",
+        ),
+        _option(
+            id="action_followup",
+            label_sv="Beslut, nästa steg och uppföljning",
+            label_en="Decisions, next steps, and follow-up",
+            description_sv="Plocka ut beslut, åtgärder, ansvariga, deadlines och öppna frågor.",
+            description_en="Extract decisions, actions, owners, deadlines, and open questions.",
+            value="action_followup",
+        ),
+        _option(
+            id="decision_support",
+            label_sv="Rekommendationer och vägval",
+            label_en="Recommendations and guidance",
+            description_sv="Ta fram rekommendationer eller nästa möjliga vägval.",
+            description_en="Create recommendations or next possible choices.",
+            value="decision_support",
+        ),
+        _option(
+            id="risk_or_issue_review",
+            label_sv="Granska risker eller problem",
+            label_en="Review risks or issues",
+            description_sv="Identifiera risker, avvikelser, osäkerheter eller problem.",
+            description_en="Identify risks, deviations, uncertainty, or problems.",
+            value="risk_or_issue_review",
+        ),
+        _option(
+            id="compare_or_validate",
+            label_sv="Jämföra eller validera",
+            label_en="Compare or validate",
+            description_sv="Jämför mot annat underlag, regler, schema eller checklista.",
+            description_en="Compare against other material, rules, a schema, or a checklist.",
+            value="compare_or_validate",
+        ),
+    ),
+    worked_examples_sv=(
+        "Transkribera mötet och plocka ut beslut, nästa steg och ansvariga.",
+        "Läs JSON och returnera fält enligt ett schema.",
+    ),
+    worked_examples_en=(
+        "Transcribe the meeting and extract decisions, next steps, and owners.",
+        "Read JSON and return fields according to a schema.",
+    ),
+)
+
+
 _STRUCTURED_ANALYSIS_NEED = QuestionTemplate(
     id="structured_analysis_need",
     question_sv=(
@@ -544,6 +635,7 @@ _ALL_TEMPLATES: tuple[QuestionTemplate, ...] = (
     _DOCX_OUTPUT_MODE,
     _PDF_GENERATION_MODE,
     _DOCUMENT_MATERIAL_SCOPE,
+    _POST_PROCESSING_GOAL,
     _STRUCTURED_ANALYSIS_NEED,
     _RUNTIME_METADATA_FIELDS,
 )

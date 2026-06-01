@@ -12,6 +12,9 @@ from intric.flows.ai_builder.ai_builder_discovery_families import (
 )
 from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryProfile
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import mentions_any
+from intric.flows.ai_builder.ai_builder_discovery_signal_inference import (
+    infer_post_processing_goal,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
@@ -44,6 +47,7 @@ def question_category(question_id: str) -> str:
         "flow_input_architecture": "input",
         "document_kind": "input",
         "document_material_scope": "input",
+        "post_processing_goal": "outcome",
         "comparison_scope": "comparison",
         "final_output_mode": "output",
         "docx_output_mode": "output",
@@ -213,6 +217,45 @@ def ultra_vague_output_choice_is_vague(profile: DiscoveryProfile) -> bool:
     ):
         return False
     return profile.document_like_input or profile.audio_like_input
+
+
+def post_processing_goal_is_vague(profile: DiscoveryProfile) -> bool:
+    if _family_inactive(profile, "post_processing_goal"):
+        return False
+    if profile.planning_state.resolved_slots.get("post_processing_goal") is not None:
+        return False
+    if "post_processing_goal" in profile.answers:
+        return False
+    if _explicit_post_processing_goal_present(profile.text):
+        return False
+    if profile.output_intent.terminal_output == "structured_json":
+        return False
+    if mentions_any(
+        profile.text,
+        (
+            "något användbart",
+            "nagot anvandbart",
+            "something useful",
+            "dela vidare",
+            "share afterwards",
+            "professionellt",
+            "professional",
+            "process documents",
+            "processa dokument",
+            "bearbeta dokument",
+        ),
+    ):
+        return True
+    return (
+        profile.audio_like_input
+        or profile.document_like_input
+        or profile.case_like_flow
+        or profile.final_output_text_or_docx
+    )
+
+
+def _explicit_post_processing_goal_present(text: str) -> bool:
+    return infer_post_processing_goal(text) is not None
 
 
 def needs_docx_mode_choice(profile: DiscoveryProfile) -> bool:
@@ -602,6 +645,18 @@ def structured_analysis_need_is_vague(profile: DiscoveryProfile) -> bool:
     if "structured_analysis_need" in answers:
         return False
     if "structured_json" in answers.get("final_output_mode", set()):
+        return False
+    post_processing_goal = profile.planning_state.resolved_slots.get(
+        "post_processing_goal"
+    )
+    if post_processing_goal is not None and post_processing_goal.value in {
+        "action_followup",
+        "compare_or_validate",
+        "decision_support",
+        "extract_key_information",
+        "risk_or_issue_review",
+        "structure_key_information",
+    }:
         return False
     if mentions_any(
         text,

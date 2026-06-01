@@ -11,8 +11,12 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from typing import get_args
 
 import intric.flows.ai_builder.ai_builder_slot_vocabulary as slot_vocabulary
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    LLMResolvableSlotName,
+)
 from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
     LLM_RESOLVABLE_SLOT_NAMES,
@@ -21,7 +25,7 @@ from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
 
 
 class TestSlotVocabularyShape:
-    def test_frozenset_contains_exactly_seven_canonical_slot_names(self) -> None:
+    def test_frozenset_contains_exactly_eight_canonical_slot_names(self) -> None:
         assert KNOWN_REQUIREMENT_SLOT_NAMES == frozenset(
             {
                 "primary_runtime_input",
@@ -29,6 +33,7 @@ class TestSlotVocabularyShape:
                 "docx_output_mode",
                 "pdf_generation_mode",
                 "document_material_scope",
+                "post_processing_goal",
                 "structured_analysis_need",
                 "runtime_metadata_fields",
             }
@@ -50,6 +55,9 @@ class TestSlotVocabularyShape:
         assert LLM_RESOLVABLE_SLOT_NAMES == (
             KNOWN_REQUIREMENT_SLOT_NAMES - NON_LLM_RESOLVABLE_SLOT_NAMES
         )
+
+    def test_llm_resolvable_slots_match_persisted_metadata_type(self) -> None:
+        assert frozenset(get_args(LLMResolvableSlotName)) == LLM_RESOLVABLE_SLOT_NAMES
 
 
 class TestLeafPurity:
