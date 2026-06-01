@@ -18,6 +18,7 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
 from intric.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     PlanningState,
+    ResolvedSlot,
     StepTriple,
 )
 
@@ -56,6 +57,29 @@ def _planning_state_with_architecture(
                 tuples_chain=list(tuples),
             )
         }
+    )
+
+
+def _state_with_slot(
+    slot_name: str,
+    value: str,
+    *,
+    state: PlanningState | None = None,
+) -> PlanningState:
+    base_state = state or PlanningState.empty()
+    return base_state.model_copy(
+        update={
+            "resolved_slots": {
+                **base_state.resolved_slots,
+                slot_name: ResolvedSlot(
+                    name=slot_name,
+                    value=value,
+                    source="structured_answer",
+                    confidence="high",
+                ),
+            }
+        },
+        deep=True,
     )
 
 
@@ -258,6 +282,51 @@ def test_plan_proposal_prompt_guides_terminal_document_review_shape() -> None:
     assert "For DOCX/PDF delivery" in prompt
     assert "complete document body" in prompt
     assert "do not put review notes directly before DOCX/PDF rendering" in prompt
+
+
+def test_plan_proposal_prompt_renders_action_followup_result_contract() -> None:
+    state = _state_with_slot(
+        "terminal_output",
+        "pdf_document",
+        state=_state_with_slot("post_processing_goal", "action_followup"),
+    )
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(
+            summary="Transkribera mötet och plocka ut beslut och nästa steg.",
+        ),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "Result contract:" in prompt
+    assert "- post_processing_goal: action_followup" in prompt
+    assert "- Decisions" in prompt
+    assert "- Owners" in prompt
+    assert "Mark missing owners, deadlines, and responsibilities as unspecified" in prompt
+    assert "final document step should render completed content" in prompt
+
+
+def test_plan_proposal_prompt_renders_machine_readable_result_contract() -> None:
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=_state_with_slot("terminal_output", "structured_json"),
+        confirmed_requirements=_requirements(
+            summary="Ta input JSON och returnera bara JSON enligt output-schemat.",
+        ),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+
+    assert "Result contract:" in prompt
+    assert "- terminal_output: structured_json" in prompt
+    assert "Use the requested schema or fields as the output contract" in prompt
+    assert "Use null or unspecified placeholders for missing source values" in prompt
+    assert "Brief summary" not in prompt
 
 
 def test_plan_proposal_prompt_omits_confirmed_requirement_boilerplate():

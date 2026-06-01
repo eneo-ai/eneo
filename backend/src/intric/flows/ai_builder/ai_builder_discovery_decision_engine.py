@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from intric.flows.ai_builder.ai_builder_conversation_metadata import (
+    question_answer_from_metadata,
+    question_answer_question_id,
+)
 from intric.flows.ai_builder.ai_builder_discovery_families import (
     family_for_issue,
 )
@@ -45,7 +49,7 @@ _QUESTION_IMPACT: dict[str, DiscoveryImpact] = {
     "document_kind": "quality",
     "document_material_scope": "quality",
     "comparison_scope": "architecture",
-    "post_processing_goal": "architecture",
+    "post_processing_goal": "quality",
     "final_output_mode": "architecture",
     "docx_output_mode": "architecture",
     "pdf_generation_mode": "architecture",
@@ -75,6 +79,7 @@ def apply_discovery_decision_engine(
     )
     planner_patterns = detect_planner_pattern_signals(profile.text)
     max_questions = compute_question_budget(profile.text)
+    spent_user_questions = _answered_user_requirement_question_count(conversation)
     assumptions: list[str] = list(
         slot_classification_result.assumptions if slot_classification_result else ()
     )
@@ -147,7 +152,7 @@ def apply_discovery_decision_engine(
             continue
 
         if (
-            len(selected_question_ids) >= max_questions
+            spent_user_questions + len(selected_question_ids) >= max_questions
             and candidate.impact != "architecture"
         ):
             suppressed.append(
@@ -167,6 +172,25 @@ def apply_discovery_decision_engine(
         suppressed,
         candidates,
     )
+
+
+def _answered_user_requirement_question_count(
+    conversation: list[ConversationMessage],
+) -> int:
+    question_ids: set[str] = set()
+    for message in conversation:
+        if message.role != "user":
+            continue
+        answer = question_answer_from_metadata(message.metadata)
+        if answer is None:
+            continue
+        question_id = question_answer_question_id(answer)
+        if question_id is None:
+            continue
+        if question_exposure_for_id(question_id) != "user_requirement":
+            continue
+        question_ids.add(question_id)
+    return len(question_ids)
 
 
 def _rank_issues_for_profile(

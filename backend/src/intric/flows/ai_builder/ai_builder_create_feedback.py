@@ -30,6 +30,9 @@ CREATE_CRITIC_REMEDIATION: dict[str, str] = {
     "explicit_json_contract_request_without_step": (
         "Lägg till ett strukturerat extraktionssteg när användaren ber om fält, kontrakt eller maskinellt återanvändbar information."
     ),
+    "action_followup_requires_followup_fields": (
+        "Beskriv ett semantiskt uppföljningsresultat som håller isär beslut, åtgärder eller nästa steg, ansvariga, deadlines och öppna frågor."
+    ),
     "field_reuse_requires_input_bindings": (
         "Beskriv vilka namngivna fält från den strukturerade extraktionen som nästa semantiska steg ska återanvända."
     ),

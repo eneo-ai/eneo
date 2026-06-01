@@ -1602,6 +1602,114 @@ class TestExtendedClarificationHints:
         ]
         assert "post_processing_goal" not in question_ids
 
+    def test_pdf_template_mode_question_suppresses_outcome_question(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Jag vill skapa en PDF från en mall.",
+                metadata={"ui_language": "sv"},
+            ),
+            ConversationMessage(
+                role="user",
+                content="PDF-dokument",
+                metadata={
+                    "question_answer": {
+                        "question_id": "final_output_mode",
+                        "selected_values": ["pdf_document"],
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "pdf_generation_mode" in question_ids
+        assert "post_processing_goal" not in question_ids
+
+    def test_spent_question_budget_suppresses_outcome_question(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Jag vill bygga ett flöde som analyserar dokument och sammanfattar dem",
+                metadata={"ui_language": "sv"},
+            ),
+            ConversationMessage(
+                role="user",
+                content="Ett dokument åt gången",
+                metadata={
+                    "question_answer": {
+                        "question_id": "processing_scope",
+                        "selected_values": ["single_case"],
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Dokument",
+                metadata={
+                    "question_answer": {
+                        "question_id": "input_material_mode",
+                        "selected_values": ["documents"],
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Flera relaterade dokument för samma ärende",
+                metadata={
+                    "question_answer": {
+                        "question_id": "document_material_scope",
+                        "selected_values": ["multiple_documents_case"],
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="Grundläggande metadata",
+                metadata={
+                    "question_answer": {
+                        "question_id": "runtime_metadata_fields",
+                        "selected_values": ["basic_case_metadata"],
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+            ConversationMessage(
+                role="user",
+                content="DOCX utan mall",
+                metadata={
+                    "question_answer": {
+                        "question_id": "final_output_format",
+                        "selected_values": ["docx_generated"],
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "post_processing_goal" not in question_ids
+        assert any(
+            candidate.issue_id == "post_processing_goal"
+            and candidate.suppressed_reason == "question_budget_exhausted"
+            for candidate in analysis.suppressed_candidates
+        )
+
     def test_structured_analysis_answer_resolves_audio_docx_extraction_question(
         self,
     ) -> None:

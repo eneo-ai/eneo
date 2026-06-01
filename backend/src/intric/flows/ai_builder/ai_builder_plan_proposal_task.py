@@ -24,6 +24,10 @@ from intric.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_reference_material,
     render_resource_reference_block,
 )
+from intric.flows.ai_builder.ai_builder_result_contract import (
+    derive_result_contract,
+    render_result_contract_prompt_block,
+)
 from intric.flows.ai_builder.ai_builder_tools import active_submission_tool_name
 from intric.flows.ai_builder.planning_state import PlanningState
 
@@ -64,6 +68,9 @@ def build_plan_proposal_system_prompt(
     )
     section_rule = _requested_output_sections_design_rule(requested_output_sections)
     terminal_document_rule = _terminal_document_design_rule(planning_state)
+    result_contract_block = render_result_contract_prompt_block(
+        derive_result_contract(planning_state)
+    )
     lines = [
         "You are drafting an Eneo Flow plan.",
         "",
@@ -94,6 +101,8 @@ def build_plan_proposal_system_prompt(
         "Confirmed requirements:",
         render_confirmed_requirements_proposal_prompt_block(confirmed_requirements),
     ]
+    if result_contract_block is not None:
+        lines.extend(["", "Result contract:", result_contract_block])
     section_block = _requested_output_sections_block(requested_output_sections)
     if section_block is not None:
         lines.extend(["", "Requested output sections:", section_block])

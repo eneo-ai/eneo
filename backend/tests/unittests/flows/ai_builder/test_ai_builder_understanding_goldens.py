@@ -86,6 +86,12 @@ def test_docx_output_characterization_cases(
                     "flexible_document_case",
                     "policy_default",
                 ),
+                ("post_processing_goal", "structure_key_information", "heuristic"),
+                (
+                    "structured_analysis_need",
+                    "use_structured_analysis",
+                    "policy_default",
+                ),
                 ("runtime_metadata_fields", "no_extra_metadata", "policy_default"),
             ],
         ),
@@ -100,6 +106,12 @@ def test_docx_output_characterization_cases(
                     "flexible_document_case",
                     "policy_default",
                 ),
+                ("post_processing_goal", "structure_key_information", "heuristic"),
+                (
+                    "structured_analysis_need",
+                    "use_structured_analysis",
+                    "policy_default",
+                ),
                 ("runtime_metadata_fields", "no_extra_metadata", "policy_default"),
             ],
         ),
@@ -112,6 +124,12 @@ def test_docx_output_characterization_cases(
                 (
                     "document_material_scope",
                     "flexible_document_case",
+                    "policy_default",
+                ),
+                ("post_processing_goal", "extract_key_information", "heuristic"),
+                (
+                    "structured_analysis_need",
+                    "use_structured_analysis",
                     "policy_default",
                 ),
                 ("runtime_metadata_fields", "no_extra_metadata", "policy_default"),

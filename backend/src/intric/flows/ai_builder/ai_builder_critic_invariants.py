@@ -640,6 +640,59 @@ _STANDALONE_AUDIO_REQUIRES_TRANSCRIPTION_STEP = CriticInvariant(
 )
 
 
+# ── Outcome contract invariants ──────────────────────────────────────────
+
+_ACTION_FOLLOWUP_REQUIRED_MARKER_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("beslut", "decision", "decisions"),
+    ("nästa steg", "nasta steg", "next step", "next steps", "åtgärd", "action"),
+    ("ansvarig", "ansvariga", "owner", "owners", "responsible"),
+    ("deadline", "deadlines", "tidsfrist", "förfallodatum"),
+    ("öppen fråga", "öppna frågor", "oppen fraga", "oppna fragor", "open question"),
+)
+
+
+def _action_followup_requires_followup_fields_evidence(
+    context: CriticContext,
+) -> bool:
+    if "action_followup" not in context.answer_signals.get(
+        "post_processing_goal", set()
+    ):
+        return False
+
+    semantic_text = _spec_semantic_text(context.spec)
+    return any(
+        not _contains_any(semantic_text, marker_group)
+        for marker_group in _ACTION_FOLLOWUP_REQUIRED_MARKER_GROUPS
+    )
+
+
+def _spec_semantic_text(spec: FlowDraftSpecCore) -> str:
+    parts: list[str] = []
+    for step in spec.steps:
+        parts.append(step.name)
+        parts.append(step.assistant_spec.instructions)
+        if step.output_contract is not None:
+            parts.append(str(step.output_contract))
+    return "\n".join(parts).casefold()
+
+
+_ACTION_FOLLOWUP_REQUIRES_FOLLOWUP_FIELDS = CriticInvariant(
+    id="action_followup_requires_followup_fields",
+    kind="semantic",
+    description=(
+        "When the user asks for action follow-up, the plan must preserve the "
+        "follow-up fields that make the output useful."
+    ),
+    evidence=_action_followup_requires_followup_fields_evidence,
+    remediation=(
+        "Användarens mål är uppföljning från materialet, men planen saknar ett tydligt "
+        "resultat för beslut, åtgärder/nästa steg, ansvariga, deadlines och öppna frågor. "
+        "Lägg till eller förtydliga ett semantiskt steg/output-kontrakt som håller isär dessa "
+        "fält och markerar saknade ansvariga eller deadlines som ospecificerade."
+    ),
+)
+
+
 # ── Field reuse across JSON steps ────────────────────────────────────────
 
 
@@ -1782,6 +1835,7 @@ CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
     _STRUCTURED_EXTRACTION_REQUIRES_JSON_CONTRACT_STEP,
     _EXPLICIT_JSON_CONTRACT_REQUEST_WITHOUT_STEP,
     _STANDALONE_AUDIO_REQUIRES_TRANSCRIPTION_STEP,
+    _ACTION_FOLLOWUP_REQUIRES_FOLLOWUP_FIELDS,
     _FIELD_REUSE_REQUIRES_INPUT_BINDINGS,
     _MULTI_DOCUMENT_COMPARE_REQUIRES_ALL_PREVIOUS_STEPS,
     _SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP,

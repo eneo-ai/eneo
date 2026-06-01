@@ -61,6 +61,7 @@ EXPECTED_CRITIC_INVARIANT_KINDS = {
     "structured_extraction_requires_json_contract_step": "semantic",
     "explicit_json_contract_request_without_step": "semantic",
     "standalone_audio_requires_transcription_step": "architecture",
+    "action_followup_requires_followup_fields": "semantic",
     "field_reuse_requires_input_bindings": "semantic",
     "multi_document_compare_requires_all_previous_steps": "architecture",
     "simple_text_transform_must_remain_single_step": "semantic",
@@ -185,6 +186,67 @@ def test_build_conversation_critic_context_exposes_requested_output_sections() -
         "bedömning av förändringens komplexitet",
         "plan för nyttorealisering",
     )
+
+
+def test_action_followup_goal_requires_followup_fields() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Motesrapport",
+        steps=[
+            _step(
+                "step_a",
+                "Sammanfatta mote",
+                "Sammanfatta transkriptionen till en kort rapport.",
+            )
+        ],
+    )
+
+    context = build_conversation_critic_context(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "Jag har motesljud och vill fa ut beslut, nasta steg, "
+                    "ansvariga och deadlines."
+                ),
+            }
+        ],
+        spec,
+    )
+
+    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
+    assert "action_followup_requires_followup_fields" in issue_ids
+
+
+def test_action_followup_goal_accepts_explicit_followup_fields() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Motesuppfoljning",
+        steps=[
+            _step(
+                "step_a",
+                "Extrahera uppfoljning",
+                (
+                    "Extrahera beslut, nasta steg, atgarder, ansvarig person, "
+                    "deadline och oppna fragor fran transkriptionen."
+                ),
+            )
+        ],
+    )
+
+    context = build_conversation_critic_context(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "Jag har motesljud och vill fa ut beslut, nasta steg, "
+                    "ansvariga och deadlines."
+                ),
+            }
+        ],
+        spec,
+    )
+
+    issue_ids = {issue.id for issue in evaluate_critic_invariants(context)}
+    assert "action_followup_requires_followup_fields" not in issue_ids
 
 
 def _structured_source_step() -> StepSpec:
@@ -5521,6 +5583,7 @@ class TestCriticInvariantRegistry:
             "structured_extraction_requires_json_contract_step",
             "explicit_json_contract_request_without_step",
             "standalone_audio_requires_transcription_step",
+            "action_followup_requires_followup_fields",
             "field_reuse_requires_input_bindings",
             "multi_document_compare_requires_all_previous_steps",
             "simple_text_transform_must_remain_single_step",

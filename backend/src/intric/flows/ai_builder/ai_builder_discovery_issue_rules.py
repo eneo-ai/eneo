@@ -230,6 +230,8 @@ def post_processing_goal_is_vague(profile: DiscoveryProfile) -> bool:
         return False
     if profile.output_intent.terminal_output == "structured_json":
         return False
+    if needs_pdf_generation_mode_choice(profile):
+        return False
     if mentions_any(
         profile.text,
         (
