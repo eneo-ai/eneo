@@ -6,7 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.database.tables.tenant_table import Tenants
 from intric.database.tables.users_table import Users, users_roles_table
+from intric.main.logging import get_logger
 from intric.scim.schemas.common import ScimFilter, ScimSort
+
+logger = get_logger(__name__)
 
 UserModel = Users
 
@@ -66,6 +69,19 @@ class ScimUserRepository:
         )
         role_id = role_id_row.scalar_one_or_none()
         if role_id is None:
+            # Mirrors the JIT-provisioning flow in
+            # authentication/federation_router.py:210-222 — provision the user
+            # but emit a WARNING so the tenant misconfiguration shows up in
+            # operator monitoring instead of only the audit archive.
+            logger.warning(
+                "SCIM provisioning: No default role configured for tenant; "
+                "creating user without role — user will have zero "
+                "permissions until an admin assigns roles",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "user_id": str(user_id),
+                },
+            )
             return
         await self._session.execute(
             sa.insert(users_roles_table).values(

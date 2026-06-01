@@ -449,3 +449,59 @@ async def test_patch_active_true_reactivates_deleted_user(db_session, client, by
         user = result.scalar_one()
         assert user.state == "active"
         assert user.deleted_at is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_create_logs_warning_when_tenant_has_no_default_role(
+    db_session, test_tenant, caplog
+):
+    """SCIM provisioning when the tenant has `default_role_id IS NULL` must
+    emit a WARNING (mirrors the JIT-provisioning flow in
+    `authentication/federation_router.py:210-222`). Without this signal,
+    operators only see the failure when an affected user tries to do
+    anything in Eneo — the SCIM 201 response and audit row are not enough.
+    """
+    import logging
+
+    from sqlalchemy import update
+
+    from intric.database.tables.tenant_table import Tenants
+    from intric.scim.repositories.user_repository import logger as repo_logger
+
+    async with db_session() as session:
+        await session.execute(
+            update(Tenants)
+            .where(Tenants.id == test_tenant.id)
+            .values(default_role_id=None)
+        )
+
+    # Eneo's `get_logger` returns a custom `SimpleLogger` with its own
+    # handlers — caplog's root-logger hook never sees the record. Attach
+    # caplog's handler directly to the repo logger (same pattern as
+    # tests/integration/credentials/test_credential_resolver.py:71-93).
+    with caplog.at_level(logging.WARNING):
+        repo_logger.addHandler(caplog.handler)
+        try:
+            async with db_session() as session:
+                repo = ScimUserRepository(session)
+                user = Users(
+                    email="no-default-role@example.com",
+                    username="no.default.role.user",
+                    state="active",
+                    tenant_id=test_tenant.id,
+                )
+                created = await repo.create(user)
+                created_id = created.id
+        finally:
+            repo_logger.removeHandler(caplog.handler)
+
+    assert created_id is not None  # user creation still succeeds
+    matching_warns = [
+        r for r in caplog.records
+        if r.levelname == "WARNING" and "No default role configured" in r.getMessage()
+    ]
+    assert matching_warns, (
+        f"Expected WARNING with 'No default role configured' in log. "
+        f"Got records: {[(r.levelname, r.getMessage()) for r in caplog.records]}"
+    )
