@@ -15,6 +15,7 @@ from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     resolve_input_intent,
 )
 from intric.flows.ai_builder.ai_builder_keywords import (
+    DOCX_CONTEXT_MARKERS,
     PDF_OUTPUT_CONTEXT_MARKERS,
 )
 from intric.flows.ai_builder.ai_builder_planner_pattern_signals import (
@@ -551,7 +552,7 @@ def infer_post_processing_goal(text: str) -> str | None:
         return "structure_key_information"
     if _looks_like_report_creation_goal(normalized):
         return "structure_key_information"
-    if _looks_like_transcript_only_goal(normalized):
+    if _looks_like_transcript_into_document_goal(normalized):
         return "stop_after_primary_operation"
     return None
 
@@ -584,8 +585,10 @@ def _looks_like_report_creation_goal(text: str) -> bool:
     )
 
 
-def _looks_like_transcript_only_goal(text: str) -> bool:
-    if not _contains_any_prefix(text, ("transkrib", "transcrib")):
+def _looks_like_transcript_into_document_goal(text: str) -> bool:
+    if not contains_any_token_prefix(text, ("transkrib", "transcrib")):
+        return False
+    if not _contains_any(text, (*DOCX_CONTEXT_MARKERS, *PDF_OUTPUT_CONTEXT_MARKERS)):
         return False
     return not _contains_any(
         text,

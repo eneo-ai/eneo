@@ -1557,6 +1557,119 @@ class TestExtendedClarificationHints:
         ]
         assert "structured_analysis_need" not in question_ids
 
+    def test_bare_transcription_prompt_asks_output_question(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Jag vill ha ett transkriberingsflöde.",
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "final_output_mode"
+        assert analysis.next_issue.suggestion is not None
+        assert analysis.next_issue.suggestion.question_id == "final_output_mode"
+
+    def test_bare_transcription_prompt_asks_outcome_after_output_answer(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Jag vill ha ett transkriberingsflöde.",
+                metadata={"ui_language": "sv"},
+            ),
+            ConversationMessage(
+                role="user",
+                content="Strukturerat textresultat",
+                metadata={
+                    "question_answer": {
+                        "question_id": "final_output_mode",
+                        "selected_values": ["structured_text"],
+                    },
+                    "ui_language": "sv",
+                },
+            ),
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "post_processing_goal"
+        assert analysis.next_issue.suggestion is not None
+        assert analysis.next_issue.suggestion.question_id == "post_processing_goal"
+
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "Jag vill ha ett OCR-flöde.",
+            "Jag vill ha ett sammanfattningsflöde.",
+            "Jag vill ha ett jämförelseflöde.",
+        ],
+    )
+    def test_bare_workflow_prompt_with_unknown_input_asks_input_question(
+        self,
+        prompt: str,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=prompt,
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "input_material_mode"
+        assert analysis.next_issue.suggestion is not None
+        assert analysis.next_issue.suggestion.question_id == "input_material_mode"
+
+    def test_detailed_task_spec_with_unknown_input_still_asks_input_question(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde som först sammanfattar materialet, sedan "
+                    "identifierar beslut, risker, öppna frågor, rekommendationer "
+                    "och nästa steg, och till sist skapar en tydlig DOCX-rapport "
+                    "med rubriker för sammanfattning, viktiga punkter, beslut, "
+                    "åtgärder, risker och frågor. Rapporten ska vara saklig, "
+                    "professionell och enkel att skicka vidare till ledningen."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "input_material_mode"
+        assert analysis.next_issue.suggestion is not None
+        assert analysis.next_issue.suggestion.question_id == "input_material_mode"
+
+    def test_pure_information_question_does_not_trigger_workflow_fallback(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Vad betyder transcribe_only?",
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        assert analysis.next_issue is None
+        assert analysis.selected_question_ids == ()
+
     def test_vague_audio_prompt_asks_outcome_before_output_format(self) -> None:
         conversation = [
             ConversationMessage(
@@ -1793,6 +1906,58 @@ class TestExtendedClarificationHints:
         ].value == (
             "use_structured_analysis"
         )
+
+    @pytest.mark.asyncio
+    async def test_classifier_resolved_outcome_still_asks_input_for_unknown_input(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content="Jag vill ha ett OCR-flöde.",
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        async def fake_classify_slots(**kwargs: Any) -> SlotClassificationResult:
+            return SlotClassificationResult(
+                slots=(
+                    ClassifiedSlot(
+                        slot_name="post_processing_goal",
+                        value="extract_key_information",
+                        confidence="high",
+                        reason="OCR suggests extracting readable text.",
+                    ),
+                    ClassifiedSlot(
+                        slot_name="terminal_output",
+                        value="structured_text",
+                        confidence="high",
+                        reason="OCR commonly returns text.",
+                    ),
+                )
+            )
+
+        with patch(
+            "intric.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+            side_effect=fake_classify_slots,
+        ):
+            context = await build_runtime_discovery_context(
+                conversation,
+                litellm_client=object(),
+                litellm_model="test-model",
+                tenant_id=uuid4(),
+            )
+
+        analysis = analyze_discovery(
+            conversation,
+            planning_state=context.planning_state,
+            slot_classification_result=context.slot_classification_result,
+        )
+
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "input_material_mode"
+        assert analysis.next_issue.suggestion is not None
+        assert analysis.next_issue.suggestion.question_id == "input_material_mode"
 
     def test_complex_multi_document_compare_prompt_skips_document_kind_and_comparison_scope(
         self,

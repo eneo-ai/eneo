@@ -94,6 +94,46 @@ class TestEditScopePolicy:
         assert "document_material_scope" not in question_ids
         assert "input_material_mode" not in question_ids
 
+    def test_output_only_workflow_wording_does_not_reopen_input_question(
+        self,
+    ) -> None:
+        flow = _make_flow(
+            _make_flow_step(
+                step_order=1,
+                user_description="Extrahera text från fil",
+                input_source="flow_input",
+                input_type="file",
+                output_mode="pass_through",
+                output_type="text",
+            ),
+            _make_flow_step(
+                step_order=2,
+                user_description="Generera rapport",
+                input_source="previous_step",
+                input_type="text",
+                output_mode="pass_through",
+                output_type="text",
+            ),
+        )
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Ändra bara sista steget till ett sammanfattningsflöde "
+                    "med kort text output."
+                ),
+            )
+        ]
+
+        analysis = analyze_discovery(conversation, flow=flow)
+        question_ids = {
+            issue.suggestion.question_id
+            for issue in analysis.issues
+            if issue.suggestion is not None
+        }
+
+        assert "input_material_mode" not in question_ids
+
     def test_output_only_docx_edit_keeps_only_output_family_questions_active(
         self,
     ) -> None:

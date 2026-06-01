@@ -102,11 +102,15 @@ _AUDIO_REFERENCE_PREFIXES: tuple[str, ...] = (
     "inspelning",
     "recording",
     "samtal",
+    "discussion",
+    "medarbetarsamtal",
     "möte",
     "mote",
     "meeting",
     "intervju",
     "interview",
+    "call",
+    "conversation",
 )
 _STRONG_AUDIO_REFERENCE_PREFIXES: tuple[str, ...] = (
     "audio",
@@ -538,6 +542,10 @@ def _document_requested(
 def _audio_runtime_input_requested(text: str) -> bool:
     if not text:
         return False
+    # The literal output-mode name appears in support questions and developer
+    # discussions; it is not evidence that the user will upload audio.
+    if "transcribe_only" in text:
+        return False
     if _mentions_runtime_audio_input(text):
         return True
     if _text_runtime_input_requested(text):
@@ -550,10 +558,13 @@ def _audio_runtime_input_requested(text: str) -> bool:
         return _contains_any(
             text, ("ljudfil", "audio file", "upload audio", "ladda upp ljud")
         )
-    return contains_any_token_prefix(text, _AUDIO_PREFIX_MARKERS) or _contains_any(
-        text,
-        ("one on one",),
-    )
+    if contains_any_token_prefix(
+        text, _DOCUMENT_REFERENCE_PREFIXES
+    ) and not contains_any_token_prefix(text, _AUDIO_REFERENCE_PREFIXES):
+        return False
+    # In a build request, transcription is itself evidence of audio input once
+    # existing text/transcript and document-source wording have been ruled out.
+    return True
 
 
 def _mentions_runtime_audio_input(text: str) -> bool:

@@ -85,7 +85,7 @@ from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
     default_discovery_assumptions as _default_discovery_assumptions,
 )
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
-    text_has_task_verbs as _text_has_task_verbs,
+    expresses_task_intent as _expresses_task_intent,
 )
 from intric.flows.ai_builder.ai_builder_discovery_questions import (
     comparison_scope_conflict_question,
@@ -146,6 +146,8 @@ def analyze_discovery(
     answers = profile.answers
     raw_issues: list[DiscoveryIssue] = []
 
+    mvs_met = _has_minimum_viable_specification(profile)
+    task_request = _expresses_task_intent(text)
     output_vague = _looks_like_output_is_vague(profile)
     case_scope_vague = _looks_like_case_scope_is_vague(profile)
     input_mode_vague = _looks_like_input_mode_is_vague(profile)
@@ -186,7 +188,7 @@ def analyze_discovery(
             )
         )
 
-    if input_mode_vague and profile.document_like_input:
+    if input_mode_vague and (profile.document_like_input or task_request):
         raw_issues.append(
             DiscoveryIssue(
                 issue_id="input_material_mode",
@@ -460,8 +462,6 @@ def analyze_discovery(
             )
         )
 
-    mvs_met = _has_minimum_viable_specification(profile)
-
     # Confidence gating: when MVS met and no blocking issues, check for
     # low-confidence inferred signals that need clarification
     if mvs_met and not any(i.severity == "blocking" for i in raw_issues):
@@ -707,7 +707,6 @@ def build_discovery_block_message(
         return None
     issue = analysis.next_issue
     if issue is None:
-        # MVS not met but no blocking issues — free discovery handles this
         return None
     return issue.message
 
@@ -789,20 +788,36 @@ def build_discovery_followup_text(
 
 def _has_minimum_viable_specification(profile: DiscoveryProfile) -> bool:
     """Require at least 2 of 3 dimensions (input, output, purpose) resolved."""
-    has_input = (
+    return (
+        sum(
+            [
+                _has_mvs_input(profile),
+                _has_mvs_output(profile),
+                _has_mvs_purpose(profile),
+            ]
+        )
+        >= 2
+    )
+
+
+def _has_mvs_input(profile: DiscoveryProfile) -> bool:
+    return (
         profile.document_like_input
         or profile.audio_like_input
         or "input_material_mode" in profile.answers
     )
-    has_output = (
-        profile.final_output_text_or_docx or "final_output_mode" in profile.answers
-    )
-    has_purpose = (
+
+
+def _has_mvs_output(profile: DiscoveryProfile) -> bool:
+    return profile.final_output_text_or_docx or "final_output_mode" in profile.answers
+
+
+def _has_mvs_purpose(profile: DiscoveryProfile) -> bool:
+    return (
         profile.case_like_flow
         or profile.comparison_requested
-        or _text_has_task_verbs(profile.text)
+        or _expresses_task_intent(profile.text)
     )
-    return sum([has_input, has_output, has_purpose]) >= 2
 
 
 def _should_surface_structured_analysis_question(profile: DiscoveryProfile) -> bool:

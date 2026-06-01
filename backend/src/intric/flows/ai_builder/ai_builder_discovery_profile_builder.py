@@ -15,6 +15,10 @@ from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryProfile,
 )
 from intric.flows.ai_builder.ai_builder_discovery_questions import localized_text
+from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
+    contains_any_token_prefix,
+    normalize_discovery_text,
+)
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
@@ -57,34 +61,60 @@ _ACTIVE_REQUEST_ANSWER_SOURCES: frozenset[str] = frozenset(
     }
 )
 
-_TASK_VERBS_SV = (
-    "sammanfatta",
-    "analysera",
-    "extrahera",
-    "transkribera",
+_TASK_VERB_PREFIXES_SV = (
+    # Prefixes are intentional: Swedish/English user requests are often
+    # inflected, compounded, or phrased as "*-flöde" / "* flow"; matching is
+    # token-prefix based so unrelated substrings do not become workflow intent.
+    "sammanfatt",
+    "analyser",
+    "extraher",
+    "transkrib",
     "jämför",
-    "granska",
-    "generera",
+    "jämförelse",
+    "jamfor",
+    "jamforelse",
+    "gransk",
+    "generer",
+    "bedom",
     "bedöm",
-    "skriv",
-    "producera",
-    "klassificera",
+    "produc",
+    "klassificer",
+    "ocr",
 )
-_TASK_VERBS_EN = (
-    "summarize",
-    "analyze",
+_TASK_VERB_PREFIXES_EN = (
+    "summar",
+    "analy",
     "extract",
-    "transcribe",
-    "compare",
+    "transcrib",
+    "compar",
     "review",
-    "generate",
+    "generat",
     "assess",
-    "write",
-    "produce",
+    "produc",
     "triage",
-    "classify",
+    "classif",
     "categorize",
     "draft",
+    "ocr",
+)
+_TASK_VERB_EXACT_TOKENS = (
+    "skriv",
+    "write",
+)
+
+_QUESTION_ACTION_MARKERS = (
+    "add",
+    "build",
+    "bygg",
+    "create",
+    "gör",
+    "gor",
+    "i want",
+    "jag vill",
+    "lägg till",
+    "lagg till",
+    "make",
+    "skapa",
 )
 
 _STRUCTURED_INTERMEDIATE_FORCE_HINTS = (
@@ -381,12 +411,31 @@ def default_discovery_assumptions(
     return assumptions
 
 
-def text_has_task_verbs(text: str) -> bool:
-    return mentions_any(text, _TASK_VERBS_SV) or mentions_any(text, _TASK_VERBS_EN)
+def expresses_task_intent(text: str) -> bool:
+    raw_text = text.casefold()
+    normalized = normalize_discovery_text(text)
+    # A bare question mark usually means the user is asking about the builder,
+    # not asking the builder to create or change a flow.
+    if "?" in raw_text and not mentions_any(normalized, _QUESTION_ACTION_MARKERS):
+        return False
+    return (
+        contains_any_token_prefix(
+            normalized,
+            (*_TASK_VERB_PREFIXES_SV, *_TASK_VERB_PREFIXES_EN),
+        )
+        or any(token in normalized.split() for token in _TASK_VERB_EXACT_TOKENS)
+    )
 
 
 def count_distinct_task_verbs(text: str) -> int:
-    matches = {verb for verb in (*_TASK_VERBS_SV, *_TASK_VERBS_EN) if verb in text}
+    normalized = normalize_discovery_text(text)
+    tokens = normalized.split()
+    matches = {
+        verb
+        for verb in (*_TASK_VERB_PREFIXES_SV, *_TASK_VERB_PREFIXES_EN)
+        if any(token.startswith(verb) for token in tokens)
+    }
+    matches.update(token for token in _TASK_VERB_EXACT_TOKENS if token in tokens)
     return len(matches)
 
 

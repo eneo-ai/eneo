@@ -226,6 +226,7 @@ def _dynamic_issue_priority_offset(
     if (
         issue.issue_id == "final_output_mode"
         and profile.output_intent.terminal_output is None
+        and profile.input_intent.primary_runtime_input != "unknown"
         and not profile.case_like_flow
         and not profile.comparison_requested
         and len(profile.text.split()) <= 7

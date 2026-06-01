@@ -3,10 +3,9 @@
 The detector `looks_like_output_is_vague` decides whether a user message should
 block on the `final_output_mode` question. It fires whenever the flow carries a
 structural signal that the output format matters (document/audio/case-like
-input, or a text/docx default) OR the user mentions an output artifact
-explicitly. For pure text-only descriptions with no artifact nouns, generic
-creation verbs ("skapa", "create", "producera") alone should not fire it —
-those describe the act of building the flow, not the artifact it delivers.
+input, or a text/docx default), the user mentions an output artifact explicitly,
+or the user asks for a workflow whose output dimension is still missing. Generic
+build words without task intent should not fire it.
 """
 
 from __future__ import annotations
@@ -48,9 +47,9 @@ def test_create_on_plain_text_does_not_trigger_output_vagueness() -> None:
     assert looks_like_output_is_vague(profile) is False
 
 
-def test_producera_on_plain_text_does_not_trigger_output_vagueness() -> None:
+def test_task_intent_with_missing_output_triggers_output_vagueness() -> None:
     profile = _profile_for("Jag vill producera något från min text.")
-    assert looks_like_output_is_vague(profile) is False
+    assert looks_like_output_is_vague(profile) is True
 
 
 def test_real_output_word_still_triggers_vagueness() -> None:

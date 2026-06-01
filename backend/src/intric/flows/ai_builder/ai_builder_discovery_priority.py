@@ -5,11 +5,13 @@ from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryIssue
 DISCOVERY_ISSUE_PRIORITY: dict[str, int] = {
     "comparison_scope_conflict": 0,
     "case_scope": 10,
+    # Unsupported outbound delivery is a capability blocker; surface that
+    # before asking unrelated input/output refinement questions.
+    "external_delivery_unsupported": 15,
     "input_material_mode": 20,
     "flow_input_architecture": 25,
     "post_processing_goal": 28,
     "final_output_mode": 30,
-    "external_delivery_unsupported": 30,
     "document_kind": 40,
     "document_material_scope": 50,
     "comparison_scope": 60,

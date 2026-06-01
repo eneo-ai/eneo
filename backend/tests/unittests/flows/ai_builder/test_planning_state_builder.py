@@ -580,6 +580,20 @@ class TestPolicyDefaults:
         )
         assert "structured_analysis_need" not in state.resolved_slots
 
+    def test_bare_transcription_goal_stays_unresolved(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content="Jag vill ha ett transkriberingsflöde.",
+                )
+            ]
+        )
+
+        assert state.resolved_slots["primary_runtime_input"].value == "audio"
+        assert "post_processing_goal" not in state.resolved_slots
+        assert "structured_analysis_need" not in state.resolved_slots
+
     def test_later_freeform_output_choice_overrides_earlier_uncertainty(
         self,
     ) -> None:

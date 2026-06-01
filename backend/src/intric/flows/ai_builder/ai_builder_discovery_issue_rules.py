@@ -11,7 +11,10 @@ from intric.flows.ai_builder.ai_builder_discovery_families import (
     family_for_issue,
 )
 from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryProfile
-from intric.flows.ai_builder.ai_builder_discovery_profile_builder import mentions_any
+from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
+    expresses_task_intent,
+    mentions_any,
+)
 from intric.flows.ai_builder.ai_builder_discovery_signal_inference import (
     infer_post_processing_goal,
 )
@@ -157,6 +160,8 @@ def looks_like_output_is_vague(profile: DiscoveryProfile) -> bool:
         or profile.case_like_flow
         or profile.final_output_text_or_docx
     ):
+        return True
+    if "final_output_mode" not in profile.answers and expresses_task_intent(text):
         return True
     return mentions_any(
         text,

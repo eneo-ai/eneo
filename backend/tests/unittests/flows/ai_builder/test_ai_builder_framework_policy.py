@@ -32,6 +32,9 @@ from intric.flows.ai_builder.ai_builder_framework_policy import (
     slot_names_blocked_by_explicit_uncertainty,
     terminal_output_uncertainty_is_unresolved,
 )
+from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
+    resolve_input_intent,
+)
 from intric.flows.ai_builder.ai_builder_keywords import OUTPUT_CHANGE_KEYWORDS
 from intric.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
@@ -1182,6 +1185,41 @@ def test_infer_post_processing_goal_reaches_richer_goal_values(
     expected_goal: str,
 ) -> None:
     assert infer_post_processing_goal(text) == expected_goal
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Jag vill ha ett transkriberingsflöde.",
+        "Jag vill transkribera samtal.",
+        "Create a transcription flow.",
+    ],
+)
+def test_infer_post_processing_goal_does_not_treat_bare_transcription_as_done(
+    text: str,
+) -> None:
+    assert infer_post_processing_goal(text) is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Transkribera ljudet ordagrant utan sammanfattning.",
+        "Transcript only, no summary.",
+        "Transcribe meeting audio and produce a DOCX file with the transcription.",
+    ],
+)
+def test_infer_post_processing_goal_detects_explicit_transcript_only(
+    text: str,
+) -> None:
+    assert infer_post_processing_goal(text) == "stop_after_primary_operation"
+
+
+def test_transcribe_document_request_does_not_imply_audio_input() -> None:
+    intent = resolve_input_intent("Transkribera detta dokument.", {})
+
+    assert intent.primary_runtime_input == "unknown"
+    assert intent.audio_requested is False
 
 
 @pytest.mark.parametrize(

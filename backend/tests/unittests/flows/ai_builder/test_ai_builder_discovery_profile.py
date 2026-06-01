@@ -7,6 +7,7 @@ from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
 )
 from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
     build_discovery_profile,
+    expresses_task_intent,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -213,6 +214,16 @@ def test_build_discovery_profile_merges_short_follow_up_into_active_request_wind
     assert profile.edit_scope.merged_previous_request is True
     assert "docx" in profile.active_request_text
     assert "kortare" in profile.active_request_text
+
+
+def test_expresses_task_intent_uses_token_prefixes_not_raw_substrings() -> None:
+    assert expresses_task_intent("Jag vill ha ett OCR-flöde.") is True
+    assert expresses_task_intent("Jag vill producera något från min text.") is True
+    assert expresses_task_intent("Skriv en kort rapport.") is True
+
+    assert expresses_task_intent("Det här är en medioker produkt.") is False
+    assert expresses_task_intent("Kan jag ha ett skrivbord där?") is False
+    assert expresses_task_intent("Vad betyder transcribe_only?") is False
 
 
 def test_build_discovery_profile_keeps_docx_output_intent_when_input_mentions_pdf() -> (
