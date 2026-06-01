@@ -15,7 +15,8 @@ const pkg = JSON.parse(json);
 export default defineConfig(({ mode }) => ({
   cacheDir: process.env.VITEST ? "node_modules/.vitest" : "node_modules/.vite-web",
   build: {
-    target: "es2022"
+    target: "es2022",
+    reportCompressedSize: false
   },
   optimizeDeps: {
     esbuildOptions: {
