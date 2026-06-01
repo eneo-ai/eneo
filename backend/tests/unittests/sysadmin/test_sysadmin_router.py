@@ -15,16 +15,16 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from intric.main.exceptions import NotFoundException
+from intric.scim.services.token_service import ScimTokenService
 from intric.sysadmin.sysadmin_router import (
     create_scim_token,
-    delete_user,
     delete_scim_token,
+    delete_user,
     get_access_token,
     get_scim_token_status,
     get_user,
     update_user,
 )
-from intric.scim.services.token_service import ScimTokenService
 from intric.users.user import UserUpdatePublic
 
 
@@ -192,23 +192,23 @@ class TestUpdateUser:
 # ---------------------------------------------------------------------------
 
 
-def _scim_session(execute_side_effects: list):
-    """Session mock that supports 'async with session.begin():'."""
+def _scim_session():
+    """Session mock that supports `async with session.begin():` (transaction
+    control only — DB access is mocked at the repository layer below)."""
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=None)
     cm.__aexit__ = AsyncMock(return_value=False)
     session = MagicMock()
     session.begin = MagicMock(return_value=cm)
-    session.execute = AsyncMock(side_effect=execute_side_effects)
     return session
 
 
-def _scim_container(session, audit=None):
+def _scim_container(repo, audit=None):
     audit = audit or AsyncMock()
     container = MagicMock()
-    container.session.return_value = session
+    container.session.return_value = _scim_session()
     container.scim_token_service.return_value = ScimTokenService(
-        session=session, audit_service=audit
+        repository=repo, audit_service=audit
     )
     return container, audit
 
@@ -216,10 +216,9 @@ def _scim_container(session, audit=None):
 class TestCreateScimToken:
     async def test_returns_token_for_existing_tenant(self):
         tenant_id = uuid.uuid4()
-        select_result = MagicMock()
-        select_result.scalar_one_or_none.return_value = tenant_id
-        session = _scim_session([select_result, MagicMock()])
-        container, _ = _scim_container(session)
+        repo = AsyncMock()
+        repo.tenant_exists.return_value = True
+        container, _ = _scim_container(repo)
 
         result = await create_scim_token(tenant_id=tenant_id, container=container)
 
@@ -228,22 +227,20 @@ class TestCreateScimToken:
 
     async def test_writes_to_db_and_logs_audit(self):
         tenant_id = uuid.uuid4()
-        select_result = MagicMock()
-        select_result.scalar_one_or_none.return_value = tenant_id
-        session = _scim_session([select_result, MagicMock()])
-        container, audit = _scim_container(session)
+        repo = AsyncMock()
+        repo.tenant_exists.return_value = True
+        container, audit = _scim_container(repo)
 
         await create_scim_token(tenant_id=tenant_id, container=container)
 
-        assert session.execute.call_count == 2
+        repo.set_token_hash.assert_awaited_once()
         audit.log.assert_called_once()
 
     async def test_raises_404_for_unknown_tenant(self):
         tenant_id = uuid.uuid4()
-        select_result = MagicMock()
-        select_result.scalar_one_or_none.return_value = None
-        session = _scim_session([select_result])
-        container, _ = _scim_container(session)
+        repo = AsyncMock()
+        repo.tenant_exists.return_value = False
+        container, _ = _scim_container(repo)
 
         with pytest.raises(NotFoundException):
             await create_scim_token(tenant_id=tenant_id, container=container)
@@ -252,11 +249,9 @@ class TestCreateScimToken:
 class TestGetScimTokenStatus:
     async def test_returns_active_when_hash_present(self):
         tenant_id = uuid.uuid4()
-        result = MagicMock()
-        result.one_or_none.return_value = ("abc123hash",)
-        session = MagicMock()
-        session.execute = AsyncMock(return_value=result)
-        container, _ = _scim_container(session)
+        repo = AsyncMock()
+        repo.get_token_hash.return_value = (True, "abc123hash")
+        container, _ = _scim_container(repo)
 
         status = await get_scim_token_status(tenant_id=tenant_id, container=container)
 
@@ -265,11 +260,9 @@ class TestGetScimTokenStatus:
 
     async def test_returns_inactive_when_no_hash(self):
         tenant_id = uuid.uuid4()
-        result = MagicMock()
-        result.one_or_none.return_value = (None,)
-        session = MagicMock()
-        session.execute = AsyncMock(return_value=result)
-        container, _ = _scim_container(session)
+        repo = AsyncMock()
+        repo.get_token_hash.return_value = (True, None)
+        container, _ = _scim_container(repo)
 
         status = await get_scim_token_status(tenant_id=tenant_id, container=container)
 
@@ -277,11 +270,9 @@ class TestGetScimTokenStatus:
 
     async def test_raises_404_for_unknown_tenant(self):
         tenant_id = uuid.uuid4()
-        result = MagicMock()
-        result.one_or_none.return_value = None
-        session = MagicMock()
-        session.execute = AsyncMock(return_value=result)
-        container, _ = _scim_container(session)
+        repo = AsyncMock()
+        repo.get_token_hash.return_value = (False, None)
+        container, _ = _scim_container(repo)
 
         with pytest.raises(NotFoundException):
             await get_scim_token_status(tenant_id=tenant_id, container=container)
@@ -290,23 +281,21 @@ class TestGetScimTokenStatus:
 class TestDeleteScimToken:
     async def test_revokes_token_for_existing_tenant(self):
         tenant_id = uuid.uuid4()
-        select_result = MagicMock()
-        select_result.scalar_one_or_none.return_value = tenant_id
-        session = _scim_session([select_result, MagicMock()])
-        container, audit = _scim_container(session)
+        repo = AsyncMock()
+        repo.tenant_exists.return_value = True
+        container, audit = _scim_container(repo)
 
         result = await delete_scim_token(tenant_id=tenant_id, container=container)
 
         assert result is None
-        assert session.execute.call_count == 2
+        repo.set_token_hash.assert_awaited_once_with(tenant_id, None)
         audit.log.assert_called_once()
 
     async def test_raises_404_for_unknown_tenant(self):
         tenant_id = uuid.uuid4()
-        select_result = MagicMock()
-        select_result.scalar_one_or_none.return_value = None
-        session = _scim_session([select_result])
-        container, _ = _scim_container(session)
+        repo = AsyncMock()
+        repo.tenant_exists.return_value = False
+        container, _ = _scim_container(repo)
 
         with pytest.raises(NotFoundException):
             await delete_scim_token(tenant_id=tenant_id, container=container)
