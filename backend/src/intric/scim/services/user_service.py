@@ -148,6 +148,28 @@ class ScimUserService:
                 search_email, tenant_id=self._tenant_id
             )
             if existing is not None:
+                # Reconciliation is the migration path for claiming a
+                # pre-existing local user (manual/JIT, external_id IS NULL)
+                # into SCIM management. If the matched user already carries an
+                # external_id, silently rebinding it would let the SCIM client
+                # take over an account that already belongs to a different
+                # SCIM identity — refuse instead and let an operator resolve.
+                if existing.external_id is not None:
+                    logger.warning(
+                        "scim.user.reconcile_refused_existing_external_id",
+                        extra={
+                            "tenant_id": str(self._tenant_id),
+                            "user_id": str(existing.id),
+                            "email": existing.email,
+                            "existing_external_id": existing.external_id,
+                            "incoming_external_id": data.externalId,
+                            "incoming_username": data.userName,
+                        },
+                    )
+                    raise ScimUserConflictError(
+                        f"User with email '{existing.email}' already exists "
+                        f"under a different external_id"
+                    )
                 if data.externalId is not None:
                     external_id_owner = await self._repository.get_by_external_id(
                         data.externalId, tenant_id=self._tenant_id
@@ -156,16 +178,24 @@ class ScimUserService:
                         raise ScimUserConflictError(
                             f"External ID '{data.externalId}' already exists"
                         )
+                # WARNING (not INFO): reconciliation rebinds an existing local
+                # account's identity to a SCIM-supplied externalId/username.
+                # Bounded by who can authenticate as SCIM (sysadmin-minted
+                # token, one IdP per tenant), but worth surfacing in operator
+                # monitoring rather than only the audit archive.
+                previous_username = existing.username
                 existing.external_id = data.externalId
                 existing.username = data.userName
                 result = _to_scim_user(await self._repository.update(existing))
-                logger.info(
+                logger.warning(
                     "scim.user.reconciled",
                     extra={
                         "tenant_id": str(self._tenant_id),
                         "user_id": str(existing.id),
-                        "username": existing.username,
-                        "external_id": data.externalId,
+                        "email": existing.email,
+                        "previous_username": previous_username,
+                        "new_username": data.userName,
+                        "new_external_id": data.externalId,
                     },
                 )
                 await self._log(

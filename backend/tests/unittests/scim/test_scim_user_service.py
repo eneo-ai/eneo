@@ -149,10 +149,13 @@ class TestCreateUser:
         assert result.externalId == "ext-123"
 
     async def test_reconciles_existing_user_by_email(self):
-        """When userName not found but email matches an existing user, link and return that user."""
+        """When userName not found but email matches an existing user with no
+        external_id (the migration case: claiming a pre-existing local user
+        for SCIM management), link and return that user."""
         repo = AsyncMock()
         existing = _make_db_user(user_name="jane")  # different username format
         existing.email = "jane@example.com"
+        existing.external_id = None  # explicit: migration case
         repo.get_by_username.return_value = None
         repo.get_by_email.return_value = existing
         repo.update.return_value = existing
@@ -169,6 +172,76 @@ class TestCreateUser:
         assert existing.external_id == "entra-guid-123"
         assert existing.username == "jane@example.com"
         assert result.userName == "jane@example.com"
+
+    async def test_reconcile_refuses_when_existing_user_has_external_id(self):
+        """If the email-matched user already carries an external_id, silently
+        rebinding their identity would let the SCIM client take over an
+        account that's already SCIM-managed. Must raise conflict instead."""
+        repo = AsyncMock()
+        existing = _make_db_user(user_name="jane")
+        existing.email = "jane@example.com"
+        existing.external_id = "existing-entra-guid-A"  # already SCIM-managed
+        repo.get_by_username.return_value = None
+        repo.get_by_email.return_value = existing
+
+        service = _make_service(repo)
+        request = ScimUserRequest(
+            userName="jane.new@example.com",
+            emails=[],
+            externalId="incoming-entra-guid-B",
+        )
+
+        with pytest.raises(ScimUserConflictError, match="different external_id"):
+            await service.create_user(request)
+
+        repo.update.assert_not_called()
+        repo.create.assert_not_called()
+        # State untouched — no silent rebind
+        assert existing.external_id == "existing-entra-guid-A"
+        assert existing.username == "jane"
+
+    async def test_reconcile_logs_warning_with_before_and_after_state(self, caplog):
+        """Reconciliation rebinds an existing local account's identity. Even
+        in the legitimate migration case, this is a significant state change
+        that must surface in operator monitoring (WARNING, not INFO), with
+        enough context to reason about what was claimed."""
+        import logging
+
+        from intric.scim.services.user_service import logger as svc_logger
+
+        repo = AsyncMock()
+        existing = _make_db_user(user_name="jane_local")
+        existing.email = "jane@example.com"
+        existing.external_id = None
+        repo.get_by_username.return_value = None
+        repo.get_by_email.return_value = existing
+        repo.update.return_value = existing
+
+        service = _make_service(repo)
+        request = ScimUserRequest(
+            userName="jane.smith@example.com",
+            emails=[],
+            externalId="entra-guid-123",
+        )
+
+        with caplog.at_level(logging.WARNING):
+            svc_logger.addHandler(caplog.handler)
+            try:
+                await service.create_user(request)
+            finally:
+                svc_logger.removeHandler(caplog.handler)
+
+        warns = [r for r in caplog.records if r.levelname == "WARNING"]
+        reconcile_warns = [r for r in warns if r.message == "scim.user.reconciled"]
+        assert reconcile_warns, (
+            f"Expected scim.user.reconciled WARNING. Got: "
+            f"{[(r.levelname, r.message) for r in caplog.records]}"
+        )
+        rec = reconcile_warns[0]
+        assert rec.previous_username == "jane_local"
+        assert rec.new_username == "jane.smith@example.com"
+        assert rec.new_external_id == "entra-guid-123"
+        assert rec.email == "jane@example.com"
 
     async def test_raises_validation_error_when_no_email_resolvable(self):
         """userName without @ and no emails → ScimValidationError."""
