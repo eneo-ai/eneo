@@ -8,6 +8,7 @@ orchestrator.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -23,9 +24,11 @@ from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
 from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.ai_builder.planning_state import PlanningState
 
-CORE_ARCHITECTURAL_SLOTS: frozenset[str] = frozenset(
-    {"primary_runtime_input", "terminal_output"}
+CORE_ARCHITECTURAL_SLOT_ORDER: tuple[str, ...] = (
+    "primary_runtime_input",
+    "terminal_output",
 )
+CORE_ARCHITECTURAL_SLOTS: frozenset[str] = frozenset(CORE_ARCHITECTURAL_SLOT_ORDER)
 
 PlannerActionKind = Literal[
     "ask_question",
@@ -54,7 +57,7 @@ def build_planner_action_policy(
     *,
     session_state: PlanningState,
     unresolved_architectural_choices: frozenset[str],
-    selected_discovery_question_ids: frozenset[str],
+    selected_discovery_question_ids: tuple[str, ...],
     requirements_confirmed: bool = False,
 ) -> PlannerActionPolicy:
     """Compute the legal action surface from typed server state.
@@ -71,17 +74,19 @@ def build_planner_action_policy(
         session_state=session_state,
         resolved_slot_names=resolved_slot_names,
     )
-    ask_target_set: frozenset[str]
+    ask_targets: tuple[str, ...]
     if session_state.architecture_commit is not None:
-        ask_target_set = frozenset()
+        ask_targets = ()
     else:
-        ask_target_set = _normalize_ask_targets(
-            unresolved_architectural_choices
-            | selected_discovery_question_ids
-            | _missing_core_architecture_slots(resolved_slot_names)
-            | unresolved_commit_slots
+        ask_targets = _ordered_ask_targets(
+            selected_discovery_question_ids=selected_discovery_question_ids,
+            architecture_required_slots=(
+                unresolved_architectural_choices
+                | _missing_core_architecture_slots(resolved_slot_names)
+            ),
+            derived_commit_required_slots=unresolved_commit_slots,
+            resolved_slot_names=resolved_slot_names,
         )
-    ask_targets = tuple(sorted(ask_target_set - resolved_slot_names))
 
     blocked: dict[PlannerActionKind, str] = {}
     allowed: list[PlannerActionKind] = []
@@ -160,13 +165,47 @@ _LEGACY_QUESTION_TO_SLOT_TARGET: dict[str, str] = {
 }
 
 
-def _normalize_ask_targets(targets: frozenset[str]) -> frozenset[str]:
-    return frozenset(
-        normalized
-        for target in targets
-        if (normalized := _LEGACY_QUESTION_TO_SLOT_TARGET.get(target, target))
-        in KNOWN_REQUIREMENT_SLOT_NAMES
+def _ordered_ask_targets(
+    *,
+    selected_discovery_question_ids: Sequence[str],
+    architecture_required_slots: frozenset[str],
+    derived_commit_required_slots: frozenset[str],
+    resolved_slot_names: frozenset[str],
+) -> tuple[str, ...]:
+    """Priority: discovery order, then core fallback, then derived requirements."""
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    def append_target(raw_target: str) -> None:
+        target = _LEGACY_QUESTION_TO_SLOT_TARGET.get(raw_target, raw_target)
+        if (
+            target not in KNOWN_REQUIREMENT_SLOT_NAMES
+            or target in resolved_slot_names
+            or target in seen
+        ):
+            return
+        ordered.append(target)
+        seen.add(target)
+
+    for target in selected_discovery_question_ids:
+        append_target(target)
+    for target in _order_slot_names(architecture_required_slots):
+        append_target(target)
+    for target in _order_slot_names(derived_commit_required_slots):
+        append_target(target)
+
+    return tuple(ordered)
+
+
+def _order_slot_names(slot_names: frozenset[str]) -> tuple[str, ...]:
+    core_slots = tuple(slot for slot in CORE_ARCHITECTURAL_SLOT_ORDER if slot in slot_names)
+    remaining = tuple(
+        slot
+        for slot in sorted(slot_names)
+        if slot not in CORE_ARCHITECTURAL_SLOTS
     )
+    return core_slots + remaining
 
 
 def _missing_core_architecture_slots(

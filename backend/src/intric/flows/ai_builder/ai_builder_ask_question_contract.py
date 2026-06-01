@@ -34,7 +34,7 @@ def allowed_ask_question_targets(
 
 def format_ask_question_targets(targets: Iterable[str]) -> str:
     """Render target IDs for prompts and diagnostics."""
-    ordered = tuple(sorted(set(targets)))
+    ordered = tuple(dict.fromkeys(targets))
     if not ordered:
         return "(none)"
     return ", ".join(f"`{target}`" for target in ordered)

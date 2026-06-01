@@ -415,7 +415,7 @@ class TestShortCircuits:
             action_policy=build_planner_action_policy(
                 session_state=state,
                 unresolved_architectural_choices=frozenset(),
-                selected_discovery_question_ids=frozenset(),
+                selected_discovery_question_ids=(),
             ),
         )
         llm = AsyncMock()

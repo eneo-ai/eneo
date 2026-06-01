@@ -41,7 +41,7 @@ def test_server_builds_ask_question_for_allowed_target() -> None:
     policy = build_planner_action_policy(
         session_state=state,
         unresolved_architectural_choices=frozenset(),
-        selected_discovery_question_ids=frozenset(),
+        selected_discovery_question_ids=(),
     )
 
     output = build_server_planner_output(
@@ -68,7 +68,7 @@ def test_server_builds_commit_when_no_questions_remain() -> None:
     policy = build_planner_action_policy(
         session_state=state,
         unresolved_architectural_choices=frozenset(),
-        selected_discovery_question_ids=frozenset(),
+        selected_discovery_question_ids=(),
     )
 
     output = build_server_planner_output(
@@ -92,7 +92,7 @@ def test_server_commit_for_text_docx_has_resolvable_pattern() -> None:
     policy = build_planner_action_policy(
         session_state=state,
         unresolved_architectural_choices=frozenset(),
-        selected_discovery_question_ids=frozenset(),
+        selected_discovery_question_ids=(),
     )
 
     output = build_server_planner_output(
@@ -143,7 +143,7 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
     policy = build_planner_action_policy(
         session_state=state,
         unresolved_architectural_choices=frozenset(),
-        selected_discovery_question_ids=frozenset(),
+        selected_discovery_question_ids=(),
     )
 
     output = build_server_planner_output(

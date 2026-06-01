@@ -1241,7 +1241,7 @@ async def test_send_message_passes_server_precomputed_commit_to_turn_runner() ->
     action_policy = build_planner_action_policy(
         session_state=state,
         unresolved_architectural_choices=frozenset(),
-        selected_discovery_question_ids=frozenset(),
+        selected_discovery_question_ids=(),
     )
     prepared = ServerOutputPrepared(
         requirements_state=_requirements_state_unconfirmed(),
@@ -1346,7 +1346,7 @@ async def test_send_message_auto_advances_server_commit_to_requirements_summary(
     action_policy = build_planner_action_policy(
         session_state=state,
         unresolved_architectural_choices=frozenset(),
-        selected_discovery_question_ids=frozenset(),
+        selected_discovery_question_ids=(),
     )
     server_output = build_server_planner_output(
         action_policy=action_policy,

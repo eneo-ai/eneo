@@ -239,9 +239,7 @@ async def prepare_planner_request(
     action_policy = build_planner_action_policy(
         session_state=rebuilt_planning_state,
         unresolved_architectural_choices=unresolved_architectural_choices,
-        selected_discovery_question_ids=frozenset(
-            discovery_analysis.selected_question_ids
-        ),
+        selected_discovery_question_ids=discovery_analysis.selected_question_ids,
         requirements_confirmed=requirements_state.confirmed,
     )
     orchestration_context = _build_orchestration_context(

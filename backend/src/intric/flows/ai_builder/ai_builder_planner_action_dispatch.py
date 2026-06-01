@@ -202,7 +202,7 @@ async def _dispatch_chained_confirm_after_commit_if_needed(
     action_policy = build_planner_action_policy(
         session_state=session_state,
         unresolved_architectural_choices=unresolved_core_slots,
-        selected_discovery_question_ids=frozenset(),
+        selected_discovery_question_ids=(),
         requirements_confirmed=request.requirements_confirmed,
     )
     server_output = build_server_planner_output(
