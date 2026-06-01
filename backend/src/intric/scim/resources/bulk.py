@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from intric.database.database import get_session_with_transaction
+from intric.main.logging import get_logger
 from intric.scim.auth import require_scim_auth
 from intric.scim.constants import (
     SCIM_BULK_MAX_OPERATIONS,
@@ -32,6 +33,8 @@ from intric.scim.schemas.group import ScimGroupRequest
 from intric.scim.schemas.user import PatchRequest, ScimUserRequest
 from intric.scim.services.group_service import ScimGroupService
 from intric.scim.services.user_service import ScimUserService
+
+logger = get_logger(__name__)
 
 router = APIRouter(dependencies=[Depends(require_scim_auth)], tags=["SCIM Bulk"])
 
@@ -151,8 +154,18 @@ async def _execute_operation(
         )
     except ScimValidationError as e:
         return _scim_error_response(method, op.bulkId, 400, str(e), "invalidValue")
-    except Exception as e:
-        return _scim_error_response(method, op.bulkId, 500, str(e))
+    except Exception:
+        # Log the full exception (including traceback) so operators can debug,
+        # but return a generic message — `str(e)` on a SQLAlchemy
+        # IntegrityError or DBAPIError exposes constraint names, column names,
+        # the SQL statement, and bound parameter values, none of which belong
+        # in an HTTP response body. Matches the non-bulk endpoint behaviour in
+        # scim_app's unhandled_exception_handler.
+        logger.exception(
+            "scim.bulk.operation_failed",
+            extra={"method": method, "path": op.path, "bulk_id": op.bulkId},
+        )
+        return _scim_error_response(method, op.bulkId, 500, "Internal server error")
 
 
 async def _handle_user_op(

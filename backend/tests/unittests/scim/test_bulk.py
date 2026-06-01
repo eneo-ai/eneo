@@ -191,6 +191,82 @@ class TestBulkCreate:
         assert ops[0]["status"] == "409"
         assert ops[0]["response"]["scimType"] == "uniqueness"
 
+    async def test_unhandled_exception_returns_generic_500_and_logs(
+        self, client: AsyncClient, caplog
+    ):
+        """Anything that isn't ScimHttpError / ScimValidationError must NOT
+        leak its raw `str(e)` into the response body. SQLAlchemy IntegrityError
+        renders with constraint names, column names, the SQL statement, and
+        bound parameter values — none of which belong in an HTTP response.
+        Instead, log the exception (with traceback) and return a generic
+        message, matching the non-bulk endpoint's behaviour."""
+        import logging
+
+        from intric.scim.resources.bulk import logger as bulk_logger
+
+        sentinel = (
+            "duplicate key value violates unique constraint "
+            '"idx_unique_active_user_email" DETAIL: Key (email)=(secret@x.com) '
+            "already exists. [SQL: INSERT INTO users ...] "
+            '[parameters: {"email": "secret@x.com"}]'
+        )
+
+        mock_svc = AsyncMock()
+        mock_svc.create_user.side_effect = RuntimeError(sentinel)
+        scim_app.dependency_overrides[get_scim_user_service] = lambda: mock_svc
+        try:
+            with caplog.at_level(logging.ERROR):
+                bulk_logger.addHandler(caplog.handler)
+                try:
+                    res = await client.post(
+                        "/scim/v2/Bulk",
+                        json={
+                            "Operations": [
+                                {
+                                    "method": "POST",
+                                    "path": "/Users",
+                                    "bulkId": "abc",
+                                    "data": {
+                                        "userName": "jane@example.com",
+                                        "schemas": [
+                                            "urn:ietf:params:scim:schemas:core:2.0:User"
+                                        ],
+                                    },
+                                }
+                            ]
+                        },
+                        headers=AUTH,
+                    )
+                finally:
+                    bulk_logger.removeHandler(caplog.handler)
+        finally:
+            scim_app.dependency_overrides.pop(get_scim_user_service, None)
+
+        ops = res.json()["Operations"]
+        assert ops[0]["status"] == "500"
+        body_str = str(ops[0]["response"])
+        # Generic message — no leak of constraint name, column, SQL, params
+        assert ops[0]["response"]["detail"] == "Internal server error"
+        for leak in (
+            "idx_unique_active_user_email",
+            "secret@x.com",
+            "INSERT INTO users",
+            "parameters",
+            "DETAIL:",
+        ):
+            assert leak not in body_str, f"Response leaked: {leak!r}"
+
+        # The full exception detail must still be reachable for operators.
+        leak_logged = any(
+            "secret@x.com" in (r.getMessage() + str(getattr(r, "exc_info", "") or ""))
+            or (r.exc_info and "secret@x.com" in str(r.exc_info[1]))
+            for r in caplog.records
+        )
+        assert leak_logged, (
+            f"Expected exception detail in logs. Got: "
+            f"{[(r.levelname, r.message) for r in caplog.records]}"
+        )
+
     async def test_validation_error_returns_400_in_operations(
         self, client: AsyncClient
     ):
@@ -259,9 +335,7 @@ class TestBulkFailOnErrors:
 class TestBulkLimits:
     async def test_exceeds_max_operations_returns_413(self, client: AsyncClient):
         # 101 operations is one over the advertised maxOperations (100).
-        ops = [
-            {"method": "DELETE", "path": f"/Users/{uuid4()}"} for _ in range(101)
-        ]
+        ops = [{"method": "DELETE", "path": f"/Users/{uuid4()}"} for _ in range(101)]
         res = await client.post(
             "/scim/v2/Bulk",
             json={"Operations": ops},
@@ -275,9 +349,7 @@ class TestBulkLimits:
 
     async def test_at_max_operations_not_rejected(self, client: AsyncClient):
         # Exactly 100 operations must NOT trip the limit (guards off-by-one).
-        ops = [
-            {"method": "DELETE", "path": f"/Users/{uuid4()}"} for _ in range(100)
-        ]
+        ops = [{"method": "DELETE", "path": f"/Users/{uuid4()}"} for _ in range(100)]
         res = await client.post(
             "/scim/v2/Bulk",
             json={"Operations": ops},
@@ -288,12 +360,12 @@ class TestBulkLimits:
     async def test_exceeds_payload_size_returns_413(self, client: AsyncClient):
         # Patch the byte limit to a tiny value so any normal request body
         # exceeds it — avoids building a real >1 MiB payload in the test.
-        with patch(
-            "intric.scim.resources.bulk.SCIM_BULK_MAX_PAYLOAD_BYTES", 10
-        ):
+        with patch("intric.scim.resources.bulk.SCIM_BULK_MAX_PAYLOAD_BYTES", 10):
             res = await client.post(
                 "/scim/v2/Bulk",
-                json={"Operations": [{"method": "DELETE", "path": f"/Users/{uuid4()}"}]},
+                json={
+                    "Operations": [{"method": "DELETE", "path": f"/Users/{uuid4()}"}]
+                },
                 headers=AUTH,
             )
         assert res.status_code == 413
