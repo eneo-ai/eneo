@@ -42,7 +42,7 @@ CATEGORY_MAPPINGS = {
     ActionType.FEDERATION_UPDATED.value: "admin_actions",
     ActionType.MODULE_ADDED.value: "admin_actions",
     ActionType.MODULE_ADDED_TO_TENANT.value: "admin_actions",
-    # User Actions (29 actions)
+    # User Actions (37 actions)
     ActionType.ASSISTANT_CREATED.value: "user_actions",
     ActionType.ASSISTANT_UPDATED.value: "user_actions",
     ActionType.ASSISTANT_DELETED.value: "user_actions",
@@ -79,6 +79,7 @@ CATEGORY_MAPPINGS = {
     ActionType.TRANSCRIPTION_MODEL_CREATED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_UPDATED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_DELETED.value: "user_actions",
+    ActionType.TRANSCRIPTION_MODEL_MIGRATED.value: "user_actions",
     # Security Events (6 actions)
     ActionType.SECURITY_CLASSIFICATION_CREATED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_UPDATED.value: "security_events",
