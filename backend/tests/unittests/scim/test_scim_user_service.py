@@ -91,6 +91,40 @@ class TestCreateUser:
 
         repo.create.assert_not_called()
 
+    async def test_logs_warning_for_email_in_other_tenant(self, caplog):
+        """Cross-tenant email collisions (Edge Case 2) must surface as a
+        WARNING. Without it, operators only see a 409 in the request log with
+        no explanation of why."""
+        import logging
+
+        from intric.scim.services.user_service import logger as svc_logger
+
+        repo = AsyncMock()
+        repo.get_by_username.return_value = None
+        repo.get_by_email.return_value = None
+        repo.email_exists_in_other_tenant.return_value = True
+
+        service = _make_service(repo)
+        with caplog.at_level(logging.WARNING):
+            svc_logger.addHandler(caplog.handler)
+            try:
+                with pytest.raises(ScimUserConflictError):
+                    await service.create_user(CREATE_REQUEST)
+            finally:
+                svc_logger.removeHandler(caplog.handler)
+
+        matching = [
+            r
+            for r in caplog.records
+            if r.levelname == "WARNING"
+            and r.message == "scim.user.cross_tenant_email_conflict"
+        ]
+        assert matching, (
+            f"Expected scim.user.cross_tenant_email_conflict WARNING. Got: "
+            f"{[(r.levelname, r.message) for r in caplog.records]}"
+        )
+        assert matching[0].email == "jane@example.com"
+
     async def test_raises_conflict_for_existing_email_in_tenant(self):
         repo = AsyncMock()
         repo.get_by_username.return_value = None

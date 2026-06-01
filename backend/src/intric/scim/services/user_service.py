@@ -122,6 +122,18 @@ class ScimUserService:
             raise ScimUserConflictError(f"Email '{email}' already exists")
 
         if await self._repository.email_exists_in_other_tenant(email, self._tenant_id):
+            # WARNING: cross-tenant collision is an unusual signal — could be a
+            # legitimate misconfiguration (same person under two SCIM-managed
+            # tenants), an org-wide email being added in two places, or worth
+            # noting in any case. Without this log the operator only sees a
+            # 409 in the request log with no explanation.
+            logger.warning(
+                "scim.user.cross_tenant_email_conflict",
+                extra={
+                    "tenant_id": str(self._tenant_id),
+                    "email": email,
+                },
+            )
             raise ScimUserConflictError(
                 f"Email '{email}' is already in use by another tenant"
             )
