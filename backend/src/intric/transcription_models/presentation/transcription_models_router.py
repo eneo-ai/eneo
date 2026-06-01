@@ -2,6 +2,7 @@ import logging
 from typing import Annotated, cast
 from uuid import UUID
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 # Audit logging - module level imports for consistency
@@ -16,6 +17,9 @@ from intric.completion_models.presentation.completion_model_models import (
     ValidationResult,
 )
 from intric.database.database import AsyncSession
+from intric.database.tables.app_table import Apps
+from intric.database.tables.spaces_table import Spaces
+from intric.database.tables.users_table import Users
 from intric.main.container.container import Container
 from intric.main.exceptions import ValidationException
 from intric.main.models import PaginatedResponse, is_provided
@@ -25,7 +29,9 @@ from intric.server.protocol import responses
 from intric.transcription_models.presentation.transcription_model_models import (
     TranscriptionModelPublic,
     TranscriptionModelUpdate,
+    TranscriptionModelUsageDetails,
     TranscriptionModelUsageStats,
+    TranscriptionUsageEntity,
 )
 from intric.users.user import UserInDB
 
@@ -162,6 +168,60 @@ async def get_transcription_model_usage(
         spaces_count=counts.get("spaces", 0),
         total_count=counts.get("total", 0),
     )
+
+
+@router.get(
+    "/{model_id}/usage/details",
+    response_model=TranscriptionModelUsageDetails,
+    responses=responses.get_responses([404]),
+    description="List apps using this transcription model (for the migrate dialog).",
+)
+async def get_transcription_model_usage_details(
+    model_id: UUID,
+    user: CurrentUser,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    limit: int = Query(100, ge=1, le=500),
+) -> TranscriptionModelUsageDetails:
+    """Per-entity usage so the migrate dialog can use the same impact table as
+    completion. Transcription's only direct reference is apps; spaces are a
+    many-to-many shown via the aggregate /usage count."""
+    validate_permission(user, Permission.ADMIN)
+    session = cast(AsyncSession, container.session())
+
+    where = sa.and_(
+        Apps.transcription_model_id == model_id,
+        Apps.tenant_id == user.tenant_id,
+    )
+    rows = (
+        await session.execute(
+            sa.select(
+                Apps.id,
+                Apps.name,
+                Spaces.name.label("space_name"),
+                Users.username.label("owner_name"),
+            )
+            .select_from(Apps)
+            .join(Spaces, Apps.space_id == Spaces.id, isouter=True)
+            .join(Users, Apps.user_id == Users.id, isouter=True)
+            .where(where)
+            .limit(limit)
+        )
+    ).all()
+    total = (
+        await session.execute(sa.select(sa.func.count()).select_from(Apps).where(where))
+    ).scalar_one()
+
+    items = [
+        TranscriptionUsageEntity(
+            entity_id=row.id,
+            entity_name=row.name,
+            entity_type="app",
+            space_name=row.space_name,
+            owner_name=row.owner_name,
+        )
+        for row in rows
+    ]
+    return TranscriptionModelUsageDetails(items=items, total=total)
 
 
 @router.get(

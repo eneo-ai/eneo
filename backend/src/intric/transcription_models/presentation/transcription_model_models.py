@@ -91,6 +91,22 @@ class TranscriptionModelUsageStats(BaseModel):
     total_count: int = 0
 
 
+class TranscriptionUsageEntity(BaseModel):
+    """One entity using a transcription model. Shape matches completion's
+    ModelUsageDetail so the migrate dialog can render both with one component."""
+
+    entity_id: UUID
+    entity_name: str
+    entity_type: str = "app"
+    space_name: Optional[str] = None
+    owner_name: Optional[str] = None
+
+
+class TranscriptionModelUsageDetails(BaseModel):
+    items: list[TranscriptionUsageEntity] = []
+    total: int = 0
+
+
 class TranscriptionModelUpdate(BaseModel):
     is_org_enabled: Optional[bool] = None
     is_org_default: Optional[bool] = None

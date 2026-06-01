@@ -293,6 +293,24 @@ export function initModels(client) {
       });
 
       return res;
+    },
+
+    /**
+     * Get detailed usage (apps) for a transcription model. Mirrors
+     * getUsageDetails so the migrate dialog renders both with one component.
+     * @param {Object} params
+     * @param {string} params.modelId Model ID
+     * @param {number} [params.limit=100] Number of results
+     * @returns {Promise<import("../types/schema").components["schemas"]["TranscriptionModelUsageDetails"]>}
+     * @throws {IntricError}
+     * */
+    getTranscriptionUsageDetails: async ({ modelId, limit = 100 }) => {
+      const res = await client.fetch("/api/v1/transcription-models/{model_id}/usage/details", {
+        method: "get",
+        params: { path: { model_id: modelId }, query: { limit } }
+      });
+
+      return res;
     }
   };
 }

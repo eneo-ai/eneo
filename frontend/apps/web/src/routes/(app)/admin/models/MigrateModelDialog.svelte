@@ -1,15 +1,14 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <!--
-  Migrate all usage of a soon-to-be-decommissioned completion model to a
-  replacement model. The dialog has three jobs:
+  Migrate all usage of a soon-to-be-decommissioned model to a replacement.
+  Shared by completion and transcription (`modelType` prop) — same layout and
+  flow, only the SDK endpoints differ. The dialog has three jobs:
 
-    1. Show what will be affected (assistants, apps, services, templates,
-       questions) before the user commits.
+    1. Show what will be affected (the entities using the model) before commit.
     2. Validate compatibility against the chosen target server-side and
        surface security blockers / warnings.
-    3. Hand off to `intric.models.migrateCompletion` and refresh the
-       migration history panel.
+    3. Hand off to the migrate endpoint and refresh the migration history panel.
 -->
 
 <script lang="ts">
@@ -50,9 +49,9 @@
     openController: Writable<boolean>;
     sourceModel: MigratableModel;
     models?: MigratableModel[];
-    // The dialog is identical for both types; only the SDK calls differ, and
-    // transcription has no usage-preview endpoints (its impact is just
-    // apps/spaces, repointed without recomputation).
+    // The dialog is identical for both types — same impact preview, same
+    // validation and confirm flow. Only which SDK endpoints get called differs
+    // (gated on modelType in loadImpact / runValidation / handleMigrate).
     modelType?: "completionModel" | "transcriptionModel";
   } = $props();
 
@@ -84,8 +83,6 @@
   let impactTotal = $state(0);
   let impactDetails = $state<UsageDetail[]>([]);
   let spacesCount = $state(0);
-  // Transcription has no usage-details endpoint, only aggregate counts.
-  let appsCount = $state(0);
   let expandedSections = $state<Record<string, boolean>>({});
 
   // --- Target eligibility -----------------------------------------------
@@ -219,47 +216,29 @@
   // surface it and block migration until the admin retries, since the
   // impact summary is what they'd otherwise be acknowledging blindly.
   async function loadImpact() {
-    if (modelType === "transcriptionModel") {
-      // Transcription has aggregate usage counts only (no per-entity details).
-      // Fetch them so the dialog shows real impact (apps + spaces) instead of a
-      // guess. impactDetails stays empty; we render a compact count box below.
-      isLoadingImpact = true;
-      hasLoadedImpact = false;
-      impactLoadError = null;
-      impactTotal = 0;
-      impactDetails = [];
-      spacesCount = 0;
-      appsCount = 0;
-      try {
-        const stats = (await intric.models.getTranscriptionUsageStats({
-          modelId: sourceModel.id
-        })) as { apps_count?: number; spaces_count?: number; total_count?: number };
-        appsCount = stats.apps_count ?? 0;
-        spacesCount = stats.spaces_count ?? 0;
-        impactTotal = stats.total_count ?? appsCount + spacesCount;
-        hasLoadedImpact = true;
-      } catch (err: unknown) {
-        impactLoadError = err instanceof Error ? err.message : m.migration_impact_load_failed();
-      } finally {
-        isLoadingImpact = false;
-      }
-      return;
-    }
     isLoadingImpact = true;
     hasLoadedImpact = false;
     impactLoadError = null;
     impactTotal = 0;
     impactDetails = [];
     spacesCount = 0;
+    // Same impact preview for both model types — only the endpoint differs.
+    // Transcription's details are its apps; spaces come from the aggregate
+    // usage count (a many-to-many, like completion).
+    const isTranscription = modelType === "transcriptionModel";
     try {
-      const details = (await intric.models.getUsageDetails({
-        modelId: sourceModel.id,
-        limit: 100
-      })) as { items?: UsageDetail[]; total?: number };
+      const details = (await (isTranscription
+        ? intric.models.getTranscriptionUsageDetails({ modelId: sourceModel.id, limit: 100 })
+        : intric.models.getUsageDetails({ modelId: sourceModel.id, limit: 100 }))) as {
+        items?: UsageDetail[];
+        total?: number;
+      };
       impactDetails = details?.items ?? [];
       // Use backend total (handles pagination), not just items.length
       impactTotal = details?.total ?? impactDetails.length;
-      const stats = (await intric.models.getUsageStats({ modelId: sourceModel.id })) as {
+      const stats = (await (isTranscription
+        ? intric.models.getTranscriptionUsageStats({ modelId: sourceModel.id })
+        : intric.models.getUsageStats({ modelId: sourceModel.id }))) as {
         spaces_count?: number;
       };
       spacesCount = stats.spaces_count ?? 0;
@@ -365,12 +344,6 @@
               <span>{impactLoadError}</span>
               <Button variant="outline" size="sm" onclick={loadImpact}>{m.retry()}</Button>
             </div>
-          </div>
-        {:else if !sourceAlreadyMigrated && modelType === "transcriptionModel" && impactTotal > 0}
-          <!-- Transcription has aggregate counts only (no per-entity details),
-               so show a compact apps + spaces summary rather than the table. -->
-          <div class="border-border text-muted-foreground rounded-lg border px-4 py-3 text-sm">
-            {m.migration_impact_transcription({ apps: appsCount, spaces: spacesCount })}
           </div>
         {:else if !sourceAlreadyMigrated && impactTotal > 0}
           <div class="border-border overflow-hidden rounded-lg border">

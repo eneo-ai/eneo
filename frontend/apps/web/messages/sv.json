@@ -2039,7 +2039,6 @@
   "migration_impact_load_failed": "Kunde inte ladda migreringens påverkan. Försök igen innan du migrerar.",
   "migration_impact_title": "{count} resurser kommer att påverkas",
   "migration_no_impact": "Inga resurser använder denna modell. Du kan radera den direkt — migrering behövs bara om du vill lämna en historikpost om att den ersattes av en annan modell.",
-  "migration_impact_transcription": "{apps} appar och {spaces} utrymmen använder den här modellen och flyttas till modellen du väljer.",
   "migration_spaces_info": "Målmodellen kommer automatiskt aktiveras på {count} spaces där denna modell är tillgänglig idag",
   "migration_impact_owner": "Ägare",
   "migration_impact_space": "Space",

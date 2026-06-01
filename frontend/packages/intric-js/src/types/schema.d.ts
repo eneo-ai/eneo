@@ -3239,6 +3239,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/transcription-models/{model_id}/usage/details": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Transcription Model Usage Details
+     * @description List apps using this transcription model (for the migrate dialog).
+     */
+    get: operations["get_transcription_model_usage_details_api_v1_transcription_models__model_id__usage_details_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/transcription-models/{model_id}/migration-validate": {
     parameters: {
       query?: never;
@@ -15772,6 +15792,19 @@ export interface components {
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
+    /** TranscriptionModelUsageDetails */
+    TranscriptionModelUsageDetails: {
+      /**
+       * Items
+       * @default []
+       */
+      items?: components["schemas"]["TranscriptionUsageEntity"][];
+      /**
+       * Total
+       * @default 0
+       */
+      total?: number;
+    };
     /**
      * TranscriptionModelUsageStats
      * @description Live count of what a transcription model migration would move.
@@ -15800,6 +15833,29 @@ export interface components {
        * @default 0
        */
       total_count?: number;
+    };
+    /**
+     * TranscriptionUsageEntity
+     * @description One entity using a transcription model. Shape matches completion's
+     *     ModelUsageDetail so the migrate dialog can render both with one component.
+     */
+    TranscriptionUsageEntity: {
+      /**
+       * Entity Id
+       * Format: uuid
+       */
+      entity_id: string;
+      /** Entity Name */
+      entity_name: string;
+      /**
+       * Entity Type
+       * @default app
+       */
+      entity_type?: string;
+      /** Space Name */
+      space_name?: string | null;
+      /** Owner Name */
+      owner_name?: string | null;
     };
     /** TransferApplicationRequest */
     TransferApplicationRequest: {
@@ -27724,6 +27780,48 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TranscriptionModelUsageStats"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_transcription_model_usage_details_api_v1_transcription_models__model_id__usage_details_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptionModelUsageDetails"];
         };
       };
       /** @description Not Found */
