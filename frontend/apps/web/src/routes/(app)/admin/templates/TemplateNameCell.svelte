@@ -1,7 +1,7 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { Tooltip } from "@intric/ui";
-  import * as LucideIcons from "lucide-svelte";
+  import { getTemplateIconComponent } from "$lib/features/templates/templateIconRegistry";
 
   interface Props {
     name: string;
@@ -12,21 +12,11 @@
 
   let { name, description, isDefault = false, iconName }: Props = $props();
 
-  // Show tooltip only for long descriptions that would be truncated
   const showTooltip = $derived(description && description.length > 80);
-
-  // Convert kebab-case to PascalCase for icon lookup
-  function toPascalCase(str: string): string {
-    return (
-      str.charAt(0).toUpperCase() + str.slice(1).replace(/-([a-z])/g, (g) => g[1].toUpperCase())
-    );
-  }
 
   const IconComponent = $derived.by(() => {
     if (!iconName) return null;
-    const pascalName = toPascalCase(iconName);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (LucideIcons as any)[pascalName] || null;
+    return getTemplateIconComponent(iconName);
   });
 </script>
 
@@ -34,7 +24,7 @@
   <div class="flex items-center gap-2">
     {#if IconComponent}
       <div class="border-strong bg-subtle flex h-6 w-6 items-center justify-center rounded border">
-        {@render IconComponent({ class: "text-text h-4 w-4" })}
+        <IconComponent class="text-text h-4 w-4" />
       </div>
     {/if}
     <span class="text-default font-medium">{name}</span>
