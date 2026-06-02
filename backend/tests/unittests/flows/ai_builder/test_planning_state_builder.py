@@ -268,7 +268,7 @@ class TestPolicyDefaults:
         output_slot = state.resolved_slots["terminal_output"]
         assert output_slot.value == "structured_text"
 
-    def test_json_runtime_input_is_inferred_as_json_not_text(self) -> None:
+    def test_json_in_json_out_treats_input_as_structured_json_not_text(self) -> None:
         state = build_planning_state_from_conversation(
             [
                 ConversationMessage(
@@ -282,6 +282,41 @@ class TestPolicyDefaults:
         )
 
         assert state.resolved_slots["primary_runtime_input"].value == "json"
+        assert state.resolved_slots["terminal_output"].value == "structured_json"
+
+    def test_json_with_explicit_schema_preserves_input_semantics(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Bygg ett flöde som tar emot en JSON payload och "
+                        "returnerar strikt JSON enligt schemat "
+                        "{name: string, amount: number, deadline: string}."
+                    ),
+                )
+            ]
+        )
+
+        assert state.resolved_slots["primary_runtime_input"].value == "json"
+        assert state.resolved_slots["terminal_output"].value == "structured_json"
+
+    def test_document_to_json_extraction_keeps_document_input(self) -> None:
+        state = build_planning_state_from_conversation(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=(
+                        "Användaren laddar upp ett PDF-avtal. Flödet ska "
+                        "extrahera kundnamn, datum och riskflaggor som "
+                        "strukturerad JSON och returnera strukturerad JSON "
+                        "som slutresultat."
+                    ),
+                )
+            ]
+        )
+
+        assert state.resolved_slots["primary_runtime_input"].value == "documents"
         assert state.resolved_slots["terminal_output"].value == "structured_json"
 
     def test_document_input_defaults_to_flexible_document_scope(self) -> None:
@@ -1231,6 +1266,24 @@ class TestModelSlotMerge:
         assert state.resolved_slots["primary_runtime_input"].value == "json"
         assert state.resolved_slots["primary_runtime_input"].source == "model"
         assert state.resolved_slots["terminal_output"].value == "structured_json"
+
+    def test_model_output_persists_secondary_result_obligations(self) -> None:
+        state = _state()
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(secondary_obligations=("risks", "actions")),
+            prompt_hash="a" * 64,
+            freeform_text=(
+                "Jämför dokumenten och ta också fram risker och rekommenderade åtgärder."
+            ),
+        )
+
+        assert [
+            signal.value
+            for signal in state.signals
+            if signal.question_id == "result_obligation"
+        ] == ["risks", "actions"]
 
     def test_model_output_cannot_displace_high_confidence_input_heuristic(
         self,

@@ -194,6 +194,7 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
         "terminal_output": "structured_text",
         "document_material_scope": "flexible_document_case",
         "post_processing_goal": "summarize_or_overview",
+        "structured_io_contract": "extract_or_compute_fields",
         "structured_analysis_need": "use_structured_analysis",
         "runtime_metadata_fields": "detailed_case_metadata",
     }
@@ -207,6 +208,7 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
             )
             for slot_name, value in values_by_slot.items()
         ),
+        secondary_obligations=("risks", "actions"),
         assumptions=("User wants runtime form fields.",),
         contradictions=("No contradiction.",),
     )
@@ -223,6 +225,7 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
     assert {slot.slot_name for slot in parsed.slots} == LLM_RESOLVABLE_SLOT_NAMES
     assert set(get_args(LLMResolvableSlotName)) == LLM_RESOLVABLE_SLOT_NAMES
     assert parsed.to_result().slots == result.slots
+    assert parsed.to_result().secondary_obligations == ("risks", "actions")
 
 
 def test_slot_classification_metadata_rejects_extra_nested_fields() -> None:

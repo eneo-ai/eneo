@@ -17,6 +17,7 @@ from intric.flows.ai_builder.ai_builder_discovery_profile_builder import (
 )
 from intric.flows.ai_builder.ai_builder_discovery_signal_inference import (
     infer_post_processing_goal,
+    infer_structured_io_contract,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -52,6 +53,7 @@ def question_category(question_id: str) -> str:
         "document_kind": "input",
         "document_material_scope": "input",
         "post_processing_goal": "outcome",
+        "structured_io_contract": "outcome",
         "comparison_scope": "comparison",
         "final_output_mode": "output",
         "docx_output_mode": "output",
@@ -237,8 +239,8 @@ def post_processing_goal_is_vague(profile: DiscoveryProfile) -> bool:
         return False
     if needs_pdf_generation_mode_choice(profile):
         return False
-    if _json_transform_goal_is_vague(profile):
-        return True
+    if _json_to_json_semantic_flow(profile):
+        return False
     if _outcome_wording_is_vague(profile):
         return True
     return (
@@ -257,7 +259,19 @@ def _resolved_slot(profile: DiscoveryProfile, slot_name: str) -> ResolvedSlot | 
     return profile.resolved_slot(slot_name)
 
 
-def _json_transform_goal_is_vague(profile: DiscoveryProfile) -> bool:
+def structured_io_contract_is_vague(profile: DiscoveryProfile) -> bool:
+    if _family_inactive(profile, "structured_io_contract"):
+        return False
+    if not _json_to_json_semantic_flow(profile):
+        return False
+    if profile.resolved_slot("structured_io_contract") is not None:
+        return False
+    if "structured_io_contract" in profile.answers:
+        return False
+    return infer_structured_io_contract(profile.text) is None
+
+
+def _json_to_json_semantic_flow(profile: DiscoveryProfile) -> bool:
     return (
         profile.input_intent.primary_runtime_input == "json"
         and profile.output_intent.terminal_output == "structured_json"
@@ -309,31 +323,6 @@ def needs_pdf_generation_mode_choice(profile: DiscoveryProfile) -> bool:
         intent.terminal_output == "pdf_document"
         and intent.pdf_generation_mode == "pdf_template_requested"
     )
-
-
-def comparison_architecture_is_clear(text: str, answers: dict[str, set[str]]) -> bool:
-    if "comparison_scope" in answers:
-        return True
-    if mentions_any(
-        text,
-        (
-            "same run",
-            "samma körning",
-            "earlier saved",
-            "tidigare sparade",
-            "knowledge base",
-            "kunskapsbas",
-            "ladda upp flera pdf",
-            "ladda upp flera pdf:er",
-            "ladda upp flera dokument",
-            "upload multiple pdf",
-            "upload several pdf",
-            "upload multiple documents",
-            *_DOCUMENT_PACKAGE_PHRASES,
-        ),
-    ):
-        return True
-    return False
 
 
 def has_same_run_comparison_contradiction(

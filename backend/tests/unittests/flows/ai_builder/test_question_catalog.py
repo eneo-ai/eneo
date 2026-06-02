@@ -737,6 +737,7 @@ class TestQuestionCopyParity:
             processing_scope_question,
             runtime_metadata_fields_question,
             structured_analysis_need_question,
+            structured_io_contract_question,
         )
 
         return {
@@ -746,6 +747,7 @@ class TestQuestionCopyParity:
             "document_kind": document_kind_question,
             "document_material_scope": document_material_scope_question,
             "post_processing_goal": post_processing_goal_question,
+            "structured_io_contract": structured_io_contract_question,
             "comparison_scope": comparison_scope_question,
             "final_output_mode": final_output_mode_question,
             "docx_output_mode": docx_output_mode_question,

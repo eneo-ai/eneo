@@ -13,6 +13,7 @@ from intric.flows.ai_builder.ai_builder_discovery_flow_defaults import (
 from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryLanguage,
     DiscoveryProfile,
+    ReferenceSourceResolution,
 )
 from intric.flows.ai_builder.ai_builder_discovery_questions import localized_text
 from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
@@ -157,6 +158,58 @@ _ANALYSIS_STAGE_HINTS = (
     "jämförelse",
 )
 
+_DOCUMENT_PACKAGE_PHRASES: tuple[str, ...] = (
+    "dokumentpaket",
+    "document package",
+    "flera relaterade pdf",
+    "multiple related pdf",
+    "flera dokument i samma ärende",
+    "multiple documents for the same case",
+)
+
+_COMPARISON_REQUEST_MARKERS = (
+    "compare",
+    "comparison",
+    "jämför",
+    "jämföra",
+    "jämförelse",
+    "contradiction",
+    "motsägelser",
+    "skillnader",
+    "validate",
+    "validation",
+    "validera",
+    "validering",
+    "checklista",
+    "checklist",
+)
+
+_SAME_RUN_REFERENCE_MARKERS = (
+    "same run",
+    "samma körning",
+    "ladda upp flera pdf",
+    "ladda upp flera pdf:er",
+    "ladda upp flera dokument",
+    "upload multiple pdf",
+    "upload several pdf",
+    "upload multiple documents",
+    *_DOCUMENT_PACKAGE_PHRASES,
+)
+
+_EXISTING_REFERENCE_MARKERS = (
+    "earlier saved",
+    "tidigare sparade",
+    "previous material",
+    "tidigare material",
+    "knowledge base",
+    "kunskapsbas",
+    "schema",
+    "regler",
+    "rules",
+    "checklista",
+    "checklist",
+)
+
 
 def build_discovery_profile(
     conversation: list[ConversationMessage],
@@ -264,6 +317,16 @@ def build_discovery_profile(
         flow_defaults=flow_defaults,
         answers=answers,
     )
+    comparison_requested = _comparison_requested(
+        text=text,
+        answers=answers,
+        planning_state=planning_state,
+    )
+    reference_source = resolve_reference_source(
+        text=text,
+        answers=answers,
+        comparison_requested=comparison_requested,
+    )
     return DiscoveryProfile(
         language=resolve_discovery_language(conversation, text),
         text=text,
@@ -277,19 +340,8 @@ def build_discovery_profile(
         planning_state=planning_state,
         flow=flow,
         edit_mode=flow is not None,
-        comparison_requested=mentions_any(
-            text,
-            (
-                "compare",
-                "comparison",
-                "jämför",
-                "jämföra",
-                "jämförelse",
-                "contradiction",
-                "motsägelser",
-                "skillnader",
-            ),
-        ),
+        comparison_requested=comparison_requested,
+        reference_source=reference_source,
         document_like_input=input_intent.document_runtime_input_requested
         or "documents" in default_input_modes,
         case_like_flow=mentions_any(
@@ -316,6 +368,72 @@ def build_discovery_profile(
             or bool(default_output_mode)
         ),
         prefer_structured_intermediate=prefer_structured_intermediate,
+    )
+
+
+def _comparison_requested(
+    *,
+    text: str,
+    answers: dict[str, set[str]],
+    planning_state: PlanningState,
+) -> bool:
+    if mentions_any(text, _COMPARISON_REQUEST_MARKERS):
+        return True
+    if "compare_or_validate" in answers.get("post_processing_goal", set()):
+        return True
+    goal = planning_state.resolved_slots.get("post_processing_goal")
+    return goal is not None and goal.value == "compare_or_validate"
+
+
+def resolve_reference_source(
+    *,
+    text: str,
+    answers: dict[str, set[str]],
+    comparison_requested: bool,
+) -> ReferenceSourceResolution:
+    if not comparison_requested:
+        return ReferenceSourceResolution(
+            status="not_requested",
+            reason="comparison_or_validation_not_requested",
+        )
+
+    comparison_scope = answers.get("comparison_scope", set())
+    if comparison_scope:
+        if comparison_scope.intersection(
+            {"same_run_compare", "same_run_multiple_documents"}
+        ):
+            return ReferenceSourceResolution(
+                status="same_run_sources",
+                reason="comparison_scope_answer_same_run",
+            )
+        if "compare_previous_material" in comparison_scope:
+            return ReferenceSourceResolution(
+                status="existing_flow_or_knowledge",
+                reason="comparison_scope_answer_existing_material",
+            )
+        if "no_direct_compare" in comparison_scope:
+            return ReferenceSourceResolution(
+                status="not_requested",
+                reason="comparison_scope_answer_no_direct_compare",
+            )
+        return ReferenceSourceResolution(
+            status="unclear",
+            reason="comparison_scope_answer_unclear",
+        )
+
+    if mentions_any(text, _SAME_RUN_REFERENCE_MARKERS):
+        return ReferenceSourceResolution(
+            status="same_run_sources",
+            reason="same_run_reference_text",
+        )
+    if mentions_any(text, _EXISTING_REFERENCE_MARKERS):
+        return ReferenceSourceResolution(
+            status="existing_flow_or_knowledge",
+            reason="existing_reference_text",
+        )
+    return ReferenceSourceResolution(
+        status="missing",
+        reason="comparison_requested_without_reference_source",
     )
 
 
@@ -418,13 +536,10 @@ def expresses_task_intent(text: str) -> bool:
     # not asking the builder to create or change a flow.
     if "?" in raw_text and not mentions_any(normalized, _QUESTION_ACTION_MARKERS):
         return False
-    return (
-        contains_any_token_prefix(
-            normalized,
-            (*_TASK_VERB_PREFIXES_SV, *_TASK_VERB_PREFIXES_EN),
-        )
-        or any(token in normalized.split() for token in _TASK_VERB_EXACT_TOKENS)
-    )
+    return contains_any_token_prefix(
+        normalized,
+        (*_TASK_VERB_PREFIXES_SV, *_TASK_VERB_PREFIXES_EN),
+    ) or any(token in normalized.split() for token in _TASK_VERB_EXACT_TOKENS)
 
 
 def count_distinct_task_verbs(text: str) -> int:

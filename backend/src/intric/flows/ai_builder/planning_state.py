@@ -58,6 +58,7 @@ SignalSource = Literal[
     "flow_default",
     "policy_default",
     "heuristic",
+    "model",
 ]
 
 SlotSource = Literal[

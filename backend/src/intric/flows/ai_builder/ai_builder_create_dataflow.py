@@ -3,15 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from intric.flows.ai_builder.ai_builder_create_models import FlowCreateDraft
-from intric.flows.ai_builder.ai_builder_underlag_policy import (
-    TARGETED_UNDERLAG_SOFT_CAP,
-    TargetedUnderlagStepSignal,
-    final_assembler_rewrite_indexes,
-    is_document_renderer,
-    is_source_surfacing_text,
-    targeted_underlag_rewrite_indexes,
-    terminal_renderer_rewrite_indexes,
-)
 from intric.flows.ai_builder.ai_builder_discovery_text_matcher import (
     normalize_discovery_text,
 )
@@ -30,6 +21,15 @@ from intric.flows.ai_builder.ai_builder_source_material import (
 )
 from intric.flows.ai_builder.ai_builder_structured_field_paths import (
     missing_draft_field_path,
+)
+from intric.flows.ai_builder.ai_builder_underlag_policy import (
+    TARGETED_UNDERLAG_SOFT_CAP,
+    TargetedUnderlagStepSignal,
+    final_assembler_rewrite_indexes,
+    is_document_renderer,
+    is_source_surfacing_text,
+    targeted_underlag_rewrite_indexes,
+    terminal_renderer_rewrite_indexes,
 )
 from intric.flows.flow_authoring_spec import (
     InputSource,
@@ -859,9 +859,7 @@ def _looks_like_always_broad_underlag_composer(composer: NewStepDraft) -> bool:
 
 def _looks_like_section_or_document_composer(composer: NewStepDraft) -> bool:
     marker_tokens = set(
-        _underlag_marker_tokens(
-            f"{composer.name} {composer.instructions or ''}"
-        )
+        _underlag_marker_tokens(f"{composer.name} {composer.instructions or ''}")
     )
     return bool(
         marker_tokens.intersection(
@@ -903,7 +901,9 @@ def _underlag_marker_token_matches(
     value_tokens: tuple[str, ...],
     marker_token: str,
 ) -> bool:
-    return any(marker_token in _underlag_token_variants(token) for token in value_tokens)
+    return any(
+        marker_token in _underlag_token_variants(token) for token in value_tokens
+    )
 
 
 def _contains_underlag_marker_sequence(
@@ -925,11 +925,7 @@ def _underlag_marker_tokens(value: str) -> tuple[str, ...]:
         value.replace("_", " ").replace("-", " ").replace("/", " ")
     )
     ascii_normalized = _normalize_swedish_ascii(normalized)
-    return tuple(
-        token
-        for token in ascii_normalized.split()
-        if len(token) >= 2
-    )
+    return tuple(token for token in ascii_normalized.split() if len(token) >= 2)
 
 
 def _select_broad_underlag_field_refs(
@@ -1153,12 +1149,7 @@ def _underlag_token_variants(token: str) -> set[str]:
 
 
 def _normalize_swedish_ascii(value: str) -> str:
-    return (
-        value.replace("å", "a")
-        .replace("ä", "a")
-        .replace("ö", "o")
-        .replace("é", "e")
-    )
+    return value.replace("å", "a").replace("ä", "a").replace("ö", "o").replace("é", "e")
 
 
 def _underlag_token_contains(first: str, second: str) -> bool:

@@ -51,6 +51,7 @@ SUPPORTED_STRUCTURED_QUESTION_IDS: frozenset[str] = frozenset(
         "document_kind",
         "document_material_scope",
         "post_processing_goal",
+        "structured_io_contract",
         "comparison_scope",
         "final_output_mode",
         "docx_output_mode",

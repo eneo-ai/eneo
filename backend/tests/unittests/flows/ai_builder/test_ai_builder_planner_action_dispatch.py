@@ -161,9 +161,9 @@ async def test_backend_selected_question_prefers_contextual_discovery_question()
         AskQuestionAction(
             kind="ask_question",
             payload=AskQuestionPayload(
-                question_id="post_processing_goal",
-                slot_name="post_processing_goal",
-                prompt="Vad ska flödet hjälpa dig göra med materialet?",
+                question_id="structured_io_contract",
+                slot_name="structured_io_contract",
+                prompt="Vad ska flödet göra mellan input-JSON och output-JSON?",
             ),
         )
     )
@@ -188,10 +188,12 @@ async def test_backend_selected_question_prefers_contextual_discovery_question()
     question = persist_question.await_args.kwargs["question"].question_data
     assert question.question == "Vad ska flödet göra mellan input-JSON och output-JSON?"
     assert [option.value for option in question.options] == [
-        "stop_after_primary_operation",
-        "extract_key_information",
-        "compare_or_validate",
-        "risk_or_issue_review",
+        "map_to_new_schema",
+        "validate_against_schema_or_rules",
+        "extract_or_compute_fields",
+        "normalize_or_enrich",
+        "classify_or_tag",
+        "custom_schema_or_rules",
     ]
 
 

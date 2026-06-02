@@ -21,6 +21,7 @@ QUESTION_FAMILY: dict[str, DiscoveryFamily] = {
     "document_kind": "input_shape",
     "document_material_scope": "input_shape",
     "post_processing_goal": "workflow_outcome",
+    "structured_io_contract": "workflow_outcome",
     "final_output_mode": "output_artifact",
     "docx_output_mode": "output_artifact",
     "pdf_generation_mode": "output_artifact",

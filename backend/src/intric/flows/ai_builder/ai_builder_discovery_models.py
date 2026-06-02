@@ -42,6 +42,13 @@ ClarificationReason = Literal[
     "build_intent_and_sufficient",
     "all_blockers_resolved",
 ]
+ReferenceSourceStatus = Literal[
+    "not_requested",
+    "missing",
+    "same_run_sources",
+    "existing_flow_or_knowledge",
+    "unclear",
+]
 
 
 @dataclass(frozen=True)
@@ -106,6 +113,12 @@ class ClarificationDecisionTrace:
     assumptions: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ReferenceSourceResolution:
+    status: ReferenceSourceStatus
+    reason: str
+
+
 @dataclass(frozen=True)
 class DiscoveryAnalysis:
     issues: tuple[DiscoveryIssue, ...]
@@ -144,6 +157,7 @@ class DiscoveryProfile:
     flow: Flow | None
     edit_mode: bool
     comparison_requested: bool
+    reference_source: ReferenceSourceResolution
     document_like_input: bool
     case_like_flow: bool
     audio_like_input: bool

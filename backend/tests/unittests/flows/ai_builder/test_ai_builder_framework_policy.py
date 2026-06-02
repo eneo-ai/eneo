@@ -2089,6 +2089,7 @@ def test_rejects_unsupported_structured_question_ids() -> None:
     assert is_supported_structured_question_id("upload_mode")
     assert is_supported_structured_question_id("final_output_type")
     assert is_supported_structured_question_id("post_processing_goal")
+    assert is_supported_structured_question_id("structured_io_contract")
     assert is_supported_structured_question_id("structured_analysis_need")
     assert is_supported_structured_question_id("output_style")
     assert is_supported_structured_question_id("output_tone")

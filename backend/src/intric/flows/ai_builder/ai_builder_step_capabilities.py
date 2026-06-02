@@ -12,6 +12,8 @@ BUILDER_RUNTIME_INPUT_MODE_BY_INPUT_TYPE = {
     "file": "documents",
     "audio": "audio",
     "text": "text",
+    # Semantic JSON input currently uses the text/API payload transport surface.
+    # Dedicated runtime UI support should change this mapping intentionally.
     "json": "text",
 }
 

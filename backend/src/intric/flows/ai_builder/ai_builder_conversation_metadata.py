@@ -35,6 +35,10 @@ from intric.flows.ai_builder.ai_builder_event_models import (
 from intric.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
 )
+from intric.flows.ai_builder.ai_builder_result_contract import (
+    RESULT_OBLIGATION_VALUES,
+    ResultObligation,
+)
 from intric.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedSlot,
@@ -64,6 +68,7 @@ LLMResolvableSlotName: TypeAlias = Literal[
     "terminal_output",
     "document_material_scope",
     "post_processing_goal",
+    "structured_io_contract",
     "structured_analysis_need",
     "runtime_metadata_fields",
 ]
@@ -71,6 +76,7 @@ LLMResolvableSlotName: TypeAlias = Literal[
 _MAX_SLOT_CLASSIFICATION_REASON_LENGTH = 500
 _MAX_SLOT_CLASSIFICATION_NOTE_LENGTH = 500
 _MAX_SLOT_CLASSIFICATION_NOTES = 10
+_MAX_RESULT_OBLIGATIONS = len(RESULT_OBLIGATION_VALUES)
 
 
 class SlotClassificationSlotMetadata(BaseModel):
@@ -111,6 +117,10 @@ def _empty_slot_classification_notes() -> list[SlotClassificationNote]:
     return []
 
 
+def _empty_result_obligations() -> list[ResultObligation]:
+    return []
+
+
 class SlotClassificationMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -118,6 +128,10 @@ class SlotClassificationMetadata(BaseModel):
     slots: list[SlotClassificationSlotMetadata] = Field(
         default_factory=_empty_slot_classification_slots,
         max_length=len(LLM_RESOLVABLE_SLOT_NAMES),
+    )
+    secondary_obligations: list[ResultObligation] = Field(
+        default_factory=_empty_result_obligations,
+        max_length=_MAX_RESULT_OBLIGATIONS,
     )
     assumptions: list[SlotClassificationNote] = Field(
         default_factory=_empty_slot_classification_notes,
@@ -142,6 +156,7 @@ class SlotClassificationMetadata(BaseModel):
     def to_result(self) -> SlotClassificationResult:
         return SlotClassificationResult(
             slots=tuple(slot.to_classified_slot() for slot in self.slots),
+            secondary_obligations=tuple(self.secondary_obligations),
             assumptions=tuple(self.assumptions),
             contradictions=tuple(self.contradictions),
         )
@@ -400,13 +415,19 @@ def slot_classification_metadata_from_result(
         for slot in result.slots
         if (payload := _slot_classification_slot_payload(slot)) is not None
     ]
-    if not slot_payloads:
+    secondary_obligations = [
+        obligation
+        for obligation in result.secondary_obligations
+        if obligation in RESULT_OBLIGATION_VALUES
+    ][:_MAX_RESULT_OBLIGATIONS]
+    if not slot_payloads and not secondary_obligations:
         return None
     try:
         return SlotClassificationMetadata.model_validate(
             {
                 "prompt_hash": prompt_hash,
                 "slots": slot_payloads,
+                "secondary_obligations": secondary_obligations,
                 "assumptions": [
                     _bounded_metadata_text(value, fallback="assumption")
                     for value in result.assumptions

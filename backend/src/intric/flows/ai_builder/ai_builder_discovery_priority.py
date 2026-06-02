@@ -10,6 +10,7 @@ DISCOVERY_ISSUE_PRIORITY: dict[str, int] = {
     "external_delivery_unsupported": 15,
     "input_material_mode": 20,
     "flow_input_architecture": 25,
+    "structured_io_contract": 27,
     "post_processing_goal": 28,
     "final_output_mode": 30,
     "document_kind": 40,

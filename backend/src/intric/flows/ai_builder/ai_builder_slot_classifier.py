@@ -8,6 +8,10 @@ from dataclasses import dataclass, replace
 from typing import Any, Literal, cast
 from uuid import UUID
 
+from intric.flows.ai_builder.ai_builder_result_contract import (
+    RESULT_OBLIGATION_VALUES,
+    ResultObligation,
+)
 from intric.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -18,7 +22,7 @@ SlotClassificationConfidence = Literal["high", "medium", "low"]
 _SLOT_CLASSIFICATION_CACHE: dict[str, "SlotClassificationResult"] = {}
 _MAX_CACHE_ENTRIES = 128
 UNKNOWN_SLOT_VALUE = "unknown"
-_SLOT_CLASSIFICATION_SCHEMA_VERSION = 5
+_SLOT_CLASSIFICATION_SCHEMA_VERSION = 6
 _SLOT_CLASSIFICATION_RESPONSE_FORMAT: dict[str, object] = {"type": "json_object"}
 
 
@@ -33,6 +37,7 @@ class ClassifiedSlot:
 @dataclass(frozen=True, slots=True)
 class SlotClassificationResult:
     slots: tuple[ClassifiedSlot, ...] = ()
+    secondary_obligations: tuple[ResultObligation, ...] = ()
     assumptions: tuple[str, ...] = ()
     contradictions: tuple[str, ...] = ()
     cached: bool = False
@@ -215,8 +220,12 @@ def parse_slot_classification_response(
         for item in cast(list[object], raw_dict.get("contradictions", []))
         if isinstance(item, str) and item.strip()
     )
+    secondary_obligations = _parse_secondary_obligations(
+        raw_dict.get("secondary_obligations", [])
+    )
     return SlotClassificationResult(
         slots=tuple(slots),
+        secondary_obligations=secondary_obligations,
         assumptions=assumptions,
         contradictions=contradictions,
     )
@@ -262,6 +271,7 @@ def _build_slot_classification_prompt(
         f"- {slot_name}: {', '.join(sorted(values))}"
         for slot_name, values in sorted(allowed_slot_values.items())
     ]
+    obligation_values = ", ".join(RESULT_OBLIGATION_VALUES)
     language_hint = (
         "Classify Swedish user intent."
         if ui_language != "en"
@@ -301,6 +311,13 @@ def _build_slot_classification_prompt(
         "compare_or_validate. Summaries and overviews are summarize_or_overview. "
         "Recommendations or possible choices are decision_support. Risk, issue, "
         "deviation, or red-flag review is risk_or_issue_review. "
+        "Also preserve explicit secondary result obligations that are not already "
+        "the primary post_processing_goal. Use only the listed "
+        "secondary_obligations values. For example, when the user asks to compare "
+        "and also report risks or recommended actions, classify "
+        "post_processing_goal as compare_or_validate and include risks/actions as "
+        "secondary_obligations. Do not include obligations that are not explicitly "
+        "requested or strongly implied by the conversation. "
         "For runtime metadata, choose no_extra_metadata when all needed data comes "
         "from the source material and no separate per-run fields are requested. "
         "If the user says values should be derived from source material, do not "
@@ -319,13 +336,17 @@ def _build_slot_classification_prompt(
         f"{text}\n\n"
         "Unresolved slots and allowed values:\n"
         f"{chr(10).join(dimension_lines)}\n\n"
+        "Allowed secondary_obligations values:\n"
+        f"{obligation_values}\n\n"
         "Return JSON with this shape:\n"
         "{"
         '"slots": [{"slot_name": str, "value": str, "confidence": "high"|"medium"|"low", "reason": str}], '
+        '"secondary_obligations": [str], '
         '"assumptions": [str], '
         '"contradictions": [str]'
         "}\n"
-        "Use only the listed slot_name values and option values."
+        "Use only the listed slot_name values, option values, and "
+        "secondary_obligations values."
     )
     return [
         {"role": "system", "content": system},
@@ -357,6 +378,23 @@ def _classification_cache_payload(
             "latest_user_answer": bias.latest_user_answer,
         }
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _parse_secondary_obligations(raw_value: object) -> tuple[ResultObligation, ...]:
+    if not isinstance(raw_value, list):
+        return ()
+    legal_values = set(RESULT_OBLIGATION_VALUES)
+    values: list[ResultObligation] = []
+    seen: set[str] = set()
+    for item in cast(list[object], raw_value):
+        if not isinstance(item, str):
+            continue
+        value = item.strip()
+        if value not in legal_values or value in seen:
+            continue
+        values.append(value)
+        seen.add(value)
+    return tuple(values)
 
 
 def _normalize_allowed_slot_values(

@@ -537,6 +537,79 @@ _POST_PROCESSING_GOAL = QuestionTemplate(
 )
 
 
+_STRUCTURED_IO_CONTRACT = QuestionTemplate(
+    id="structured_io_contract",
+    question_sv="Vad ska flödet göra mellan input-JSON och output-JSON?",
+    question_en="What should the flow do between input JSON and output JSON?",
+    help_sv=(
+        "För maskinläsbara payloads behöver flödet veta om JSON ska mappas, "
+        "valideras, beräknas, normaliseras eller klassificeras."
+    ),
+    help_en=(
+        "For machine-readable payloads, the flow needs to know whether JSON "
+        "should be mapped, validated, computed, normalized, or classified."
+    ),
+    options=(
+        _option(
+            id="map_to_new_schema",
+            label_sv="Mappa till nytt schema",
+            label_en="Map to a new schema",
+            description_sv="Välj, döp om eller flytta fält till en ny JSON-struktur.",
+            description_en="Select, rename, or move fields into a new JSON shape.",
+            value="map_to_new_schema",
+        ),
+        _option(
+            id="validate_against_schema_or_rules",
+            label_sv="Validera mot schema eller regler",
+            label_en="Validate against schema or rules",
+            description_sv="Kontrollera payloaden mot ett schema, regler eller krav.",
+            description_en="Check the payload against a schema, rules, or requirements.",
+            value="validate_against_schema_or_rules",
+        ),
+        _option(
+            id="extract_or_compute_fields",
+            label_sv="Extrahera eller beräkna fält",
+            label_en="Extract or compute fields",
+            description_sv="Plocka ut, kombinera eller beräkna värden i JSON.",
+            description_en="Extract, combine, or compute values in JSON.",
+            value="extract_or_compute_fields",
+        ),
+        _option(
+            id="normalize_or_enrich",
+            label_sv="Normalisera eller berika",
+            label_en="Normalize or enrich",
+            description_sv="Städa, standardisera eller komplettera payloaden.",
+            description_en="Clean, standardize, or enrich the payload.",
+            value="normalize_or_enrich",
+        ),
+        _option(
+            id="classify_or_tag",
+            label_sv="Klassificera eller tagga",
+            label_en="Classify or tag",
+            description_sv="Lägg till kategori, status, etiketter eller routingfält.",
+            description_en="Add category, status, labels, or routing fields.",
+            value="classify_or_tag",
+        ),
+        _option(
+            id="custom_schema_or_rules",
+            label_sv="Eget schema eller egna regler",
+            label_en="Custom schema or rules",
+            description_sv="Följ ett särskilt kontrakt som användaren beskriver.",
+            description_en="Follow a specific contract described by the user.",
+            value="custom_schema_or_rules",
+        ),
+    ),
+    worked_examples_sv=(
+        "Mappa inkommande order-JSON till organisationens exportschema.",
+        "Validera payloaden mot regler och returnera fel som JSON.",
+    ),
+    worked_examples_en=(
+        "Map incoming order JSON to the organization's export schema.",
+        "Validate the payload against rules and return errors as JSON.",
+    ),
+)
+
+
 _STRUCTURED_ANALYSIS_NEED = QuestionTemplate(
     id="structured_analysis_need",
     question_sv=(
@@ -646,6 +719,7 @@ _ALL_TEMPLATES: tuple[QuestionTemplate, ...] = (
     _PDF_GENERATION_MODE,
     _DOCUMENT_MATERIAL_SCOPE,
     _POST_PROCESSING_GOAL,
+    _STRUCTURED_IO_CONTRACT,
     _STRUCTURED_ANALYSIS_NEED,
     _RUNTIME_METADATA_FIELDS,
 )

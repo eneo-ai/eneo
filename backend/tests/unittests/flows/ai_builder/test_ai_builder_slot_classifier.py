@@ -102,6 +102,26 @@ def test_parse_slot_classification_response_filters_invalid_entries() -> None:
     assert result.contradictions == ("input is ambiguous",)
 
 
+def test_parse_slot_classification_response_filters_secondary_obligations() -> None:
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "secondary_obligations": [
+                    "risks",
+                    "actions",
+                    "risks",
+                    "invented",
+                ],
+            }
+        ),
+        allowed_slot_values={"post_processing_goal": {"compare_or_validate"}},
+    )
+
+    assert result is not None
+    assert result.secondary_obligations == ("risks", "actions")
+
+
 def test_parse_slot_classification_response_accepts_explicit_uncertainty() -> None:
     result = parse_slot_classification_response(
         json.dumps(
@@ -157,7 +177,7 @@ def test_prompt_hash_uses_sorted_names_and_stable_json_serialization() -> None:
                         "primary_runtime_input": ["audio", "documents"],
                         "terminal_output": ["pdf_document", "structured_text"],
                     },
-                    "schema_version": 5,
+                    "schema_version": 6,
                     "text": text,
                     "ui_language": "sv",
                 },

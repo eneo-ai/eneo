@@ -1850,7 +1850,7 @@ class TestExtendedClarificationHints:
         ]
         assert "post_processing_goal" not in question_ids
 
-    def test_bare_json_to_json_prompt_asks_outcome_question(self) -> None:
+    def test_json_in_out_without_rules_asks_structured_payload_contract(self) -> None:
         conversation = [
             ConversationMessage(
                 role="user",
@@ -1864,10 +1864,40 @@ class TestExtendedClarificationHints:
         analysis = analyze_discovery(conversation)
 
         assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "post_processing_goal"
+        assert analysis.next_issue.issue_id == "structured_io_contract"
         assert analysis.next_issue.suggestion is not None
-        assert analysis.next_issue.suggestion.question_id == "post_processing_goal"
+        assert analysis.next_issue.suggestion.question_id == "structured_io_contract"
+        assert (
+            analysis.decision_trace.selected_reason
+            == "missing_structured_payload_contract"
+        )
         assert "input-JSON" in analysis.next_issue.suggestion.question
+
+    def test_exact_json_schema_prompt_skips_human_document_purpose_question(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde där användaren klistrar in en JSON payload "
+                    "och får tillbaka strikt JSON enligt det här schemat: "
+                    "{name: string, amount: number, deadline: string}. "
+                    "Returnera bara giltig JSON."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+        assert "post_processing_goal" not in question_ids
+        assert "structured_io_contract" not in question_ids
 
     def test_document_to_json_extraction_does_not_ask_post_processing_goal(
         self,
@@ -2257,6 +2287,65 @@ class TestExtendedClarificationHints:
                 role="user",
                 content=(
                     "Bygg ett flöde som jämför flera dokument och genererar en DOCX-rapport."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "comparison_scope"
+
+    def test_comparison_against_internal_policy_asks_reference_source(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde som jämför ett uppladdat avtal mot vår interna "
+                    "policy och skriver en kort rapport."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+
+        assert analysis.next_issue is not None
+        assert analysis.next_issue.issue_id == "comparison_scope"
+        assert analysis.decision_trace is not None
+        assert analysis.decision_trace.selected_reason == "missing_reference_source"
+
+    def test_comparison_with_two_runtime_documents_does_not_ask_reference_source(
+        self,
+    ) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg ett flöde där användaren laddar upp flera dokument i "
+                    "samma körning och jämför dem direkt i en strukturerad rapport."
+                ),
+                metadata={"ui_language": "sv"},
+            )
+        ]
+
+        analysis = analyze_discovery(conversation)
+        question_ids = [
+            issue.suggestion.question_id
+            for issue in analysis.blocking_issues
+            if issue.suggestion is not None
+        ]
+
+        assert "comparison_scope" not in question_ids
+
+    def test_build_intent_does_not_suppress_reference_source_question(self) -> None:
+        conversation = [
+            ConversationMessage(
+                role="user",
+                content=(
+                    "Bygg planen för ett flöde som jämför uppladdade avtal mot "
+                    "vår interna policy och returnerar en DOCX-rapport."
                 ),
                 metadata={"ui_language": "sv"},
             )

@@ -41,6 +41,10 @@ from intric.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
     resolve_requirements_state,
 )
+from intric.flows.ai_builder.ai_builder_result_contract import (
+    RESULT_OBLIGATION_SIGNAL_ID,
+    RESULT_OBLIGATION_VALUES,
+)
 from intric.flows.ai_builder.ai_builder_runtime_input_fields import (
     NO_EXTRA_RUNTIME_METADATA,
     infer_runtime_metadata_slot,
@@ -57,6 +61,7 @@ from intric.flows.ai_builder.planning_state import (
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
     EvidenceRef,
+    PlanningSignal,
     PlanningState,
     ResolvedSlot,
     SlotConfidence,
@@ -265,6 +270,11 @@ def merge_llm_resolved_slots(
         classification_result=classification_result,
         freeform_text=freeform_text,
     )
+    _merge_model_result_obligations(
+        state,
+        classification_result=classification_result,
+        prompt_hash=prompt_hash,
+    )
 
     for classified_slot in classification_result.slots:
         if not _model_slot_is_persistable(classified_slot.slot_name):
@@ -302,6 +312,33 @@ def merge_llm_resolved_slots(
 
     if state.resolved_slots and state.phase == "awaiting_input":
         state.phase = "discovering"
+
+
+def _merge_model_result_obligations(
+    state: PlanningState,
+    *,
+    classification_result: SlotClassificationResult,
+    prompt_hash: str,
+) -> None:
+    legal_values = set(RESULT_OBLIGATION_VALUES)
+    existing = {
+        signal.value
+        for signal in state.signals
+        if signal.question_id == RESULT_OBLIGATION_SIGNAL_ID
+    }
+    for obligation in classification_result.secondary_obligations:
+        if obligation not in legal_values or obligation in existing:
+            continue
+        state.signals.append(
+            PlanningSignal(
+                question_id=RESULT_OBLIGATION_SIGNAL_ID,
+                value=obligation,
+                confidence="high",
+                source="model",
+                provenance=[f"model:{RESULT_OBLIGATION_SIGNAL_ID}:{prompt_hash}"],
+            )
+        )
+        existing.add(obligation)
 
 
 def _blocked_model_values(
@@ -439,6 +476,7 @@ def llm_resolvable_slot_values_for_state(
     candidate_slots = {
         slot_name
         for slot_name in LLM_RESOLVABLE_SLOT_NAMES
+        if _model_slot_is_relevant(slot_name=slot_name, state=state)
         if _model_slot_can_replace(
             existing_slot=state.resolved_slots.get(slot_name),
             model_confidence="high",
@@ -451,6 +489,19 @@ def llm_resolvable_slot_values_for_state(
 
 def _model_slot_is_persistable(slot_name: str) -> bool:
     return slot_name in LLM_RESOLVABLE_SLOT_NAMES
+
+
+def _model_slot_is_relevant(*, slot_name: str, state: PlanningState) -> bool:
+    if slot_name != "structured_io_contract":
+        return True
+    primary_runtime_input = state.resolved_slots.get("primary_runtime_input")
+    terminal_output = state.resolved_slots.get("terminal_output")
+    return (
+        primary_runtime_input is not None
+        and primary_runtime_input.value == "json"
+        and terminal_output is not None
+        and terminal_output.value == "structured_json"
+    )
 
 
 def _model_slot_can_replace(
@@ -625,6 +676,24 @@ def _resolve_slots(
             freeform_text=freeform_text,
             summary_field=None,
             slot_value=post_processing_goal,
+        )
+
+    structured_io_contract = _single_slot_value(
+        answer_signals=answer_signals,
+        flow_defaults=flow_defaults,
+        question_id="structured_io_contract",
+    )
+    if structured_io_contract is not None:
+        slots["structured_io_contract"] = _build_slot(
+            name="structured_io_contract",
+            value=structured_io_contract,
+            question_id="structured_io_contract",
+            conversation=conversation,
+            flow_defaults=flow_defaults,
+            requirements_state=requirements_state,
+            freeform_text=freeform_text,
+            summary_field=None,
+            slot_value=structured_io_contract,
         )
 
     structured_analysis_need = _single_slot_value(

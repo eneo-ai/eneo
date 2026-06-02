@@ -19,6 +19,7 @@ KNOWN_REQUIREMENT_SLOT_NAMES: frozenset[str] = frozenset(
         "pdf_generation_mode",
         "document_material_scope",
         "post_processing_goal",
+        "structured_io_contract",
         "structured_analysis_need",
         "runtime_metadata_fields",
     }

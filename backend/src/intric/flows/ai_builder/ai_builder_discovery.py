@@ -7,9 +7,6 @@ from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     EXTERNAL_DELIVERY_UNSUPPORTED_ISSUE_ID,
 )
 from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    comparison_architecture_is_clear as _comparison_architecture_is_clear,
-)
-from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     document_cardinality_is_vague as _document_cardinality_is_vague,
 )
 from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
@@ -64,6 +61,9 @@ from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     structured_analysis_need_is_vague as _structured_analysis_need_is_vague,
 )
 from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
+    structured_io_contract_is_vague as _structured_io_contract_is_vague,
+)
+from intric.flows.ai_builder.ai_builder_discovery_issue_rules import (
     ultra_vague_output_choice_is_vague as _ultra_vague_output_choice_is_vague,
 )
 from intric.flows.ai_builder.ai_builder_discovery_models import (
@@ -102,7 +102,6 @@ from intric.flows.ai_builder.ai_builder_discovery_questions import (
     final_pdf_type_question,
     flow_input_architecture_question,
     input_material_mode_question,
-    json_transform_goal_question,
     localized_text,
     output_reader_question,
     pdf_generation_mode_question,
@@ -112,6 +111,7 @@ from intric.flows.ai_builder.ai_builder_discovery_questions import (
     question_suggestion_for_id,
     runtime_metadata_fields_question,
     structured_analysis_need_question,
+    structured_io_contract_question,
 )
 from intric.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -265,9 +265,10 @@ def analyze_discovery(
             )
         )
 
-    if profile.comparison_requested and not _comparison_architecture_is_clear(
-        text, answers
-    ):
+    if profile.comparison_requested and profile.reference_source.status in {
+        "missing",
+        "unclear",
+    }:
         raw_issues.append(
             DiscoveryIssue(
                 issue_id="comparison_scope",
@@ -299,11 +300,23 @@ def analyze_discovery(
             )
         )
 
-    if _post_processing_goal_is_vague(profile):
-        json_transform_question = (
-            profile.input_intent.primary_runtime_input == "json"
-            and profile.output_intent.terminal_output == "structured_json"
+    if _structured_io_contract_is_vague(profile):
+        raw_issues.append(
+            DiscoveryIssue(
+                issue_id="structured_io_contract",
+                category="outcome",
+                severity="blocking",
+                message=localized_text(
+                    profile.language,
+                    "Det är fortfarande oklart hur input-JSON ska omvandlas till output-JSON.",
+                    "It is still unclear how input JSON should be transformed into output JSON.",
+                ),
+                suggestion=structured_io_contract_question(profile.language),
+                question_level="blocking",
+            )
         )
+
+    if _post_processing_goal_is_vague(profile):
         raw_issues.append(
             DiscoveryIssue(
                 issue_id="post_processing_goal",
@@ -311,18 +324,10 @@ def analyze_discovery(
                 severity="blocking",
                 message=localized_text(
                     profile.language,
-                    "Det är fortfarande oklart hur input-JSON ska omvandlas till output-JSON.",
-                    "It is still unclear how input JSON should be transformed into output JSON.",
-                )
-                if json_transform_question
-                else localized_text(
-                    profile.language,
                     "Det är fortfarande oklart vad flödet ska hjälpa användaren göra med materialet.",
                     "It is still unclear what the flow should help the user do with the material.",
                 ),
-                suggestion=json_transform_goal_question(profile.language)
-                if json_transform_question
-                else post_processing_goal_question(profile.language),
+                suggestion=post_processing_goal_question(profile.language),
                 question_level="high_value",
             )
         )
@@ -633,6 +638,8 @@ def _trace_reason(
         return "model_slot_not_sufficient"
     if selected_issue.issue_id == "post_processing_goal":
         return "missing_outcome_requirement"
+    if selected_issue.issue_id == "structured_io_contract":
+        return "missing_structured_payload_contract"
     if selected_issue.issue_id == "comparison_scope":
         return "missing_reference_source"
     if selected_issue.issue_id in {
@@ -888,6 +895,12 @@ def build_discovery_followup_text(
             language,
             "Jag behöver förstå vad resultatet ska hjälpa dig göra innan jag kan bekräfta lösningen.",
             "I need to understand what the result should help you do before I can confirm the solution.",
+        )
+    if issue.issue_id == "structured_io_contract":
+        return localized_text(
+            language,
+            "Jag behöver förstå JSON-kontraktet innan jag kan bekräfta lösningen.",
+            "I need to understand the JSON contract before I can confirm the solution.",
         )
     if issue.issue_id == EXTERNAL_DELIVERY_UNSUPPORTED_ISSUE_ID:
         return localized_text(

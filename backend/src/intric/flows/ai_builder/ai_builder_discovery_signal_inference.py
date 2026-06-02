@@ -56,6 +56,11 @@ def infer_answer_signals_from_text(text: str) -> dict[str, set[str]]:
     _add_signal(signals, "post_processing_goal", infer_post_processing_goal(normalized))
     _add_signal(
         signals,
+        "structured_io_contract",
+        infer_structured_io_contract(normalized),
+    )
+    _add_signal(
+        signals,
         "structured_analysis_need",
         _infer_structured_analysis_need(normalized),
     )
@@ -556,6 +561,88 @@ def infer_post_processing_goal(text: str) -> str | None:
         return "structure_key_information"
     if _looks_like_transcript_into_document_goal(normalized):
         return "stop_after_primary_operation"
+    return None
+
+
+def infer_structured_io_contract(text: str) -> str | None:
+    # Heuristic backstop; classifier and structured answers remain the primary path.
+    normalized = normalize_signal_text(text)
+    if not normalized or "json" not in normalized:
+        return None
+    if _contains_any(
+        normalized,
+        (
+            "validera",
+            "validate",
+            "validation",
+            "schema",
+            "schemat",
+            "schemas",
+            "regler",
+            "rules",
+            "krav",
+            "requirements",
+        ),
+    ):
+        return "validate_against_schema_or_rules"
+    if _contains_any(
+        normalized,
+        (
+            "mappa",
+            "map",
+            "mapping",
+            "ny json struktur",
+            "new json shape",
+            "new schema",
+            "nytt schema",
+            "döp om",
+            "dop om",
+            "rename",
+        ),
+    ):
+        return "map_to_new_schema"
+    if _contains_any(
+        normalized,
+        (
+            "extrahera",
+            "extract",
+            "beräkna",
+            "berakna",
+            "compute",
+            "fält",
+            "falt",
+            "fields",
+            "returnera fält",
+            "return fields",
+        ),
+    ):
+        return "extract_or_compute_fields"
+    if _contains_any(
+        normalized,
+        (
+            "normalisera",
+            "normalize",
+            "standardisera",
+            "standardize",
+            "berika",
+            "enrich",
+        ),
+    ):
+        return "normalize_or_enrich"
+    if _contains_any(
+        normalized,
+        (
+            "klassificera",
+            "classify",
+            "tagga",
+            "tag",
+            "kategori",
+            "category",
+            "etikett",
+            "label",
+        ),
+    ):
+        return "classify_or_tag"
     return None
 
 
