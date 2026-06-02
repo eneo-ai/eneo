@@ -60,7 +60,21 @@ async def scim_invalid_filter_error_handler(
 async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    return _scim_error_json(422, str(exc))
+    # SCIM clients expect a 4xx SCIM error body (RFC 7644 §3.12), not FastAPI's
+    # default 422. Map pydantic/FastAPI request-validation failures to 400 with
+    # scimType invalidValue (a required value was missing or an attribute value
+    # was incompatible with its type). We summarise the failing locations rather
+    # than dumping str(exc), which embeds the full internal error repr.
+    details = "; ".join(
+        f"{'.'.join(str(loc) for loc in err.get('loc', ()))}: {err.get('msg', '')}"
+        for err in exc.errors()
+    )
+    detail = (
+        f"Request validation failed: {details}"
+        if details
+        else "Request validation failed"
+    )
+    return _scim_error_json(400, detail, scim_type="invalidValue")
 
 
 @scim_app.exception_handler(HTTPException)

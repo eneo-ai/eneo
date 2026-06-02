@@ -41,16 +41,22 @@ class TestScimErrorSchema:
         assert body["status"] == "401"
 
     async def test_validation_error_returns_scim_schema(self, client: AsyncClient):
+        """SCIM clients expect a 4xx SCIM error body (RFC 7644 §3.12), so
+        FastAPI/pydantic request-validation failures must map to 400
+        invalidValue rather than the framework default 422."""
         res = await client.post(
             "/scim/v2/Users",
             json={"invalid": "payload"},
             headers=AUTH,
         )
-        assert res.status_code == 422
+        assert res.status_code == 400
         body = res.json()
         assert SCIM_ERROR_SCHEMA in body["schemas"]
-        assert body["status"] == "422"
-        assert "detail" in body
+        assert body["status"] == "400"
+        assert body["scimType"] == "invalidValue"
+        # Detail names the failing attribute (the required userName) instead of
+        # dumping the raw RequestValidationError repr.
+        assert "userName" in body["detail"]
 
     async def test_unhandled_error_returns_generic_scim_500(
         self,
