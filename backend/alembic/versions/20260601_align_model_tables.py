@@ -23,7 +23,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic
 revision = "20260601_align_model_tables"
-down_revision = "20260501_backfill_model_costs"
+down_revision = "202605261000"
 branch_labels = None
 depends_on = None
 

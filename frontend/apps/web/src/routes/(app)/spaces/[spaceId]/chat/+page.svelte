@@ -125,6 +125,7 @@
           : undefined}
       ></ConversationView>
     </Page.Tab>
+
     <Page.Tab id="history">
       {#await data.initialHistory}
         <!-- TODO: This has some delay on it as the underlying table is delayed in updating its rows, so we cover it up during that time. -->
@@ -135,6 +136,7 @@
           <IconLoadingSpinner class="animate-spin"></IconLoadingSpinner>
         </div>
       {/await}
+
       <HistoryTable
         onConversationLoaded={(conversation) => {
           const tab = "chat";

@@ -1,0 +1,409 @@
+# SCIM Provisioning
+
+Eneo supports SCIM 2.0 (RFC 7644) for automated user and group provisioning from your identity provider. This guide covers how to enable SCIM for a tenant, configure Azure Entra ID, and understand how Eneo behaves when SCIM interacts with existing accounts.
+
+## Overview
+
+SCIM (System for Cross-domain Identity Management) is a standardized push channel where your identity provider proactively keeps Eneo up to date. It complements OIDC just-in-time (JIT) provisioning, which only creates users when they sign in.
+
+SCIM provisioning in Eneo provides:
+
+- **Automatic deprovisioning** — users disabled in your IdP are deactivated in Eneo without manual intervention
+- **Group synchronization** — manage Eneo access through existing directory groups
+- **Pre-provisioning** — give users access before their first sign-in
+- **Multi-tenant isolation** — each Eneo tenant has its own SCIM endpoint and bearer token
+
+### SCIM vs JIT provisioning
+
+| Feature | JIT (OIDC) | SCIM |
+|---|---|---|
+| User created on first login | Yes | No (pushed by IdP) |
+| User deactivated when disabled in IdP | No | Yes |
+| Groups synchronized | No | Yes |
+| Visible to admins before login | No | Yes |
+
+The two can coexist. SCIM reconciles existing JIT-created users automatically — no duplicates are created.
+
+---
+
+## How it works
+
+Eneo exposes a SCIM 2.0 server at `/scim/v2`, separate from the main `/api/v1/` API. Authentication is per-tenant: each tenant has its own bearer token, and the token itself identifies which tenant to write to.
+
+### Endpoint summary
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/scim/v2/ServiceProviderConfig` | Discover server capabilities |
+| GET | `/scim/v2/Schemas` | User and Group attribute schemas |
+| GET | `/scim/v2/ResourceTypes` | Available resource types |
+| POST / GET / PUT / PATCH / DELETE | `/scim/v2/Users` | User CRUD |
+| POST / GET / PUT / PATCH / DELETE | `/scim/v2/Groups` | Group CRUD |
+| POST | `/scim/v2/Bulk` | Bulk operations (up to 100 ops, 1 MB payload) |
+
+`DELETE` is a soft delete — the underlying row is marked `state=DELETED` with a `deleted_at` timestamp. The audit trail is preserved.
+
+### Supported capabilities
+
+The server advertises the following in `ServiceProviderConfig`:
+
+- **PATCH**: supported (per RFC 7644 §3.5.2)
+- **Bulk**: up to 100 operations per request, 1 MB max payload
+- **Filter**: supported, max 200 results
+- **Sort**: supported
+- **changePassword**: not supported (passwords are managed in the IdP)
+- **etag**: not supported
+
+---
+
+## Step 1: Generate a SCIM token
+
+SCIM tokens are issued per tenant through the sysadmin API. They are required to authenticate any request to `/scim/v2`.
+
+A token is shown **only once** on creation. Eneo stores only a SHA-256 hash of the token — there is no way to retrieve it later. If a token is lost, revoke it and issue a new one.
+
+### Create a token
+
+```bash
+curl -X POST https://your-domain.com/api/v1/sysadmin/tenants/{tenant-id}/scim-token \
+  -H "Authorization: Bearer ${ENEO_SUPER_API_KEY}"
+```
+
+The response contains the raw token:
+
+```json
+{
+  "token": "scim_4f9c8a2b1d7e3...",
+  "created_at": "2026-05-25T09:00:00Z"
+}
+```
+
+Store this token securely. Configure it in your IdP as described below.
+
+### Check whether a token is active
+
+```bash
+curl https://your-domain.com/api/v1/sysadmin/tenants/{tenant-id}/scim-token \
+  -H "Authorization: Bearer ${ENEO_SUPER_API_KEY}"
+```
+
+Returns `{ "active": true }` or `{ "active": false }`. The actual token is never returned.
+
+### Revoke a token
+
+```bash
+curl -X DELETE https://your-domain.com/api/v1/sysadmin/tenants/{tenant-id}/scim-token \
+  -H "Authorization: Bearer ${ENEO_SUPER_API_KEY}"
+```
+
+After revocation, all SCIM requests to that tenant return `401 Unauthorized`. To rotate a token, revoke the old one and create a new one.
+
+---
+
+## Step 2: Configure Azure Entra ID
+
+Azure Entra ID can provision users and groups to Eneo over SCIM. The setup uses Entra's **Enterprise applications → Provisioning** feature.
+
+### Create an Enterprise application
+
+1. Go to [Azure Portal](https://portal.azure.com)
+2. Navigate to **Microsoft Entra ID → Enterprise applications → New application**
+3. Choose **Create your own application**
+4. Name it (for example, `Eneo SCIM`) and select **Integrate any other application you don't find in the gallery (Non-gallery)**
+5. Click **Create**
+
+### Configure provisioning
+
+1. In the new application, go to **Provisioning → Get started**
+2. Set **Provisioning Mode** to **Automatic**
+3. Under **Admin Credentials**, enter:
+   - **Tenant URL**: `https://your-domain.com/scim/v2`
+   - **Secret Token**: the SCIM token from Step 1
+4. Click **Test Connection** — you should see a success message
+5. Click **Save**
+
+### Assign users and groups
+
+1. Go to **Users and groups** in the same application
+2. Click **Add user/group** and assign the users or directory groups that should be synced to Eneo
+3. Return to **Provisioning** and click **Start provisioning**
+
+Entra will perform an initial sync followed by periodic delta syncs (default: every 40 minutes).
+
+### Attribute mappings
+
+Entra's default User mappings work for Eneo. The minimum required attributes are:
+
+- `userName` — Eneo's username (typically the user's email)
+- `emails[type eq "work"].value` — primary email
+- `externalId` — Entra's immutable object ID
+- `active` — controls deprovisioning
+
+For Group mappings, the defaults also work. Members are referenced by their `externalId`.
+
+---
+
+## Step 3: Verify the integration
+
+1. Go to **Provisioning logs** in your Enterprise application
+2. Confirm that initial sync events show **Status: Success**
+3. Log into Eneo as an admin and verify that the assigned users appear under **Organization → Users**
+4. Disable a test user in Entra and wait for the next sync — the user should appear as inactive in Eneo
+5. Re-enable the user in Entra — they should be reactivated in Eneo
+
+---
+
+## Sign-in prerequisites when paired with OIDC
+
+SCIM provisions users into Eneo, but users still need to **sign in** through OIDC. Eneo matches a signing-in user to their SCIM-provisioned row by **email** — specifically, the `email` claim in the ID token issued by your identity provider.
+
+Azure Entra ID derives the `email` claim from the user's `mail` attribute. If `mail` is empty on the directory record, the ID token arrives **without an `email` claim** and Eneo rejects the sign-in:
+
+```
+401 Unauthorized
+{ "detail": "Email claim not found in ID token" }
+```
+
+---
+
+## How Eneo handles existing users
+
+When you connect SCIM to an Eneo tenant that already has users (for example, from prior JIT provisioning), Eneo reconciles them automatically rather than creating duplicates.
+
+The reconciliation flow on first provisioning:
+
+1. SCIM looks up a user by `userName` — if found, the user is updated.
+2. If not found and `userName` contains an email, SCIM falls back to matching by **email**.
+3. On an email match, the existing row is updated with the new `externalId` and `userName` from the IdP.
+4. An audit event `SCIM_USER_RECONCILED` is logged so the reconciliation is visible.
+
+This means initial Entra provisioning is safe to run against any existing tenant.
+
+---
+
+## Multi-tenant behavior and the email constraint
+
+Eneo enforces a global uniqueness constraint on active user emails: an email address can only belong to one active user across the entire installation, regardless of tenant. This applies to both OIDC and SCIM.
+
+If SCIM tries to provision an email that is already active in another tenant, the server returns `409 Conflict`:
+
+```json
+{
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:Error"],
+  "status": "409",
+  "scimType": "uniqueness",
+  "detail": "Email 'user@example.com' is already in use by another tenant"
+}
+```
+
+For single-tenant installations this is invisible. For multi-tenant installations, this only affects users (such as consultants) who would otherwise need accounts in multiple tenants simultaneously.
+
+---
+
+## Provisioning scope and deprovisioning triggers
+
+Azure Entra ID's SCIM provisioning has two scope modes that decide **which users are in scope** for a given Enterprise application. The mode you pick changes what user actions in Azure send `active=false` to Eneo — which is often counter-intuitive.
+
+### The two scope modes
+
+Set under **Enterprise applications → [app] → Provisioning → Settings → Scope**:
+
+| Scope | Who gets synced | When does Azure send `active=false`? |
+|---|---|---|
+| **Sync only assigned users and groups** | Only users on the app's **Users and groups** list | When you **remove a user from the assignment list** (or remove a user from an assigned group) |
+| **Sync all users and groups** | Every user in the Azure tenant | When you **delete the user from Azure** entirely |
+
+A common surprise: in **either mode**, just unchecking **Account Enabled** on a user does **not** by itself send `active=false`. Azure derives `active` from whether the user is in scope, not from the enabled flag.
+
+### Safety net: "Prevent accidental deletion"
+
+Under **Provisioning → Settings**, the **"Prevent accidental deletion"** toggle (with an **Accidental deletion threshold** value) acts as a circuit breaker: if a sync cycle would deprovision more users than the threshold, Azure **pauses the cycle**, sends an email to the configured notification address, and waits for the operator to review and approve or reject the deletions before any users are actually deprovisioned.
+
+This is not "ignore deletions" — it's "stop and ask" when the deletion count crosses the line. Useful when changing scope or assignments on an already-provisioned tenant, where a mistake could otherwise mass-deprovision users.
+
+### Triggering a sync immediately
+
+Periodic sync runs every ~40 minutes by default. To trigger an action without waiting:
+
+- **Provision on demand**: select a specific user or group in Azure (Enterprise app → Provisioning → Provision on demand). Bypasses the periodic cycle. Note: requires the user to still exist in Azure — you cannot target a user that has already been deleted from the directory.
+- **Restart provisioning**: forces a full delta cycle for everything in scope.
+
+If a user has been deleted in Azure entirely (so they're no longer selectable in Provision on demand), Eneo will deprovision them at the next periodic sync; there is no Azure-side button to push that immediately.
+
+---
+
+## Deprovisioning and reactivation
+
+When the IdP sets `active=false` on a user (typically because the user was disabled or left the organization), Eneo performs a **soft delete**:
+
+- The user's `state` is set to `DELETED`
+- `deleted_at` is set to the current time
+- The user can no longer sign in
+- The row is preserved so the audit trail remains intact
+
+This operation is **idempotent** — repeated `active=false` updates have no further effect.
+
+If the same user is later re-enabled in the IdP (`active=true`), Eneo reactivates the existing row rather than creating a new one:
+
+- `state` returns to `ACTIVE`
+- `deleted_at` is cleared
+- The user's `externalId` is updated if it changed
+- An audit event `SCIM_USER_REACTIVATED` is logged
+
+Hard deletion is not available over SCIM by design — preserving the audit trail is required for compliance.
+
+---
+
+## Groups
+
+Groups created via SCIM are stored in the same `user_groups` table as native Eneo groups. SCIM-managed groups can be identified by their `external_id` field.
+
+- Group membership is fully managed by the IdP. Changes made directly in Eneo to SCIM-managed groups may be overwritten by the next sync.
+- Members must belong to the same tenant. Cross-tenant memberships are rejected with `400 Bad Request`.
+- Groups support soft delete with the same semantics as users.
+
+---
+
+## Bulk operations
+
+Eneo supports the SCIM `/Bulk` endpoint for batched changes, which Entra and other IdPs use to reduce request volume.
+
+- Up to **100 operations** per request
+- Up to **1 MiB** total payload size
+- Each operation runs in its own savepoint, so a failure in one operation does not corrupt earlier successes
+- `failOnErrors` aborts the batch after a configurable number of errors
+- `bulkId` references let you create a user and reference them as a group member in the same request
+
+These behaviors are advertised in `ServiceProviderConfig` and follow RFC 7644 §3.7.
+
+### Why these limits?
+
+The 100-operation and 1 MiB limits are aligned with the conservative side of common SCIM server defaults (Azure Entra ID, Okta, Ping, Microsoft Identity Manager). They balance two competing concerns:
+
+- **Large enough to be useful**: matches the chunk sizes that Entra and Okta use by default, so well-behaved IdPs rarely need to split a sync into more requests than necessary.
+- **Small enough to bound resource use**: a single bulk fits comfortably within one database transaction and one worker without risking long-running locks or large memory spikes.
+
+Both limits are independent — whichever is reached first triggers rejection. For example, a request with 50 operations totalling 1.5 MiB is rejected on payload size, and a request with 150 small operations is rejected on operation count.
+
+### What happens when a limit is exceeded?
+
+Per RFC 7644 §3.7.3, Eneo returns **HTTP 413 Payload Too Large** with a SCIM error response:
+
+```json
+{
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:Error"],
+  "status": "413",
+  "detail": "Bulk request has 150 operations, exceeds maxOperations (100)"
+}
+```
+
+Clients reading `ServiceProviderConfig` (which all standard IdPs do) will automatically chunk requests to stay within these limits, so you should not see 413 responses during normal operation. Receiving one usually indicates a misconfigured client or a custom integration that does not consult discovery.
+
+### How the size limit is enforced
+
+The 1 MiB payload limit is checked server-side against the request's `Content-Length` header. This catches well-behaved clients that send the header correctly — which all standard SCIM IdPs do.
+
+Clients that omit the header (for example, using chunked transfer encoding) or that report it incorrectly can bypass the application-level check. In those cases the limit is enforced by the upstream reverse proxy in front of Eneo (Traefik in the reference deployment), which applies its own body-size limit before the request reaches the application.
+
+For deployments exposing SCIM to untrusted networks, ensure the reverse proxy is configured with a payload limit at or below 1 MiB. The application-level check is best-effort and should not be relied on as the only defense against oversized payloads.
+
+---
+
+## Audit logging
+
+All SCIM mutations are recorded in the Eneo audit log alongside other administrative actions. Relevant action types include:
+
+- `SCIM_USER_PROVISIONED` — new user created
+- `SCIM_USER_RECONCILED` — existing user matched by email and linked to IdP
+- `SCIM_USER_REACTIVATED` — soft-deleted user restored
+- `SCIM_USER_UPDATED` — user attributes changed
+- `SCIM_USER_SOFT_DELETED` — user deactivated
+- `SCIM_GROUP_*` — analogous events for groups
+- `SCIM_TOKEN_CREATED`, `SCIM_TOKEN_REVOKED` — sysadmin token lifecycle
+
+Each event records the acting principal as `actor.type = "scim"` with the bearer token's tenant context. Sysadmin token operations are recorded with `actor_type = "SYSTEM"`.
+
+See the [Audit Logging guide](/guides/audit-logging) for how to view and export these events.
+
+---
+
+## Troubleshooting
+
+### Test Connection fails in Entra
+
+**Check the Tenant URL:**
+
+- Must end with `/scim/v2` (no trailing slash)
+- Must use HTTPS in production
+- Must be reachable from Azure (test from outside your network)
+
+**Verify the token works:**
+
+```bash
+curl https://your-domain.com/scim/v2/ServiceProviderConfig \
+  -H "Authorization: Bearer ${SCIM_TOKEN}"
+```
+
+You should receive a JSON `ServiceProviderConfig` document. A `401` indicates the token is wrong or revoked.
+
+### Provisioning logs show 409 Conflict
+
+A 409 typically means one of:
+
+- The user's email already belongs to a different tenant in this Eneo installation
+- The `externalId` collides with an existing user
+
+Check the `detail` field in the SCIM error response to determine the cause. Reconciliation only runs when the existing user has no `externalId` set — if a different IdP previously set one, it must be cleared first.
+
+### OIDC sign-in fails with "Email claim not found in ID token"
+
+Azure omits the `email` claim from the ID token if either:
+
+- The signing-in user has no `mail` attribute set in the directory, or
+- The App Registration is not configured to include `email` as an optional claim
+
+See [Sign-in prerequisites when paired with OIDC](#sign-in-prerequisites-when-paired-with-oidc) for the full checklist and a PowerShell snippet to bulk-fix missing `mail` attributes.
+
+### Users are not deactivated when removed from Entra
+
+What triggers deprovisioning depends on the provisioning **scope** of the Enterprise application — and unchecking **Account Enabled** on a user is **not** one of the triggers. Azure derives `active` from whether the user is in scope, not from the enabled flag.
+
+The common deprovisioning triggers:
+
+- **Scope = "Sync only assigned users and groups"**: removing the user from the app's **Users and groups** list sends `active=false` at the next sync.
+- **Scope = "Sync all users and groups"**: deleting the user from Azure entirely sends `active=false` at the next sync.
+
+See [Provisioning scope and deprovisioning triggers](#provisioning-scope-and-deprovisioning-triggers) for the full picture and the "Prevent accidental deletion" safety net.
+
+### Group members are missing
+
+Group members are referenced by `externalId`. A user must have been synced and have an `externalId` set before they can be added to a group. Check the user provisioning log first — group sync runs after user sync.
+
+### Check backend logs
+
+For server-side errors:
+
+```bash
+docker compose logs backend | grep scim
+```
+
+SCIM-specific log entries are tagged with `scim.user.*` or `scim.group.*`.
+
+---
+
+## Security considerations
+
+- **Token rotation**: SCIM tokens do not expire. Rotate them periodically using the revoke + create flow.
+- **Storage**: tokens are stored as SHA-256 hashes only. Treat the raw token as a long-lived credential.
+- **Transport**: always use HTTPS. The token is sent in the `Authorization` header on every request.
+- **Scope**: a SCIM token is scoped to a single tenant. It cannot access `/api/v1/`.
+- **Network**: if your Eneo deployment is on a private network, ensure that the IdP can reach `/scim/v2` either via VPN, IP allowlisting, or a public reverse proxy with TLS.
+
+---
+
+## Need Help?
+
+- See the [Authentication & OIDC guide](/guides/authentication) for SSO setup that pairs with SCIM
+- Check the [Audit Logging guide](/guides/audit-logging) to monitor SCIM activity
+- Visit [GitHub Issues](https://github.com/eneo-ai/eneo/issues)
+- Contact us at digitalisering@sundsvall.se (public sector organizations)

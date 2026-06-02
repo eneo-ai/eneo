@@ -54,6 +54,9 @@ class Tenants(BasePublic):
     favorite_providers: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, server_default="[]"
     )
+    scim_token_hash: Mapped[Optional[str]] = mapped_column(
+        String(64), unique=True, index=True
+    )
 
     modules: Mapped[list[Modules]] = relationship(secondary="tenants_modules")
     sharepoint_app: Mapped[Optional["TenantSharePointApp"]] = relationship(

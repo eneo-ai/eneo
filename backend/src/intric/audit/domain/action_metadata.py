@@ -116,6 +116,51 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "Modul aktiverad",
         "description_sv": "Loggar när en modul aktiveras för organisationen",
     },
+    # SCIM Provisioning Actions (11)
+    ActionType.SCIM_USER_PROVISIONED.value: {
+        "name_sv": "SCIM-användare etablerad",
+        "description_sv": "Loggar när en användare etableras via SCIM",
+    },
+    ActionType.SCIM_USER_RECONCILED.value: {
+        "name_sv": "SCIM-användare avstämd",
+        "description_sv": "Loggar när en SCIM-användare matchas mot en befintlig användare",
+    },
+    ActionType.SCIM_USER_REACTIVATED.value: {
+        "name_sv": "SCIM-användare återaktiverad",
+        "description_sv": "Loggar när en avetablerad SCIM-användare återaktiveras",
+    },
+    ActionType.SCIM_USER_DEPROVISIONED.value: {
+        "name_sv": "SCIM-användare avetablerad",
+        "description_sv": "Loggar när en användare avetableras via SCIM",
+    },
+    ActionType.SCIM_USER_UPDATED.value: {
+        "name_sv": "SCIM-användare uppdaterad",
+        "description_sv": "Loggar ändringar av en SCIM-användare",
+    },
+    ActionType.SCIM_GROUP_CREATED.value: {
+        "name_sv": "SCIM-grupp skapad",
+        "description_sv": "Loggar när en grupp skapas via SCIM",
+    },
+    ActionType.SCIM_GROUP_REACTIVATED.value: {
+        "name_sv": "SCIM-grupp återaktiverad",
+        "description_sv": "Loggar när en raderad SCIM-grupp återaktiveras",
+    },
+    ActionType.SCIM_GROUP_UPDATED.value: {
+        "name_sv": "SCIM-grupp uppdaterad",
+        "description_sv": "Loggar ändringar av en SCIM-grupp",
+    },
+    ActionType.SCIM_GROUP_DELETED.value: {
+        "name_sv": "SCIM-grupp raderad",
+        "description_sv": "Loggar när en grupp raderas via SCIM",
+    },
+    ActionType.SCIM_TOKEN_CREATED.value: {
+        "name_sv": "SCIM-token skapad",
+        "description_sv": "Loggar när en SCIM-provisioneringstoken skapas",
+    },
+    ActionType.SCIM_TOKEN_REVOKED.value: {
+        "name_sv": "SCIM-token revokerad",
+        "description_sv": "Loggar när en SCIM-provisioneringstoken revokeras",
+    },
     # User Actions (41) - Assistants, Spaces, Apps, Files, etc.
     ActionType.ASSISTANT_CREATED.value: {
         "name_sv": "Assistent skapad",

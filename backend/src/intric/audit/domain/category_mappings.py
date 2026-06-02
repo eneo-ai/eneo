@@ -16,7 +16,7 @@ CATEGORY_DESCRIPTIONS = {
 
 # Map all ActionType constants to categories (using string values as keys)
 CATEGORY_MAPPINGS = {
-    # Admin Actions (23 actions)
+    # Admin Actions (33 actions)
     ActionType.USER_CREATED.value: "admin_actions",
     ActionType.USER_DELETED.value: "admin_actions",
     ActionType.USER_UPDATED.value: "admin_actions",
@@ -42,6 +42,18 @@ CATEGORY_MAPPINGS = {
     ActionType.FEDERATION_UPDATED.value: "admin_actions",
     ActionType.MODULE_ADDED.value: "admin_actions",
     ActionType.MODULE_ADDED_TO_TENANT.value: "admin_actions",
+    # SCIM Provisioning Actions (11 actions)
+    ActionType.SCIM_USER_PROVISIONED.value: "admin_actions",
+    ActionType.SCIM_USER_RECONCILED.value: "admin_actions",
+    ActionType.SCIM_USER_REACTIVATED.value: "admin_actions",
+    ActionType.SCIM_USER_DEPROVISIONED.value: "admin_actions",
+    ActionType.SCIM_USER_UPDATED.value: "admin_actions",
+    ActionType.SCIM_GROUP_CREATED.value: "admin_actions",
+    ActionType.SCIM_GROUP_REACTIVATED.value: "admin_actions",
+    ActionType.SCIM_GROUP_UPDATED.value: "admin_actions",
+    ActionType.SCIM_GROUP_DELETED.value: "admin_actions",
+    ActionType.SCIM_TOKEN_CREATED.value: "admin_actions",
+    ActionType.SCIM_TOKEN_REVOKED.value: "admin_actions",
     # User Actions (37 actions)
     ActionType.ASSISTANT_CREATED.value: "user_actions",
     ActionType.ASSISTANT_UPDATED.value: "user_actions",
