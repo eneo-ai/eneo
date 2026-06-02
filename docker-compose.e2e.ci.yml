@@ -1,0 +1,129 @@
+# Portable E2E stack for CI (and any machine without the devcontainer image).
+#
+# Same shape as docker-compose.e2e.yml but self-provisioning: it BUILDS the
+# backend from backend/Dockerfile instead of reusing the devcontainer image, and
+# runs the mock on a plain python image — so it needs nothing pre-existing on the
+# host. Service names match the local stack, so e2e/seed.py's mock endpoint
+# (http://e2e-mock-model:8200/v1) resolves unchanged.
+#
+#   docker compose -f docker-compose.e2e.ci.yml up -d --build --wait
+#   docker compose -f docker-compose.e2e.ci.yml down -v
+
+name: eneo-e2e
+
+services:
+  e2e-db:
+    image: pgvector/pgvector:pg13
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: eneo_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks: [e2e]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d eneo_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+
+  e2e-redis:
+    image: redis
+    networks: [e2e]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+
+  e2e-mock-model:
+    image: python:3.11-slim
+    command: ["python3", "/e2e/mock_model_server.py"]
+    volumes:
+      - ./e2e:/e2e:ro
+    networks: [e2e]
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(('127.0.0.1',8200)))"
+      interval: 2s
+      timeout: 3s
+      retries: 40
+
+  e2e-backend:
+    build:
+      context: ./backend
+    working_dir: /app
+    depends_on:
+      e2e-db:
+        condition: service_healthy
+      e2e-redis:
+        condition: service_healthy
+      e2e-mock-model:
+        condition: service_healthy
+    environment:
+      # Connections to the isolated services.
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST: e2e-db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: eneo_test
+      REDIS_HOST: e2e-redis
+      REDIS_PORT: "6379"
+      # No encryption → seeded provider credentials are plaintext (no real keys).
+      ENCRYPTION_KEY: ""
+      TENANT_CREDENTIALS_ENABLED: "false"
+      OPENAI_API_KEY: test-openai-key
+      ANTHROPIC_API_KEY: test-anthropic-key
+      AZURE_API_KEY: test-azure-key
+      MISTRAL_API_KEY: test-mistral-key
+      # App settings (mirror the CI env). JWT_SECRET must match the frontend.
+      API_PREFIX: /api/v1
+      API_KEY_LENGTH: "64"
+      API_KEY_HEADER_NAME: X-API-Key
+      JWT_AUDIENCE: test
+      JWT_ISSUER: test
+      JWT_EXPIRY_TIME: "3600"
+      JWT_ALGORITHM: HS256
+      JWT_SECRET: test_secret
+      JWT_TOKEN_PREFIX: Bearer
+      URL_SIGNING_KEY: test_key
+      UPLOAD_FILE_TO_SESSION_MAX_SIZE: "10485760"
+      UPLOAD_IMAGE_TO_SESSION_MAX_SIZE: "10485760"
+      UPLOAD_MAX_FILE_SIZE: "10485760"
+      TRANSCRIPTION_MAX_FILE_SIZE: "10485760"
+      MAX_IN_QUESTION: "1"
+      # Seeded login identity.
+      DEFAULT_TENANT_NAME: E2ETenant
+      DEFAULT_USER_EMAIL: e2e@example.com
+      DEFAULT_USER_PASSWORD: E2ePassword1!
+    command:
+      - bash
+      - -lc
+      - |
+        set -e
+        python init_db.py            # migrate (alembic upgrade head) + seed tenant/user
+        python /e2e/seed.py          # seed mock completion model
+        exec gunicorn src.intric.server.main:app \
+          --workers 1 --worker-class uvicorn.workers.UvicornWorker \
+          --bind 0.0.0.0:8000
+    volumes:
+      - ./e2e:/e2e:ro
+    ports:
+      - "8124:8000"
+    networks: [e2e]
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(('127.0.0.1',8000)))"
+      interval: 3s
+      timeout: 3s
+      retries: 50
+      start_period: 60s
+
+networks:
+  e2e:
+    name: eneo-e2e

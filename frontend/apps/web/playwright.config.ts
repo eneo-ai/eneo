@@ -24,6 +24,11 @@ export default defineConfig({
   // Specs only by default; the setup project opts into auth.setup.ts explicitly,
   // so the chromium project never re-runs the setup as a test.
   testMatch: /(.+\.)?(test|spec)\.[jt]s/,
+  // list: console output; html: full interactive report (uploaded as a CI
+  // artifact); github: inline PR annotations on failure (CI only).
+  reporter: process.env.CI
+    ? [["list"], ["html", { open: "never" }], ["github"]]
+    : [["list"], ["html", { open: "never" }]],
   use: {
     baseURL: `http://localhost:${PORT}`,
     trace: "on-first-retry"
@@ -48,7 +53,9 @@ export default defineConfig({
       // cookie-signing secret so the session cookie validates.
       ENEO_BACKEND_URL: BACKEND_URL,
       PUBLIC_ENEO_BACKEND_URL: BACKEND_URL,
-      JWT_SECRET: process.env.E2E_JWT_SECRET ?? "1234"
+      JWT_SECRET: process.env.E2E_JWT_SECRET ?? "1234",
+      // The production Svelte build exceeds Node's default heap (same flag CI uses).
+      NODE_OPTIONS: "--max-old-space-size=6144"
     }
   }
 });
