@@ -411,3 +411,50 @@ class TestBulkIdReference:
         assert ops[0]["status"] == "201"
         assert ops[1]["status"] == "204"
         mock_svc.delete_user.assert_called_once()
+
+    async def test_bulkid_resolved_in_group_member_value(self, client: AsyncClient):
+        """A bulkId reference inside Group.members[].value (not just the path)
+        must be resolved to the created user's real id before it reaches the
+        group service — otherwise UUID('bulkId:newuser') blows up with a 500."""
+        user = _make_scim_user()
+        group = _make_scim_group()
+        user_svc = AsyncMock()
+        user_svc.create_user.return_value = user
+        group_svc = AsyncMock()
+        group_svc.create_group.return_value = group
+        scim_app.dependency_overrides[get_scim_user_service] = lambda: user_svc
+        scim_app.dependency_overrides[get_scim_group_service] = lambda: group_svc
+        try:
+            res = await client.post(
+                "/scim/v2/Bulk",
+                json={
+                    "Operations": [
+                        {
+                            "method": "POST",
+                            "path": "/Users",
+                            "bulkId": "newuser",
+                            "data": {"userName": "jane@example.com"},
+                        },
+                        {
+                            "method": "POST",
+                            "path": "/Groups",
+                            "bulkId": "newgroup",
+                            "data": {
+                                "displayName": "Engineering",
+                                "members": [{"value": "bulkId:newuser"}],
+                            },
+                        },
+                    ]
+                },
+                headers=AUTH,
+            )
+        finally:
+            scim_app.dependency_overrides.pop(get_scim_user_service, None)
+            scim_app.dependency_overrides.pop(get_scim_group_service, None)
+        ops = res.json()["Operations"]
+        assert ops[0]["status"] == "201"
+        assert ops[1]["status"] == "201"
+        group_svc.create_group.assert_called_once()
+        created = group_svc.create_group.call_args.args[0]
+        # bulkId:newuser resolved to the real user id, not passed through raw
+        assert [m.value for m in created.members] == [user.id]

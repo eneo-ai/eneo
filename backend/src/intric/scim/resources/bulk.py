@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Annotated
+from typing import Annotated, Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
@@ -44,6 +44,31 @@ _PATH_RE = re.compile(r"^/(Users|Groups)(?:/([^/]+))?$")
 
 def _resolve_path(path: str, bulk_id_map: dict[str, str]) -> str:
     return _BULK_ID_RE.sub(lambda m: bulk_id_map.get(m.group(1), m.group(0)), path)
+
+
+def _resolve_bulk_ids(value: Any, bulk_id_map: dict[str, str]) -> Any:
+    """Recursively resolve ``bulkId:<temp-id>`` references inside operation data.
+
+    RFC 7644 §3.7.2 lets one operation reference a resource created earlier in
+    the same request via a ``bulkId:<temp-id>`` token wherever a resource
+    identifier is expected — most importantly ``Group.members[].value``, so a
+    single request can create a user and add it to a group. Resolving only the
+    URL/path (``_resolve_path``) misses those in-body references, leaving the
+    group service to choke on ``UUID("bulkId:u1")``. We substitute against the
+    same map; an unresolved token is left untouched so the downstream UUID
+    parse fails with a clear error rather than silently dropping the member.
+    """
+    if isinstance(value, str):
+        return _BULK_ID_RE.sub(lambda m: bulk_id_map.get(m.group(1), m.group(0)), value)
+    if isinstance(value, list):
+        items: list[Any] = cast("list[Any]", value)
+        return [_resolve_bulk_ids(item, bulk_id_map) for item in items]
+    if isinstance(value, dict):
+        entries: dict[str, Any] = cast("dict[str, Any]", value)
+        return {
+            key: _resolve_bulk_ids(val, bulk_id_map) for key, val in entries.items()
+        }
+    return value
 
 
 def _scim_error_response(
@@ -131,6 +156,9 @@ async def _execute_operation(
 ) -> BulkOperationResponse:
     method = op.method.upper()
     path = _resolve_path(op.path, bulk_id_map)
+    # Resolve bulkId references in the body too (e.g. Group.members[].value),
+    # not just the path — see _resolve_bulk_ids.
+    op.data = _resolve_bulk_ids(op.data, bulk_id_map)
     match = _PATH_RE.match(path)
     if not match:
         return _scim_error_response(method, op.bulkId, 400, f"Invalid path: {op.path}")
