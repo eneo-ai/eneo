@@ -84,6 +84,14 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "API-nyckel roterad",
         "description_sv": "Loggar när en API-nyckel roteras",
     },
+    ActionType.API_KEY_EXPIRATION_EXTENDED.value: {
+        "name_sv": "API-nyckels giltighet förlängd",
+        "description_sv": "Loggar när en API-nyckels giltighetstid förlängs",
+    },
+    ActionType.API_KEY_PURGED.value: {
+        "name_sv": "API-nyckel rensad",
+        "description_sv": "Loggar när en utgången API-nyckel rensas permanent",
+    },
     ActionType.API_KEY_EXPIRED.value: {
         "name_sv": "API-nyckel utgången",
         "description_sv": "Loggar när en API-nyckel löper ut",
@@ -107,6 +115,51 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
     ActionType.MODULE_ADDED_TO_TENANT.value: {
         "name_sv": "Modul aktiverad",
         "description_sv": "Loggar när en modul aktiveras för organisationen",
+    },
+    # SCIM Provisioning Actions (11)
+    ActionType.SCIM_USER_PROVISIONED.value: {
+        "name_sv": "SCIM-användare etablerad",
+        "description_sv": "Loggar när en användare etableras via SCIM",
+    },
+    ActionType.SCIM_USER_RECONCILED.value: {
+        "name_sv": "SCIM-användare avstämd",
+        "description_sv": "Loggar när en SCIM-användare matchas mot en befintlig användare",
+    },
+    ActionType.SCIM_USER_REACTIVATED.value: {
+        "name_sv": "SCIM-användare återaktiverad",
+        "description_sv": "Loggar när en avetablerad SCIM-användare återaktiveras",
+    },
+    ActionType.SCIM_USER_DEPROVISIONED.value: {
+        "name_sv": "SCIM-användare avetablerad",
+        "description_sv": "Loggar när en användare avetableras via SCIM",
+    },
+    ActionType.SCIM_USER_UPDATED.value: {
+        "name_sv": "SCIM-användare uppdaterad",
+        "description_sv": "Loggar ändringar av en SCIM-användare",
+    },
+    ActionType.SCIM_GROUP_CREATED.value: {
+        "name_sv": "SCIM-grupp skapad",
+        "description_sv": "Loggar när en grupp skapas via SCIM",
+    },
+    ActionType.SCIM_GROUP_REACTIVATED.value: {
+        "name_sv": "SCIM-grupp återaktiverad",
+        "description_sv": "Loggar när en raderad SCIM-grupp återaktiveras",
+    },
+    ActionType.SCIM_GROUP_UPDATED.value: {
+        "name_sv": "SCIM-grupp uppdaterad",
+        "description_sv": "Loggar ändringar av en SCIM-grupp",
+    },
+    ActionType.SCIM_GROUP_DELETED.value: {
+        "name_sv": "SCIM-grupp raderad",
+        "description_sv": "Loggar när en grupp raderas via SCIM",
+    },
+    ActionType.SCIM_TOKEN_CREATED.value: {
+        "name_sv": "SCIM-token skapad",
+        "description_sv": "Loggar när en SCIM-provisioneringstoken skapas",
+    },
+    ActionType.SCIM_TOKEN_REVOKED.value: {
+        "name_sv": "SCIM-token revokerad",
+        "description_sv": "Loggar när en SCIM-provisioneringstoken revokeras",
     },
     # User Actions (41) - Assistants, Spaces, Apps, Files, etc.
     ActionType.ASSISTANT_CREATED.value: {
@@ -376,7 +429,11 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "Systemunderhåll",
         "description_sv": "Loggar planerat systemunderhåll",
     },
-    # Audit Access (2)
+    # Audit Access (3)
+    ActionType.AUDIT_SESSION_CREATED.value: {
+        "name_sv": "Granskningssession skapad",
+        "description_sv": "Loggar när en session för granskningsåtkomst skapas",
+    },
     ActionType.AUDIT_LOG_VIEWED.value: {
         "name_sv": "Granskningsloggar visade",
         "description_sv": "Loggar när granskningsloggar visas",
