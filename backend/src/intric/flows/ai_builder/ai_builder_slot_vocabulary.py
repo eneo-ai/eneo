@@ -1,15 +1,28 @@
-"""Canonical vocabulary of requirement-slot names emitted by AI Builder
-plan-discovery.
+"""Canonical vocabulary of AI Builder discovery slot names and classifiers.
 
 Pure leaf — imports nothing from any ``intric.flows.ai_builder.*`` sibling;
 stdlib only. Consumers such as ``question_catalog`` and ``pattern_registry``
-may depend on this module without dragging the resolver's transitive
-dependency graph into the leaf layer. The purity invariant is pinned by
-the unit test in ``test_ai_builder_slot_vocabulary.py`` and by the
-importlinter rule that forbids non-stdlib imports into this module.
+may depend on this module without dragging the resolver's transitive graph
+into the leaf layer. The purity invariant is pinned by the unit test in
+``test_ai_builder_slot_vocabulary.py`` and by the importlinter rule that
+forbids non-stdlib imports into this module.
 """
 
 from __future__ import annotations
+
+from typing import Literal
+
+DiscoveryFamily = Literal[
+    "case_scope",
+    "input_shape",
+    "output_artifact",
+    "workflow_outcome",
+    "output_style",
+    "structured_reuse",
+    "runtime_metadata",
+]
+
+DiscoveryImpact = Literal["architecture", "quality", "polish"]
 
 KNOWN_REQUIREMENT_SLOT_NAMES: frozenset[str] = frozenset(
     {

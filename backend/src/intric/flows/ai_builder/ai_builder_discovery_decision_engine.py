@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
+
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     question_answer_from_metadata,
     question_answer_question_id,
@@ -10,7 +13,6 @@ from intric.flows.ai_builder.ai_builder_discovery_families import (
 from intric.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryCandidate,
     DiscoveryConfidence,
-    DiscoveryImpact,
     DiscoveryIssue,
     DiscoveryProfile,
     DiscoveryResolvedBy,
@@ -39,27 +41,43 @@ from intric.flows.ai_builder.ai_builder_slot_classifier import (
     UNKNOWN_SLOT_VALUE,
     SlotClassificationResult,
 )
-from intric.flows.ai_builder.question_catalog import slot_name_for_legacy_question_id
+from intric.flows.ai_builder.ai_builder_slot_vocabulary import DiscoveryImpact
+from intric.flows.ai_builder.question_catalog import (
+    QUESTION_CATALOG,
+    legacy_question_id_for_slot,
+    slot_name_for_legacy_question_id,
+)
 
-_QUESTION_IMPACT: dict[str, DiscoveryImpact] = {
+_NON_SLOT_QUESTION_IMPACT: dict[str, DiscoveryImpact] = {
+    # Cross-slot contradiction gate; deciding wrong changes the flow shape.
     "comparison_scope_conflict": "architecture",
+    # Legacy processing-scope question; quality guidance rather than topology.
     "case_scope": "quality",
-    "input_material_mode": "architecture",
+    # Cross-input architecture conflict; deciding wrong changes the flow shape.
     "flow_input_architecture": "architecture",
+    # Source-document kind refinement; improves reader quality.
     "document_kind": "quality",
-    "document_material_scope": "quality",
+    # Reference-source comparison gate; deciding wrong changes the flow shape.
     "comparison_scope": "architecture",
-    "structured_io_contract": "architecture",
-    "post_processing_goal": "quality",
-    "final_output_mode": "architecture",
-    "docx_output_mode": "architecture",
-    "pdf_generation_mode": "architecture",
+    # Reader/audience style refinement, so it stays non-blocking polish.
     "output_reader": "polish",
+    # Output-scope style refinement, so it stays non-blocking polish.
     "final_output_scope": "polish",
+    # PDF style refinement after terminal output is already known.
     "final_pdf_type": "quality",
-    "structured_analysis_need": "quality",
-    "runtime_metadata_fields": "quality",
 }
+
+_CATALOG_QUESTION_IMPACT: dict[str, DiscoveryImpact] = {
+    legacy_question_id_for_slot(template.id): template.impact
+    for template in QUESTION_CATALOG.values()
+}
+
+_QUESTION_IMPACT: Mapping[str, DiscoveryImpact] = MappingProxyType(
+    {
+        **_NON_SLOT_QUESTION_IMPACT,
+        **_CATALOG_QUESTION_IMPACT,
+    }
+)
 
 
 def apply_discovery_decision_engine(

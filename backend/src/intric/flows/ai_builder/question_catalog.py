@@ -44,6 +44,8 @@ from typing import Literal
 
 from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
+    DiscoveryFamily,
+    DiscoveryImpact,
 )
 
 QUESTION_CATALOG_VERSION: int = 1
@@ -97,6 +99,10 @@ class QuestionTemplate:
     Today's `_build_catalog` only accepts exact slot-name keys; supporting
     multiple questions per slot would require an explicit key shape and a
     matching catalog build rule.
+
+    `family`, `priority_base`, and `impact` are static discovery metadata
+    for slot-backed questions. Lower priority wins; non-slot gates may
+    interleave between catalog priorities in their own explicit maps.
     """
 
     id: str
@@ -107,6 +113,9 @@ class QuestionTemplate:
     options: tuple[QuestionOption, ...]
     worked_examples_sv: tuple[str, ...]
     worked_examples_en: tuple[str, ...]
+    family: DiscoveryFamily
+    priority_base: int
+    impact: DiscoveryImpact
     exposure: QuestionExposure = "user_requirement"
 
     def __post_init__(self) -> None:
@@ -137,6 +146,10 @@ class QuestionTemplate:
             raise ValueError(
                 f"QuestionTemplate {self.id!r}: worked_examples_en must "
                 "contain >=1 entry"
+            )
+        if self.priority_base < 0:
+            raise ValueError(
+                f"QuestionTemplate {self.id!r}: priority_base must be non-negative"
             )
         for example in self.worked_examples_sv:
             if not example.strip():
@@ -240,6 +253,9 @@ _PRIMARY_RUNTIME_INPUT = QuestionTemplate(
         "The user pastes a report as text.",
         "Another system sends in a JSON payload.",
     ),
+    family="input_shape",
+    priority_base=20,
+    impact="architecture",
 )
 
 
@@ -299,6 +315,9 @@ _TERMINAL_OUTPUT = QuestionTemplate(
         "Summary and assessment as a readable memo.",
         "Filled DOCX template delivered to the recipient.",
     ),
+    family="output_artifact",
+    priority_base=30,
+    impact="architecture",
 )
 
 
@@ -340,6 +359,9 @@ _DOCX_OUTPUT_MODE = QuestionTemplate(
         "Generated report without a template.",
         "Filling the organization's DOCX template.",
     ),
+    family="output_artifact",
+    priority_base=70,
+    impact="architecture",
 )
 
 
@@ -389,6 +411,9 @@ _PDF_GENERATION_MODE = QuestionTemplate(
         "Generated summary PDF report.",
         "Requested fixed PDF layout for publication.",
     ),
+    family="output_artifact",
+    priority_base=72,
+    impact="architecture",
 )
 
 
@@ -443,6 +468,9 @@ _DOCUMENT_MATERIAL_SCOPE = QuestionTemplate(
         "One report per run.",
         "A document package with primary document, response, and attachments.",
     ),
+    family="input_shape",
+    priority_base=50,
+    impact="quality",
 )
 
 
@@ -534,6 +562,9 @@ _POST_PROCESSING_GOAL = QuestionTemplate(
         "Transcribe the meeting and extract decisions, next steps, and owners.",
         "Read JSON and return fields according to a schema.",
     ),
+    family="workflow_outcome",
+    priority_base=28,
+    impact="quality",
 )
 
 
@@ -607,6 +638,9 @@ _STRUCTURED_IO_CONTRACT = QuestionTemplate(
         "Map incoming order JSON to the organization's export schema.",
         "Validate the payload against rules and return errors as JSON.",
     ),
+    family="workflow_outcome",
+    priority_base=27,
+    impact="architecture",
 )
 
 
@@ -651,6 +685,9 @@ _STRUCTURED_ANALYSIS_NEED = QuestionTemplate(
         "Extract party, date, and amount before the final report.",
         "Write the analysis directly as prose without an intermediate step.",
     ),
+    family="structured_reuse",
+    priority_base=95,
+    impact="quality",
     exposure="planner_internal",
 )
 
@@ -709,6 +746,9 @@ _RUNTIME_METADATA_FIELDS = QuestionTemplate(
         "Runtime fields for reference number and responsible unit.",
         "No extra metadata — the flow works only with the uploaded material.",
     ),
+    family="runtime_metadata",
+    priority_base=100,
+    impact="quality",
 )
 
 

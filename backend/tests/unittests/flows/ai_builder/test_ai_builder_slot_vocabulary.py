@@ -21,6 +21,8 @@ from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
     LLM_RESOLVABLE_SLOT_NAMES,
     NON_LLM_RESOLVABLE_SLOT_NAMES,
+    DiscoveryFamily,
+    DiscoveryImpact,
 )
 
 
@@ -59,6 +61,28 @@ class TestSlotVocabularyShape:
 
     def test_llm_resolvable_slots_match_persisted_metadata_type(self) -> None:
         assert frozenset(get_args(LLMResolvableSlotName)) == LLM_RESOLVABLE_SLOT_NAMES
+
+    def test_discovery_family_values_are_pinned(self) -> None:
+        assert frozenset(get_args(DiscoveryFamily)) == frozenset(
+            {
+                "case_scope",
+                "input_shape",
+                "output_artifact",
+                "workflow_outcome",
+                "output_style",
+                "structured_reuse",
+                "runtime_metadata",
+            }
+        )
+
+    def test_discovery_impact_values_are_pinned(self) -> None:
+        assert frozenset(get_args(DiscoveryImpact)) == frozenset(
+            {
+                "architecture",
+                "quality",
+                "polish",
+            }
+        )
 
 
 class TestLeafPurity:

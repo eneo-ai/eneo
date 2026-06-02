@@ -1,29 +1,47 @@
 from __future__ import annotations
 
-from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryIssue
+from collections.abc import Mapping
+from types import MappingProxyType
 
-DISCOVERY_ISSUE_PRIORITY: dict[str, int] = {
+from intric.flows.ai_builder.ai_builder_discovery_models import DiscoveryIssue
+from intric.flows.ai_builder.question_catalog import (
+    QUESTION_CATALOG,
+    legacy_question_id_for_slot,
+)
+
+_NON_SLOT_DISCOVERY_ISSUE_PRIORITY: dict[str, int] = {
+    # Cross-slot contradiction gate; must precede ordinary clarification.
     "comparison_scope_conflict": 0,
+    # Legacy processing-scope question; not a named architectural slot today.
     "case_scope": 10,
     # Unsupported outbound delivery is a capability blocker; surface that
     # before asking unrelated input/output refinement questions.
     "external_delivery_unsupported": 15,
-    "input_material_mode": 20,
+    # Cross-input architecture conflict; wider than the primary input slot.
     "flow_input_architecture": 25,
-    "structured_io_contract": 27,
-    "post_processing_goal": 28,
-    "final_output_mode": 30,
+    # Source-document kind refinement; currently lives in discovery rules.
     "document_kind": 40,
-    "document_material_scope": 50,
+    # Reference-source comparison gate; no single slot owns it yet.
     "comparison_scope": 60,
-    "docx_output_mode": 70,
-    "pdf_generation_mode": 72,
+    # PDF style refinement after terminal output is already known.
     "final_pdf_type": 75,
+    # Reader/audience style refinement, not an output artifact slot.
     "output_reader": 80,
+    # Output-scope style refinement, not a terminal artifact choice.
     "final_output_scope": 90,
-    "structured_analysis_need": 95,
-    "runtime_metadata_fields": 100,
 }
+
+_CATALOG_DISCOVERY_ISSUE_PRIORITY: dict[str, int] = {
+    legacy_question_id_for_slot(template.id): template.priority_base
+    for template in QUESTION_CATALOG.values()
+}
+
+DISCOVERY_ISSUE_PRIORITY: Mapping[str, int] = MappingProxyType(
+    {
+        **_NON_SLOT_DISCOVERY_ISSUE_PRIORITY,
+        **_CATALOG_DISCOVERY_ISSUE_PRIORITY,
+    }
+)
 
 
 def sort_discovery_issues(issues: list[DiscoveryIssue]) -> list[DiscoveryIssue]:

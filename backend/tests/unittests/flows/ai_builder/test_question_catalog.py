@@ -14,11 +14,21 @@ That surface stays on the Pattern Registry and the FCM.
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from typing import get_args
 
 import pytest
 
+from intric.flows.ai_builder.ai_builder_discovery_decision_engine import (
+    _QUESTION_IMPACT,
+)
+from intric.flows.ai_builder.ai_builder_discovery_families import QUESTION_FAMILY
+from intric.flows.ai_builder.ai_builder_discovery_priority import (
+    DISCOVERY_ISSUE_PRIORITY,
+)
 from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
+    DiscoveryFamily,
+    DiscoveryImpact,
 )
 from intric.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from intric.flows.ai_builder.question_catalog import (
@@ -34,6 +44,39 @@ from intric.flows.ai_builder.question_catalog import (
     render_question,
     slot_name_for_legacy_question_id,
 )
+
+_SLOT_DERIVED_ISSUE_IDS = frozenset(
+    legacy_question_id_for_slot(slot_name) for slot_name in KNOWN_REQUIREMENT_SLOT_NAMES
+)
+
+_NON_SLOT_PRIORITY_ISSUE_IDS = frozenset(
+    {
+        "comparison_scope_conflict",
+        "case_scope",
+        "external_delivery_unsupported",
+        "flow_input_architecture",
+        "document_kind",
+        "comparison_scope",
+        "final_pdf_type",
+        "output_reader",
+        "final_output_scope",
+    }
+)
+
+_NON_SLOT_FAMILY_ISSUE_IDS = frozenset(
+    {
+        "comparison_scope_conflict",
+        "case_scope",
+        "flow_input_architecture",
+        "document_kind",
+        "comparison_scope",
+        "final_pdf_type",
+        "output_reader",
+        "final_output_scope",
+    }
+)
+
+_NON_SLOT_IMPACT_ISSUE_IDS = _NON_SLOT_FAMILY_ISSUE_IDS
 
 
 def _valid_option(
@@ -55,6 +98,9 @@ def _valid_template(
     *,
     template_id: str = "primary_runtime_input",
     options: tuple[QuestionOption, ...] | None = None,
+    family: DiscoveryFamily = "input_shape",
+    priority_base: int = 20,
+    impact: DiscoveryImpact = "architecture",
 ) -> QuestionTemplate:
     return QuestionTemplate(
         id=template_id,
@@ -65,6 +111,9 @@ def _valid_template(
         options=options if options is not None else (_valid_option(),),
         worked_examples_sv=("Exempel ett",),
         worked_examples_en=("Example one",),
+        family=family,
+        priority_base=priority_base,
+        impact=impact,
     )
 
 
@@ -160,6 +209,9 @@ class TestQuestionTemplate:
                 options=(_valid_option(),),
                 worked_examples_sv=("Exempel",),
                 worked_examples_en=("Example",),
+                family="input_shape",
+                priority_base=20,
+                impact="architecture",
             )
 
     def test_template_rejects_empty_question_sv(self) -> None:
@@ -173,6 +225,9 @@ class TestQuestionTemplate:
                 options=(_valid_option(),),
                 worked_examples_sv=("Exempel",),
                 worked_examples_en=("Example",),
+                family="input_shape",
+                priority_base=20,
+                impact="architecture",
             )
 
     def test_template_rejects_empty_question_en(self) -> None:
@@ -186,6 +241,9 @@ class TestQuestionTemplate:
                 options=(_valid_option(),),
                 worked_examples_sv=("Exempel",),
                 worked_examples_en=("Example",),
+                family="input_shape",
+                priority_base=20,
+                impact="architecture",
             )
 
     def test_template_rejects_empty_help_sv(self) -> None:
@@ -199,6 +257,9 @@ class TestQuestionTemplate:
                 options=(_valid_option(),),
                 worked_examples_sv=("Exempel",),
                 worked_examples_en=("Example",),
+                family="input_shape",
+                priority_base=20,
+                impact="architecture",
             )
 
     def test_template_rejects_empty_help_en(self) -> None:
@@ -212,6 +273,9 @@ class TestQuestionTemplate:
                 options=(_valid_option(),),
                 worked_examples_sv=("Exempel",),
                 worked_examples_en=("Example",),
+                family="input_shape",
+                priority_base=20,
+                impact="architecture",
             )
 
     def test_template_rejects_empty_worked_examples_sv(self) -> None:
@@ -225,6 +289,9 @@ class TestQuestionTemplate:
                 options=(_valid_option(),),
                 worked_examples_sv=(),
                 worked_examples_en=("Example",),
+                family="input_shape",
+                priority_base=20,
+                impact="architecture",
             )
 
     def test_template_rejects_empty_worked_examples_en(self) -> None:
@@ -238,6 +305,9 @@ class TestQuestionTemplate:
                 options=(_valid_option(),),
                 worked_examples_sv=("Exempel",),
                 worked_examples_en=(),
+                family="input_shape",
+                priority_base=20,
+                impact="architecture",
             )
 
     def test_template_rejects_blank_worked_example_sv(self) -> None:
@@ -251,6 +321,9 @@ class TestQuestionTemplate:
                 options=(_valid_option(),),
                 worked_examples_sv=("Exempel ett", "   "),
                 worked_examples_en=("Example one",),
+                family="input_shape",
+                priority_base=20,
+                impact="architecture",
             )
 
     def test_template_rejects_blank_worked_example_en(self) -> None:
@@ -264,6 +337,9 @@ class TestQuestionTemplate:
                 options=(_valid_option(),),
                 worked_examples_sv=("Exempel ett",),
                 worked_examples_en=("Example one", ""),
+                family="input_shape",
+                priority_base=20,
+                impact="architecture",
             )
 
     def test_template_rejects_no_options(self) -> None:
@@ -280,6 +356,9 @@ class TestQuestionTemplate:
                 options=(),
                 worked_examples_sv=("Exempel",),
                 worked_examples_en=("Example",),
+                family="input_shape",
+                priority_base=20,
+                impact="architecture",
             )
 
     def test_template_rejects_duplicate_option_ids(self) -> None:
@@ -299,7 +378,14 @@ class TestQuestionTemplate:
                 ),
                 worked_examples_sv=("Exempel",),
                 worked_examples_en=("Example",),
+                family="input_shape",
+                priority_base=20,
+                impact="architecture",
             )
+
+    def test_template_rejects_negative_priority_base(self) -> None:
+        with pytest.raises(ValueError, match="priority_base"):
+            _valid_template(priority_base=-1)
 
 
 class TestCatalogInvariants:
@@ -367,6 +453,45 @@ class TestCatalogInvariants:
         assert slot_name_for_legacy_question_id("final_output_mode") == (
             "terminal_output"
         )
+
+
+class TestCatalogStaticDiscoveryMetadata:
+    def test_every_template_declares_static_discovery_metadata(self) -> None:
+        families = frozenset(get_args(DiscoveryFamily))
+        impacts = frozenset(get_args(DiscoveryImpact))
+
+        for template in QUESTION_CATALOG.values():
+            assert template.family in families, (
+                f"{template.id}: unknown discovery family {template.family!r}"
+            )
+            assert template.priority_base >= 0, (
+                f"{template.id}: priority_base must be non-negative"
+            )
+            assert template.impact in impacts, (
+                f"{template.id}: unknown discovery impact {template.impact!r}"
+            )
+
+    def test_slot_issue_metadata_is_derived_from_catalog(self) -> None:
+        for slot_name, template in QUESTION_CATALOG.items():
+            issue_id = legacy_question_id_for_slot(slot_name)
+            assert QUESTION_FAMILY[issue_id] == template.family
+            assert DISCOVERY_ISSUE_PRIORITY[issue_id] == template.priority_base
+            assert _QUESTION_IMPACT[issue_id] == template.impact
+
+    def test_priority_map_separates_slot_and_non_slot_issue_ids(self) -> None:
+        expected_issue_ids = _SLOT_DERIVED_ISSUE_IDS | _NON_SLOT_PRIORITY_ISSUE_IDS
+
+        assert frozenset(DISCOVERY_ISSUE_PRIORITY) == expected_issue_ids
+
+    def test_family_map_separates_slot_and_non_slot_issue_ids(self) -> None:
+        expected_issue_ids = _SLOT_DERIVED_ISSUE_IDS | _NON_SLOT_FAMILY_ISSUE_IDS
+
+        assert frozenset(QUESTION_FAMILY) == expected_issue_ids
+
+    def test_impact_map_separates_slot_and_non_slot_issue_ids(self) -> None:
+        expected_issue_ids = _SLOT_DERIVED_ISSUE_IDS | _NON_SLOT_IMPACT_ISSUE_IDS
+
+        assert frozenset(_QUESTION_IMPACT) == expected_issue_ids
 
 
 class TestBilingualContract:

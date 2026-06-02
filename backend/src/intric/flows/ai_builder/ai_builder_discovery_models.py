@@ -17,13 +17,18 @@ from intric.flows.ai_builder.ai_builder_event_models import StructuredQuestionPa
 from intric.flows.ai_builder.ai_builder_input_architecture_policy import (
     InputIntentResolution,
 )
+from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
+    DiscoveryFamily as DiscoveryFamily,
+)
+from intric.flows.ai_builder.ai_builder_slot_vocabulary import (
+    DiscoveryImpact,
+)
 from intric.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
 from intric.flows.ai_builder.question_catalog import QuestionExposure
 
 DiscoverySeverity = Literal["blocking", "info"]
 DiscoveryLanguage = Literal["sv", "en"]
 QuestionLevel = Literal["blocking", "high_value", "nice_to_have"]
-DiscoveryImpact = Literal["architecture", "quality", "polish"]
 DiscoveryConfidence = Literal["high", "medium", "low"]
 DiscoveryResolvedBy = Literal[
     "structured_answer",
