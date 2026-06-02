@@ -76,6 +76,7 @@ class CompletionModelMigrationService:
         *,
         user: "UserInDB",
         confirm_migration: bool = False,
+        force_override: bool = False,
     ) -> MigrationResult:
         """Execute model migration with full safety checks and observability."""
         start_time = datetime.now(timezone.utc)
@@ -91,6 +92,7 @@ class CompletionModelMigrationService:
                 "user_id": str(user.id),
                 "entity_types": entity_types,
                 "confirm_migration": confirm_migration,
+                "force_override": force_override,
             },
         )
 
@@ -272,13 +274,14 @@ class CompletionModelMigrationService:
                 extra={"migration_id": str(migration_id)},
             )
 
-            # Security blockers cannot be overridden with confirm_migration
+            # Security blockers cannot be overridden with confirm_migration —
+            # only the explicit force_override escape hatch bypasses them.
             has_blockers = any(
                 w.startswith("security_classification_insufficient")
                 for w in validation_result.warning_codes
             )
 
-            if has_blockers:
+            if has_blockers and not force_override:
                 duration = (datetime.now(timezone.utc) - start_time).total_seconds()
                 await self.migration_history_repo.update_migration_history(
                     migration_id=migration_id,
@@ -293,6 +296,18 @@ class CompletionModelMigrationService:
                 )
                 raise ValidationException(
                     f"Migration blocked by security classification: {', '.join(validation_result.warnings)}"
+                )
+
+            if has_blockers and force_override:
+                self.logger.warning(
+                    f"User force-overrode security classification blocker: {', '.join(validation_result.warnings)}",
+                    extra={
+                        "migration_id": str(migration_id),
+                        "from_model_id": str(from_model_id),
+                        "to_model_id": str(to_model_id),
+                        "force_override": True,
+                        "warnings": validation_result.warnings,
+                    },
                 )
 
             # Other compatibility issues can be overridden with confirm_migration
@@ -794,8 +809,14 @@ class CompletionModelMigrationService:
                 select(Users.id).where(Users.tenant_id == tenant_id)
             )
         elif entity_type in {"assistant_template", "app_template"}:
-            # Global entities - no tenant filtering needed
-            return true()
+            # Templates carry their own tenant_id and soft-delete marker. Scope
+            # strictly to this tenant and skip soft-deleted rows so a migration
+            # never counts or rebinds another tenant's or an already-deleted
+            # template. Keep in sync with the usage service's copy.
+            return and_(
+                table.tenant_id == tenant_id,
+                table.deleted_at.is_(None),
+            )
         elif entity_type == "spaces":
             # Spaces have direct tenant_id field
             return table.tenant_id == tenant_id

@@ -45,6 +45,9 @@ class ModelMigrationRequest(BaseModel):
     to_model_id: UUID
     entity_types: Optional[List[str]] = None  # If None, migrate all types
     confirm_migration: bool = False
+    # Overrides hard blockers (security classification) that confirm_migration
+    # cannot bypass. Admin-only escape hatch.
+    force_override: bool = False
 
 
 class MigrationResult(BaseModel):

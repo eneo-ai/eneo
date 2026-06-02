@@ -11976,6 +11976,11 @@ export interface components {
        * @default false
        */
       confirm_migration?: boolean;
+      /**
+       * Force Override
+       * @default false
+       */
+      force_override?: boolean;
     };
     /**
      * ModelProviderCreate

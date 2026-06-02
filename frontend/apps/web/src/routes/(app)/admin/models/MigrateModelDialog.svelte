@@ -25,9 +25,11 @@
     Bot,
     AppWindow,
     LayoutGrid,
+    FileText,
     ChevronDown,
     AlertTriangle,
-    ShieldAlert
+    ShieldAlert,
+    Info
   } from "lucide-svelte";
 
   import * as Dialog from "$lib/components/ui/dialog/index.js";
@@ -37,7 +39,7 @@
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
 
   import { bumpModelMigrationHistoryVersion } from "./migrationHistoryRefresh";
-  import { isSecurityBlockerCode, translateMigrationWarning } from "./migrationWarnings";
+  import { classifyMigrationCode, translateMigrationWarning } from "./migrationWarnings";
 
   let {
     openController,
@@ -101,30 +103,55 @@
   const sourceAlreadyMigrated = $derived(!!sourceModel.migrated_to_model_id);
 
   // --- Validation -------------------------------------------------------
-  let compatWarnings = $state<string[]>([]);
-  let hasSecurityBlocker = $state(false);
+  // Keep the raw codes from the backend and split them into severity tiers
+  // so each renders in its own section (error / warning / info) instead of
+  // everything landing in one red box.
+  let validationCodes = $state<string[]>([]);
+  // Defensive fallback if the backend ever returns warnings without codes.
+  let fallbackWarnings = $state<string[]>([]);
   let isValidating = $state(false);
   let acknowledged = $state(false);
   let validationError = $state(false);
 
-  const hasWarnings = $derived(compatWarnings.length > 0);
-  // Compatibility warnings (different_family, kwargs_reset, …) are about
-  // resource-level concerns (assistant prompts, kwargs). With zero
-  // resources to re-bind, the warnings are vacuous — even if the model is
-  // still enabled on spaces (those just get repointed). Only security
-  // blockers gate the action regardless of count.
+  const blockerMsgs = $derived(
+    validationCodes
+      .filter((c) => classifyMigrationCode(c) === "blocker")
+      .map(translateMigrationWarning)
+  );
+  const warningMsgs = $derived([
+    ...validationCodes
+      .filter((c) => classifyMigrationCode(c) === "warning")
+      .map(translateMigrationWarning),
+    ...fallbackWarnings
+  ]);
+  const infoMsgs = $derived(
+    validationCodes
+      .filter((c) => classifyMigrationCode(c) === "info")
+      .map(translateMigrationWarning)
+  );
+  const hasSecurityBlocker = $derived(blockerMsgs.length > 0);
+
+  // Compatibility warnings + info (different_family, lower token limit,
+  // kwargs reset, …) concern resource-level state (assistant prompts,
+  // kwargs). With zero resources to re-bind they are vacuous — even if the
+  // model is still enabled on spaces (those just get repointed). Security
+  // blockers gate the action regardless of count (they concern spaces).
   const hasResourceImpact = $derived(impactTotal > 0);
-  const shouldConfirmMigration = $derived(!hasWarnings || acknowledged || !hasResourceImpact);
+  const showWarnings = $derived(warningMsgs.length > 0 && hasResourceImpact);
+  const showInfo = $derived(infoMsgs.length > 0 && hasResourceImpact);
+  const anyValidationSection = $derived(hasSecurityBlocker || showWarnings || showInfo);
+  // A single checkbox gates everything that would otherwise block: security
+  // blockers (via force_override) and compatibility warnings (via confirm).
+  const needsAck = $derived(hasSecurityBlocker || showWarnings);
   const canMigrate = $derived(
     !!targetModelId &&
-      !hasSecurityBlocker &&
       !isLoadingImpact &&
       hasLoadedImpact &&
       !impactLoadError &&
       !isValidating &&
       !validationError &&
       !sourceAlreadyMigrated &&
-      shouldConfirmMigration
+      (!needsAck || acknowledged)
   );
 
   // Track which target the current validation is for to discard stale responses.
@@ -132,8 +159,8 @@
 
   $effect(() => {
     if (!targetModelId || sourceAlreadyMigrated) {
-      compatWarnings = [];
-      hasSecurityBlocker = false;
+      validationCodes = [];
+      fallbackWarnings = [];
       validationError = false;
       return;
     }
@@ -146,8 +173,8 @@
   async function runValidation(toId: string) {
     validatingForTarget = toId;
     isValidating = true;
-    compatWarnings = [];
-    hasSecurityBlocker = false;
+    validationCodes = [];
+    fallbackWarnings = [];
     validationError = false;
     try {
       const result = (await intric.models.validateMigration({
@@ -161,8 +188,8 @@
       };
       if (validatingForTarget !== toId) return;
       const codes = result.warning_codes ?? [];
-      compatWarnings = codes.length > 0 ? codes.map(translateMigrationWarning) : result.warnings;
-      hasSecurityBlocker = codes.some(isSecurityBlockerCode);
+      validationCodes = codes;
+      fallbackWarnings = codes.length === 0 ? (result.warnings ?? []) : [];
     } catch (err: unknown) {
       if (validatingForTarget !== toId) return;
       console.error("[MigrateModelDialog] Validation failed:", err);
@@ -248,7 +275,9 @@
         toId: targetModelId,
         // Match the UI gate: spaces-only warning cases are allowed without
         // a manual acknowledgement because no resources are rebound.
-        confirmMigration: shouldConfirmMigration
+        confirmMigration: !needsAck || acknowledged,
+        // Security blockers only clear when the admin actively acknowledges.
+        forceOverride: hasSecurityBlocker && acknowledged
       });
       toast.success(m.migration_success());
       bumpModelMigrationHistoryVersion();
@@ -280,8 +309,11 @@
     assistant: { label: () => m.migration_summary_assistants(), icon: Bot },
     app: { label: () => m.migration_summary_apps(), icon: AppWindow },
     service: { label: () => m.migration_summary_services(), icon: LayoutGrid },
-    assistant_template: { label: () => m.migration_summary_assistants(), icon: Bot },
-    app_template: { label: () => m.migration_summary_apps(), icon: AppWindow }
+    assistant_template: {
+      label: () => m.migration_summary_assistant_templates(),
+      icon: FileText
+    },
+    app_template: { label: () => m.migration_summary_app_templates(), icon: FileText }
   };
 </script>
 
@@ -431,46 +463,94 @@
           </Field.Field>
         {/if}
 
-        <!-- 3. Validation results -->
+        <!-- 3. Validation results — split by severity -->
         {#if isValidating}
           <div class="text-muted-foreground flex items-center gap-2 py-2 text-sm">
             <Loader2 class="size-4 animate-spin" aria-hidden="true" />
             <span>{m.loading()}</span>
           </div>
-        {:else if hasSecurityBlocker}
-          <div
-            class="border-negative-default/30 bg-negative-dimmer/40 text-negative-stronger flex items-start gap-3 rounded-lg border px-4 py-3 text-sm"
-            role="alert"
-          >
-            <ShieldAlert size={18} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
-            <div>
-              <p class="font-medium">{m.migration_blocked_title()}</p>
-              {#each compatWarnings as w, i (i)}
-                <p class="text-negative-default mt-1">{w}</p>
-              {/each}
-            </div>
-          </div>
-        {:else if hasWarnings && hasResourceImpact}
-          <div
-            class="border-warning-default/30 bg-warning-dimmer/30 rounded-lg border px-4 py-3 text-sm"
-            role="alert"
-          >
-            <ul class="space-y-1.5">
-              {#each compatWarnings as w, i (i)}
-                <li class="text-warning-stronger flex items-start gap-2">
-                  <AlertTriangle size={14} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
-                  <span>{w}</span>
-                </li>
-              {/each}
-            </ul>
-            <div class="border-warning-default/20 mt-3 border-t pt-3">
-              <Field.Field orientation="horizontal" class="text-warning-stronger w-fit">
-                <Checkbox id="migrate-acknowledge" bind:checked={acknowledged} />
-                <Field.Label for="migrate-acknowledge" class="text-warning-stronger cursor-pointer">
-                  {m.migrate_model_confirm_label()}
-                </Field.Label>
-              </Field.Field>
-            </div>
+        {:else if anyValidationSection}
+          <div class="flex flex-col gap-3">
+            <!-- Errors: hard blockers (security classification) -->
+            {#if hasSecurityBlocker}
+              <div
+                class="border-negative-default/30 bg-negative-dimmer/40 text-negative-stronger flex items-start gap-3 rounded-lg border px-4 py-3 text-sm"
+                role="alert"
+              >
+                <ShieldAlert size={18} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
+                <div>
+                  <p class="font-medium">{m.migration_blocked_title()}</p>
+                  {#each blockerMsgs as w, i (i)}
+                    <p class="text-negative-default mt-1">{w}</p>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
+            <!-- Warnings: compatibility issues -->
+            {#if showWarnings}
+              <div
+                class="border-warning-default/30 bg-warning-dimmer/30 rounded-lg border px-4 py-3 text-sm"
+                role="alert"
+              >
+                <p class="text-warning-stronger mb-1.5 font-medium">
+                  {m.migration_warnings_title()}
+                </p>
+                <ul class="space-y-1.5">
+                  {#each warningMsgs as w, i (i)}
+                    <li class="text-warning-stronger flex items-start gap-2">
+                      <AlertTriangle size={14} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
+                      <span>{w}</span>
+                    </li>
+                  {/each}
+                </ul>
+              </div>
+            {/if}
+
+            <!-- Info: purely informational notices -->
+            {#if showInfo}
+              <div
+                class="border-border bg-muted/30 text-muted-foreground rounded-lg border px-4 py-3 text-sm"
+              >
+                <p class="text-default mb-1.5 font-medium">{m.migration_info_title()}</p>
+                <ul class="space-y-1.5">
+                  {#each infoMsgs as w, i (i)}
+                    <li class="flex items-start gap-2">
+                      <Info size={14} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
+                      <span>{w}</span>
+                    </li>
+                  {/each}
+                </ul>
+              </div>
+            {/if}
+
+            <!-- Single acknowledgement gating both blockers and warnings -->
+            {#if needsAck}
+              <div
+                class="rounded-lg border px-4 py-3 {hasSecurityBlocker
+                  ? 'border-negative-default/30 bg-negative-dimmer/30'
+                  : 'border-warning-default/30 bg-warning-dimmer/20'}"
+              >
+                <Field.Field
+                  orientation="horizontal"
+                  class="{hasSecurityBlocker
+                    ? 'text-negative-stronger'
+                    : 'text-warning-stronger'} w-fit"
+                >
+                  <Checkbox id="migrate-acknowledge" bind:checked={acknowledged} />
+                  <Field.Label
+                    for="migrate-acknowledge"
+                    class="{hasSecurityBlocker
+                      ? 'text-negative-stronger'
+                      : 'text-warning-stronger'} cursor-pointer"
+                  >
+                    {hasSecurityBlocker
+                      ? m.migrate_model_override_security_label()
+                      : m.migrate_model_confirm_label()}
+                  </Field.Label>
+                </Field.Field>
+              </div>
+            {/if}
           </div>
         {/if}
 
