@@ -17,7 +17,7 @@ from intric.database.tables.ai_models_table import TranscriptionModels
 from intric.database.tables.transcription_model_migration_history_table import (
     TranscriptionModelMigrationHistory,
 )
-from intric.main.exceptions import ModelInUseException
+from intric.main.exceptions import ModelInUseException, NotFoundException
 from intric.tenant_models.application.tenant_model_service import (
     TenantTranscriptionModelService,
 )
@@ -26,6 +26,9 @@ from intric.transcription_models.domain.transcription_model_repo import (
 )
 from intric.transcription_models.infrastructure.transcription_model_cleanup_worker import (  # noqa: E501
     cleanup_orphaned_transcription_models,
+)
+from intric.transcription_models.presentation.tenant_transcription_models_router import (
+    TenantTranscriptionModelUpdate,
 )
 
 
@@ -82,6 +85,22 @@ class TestTranscriptionModelSoftDelete:
                 )
             ).scalar_one()
             assert row.deleted_at is None
+
+    async def test_update_rejects_soft_deleted_model(
+        self, db_container, transcription_model_factory, admin_user
+    ):
+        async with db_container() as container:
+            session = container.session()
+            model = await transcription_model_factory(session, "whisper-update-deleted")
+            model.deleted_at = datetime.now(timezone.utc)
+            await session.flush()
+
+            service = TenantTranscriptionModelService(session=session, user=admin_user)
+            with pytest.raises(NotFoundException):
+                await service.update(
+                    model.id,
+                    TenantTranscriptionModelUpdate(description="should not update"),
+                )
 
 
 @pytest.mark.integration

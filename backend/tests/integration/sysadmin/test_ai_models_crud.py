@@ -607,14 +607,17 @@ async def test_delete_embedding_model(client, super_admin_token, db_container):
 
     assert response.status_code == 200
 
-    # Verify model was deleted from database
+    # The normal sysadmin delete soft-deletes (parity with completion): the row
+    # is kept as a tombstone with deleted_at set so historical info_blob
+    # attribution survives. Use force=true for a hard delete.
     async with db_container() as container:
         session = container.session()
         stmt = sa.select(EmbeddingModels).where(EmbeddingModels.id == model_id)
         result = await session.execute(stmt)
         db_model = result.scalar_one_or_none()
 
-        assert db_model is None
+        assert db_model is not None
+        assert db_model.deleted_at is not None
 
 
 @pytest.mark.integration

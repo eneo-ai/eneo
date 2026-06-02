@@ -443,6 +443,7 @@ class TenantEmbeddingModelService:
         stmt = sa.select(EmbeddingModels).where(
             EmbeddingModels.id == model_id,
             EmbeddingModels.tenant_id == self.user.tenant_id,
+            EmbeddingModels.deleted_at.is_(None),
         )
         result = await self.session.execute(stmt)
         model = result.scalar_one_or_none()
@@ -667,6 +668,7 @@ class TenantTranscriptionModelService:
         stmt = sa.select(TranscriptionModels).where(
             TranscriptionModels.id == model_id,
             TranscriptionModels.tenant_id == self.user.tenant_id,
+            TranscriptionModels.deleted_at.is_(None),
         )
         result = await self.session.execute(stmt)
         model = result.scalar_one_or_none()

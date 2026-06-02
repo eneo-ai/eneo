@@ -17,12 +17,17 @@ from sqlalchemy import select
 from intric.database.tables.ai_models_table import EmbeddingModels
 from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.database.tables.model_providers_table import ModelProviders
+from intric.database.tables.spaces_table import SpacesEmbeddingModels
 from intric.embedding_models.domain.embedding_model_repo import (
     EmbeddingModelRepository,
 )
 from intric.embedding_models.infrastructure.embedding_model_cleanup_worker import (
     cleanup_orphaned_embedding_models,
 )
+from intric.embedding_models.presentation.tenant_embedding_models_router import (
+    TenantEmbeddingModelUpdate,
+)
+from intric.main.exceptions import NotFoundException
 from intric.tenant_models.application.tenant_model_service import (
     TenantEmbeddingModelService,
 )
@@ -90,6 +95,74 @@ class TestEmbeddingModelSoftDelete:
             repo = EmbeddingModelRepository(session, admin_user)
             assert all(m.id != model_id for m in await repo.all())
             assert await repo.one_or_none(model_id) is None
+
+    async def test_update_rejects_soft_deleted_model(self, db_container, admin_user):
+        async with db_container() as container:
+            session = container.session()
+            model = await _make_embedding_model(
+                session, admin_user, "embed-update-deleted", deleted=True
+            )
+
+            service = TenantEmbeddingModelService(session=session, user=admin_user)
+            with pytest.raises(NotFoundException):
+                await service.update(
+                    model.id,
+                    TenantEmbeddingModelUpdate(description="should not update"),
+                )
+
+    async def test_sysadmin_delete_soft_deletes_and_preserves_info_blob_model_link(
+        self, client, super_admin_token, db_container, admin_user, space_factory
+    ):
+        async with db_container() as container:
+            session = container.session()
+            model = await _make_embedding_model(session, admin_user, "embed-admin-del")
+            model_id = model.id
+            space = await space_factory(session, "Embedding model admin delete")
+            session.add(
+                SpacesEmbeddingModels(space_id=space.id, embedding_model_id=model_id)
+            )
+            info_blob = InfoBlobs(
+                text="historical chunk",
+                size=10,
+                user_id=admin_user.id,
+                tenant_id=admin_user.tenant_id,
+                embedding_model_id=model_id,
+            )
+            session.add(info_blob)
+            await session.flush()
+            info_blob_id = info_blob.id
+
+        response = await client.delete(
+            f"/api/v1/sysadmin/embedding-models/{model_id}",
+            headers={"X-API-Key": super_admin_token},
+        )
+        assert response.status_code == 200
+
+        async with db_container() as container:
+            session = container.session()
+
+            row = (
+                await session.execute(
+                    select(EmbeddingModels).where(EmbeddingModels.id == model_id)
+                )
+            ).scalar_one()
+            assert row.deleted_at is not None
+
+            blob = (
+                await session.execute(
+                    select(InfoBlobs).where(InfoBlobs.id == info_blob_id)
+                )
+            ).scalar_one()
+            assert blob.embedding_model_id == model_id
+
+            link = (
+                await session.execute(
+                    select(SpacesEmbeddingModels).where(
+                        SpacesEmbeddingModels.embedding_model_id == model_id
+                    )
+                )
+            ).scalar_one_or_none()
+            assert link is None
 
 
 @pytest.mark.integration
