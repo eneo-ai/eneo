@@ -383,6 +383,11 @@ class BaseModelMigrationService:
                 "Database error during model migration",
                 extra={"migration_id": str(migration_id), "error": str(e)},
             )
+            # Known gap: if the error aborted the surrounding transaction, this
+            # "failed" history UPDATE runs in a poisoned session and itself
+            # raises InFailedSqlTransactionError, so the failure row may not
+            # persist. Fixing it properly needs a separate session for the
+            # failure write; tracked as a follow-up.
             duration = (datetime.now(timezone.utc) - start_time).total_seconds()
             await self.history_repo.update_migration_history(
                 migration_id=migration_id,
