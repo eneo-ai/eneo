@@ -101,7 +101,7 @@ class TestSchemas:
         res = await client.get("/scim/v2/Schemas", headers=auth_headers)
         group = next(r for r in res.json()["Resources"] if r["id"].endswith(":Group"))
         attr_names = {a["name"] for a in group["attributes"]}
-        assert {"displayName", "members"}.issubset(attr_names)
+        assert {"displayName", "members", "externalId"}.issubset(attr_names)
 
     async def test_group_schema_members_has_subattributes(
         self, client: AsyncClient, auth_headers

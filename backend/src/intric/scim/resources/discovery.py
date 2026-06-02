@@ -144,6 +144,16 @@ _GROUP_SCHEMA = {
                 },
             ],
         },
+        {
+            "name": "externalId",
+            "type": "string",
+            "multiValued": False,
+            "required": False,
+            "caseExact": True,
+            "mutability": "readWrite",
+            "returned": "default",
+            "uniqueness": "none",
+        },
     ],
 }
 

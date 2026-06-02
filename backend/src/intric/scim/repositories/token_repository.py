@@ -11,10 +11,7 @@ from intric.database.tables.tenant_table import Tenants
 
 class ScimTokenRepository:
     """Data access for the SCIM bearer-token hash stored on `tenants`.
-
-    Repository pattern keeps SQL out of `ScimTokenService` and matches the
-    convention used by `ScimUserRepository` / `ScimGroupRepository`. The
-    underlying column lives on the `Tenants` table because SCIM tokens are
+    The underlying column lives on the `Tenants` table because SCIM tokens are
     a tenant-scoped credential, not a separate entity.
     """
 
