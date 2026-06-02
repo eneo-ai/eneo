@@ -317,6 +317,72 @@ class TestCreateUser:
 
         repo.update.assert_not_called()
 
+    async def test_create_with_active_false_provisions_inactive_user(self):
+        """A SCIM create with active=false must NOT result in an active account.
+        The IdP is the source of truth for the activation state, so the new
+        row is provisioned soft-deleted."""
+        repo = AsyncMock()
+        repo.get_by_username.return_value = None
+        repo.get_by_email.return_value = None
+        repo.email_exists_in_other_tenant.return_value = False
+        repo.create.side_effect = lambda m: m
+
+        service = _make_service(repo)
+        request = ScimUserRequest(userName="jane@example.com", active=False)
+        result = await service.create_user(request)
+
+        created = repo.create.call_args.args[0]
+        assert created.state == ScimUserState.DELETED
+        assert created.deleted_at is not None
+        assert result.active is False
+
+    async def test_reconcile_with_active_false_deactivates_existing_user(self):
+        """Reconciling (claiming) an active local account with active=false must
+        leave it deprovisioned, not silently active."""
+        repo = AsyncMock()
+        existing = _make_db_user(user_name="jane")  # active local account
+        existing.email = "jane@example.com"
+        existing.external_id = None  # migration case
+        repo.get_by_username.return_value = None
+        repo.get_by_email.return_value = existing
+        repo.update.return_value = existing
+
+        service = _make_service(repo)
+        request = ScimUserRequest(
+            userName="jane@example.com",
+            externalId="entra-guid-123",
+            active=False,
+        )
+        result = await service.create_user(request)
+
+        repo.create.assert_not_called()
+        assert existing.external_id == "entra-guid-123"
+        assert existing.state == ScimUserState.DELETED
+        assert existing.deleted_at is not None
+        assert result.active is False
+
+    async def test_reprovision_inactive_user_with_active_false_stays_deleted(self):
+        """A create targeting an already soft-deleted row with active=false must
+        rebind the externalId but keep the row deprovisioned — no reactivation."""
+        repo = AsyncMock()
+        inactive = _make_db_user(active=False)
+        original_deleted_at = inactive.deleted_at
+        repo.get_by_username.return_value = inactive
+        repo.update.return_value = inactive
+
+        service = _make_service(repo)
+        request = ScimUserRequest(
+            userName="jane@example.com", externalId="new-ext-id", active=False
+        )
+        result = await service.create_user(request)
+
+        repo.create.assert_not_called()
+        assert inactive.state == ScimUserState.DELETED
+        # deleted_at preserved (idempotent) — not bumped to now()
+        assert inactive.deleted_at == original_deleted_at
+        assert inactive.external_id == "new-ext-id"
+        assert result.active is False
+
 
 class TestGetUser:
     async def test_returns_active_user(self):

@@ -199,6 +199,10 @@ class ScimUserService:
                 previous_username = existing.username
                 existing.external_id = data.externalId
                 existing.username = data.userName
+                # Honour SCIM `active`: if the IdP claims this local account
+                # while signalling it as inactive, the reconciled user must end
+                # up deprovisioned rather than silently staying active.
+                _set_active(existing, data.active)
                 result = _to_scim_user(await self._repository.update(existing))
                 logger.warning(
                     "scim.user.reconciled",
@@ -237,25 +241,45 @@ class ScimUserService:
                     raise ScimUserConflictError(
                         f"External ID '{data.externalId}' already exists"
                     )
-            existing.state = ScimUserState.ACTIVE
-            existing.deleted_at = None
             existing.external_id = data.externalId
+            # Honour SCIM `active`: a create targeting an already soft-deleted
+            # row must only reactivate it when the payload says active=true.
+            # active=false keeps the row deprovisioned (it stays DELETED) while
+            # still rebinding the externalId.
+            _set_active(existing, data.active)
             result = _to_scim_user(await self._repository.update(existing))
-            logger.info(
-                "scim.user.reactivated",
-                extra={
-                    "tenant_id": str(self._tenant_id),
-                    "user_id": str(existing.id),
-                    "username": existing.username,
-                    "external_id": data.externalId,
-                },
-            )
-            await self._log(
-                ActionType.SCIM_USER_REACTIVATED,
-                existing.id,
-                f"SCIM reactivated user '{existing.username}'",
-                _user_target(existing),
-            )
+            if data.active:
+                logger.info(
+                    "scim.user.reactivated",
+                    extra={
+                        "tenant_id": str(self._tenant_id),
+                        "user_id": str(existing.id),
+                        "username": existing.username,
+                        "external_id": data.externalId,
+                    },
+                )
+                await self._log(
+                    ActionType.SCIM_USER_REACTIVATED,
+                    existing.id,
+                    f"SCIM reactivated user '{existing.username}'",
+                    _user_target(existing),
+                )
+            else:
+                logger.info(
+                    "scim.user.reprovisioned_inactive",
+                    extra={
+                        "tenant_id": str(self._tenant_id),
+                        "user_id": str(existing.id),
+                        "username": existing.username,
+                        "external_id": data.externalId,
+                    },
+                )
+                await self._log(
+                    ActionType.SCIM_USER_UPDATED,
+                    existing.id,
+                    f"SCIM re-provisioned user '{existing.username}' as inactive",
+                    _user_target(existing),
+                )
             return result
         email = _resolve_email(data)
         await self._validate_unique_fields(
@@ -270,6 +294,10 @@ class ScimUserService:
             state=ScimUserState.ACTIVE,  # pyright: ignore[reportCallIssue]
             tenant_id=self._tenant_id,  # pyright: ignore[reportCallIssue]
         )
+        # Honour SCIM `active`: an IdP that provisions a user as active=false
+        # (e.g. a disabled account synced ahead of activation) must NOT result
+        # in an active Eneo account. _set_active maps false → soft-deleted.
+        _set_active(model, data.active)
         model = await self._repository.create(model)
         logger.info(
             "scim.user.created",
@@ -278,6 +306,7 @@ class ScimUserService:
                 "user_id": str(model.id),
                 "username": model.username,
                 "external_id": model.external_id,
+                "active": data.active,
             },
         )
         await self._log(
