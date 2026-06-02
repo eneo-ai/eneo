@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Final
+
 from intric.flows.ai_builder.ai_builder_discovery_decision_engine import (
     apply_discovery_decision_engine,
 )
@@ -136,6 +139,10 @@ from intric.flows.ai_builder.ai_builder_slot_classifier import SlotClassificatio
 from intric.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
 from intric.flows.domain.flow import Flow
 
+DiscoveryIssueBuilder = Callable[
+    [list[ConversationMessage], DiscoveryProfile], DiscoveryIssue | None
+]
+
 
 def analyze_discovery(
     conversation: list[ConversationMessage],
@@ -149,347 +156,13 @@ def analyze_discovery(
         flow=flow,
         planning_state=planning_state,
     )
-    text = profile.text
-    answers = profile.answers
-    raw_issues: list[DiscoveryIssue] = []
-
     mvs_met = _has_minimum_viable_specification(profile)
-    task_request = _expresses_task_intent(text)
-    output_vague = _looks_like_output_is_vague(profile)
-    case_scope_vague = _looks_like_case_scope_is_vague(profile)
-    input_mode_vague = _looks_like_input_mode_is_vague(profile)
-
-    if _has_same_run_comparison_contradiction(text, answers):
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="comparison_scope_conflict",
-                category="comparison",
-                severity="blocking",
-                message=(
-                    localized_text(
-                        profile.language,
-                        "Användaren valde en fil per körning men vill också jämföra flera "
-                        "dokument i samma körning. Jämförelsearkitekturen måste redas ut innan kraven kan sammanfattas.",
-                        "The user chose one file per run but also wants comparison across multiple "
-                        "documents in the same run. Resolve the comparison architecture before summarizing.",
-                    )
-                ),
-                suggestion=comparison_scope_conflict_question(profile.language),
-                question_level="blocking",
-            )
-        )
-
-    if case_scope_vague:
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="case_scope",
-                category="scope",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "Det är fortfarande oklart vilket omfång varje körning ska ha.",
-                    "The flow scope per run is still unclear.",
-                ),
-                suggestion=processing_scope_question(profile.language),
-                question_level="high_value",
-            )
-        )
-
-    if input_mode_vague and (profile.document_like_input or task_request):
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="input_material_mode",
-                category="input",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "Det är fortfarande oklart vilket material användaren ska lämna vid körning.",
-                    "It is still unclear what kind of runtime material the user should provide.",
-                ),
-                suggestion=input_material_mode_question(profile.language),
-                question_level="blocking",
-            )
-        )
-
-    if _mixed_input_architecture_is_vague(
-        profile,
-        explicit_resolved=has_explicit_structured_answer(
-            conversation,
-            "flow_input_architecture",
-        ),
-    ):
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="flow_input_architecture",
-                category="input",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "Användaren verkar vilja kombinera ljudtranskribering och dokumentuppladdning i samma flöde, men inmatningsarkitekturen är inte löst ännu.",
-                    "The user appears to want both audio transcription and document upload in the same flow, but the input architecture is not resolved yet.",
-                ),
-                suggestion=flow_input_architecture_question(profile.language),
-                question_level="blocking",
-            )
-        )
-
-    if _document_kind_is_vague(profile):
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="document_kind",
-                category="input",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "Det är fortfarande oklart vilken typ av dokument flödet främst ska arbeta med.",
-                    "It is still unclear what kind of documents the flow should primarily handle.",
-                ),
-                suggestion=document_kind_question(profile.language),
-                question_level="high_value",
-            )
-        )
-
-    if _document_cardinality_is_vague(profile):
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="document_material_scope",
-                category="input",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "Det är fortfarande oklart om varje körning normalt består av ett dokument eller ett dokumentpaket med flera filer.",
-                    "It is still unclear whether one run normally contains one source document or a document package with several files.",
-                ),
-                suggestion=document_material_scope_question(profile.language),
-                question_level="high_value",
-            )
-        )
-
-    if profile.comparison_requested and profile.reference_source.status in {
-        "missing",
-        "unclear",
-    }:
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="comparison_scope",
-                category="comparison",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "Det är fortfarande oklart hur jämförelsen mellan dokument ska fungera.",
-                    "The comparison architecture is unresolved.",
-                ),
-                suggestion=comparison_scope_question(profile.language),
-                question_level="blocking",
-            )
-        )
-
-    if _external_delivery_requested(profile) and "final_output_mode" not in answers:
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id=EXTERNAL_DELIVERY_UNSUPPORTED_ISSUE_ID,
-                category="output",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "Användaren vill skicka resultatet till ett externt API eller system, men AI Builder kan inte skapa ett utgående API-leveranssteg automatiskt i nya flöden ännu.",
-                    "The user wants to send the result to an external API or system, but AI Builder cannot automatically create an outbound API delivery step in new flows yet.",
-                ),
-                suggestion=external_delivery_internal_output_question(profile.language),
-                question_level="blocking",
-            )
-        )
-
-    if _structured_io_contract_is_vague(profile):
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="structured_io_contract",
-                category="outcome",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "Det är fortfarande oklart hur input-JSON ska omvandlas till output-JSON.",
-                    "It is still unclear how input JSON should be transformed into output JSON.",
-                ),
-                suggestion=structured_io_contract_question(profile.language),
-                question_level="blocking",
-            )
-        )
-
-    if _post_processing_goal_is_vague(profile):
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="post_processing_goal",
-                category="outcome",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "Det är fortfarande oklart vad flödet ska hjälpa användaren göra med materialet.",
-                    "It is still unclear what the flow should help the user do with the material.",
-                ),
-                suggestion=post_processing_goal_question(profile.language),
-                question_level="high_value",
-            )
-        )
-
-    if output_vague:
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="final_output_mode",
-                category="output",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "Slutresultatet är fortfarande för vagt för att flödet ska kunna designas säkert.",
-                    "The final output format is still too vague to design the flow confidently.",
-                ),
-                suggestion=final_output_mode_question(profile.language),
-                question_level="blocking",
-            )
-        )
-    elif _ultra_vague_output_choice_is_vague(profile):
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="final_output_mode",
-                category="output",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "Det är fortfarande oklart vilket slutresultat flödet ska leverera.",
-                    "The final output is still too vague to summarize safely.",
-                ),
-                suggestion=final_output_mode_question(profile.language),
-                question_level="blocking",
-            )
-        )
-
-    if _needs_docx_mode_choice(profile) and not has_explicit_structured_answer(
-        conversation,
-        "docx_output_mode",
-    ):
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="docx_output_mode",
-                category="output",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "DOCX efterfrågas, men det är fortfarande oklart hur dokumentet ska skapas.",
-                    "DOCX output is requested, but the DOCX generation mode is unresolved.",
-                ),
-                suggestion=docx_output_mode_question(profile.language),
-                question_level="blocking",
-            )
-        )
-
-    if _needs_pdf_generation_mode_choice(
-        profile
-    ) and not has_explicit_structured_answer(
-        conversation,
-        "pdf_generation_mode",
-    ):
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="pdf_generation_mode",
-                category="output",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "Användaren nämner PDF-mall, men det är fortfarande oklart om slutresultatet ska vara en vanlig genererad PDF eller om en fast mallförväntan måste hanteras uttryckligt.",
-                    "The user mentions a PDF template, but it is still unclear whether the result should be a normal generated PDF or whether a fixed template expectation must be handled explicitly.",
-                ),
-                suggestion=pdf_generation_mode_question(profile.language),
-                question_level="blocking",
-            )
-        )
-
-    if _reader_and_style_is_vague(profile):
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="output_reader",
-                category="output",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "Det är fortfarande oklart vem som främst ska läsa slutresultatet och vilken ton det bör ha.",
-                    "The main reader and tone of the final output are still unclear.",
-                ),
-                suggestion=output_reader_question(profile.language),
-                question_level="nice_to_have",
-            )
-        )
-
-    if _final_output_scope_is_vague(profile):
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="final_output_scope",
-                category="output",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "Det är fortfarande oklart hur detaljerat slutresultatet ska vara.",
-                    "The level of detail in the final output is still unclear.",
-                ),
-                suggestion=final_output_scope_question(profile.language),
-                question_level="nice_to_have",
-            )
-        )
-
-    if _final_pdf_type_is_vague(profile):
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="final_pdf_type",
-                category="output",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "Det är fortfarande oklart vilken typ av PDF användaren vill ha som slutresultat.",
-                    "The style of the final PDF output is still unclear.",
-                ),
-                suggestion=final_pdf_type_question(profile.language),
-                question_level="high_value",
-            )
-        )
-
-    if _structured_analysis_need_is_vague(profile) and (
-        question_exposure_for_id("structured_analysis_need") == "user_requirement"
-        or _should_surface_structured_analysis_question(profile)
-    ):
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="structured_analysis_need",
-                category="automation",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "Det är fortfarande oklart om flödet ska ta fram strukturerad analys som återanvänds i senare steg.",
-                    "It is still unclear whether the flow should produce structured analysis that later steps can reuse.",
-                ),
-                suggestion=structured_analysis_need_question(profile.language),
-                question_level="high_value",
-            )
-        )
-
-    if _runtime_metadata_is_vague(profile):
-        raw_issues.append(
-            DiscoveryIssue(
-                issue_id="runtime_metadata_fields",
-                category="input",
-                severity="blocking",
-                message=localized_text(
-                    profile.language,
-                    "Det är fortfarande oklart om användaren ska ange extra metadata vid körning.",
-                    "It is still unclear whether the user should provide extra runtime metadata.",
-                ),
-                suggestion=runtime_metadata_fields_question(profile.language),
-                question_level="high_value",
-            )
-        )
+    raw_issues = _build_raw_discovery_issues(conversation, profile)
 
     # Confidence gating: when MVS met and no blocking issues, check for
     # low-confidence inferred signals that need clarification
     if mvs_met and not any(i.severity == "blocking" for i in raw_issues):
-        scored = score_conversation_signals(conversation, freeform_text=text)
+        scored = score_conversation_signals(conversation, freeform_text=profile.text)
         if has_low_confidence_signals(scored) and len(profile.answers) < 3:
             low_signal = next(
                 (s for s in reversed(scored) if s.confidence == "low"), None
@@ -551,6 +224,431 @@ def analyze_discovery(
             profile=profile,
         ),
     )
+
+
+def _build_raw_discovery_issues(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> list[DiscoveryIssue]:
+    return [
+        issue
+        for builder in _DISCOVERY_ISSUE_BUILDERS
+        if (issue := builder(conversation, profile)) is not None
+    ]
+
+
+def _build_comparison_scope_conflict_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if not _has_same_run_comparison_contradiction(profile.text, profile.answers):
+        return None
+    return DiscoveryIssue(
+        issue_id="comparison_scope_conflict",
+        category="comparison",
+        severity="blocking",
+        message=localized_text(
+            profile.language,
+            "Användaren valde en fil per körning men vill också jämföra flera "
+            "dokument i samma körning. Jämförelsearkitekturen måste redas ut innan kraven kan sammanfattas.",
+            "The user chose one file per run but also wants comparison across multiple "
+            "documents in the same run. Resolve the comparison architecture before summarizing.",
+        ),
+        suggestion=comparison_scope_conflict_question(profile.language),
+        question_level="blocking",
+    )
+
+
+def _build_case_scope_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if not _looks_like_case_scope_is_vague(profile):
+        return None
+    return DiscoveryIssue(
+        issue_id="case_scope",
+        category="scope",
+        severity="blocking",
+        message=localized_text(
+            profile.language,
+            "Det är fortfarande oklart vilket omfång varje körning ska ha.",
+            "The flow scope per run is still unclear.",
+        ),
+        suggestion=processing_scope_question(profile.language),
+        question_level="high_value",
+    )
+
+
+def _build_input_material_mode_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if not _looks_like_input_mode_is_vague(profile):
+        return None
+    if not (profile.document_like_input or _expresses_task_intent(profile.text)):
+        return None
+    return DiscoveryIssue(
+        issue_id="input_material_mode",
+        category="input",
+        severity="blocking",
+        message=localized_text(
+            profile.language,
+            "Det är fortfarande oklart vilket material användaren ska lämna vid körning.",
+            "It is still unclear what kind of runtime material the user should provide.",
+        ),
+        suggestion=input_material_mode_question(profile.language),
+        question_level="blocking",
+    )
+
+
+def _build_flow_input_architecture_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if not _mixed_input_architecture_is_vague(
+        profile,
+        explicit_resolved=has_explicit_structured_answer(
+            conversation,
+            "flow_input_architecture",
+        ),
+    ):
+        return None
+    return DiscoveryIssue(
+        issue_id="flow_input_architecture",
+        category="input",
+        severity="blocking",
+        message=localized_text(
+            profile.language,
+            "Användaren verkar vilja kombinera ljudtranskribering och dokumentuppladdning i samma flöde, men inmatningsarkitekturen är inte löst ännu.",
+            "The user appears to want both audio transcription and document upload in the same flow, but the input architecture is not resolved yet.",
+        ),
+        suggestion=flow_input_architecture_question(profile.language),
+        question_level="blocking",
+    )
+
+
+def _build_document_kind_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if not _document_kind_is_vague(profile):
+        return None
+    return DiscoveryIssue(
+        issue_id="document_kind",
+        category="input",
+        severity="blocking",
+        message=localized_text(
+            profile.language,
+            "Det är fortfarande oklart vilken typ av dokument flödet främst ska arbeta med.",
+            "It is still unclear what kind of documents the flow should primarily handle.",
+        ),
+        suggestion=document_kind_question(profile.language),
+        question_level="high_value",
+    )
+
+
+def _build_document_material_scope_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if not _document_cardinality_is_vague(profile):
+        return None
+    return DiscoveryIssue(
+        issue_id="document_material_scope",
+        category="input",
+        severity="blocking",
+        message=localized_text(
+            profile.language,
+            "Det är fortfarande oklart om varje körning normalt består av ett dokument eller ett dokumentpaket med flera filer.",
+            "It is still unclear whether one run normally contains one source document or a document package with several files.",
+        ),
+        suggestion=document_material_scope_question(profile.language),
+        question_level="high_value",
+    )
+
+
+def _build_comparison_scope_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if not profile.comparison_requested or profile.reference_source.status not in {
+        "missing",
+        "unclear",
+    }:
+        return None
+    return DiscoveryIssue(
+        issue_id="comparison_scope",
+        category="comparison",
+        severity="blocking",
+        message=localized_text(
+            profile.language,
+            "Det är fortfarande oklart hur jämförelsen mellan dokument ska fungera.",
+            "The comparison architecture is unresolved.",
+        ),
+        suggestion=comparison_scope_question(profile.language),
+        question_level="blocking",
+    )
+
+
+def _build_external_delivery_unsupported_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if not _external_delivery_requested(profile):
+        return None
+    if "final_output_mode" in profile.answers:
+        return None
+    return DiscoveryIssue(
+        issue_id=EXTERNAL_DELIVERY_UNSUPPORTED_ISSUE_ID,
+        category="output",
+        severity="blocking",
+        message=localized_text(
+            profile.language,
+            "Användaren vill skicka resultatet till ett externt API eller system, men AI Builder kan inte skapa ett utgående API-leveranssteg automatiskt i nya flöden ännu.",
+            "The user wants to send the result to an external API or system, but AI Builder cannot automatically create an outbound API delivery step in new flows yet.",
+        ),
+        suggestion=external_delivery_internal_output_question(profile.language),
+        question_level="blocking",
+    )
+
+
+def _build_structured_io_contract_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if not _structured_io_contract_is_vague(profile):
+        return None
+    return DiscoveryIssue(
+        issue_id="structured_io_contract",
+        category="outcome",
+        severity="blocking",
+        message=localized_text(
+            profile.language,
+            "Det är fortfarande oklart hur input-JSON ska omvandlas till output-JSON.",
+            "It is still unclear how input JSON should be transformed into output JSON.",
+        ),
+        suggestion=structured_io_contract_question(profile.language),
+        question_level="blocking",
+    )
+
+
+def _build_post_processing_goal_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if not _post_processing_goal_is_vague(profile):
+        return None
+    return DiscoveryIssue(
+        issue_id="post_processing_goal",
+        category="outcome",
+        severity="blocking",
+        message=localized_text(
+            profile.language,
+            "Det är fortfarande oklart vad flödet ska hjälpa användaren göra med materialet.",
+            "It is still unclear what the flow should help the user do with the material.",
+        ),
+        suggestion=post_processing_goal_question(profile.language),
+        question_level="high_value",
+    )
+
+
+def _build_final_output_mode_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if _looks_like_output_is_vague(profile):
+        message = localized_text(
+            profile.language,
+            "Slutresultatet är fortfarande för vagt för att flödet ska kunna designas säkert.",
+            "The final output format is still too vague to design the flow confidently.",
+        )
+    elif _ultra_vague_output_choice_is_vague(profile):
+        message = localized_text(
+            profile.language,
+            "Det är fortfarande oklart vilket slutresultat flödet ska leverera.",
+            "The final output is still too vague to summarize safely.",
+        )
+    else:
+        return None
+    return DiscoveryIssue(
+        issue_id="final_output_mode",
+        category="output",
+        severity="blocking",
+        message=message,
+        suggestion=final_output_mode_question(profile.language),
+        question_level="blocking",
+    )
+
+
+def _build_docx_output_mode_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if not _needs_docx_mode_choice(profile):
+        return None
+    if has_explicit_structured_answer(conversation, "docx_output_mode"):
+        return None
+    return DiscoveryIssue(
+        issue_id="docx_output_mode",
+        category="output",
+        severity="blocking",
+        message=localized_text(
+            profile.language,
+            "DOCX efterfrågas, men det är fortfarande oklart hur dokumentet ska skapas.",
+            "DOCX output is requested, but the DOCX generation mode is unresolved.",
+        ),
+        suggestion=docx_output_mode_question(profile.language),
+        question_level="blocking",
+    )
+
+
+def _build_pdf_generation_mode_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if not _needs_pdf_generation_mode_choice(profile):
+        return None
+    if has_explicit_structured_answer(conversation, "pdf_generation_mode"):
+        return None
+    return DiscoveryIssue(
+        issue_id="pdf_generation_mode",
+        category="output",
+        severity="blocking",
+        message=localized_text(
+            profile.language,
+            "Användaren nämner PDF-mall, men det är fortfarande oklart om slutresultatet ska vara en vanlig genererad PDF eller om en fast mallförväntan måste hanteras uttryckligt.",
+            "The user mentions a PDF template, but it is still unclear whether the result should be a normal generated PDF or whether a fixed template expectation must be handled explicitly.",
+        ),
+        suggestion=pdf_generation_mode_question(profile.language),
+        question_level="blocking",
+    )
+
+
+def _build_output_reader_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if not _reader_and_style_is_vague(profile):
+        return None
+    return DiscoveryIssue(
+        issue_id="output_reader",
+        category="output",
+        severity="blocking",
+        message=localized_text(
+            profile.language,
+            "Det är fortfarande oklart vem som främst ska läsa slutresultatet och vilken ton det bör ha.",
+            "The main reader and tone of the final output are still unclear.",
+        ),
+        suggestion=output_reader_question(profile.language),
+        question_level="nice_to_have",
+    )
+
+
+def _build_final_output_scope_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if not _final_output_scope_is_vague(profile):
+        return None
+    return DiscoveryIssue(
+        issue_id="final_output_scope",
+        category="output",
+        severity="blocking",
+        message=localized_text(
+            profile.language,
+            "Det är fortfarande oklart hur detaljerat slutresultatet ska vara.",
+            "The level of detail in the final output is still unclear.",
+        ),
+        suggestion=final_output_scope_question(profile.language),
+        question_level="nice_to_have",
+    )
+
+
+def _build_final_pdf_type_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if not _final_pdf_type_is_vague(profile):
+        return None
+    return DiscoveryIssue(
+        issue_id="final_pdf_type",
+        category="output",
+        severity="blocking",
+        message=localized_text(
+            profile.language,
+            "Det är fortfarande oklart vilken typ av PDF användaren vill ha som slutresultat.",
+            "The style of the final PDF output is still unclear.",
+        ),
+        suggestion=final_pdf_type_question(profile.language),
+        question_level="high_value",
+    )
+
+
+def _build_structured_analysis_need_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if not _structured_analysis_need_is_vague(profile):
+        return None
+    if (
+        question_exposure_for_id("structured_analysis_need") != "user_requirement"
+        and not _should_surface_structured_analysis_question(profile)
+    ):
+        return None
+    return DiscoveryIssue(
+        issue_id="structured_analysis_need",
+        category="automation",
+        severity="blocking",
+        message=localized_text(
+            profile.language,
+            "Det är fortfarande oklart om flödet ska ta fram strukturerad analys som återanvänds i senare steg.",
+            "It is still unclear whether the flow should produce structured analysis that later steps can reuse.",
+        ),
+        suggestion=structured_analysis_need_question(profile.language),
+        question_level="high_value",
+    )
+
+
+def _build_runtime_metadata_fields_issue(
+    conversation: list[ConversationMessage],
+    profile: DiscoveryProfile,
+) -> DiscoveryIssue | None:
+    if not _runtime_metadata_is_vague(profile):
+        return None
+    return DiscoveryIssue(
+        issue_id="runtime_metadata_fields",
+        category="input",
+        severity="blocking",
+        message=localized_text(
+            profile.language,
+            "Det är fortfarande oklart om användaren ska ange extra metadata vid körning.",
+            "It is still unclear whether the user should provide extra runtime metadata.",
+        ),
+        suggestion=runtime_metadata_fields_question(profile.language),
+        question_level="high_value",
+    )
+
+
+_DISCOVERY_ISSUE_BUILDERS: Final[tuple[DiscoveryIssueBuilder, ...]] = (
+    _build_comparison_scope_conflict_issue,
+    _build_case_scope_issue,
+    _build_input_material_mode_issue,
+    _build_flow_input_architecture_issue,
+    _build_document_kind_issue,
+    _build_document_material_scope_issue,
+    _build_comparison_scope_issue,
+    _build_external_delivery_unsupported_issue,
+    _build_structured_io_contract_issue,
+    _build_post_processing_goal_issue,
+    _build_final_output_mode_issue,
+    _build_docx_output_mode_issue,
+    _build_pdf_generation_mode_issue,
+    _build_output_reader_issue,
+    _build_final_output_scope_issue,
+    _build_final_pdf_type_issue,
+    _build_structured_analysis_need_issue,
+    _build_runtime_metadata_fields_issue,
+)
 
 
 def _build_decision_trace(
