@@ -2,18 +2,6 @@
 
 from intric.audit.domain.action_types import ActionType
 
-# Category descriptions for UI display
-CATEGORY_DESCRIPTIONS = {
-    "admin_actions": "User management, role changes, API keys, tenant settings",
-    "user_actions": "Assistant, space, app operations, templates, model configs",
-    "security_events": "Security classification lifecycle events",
-    "file_operations": "File uploads and deletions",
-    "integration_events": "Integration connections, knowledge sources, website crawling, MCP servers",
-    "system_actions": "Retention policies, encryption, maintenance",
-    "audit_access": "Viewing and exporting audit logs",
-}
-
-
 # Map all ActionType constants to categories (using string values as keys)
 CATEGORY_MAPPINGS = {
     # Admin Actions (33 actions)

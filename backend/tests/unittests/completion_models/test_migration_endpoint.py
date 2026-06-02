@@ -8,7 +8,6 @@ from uuid import uuid4
 
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.category_mappings import CATEGORY_MAPPINGS
-from intric.audit.domain.action_metadata import ACTION_METADATA
 from intric.completion_models.presentation.completion_model_models import (
     ModelMigrationRequest,
     ValidationResult,
@@ -24,18 +23,6 @@ class TestCompletionModelMigratedActionType:
         action_value = ActionType.COMPLETION_MODEL_MIGRATED.value
         assert action_value in CATEGORY_MAPPINGS
         assert CATEGORY_MAPPINGS[action_value] == "user_actions"
-
-    def test_completion_model_migrated_has_metadata(self):
-        action_value = ActionType.COMPLETION_MODEL_MIGRATED.value
-        assert action_value in ACTION_METADATA
-
-        metadata = ACTION_METADATA[action_value]
-        assert "name_sv" in metadata
-        assert "description_sv" in metadata
-        assert isinstance(metadata["name_sv"], str)
-        assert isinstance(metadata["description_sv"], str)
-        assert len(metadata["name_sv"]) > 0
-        assert len(metadata["description_sv"]) > 0
 
 
 class TestValidationResultSchema:

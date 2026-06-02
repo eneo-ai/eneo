@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from intric.audit.domain.action_metadata import get_all_actions
+from intric.audit.domain.action_types import ActionType
 from intric.database.tables.audit_action_config_table import AuditActionConfig
 from intric.main.logging import get_logger
 
@@ -174,8 +174,8 @@ class AuditActionConfigRepository:
         existing = await self.get_actions_for_tenant(tenant_id)
         existing_actions = {config.action for config in existing}
 
-        # Get all known actions from metadata
-        all_actions = set(get_all_actions())
+        # Get all known actions from the canonical ActionType vocabulary
+        all_actions = {action.value for action in ActionType}
 
         # Find missing actions
         missing_actions = all_actions - existing_actions

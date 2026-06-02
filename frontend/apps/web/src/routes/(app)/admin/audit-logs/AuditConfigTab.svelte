@@ -2,6 +2,9 @@
   import { Button, Input } from "@intric/ui";
   import { getIntric } from "$lib/core/Intric";
   import * as m from "$lib/paraglide/messages";
+  import type { components } from "@intric/intric-js";
+  import { getActionLabel, getActionDescription } from "./audit-action-labels";
+  import { getCategoryLabel, getCategoryDescription } from "./audit-category-labels";
   import { ChevronRight, Search, Check, X } from "lucide-svelte";
   import { onMount } from "svelte";
   import { slide, fly } from "svelte/transition";
@@ -9,22 +12,9 @@
 
   const intric = getIntric();
 
-  // Types for audit config
-  type CategoryConfigItem = {
-    category: string;
-    enabled: boolean;
-    description: string;
-    action_count: number;
-    example_actions: string[];
-  };
-
-  type ActionConfigItem = {
-    action: string;
-    enabled: boolean;
-    category: string;
-    name_sv: string;
-    description_sv: string;
-  };
+  // Display text is resolved from translation keys, not the API payload.
+  type CategoryConfigItem = components["schemas"]["CategoryConfig"];
+  type ActionConfigItem = components["schemas"]["ActionConfig"];
 
   // State
   let categoryConfig = $state<CategoryConfigItem[]>([]);
@@ -60,8 +50,8 @@
     const filtered = actionConfig.filter(
       (action) =>
         action.action.toLowerCase().includes(query) ||
-        action.name_sv?.toLowerCase().includes(query) ||
-        action.description_sv?.toLowerCase().includes(query)
+        getActionLabel(action.action).toLowerCase().includes(query) ||
+        getActionDescription(action.action).toLowerCase().includes(query)
     );
 
     return groupActionsByCategory(filtered);
@@ -77,12 +67,6 @@
       grouped[action.category].push(action);
     }
     return grouped;
-  }
-
-  // Get category display name
-  function getCategoryName(category: string): string {
-    const key = `audit_category_${category}`;
-    return (m as unknown as Record<string, (() => string) | undefined>)[key]?.() || category;
   }
 
   // Toggle category expansion
@@ -346,7 +330,7 @@
                   />
                 </div>
                 <span class="text-default truncate text-sm font-semibold"
-                  >{getCategoryName(category.category)}</span
+                  >{getCategoryLabel(category.category)}</span
                 >
                 <span
                   class="bg-primary text-muted border-default inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold"
@@ -363,8 +347,10 @@
                 />
               </div>
             </div>
-            {#if category.description}
-              <p class="text-muted mt-3 ml-9 text-sm leading-relaxed">{category.description}</p>
+            {#if getCategoryDescription(category.category)}
+              <p class="text-muted mt-3 ml-9 text-sm leading-relaxed">
+                {getCategoryDescription(category.category)}
+              </p>
             {/if}
           </div>
 
@@ -377,7 +363,7 @@
                     <div class="min-w-0 flex-1">
                       <div class="mb-1.5 flex flex-wrap items-center gap-2.5">
                         <span class="text-default text-sm font-semibold">
-                          {action.name_sv || action.action}
+                          {getActionLabel(action.action)}
                         </span>
                         {#if !action.enabled}
                           <span
@@ -388,9 +374,9 @@
                           </span>
                         {/if}
                       </div>
-                      {#if action.description_sv}
+                      {#if getActionDescription(action.action)}
                         <p class="text-muted mb-2 text-sm leading-relaxed">
-                          {action.description_sv}
+                          {getActionDescription(action.action)}
                         </p>
                       {/if}
                       <code
