@@ -1,0 +1,14 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignore": ["**/paraglide/**", "src/paraglide/**", "**/tests/**"],
+  "ignoreDependencies": ["@intric/icons.*", "prettier", "prettier-plugin-.*"],
+  "ignoreWorkspaces": ["apps/docs-site"],
+  "workspaces": {
+    "apps/web": {
+      "ignore": ["src/lib/paraglide/**"]
+    },
+    "packages/ui": {},
+    "packages/intric-js": {},
+    "packages/eslint-plugin": {}
+  }
+}

@@ -90,6 +90,8 @@ dev = [
     "pytest-dotenv>=0.5.2,<0.6",
     "openpyxl>=3.1.5,<4",
     "pytest-xdist>=3.8.0",
+    "deptry>=0.25.1",
+    "vulture>=2.16",
 ]
 
 [build-system]
@@ -128,3 +130,30 @@ ignore = []
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+# Dead-code / dependency analysis. Both are advisory (not wired into pre-commit)
+# and run via `task deadcode` or directly. They surface candidates for a human
+# to triage — neither auto-removes anything.
+
+[tool.deptry]
+# DEP003 (transitive): sqlalchemy/starlette/aiohttp are imported directly across
+# the codebase but only resolve via transitive deps. Promoting them to direct
+# dependencies is a separate cleanup; ignored here to keep the signal readable.
+# DEP002 (unused): runtime-only deps that are legitimately never imported — DB
+# drivers, the WSGI server, migrations CLI, env loading and async glue.
+[tool.deptry.per_rule_ignores]
+DEP003 = ["sqlalchemy", "starlette", "aiohttp"]
+DEP002 = [
+    "alembic",
+    "asyncpg",
+    "psycopg2-binary",
+    "greenlet",
+    "gunicorn",
+    "python-multipart",
+    "python-dotenv",
+]
+
+[tool.vulture]
+min_confidence = 80
+paths = ["src/intric"]
+sort_by_size = true
