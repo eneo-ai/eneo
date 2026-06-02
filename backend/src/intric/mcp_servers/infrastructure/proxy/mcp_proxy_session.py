@@ -85,6 +85,12 @@ class MCPProxySession:
         self._clients: dict[UUID, MCPClient] = {}
         self._connection_locks: dict[UUID, asyncio.Lock] = {}
 
+        # Servers that pushed a tools/list_changed notification this session.
+        # refresh_tools() re-lists them and rebuilds their slice of the
+        # registry. Populated by the per-client callback wired in
+        # _get_or_create_client; generic — any MCP server can drive it.
+        self._dirty_server_ids: set[UUID] = set()
+
         # Servers that failed to connect or errored mid-session. Tracked instead
         # of dropping clients from the cache: drops would leak the underlying
         # streamablehttp_client whose anyio cancel scope can only be exited from
@@ -119,6 +125,69 @@ class MCPProxySession:
             sanitized = "t_" + sanitized
         return sanitized
 
+    def _register_tool(
+        self,
+        server: MCPServer,
+        server_prefix: str,
+        name: str,
+        title: str | None,
+        description: str | None,
+        input_schema: dict[str, Any] | None,
+    ) -> str | None:
+        """Register one tool into the registry + LLM list.
+
+        Returns the prefixed name on success, or None if the tool was skipped
+        because its prefixed name collides with a tool from another server.
+        Shared by the DB-backed initial build and the live refresh so prefixing,
+        collision handling, and OpenAI-format conversion stay identical.
+        """
+        tool_name_sanitized = self._sanitize_name(name)
+        prefixed_name = f"{server_prefix}__{tool_name_sanitized}"
+
+        # Check for collision before registering. A tool already owned by this
+        # same server is not a collision — the refresh path clears a server's
+        # entries before re-registering, so any leftover here is another server.
+        if prefixed_name in self._tool_registry:
+            existing_server, existing_tool, _ = self._tool_registry[prefixed_name]
+            logger.warning(
+                f"[MCPProxy] Tool collision: '{prefixed_name}' from "
+                f"'{server.name}/{name}' skipped (already registered from "
+                f"'{existing_server.name}/{existing_tool}')"
+            )
+            return None
+
+        self._tool_registry[prefixed_name] = (server, name, title)
+        self._tools_for_llm.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": prefixed_name,
+                    "description": description or f"Tool from {server.name}",
+                    "parameters": input_schema or {"type": "object", "properties": {}},
+                },
+            }
+        )
+        return prefixed_name
+
+    @staticmethod
+    def _is_db_tool_enabled(tool: Any) -> bool:
+        """Whether a DB-stored tool definition is exposed to the model.
+
+        Admins disable tools per server; we also hide brand-new tools that have
+        not been synced with active values yet. Shared by the initial build and
+        the live refresh so an admin-disabled tool is never re-exposed when a
+        server's tool list is re-listed.
+        """
+        if not tool.is_enabled_by_default:
+            return False
+        if (
+            tool.requires_approval
+            and tool.description is None
+            and tool.input_schema is None
+        ):
+            return False
+        return True
+
     def _build_tool_registry(self):
         """Build tool registry from DB-stored tool definitions."""
         for server in self.mcp_servers:
@@ -128,53 +197,149 @@ class MCPProxySession:
             server_prefix = self._sanitize_name(server.name.lower())
 
             for tool in server.tools:
-                # Only include enabled tools
-                if not tool.is_enabled_by_default:
-                    continue
-                # Skip new tools that have no active values yet
-                if (
-                    tool.requires_approval
-                    and tool.description is None
-                    and tool.input_schema is None
-                ):
+                if not self._is_db_tool_enabled(tool):
                     continue
 
-                # Create prefixed tool name: server_name__tool_name
-                tool_name_sanitized = self._sanitize_name(tool.name)
-                prefixed_name = f"{server_prefix}__{tool_name_sanitized}"
-
-                # Check for collision before registering
-                if prefixed_name in self._tool_registry:
-                    existing_server, existing_tool, _ = self._tool_registry[
-                        prefixed_name
-                    ]
-                    logger.warning(
-                        f"[MCPProxy] Tool collision: '{prefixed_name}' from '{server.name}/{tool.name}' "
-                        f"skipped (already registered from '{existing_server.name}/{existing_tool}')"
-                    )
-                    continue  # Skip this tool entirely (no registry, no LLM list)
-
-                # Register tool -> (server, original_name) mapping
-                self._tool_registry[prefixed_name] = (server, tool.name, tool.title)
-
-                # Build OpenAI-format tool definition
-                self._tools_for_llm.append(
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": prefixed_name,
-                            "description": tool.description
-                            or f"Tool from {server.name}",
-                            "parameters": tool.input_schema
-                            or {"type": "object", "properties": {}},
-                        },
-                    }
+                self._register_tool(
+                    server=server,
+                    server_prefix=server_prefix,
+                    name=tool.name,
+                    title=tool.title,
+                    description=tool.description,
+                    input_schema=tool.input_schema,
                 )
 
         logger.debug(
             f"[MCPProxy] Built registry with {len(self._tool_registry)} tools "
             f"from {len(self.mcp_servers)} servers"
         )
+
+    def _rebuild_server_tools(
+        self, server: MCPServer, live_tools: list[dict[str, Any]]
+    ) -> bool:
+        """Replace a server's registry slice with a freshly-listed tool set.
+
+        Used by refresh_tools after a tools/list_changed: drop every prefixed
+        name currently owned by this server, then re-register from the live
+        ``list_tools()`` response. Admin-disabled tools stay hidden — a live
+        tool is registered only if it is genuinely new (not in the DB tool list,
+        i.e. dynamically activated) or its DB row is enabled. Returns True if the
+        server's set of prefixed names changed.
+        """
+        before = {
+            prefixed
+            for prefixed, (srv, _, _) in self._tool_registry.items()
+            if srv.id == server.id
+        }
+
+        # Drop the server's existing entries from both the registry and the
+        # LLM-facing list so re-registration starts clean (and stale tools the
+        # server no longer exposes disappear).
+        for prefixed in before:
+            self._tool_registry.pop(prefixed, None)
+        self._tools_for_llm = [
+            t for t in self._tools_for_llm if t["function"]["name"] not in before
+        ]
+
+        # Names an admin disabled (or that are not yet synced) must stay hidden
+        # even though the live server still advertises them. Tools absent from
+        # the DB entirely are dynamically activated and allowed.
+        db_tools = server.tools or []
+        disabled_names = {
+            tool.name for tool in db_tools if not self._is_db_tool_enabled(tool)
+        }
+
+        server_prefix = self._sanitize_name(server.name.lower())
+        after: set[str] = set()
+        for tool in live_tools:
+            if tool["name"] in disabled_names:
+                continue
+            prefixed = self._register_tool(
+                server=server,
+                server_prefix=server_prefix,
+                name=tool["name"],
+                title=tool.get("title"),
+                description=tool.get("description"),
+                input_schema=tool.get("input_schema"),
+            )
+            if prefixed is not None:
+                after.add(prefixed)
+
+        return before != after
+
+    async def refresh_tools(self, touched_tool_names: list[str] | None = None) -> bool:
+        """Re-list tools for servers whose advertised set may have changed.
+
+        Spec-compliant progressive-discovery servers start with a small
+        bootstrap tool set (e.g. ``search_tools`` + ``load_tools``) and emit
+        ``notifications/tools/list_changed`` once an activation tool reveals
+        more. Without re-listing, the model never sees the activated tools and
+        loops calling the activator. We refresh the union of:
+
+        * servers that pushed a list_changed notification this session, and
+        * servers we just called a tool on (``touched_tool_names``) **that
+          advertised tools.listChanged** — the belt-and-suspenders path for when
+          the notification did not arrive. Static servers (no listChanged
+          capability) are never re-listed here: they keep their DB-synced tool
+          set, with no extra tools/list round-trip and no risk of exposing
+          server-side tools that were never synced/enabled by an admin.
+
+        Only connected, non-failed servers are re-listed. Must run on the proxy
+        session's owner task (it reuses the cached client's session); the agent
+        loop calls it right after ``call_tools_parallel``, which connects on
+        that same task. Returns True if any server's tool set changed.
+        """
+        # Dirty servers actually pushed a notification — proof of support, and
+        # the path resumed sessions (which skip initialize) rely on. The
+        # touched path only adds servers that opted into listChanged.
+        target_ids: set[UUID] = set(self._dirty_server_ids)
+        for name in touched_tool_names or []:
+            entry = self._tool_registry.get(name)
+            if entry is None:
+                continue
+            sid = entry[0].id
+            client = self._clients.get(sid)
+            if client is not None and client.supports_tools_list_changed:
+                target_ids.add(sid)
+
+        # Only servers we hold a live connection to and that have not failed.
+        target_ids = {
+            sid
+            for sid in target_ids
+            if sid in self._clients and sid not in self._failed_server_ids
+        }
+        if not target_ids:
+            return False
+
+        servers_by_id = {s.id: s for s in self.mcp_servers}
+        changed = False
+        for sid in target_ids:
+            client = self._clients.get(sid)
+            server = servers_by_id.get(sid)
+            if client is None or server is None:
+                continue
+            try:
+                live_tools = await client.list_tools()
+            except Exception as exc:
+                logger.warning(
+                    "[MCPProxy] Failed to refresh tools for '%s': %s",
+                    server.name,
+                    exc,
+                )
+                continue
+            if self._rebuild_server_tools(server, live_tools):
+                changed = True
+                logger.info(
+                    "[MCPProxy] Refreshed tools for '%s' (%d tools now visible)",
+                    server.name,
+                    sum(
+                        1 for srv, _, _ in self._tool_registry.values() if srv.id == sid
+                    ),
+                )
+            client.tools_list_changed_pending = False
+            self._dirty_server_ids.discard(sid)
+
+        return changed
 
     async def _is_circuit_open(self, server_id: UUID) -> bool:
         async with _CIRCUIT_BREAKER_LOCK:
@@ -353,6 +518,9 @@ class MCPProxySession:
                 server,
                 auth_creds,
                 resume_mcp_session_id=resume_id,
+                on_tools_list_changed=lambda sid=server_id: self._dirty_server_ids.add(
+                    sid
+                ),
             )
 
             logger.debug(f"[MCPProxy] Connecting to '{server.name}'...")

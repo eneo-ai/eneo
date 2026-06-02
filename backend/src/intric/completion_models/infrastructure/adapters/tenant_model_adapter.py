@@ -573,6 +573,38 @@ class TenantModelAdapter(CompletionModelAdapter):
         mcp_tools = mcp_proxy.get_tools_for_llm() if mcp_proxy else []
         return intric_tools + mcp_tools
 
+    async def _refresh_mcp_tools_after_round(
+        self,
+        mcp_proxy: "MCPProxySession",
+        intric_tools: list[dict[str, Any]],
+        tool_names: list[str],
+        litellm_kwargs: dict[str, Any],
+        allowed_tools: set[str],
+    ) -> set[str]:
+        """Re-list MCP tools after a tool round; update the advertised set if changed.
+
+        Progressive-discovery MCP servers reveal tools lazily: a tool such as
+        ``load_tools`` activates new tools and the server emits
+        ``notifications/tools/list_changed``. Without re-listing, the model never
+        sees the activated tools and loops calling the activator. When the tool
+        set changed, rewrite ``litellm_kwargs["tools"]`` (consumed by the
+        follow-up request) and return a refreshed allow-list; otherwise return
+        the current allow-list unchanged.
+        """
+        try:
+            tools_changed = await mcp_proxy.refresh_tools(touched_tool_names=tool_names)
+        except Exception as exc:
+            logger.warning(f"[MCP] Tool refresh failed: {exc}")
+            return allowed_tools
+
+        if not tools_changed:
+            return allowed_tools
+
+        refreshed_tools = self._merge_mcp_tools(intric_tools, mcp_proxy)
+        if refreshed_tools:
+            litellm_kwargs["tools"] = refreshed_tools
+        return mcp_proxy.get_allowed_tool_names()
+
     def _create_messages_from_context(self, context: "Context") -> list[dict[str, Any]]:
         """
         Convert Intric context to OpenAI message format with vision support.
@@ -1063,6 +1095,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                     "kwargs": litellm_kwargs,
                     "has_tools": bool(all_tools),
                     "mcp_proxy": mcp_proxy,
+                    # Kept so iterate_stream can re-merge with refreshed MCP
+                    # tools after a tools/list_changed without recomputing the
+                    # Intric built-ins.
+                    "intric_tools": intric_tools,
                 },
             )
 
@@ -1295,6 +1331,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             ):
                 messages = eneo_ctx["messages"]
                 litellm_kwargs = eneo_ctx["kwargs"]
+                intric_tools: list[dict[str, Any]] = eneo_ctx.get("intric_tools", [])
                 allowed_tools = mcp_proxy.get_allowed_tool_names()
 
                 max_rounds = 10
@@ -1631,6 +1668,19 @@ class TenantModelAdapter(CompletionModelAdapter):
                             response_type=ResponseType.TOOL_CALL,
                             tool_calls_metadata=denied_metadata,
                         )
+
+                    # Re-fetch tools in case a tool we just ran (e.g. load_tools
+                    # on a progressive-discovery server) activated new tools via
+                    # notifications/tools/list_changed. Updates the advertised
+                    # tools on litellm_kwargs (consumed by the follow-up below)
+                    # and returns a fresh allow-list for next round's validation.
+                    allowed_tools = await self._refresh_mcp_tools_after_round(
+                        mcp_proxy=mcp_proxy,
+                        intric_tools=intric_tools,
+                        tool_names=[tc["function"]["name"] for tc in tool_calls],
+                        litellm_kwargs=litellm_kwargs,
+                        allowed_tools=allowed_tools,
+                    )
 
                     # Follow-up streaming request (keep tools for next round)
                     follow_up = cast(

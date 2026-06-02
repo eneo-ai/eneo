@@ -3,11 +3,12 @@
 import asyncio
 from datetime import timedelta
 from types import TracebackType
-from typing import Any, Optional, cast
+from typing import Any, Callable, Optional, cast
 
 import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.types import ServerNotification, ToolListChangedNotification
 
 from intric.main.config import get_settings
 from intric.main.exceptions import MCPAuthenticationError, MCPClientError
@@ -155,6 +156,7 @@ class MCPClient:
         list_tools_timeout: int | None = None,
         tool_call_timeout: int | None = None,
         resume_mcp_session_id: str | None = None,
+        on_tools_list_changed: Callable[[], None] | None = None,
     ):
         """
         Initialize MCP client.
@@ -166,6 +168,11 @@ class MCPClient:
             resume_mcp_session_id: If set, sent as the initial ``Mcp-Session-Id``
                 header so the server resumes the prior logical session for state
                 that outlives a single transport connection.
+            on_tools_list_changed: Fired (best-effort) when the server pushes a
+                ``notifications/tools/list_changed``. Progressive-discovery
+                servers emit this after a tool like ``load_tools`` activates new
+                tools; the proxy reacts by re-listing so the freshly activated
+                tools become callable on the next model turn.
         """
         super().__init__()
         self.mcp_server = mcp_server
@@ -174,6 +181,15 @@ class MCPClient:
         self.list_tools_timeout = list_tools_timeout or MCP_LIST_TOOLS_TIMEOUT_DEFAULT
         self.tool_call_timeout = tool_call_timeout or MCP_TOOL_CALL_TIMEOUT_DEFAULT
         self.resume_mcp_session_id = resume_mcp_session_id
+        self._on_tools_list_changed = on_tools_list_changed
+        # Set when a tools/list_changed notification arrives on this session.
+        # The proxy also re-lists the servers it just called, so this flag is a
+        # protocol-correct optimization rather than the sole trigger.
+        self.tools_list_changed_pending: bool = False
+        # Captured from the initialize() handshake (fresh connect only). Default
+        # False — including resumed sessions, which skip initialize; those rely
+        # on the dirty flag above, set by the actual notification, instead.
+        self.supports_tools_list_changed: bool = False
         self.session: Optional[ClientSession] = None
         self._streams_context = None
         self._session_context = None
@@ -186,6 +202,29 @@ class MCPClient:
         # Set by the streamable HTTP transport; reading it after initialize()
         # returns the session id the SDK captured from the server response.
         self._get_session_id_callable: Optional[Any] = None
+
+    async def _handle_session_message(self, message: Any) -> None:
+        """ClientSession message handler.
+
+        We only care about ``notifications/tools/list_changed``: it tells us the
+        server's advertised tool set just changed (progressive discovery), so the
+        next model turn must see the new tools. Everything else mirrors the SDK's
+        default handler (a cooperative checkpoint). Never raises — a handler
+        exception would tear down the session's receive loop.
+        """
+        try:
+            if isinstance(message, ServerNotification) and isinstance(
+                message.root, ToolListChangedNotification
+            ):
+                self.tools_list_changed_pending = True
+                if self._on_tools_list_changed is not None:
+                    self._on_tools_list_changed()
+        except Exception:  # pragma: no cover - defensive
+            logger.debug(
+                "Error handling MCP notification from %s", self.mcp_server.name
+            )
+        finally:
+            await asyncio.sleep(0)
 
     async def _build_auth_headers(self) -> dict[str, str]:
         """Build authentication headers for this connection.
@@ -317,7 +356,9 @@ class MCPClient:
             f"Streamable HTTP transport connected to {self.mcp_server.http_url}"
         )
 
-        session_context = ClientSession(read, write)
+        session_context = ClientSession(
+            read, write, message_handler=self._handle_session_message
+        )
         try:
             session = await session_context.__aenter__()
         except BaseException:
@@ -415,6 +456,18 @@ class MCPClient:
             self.assigned_mcp_session_id = get_session_id()
         except Exception:
             self.assigned_mcp_session_id = None
+
+        # Whether this server advertised tools.listChanged. Only servers that
+        # opt in get re-listed by the proxy's belt-and-suspenders path; static
+        # servers keep their original DB-synced tool set untouched (no extra
+        # tools/list round-trip, no exposure of un-synced server-side tools).
+        try:
+            tools_cap = getattr(init_result.capabilities, "tools", None)
+            self.supports_tools_list_changed = bool(
+                getattr(tools_cap, "listChanged", False)
+            )
+        except Exception:
+            self.supports_tools_list_changed = False
 
         logger.info(
             "Connected to MCP server: %s (server_info=%s/%s, session_id=%s)",
