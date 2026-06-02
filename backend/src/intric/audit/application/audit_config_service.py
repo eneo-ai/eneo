@@ -3,10 +3,12 @@
 import logging
 from uuid import UUID
 
+from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.category_mappings import (
     CATEGORY_MAPPINGS,
     get_category_for_action,
 )
+from intric.audit.domain.category_types import CategoryType
 from intric.audit.domain.repositories.audit_config_repository import (
     ActionOverrides,
     AuditConfigRepository,
@@ -130,20 +132,9 @@ class AuditConfigService:
             category: enabled for category, enabled in configs
         }
 
-        # All 7 categories in order
-        all_categories = [
-            "admin_actions",
-            "user_actions",
-            "security_events",
-            "file_operations",
-            "integration_events",
-            "system_actions",
-            "audit_access",
-        ]
-
-        # Build enriched category configs
+        # Build enriched category configs (CategoryType defines order)
         category_configs: list[CategoryConfig] = []
-        for category in all_categories:
+        for category in CategoryType:
             # Get enabled state (default to True if not found)
             enabled = config_dict.get(category, True)
 
@@ -334,9 +325,9 @@ class AuditConfigService:
 
             action_configs.append(
                 ActionConfig(
-                    action=action_value,
+                    action=ActionType(action_value),
                     enabled=enabled,
-                    category=category,
+                    category=CategoryType(category),
                 )
             )
 

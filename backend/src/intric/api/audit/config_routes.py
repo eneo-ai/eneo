@@ -86,7 +86,9 @@ async def update_audit_config(
 
     # Capture old configuration for audit log
     old_config = await audit_config_service.get_config(user.tenant_id)
-    old_config_dict = {c.category: c.enabled for c in old_config.categories}
+    old_config_dict: dict[str, bool] = {
+        c.category: c.enabled for c in old_config.categories
+    }
 
     # Update configuration
     updated_config = await audit_config_service.update_config(
