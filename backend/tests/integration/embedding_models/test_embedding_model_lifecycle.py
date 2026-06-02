@@ -1,0 +1,168 @@
+"""Integration tests for the embedding model lifecycle.
+
+Embedding models are never migrated (switching embedding model means
+re-embedding, not repointing), so the lifecycle is soft-delete only:
+- tenant delete soft-deletes (keeps the row as a tombstone) and hides it from
+  read paths
+- the weekly cleanup worker hard-deletes a tombstone only once nothing
+  references it — info_blobs (the historical chunk → model link, FK SET NULL)
+  are the blocker that keeps a tombstone alive until the knowledge is gone
+"""
+
+from datetime import datetime, timezone
+
+import pytest
+from sqlalchemy import select
+
+from intric.database.tables.ai_models_table import EmbeddingModels
+from intric.database.tables.info_blobs_table import InfoBlobs
+from intric.database.tables.model_providers_table import ModelProviders
+from intric.embedding_models.domain.embedding_model_repo import (
+    EmbeddingModelRepository,
+)
+from intric.embedding_models.infrastructure.embedding_model_cleanup_worker import (
+    cleanup_orphaned_embedding_models,
+)
+from intric.tenant_models.application.tenant_model_service import (
+    TenantEmbeddingModelService,
+)
+
+
+async def _make_embedding_model(session, admin_user, name, *, deleted=False):
+    provider = (
+        await session.execute(
+            select(ModelProviders).where(
+                ModelProviders.tenant_id == admin_user.tenant_id,
+                ModelProviders.provider_type == "openai",
+            )
+        )
+    ).scalar_one_or_none()
+    if provider is None:
+        provider = ModelProviders(
+            tenant_id=admin_user.tenant_id,
+            name="Openai",
+            provider_type="openai",
+            credentials={"api_key": "test-key"},
+            config={},
+            is_active=True,
+        )
+        session.add(provider)
+        await session.flush()
+
+    model = EmbeddingModels(
+        tenant_id=admin_user.tenant_id,
+        provider_id=provider.id,
+        name=name,
+        open_source=False,
+        family="openai",
+        stability="stable",
+        hosting="usa",
+    )
+    session.add(model)
+    await session.flush()
+    if deleted:
+        model.deleted_at = datetime.now(timezone.utc)
+        await session.flush()
+    return model
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+class TestEmbeddingModelSoftDelete:
+    async def test_delete_soft_deletes_and_hides_from_reads(
+        self, db_container, admin_user
+    ):
+        async with db_container() as container:
+            session = container.session()
+            model = await _make_embedding_model(session, admin_user, "embed-del")
+            model_id = model.id
+
+            service = TenantEmbeddingModelService(session=session, user=admin_user)
+            await service.delete(model_id)
+
+            row = (
+                await session.execute(
+                    select(EmbeddingModels).where(EmbeddingModels.id == model_id)
+                )
+            ).scalar_one()
+            assert row.deleted_at is not None
+
+            repo = EmbeddingModelRepository(session, admin_user)
+            assert all(m.id != model_id for m in await repo.all())
+            assert await repo.one_or_none(model_id) is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+class TestEmbeddingModelCleanupWorker:
+    async def test_cleanup_removes_soft_deleted_without_references(
+        self, db_container, admin_user
+    ):
+        async with db_container() as container:
+            session = container.session()
+            model = await _make_embedding_model(
+                session, admin_user, "embed-tomb", deleted=True
+            )
+            model_id = model.id
+
+        async with db_container() as container:
+            result = await cleanup_orphaned_embedding_models(container)
+            session = container.session()
+
+            assert str(model_id) in [m["id"] for m in result["removed_models"]]
+            assert (
+                await session.execute(
+                    select(EmbeddingModels).where(EmbeddingModels.id == model_id)
+                )
+            ).scalar_one_or_none() is None
+
+    async def test_cleanup_never_touches_active_models(self, db_container, admin_user):
+        # An embedding model with no deleted_at is not a tombstone and must never
+        # be selected — embedding has no migration, so deleted_at is the *only*
+        # lifecycle signal.
+        async with db_container() as container:
+            session = container.session()
+            active = await _make_embedding_model(session, admin_user, "embed-active")
+            active_id = active.id
+
+        async with db_container() as container:
+            result = await cleanup_orphaned_embedding_models(container)
+            session = container.session()
+
+            assert str(active_id) not in [m["id"] for m in result["removed_models"]]
+            assert (
+                await session.execute(
+                    select(EmbeddingModels).where(EmbeddingModels.id == active_id)
+                )
+            ).scalar_one_or_none() is not None
+
+    async def test_cleanup_skips_tombstone_with_info_blob_reference(
+        self, db_container, admin_user
+    ):
+        async with db_container() as container:
+            session = container.session()
+            model = await _make_embedding_model(
+                session, admin_user, "embed-stuck", deleted=True
+            )
+            model_id = model.id
+            session.add(
+                InfoBlobs(
+                    text="historical chunk",
+                    size=10,
+                    user_id=admin_user.id,
+                    tenant_id=admin_user.tenant_id,
+                    embedding_model_id=model_id,
+                )
+            )
+            await session.flush()
+
+        async with db_container() as container:
+            result = await cleanup_orphaned_embedding_models(container)
+            session = container.session()
+
+            assert str(model_id) in [m["id"] for m in result["skipped_models"]]
+            assert (
+                await session.execute(
+                    select(EmbeddingModels).where(EmbeddingModels.id == model_id)
+                )
+            ).scalar_one_or_none() is not None
