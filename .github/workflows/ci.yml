@@ -260,11 +260,35 @@ jobs:
 
       - name: Fail on schema drift
         run: |
-          if ! git diff --exit-code -- frontend/packages/intric-js/src/types/schema.d.ts; then
-            echo "::error::frontend/packages/intric-js/src/types/schema.d.ts is out of sync with the backend OpenAPI spec."
-            echo "Regenerate it (cd frontend/packages/intric-js && node update.js against a backend, or the offline app.openapi() regen) and commit the result."
-            exit 1
+          SCHEMA=frontend/packages/intric-js/src/types/schema.d.ts
+          if git diff --quiet -- "$SCHEMA"; then
+            echo "$SCHEMA is in sync with the backend OpenAPI spec."
+            exit 0
           fi
+
+          echo "::error file=$SCHEMA::Out of sync with the backend OpenAPI spec — regenerate and commit it."
+
+          # Render the drift in the job Summary so it's visible without opening raw logs.
+          {
+            echo "## ❌ schema.d.ts drift detected"
+            echo ""
+            echo "\`$SCHEMA\` does not match the backend OpenAPI spec."
+            echo "Regenerate it (\`cd frontend/packages/intric-js && node update.js\` against a backend, or the offline \`app.openapi()\` regen) and commit the result."
+            echo ""
+            echo "<details><summary>Diff — committed (red) vs. regenerated/expected (green)</summary>"
+            echo ""
+            echo '```diff'
+            git diff --no-color -- "$SCHEMA"
+            echo '```'
+            echo ""
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Also surface it in the step log, collapsed.
+          echo "::group::schema.d.ts diff (committed vs. regenerated)"
+          git diff -- "$SCHEMA"
+          echo "::endgroup::"
+          exit 1
 
   docker-builds:
     name: Docker builds (${{ matrix.image }})
