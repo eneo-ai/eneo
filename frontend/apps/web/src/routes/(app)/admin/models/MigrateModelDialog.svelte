@@ -1,20 +1,19 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <!--
-  Migrate all usage of a soon-to-be-decommissioned completion model to a
-  replacement model. The dialog has three jobs:
+  Migrate all usage of a soon-to-be-decommissioned model to a replacement.
+  Shared by completion and transcription (`modelType` prop) — same layout and
+  flow, only the SDK endpoints differ. The dialog has three jobs:
 
-    1. Show what will be affected (assistants, apps, services, templates,
-       questions) before the user commits.
+    1. Show what will be affected (the entities using the model) before commit.
     2. Validate compatibility against the chosen target server-side and
        surface security blockers / warnings.
-    3. Hand off to `intric.models.migrateCompletion` and refresh the
-       migration history panel.
+    3. Hand off to the migrate endpoint and refresh the migration history panel.
 -->
 
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import type { CompletionModel } from "@intric/intric-js";
+  import type { CompletionModel, TranscriptionModel } from "@intric/intric-js";
   import type { Writable } from "svelte/store";
   import { invalidate } from "$app/navigation";
   import { getIntric } from "$lib/core/Intric";
@@ -33,14 +32,21 @@
   import ModelUsageBreakdown from "./ModelUsageBreakdown.svelte";
   import type { UsageDetail } from "./usage";
 
+  type MigratableModel = CompletionModel | TranscriptionModel;
+
   let {
     openController,
     sourceModel,
-    models = []
+    models = [],
+    modelType = "completionModel"
   }: {
     openController: Writable<boolean>;
-    sourceModel: CompletionModel;
-    models?: CompletionModel[];
+    sourceModel: MigratableModel;
+    models?: MigratableModel[];
+    // The dialog is identical for both types — same impact preview, same
+    // validation and confirm flow. Only which SDK endpoints get called differs
+    // (gated on modelType in loadImpact / runValidation / handleMigrate).
+    modelType?: "completionModel" | "transcriptionModel";
   } = $props();
 
   const intric = getIntric();
@@ -74,7 +80,7 @@
       .filter((mod) => !mod.migrated_to_model_id)
   );
 
-  function labelFor(mod: CompletionModel): string {
+  function labelFor(mod: MigratableModel): string {
     return mod.nickname ? mod.nickname : mod.name;
   }
 
@@ -160,10 +166,9 @@
     fallbackWarnings = [];
     validationError = false;
     try {
-      const result = (await intric.models.validateMigration({
-        fromId: sourceModel.id,
-        toId
-      })) as {
+      const result = (await (modelType === "transcriptionModel"
+        ? intric.models.validateTranscriptionMigration({ fromId: sourceModel.id, toId })
+        : intric.models.validateMigration({ fromId: sourceModel.id, toId }))) as {
         compatible: boolean;
         warnings: string[];
         warning_codes: string[];
@@ -226,15 +231,23 @@
     impactTotal = 0;
     impactDetails = [];
     spacesCount = 0;
+    // Same impact preview for both model types — only the endpoint differs.
+    // Transcription's details are its apps; spaces come from the aggregate
+    // usage count (a many-to-many, like completion).
+    const isTranscription = modelType === "transcriptionModel";
     try {
-      const details = (await intric.models.getUsageDetails({
-        modelId: sourceModel.id,
-        limit: 100
-      })) as { items?: UsageDetail[]; total?: number };
+      const details = (await (isTranscription
+        ? intric.models.getTranscriptionUsageDetails({ modelId: sourceModel.id, limit: 100 })
+        : intric.models.getUsageDetails({ modelId: sourceModel.id, limit: 100 }))) as {
+        items?: UsageDetail[];
+        total?: number;
+      };
       impactDetails = details?.items ?? [];
       // Use backend total (handles pagination), not just items.length
       impactTotal = details?.total ?? impactDetails.length;
-      const stats = (await intric.models.getUsageStats({ modelId: sourceModel.id })) as {
+      const stats = (await (isTranscription
+        ? intric.models.getTranscriptionUsageStats({ modelId: sourceModel.id })
+        : intric.models.getUsageStats({ modelId: sourceModel.id }))) as {
         spaces_count?: number;
       };
       spacesCount = stats.spaces_count ?? 0;
@@ -252,15 +265,25 @@
     submitError = null;
     isSubmitting = true;
     try {
-      await intric.models.migrateCompletion({
-        fromId: sourceModel.id,
-        toId: targetModelId,
-        // Match the UI gate: spaces-only warning cases are allowed without
-        // a manual acknowledgement because no resources are rebound.
-        confirmMigration: !needsAck || acknowledged,
-        // Security blockers only clear when the admin actively acknowledges.
-        forceOverride: hasSecurityBlocker && acknowledged
-      });
+      // Match the UI gate: spaces-only warning cases are allowed without a
+      // manual acknowledgement because no resources are rebound.
+      if (modelType === "transcriptionModel") {
+        // Transcription has no force_override path (no security-blocker
+        // escape hatch wired end-to-end), so it only passes confirmMigration.
+        await intric.models.migrateTranscription({
+          fromId: sourceModel.id,
+          toId: targetModelId,
+          confirmMigration: !needsAck || acknowledged
+        });
+      } else {
+        await intric.models.migrateCompletion({
+          fromId: sourceModel.id,
+          toId: targetModelId,
+          confirmMigration: !needsAck || acknowledged,
+          // Security blockers only clear when the admin actively acknowledges.
+          forceOverride: hasSecurityBlocker && acknowledged
+        });
+      }
       toast.success(m.migration_success());
       bumpModelMigrationHistoryVersion();
       await invalidate("admin:model-providers:load");

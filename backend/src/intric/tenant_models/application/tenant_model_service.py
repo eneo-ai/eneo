@@ -21,6 +21,9 @@ from uuid import UUID
 
 import sqlalchemy as sa
 
+from intric.ai_models.display_name_validation import (
+    validate_unique_display_name as _validate_unique_display_name,
+)
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
@@ -175,6 +178,13 @@ class TenantCompletionModelService:
         await _validate_active_provider(
             self.session, payload.provider_id, self.user.tenant_id
         )
+        await _validate_unique_display_name(
+            self.session,
+            CompletionModels,
+            tenant_id=self.user.tenant_id,
+            provider_id=payload.provider_id,
+            nickname=payload.display_name,
+        )
 
         if payload.is_default:
             await _unset_other_defaults(
@@ -252,6 +262,14 @@ class TenantCompletionModelService:
         if payload.name is not None:
             model.name = payload.name
         if payload.display_name is not None:
+            await _validate_unique_display_name(
+                self.session,
+                CompletionModels,
+                tenant_id=self.user.tenant_id,
+                provider_id=model.provider_id,
+                nickname=payload.display_name,
+                exclude_id=model.id,
+            )
             model.nickname = payload.display_name
         if "description" in provided:
             model.description = payload.description
@@ -360,6 +378,13 @@ class TenantEmbeddingModelService:
         await _validate_active_provider(
             self.session, payload.provider_id, self.user.tenant_id
         )
+        await _validate_unique_display_name(
+            self.session,
+            EmbeddingModels,
+            tenant_id=self.user.tenant_id,
+            provider_id=payload.provider_id,
+            nickname=payload.display_name,
+        )
 
         if payload.is_default:
             await _unset_other_defaults(
@@ -418,6 +443,7 @@ class TenantEmbeddingModelService:
         stmt = sa.select(EmbeddingModels).where(
             EmbeddingModels.id == model_id,
             EmbeddingModels.tenant_id == self.user.tenant_id,
+            EmbeddingModels.deleted_at.is_(None),
         )
         result = await self.session.execute(stmt)
         model = result.scalar_one_or_none()
@@ -429,6 +455,14 @@ class TenantEmbeddingModelService:
 
         provided = payload.model_fields_set
         if payload.display_name is not None:
+            await _validate_unique_display_name(
+                self.session,
+                EmbeddingModels,
+                tenant_id=self.user.tenant_id,
+                provider_id=model.provider_id,
+                nickname=payload.display_name,
+                exclude_id=model.id,
+            )
             model.nickname = payload.display_name
         if "description" in provided:
             model.description = payload.description
@@ -482,11 +516,13 @@ class TenantEmbeddingModelService:
     async def delete(self, model_id: UUID) -> None:
         from intric.database.tables.collections_table import CollectionsTable
         from intric.database.tables.integration_table import IntegrationKnowledge
+        from intric.database.tables.spaces_table import SpacesEmbeddingModels
         from intric.database.tables.websites_table import Websites
 
         stmt = sa.select(EmbeddingModels).where(
             EmbeddingModels.id == model_id,
             EmbeddingModels.tenant_id == self.user.tenant_id,
+            EmbeddingModels.deleted_at.is_(None),
         )
         result = await self.session.execute(stmt)
         model = result.scalar_one_or_none()
@@ -519,13 +555,21 @@ class TenantEmbeddingModelService:
         if row.collections > 0 or row.websites > 0 or row.integrations > 0:
             raise ModelInUseException()
 
+        # Spaces are containers (configuration, not usage): drop the link rows so
+        # the soft-deleted model doesn't dangle in space-aware reads.
+        await self.session.execute(
+            sa.delete(SpacesEmbeddingModels).where(
+                SpacesEmbeddingModels.embedding_model_id == model_id
+            )
+        )
+
+        # Soft delete: keep the row as a tombstone so historical info_blob chunks
+        # (FK ON DELETE SET NULL) keep resolving their embedding model. Read paths
+        # filter deleted_at; the cleanup worker hard-deletes once nothing
+        # references it.
         snapshot = _DeletedSnapshot(id=model.id, name=model.name)
-        try:
-            await self.session.delete(model)
-            await self.session.flush()
-        except sa.exc.IntegrityError as exc:
-            await self.session.rollback()
-            raise ModelInUseException() from exc
+        model.deleted_at = sa.func.now()
+        await self.session.flush()
 
         await _audit(
             self.audit_service,
@@ -559,6 +603,13 @@ class TenantTranscriptionModelService:
         await _validate_active_provider(
             self.session, payload.provider_id, self.user.tenant_id
         )
+        await _validate_unique_display_name(
+            self.session,
+            TranscriptionModels,
+            tenant_id=self.user.tenant_id,
+            provider_id=payload.provider_id,
+            nickname=payload.display_name,
+        )
 
         if payload.is_default:
             await _unset_other_defaults(
@@ -574,6 +625,10 @@ class TenantTranscriptionModelService:
                 tenant_id=self.user.tenant_id,
                 provider_id=payload.provider_id,
                 name=payload.display_name,
+                # Keep nickname in sync with the display name (which still lives
+                # in `name` for transcription). Lets the read path source the
+                # display from nickname uniformly with completion/embedding.
+                nickname=payload.display_name,
                 model_name=payload.name,
                 family=payload.family,
                 hosting=payload.hosting,
@@ -613,6 +668,7 @@ class TenantTranscriptionModelService:
         stmt = sa.select(TranscriptionModels).where(
             TranscriptionModels.id == model_id,
             TranscriptionModels.tenant_id == self.user.tenant_id,
+            TranscriptionModels.deleted_at.is_(None),
         )
         result = await self.session.execute(stmt)
         model = result.scalar_one_or_none()
@@ -624,7 +680,16 @@ class TenantTranscriptionModelService:
 
         provided = payload.model_fields_set
         if payload.display_name is not None:
+            await _validate_unique_display_name(
+                self.session,
+                TranscriptionModels,
+                tenant_id=self.user.tenant_id,
+                provider_id=model.provider_id,
+                nickname=payload.display_name,
+                exclude_id=model.id,
+            )
             model.name = payload.display_name
+            model.nickname = payload.display_name
         if "description" in provided:
             model.description = payload.description
         if payload.hosting is not None:
@@ -667,9 +732,13 @@ class TenantTranscriptionModelService:
         return loaded
 
     async def delete(self, model_id: UUID) -> None:
+        from intric.database.tables.app_table import Apps
+        from intric.database.tables.spaces_table import SpacesTranscriptionModels
+
         stmt = sa.select(TranscriptionModels).where(
             TranscriptionModels.id == model_id,
             TranscriptionModels.tenant_id == self.user.tenant_id,
+            TranscriptionModels.deleted_at.is_(None),
         )
         result = await self.session.execute(stmt)
         model = result.scalar_one_or_none()
@@ -679,13 +748,34 @@ class TenantTranscriptionModelService:
             )
         _ensure_tenant_owned(model)
 
+        # Block while any app still transcribes with this model. The FK is
+        # ON DELETE SET NULL, so a hard delete would silently null those apps'
+        # transcription_model_id instead of failing — an explicit count is the
+        # only thing standing between deletion and orphaned apps.
+        app_refs = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(Apps)
+            .where(Apps.transcription_model_id == model_id)
+        )
+        if app_refs:
+            raise ModelInUseException()
+
+        # Spaces are containers: a model "enabled" on a space without an app
+        # using it is configuration, not usage. Drop those cross-reference rows
+        # so the soft-deleted model doesn't dangle in space-aware reads (which
+        # join on the link table rather than filter deleted_at).
+        await self.session.execute(
+            sa.delete(SpacesTranscriptionModels).where(
+                SpacesTranscriptionModels.transcription_model_id == model_id
+            )
+        )
+
+        # Soft delete: keep the row as a tombstone so migration history and any
+        # lingering references still resolve. Read paths filter deleted_at; the
+        # cleanup worker hard-deletes once nothing references it.
         snapshot = _DeletedSnapshot(id=model.id, name=model.name)
-        try:
-            await self.session.delete(model)
-            await self.session.flush()
-        except sa.exc.IntegrityError as exc:
-            await self.session.rollback()
-            raise ModelInUseException() from exc
+        model.deleted_at = sa.func.now()
+        await self.session.flush()
 
         await _audit(
             self.audit_service,

@@ -38,6 +38,7 @@ class TranscriptionModelPublic(BaseModel):
     provider_name: Optional[str] = None
     provider_type: Optional[str] = None
     deprecation_date: Optional[str] = None
+    migrated_to_model_id: Optional[UUID] = None
 
     @classmethod
     def from_domain(cls, model: TranscriptionModel):
@@ -69,11 +70,41 @@ class TranscriptionModelPublic(BaseModel):
             provider_name=model.provider_name,
             provider_type=model.provider_type,
             deprecation_date=model.litellm_deprecation_date,
+            migrated_to_model_id=model.migrated_to_model_id,
         )
 
 
 class TranscriptionModelSecurityStatus(TranscriptionModelPublic):
     meets_security_classification: Optional[bool] = None
+
+
+class TranscriptionModelUsageStats(BaseModel):
+    """Live count of what a transcription model migration would move.
+
+    Transcription has no pre-aggregated usage-stats table (unlike completion);
+    these counts come straight from the migration engine's entity counters.
+    """
+
+    model_id: UUID
+    apps_count: int = 0
+    spaces_count: int = 0
+    total_count: int = 0
+
+
+class TranscriptionUsageEntity(BaseModel):
+    """One entity using a transcription model. Shape matches completion's
+    ModelUsageDetail so the migrate dialog can render both with one component."""
+
+    entity_id: UUID
+    entity_name: str
+    entity_type: str = "app"
+    space_name: Optional[str] = None
+    owner_name: Optional[str] = None
+
+
+class TranscriptionModelUsageDetails(BaseModel):
+    items: list[TranscriptionUsageEntity] = []
+    total: int = 0
 
 
 class TranscriptionModelUpdate(BaseModel):

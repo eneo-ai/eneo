@@ -18,6 +18,7 @@ from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.main.observability import init_observability, instrument_fastapi
 from intric.main.request_context import get_request_context
+from intric.scim.app import scim_app
 from intric.server import api_documentation
 from intric.server.dependencies.lifespan import lifespan as app_lifespan
 from intric.server.exception_handlers import add_exception_handlers
@@ -247,6 +248,7 @@ def get_application():
     instrument_fastapi(app)
 
     app.include_router(api_router, prefix=get_settings().api_prefix)
+    app.mount("/scim/v2", scim_app)
 
     # Add handlers of all errors except 500
     add_exception_handlers(app)

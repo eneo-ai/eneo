@@ -41,7 +41,10 @@ class EmbeddingModelRepository:
                 sa.or_(
                     EmbeddingModels.tenant_id.is_(None),
                     EmbeddingModels.tenant_id == self.user.tenant_id,
-                )
+                ),
+                # Soft-deleted models are tombstones kept only so existing
+                # collections/websites still resolve; never surface them.
+                EmbeddingModels.deleted_at.is_(None),
             )
             .order_by(
                 EmbeddingModels.org,
@@ -86,6 +89,8 @@ class EmbeddingModelRepository:
                     EmbeddingModels.tenant_id.is_(None),
                     EmbeddingModels.tenant_id == self.user.tenant_id,
                 ),
+                # Soft-deleted models stay invisible to all callers.
+                EmbeddingModels.deleted_at.is_(None),
             )
         )
 

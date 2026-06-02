@@ -42,6 +42,7 @@ class TranscriptionModel(AIModel):
         provider_id: Optional["UUID"] = None,
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
+        migrated_to_model_id: Optional["UUID"] = None,
     ):
         super().__init__(
             user=user,
@@ -69,6 +70,7 @@ class TranscriptionModel(AIModel):
         self.provider_id = provider_id
         self.provider_name = provider_name
         self.provider_type = provider_type
+        self.migrated_to_model_id = migrated_to_model_id
 
     @property
     def model_name(self) -> str:
@@ -93,7 +95,11 @@ class TranscriptionModel(AIModel):
             id=transcription_model_db.id,
             created_at=transcription_model_db.created_at,
             updated_at=transcription_model_db.updated_at,
-            nickname=transcription_model_db.name,
+            # Display name now lives in `nickname` (parity with
+            # completion/embedding); fall back to `name` for rows written
+            # before nickname was synced. The DB `name`/`model_name` inversion
+            # is left untouched until a later normalization phase.
+            nickname=transcription_model_db.nickname or transcription_model_db.name,
             name=transcription_model_db.model_name,
             family=transcription_model_db.family,
             hosting=transcription_model_db.hosting,
@@ -114,4 +120,5 @@ class TranscriptionModel(AIModel):
             provider_id=transcription_model_db.provider_id,
             provider_name=provider_name,
             provider_type=provider_type,
+            migrated_to_model_id=transcription_model_db.migrated_to_model_id,
         )

@@ -26,7 +26,7 @@
   import { Loader2 } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
-  import { toastError } from "$lib/core/errors";
+  import { getErrorMessage, toastError } from "$lib/core/errors";
   import { getIntric } from "$lib/core/Intric";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
@@ -197,7 +197,7 @@
       toast.success(m.model_updated_success());
       dialogOpen = false;
     } catch (e: unknown) {
-      error = e instanceof Error ? e.message : m.failed_to_update_model();
+      error = getErrorMessage(e);
       toastError(e, m.failed_to_update_model());
     } finally {
       isSubmitting = false;

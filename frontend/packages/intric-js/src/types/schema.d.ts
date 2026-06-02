@@ -3236,6 +3236,146 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/transcription-models/{model_id}/usage": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Transcription Model Usage
+     * @description Count apps and spaces that would be moved by migrating this model.
+     */
+    get: operations["get_transcription_model_usage_api_v1_transcription_models__model_id__usage_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/{model_id}/usage/details": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Transcription Model Usage Details
+     * @description List apps using this transcription model (for the migrate dialog).
+     */
+    get: operations["get_transcription_model_usage_details_api_v1_transcription_models__model_id__usage_details_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/{model_id}/migration-validate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Validate Transcription Migration
+     * @description Validate transcription migration compatibility without executing.
+     */
+    get: operations["validate_transcription_migration_api_v1_transcription_models__model_id__migration_validate_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/{model_id}/migrate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Migrate Transcription Model Usage
+     * @description Migrate all usage from one transcription model to another.
+     */
+    post: operations["migrate_transcription_model_usage_api_v1_transcription_models__model_id__migrate_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/migration-history": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get All Transcription Migration History
+     * @description List all transcription migration history for the tenant.
+     */
+    get: operations["get_all_transcription_migration_history_api_v1_transcription_models_migration_history_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/migration-history/{migration_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Transcription Migration History By Id
+     * @description Get a specific transcription migration history record by ID.
+     */
+    get: operations["get_transcription_migration_history_by_id_api_v1_transcription_models_migration_history__migration_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/{model_id}/migration-history": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Transcription Model Migration History
+     * @description Get migration history for a specific transcription model.
+     */
+    get: operations["get_transcription_model_migration_history_api_v1_transcription_models__model_id__migration_history_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/model-providers/": {
     parameters: {
       query?: never;
@@ -6999,6 +7139,7 @@ export interface components {
       | "transcription_model_created"
       | "transcription_model_updated"
       | "transcription_model_deleted"
+      | "transcription_model_migrated"
       | "template_created"
       | "template_updated"
       | "template_deleted"
@@ -13345,12 +13486,22 @@ export interface components {
      *     `model_name` and `context_window` are echoed so a client can compute the
      *     percentage fill locally without a separate round-trip to fetch model
      *     metadata.
+     *
+     *     `excluded_file_count` is the number of attached files we could not
+     *     tokenise here (images and other binary payloads use provider-specific
+     *     multimodal accounting). Callers should treat the response as a
+     *     conservative lower bound when this is non-zero.
      */
     PreflightResponse: {
       /** Input Tokens */
       input_tokens: number;
       /** File Tokens */
       file_tokens: number;
+      /**
+       * Excluded File Count
+       * @default 0
+       */
+      excluded_file_count?: number;
       /** Model Name */
       model_name: string;
       /** Context Window */
@@ -15586,6 +15737,8 @@ export interface components {
       provider_type?: string | null;
       /** Deprecation Date */
       deprecation_date?: string | null;
+      /** Migrated To Model Id */
+      migrated_to_model_id?: string | null;
     };
     /** TranscriptionModelSecurityStatus */
     TranscriptionModelSecurityStatus: {
@@ -15651,6 +15804,8 @@ export interface components {
       provider_type?: string | null;
       /** Deprecation Date */
       deprecation_date?: string | null;
+      /** Migrated To Model Id */
+      migrated_to_model_id?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -15662,6 +15817,71 @@ export interface components {
       is_org_default?: boolean | null;
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /** TranscriptionModelUsageDetails */
+    TranscriptionModelUsageDetails: {
+      /**
+       * Items
+       * @default []
+       */
+      items?: components["schemas"]["TranscriptionUsageEntity"][];
+      /**
+       * Total
+       * @default 0
+       */
+      total?: number;
+    };
+    /**
+     * TranscriptionModelUsageStats
+     * @description Live count of what a transcription model migration would move.
+     *
+     *     Transcription has no pre-aggregated usage-stats table (unlike completion);
+     *     these counts come straight from the migration engine's entity counters.
+     */
+    TranscriptionModelUsageStats: {
+      /**
+       * Model Id
+       * Format: uuid
+       */
+      model_id: string;
+      /**
+       * Apps Count
+       * @default 0
+       */
+      apps_count?: number;
+      /**
+       * Spaces Count
+       * @default 0
+       */
+      spaces_count?: number;
+      /**
+       * Total Count
+       * @default 0
+       */
+      total_count?: number;
+    };
+    /**
+     * TranscriptionUsageEntity
+     * @description One entity using a transcription model. Shape matches completion's
+     *     ModelUsageDetail so the migrate dialog can render both with one component.
+     */
+    TranscriptionUsageEntity: {
+      /**
+       * Entity Id
+       * Format: uuid
+       */
+      entity_id: string;
+      /** Entity Name */
+      entity_name: string;
+      /**
+       * Entity Type
+       * @default app
+       */
+      entity_type?: string;
+      /** Space Name */
+      space_name?: string | null;
+      /** Owner Name */
+      owner_name?: string | null;
     };
     /** TransferApplicationRequest */
     TransferApplicationRequest: {
@@ -27622,6 +27842,326 @@ export interface operations {
       };
     };
   };
+  get_transcription_model_usage_api_v1_transcription_models__model_id__usage_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptionModelUsageStats"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_transcription_model_usage_details_api_v1_transcription_models__model_id__usage_details_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptionModelUsageDetails"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  validate_transcription_migration_api_v1_transcription_models__model_id__migration_validate_get: {
+    parameters: {
+      query: {
+        /** @description Target model ID */
+        to_model_id: string;
+      };
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ValidationResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  migrate_transcription_model_usage_api_v1_transcription_models__model_id__migrate_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelMigrationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MigrationResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_all_transcription_migration_history_api_v1_transcription_models_migration_history_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"][];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_transcription_migration_history_by_id_api_v1_transcription_models_migration_history__migration_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        migration_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_transcription_model_migration_history_api_v1_transcription_models__model_id__migration_history_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"][];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   list_providers_api_v1_admin_model_providers__get: {
     parameters: {
       query?: never;
@@ -28638,12 +29178,30 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description File deleted successfully. No response body is returned. */
       204: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {

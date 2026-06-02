@@ -87,11 +87,11 @@ These permissions are used for personal spaces and the Service Account method. T
 - `Sites.Read.All` – read SharePoint sites
 - `offline_access` – keep the session active without the user needing to log in again
 
-**Optional delegated permissions:**
+**Additional delegated permission (requested on every sign-in):**
 
-These permissions are not required for basic functionality but enable additional features in the import dialog.
+- `Group.Read.All` – categorize SharePoint sites by Microsoft Teams membership, so users can see which sites belong to teams they are a member of, which belong to public teams, and which are other sites. Without it, all sites are shown without categorization.
 
-- `Group.Read.All` – categorize SharePoint sites by Microsoft Teams membership, so users can see which sites belong to teams they are a member of, which belong to public teams, and which are other sites. Without this permission, all sites are shown without categorization.
+> **Important:** Although the *categorization feature* is optional, Eneo requests `Group.Read.All` as part of the sign-in scope on **every** authentication. Because `Group.Read.All` requires admin consent, you must add this permission here **and** include it in the admin consent below. If it is left out or un-consented, only Microsoft Entra ID administrators will be able to sign in – regular users will receive a consent error (AADSTS65001), even though they could otherwise self-consent to `Files.Read.All` and `Sites.Read.All`.
 
 **Application permissions (only for Tenant App method):**
 
@@ -101,11 +101,11 @@ These permissions are **only required if you choose the Tenant App authenticatio
 
 - `Files.Read.All` – read files across the entire organization
 - `Sites.Read.All` – read all SharePoint sites
-- `Group.Read.All` *(optional)* – enable site categorization by Teams membership (see optional delegated permissions above)
+- `Group.Read.All` – enable site categorization by Teams membership (see the delegated permissions above; this scope is requested on every sign-in, so it must be consented)
 
 After adding the permissions, click **Grant admin consent for [your tenant]** to approve them at the organization level.
 
-> **Important:** The delegated permissions `Files.Read.All` and `Sites.Read.All` require admin consent before regular users can authenticate. Without granting admin consent, only Microsoft Entra ID administrators will be able to use the integration – other users will receive a consent error (AADSTS65001) when trying to sign in.
+> **Important:** The delegated permissions `Files.Read.All`, `Sites.Read.All` and `Group.Read.All` all require admin consent before regular users can authenticate. Because Eneo requests `Group.Read.All` on every sign-in, granting admin consent for it is mandatory – not optional. Without granting admin consent, only Microsoft Entra ID administrators will be able to use the integration – other users will receive a consent error (AADSTS65001) when trying to sign in.
 
 ### Create a Client Secret
 

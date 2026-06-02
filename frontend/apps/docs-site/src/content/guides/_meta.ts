@@ -3,6 +3,7 @@ import type { MetaRecord } from 'nextra';
 const meta: MetaRecord = {
   index: 'Overview',
   authentication: 'Authentication & OIDC',
+  'scim-provisioning': 'SCIM Provisioning',
   'audit-logging': 'Audit Logging',
   'ai-providers': 'AI Provider Configuration',
   'mcp-servers': 'MCP Servers',
