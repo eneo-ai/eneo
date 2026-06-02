@@ -526,12 +526,23 @@ class BaseModelMigrationService:
                     )
                 results["total"] = sum(results.values())
 
-                mark_stmt = (
-                    update(self._model_table)
-                    .where(self._model_table.id == from_model_id)
-                    .values(migrated_to_model_id=to_model_id)
-                )
-                await self.session.execute(mark_stmt)
+                # Mark the source migrated only when this run moved *every*
+                # migratable surface. `migrated_to_model_id` is a one-way latch:
+                # once set, `_ensure_source_model_not_already_migrated` blocks any
+                # further migration of this source. Marking it after a partial run
+                # (a subset of entity_types) would therefore strand the
+                # un-migrated surfaces — their references would dangle on a source
+                # that can never be migrated again. The frontend always sends all
+                # types (entity_types omitted → expands to the full list), so the
+                # normal flow latches as before; only deliberate partial API calls
+                # stay re-runnable until they cover everything.
+                if set(entity_types) >= set(self._migratable_entity_types):
+                    mark_stmt = (
+                        update(self._model_table)
+                        .where(self._model_table.id == from_model_id)
+                        .values(migrated_to_model_id=to_model_id)
+                    )
+                    await self.session.execute(mark_stmt)
 
                 await savepoint.commit()
                 return results

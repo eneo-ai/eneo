@@ -64,8 +64,9 @@ class TestTranscriptionModelMigration:
             ).scalar_one()
             assert updated_app.transcription_model_id == new_model.id
 
-            # Source is marked migrated (the shared engine's mark-as-migrated
-            # step against TranscriptionModels — requires the ORM column).
+            # A partial migration (apps only, spaces left out) must NOT latch the
+            # source as migrated — the engine marks it only when every migratable
+            # surface was moved, so the spaces migration stays re-runnable.
             src = (
                 await session.execute(
                     select(TranscriptionModels).where(
@@ -73,7 +74,7 @@ class TestTranscriptionModelMigration:
                     )
                 )
             ).scalar_one()
-            assert src.migrated_to_model_id == new_model.id
+            assert src.migrated_to_model_id is None
 
     async def test_migrate_spaces_successfully(
         self,
