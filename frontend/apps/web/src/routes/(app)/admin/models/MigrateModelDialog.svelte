@@ -20,17 +20,7 @@
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
-  import {
-    Loader2,
-    Bot,
-    AppWindow,
-    LayoutGrid,
-    FileText,
-    ChevronDown,
-    AlertTriangle,
-    ShieldAlert,
-    Info
-  } from "lucide-svelte";
+  import { Loader2, AlertTriangle, ShieldAlert, Info } from "lucide-svelte";
 
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -40,6 +30,8 @@
 
   import { bumpModelMigrationHistoryVersion } from "./migrationHistoryRefresh";
   import { classifyMigrationCode, translateMigrationWarning } from "./migrationWarnings";
+  import ModelUsageBreakdown from "./ModelUsageBreakdown.svelte";
+  import type { UsageDetail } from "./usage";
 
   let {
     openController,
@@ -68,18 +60,9 @@
   let impactLoadError = $state<string | null>(null);
   let submitError = $state<string | null>(null);
 
-  type UsageDetail = {
-    entity_id: string;
-    entity_name: string;
-    entity_type: string;
-    space_name: string | null;
-    owner_name: string | null;
-  };
-
   let impactTotal = $state(0);
   let impactDetails = $state<UsageDetail[]>([]);
   let spacesCount = $state(0);
-  let expandedSections = $state<Record<string, boolean>>({});
 
   // --- Target eligibility -----------------------------------------------
   const availableTargets = $derived(
@@ -209,7 +192,6 @@
     impactLoadError = null;
     hasLoadedImpact = false;
     acknowledged = false;
-    expandedSections = {};
     impactTotal = 0;
     impactDetails = [];
     spacesCount = 0;
@@ -289,32 +271,6 @@
       isSubmitting = false;
     }
   }
-
-  // --- Grouped impact ---------------------------------------------------
-  const groupedDetails = $derived.by(() => {
-    const groups: Record<string, UsageDetail[]> = {};
-    for (const d of impactDetails) {
-      if (!groups[d.entity_type]) groups[d.entity_type] = [];
-      groups[d.entity_type].push(d);
-    }
-    return groups;
-  });
-
-  function toggleSection(type: string) {
-    expandedSections = { ...expandedSections, [type]: !expandedSections[type] };
-  }
-
-  type SectionConfig = { label: () => string; icon: typeof Bot };
-  const sectionConfig: Record<string, SectionConfig> = {
-    assistant: { label: () => m.migration_summary_assistants(), icon: Bot },
-    app: { label: () => m.migration_summary_apps(), icon: AppWindow },
-    service: { label: () => m.migration_summary_services(), icon: LayoutGrid },
-    assistant_template: {
-      label: () => m.migration_summary_assistant_templates(),
-      icon: FileText
-    },
-    app_template: { label: () => m.migration_summary_app_templates(), icon: FileText }
-  };
 </script>
 
 <Dialog.Root bind:open={dialogOpen}>
@@ -357,78 +313,12 @@
             </div>
           </div>
         {:else if !sourceAlreadyMigrated && impactTotal > 0}
-          <div class="border-border overflow-hidden rounded-lg border">
-            <div class="border-border bg-muted/30 flex items-center gap-4 border-b px-4 py-3">
-              <span class="text-sm font-medium">
-                {m.migration_impact_title({ count: impactTotal })}
-              </span>
-            </div>
-            <div class="divide-border divide-y">
-              {#each Object.entries(groupedDetails) as [type, entities] (type)}
-                {@const config = sectionConfig[type] ?? { label: () => type, icon: Bot }}
-                {@const Icon = config.icon}
-                <div>
-                  <button
-                    type="button"
-                    class="hover:bg-muted/40 flex w-full items-center justify-between px-4 py-2.5 text-left text-sm transition-colors"
-                    onclick={() => toggleSection(type)}
-                    aria-expanded={Boolean(expandedSections[type])}
-                  >
-                    <div class="flex items-center gap-2">
-                      <Icon size={15} class="text-muted-foreground" aria-hidden="true" />
-                      <span class="font-medium">{config.label()}</span>
-                      <span class="text-muted-foreground">({entities.length})</span>
-                    </div>
-                    <ChevronDown
-                      size={16}
-                      class="text-muted-foreground transition-transform {expandedSections[type]
-                        ? 'rotate-0'
-                        : '-rotate-90'}"
-                      aria-hidden="true"
-                    />
-                  </button>
-                  {#if expandedSections[type]}
-                    <div class="border-border bg-muted/20 border-t">
-                      <table class="w-full text-sm">
-                        <thead>
-                          <tr class="text-muted-foreground text-xs tracking-wider uppercase">
-                            <th class="px-4 py-2 text-left font-medium">{m.name()}</th>
-                            <th class="px-4 py-2 text-left font-medium"
-                              >{m.migration_impact_space()}</th
-                            >
-                            <th class="px-4 py-2 text-left font-medium"
-                              >{m.migration_impact_owner()}</th
-                            >
-                          </tr>
-                        </thead>
-                        <tbody class="divide-border divide-y">
-                          {#each entities as entity (entity.entity_id)}
-                            <tr>
-                              <td class="px-4 py-2">{entity.entity_name}</td>
-                              <td class="text-muted-foreground px-4 py-2"
-                                >{entity.space_name ?? "–"}</td
-                              >
-                              <td class="text-muted-foreground px-4 py-2"
-                                >{entity.owner_name ?? "–"}</td
-                              >
-                            </tr>
-                          {/each}
-                        </tbody>
-                      </table>
-                    </div>
-                  {/if}
-                </div>
-              {/each}
-              {#if spacesCount > 0}
-                <div
-                  class="text-muted-foreground bg-muted/20 flex items-center gap-2 px-4 py-3 text-sm"
-                >
-                  <LayoutGrid size={15} class="flex-shrink-0" aria-hidden="true" />
-                  <span>{m.migration_spaces_info({ count: spacesCount })}</span>
-                </div>
-              {/if}
-            </div>
-          </div>
+          <ModelUsageBreakdown
+            details={impactDetails}
+            {spacesCount}
+            title={m.migration_impact_title({ count: impactTotal })}
+            spacesText={m.migration_spaces_info({ count: spacesCount })}
+          />
         {:else if !sourceAlreadyMigrated}
           <div class="border-border text-muted-foreground rounded-lg border px-4 py-3 text-sm">
             {m.migration_no_impact()}
