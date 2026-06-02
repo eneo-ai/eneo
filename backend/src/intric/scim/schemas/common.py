@@ -40,13 +40,35 @@ class ScimFilter:
 
     @staticmethod
     def parse(filter_str: str) -> ScimFilter | None:
-        m = _FILTER_RE.match(filter_str.strip())
+        """Parse a single SCIM comparison expression, or return None if invalid.
+
+        Returning None makes the caller raise ScimInvalidFilterError → HTTP 400
+        invalidFilter. We deliberately reject anything we don't fully support
+        rather than silently applying a partial filter, because an IdP that
+        believes its full filter ran (when only the first clause did) can
+        de-dup against the wrong result set and provision duplicates.
+        """
+        stripped = filter_str.strip()
+        m = _FILTER_RE.match(stripped)
         if not m:
+            return None
+        # The regex is anchored at the start only. Composite filters such as
+        # `userName eq "a" and active eq true` would match just the first
+        # clause and drop the rest unnoticed — reject when anything other than
+        # trailing whitespace is left over. We support a single expression.
+        if m.end() != len(stripped):
+            return None
+        operator = m.group(2).lower()
+        value = m.group(3)
+        # Only `pr` (presence) is valueless; every other operator needs a
+        # quoted comparison value. This also rejects unquoted forms like
+        # `active eq true` that the regex would otherwise read as value-less.
+        if operator != "pr" and value is None:
             return None
         return ScimFilter(
             attribute=m.group(1),
-            operator=m.group(2).lower(),
-            value=m.group(3),
+            operator=operator,
+            value=value,
         )
 
 
