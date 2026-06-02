@@ -41,6 +41,20 @@ services:
       timeout: 3s
       retries: 30
 
+  # Deterministic OpenAI-compatible stand-in. The seeded test model's provider
+  # endpoint points here, so chat completions never reach a real provider.
+  e2e-mock-model:
+    image: eneo_devcontainer-eneo
+    command: ["python3", "/workspace/e2e/mock_model_server.py"]
+    volumes:
+      - .:/workspace:ro
+    networks: [e2e]
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "echo > /dev/tcp/127.0.0.1/8200"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   e2e-backend:
     image: eneo_devcontainer-eneo
     # Root so we can install the few system libs the devcontainer adds
@@ -52,6 +66,8 @@ services:
         condition: service_healthy
       e2e-redis:
         condition: service_healthy
+      e2e-mock-model:
+        condition: service_healthy
     env_file:
       - ./backend/.env
     environment:
@@ -59,6 +75,10 @@ services:
       POSTGRES_DB: eneo_test
       REDIS_HOST: e2e-redis
       PYTHONDONTWRITEBYTECODE: "1"
+      # No encryption → seeded provider credentials are read as plaintext (no
+      # real keys involved). Requires tenant credentials disabled.
+      ENCRYPTION_KEY: ""
+      TENANT_CREDENTIALS_ENABLED: "false"
       # Hard guarantee: no real outbound model calls from the test stack.
       OPENAI_API_KEY: test-openai-key
       ANTHROPIC_API_KEY: test-anthropic-key
@@ -75,7 +95,8 @@ services:
         set -e
         export PATH="/workspace/backend/.venv/bin:$$PATH"
         apt-get update -qq && apt-get install -y -qq libsndfile1 ffmpeg >/dev/null
-        python init_db.py   # migrate (alembic upgrade head) + seed tenant/user
+        python init_db.py            # migrate (alembic upgrade head) + seed tenant/user
+        python /workspace/e2e/seed.py  # seed mock completion model
         exec gunicorn src.intric.server.main:app \
           --workers 1 --worker-class uvicorn.workers.UvicornWorker \
           --bind 0.0.0.0:8000

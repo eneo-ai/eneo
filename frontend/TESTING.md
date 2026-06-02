@@ -86,9 +86,17 @@ exercised for real, but each test starts authenticated.
 > or run E2E in CI. The seeded login is `e2e@example.com` / `E2ePassword1!` in
 > tenant `E2ETenant`.
 >
-> **Status:** the isolated backend + login/auth flow are verified working. Chat
-> flows need a deterministic fake model (an OpenAI-compatible mock the seeded
-> completion model points at via `base_url`) — that is the next increment.
+**Deterministic chat.** The stack includes a tiny OpenAI-compatible **mock model
+server** (`e2e/mock_model_server.py`); `e2e/seed.py` seeds a default completion
+model whose provider `endpoint` points at it, so chat completions return a fixed
+string (`E2E mock completion: pong`) — fast, free, and identical every run. No
+real provider is ever called. To keep credentials simple the stack runs with
+encryption off, so the seeded api-key is plaintext (and meaningless).
+
+> **Status:** verified working at the API layer — login, the seeded mock model,
+> and the personal-chat conversation stream all return the deterministic reply.
+> The browser specs are written and discovered; run them with a dev server
+> stopped (or in CI), since the preview build conflicts with a live `.svelte-kit`.
 
 ## Writing tests
 
