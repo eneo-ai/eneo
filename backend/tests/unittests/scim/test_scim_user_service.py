@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from intric.scim.constants import SCIM_FILTER_MAX_RESULTS
 from intric.scim.domain.errors import (
     ScimUserConflictError,
     ScimUserNotFoundError,
@@ -437,13 +438,35 @@ class TestListUsers:
             tenant_id=ANY, scim_filter=None, scim_sort=None, offset=2, limit=10
         )
 
+    async def test_count_above_max_is_clamped_to_advertised_max(self):
+        """A client requesting more than the advertised maxResults must not get
+        more than maxResults — the cap is a contract + performance guarantee."""
+        repo = self._make_repo()
+        service = _make_service(repo)
+        await service.list_users(count=SCIM_FILTER_MAX_RESULTS + 5000)
+        _, kwargs = repo.list.call_args
+        assert kwargs["limit"] == SCIM_FILTER_MAX_RESULTS
+
+    async def test_omitted_count_defaults_to_max_not_unbounded(self):
+        """An omitted count must bound the query to maxResults rather than
+        dumping the whole tenant."""
+        repo = self._make_repo()
+        service = _make_service(repo)
+        await service.list_users()
+        _, kwargs = repo.list.call_args
+        assert kwargs["limit"] == SCIM_FILTER_MAX_RESULTS
+
     async def test_passes_none_filter_when_no_filter(self):
         repo = self._make_repo()
         service = _make_service(repo)
         await service.list_users(filter_str=None)
         repo.count.assert_called_once_with(tenant_id=ANY, scim_filter=None)
         repo.list.assert_called_once_with(
-            tenant_id=ANY, scim_filter=None, scim_sort=None, offset=0, limit=None
+            tenant_id=ANY,
+            scim_filter=None,
+            scim_sort=None,
+            offset=0,
+            limit=SCIM_FILTER_MAX_RESULTS,
         )
 
     async def test_eq_filter_on_username(self):
@@ -455,7 +478,7 @@ class TestListUsers:
             scim_filter=ScimFilter("userName", "eq", "jane@example.com"),
             scim_sort=None,
             offset=0,
-            limit=None,
+            limit=SCIM_FILTER_MAX_RESULTS,
         )
 
     async def test_co_filter_on_username(self):
@@ -467,7 +490,7 @@ class TestListUsers:
             scim_filter=ScimFilter("userName", "co", "jane"),
             scim_sort=None,
             offset=0,
-            limit=None,
+            limit=SCIM_FILTER_MAX_RESULTS,
         )
 
     async def test_sw_filter_on_username(self):
@@ -479,7 +502,7 @@ class TestListUsers:
             scim_filter=ScimFilter("userName", "sw", "j"),
             scim_sort=None,
             offset=0,
-            limit=None,
+            limit=SCIM_FILTER_MAX_RESULTS,
         )
 
     async def test_pr_filter_on_username(self):
@@ -491,7 +514,7 @@ class TestListUsers:
             scim_filter=ScimFilter("userName", "pr", None),
             scim_sort=None,
             offset=0,
-            limit=None,
+            limit=SCIM_FILTER_MAX_RESULTS,
         )
 
     async def test_eq_filter_on_external_id(self):
@@ -503,7 +526,7 @@ class TestListUsers:
             scim_filter=ScimFilter("externalId", "eq", "aad-guid-123"),
             scim_sort=None,
             offset=0,
-            limit=None,
+            limit=SCIM_FILTER_MAX_RESULTS,
         )
 
     async def test_sort_by_username_ascending(self):
@@ -517,7 +540,7 @@ class TestListUsers:
             scim_filter=None,
             scim_sort=ScimSort("userName", "ascending"),
             offset=0,
-            limit=None,
+            limit=SCIM_FILTER_MAX_RESULTS,
         )
 
     async def test_sort_by_username_descending(self):
@@ -531,7 +554,7 @@ class TestListUsers:
             scim_filter=None,
             scim_sort=ScimSort("userName", "descending"),
             offset=0,
-            limit=None,
+            limit=SCIM_FILTER_MAX_RESULTS,
         )
 
 

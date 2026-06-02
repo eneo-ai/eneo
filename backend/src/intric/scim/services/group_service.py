@@ -15,7 +15,7 @@ from intric.scim.domain.errors import (
     ScimValidationError,
 )
 from intric.scim.repositories.group_repository import ScimGroupRepository
-from intric.scim.schemas.common import ScimFilter, ScimSort
+from intric.scim.schemas.common import ScimFilter, ScimSort, clamp_count
 from intric.scim.schemas.group import ScimGroup, ScimGroupMember, ScimGroupRequest
 from intric.scim.schemas.user import PatchOperation, ScimMeta
 from intric.user_groups.user_group import UserGroupState
@@ -220,6 +220,10 @@ class ScimGroupService:
                 )
         scim_sort = ScimSort.parse(sort_by, sort_order)
         offset = max(0, start_index - 1)
+        # Cap the page size to the advertised maxResults (clamp_count also
+        # bounds an omitted count, so an unfiltered list never dumps the whole
+        # tenant).
+        limit = clamp_count(count)
         total = await self._repository.count(
             tenant_id=self._tenant_id, scim_filter=scim_filter
         )
@@ -228,7 +232,7 @@ class ScimGroupService:
             scim_filter=scim_filter,
             scim_sort=scim_sort,
             offset=offset,
-            limit=count,
+            limit=limit,
         )
         logger.debug(
             "scim.group.list",

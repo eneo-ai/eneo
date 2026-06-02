@@ -33,6 +33,16 @@ class TestServiceProviderConfig:
         res = await client.get("/scim/v2/ServiceProviderConfig", headers=auth_headers)
         assert res.json()["filter"]["supported"] is True
 
+    async def test_filter_max_results_matches_enforced_cap(
+        self, client: AsyncClient, auth_headers
+    ):
+        """The advertised filter.maxResults must equal the value the list
+        endpoints actually enforce (clamp_count), or the contract lies."""
+        from intric.scim.constants import SCIM_FILTER_MAX_RESULTS
+
+        res = await client.get("/scim/v2/ServiceProviderConfig", headers=auth_headers)
+        assert res.json()["filter"]["maxResults"] == SCIM_FILTER_MAX_RESULTS
+
     async def test_declares_sort_support(self, client: AsyncClient, auth_headers):
         res = await client.get("/scim/v2/ServiceProviderConfig", headers=auth_headers)
         assert res.json()["sort"]["supported"] is True

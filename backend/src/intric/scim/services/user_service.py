@@ -16,7 +16,7 @@ from intric.scim.domain.errors import (
     ScimValidationError,
 )
 from intric.scim.repositories.user_repository import ScimUserRepository
-from intric.scim.schemas.common import ScimFilter, ScimSort
+from intric.scim.schemas.common import ScimFilter, ScimSort, clamp_count
 from intric.scim.schemas.user import (
     PatchOperation,
     ScimEmail,
@@ -344,6 +344,10 @@ class ScimUserService:
                 )
         scim_sort = ScimSort.parse(sort_by, sort_order)
         offset = max(0, start_index - 1)
+        # Cap the page size to the advertised maxResults (clamp_count also
+        # bounds an omitted count, so an unfiltered list never dumps the whole
+        # tenant).
+        limit = clamp_count(count)
         total = await self._repository.count(
             tenant_id=self._tenant_id, scim_filter=scim_filter
         )
@@ -352,7 +356,7 @@ class ScimUserService:
             scim_filter=scim_filter,
             scim_sort=scim_sort,
             offset=offset,
-            limit=count,
+            limit=limit,
         )
         logger.debug(
             "scim.user.list",

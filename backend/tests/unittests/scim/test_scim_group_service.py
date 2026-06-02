@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from intric.scim.constants import SCIM_FILTER_MAX_RESULTS
 from intric.scim.domain.errors import (
     ScimGroupConflictError,
     ScimGroupNotFoundError,
@@ -146,13 +147,31 @@ class TestListGroups:
             tenant_id=ANY, scim_filter=None, scim_sort=None, offset=2, limit=10
         )
 
+    async def test_count_above_max_is_clamped_to_advertised_max(self):
+        repo = self._make_repo()
+        service = _make_service(repo)
+        await service.list_groups(count=SCIM_FILTER_MAX_RESULTS + 5000)
+        _, kwargs = repo.list.call_args
+        assert kwargs["limit"] == SCIM_FILTER_MAX_RESULTS
+
+    async def test_omitted_count_defaults_to_max_not_unbounded(self):
+        repo = self._make_repo()
+        service = _make_service(repo)
+        await service.list_groups()
+        _, kwargs = repo.list.call_args
+        assert kwargs["limit"] == SCIM_FILTER_MAX_RESULTS
+
     async def test_passes_none_filter_when_no_filter(self):
         repo = self._make_repo()
         service = _make_service(repo)
         await service.list_groups(filter_str=None)
         repo.count.assert_called_once_with(tenant_id=ANY, scim_filter=None)
         repo.list.assert_called_once_with(
-            tenant_id=ANY, scim_filter=None, scim_sort=None, offset=0, limit=None
+            tenant_id=ANY,
+            scim_filter=None,
+            scim_sort=None,
+            offset=0,
+            limit=SCIM_FILTER_MAX_RESULTS,
         )
 
     async def test_passes_filter_to_repo(self):
@@ -166,7 +185,7 @@ class TestListGroups:
             scim_filter=ScimFilter("displayName", "eq", "Engineering"),
             scim_sort=None,
             offset=0,
-            limit=None,
+            limit=SCIM_FILTER_MAX_RESULTS,
         )
 
     async def test_eq_filter_on_external_id(self):
@@ -180,7 +199,7 @@ class TestListGroups:
             scim_filter=ScimFilter("externalId", "eq", "aad-group-guid"),
             scim_sort=None,
             offset=0,
-            limit=None,
+            limit=SCIM_FILTER_MAX_RESULTS,
         )
 
     async def test_sort_by_displayname(self):
@@ -194,7 +213,7 @@ class TestListGroups:
             scim_filter=None,
             scim_sort=ScimSort("displayName", "descending"),
             offset=0,
-            limit=None,
+            limit=SCIM_FILTER_MAX_RESULTS,
         )
 
 
