@@ -11,7 +11,10 @@ import pytest
 from intric.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
 )
-from intric.flows.ai_builder.ai_builder_create_outline import OUTLINE_FLOW_TOOL_NAME
+from intric.flows.ai_builder.ai_builder_create_outline import (
+    OUTLINE_FLOW_TOOL_NAME,
+    parse_outline_flow_arguments,
+)
 from intric.flows.ai_builder.ai_builder_proposal_repair import (
     ForcedToolRetryOutcome,
     _build_retry_feedback,
@@ -30,6 +33,11 @@ from intric.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 from intric.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
+)
+from tests.unittests.flows.ai_builder.ai_builder_outline_diagnostic_payloads import (
+    expected_root_assumption_strings,
+    expected_step_assumption_strings,
+    self_correction_outline_with_step_assumptions_payload,
 )
 
 
@@ -218,6 +226,52 @@ async def test_retry_forced_tool_after_text_surfaces_tool_user_message() -> None
             "data": '{"text":"Det markerade steget använder ingen chattmodell."}',
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_retry_forced_tool_after_text_accepts_diagnostic_json_text_with_step_assumptions() -> (
+    None
+):
+    observed_assumptions: list[str] = []
+    call_proposal_completion = AsyncMock()
+    payload = self_correction_outline_with_step_assumptions_payload()
+    assistant_text = f"```json\n{json.dumps(payload, ensure_ascii=False)}\n```"
+
+    async def process_invocation(
+        invocation: ToolRetryInvocation,
+    ) -> ToolProcessingResult:
+        outline = parse_outline_flow_arguments(invocation.arguments)
+        observed_assumptions.extend(outline.assumptions)
+        return ToolProcessingResult(event={"event": "plan", "data": "{}"})
+
+    result = await retry_forced_tool_after_text(
+        correction_messages=[{"role": "system", "content": "Prompt"}],
+        assistant_text=assistant_text,
+        tool_schemas=[{"function": {"name": "outline_flow"}}],
+        litellm_model="openai/gpt-5.4",
+        litellm_kwargs={},
+        turn=_make_turn(),
+        conversation=[],
+        new_messages_start=0,
+        available_model_refs=None,
+        available_kb_refs=None,
+        max_output_tokens=1024,
+        target_tool_name="outline_flow",
+        forced_tool_prompt="Call outline_flow.",
+        forced_proposal_temperature=0.1,
+        call_proposal_completion=call_proposal_completion,
+        process_tool_invocation=process_invocation,
+        flow=None,
+        resource_catalog=None,
+    )
+
+    assert result.events == ({"event": "plan", "data": "{}"},)
+    assert result.feedback is None
+    assert observed_assumptions == [
+        *expected_root_assumption_strings(),
+        *expected_step_assumption_strings(),
+    ]
+    call_proposal_completion.assert_not_awaited()
 
 
 @pytest.mark.asyncio

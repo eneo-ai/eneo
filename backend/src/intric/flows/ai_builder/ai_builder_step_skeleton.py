@@ -631,10 +631,11 @@ def _compose_step_skeleton_slot(
         content=content,
         prior_step=prior_step,
     )
-    if content is not None and output_type == OutputType.JSON:
-        output_fields = list(content.output_fields) or None
-    else:
-        output_fields = list(slot.output_fields) or None
+    output_fields = _compose_output_fields(
+        slot=slot,
+        content=content,
+        output_type=output_type,
+    )
     return (
         NewStepDraft(
             name=content.name if content is not None else slot.default_name,
@@ -673,6 +674,24 @@ def _compose_step_skeleton_slot(
         ),
         output_type_drift,
     )
+
+
+def _compose_output_fields(
+    *,
+    slot: StepSkeleton,
+    content: StepSkeletonSemanticContent | None,
+    output_type: OutputType,
+) -> list[StructuredFieldDraft] | None:
+    if output_type != OutputType.JSON:
+        return None
+    if content is None:
+        return list(slot.output_fields) or None
+    if content.output_fields:
+        return list(content.output_fields)
+    if content.requested_output_type == OutputType.JSON:
+        # Keep the critic strict when the model asks for JSON but omits a schema.
+        return default_structured_output_fields()
+    return list(slot.output_fields) or None
 
 
 def _compose_output_type(

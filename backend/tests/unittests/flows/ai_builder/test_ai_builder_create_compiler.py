@@ -78,6 +78,11 @@ from intric.flows.flow_authoring_spec import (
     OutputType,
 )
 from intric.flows.flow_review_policy import FlowStepReviewMode
+from tests.unittests.flows.ai_builder.ai_builder_outline_diagnostic_payloads import (
+    expected_root_assumption_strings,
+    expected_step_assumption_strings,
+    self_correction_outline_with_step_assumptions_payload,
+)
 
 
 def _model_resource(
@@ -2537,6 +2542,48 @@ def test_parse_outline_flow_ignores_stale_backend_owned_step_mechanics() -> None
     assert draft.steps[0].input_type.value == "text"
 
 
+def test_parse_outline_flow_merges_step_local_assumptions_from_diagnostic_payload() -> (
+    None
+):
+    outline = parse_outline_flow_arguments(
+        self_correction_outline_with_step_assumptions_payload()
+    )
+
+    assert outline.assumptions == [
+        *expected_root_assumption_strings(),
+        *expected_step_assumption_strings(),
+    ]
+    assert all("assumptions" not in step.model_dump() for step in outline.steps)
+
+
+def test_parse_outline_flow_rejects_step_local_input_fields() -> None:
+    with pytest.raises(OutlineFlowArgumentError) as exc_info:
+        parse_outline_flow_arguments(
+            {
+                "flow_name": "Felplacerade fält",
+                "plan_rationale": "Input fields ska vara root-level.",
+                "steps": [
+                    {
+                        "name": "Bearbeta",
+                        "task": "Bearbeta med extra körningsfält.",
+                        "input_fields": [
+                            {
+                                "variable_name": "case_id",
+                                "label": "Case ID",
+                                "field_type": "text",
+                                "required": True,
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+    message = str(exc_info.value)
+    assert "steps.0.input_fields" in message
+    assert "Case ID" not in message
+
+
 def test_parse_outline_flow_ignores_step_only_fields_at_root() -> None:
     outline = parse_outline_flow_arguments(
         {
@@ -4520,6 +4567,75 @@ def test_compile_outline_audio_docx_keeps_document_body_step_text_when_fields_re
     assert compiled.steps[-1].input_type.value == "text"
     assert compiled.steps[-1].input_bindings is None
     assert validation.valid
+
+
+def test_compile_outline_audio_pdf_defaults_contract_for_untyped_json_extraction() -> (
+    None
+):
+    from intric.flows.ai_builder.ai_builder_plan_quality_critic import (
+        build_conversation_aware_quality_feedback,
+    )
+
+    outline = parse_outline_flow_arguments(
+        {
+            "flow_name": "Audio PDF report",
+            "plan_rationale": "Extract key information and produce a PDF.",
+            "steps": [
+                {
+                    "name": "Extrahera nyckeluppgifter",
+                    "task": "Extrahera nyckeluppgifter från transkriptionen.",
+                    "output_type": "json",
+                },
+                {
+                    "name": "Skapa PDF-innehåll",
+                    "task": "Skriv PDF-innehåll från de extraherade uppgifterna.",
+                    "output_type": "pdf",
+                },
+            ],
+        }
+    )
+    state = PlanningState.empty()
+    state.architecture_commit = finalize_architecture_commit(
+        ArchitectureCommitDraft(
+            tuples_chain=[
+                StepTriple(
+                    input_type="audio",
+                    output_type="pdf",
+                    output_mode="pass_through",
+                )
+            ],
+            chosen_patterns=["audio_to_artifact_report"],
+            required_capabilities=["input_audio", "output_mode_pass_through"],
+        )
+    )
+
+    draft = compile_outline_to_create_draft(
+        outline,
+        context=outline_compile_context_from_planning_state(state),
+    )
+    compiled = compile_create_draft(draft)
+    validation = validate_spec(compiled)
+    feedback = build_conversation_aware_quality_feedback(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "Transkribera ljud, extrahera nyckeluppgifter och skapa en PDF."
+                ),
+            }
+        ],
+        compiled,
+    )
+
+    extraction_step = draft.steps[1]
+    assert extraction_step.output_type == OutputType.JSON
+    assert extraction_step.output_fields is not None
+    assert {field.name for field in extraction_step.output_fields} == {
+        "source_facts",
+        "uncertainties",
+    }
+    assert validation.valid
+    assert feedback is None
 
 
 @pytest.mark.parametrize("final_output_type", ["docx", "pdf"])
@@ -7403,7 +7519,11 @@ def test_compile_outline_audio_document_json_hint_keeps_transcript_source() -> N
         for step in compiled.steps
     )
     assert compiled.steps[2].input_bindings == {
-        "question": "{{ step_b.output.structured }}\n\nKällmaterial: {{ step_a.output.text }}"
+        "question": (
+            "Important source facts extracted from the input material.: "
+            "{{ step_b.output.structured.source_facts }}\n\n"
+            "Källmaterial: {{ step_a.output.text }}"
+        )
     }
     assert validation.valid
 

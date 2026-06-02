@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from functools import cache
 from typing import Any, cast
 
 from pydantic import (
@@ -66,25 +67,9 @@ _OUTLINE_STEP_BACKEND_OWNED_KEYS = frozenset(
     }
 )
 logger = logging.getLogger(__name__)
-_OUTLINE_STEP_ONLY_ROOT_IGNORED_KEYS = frozenset(
-    {
-        "citations_requested",
-        "knowledge_refs",
-        "mcp_server_refs",
-        "mcp_tool_refs",
-        "model_ref",
-        "name",
-        "output_fields",
-        "output_type",
-        "reasoning",
-        "review_mode",
-        "task",
-        "uses_input_fields",
-    }
-)
-_OUTLINE_ROOT_IGNORED_KEYS = (
-    _OUTLINE_STEP_BACKEND_OWNED_KEYS | _OUTLINE_STEP_ONLY_ROOT_IGNORED_KEYS
-)
+_OUTLINE_ROOT_COMPATIBILITY_IGNORED_KEYS = frozenset({"reasoning"})
+_OUTLINE_ASSUMPTIONS_FIELD = "assumptions"
+_OUTLINE_STEP_ROOT_RECOVERED_KEYS = frozenset({_OUTLINE_ASSUMPTIONS_FIELD})
 
 
 def outline_runtime_input_type_values() -> list[str]:
@@ -344,7 +329,7 @@ def safe_validation_issues(error: ValidationError) -> tuple[str, ...]:
 
 
 def _normalize_outline_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Strip backend-owned mechanics from outline-flow tool arguments.
+    """Strip fields outside the semantic outline contract before validation.
 
     Outline mode is semantic. Some model outputs may still include fields
     outside that contract, but those fields must never become the source of
@@ -354,42 +339,108 @@ def _normalize_outline_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
     normalized = {
         key: value
         for key, value in arguments.items()
-        if key not in _OUTLINE_ROOT_IGNORED_KEYS
+        if key not in _outline_root_ignored_keys()
     }
     raw_steps = normalized.get("steps")
     if isinstance(raw_steps, list):
         typed_steps = cast(list[Any], raw_steps)
-        normalized["steps"] = _normalize_outline_steps(typed_steps)
+        normalized_steps, misplaced_assumptions = _normalize_outline_steps(typed_steps)
+        normalized["steps"] = normalized_steps
+        if misplaced_assumptions:
+            normalized[_OUTLINE_ASSUMPTIONS_FIELD] = _merge_outline_assumptions(
+                normalized.get(_OUTLINE_ASSUMPTIONS_FIELD),
+                misplaced_assumptions,
+            )
     return normalized
 
 
-def _normalize_outline_steps(raw_steps: list[Any]) -> list[Any]:
+@cache
+def _outline_root_ignored_keys() -> frozenset[str]:
+    return (
+        _OUTLINE_STEP_BACKEND_OWNED_KEYS
+        | _outline_step_only_keys()
+        | _OUTLINE_ROOT_COMPATIBILITY_IGNORED_KEYS
+    )
+
+
+@cache
+def _outline_step_ignored_keys() -> frozenset[str]:
+    return _OUTLINE_STEP_BACKEND_OWNED_KEYS | _OUTLINE_STEP_ROOT_RECOVERED_KEYS
+
+
+@cache
+def _outline_step_only_keys() -> frozenset[str]:
+    return frozenset(OutlineStep.model_fields.keys()) - frozenset(
+        FlowCreateOutline.model_fields.keys()
+    )
+
+
+def _normalize_outline_steps(raw_steps: list[Any]) -> tuple[list[Any], list[str]]:
     """Recover common small-model shape errors without weakening Flow models.
 
     Outline steps are semantic units with a task. When a model accidentally
-    places an output field object directly inside steps[], keep that semantic
-    schema hint by attaching it to the previous step instead of treating it as a
-    broken step.
+    places assumptions on a step, keep the root source of truth by folding those
+    notes into root assumptions. Orphan output field objects are attached to the
+    previous step instead of being treated as broken steps.
     """
 
     steps: list[Any] = []
+    misplaced_assumptions: list[str] = []
+    recovered_step_keys: set[str] = set()
     for raw_step in raw_steps:
-        step = _strip_backend_owned_step_keys(raw_step)
+        step, step_assumptions, recovered_keys = _strip_ignored_outline_step_keys(
+            raw_step
+        )
+        misplaced_assumptions.extend(step_assumptions)
+        recovered_step_keys.update(recovered_keys)
         if _looks_like_orphan_output_field(step):
             _attach_orphan_output_field(steps, cast(dict[str, Any], step))
             continue
         steps.append(step)
-    return steps
+    if recovered_step_keys:
+        logger.info(
+            "ai_builder_outline_step_assumptions_recovered",
+            extra={"keys": sorted(recovered_step_keys)},
+        )
+    return steps, misplaced_assumptions
 
 
-def _strip_backend_owned_step_keys(value: Any) -> Any:
+def _strip_ignored_outline_step_keys(
+    value: Any,
+) -> tuple[Any, list[str], frozenset[str]]:
     if not isinstance(value, dict):
-        return value
+        return value, [], frozenset()
+    raw = cast(dict[str, Any], value)
+    recovered_keys = frozenset(
+        key for key in raw if key in _OUTLINE_STEP_ROOT_RECOVERED_KEYS
+    )
+    misplaced_assumptions = _assumption_strings(
+        raw.get(_OUTLINE_ASSUMPTIONS_FIELD)
+    )
     return {
         key: step_value
-        for key, step_value in cast(dict[str, Any], value).items()
-        if key not in _OUTLINE_STEP_BACKEND_OWNED_KEYS
-    }
+        for key, step_value in raw.items()
+        if key not in _outline_step_ignored_keys()
+    }, misplaced_assumptions, recovered_keys
+
+
+def _merge_outline_assumptions(
+    raw_assumptions: Any,
+    misplaced_assumptions: list[str],
+) -> Any:
+    if raw_assumptions is None:
+        return misplaced_assumptions
+    if isinstance(raw_assumptions, list):
+        return [*cast(list[Any], raw_assumptions), *misplaced_assumptions]
+    return raw_assumptions
+
+
+def _assumption_strings(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if not isinstance(value, list):
+        return []
+    return [item for item in cast(list[Any], value) if isinstance(item, str)]
 
 
 def _looks_like_orphan_output_field(value: Any) -> bool:
