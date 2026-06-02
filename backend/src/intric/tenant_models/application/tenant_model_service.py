@@ -515,11 +515,13 @@ class TenantEmbeddingModelService:
     async def delete(self, model_id: UUID) -> None:
         from intric.database.tables.collections_table import CollectionsTable
         from intric.database.tables.integration_table import IntegrationKnowledge
+        from intric.database.tables.spaces_table import SpacesEmbeddingModels
         from intric.database.tables.websites_table import Websites
 
         stmt = sa.select(EmbeddingModels).where(
             EmbeddingModels.id == model_id,
             EmbeddingModels.tenant_id == self.user.tenant_id,
+            EmbeddingModels.deleted_at.is_(None),
         )
         result = await self.session.execute(stmt)
         model = result.scalar_one_or_none()
@@ -552,13 +554,21 @@ class TenantEmbeddingModelService:
         if row.collections > 0 or row.websites > 0 or row.integrations > 0:
             raise ModelInUseException()
 
+        # Spaces are containers (configuration, not usage): drop the link rows so
+        # the soft-deleted model doesn't dangle in space-aware reads.
+        await self.session.execute(
+            sa.delete(SpacesEmbeddingModels).where(
+                SpacesEmbeddingModels.embedding_model_id == model_id
+            )
+        )
+
+        # Soft delete: keep the row as a tombstone so historical info_blob chunks
+        # (FK ON DELETE SET NULL) keep resolving their embedding model. Read paths
+        # filter deleted_at; the cleanup worker hard-deletes once nothing
+        # references it.
         snapshot = _DeletedSnapshot(id=model.id, name=model.name)
-        try:
-            await self.session.delete(model)
-            await self.session.flush()
-        except sa.exc.IntegrityError as exc:
-            await self.session.rollback()
-            raise ModelInUseException() from exc
+        model.deleted_at = sa.func.now()
+        await self.session.flush()
 
         await _audit(
             self.audit_service,
@@ -720,9 +730,13 @@ class TenantTranscriptionModelService:
         return loaded
 
     async def delete(self, model_id: UUID) -> None:
+        from intric.database.tables.app_table import Apps
+        from intric.database.tables.spaces_table import SpacesTranscriptionModels
+
         stmt = sa.select(TranscriptionModels).where(
             TranscriptionModels.id == model_id,
             TranscriptionModels.tenant_id == self.user.tenant_id,
+            TranscriptionModels.deleted_at.is_(None),
         )
         result = await self.session.execute(stmt)
         model = result.scalar_one_or_none()
@@ -732,13 +746,34 @@ class TenantTranscriptionModelService:
             )
         _ensure_tenant_owned(model)
 
+        # Block while any app still transcribes with this model. The FK is
+        # ON DELETE SET NULL, so a hard delete would silently null those apps'
+        # transcription_model_id instead of failing — an explicit count is the
+        # only thing standing between deletion and orphaned apps.
+        app_refs = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(Apps)
+            .where(Apps.transcription_model_id == model_id)
+        )
+        if app_refs:
+            raise ModelInUseException()
+
+        # Spaces are containers: a model "enabled" on a space without an app
+        # using it is configuration, not usage. Drop those cross-reference rows
+        # so the soft-deleted model doesn't dangle in space-aware reads (which
+        # join on the link table rather than filter deleted_at).
+        await self.session.execute(
+            sa.delete(SpacesTranscriptionModels).where(
+                SpacesTranscriptionModels.transcription_model_id == model_id
+            )
+        )
+
+        # Soft delete: keep the row as a tombstone so migration history and any
+        # lingering references still resolve. Read paths filter deleted_at; the
+        # cleanup worker hard-deletes once nothing references it.
         snapshot = _DeletedSnapshot(id=model.id, name=model.name)
-        try:
-            await self.session.delete(model)
-            await self.session.flush()
-        except sa.exc.IntegrityError as exc:
-            await self.session.rollback()
-            raise ModelInUseException() from exc
+        model.deleted_at = sa.func.now()
+        await self.session.flush()
 
         await _audit(
             self.audit_service,
