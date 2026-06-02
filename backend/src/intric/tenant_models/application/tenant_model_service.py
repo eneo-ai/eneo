@@ -182,6 +182,7 @@ class TenantCompletionModelService:
             self.session,
             CompletionModels,
             tenant_id=self.user.tenant_id,
+            provider_id=payload.provider_id,
             nickname=payload.display_name,
         )
 
@@ -265,6 +266,7 @@ class TenantCompletionModelService:
                 self.session,
                 CompletionModels,
                 tenant_id=self.user.tenant_id,
+                provider_id=model.provider_id,
                 nickname=payload.display_name,
                 exclude_id=model.id,
             )
@@ -380,6 +382,7 @@ class TenantEmbeddingModelService:
             self.session,
             EmbeddingModels,
             tenant_id=self.user.tenant_id,
+            provider_id=payload.provider_id,
             nickname=payload.display_name,
         )
 
@@ -455,6 +458,7 @@ class TenantEmbeddingModelService:
                 self.session,
                 EmbeddingModels,
                 tenant_id=self.user.tenant_id,
+                provider_id=model.provider_id,
                 nickname=payload.display_name,
                 exclude_id=model.id,
             )
@@ -592,6 +596,7 @@ class TenantTranscriptionModelService:
             self.session,
             TranscriptionModels,
             tenant_id=self.user.tenant_id,
+            provider_id=payload.provider_id,
             nickname=payload.display_name,
         )
 
@@ -667,6 +672,7 @@ class TenantTranscriptionModelService:
                 self.session,
                 TranscriptionModels,
                 tenant_id=self.user.tenant_id,
+                provider_id=model.provider_id,
                 nickname=payload.display_name,
                 exclude_id=model.id,
             )

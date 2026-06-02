@@ -11,7 +11,9 @@ tell apart. This mirrors the partial unique indexes added in the
 Used by both the tenant model service (AddWizard path) and the sysadmin
 global-model endpoints — same rule everywhere. The predicate must stay in lockstep
 with that migration's index: active = `deleted_at IS NULL AND is_deprecated = false`,
-case-insensitive via SQL `lower()`, scoped per tenant (NULL = global).
+case-insensitive via SQL `lower()`, scoped per (tenant, provider). Global models
+always carry `provider_id IS NULL`, so they share one provider scope and stay
+unique per name; the same name may repeat across a tenant's providers.
 """
 
 from __future__ import annotations
@@ -33,14 +35,19 @@ async def validate_unique_display_name(
     *,
     tenant_id: UUID | None,
     nickname: str | None,
+    provider_id: UUID | None = None,
     exclude_id: UUID | None = None,
 ) -> None:
-    """Raise `NameCollisionException` if another active model in the same scope
-    already uses `nickname`. No-op when `nickname` is None.
+    """Raise `NameCollisionException` if another active model in the same
+    (tenant, provider) scope already uses `nickname`. No-op when `nickname` is
+    None.
 
     `table` is one of the three model ORM tables (all carry `nickname`,
-    `deleted_at`, `is_deprecated`, `tenant_id` after the model-table alignment).
-    Pass `exclude_id` on updates so a row never collides with itself.
+    `deleted_at`, `is_deprecated`, `tenant_id`, `provider_id` after the
+    model-table alignment). `provider_id` is None for global models (which also
+    have no provider) and otherwise scopes the check to one provider, so a name
+    may repeat across a tenant's providers. Pass `exclude_id` on updates so a row
+    never collides with itself.
     """
     if nickname is None:
         return
@@ -54,6 +61,10 @@ async def validate_unique_display_name(
         conditions.append(table.tenant_id.is_(None))
     else:
         conditions.append(table.tenant_id == tenant_id)
+    if provider_id is None:
+        conditions.append(table.provider_id.is_(None))
+    else:
+        conditions.append(table.provider_id == provider_id)
     if exclude_id is not None:
         conditions.append(table.id != exclude_id)
 
