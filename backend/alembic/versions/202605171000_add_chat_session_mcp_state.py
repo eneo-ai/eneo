@@ -11,7 +11,7 @@ Generic shape: any MCP server that returns a session id on initialize can use
 the same row.
 
 Revision ID: 202605171000
-Revises: 20260501_backfill_model_costs
+Revises: 202605261000
 Create Date: 2026-05-17
 """
 
@@ -20,7 +20,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "202605171000"
-down_revision = "20260501_backfill_model_costs"
+down_revision = "202605261000"
 branch_labels = None
 depends_on = None
 
