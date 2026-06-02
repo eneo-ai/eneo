@@ -3154,5 +3154,9 @@
   "pagination_showing_range": "{start}–{end} av {total}",
   "spaces_more_members": "+{count} till",
   "could_not_delete_crawl": "Kunde inte ta bort genomsökningen.",
-  "this_run_did_not_receive_any_inputs": "Den här körningen tog inte emot några indata."
+  "this_run_did_not_receive_any_inputs": "Den här körningen tog inte emot några indata.",
+  "chat_history_untitled": "Namnlös",
+  "chat_history_rename": "Byt namn",
+  "chat_history_rename_description": "Skriv ett nytt namn för konversationen.",
+  "chat_history_name_label": "Namn"
 }

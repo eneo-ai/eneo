@@ -3154,5 +3154,9 @@
   "view_all_conversations_users_had": "View all conversations users had with this assistant in the selected time frame.",
   "you_are_about_to_change_security_classification": "You are about to change the security classification for this space.",
   "do_you_want_to_proceed": "Do you want to proceed?",
-  "publishing": "Publishing"
+  "publishing": "Publishing",
+  "chat_history_untitled": "Untitled",
+  "chat_history_rename": "Rename",
+  "chat_history_rename_description": "Enter a new name for the conversation.",
+  "chat_history_name_label": "Name"
 }

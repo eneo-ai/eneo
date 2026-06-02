@@ -145,7 +145,14 @@ class AIModelsService:
 
         models: list[CompletionModelPublic] = []
         for model in completion_models:
-            if model.family == "azure" and not get_settings().using_azure_models:
+            # See completion_model_crud_service: only the predefined global
+            # Azure models (tenant_id is None) are gated by this flag. Tenant-
+            # configured Azure models are explicit config and always shown.
+            if (
+                model.family == "azure"
+                and model.tenant_id is None
+                and not get_settings().using_azure_models
+            ):
                 continue
 
             models.append(

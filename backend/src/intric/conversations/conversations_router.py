@@ -19,6 +19,7 @@ from intric.authentication.auth_dependencies import (
     require_resource_permission_for_method,
 )
 from intric.conversations.conversation_models import (
+    ConversationRenameRequest,
     ConversationRequest,
     PreflightRequest,
     PreflightResponse,
@@ -38,6 +39,7 @@ from intric.sessions.session import (
     SessionFeedback,
     SessionMetadataPublic,
     SessionPublic,
+    SessionUpdate,
     SSEError,
     SSEFiles,
     SSEFirstChunk,
@@ -768,3 +770,25 @@ async def approve_tools(
         decisions_remaining=submit_result.decisions_remaining,
         unrecognized_tool_call_ids=submit_result.unrecognized_tool_call_ids,
     )
+
+
+@router.patch(
+    "/{session_id}/name/",
+    response_model=SessionPublic,
+    responses=responses.get_responses([400, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+    description="Rename a conversation (session).",
+)
+async def rename_conversation(
+    payload: ConversationRenameRequest,
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    """Rename a conversation (session)"""
+    session_service = container.session_service()
+    session = await session_service.update_session(
+        SessionUpdate(id=session_id, name=payload.name)
+    )
+    return to_session_public(session)
