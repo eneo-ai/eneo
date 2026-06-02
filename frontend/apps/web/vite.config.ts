@@ -24,7 +24,37 @@ export default defineConfig({
     sveltekit() as PluginOption
   ],
   test: {
-    include: ["src/**/*.{test,spec}.{js,ts}"]
+    // Two Vitest projects share the Vite/SvelteKit setup above via `extends`:
+    //   - client: component tests (*.svelte.test.ts) in a real Chromium via Playwright
+    //   - server: pure unit tests (*.test.ts) in Node
+    // Component tests need a real DOM because Svelte 5 runes/$effect/transitions
+    // misbehave under jsdom; the server project keeps unit tests fast.
+    projects: [
+      {
+        extends: "./vite.config.ts",
+        test: {
+          name: "client",
+          environment: "browser",
+          browser: {
+            enabled: true,
+            provider: "playwright",
+            headless: true,
+            instances: [{ browser: "chromium" }]
+          },
+          include: ["src/**/*.svelte.{test,spec}.{js,ts}"],
+          exclude: ["src/lib/server/**"]
+        }
+      },
+      {
+        extends: "./vite.config.ts",
+        test: {
+          name: "server",
+          environment: "node",
+          include: ["src/**/*.{test,spec}.{js,ts}"],
+          exclude: ["src/**/*.svelte.{test,spec}.{js,ts}"]
+        }
+      }
+    ]
   },
   server: {
     host: "0.0.0.0", // Change to host 0.0.0.0 if you cant login on localhost (e.g. WSL)
