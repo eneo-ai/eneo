@@ -11,9 +11,17 @@ model type subclasses and supplies only its specifics:
   - `_special_entity_migrators` (e.g. completion's assistant kwargs reset)
   - `_after_execute` (e.g. completion's usage-stats recalculation)
 
-Behavioural note: this is a straight extraction of the original
-`CompletionModelMigrationService` — completion behaviour is unchanged, it now
-just lives here and is parameterized.
+Behavioural note: this began as a straight extraction of the original
+`CompletionModelMigrationService` (orchestration, repoint logic and validation
+messages are byte-for-byte preserved). One behaviour was intentionally changed
+for *both* model types when partial migrations were hardened: the source is
+latched (`migrated_to_model_id`) only once no migratable surface still
+references it (see `_has_remaining_source_references`) rather than
+unconditionally after every run, and a partial migration to a different target
+than an earlier completed one is rejected (see the split-target guard in
+`_ensure_partial_migrations_keep_same_target`). The full-migration path the
+frontend uses (entity_types omitted → all surfaces in one call) latches exactly
+as before.
 """
 
 import logging
