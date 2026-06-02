@@ -54,23 +54,25 @@ E2E runs the built app against an **isolated test backend** — never your dev o
 prod stack. The stack (`docker-compose.e2e.yml` at the repo root) is prod-safe by
 construction:
 
-- it talks only to a separate `eneo_test` database (created on demand), never the
-  dev/prod db;
+- it brings its **own throwaway postgres + redis** (in-memory, no volumes), so it
+  never touches your dev/prod database and your local db can be in any state;
 - every outbound model key is overridden with a dummy, so it can't reach a real
   LLM provider even if a flow tries to;
 - it reuses the already-built devcontainer image, so it ships nothing into any
   production image.
 
+The stack is **ephemeral and managed for you**: `bun run test:e2e` brings up its
+own throwaway postgres + redis + backend (seeded fresh), runs the suite, then
+removes everything. Each run starts from a clean, known database.
+
 ```bash
-# 1) Bring up the isolated backend (migrates + seeds eneo_test, serves on :8124)
-docker compose -f docker-compose.e2e.yml up -d --wait
-
-# 2) Run the suite (build + preview on :4173, wired to :8124)
-cd frontend/apps/web && bun run test:e2e
+cd frontend/apps/web && bun run test:e2e          # up → seed → run → down
 cd frontend/apps/web && bun run test:e2e --ui     # interactive runner
-cd frontend/apps/web && bun run test:e2e --list   # discover tests, no server needed
+cd frontend/apps/web && bun run test:e2e --list   # discover tests, no stack
 
-# 3) Tear down
+# Iterating on specs? Manage the stack yourself and skip up/down each run:
+docker compose -f docker-compose.e2e.yml up -d --wait
+E2E_MANAGE_STACK=0 bun run test:e2e
 docker compose -f docker-compose.e2e.yml down
 ```
 

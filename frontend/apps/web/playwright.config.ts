@@ -16,6 +16,11 @@ export const STORAGE_STATE = "playwright/.auth/user.json";
 
 export default defineConfig({
   testDir: "tests",
+  // Bring the ephemeral test stack up before the run and remove it after, so
+  // each run seeds a fresh db and leaves nothing behind (E2E_MANAGE_STACK=0 to
+  // manage it yourself).
+  globalSetup: "./e2e/global-setup.ts",
+  globalTeardown: "./e2e/global-teardown.ts",
   // Specs only by default; the setup project opts into auth.setup.ts explicitly,
   // so the chromium project never re-runs the setup as a test.
   testMatch: /(.+\.)?(test|spec)\.[jt]s/,
