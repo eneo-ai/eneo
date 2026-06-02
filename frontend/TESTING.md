@@ -50,19 +50,43 @@ cd frontend && bun x playwright install chromium chromium-headless-shell
 
 ### End-to-end
 
-E2E needs the **full stack reachable** (backend + database) and builds a
-production preview of the app on port `4173`.
+E2E runs the built app against an **isolated test backend** — never your dev or
+prod stack. The stack (`docker-compose.e2e.yml` at the repo root) is prod-safe by
+construction:
+
+- it talks only to a separate `eneo_test` database (created on demand), never the
+  dev/prod db;
+- every outbound model key is overridden with a dummy, so it can't reach a real
+  LLM provider even if a flow tries to;
+- it reuses the already-built devcontainer image, so it ships nothing into any
+  production image.
 
 ```bash
-cd apps/web && bun run test:e2e            # build + preview + run
-cd apps/web && bun run test:e2e --ui       # interactive runner
-cd apps/web && bun run test:e2e --list     # discover tests without starting the server
+# 1) Bring up the isolated backend (migrates + seeds eneo_test, serves on :8124)
+docker compose -f docker-compose.e2e.yml up -d --wait
+
+# 2) Run the suite (build + preview on :4173, wired to :8124)
+cd frontend/apps/web && bun run test:e2e
+cd frontend/apps/web && bun run test:e2e --ui     # interactive runner
+cd frontend/apps/web && bun run test:e2e --list   # discover tests, no server needed
+
+# 3) Tear down
+docker compose -f docker-compose.e2e.yml down
 ```
 
-> ⚠️ **Do not run E2E while `bun run dev` is live.** The E2E web server runs
+The suite authenticates once (`auth.setup.ts` logs in the seeded user and saves a
+session to `playwright/.auth/`), then every spec reuses that session — login is
+exercised for real, but each test starts authenticated.
+
+> ⚠️ **Do not run E2E while a dev server is live.** The E2E web server runs
 > `vite build`, which writes to the shared `.svelte-kit` output and corrupts the
-> running dev server. Stop dev first, or start your own preview and let
-> `reuseExistingServer` pick it up.
+> running dev server (blank pages until `.svelte-kit` is cleared). Stop dev first,
+> or run E2E in CI. The seeded login is `e2e@example.com` / `E2ePassword1!` in
+> tenant `E2ETenant`.
+>
+> **Status:** the isolated backend + login/auth flow are verified working. Chat
+> flows need a deterministic fake model (an OpenAI-compatible mock the seeded
+> completion model points at via `base_url`) — that is the next increment.
 
 ## Writing tests
 
@@ -118,17 +142,28 @@ Notes:
 ### E2E test (`tests/*.spec.ts`)
 
 Standard Playwright. `baseURL` is preconfigured, so navigate with relative paths.
-See `tests/smoke.spec.ts` for the reference example:
+Specs run in the `chromium` project, which **starts already authenticated** via the
+session saved by `auth.setup.ts` — so just navigate into the app. The reference
+specs:
+
+- `tests/auth.setup.ts` — logs in through the real UI and persists the session.
+- `tests/authenticated.spec.ts` — a logged-in user reaches the chat workspace.
+- `tests/smoke.spec.ts` — an anonymous visitor is redirected to login (opts out of
+  the shared session with `test.use({ storageState: { cookies: [], origins: [] } })`).
 
 ```ts
 import { expect, test } from "@playwright/test";
 
-test("unauthenticated visitor lands on the login page", async ({ page }) => {
+test("authenticated user lands in the personal chat workspace", async ({ page }) => {
   await page.goto("/");
-  await expect(page).toHaveURL(/\/login/);
-  await expect(page).toHaveTitle(/Eneo\.ai/);
+  await expect(page).toHaveURL(/\/spaces\/personal\/chat/);
+  await expect(page.getByRole("navigation").first()).toBeVisible();
 });
 ```
+
+Prefer stable, language-agnostic locators (`input[name="email"]`,
+`button[type="submit"]`, `getByRole`) over text — the UI is localized via
+Paraglide `m.*`.
 
 ## AI-assisted workflow
 

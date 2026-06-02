@@ -1,0 +1,81 @@
+# Isolated backend for end-to-end tests.
+#
+# Prod-safety by construction:
+#   - talks only to a SEPARATE database (eneo_test), never the dev/prod db
+#   - every outbound LLM key is overridden with a dummy, so this stack can
+#     never reach a real provider even if a flow tries to
+#   - it reuses the already-built devcontainer image + venv volume, so it adds
+#     no build step and ships nothing into any production image
+#
+# It joins the existing devcontainer network to reach the running `db`/`redis`,
+# and publishes its own port (8124) so the host-side Playwright preview can
+# reach it independently of VS Code port-forwarding.
+#
+# Bring up:   docker compose -f docker-compose.e2e.yml up -d --wait
+# Tear down:  docker compose -f docker-compose.e2e.yml down
+
+name: eneo-e2e
+
+services:
+  e2e-backend:
+    image: eneo_devcontainer-eneo
+    # Root so we can install the few system libs the devcontainer adds
+    # post-create (they aren't baked into the image). No venv writes happen.
+    user: root
+    working_dir: /workspace/backend
+    env_file:
+      - ./backend/.env
+    environment:
+      # Isolation: dedicated database on the shared postgres.
+      POSTGRES_HOST: db
+      POSTGRES_DB: eneo_test
+      REDIS_HOST: redis
+      # Hard guarantee: no real outbound model calls from the test stack.
+      OPENAI_API_KEY: test-openai-key
+      ANTHROPIC_API_KEY: test-anthropic-key
+      AZURE_API_KEY: test-azure-key
+      MISTRAL_API_KEY: test-mistral-key
+      # Deterministic, isolated identity for the seeded login user.
+      DEFAULT_TENANT_NAME: E2ETenant
+      DEFAULT_USER_EMAIL: e2e@example.com
+      DEFAULT_USER_PASSWORD: E2ePassword1!
+    command:
+      - bash
+      - -lc
+      - |
+        set -e
+        export PATH="/workspace/backend/.venv/bin:$$PATH"
+        apt-get update -qq && apt-get install -y -qq libsndfile1 ffmpeg postgresql-client >/dev/null
+        # Self-contained: create the isolated test database if it isn't there yet,
+        # so a single `up` works regardless of the developer's local db state.
+        export PGPASSWORD="$$POSTGRES_PASSWORD"
+        psql -h "$$POSTGRES_HOST" -U "$$POSTGRES_USER" -tc \
+          "SELECT 1 FROM pg_database WHERE datname='eneo_test'" | grep -q 1 \
+          || psql -h "$$POSTGRES_HOST" -U "$$POSTGRES_USER" -c "CREATE DATABASE eneo_test"
+        python init_db.py
+        exec gunicorn src.intric.server.main:app \
+          --workers 1 --worker-class uvicorn.workers.UvicornWorker \
+          --bind 0.0.0.0:8000
+    ports:
+      - "8124:8000"
+    volumes:
+      - .:/workspace
+      - backend_venv:/workspace/backend/.venv
+    networks:
+      - eneo
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "echo > /dev/tcp/127.0.0.1/8000"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 40s
+
+networks:
+  eneo:
+    external: true
+    name: eneo
+
+volumes:
+  backend_venv:
+    external: true
+    name: eneo_devcontainer_backend_venv
