@@ -199,9 +199,12 @@ jobs:
         run: FORCE_COLOR=1 bun run --filter '@intric/eslint-plugin' test
 
       # Component tests run in a real Chromium via Vitest browser mode, so the
-      # matching Playwright browser has to be present on the runner.
+      # matching Playwright browser must be on the runner. Pin the playwright
+      # version explicitly: a bare `bun x playwright` fetches the latest and
+      # installs a browser build that @vitest/browser (on the pinned playwright)
+      # can't find. Keep this in sync with apps/web's playwright dependency.
       - name: Install Playwright Chromium
-        run: bun x playwright install --with-deps chromium chromium-headless-shell
+        run: bun x playwright@1.58.2 install --with-deps chromium chromium-headless-shell
 
       - name: Run web unit & component tests
         run: FORCE_COLOR=1 bun run --filter '@intric/web' test:unit
