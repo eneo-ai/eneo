@@ -46,9 +46,11 @@
   const showEditDialog = writable(false);
   const showMigrateDialog = writable(false);
 
-  // Usage tab is completion-only (the usage endpoints exist only there) and
-  // lazy-loads on activation, so it must not be the default tab.
+  // Usage tab exists for completion + transcription (both expose usage
+  // endpoints); embedding models have none. It lazy-loads on activation, so
+  // it must not be the default tab.
   let activeTab = $state("info");
+  const showUsageTab = $derived(type === "completionModel" || type === "transcriptionModel");
 
   const deprecation = $derived(
     getDeprecationStatus("deprecation_date" in model ? model : { deprecation_date: null })
@@ -105,7 +107,7 @@
         </div>
       {/if}
 
-      {#if type === "completionModel"}
+      {#if showUsageTab}
         <Tabs.Root bind:value={activeTab}>
           <Tabs.List variant="line" class="w-full justify-start px-6 pt-2">
             <Tabs.Trigger value="info">{m.model_detail_tab_info()}</Tabs.Trigger>
@@ -114,7 +116,11 @@
           <Tabs.Content value="info">{@render properties()}</Tabs.Content>
           <Tabs.Content value="usage">
             <div class="px-6 py-5">
-              <ModelUsageSection modelId={model.id} active={activeTab === "usage"} />
+              <ModelUsageSection
+                type={type === "transcriptionModel" ? "transcriptionModel" : "completionModel"}
+                modelId={model.id}
+                active={activeTab === "usage"}
+              />
             </div>
           </Tabs.Content>
         </Tabs.Root>

@@ -3,8 +3,9 @@
 <!--
   Read-only "who uses this model" panel for the model detail dialog's usage
   tab. Lazily fetches usage on first activation (the tab is not the default),
-  then renders the shared `ModelUsageBreakdown`. Completion models only — the
-  usage endpoints exist for completion models alone.
+  then renders the shared `ModelUsageBreakdown`. Works for completion and
+  transcription models — only the endpoint differs; both return the same
+  `UsageDetail` shape and a `spaces_count`.
 -->
 
 <script lang="ts">
@@ -17,9 +18,11 @@
 
   let {
     modelId,
+    type = "completionModel",
     active = true
   }: {
     modelId: string;
+    type?: "completionModel" | "transcriptionModel";
     // Defer the fetch until the usage tab is actually shown.
     active?: boolean;
   } = $props();
@@ -40,14 +43,19 @@
     total = 0;
     details = [];
     spacesCount = 0;
+    const isTranscription = type === "transcriptionModel";
     try {
-      const detailsRes = (await intric.models.getUsageDetails({ modelId, limit: 100 })) as {
+      const detailsRes = (await (isTranscription
+        ? intric.models.getTranscriptionUsageDetails({ modelId, limit: 100 })
+        : intric.models.getUsageDetails({ modelId, limit: 100 }))) as {
         items?: UsageDetail[];
         total?: number;
       };
       details = detailsRes?.items ?? [];
       total = detailsRes?.total ?? details.length;
-      const stats = (await intric.models.getUsageStats({ modelId })) as {
+      const stats = (await (isTranscription
+        ? intric.models.getTranscriptionUsageStats({ modelId })
+        : intric.models.getUsageStats({ modelId }))) as {
         spaces_count?: number;
       };
       spacesCount = stats.spaces_count ?? 0;
