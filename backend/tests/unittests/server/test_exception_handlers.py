@@ -1,12 +1,78 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
 
 from intric.main.exceptions import (
     BadRequestException,
     ErrorCodes,
     FileTooLargeException,
 )
-from intric.server.exception_handlers import add_exception_handlers
+from intric.server.exception_handlers import (
+    add_exception_handlers,
+    is_active_display_name_violation,
+)
+
+
+class _FakeOrig:
+    """Stand-in for the DBAPI error wrapped by IntegrityError.orig."""
+
+    def __init__(self, constraint_name=None, text=""):
+        if constraint_name is not None:
+            self.constraint_name = constraint_name
+        self._text = text
+
+    def __str__(self):
+        return self._text
+
+
+def _integrity_error(orig):
+    return IntegrityError("INSERT INTO completion_models ...", {}, orig)
+
+
+def test_active_nickname_violation_matched_by_constraint_name():
+    exc = _integrity_error(
+        _FakeOrig(constraint_name="uq_completion_models_active_nickname")
+    )
+    assert is_active_display_name_violation(exc) is True
+
+
+def test_active_nickname_violation_matched_by_message_text():
+    exc = _integrity_error(
+        _FakeOrig(
+            text="duplicate key value violates unique constraint "
+            '"uq_transcription_models_active_nickname"'
+        )
+    )
+    assert is_active_display_name_violation(exc) is True
+
+
+def test_other_constraint_not_matched():
+    exc = _integrity_error(
+        _FakeOrig(
+            constraint_name="ck_completion_models_tenant_provider",
+            text="violates check constraint",
+        )
+    )
+    assert is_active_display_name_violation(exc) is False
+
+
+def test_integrity_error_without_orig_not_matched():
+    assert is_active_display_name_violation(_integrity_error(None)) is False
+
+
+def test_active_nickname_violation_maps_to_409():
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.get("/collide")
+    async def collide():
+        raise _integrity_error(
+            _FakeOrig(constraint_name="uq_embedding_models_active_nickname")
+        )
+
+    response = TestClient(app).get("/collide")
+    assert response.status_code == 409
+    assert response.json()["intric_error_code"] == ErrorCodes.NAME_COLLISION
 
 
 def test_file_too_large_exception_includes_structured_details():
