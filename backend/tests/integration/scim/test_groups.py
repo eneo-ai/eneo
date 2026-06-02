@@ -230,7 +230,9 @@ async def test_add_member_links_user_to_group(db_session, scim_user, scim_group)
     """add_member() inserts a row in the usergroups_users junction table."""
     async with db_session() as session:
         repo = ScimGroupRepository(session)
-        await repo.add_member(scim_group.id, scim_user.id)
+        await repo.add_member(
+            scim_group.id, scim_user.id, tenant_id=scim_group.tenant_id
+        )
 
     async with db_session() as session:
         result = await session.execute(
@@ -250,11 +252,15 @@ async def test_add_member_is_idempotent(db_session, scim_user, scim_group):
     """add_member() called twice does not create duplicate junction rows."""
     async with db_session() as session:
         repo = ScimGroupRepository(session)
-        await repo.add_member(scim_group.id, scim_user.id)
+        await repo.add_member(
+            scim_group.id, scim_user.id, tenant_id=scim_group.tenant_id
+        )
 
     async with db_session() as session:
         repo = ScimGroupRepository(session)
-        await repo.add_member(scim_group.id, scim_user.id)
+        await repo.add_member(
+            scim_group.id, scim_user.id, tenant_id=scim_group.tenant_id
+        )
 
     async with db_session() as session:
         result = await session.execute(
@@ -274,11 +280,15 @@ async def test_remove_member_unlinks_user(db_session, scim_user, scim_group):
     """remove_member() deletes the junction row between user and group."""
     async with db_session() as session:
         repo = ScimGroupRepository(session)
-        await repo.add_member(scim_group.id, scim_user.id)
+        await repo.add_member(
+            scim_group.id, scim_user.id, tenant_id=scim_group.tenant_id
+        )
 
     async with db_session() as session:
         repo = ScimGroupRepository(session)
-        await repo.remove_member(scim_group.id, scim_user.id)
+        await repo.remove_member(
+            scim_group.id, scim_user.id, tenant_id=scim_group.tenant_id
+        )
 
     async with db_session() as session:
         result = await session.execute(
@@ -317,11 +327,11 @@ async def test_set_members_replaces_all_members(db_session, test_tenant, scim_gr
 
     async with db_session() as session:
         repo = ScimGroupRepository(session)
-        await repo.set_members(scim_group.id, [uid_a])
+        await repo.set_members(scim_group.id, [uid_a], tenant_id=scim_group.tenant_id)
 
     async with db_session() as session:
         repo = ScimGroupRepository(session)
-        await repo.set_members(scim_group.id, [uid_b])
+        await repo.set_members(scim_group.id, [uid_b], tenant_id=scim_group.tenant_id)
 
     async with db_session() as session:
         result = await session.execute(
@@ -343,11 +353,13 @@ async def test_set_members_with_empty_list_removes_all(
     """set_members([]) removes all members from the group."""
     async with db_session() as session:
         repo = ScimGroupRepository(session)
-        await repo.add_member(scim_group.id, scim_user.id)
+        await repo.add_member(
+            scim_group.id, scim_user.id, tenant_id=scim_group.tenant_id
+        )
 
     async with db_session() as session:
         repo = ScimGroupRepository(session)
-        await repo.set_members(scim_group.id, [])
+        await repo.set_members(scim_group.id, [], tenant_id=scim_group.tenant_id)
 
     async with db_session() as session:
         result = await session.execute(
@@ -366,7 +378,7 @@ async def test_delete_removes_group_row(db_session, scim_group):
     """delete() performs a hard delete — the group row is gone from the table."""
     async with db_session() as session:
         repo = ScimGroupRepository(session)
-        await repo.delete(scim_group.id)
+        await repo.delete(scim_group.id, tenant_id=scim_group.tenant_id)
 
     async with db_session() as session:
         repo = ScimGroupRepository(session)
@@ -374,6 +386,74 @@ async def test_delete_removes_group_row(db_session, scim_group):
         exists = result is not None
 
     assert not exists, "Hard delete must remove the row"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_add_member_ignores_group_in_another_tenant(
+    db_session, scim_user, scim_group
+):
+    """Defensive tenant scoping: add_member() must not touch a group that does
+    not belong to the supplied tenant, even though the junction table itself
+    carries no tenant_id column."""
+    wrong_tenant = uuid.uuid4()
+    async with db_session() as session:
+        repo = ScimGroupRepository(session)
+        await repo.add_member(scim_group.id, scim_user.id, tenant_id=wrong_tenant)
+
+    async with db_session() as session:
+        result = await session.execute(
+            select(usergroups_users_table).where(
+                usergroups_users_table.c.user_group_id == scim_group.id,
+                usergroups_users_table.c.user_id == scim_user.id,
+            )
+        )
+        row_exists = result.first() is not None
+
+    assert not row_exists, "add_member must be a no-op for a foreign-tenant group"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_set_members_ignores_group_in_another_tenant(
+    db_session, scim_user, scim_group
+):
+    """set_members() with a foreign tenant must neither add nor remove rows."""
+    async with db_session() as session:
+        repo = ScimGroupRepository(session)
+        await repo.add_member(
+            scim_group.id, scim_user.id, tenant_id=scim_group.tenant_id
+        )
+
+    # Attempt to wipe members using the wrong tenant — must be ignored.
+    async with db_session() as session:
+        repo = ScimGroupRepository(session)
+        await repo.set_members(scim_group.id, [], tenant_id=uuid.uuid4())
+
+    async with db_session() as session:
+        result = await session.execute(
+            select(func.count()).where(
+                usergroups_users_table.c.user_group_id == scim_group.id
+            )
+        )
+        count = result.scalar_one()
+
+    assert count == 1, "set_members must not clear members of a foreign-tenant group"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_delete_ignores_group_in_another_tenant(db_session, scim_group):
+    """delete() with a foreign tenant must leave the group untouched."""
+    async with db_session() as session:
+        repo = ScimGroupRepository(session)
+        await repo.delete(scim_group.id, tenant_id=uuid.uuid4())
+
+    async with db_session() as session:
+        repo = ScimGroupRepository(session)
+        result = await repo.get_by_id(scim_group.id, tenant_id=scim_group.tenant_id)
+
+    assert result is not None, "delete must be a no-op for a foreign-tenant group"
 
 
 @pytest.mark.asyncio

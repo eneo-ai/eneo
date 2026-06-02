@@ -162,21 +162,44 @@ class ScimGroupRepository:
         await self._session.refresh(model)
         return model
 
-    async def delete(self, group_id: UUID) -> None:
+    async def _group_in_tenant(self, group_id: UUID, tenant_id: UUID) -> bool:
+        """Whether ``group_id`` belongs to ``tenant_id``.
+
+        The membership junction table carries no tenant_id column, so member
+        mutations can't scope by tenant directly in their own WHERE clause.
+        This guard puts tenant_id back into an SQL condition (against the group
+        table) before any junction write, so the repository never mutates a
+        group outside the caller's tenant even if a caller passes a foreign id.
+        """
+        result = await self._session.execute(
+            select(GroupModel.id).where(
+                GroupModel.id == group_id,
+                GroupModel.tenant_id == tenant_id,
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def delete(self, group_id: UUID, tenant_id: UUID) -> None:
         await self._session.execute(
             update(GroupModel)
-            .where(GroupModel.id == group_id)
+            .where(GroupModel.id == group_id, GroupModel.tenant_id == tenant_id)
             .values(state=UserGroupState.DELETED)
         )
 
-    async def add_member(self, group_id: UUID, user_id: UUID) -> None:
+    async def add_member(self, group_id: UUID, user_id: UUID, tenant_id: UUID) -> None:
+        if not await self._group_in_tenant(group_id, tenant_id):
+            return
         await self._session.execute(
             pg_insert(usergroups_users)
             .values(user_group_id=group_id, user_id=user_id)
             .on_conflict_do_nothing()
         )
 
-    async def remove_member(self, group_id: UUID, user_id: UUID) -> None:
+    async def remove_member(
+        self, group_id: UUID, user_id: UUID, tenant_id: UUID
+    ) -> None:
+        if not await self._group_in_tenant(group_id, tenant_id):
+            return
         await self._session.execute(
             delete(usergroups_users).where(
                 usergroups_users.c.user_group_id == group_id,
@@ -184,7 +207,11 @@ class ScimGroupRepository:
             )
         )
 
-    async def set_members(self, group_id: UUID, user_ids: list[UUID]) -> None:
+    async def set_members(
+        self, group_id: UUID, user_ids: list[UUID], tenant_id: UUID
+    ) -> None:
+        if not await self._group_in_tenant(group_id, tenant_id):
+            return
         await self._session.execute(
             delete(usergroups_users).where(usergroups_users.c.user_group_id == group_id)
         )

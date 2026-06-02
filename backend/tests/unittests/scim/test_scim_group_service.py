@@ -290,7 +290,7 @@ class TestPatchGroup:
             [PatchOperation(op="Add", path="members", value=[{"value": str(user_id)}])],
         )
 
-        repo.add_member.assert_called_once_with(db_group.id, user_id)
+        repo.add_member.assert_called_once_with(db_group.id, user_id, tenant_id=ANY)
 
     async def test_rejects_add_member_outside_tenant(self):
         repo = AsyncMock()
@@ -327,7 +327,7 @@ class TestPatchGroup:
             [PatchOperation(op="Remove", path=f'members[value eq "{user_id}"]')],
         )
 
-        repo.remove_member.assert_called_once_with(db_group.id, user_id)
+        repo.remove_member.assert_called_once_with(db_group.id, user_id, tenant_id=ANY)
 
     async def test_raises_conflict_when_display_name_belongs_to_another_group(self):
         repo = AsyncMock()
@@ -364,7 +364,7 @@ class TestDeleteGroup:
         service = _make_service(repo)
         await service.delete_group(db_group.id)
 
-        repo.delete.assert_called_once_with(db_group.id)
+        repo.delete.assert_called_once_with(db_group.id, tenant_id=ANY)
 
     async def test_raises_not_found(self):
         repo = AsyncMock()

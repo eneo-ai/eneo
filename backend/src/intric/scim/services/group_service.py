@@ -137,7 +137,9 @@ class ScimGroupService:
         if existing is not None:
             existing.state = None
             existing.external_id = data.externalId
-            await self._repository.set_members(existing.id, member_ids)
+            await self._repository.set_members(
+                existing.id, member_ids, tenant_id=self._tenant_id
+            )
             await self._repository.update(existing)
             refreshed = await self._repository.get_by_id(
                 existing.id, tenant_id=self._tenant_id
@@ -169,7 +171,9 @@ class ScimGroupService:
         )
         model = await self._repository.create(model)
         if data.members:
-            await self._repository.set_members(model.id, member_ids)
+            await self._repository.set_members(
+                model.id, member_ids, tenant_id=self._tenant_id
+            )
         refreshed = await self._repository.get_by_id(
             model.id, tenant_id=self._tenant_id
         )
@@ -253,7 +257,9 @@ class ScimGroupService:
         model.name = data.displayName
         member_ids = [UUID(m.value) for m in data.members]
         await _validate_member_ids(self._repository, self._tenant_id, member_ids)
-        await self._repository.set_members(group_id, member_ids)
+        await self._repository.set_members(
+            group_id, member_ids, tenant_id=self._tenant_id
+        )
         await self._repository.update(model)
         refreshed = await self._repository.get_by_id(
             group_id, tenant_id=self._tenant_id
@@ -326,7 +332,7 @@ class ScimGroupService:
             raise ScimGroupNotFoundError(f"Group '{group_id}' not found")
         if model.state == UserGroupState.DELETED:
             return
-        await self._repository.delete(group_id)
+        await self._repository.delete(group_id, tenant_id=self._tenant_id)
         logger.info(
             "scim.group.deleted",
             extra={
@@ -381,7 +387,9 @@ async def _apply_patch_operation(
     if op_lower == "remove" and op.path:
         match = _MEMBER_VALUE_RE.match(op.path)
         if match:
-            await repo.remove_member(group_id, UUID(match.group(1)))
+            await repo.remove_member(
+                group_id, UUID(match.group(1)), tenant_id=tenant_id
+            )
 
 
 async def _apply_group_attr(
@@ -409,7 +417,7 @@ async def _apply_group_attr(
         ]
         await _validate_member_ids(repo, tenant_id, member_ids)
         if op_lower == "replace":
-            await repo.set_members(group_id, member_ids)
+            await repo.set_members(group_id, member_ids, tenant_id=tenant_id)
         else:
             for user_id in member_ids:
-                await repo.add_member(group_id, user_id)
+                await repo.add_member(group_id, user_id, tenant_id=tenant_id)
