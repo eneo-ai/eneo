@@ -227,10 +227,17 @@ export function initModels(client) {
      * @param {string} params.toId Target model ID
      * @param {string[]} [params.entityTypes] Optional list of entity types to migrate
      * @param {boolean} [params.confirmMigration] Proceed even if compatibility warnings exist
+     * @param {boolean} [params.forceOverride] Bypass hard blockers (e.g. insufficient security classification)
      * @returns {Promise<import("../types/schema").components["schemas"]["MigrationResult"]>}
      * @throws {IntricError}
      * */
-    migrateTranscription: async ({ fromId, toId, entityTypes, confirmMigration }) => {
+    migrateTranscription: async ({
+      fromId,
+      toId,
+      entityTypes,
+      confirmMigration,
+      forceOverride
+    }) => {
       const res = await client.fetch("/api/v1/transcription-models/{model_id}/migrate", {
         method: "post",
         params: { path: { model_id: fromId } },
@@ -238,7 +245,8 @@ export function initModels(client) {
           "application/json": {
             to_model_id: toId,
             entity_types: entityTypes,
-            confirm_migration: confirmMigration
+            confirm_migration: confirmMigration,
+            force_override: forceOverride
           }
         }
       });

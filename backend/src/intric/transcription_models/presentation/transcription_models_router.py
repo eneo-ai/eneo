@@ -279,6 +279,7 @@ async def migrate_transcription_model_usage(
                 entity_types=migration_request.entity_types,
                 user=user,
                 confirm_migration=migration_request.confirm_migration,
+                force_override=migration_request.force_override,
             )
         except ValidationException as exc:
             # The engine records the failure in migration_history before raising;

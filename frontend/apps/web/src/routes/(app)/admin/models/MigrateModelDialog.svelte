@@ -267,20 +267,20 @@
     try {
       // Match the UI gate: spaces-only warning cases are allowed without a
       // manual acknowledgement because no resources are rebound.
+      // Security blockers only clear when the admin actively acknowledges
+      // (force_override); both model types support the same escape hatch.
       if (modelType === "transcriptionModel") {
-        // Transcription has no force_override path (no security-blocker
-        // escape hatch wired end-to-end), so it only passes confirmMigration.
         await intric.models.migrateTranscription({
           fromId: sourceModel.id,
           toId: targetModelId,
-          confirmMigration: !needsAck || acknowledged
+          confirmMigration: !needsAck || acknowledged,
+          forceOverride: hasSecurityBlocker && acknowledged
         });
       } else {
         await intric.models.migrateCompletion({
           fromId: sourceModel.id,
           toId: targetModelId,
           confirmMigration: !needsAck || acknowledged,
-          // Security blockers only clear when the admin actively acknowledges.
           forceOverride: hasSecurityBlocker && acknowledged
         });
       }
