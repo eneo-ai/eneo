@@ -187,6 +187,9 @@ class BaseModelMigrationService:
                 )
 
             self._ensure_source_model_not_already_migrated(from_model)
+            await self._ensure_partial_migrations_keep_same_target(
+                from_model_id, to_model_id, user.tenant_id
+            )
 
             from_enabled = await self.session.execute(
                 select(self._model_table).where(
@@ -526,23 +529,14 @@ class BaseModelMigrationService:
                     )
                 results["total"] = sum(results.values())
 
-                # Mark the source migrated only when this run moved *every*
-                # migratable surface. `migrated_to_model_id` is a one-way latch:
-                # once set, `_ensure_source_model_not_already_migrated` blocks any
-                # further migration of this source. Marking it after a partial run
-                # (a subset of entity_types) would therefore strand the
-                # un-migrated surfaces — their references would dangle on a source
-                # that can never be migrated again. The frontend always sends all
-                # types (entity_types omitted → expands to the full list), so the
-                # normal flow latches as before; only deliberate partial API calls
-                # stay re-runnable until they cover everything.
-                if set(entity_types) >= set(self._migratable_entity_types):
-                    mark_stmt = (
-                        update(self._model_table)
-                        .where(self._model_table.id == from_model_id)
-                        .values(migrated_to_model_id=to_model_id)
-                    )
-                    await self.session.execute(mark_stmt)
+                # `migrated_to_model_id` is a one-way latch. Full migrations
+                # usually clear everything in one call; deliberate partial API
+                # calls may clear the source over several calls. Latch only when
+                # no migratable surface still references the source.
+                if not await self._has_remaining_source_references(
+                    from_model_id, tenant_id
+                ):
+                    await self._mark_source_migrated(from_model_id, to_model_id)
 
                 await savepoint.commit()
                 return results
@@ -570,6 +564,46 @@ class BaseModelMigrationService:
                 f"Unknown entity type for tenant filtering: {entity_type}"
             )
             return true()
+
+    async def _ensure_partial_migrations_keep_same_target(
+        self, from_model_id: UUID, to_model_id: UUID, tenant_id: UUID
+    ) -> None:
+        """Prevent split-target partial migrations for the same source model."""
+        stmt = (
+            select(self.history_repo.table.to_model_id)
+            .where(
+                self.history_repo.table.tenant_id == tenant_id,
+                self.history_repo.table.from_model_id == from_model_id,
+                self.history_repo.table.status == "completed",
+                self.history_repo.table.to_model_id != to_model_id,
+            )
+            .limit(1)
+        )
+        previous_target = (await self.session.execute(stmt)).scalar_one_or_none()
+        if previous_target is not None:
+            raise ValidationException(
+                "Source model has completed partial migration history to a "
+                "different target. Complete remaining references to the original "
+                "target before using another target model."
+            )
+
+    async def _has_remaining_source_references(
+        self, from_model_id: UUID, tenant_id: UUID
+    ) -> bool:
+        remaining = await self._count_affected_entities(
+            from_model_id, list(self._migratable_entity_types), tenant_id
+        )
+        return remaining > 0
+
+    async def _mark_source_migrated(
+        self, from_model_id: UUID, to_model_id: UUID
+    ) -> None:
+        stmt = (
+            update(self._model_table)
+            .where(self._model_table.id == from_model_id)
+            .values(migrated_to_model_id=to_model_id)
+        )
+        await self.session.execute(stmt)
 
     async def _migrate_entity_type(
         self, entity_type: str, from_model_id: UUID, to_model_id: UUID, tenant_id: UUID

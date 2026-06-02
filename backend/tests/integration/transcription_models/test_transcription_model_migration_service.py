@@ -64,9 +64,51 @@ class TestTranscriptionModelMigration:
             ).scalar_one()
             assert updated_app.transcription_model_id == new_model.id
 
-            # A partial migration (apps only, spaces left out) must NOT latch the
-            # source as migrated — the engine marks it only when every migratable
-            # surface was moved, so the spaces migration stays re-runnable.
+            # The source has no remaining apps/spaces, so even an apps-only API
+            # call has completed the source migration and can latch it.
+            src = (
+                await session.execute(
+                    select(TranscriptionModels).where(
+                        TranscriptionModels.id == old_model.id
+                    )
+                )
+            ).scalar_one()
+            assert src.migrated_to_model_id == new_model.id
+
+    async def test_partial_migrations_latch_after_last_remaining_surface(
+        self,
+        db_container,
+        transcription_model_factory,
+        app_factory,
+        space_factory,
+        admin_user,
+    ):
+        async with db_container() as container:
+            session = container.session()
+
+            old_model = await transcription_model_factory(session, "whisper-old")
+            new_model = await transcription_model_factory(session, "whisper-new")
+
+            await app_factory(
+                session, "Transcribe App", None, transcription_model_id=old_model.id
+            )
+            space = await space_factory(session, "Transcription Space")
+            session.add(
+                SpacesTranscriptionModels(
+                    space_id=space.id, transcription_model_id=old_model.id
+                )
+            )
+            await session.flush()
+
+            migration_service = container.transcription_model_migration_service()
+            await migration_service.migrate_model_usage(
+                from_model_id=old_model.id,
+                to_model_id=new_model.id,
+                entity_types=["apps"],
+                user=admin_user,
+                confirm_migration=True,
+            )
+
             src = (
                 await session.execute(
                     select(TranscriptionModels).where(
@@ -75,6 +117,63 @@ class TestTranscriptionModelMigration:
                 )
             ).scalar_one()
             assert src.migrated_to_model_id is None
+
+            result = await migration_service.migrate_model_usage(
+                from_model_id=old_model.id,
+                to_model_id=new_model.id,
+                entity_types=["spaces"],
+                user=admin_user,
+                confirm_migration=True,
+            )
+
+            assert result.success is True
+            assert result.details["spaces"] == 1
+            await session.refresh(src)
+            assert src.migrated_to_model_id == new_model.id
+
+    async def test_partial_migrations_reject_split_targets(
+        self,
+        db_container,
+        transcription_model_factory,
+        app_factory,
+        space_factory,
+        admin_user,
+    ):
+        async with db_container() as container:
+            session = container.session()
+
+            old_model = await transcription_model_factory(session, "whisper-old")
+            first_target = await transcription_model_factory(session, "whisper-new-a")
+            second_target = await transcription_model_factory(session, "whisper-new-b")
+
+            await app_factory(
+                session, "Transcribe App", None, transcription_model_id=old_model.id
+            )
+            space = await space_factory(session, "Transcription Space")
+            session.add(
+                SpacesTranscriptionModels(
+                    space_id=space.id, transcription_model_id=old_model.id
+                )
+            )
+            await session.flush()
+
+            migration_service = container.transcription_model_migration_service()
+            await migration_service.migrate_model_usage(
+                from_model_id=old_model.id,
+                to_model_id=first_target.id,
+                entity_types=["apps"],
+                user=admin_user,
+                confirm_migration=True,
+            )
+
+            with pytest.raises(ValidationException):
+                await migration_service.migrate_model_usage(
+                    from_model_id=old_model.id,
+                    to_model_id=second_target.id,
+                    entity_types=["spaces"],
+                    user=admin_user,
+                    confirm_migration=True,
+                )
 
     async def test_migrate_spaces_successfully(
         self,
