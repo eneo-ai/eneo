@@ -118,12 +118,8 @@ def _build_service(
         patch(
             "intric.completion_models.application.completion_model_migration_service.CompletionModelMigrationHistoryRepo"
         ),
-        patch(
-            "intric.completion_models.application.completion_model_migration_service.get_event_publisher"
-        ),
-        patch(
-            "intric.completion_models.application.completion_model_migration_service.get_settings"
-        ),
+        patch("intric.ai_models.migration.base_migration_service.get_event_publisher"),
+        patch("intric.ai_models.migration.base_migration_service.get_settings"),
     ):
         service = CompletionModelMigrationService(
             session=session,

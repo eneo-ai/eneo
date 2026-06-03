@@ -79,6 +79,7 @@ class ActionType(str, Enum):
     TRANSCRIPTION_MODEL_CREATED = "transcription_model_created"
     TRANSCRIPTION_MODEL_UPDATED = "transcription_model_updated"
     TRANSCRIPTION_MODEL_DELETED = "transcription_model_deleted"
+    TRANSCRIPTION_MODEL_MIGRATED = "transcription_model_migrated"
     TEMPLATE_CREATED = "template_created"
     TEMPLATE_UPDATED = "template_updated"
     TEMPLATE_DELETED = "template_deleted"

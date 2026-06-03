@@ -118,7 +118,7 @@ def _completion_payload(provider_id: str, **overrides) -> dict:
     body = {
         "provider_id": provider_id,
         "name": f"completion-{uuid4().hex[:8]}",
-        "display_name": "Test completion",
+        "display_name": f"Test completion {uuid4().hex[:8]}",
         "max_input_tokens": 8000,
         "max_output_tokens": 4096,
     }
@@ -130,7 +130,7 @@ def _embedding_payload(provider_id: str, **overrides) -> dict:
     body = {
         "provider_id": provider_id,
         "name": f"embedding-{uuid4().hex[:8]}",
-        "display_name": "Test embedding",
+        "display_name": f"Test embedding {uuid4().hex[:8]}",
     }
     body.update(overrides)
     return body
@@ -140,7 +140,7 @@ def _transcription_payload(provider_id: str, **overrides) -> dict:
     body = {
         "provider_id": provider_id,
         "name": f"transcription-{uuid4().hex[:8]}",
-        "display_name": "Test transcription",
+        "display_name": f"Test transcription {uuid4().hex[:8]}",
     }
     body.update(overrides)
     return body

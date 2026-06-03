@@ -345,6 +345,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_transcription_model_deleted,
     description: m.audit_action_transcription_model_deleted_description
   },
+  transcription_model_migrated: {
+    name: m.audit_action_transcription_model_migrated,
+    description: m.audit_action_transcription_model_migrated_description
+  },
   template_created: {
     name: m.audit_action_template_created,
     description: m.audit_action_template_created_description

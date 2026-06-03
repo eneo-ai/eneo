@@ -263,6 +263,7 @@ async def migrate_model_usage(
                 entity_types=migration_request.entity_types,
                 user=user,
                 confirm_migration=migration_request.confirm_migration,
+                force_override=migration_request.force_override,
             )
         except ValidationException as exc:
             # The service records validation/security/database failures in

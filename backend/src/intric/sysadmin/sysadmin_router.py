@@ -16,6 +16,7 @@ from intric.ai_models.completion_models.completion_model import (
 from intric.ai_models.completion_models.completion_models_repo import (
     CompletionModelsRepository,
 )
+from intric.ai_models.display_name_validation import validate_unique_display_name
 from intric.ai_models.embedding_models.embedding_model import (
     EmbeddingModelCreate,
     EmbeddingModelLegacy,
@@ -44,8 +45,14 @@ from intric.completion_models.presentation.completion_model_models import (
     ModelMigrationRequest,
 )
 from intric.database.database import AsyncSession
+from intric.database.tables.ai_models_table import (
+    CompletionModels,
+    EmbeddingModels,
+)
 from intric.database.tables.collections_table import CollectionsTable
+from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.database.tables.integration_table import IntegrationKnowledge
+from intric.database.tables.spaces_table import SpacesEmbeddingModels
 from intric.database.tables.websites_table import Websites
 from intric.main.container.container import Container
 from intric.main.container.container_overrides import override_user
@@ -1251,6 +1258,12 @@ async def create_completion_model(
     # sysadmin_audit store; tracked as follow-up.
     session = cast(AsyncSession, container.session())
     async with session.begin():
+        await validate_unique_display_name(
+            session,
+            CompletionModels,
+            tenant_id=None,
+            nickname=getattr(model_data, "nickname", None),
+        )
         repo = CompletionModelsRepository(session=session)
         model = await repo.create_model(model_data)
 
@@ -1279,6 +1292,14 @@ async def update_completion_model_metadata(
     session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = CompletionModelsRepository(session=session)
+
+        await validate_unique_display_name(
+            session,
+            CompletionModels,
+            tenant_id=None,
+            nickname=getattr(model_data, "nickname", None),
+            exclude_id=id,
+        )
 
         # Ensure model_data has the id
         update_with_id = CompletionModelUpdate(
@@ -1362,6 +1383,12 @@ async def create_embedding_model(
     # global model row, so no audit_log entry is emitted today.
     session = cast(AsyncSession, container.session())
     async with session.begin():
+        await validate_unique_display_name(
+            session,
+            EmbeddingModels,
+            tenant_id=None,
+            nickname=getattr(model_data, "nickname", None),
+        )
         repo = AdminEmbeddingModelsService(session=session)
         model = await repo.create_model(model_data)
 
@@ -1391,6 +1418,14 @@ async def update_embedding_model_metadata(
     async with session.begin():
         repo = AdminEmbeddingModelsService(session=session)
 
+        await validate_unique_display_name(
+            session,
+            EmbeddingModels,
+            tenant_id=None,
+            nickname=getattr(model_data, "nickname", None),
+            exclude_id=id,
+        )
+
         # Ensure model_data has the id
         update_with_id = EmbeddingModelMetadataUpdate(
             id=id, **model_data.model_dump(exclude={"id"}, exclude_unset=True)
@@ -1418,13 +1453,39 @@ async def delete_embedding_model(
     Requires: X-API-Key header with ENEO_SUPER_API_KEY
 
     WARNING: Deletion affects all tenants. Use with caution.
+    Set force=true to hard-delete (may erase historical info_blob attribution).
     """
     # AUDIT GAP: see create_embedding_model — no owning tenant to attach
     # the audit row to. App logs are the only trace today.
     session = cast(AsyncSession, container.session())
 
     async with session.begin():
-        if not force:
+        if force:
+            # Hard-delete remains an explicit operator escape hatch. Historical
+            # info_blobs use ON DELETE SET NULL, so this can erase attribution;
+            # the normal path below soft-deletes instead.
+            from sqlalchemy.exc import IntegrityError
+
+            repo = AdminEmbeddingModelsService(session=session)
+            try:
+                await repo.delete_model(id)
+            except IntegrityError as exc:
+                raise ModelInUseException() from exc
+        else:
+            model = await session.scalar(
+                sa.select(EmbeddingModels).where(
+                    EmbeddingModels.id == id,
+                    EmbeddingModels.deleted_at.is_(None),
+                )
+            )
+            if model is None:
+                # Idempotent, matching delete_completion_model: a missing or
+                # already-soft-deleted model is a no-op success, not a 404.
+                return {
+                    "success": True,
+                    "message": f"Model {id} deleted successfully",
+                }
+
             # Three separate counts — combining them in one SELECT pulls all three
             # tables into the FROM clause, producing a cartesian product.
             collections_count = await session.scalar(
@@ -1443,17 +1504,25 @@ async def delete_embedding_model(
             if collections_count or websites_count or integrations_count:
                 raise ModelInUseException()
 
-        # Mirror the completion-model force-delete contract: if the DB
-        # refuses the delete because of a FK constraint (e.g. websites
-        # without ondelete, integration_knowledge references) surface it
-        # as MODEL_IN_USE (400) rather than letting it bubble up as a 500.
-        from sqlalchemy.exc import IntegrityError
+            info_blobs_count = await session.scalar(
+                sa.select(sa.func.count()).where(InfoBlobs.embedding_model_id == id)
+            )
+            if info_blobs_count:
+                logger.info(
+                    "sysadmin.embedding_model.soft_deleted_with_info_blobs",
+                    extra={
+                        "embedding_model_id": str(id),
+                        "info_blobs_count": info_blobs_count,
+                    },
+                )
 
-        repo = AdminEmbeddingModelsService(session=session)
-        try:
-            await repo.delete_model(id)
-        except IntegrityError as exc:
-            raise ModelInUseException() from exc
+            await session.execute(
+                sa.delete(SpacesEmbeddingModels).where(
+                    SpacesEmbeddingModels.embedding_model_id == id
+                )
+            )
+            model.deleted_at = sa.func.now()
+            await session.flush()
 
     return {"success": True, "message": f"Model {id} deleted successfully"}
 

@@ -316,6 +316,12 @@ from intric.token_usage.infrastructure.user_token_usage_analyzer import (
     UserTokenUsageAnalyzer,
 )
 from intric.transcription_models.application import TranscriptionModelCRUDService
+from intric.transcription_models.application.transcription_model_migration_history_service import (  # noqa: E501
+    TranscriptionModelMigrationHistoryService,
+)
+from intric.transcription_models.application.transcription_model_migration_service import (  # noqa: E501
+    TranscriptionModelMigrationService,
+)
 from intric.transcription_models.domain import TranscriptionModelRepository
 from intric.transcription_models.domain.transcription_model_service import (
     TranscriptionModelService,
@@ -805,6 +811,15 @@ class Container(containers.DeclarativeContainer):
     )
     completion_model_migration_history_service = providers.Factory(
         CompletionModelMigrationHistoryService,
+        session=session,
+    )
+    transcription_model_migration_service = providers.Factory(
+        TranscriptionModelMigrationService,
+        session=session,
+        transcription_model_repo=transcription_model_repo,
+    )
+    transcription_model_migration_history_service = providers.Factory(
+        TranscriptionModelMigrationHistoryService,
         session=session,
     )
     transcription_model_service = providers.Factory(
