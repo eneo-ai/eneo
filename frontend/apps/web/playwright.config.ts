@@ -5,9 +5,9 @@ import { defineConfig, devices } from "@playwright/test";
 // `eneo_test` database, dummy model keys). See frontend/TESTING.md for the full
 // flow and how to bring the stack up.
 //
-// IMPORTANT: the webServer step runs `vite build`, which writes to the shared
-// .svelte-kit output. Do NOT run the E2E suite while a dev server is live — the
-// concurrent build corrupts .svelte-kit. Stop dev first (or run this in CI).
+// The webServer step runs `vite build` + `preview` into a SEPARATE SvelteKit dir
+// (SVELTE_KIT_OUT_DIR=.svelte-kit-e2e, see below), so it no longer touches a live
+// `vite dev`'s `.svelte-kit` — you can run the E2E suite while developing.
 const PORT = 4173;
 const BACKEND_URL = process.env.E2E_BACKEND_URL ?? "http://localhost:8124";
 
@@ -49,6 +49,10 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
     env: {
+      // Build/preview into a separate SvelteKit dir so the E2E build never
+      // clobbers a live `vite dev`'s `.svelte-kit` — tests and dev can run at
+      // once. See svelte.config.js (outDir).
+      SVELTE_KIT_OUT_DIR: ".svelte-kit-e2e",
       // Point the previewed app at the isolated test backend, and match its
       // cookie-signing secret so the session cookie validates.
       ENEO_BACKEND_URL: BACKEND_URL,

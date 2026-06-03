@@ -27,6 +27,18 @@ Svelte team now recommends.
 
 All commands run from `frontend/` (or `frontend/apps/web/`).
 
+**Run everything with one command.** From `frontend/apps/web`:
+
+```bash
+bun run test:all   # installs Chromium if missing → unit + component → E2E
+```
+
+`test:all` is the low-friction entry point: it ensures the Chromium binary is
+present (idempotent — a no-op once installed), runs the Vitest unit + component
+layer, then the Playwright E2E suite (which brings its own backend stack up and
+down). Needs Docker running for the E2E part. Everything below is the same steps
+broken out for when you want to run just one layer.
+
 ```bash
 # Unit + component (both Vitest projects), one-shot — what CI runs
 bun run --filter @intric/web test:unit
@@ -42,7 +54,8 @@ cd apps/web && bun run vitest run --project client   # component only
 cd apps/web && bun run vitest run src/lib/core/formatting/formatBytes.test.ts
 ```
 
-First run on a fresh machine needs the Chromium binary for component tests:
+`test:all` installs Chromium for you; to do it by hand (e.g. before running only
+the component layer):
 
 ```bash
 cd frontend && bun x playwright install chromium chromium-headless-shell
@@ -80,12 +93,13 @@ The suite authenticates once (`auth.setup.ts` logs in the seeded user and saves 
 session to `playwright/.auth/`), then every spec reuses that session — login is
 exercised for real, but each test starts authenticated.
 
-> ⚠️ **Do not run E2E while a dev server is live.** The E2E web server runs
-> `vite build`, which writes to the shared `.svelte-kit` output and corrupts the
-> running dev server (blank pages until `.svelte-kit` is cleared). Stop dev first,
-> or run E2E in CI. The seeded login is `e2e@example.com` / `E2ePassword1!` in
-> tenant `E2ETenant`.
->
+**Runs alongside `vite dev`.** The E2E web server runs `vite build` + `preview`,
+but into a *separate* SvelteKit output dir (`SVELTE_KIT_OUT_DIR=.svelte-kit-e2e`,
+set in `playwright.config.ts` and honoured by `svelte.config.js`). It never writes
+the `.svelte-kit` your dev server uses, so you can keep developing while the suite
+runs — no more blank-page corruption, no need to stop dev first. The seeded login
+is `e2e@example.com` / `E2ePassword1!` in tenant `E2ETenant`.
+
 **Deterministic chat.** The stack includes a tiny OpenAI-compatible **mock model
 server** (`e2e/mock_model_server.py`); `e2e/seed.py` seeds a default completion
 model whose provider `endpoint` points at it, so chat completions return a fixed
@@ -95,8 +109,7 @@ encryption off, so the seeded api-key is plaintext (and meaningless).
 
 > **Status:** the full suite (login, unauthenticated redirect, authenticated
 > landing, and the deterministic chat stream) runs green in CI on every PR via the
-> `Frontend E2E` job. Locally, run it with a dev server **stopped**, since the
-> preview build conflicts with a live `.svelte-kit`.
+> `Frontend E2E` job, and locally with `bun run test:all` (or `bun run test:e2e`).
 
 ## Writing tests
 
