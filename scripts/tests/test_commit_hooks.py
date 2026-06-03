@@ -152,7 +152,8 @@ class CommitHookTests(unittest.TestCase):
         subprocess.run(["git", "add", "README.md"], cwd=root, check=True, capture_output=True, text=True)
         subprocess.run(["git", "commit", "-m", "docs: seed"], cwd=root, check=True, capture_output=True, text=True)
 
-        backend_source = root / "backend" / "src" / "intric" / "service.py"
+        backend_source = root / "backend" / "tests" / "service_test.py"
+        backend_source.parent.mkdir(parents=True, exist_ok=True)
         frontend_source = root / "frontend" / "apps" / "web" / "src" / "page.ts"
         backend_source.write_text("VALUE = 1\n", encoding="utf-8")
         frontend_source.write_text("export const value = 1;\n", encoding="utf-8")
@@ -174,6 +175,98 @@ class CommitHookTests(unittest.TestCase):
         result = run_script(PRE_PUSH_CHECK, cwd=root, env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(marker.exists(), result.stderr)
+
+    def test_pre_push_check_runs_schema_drift_for_backend_source_changes(self) -> None:
+        root = self.make_repo()
+        bin_dir = root / "bin"
+        schema = root / "frontend" / "packages" / "intric-js" / "src" / "types" / "schema.d.ts"
+        bin_dir.mkdir()
+        schema.parent.mkdir(parents=True, exist_ok=True)
+        schema.write_text("export type Schema = 'current';\n", encoding="utf-8")
+
+        uv = bin_dir / "uv"
+        uv.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+        uv.chmod(0o755)
+
+        bun = bin_dir / "bun"
+        bun.write_text(
+            "#!/usr/bin/env python3\n"
+            "import pathlib, sys\n"
+            "args = sys.argv[1:]\n"
+            "if 'openapi-typescript' in args:\n"
+            "    out = pathlib.Path(args[args.index('-o') + 1])\n"
+            "    out.write_text(\"export type Schema = 'current';\\n\", encoding='utf-8')\n"
+            "sys.exit(0)\n",
+            encoding="utf-8",
+        )
+        bun.chmod(0o755)
+
+        readme = root / "README.md"
+        readme.write_text("hello\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "README.md", str(schema.relative_to(root))],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(["git", "commit", "-m", "docs: seed"], cwd=root, check=True, capture_output=True, text=True)
+
+        backend_source = root / "backend" / "src" / "intric" / "service.py"
+        backend_source.write_text("VALUE = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", str(backend_source.relative_to(root))], cwd=root, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "commit", "-m", "feat: add backend source"], cwd=root, check=True, capture_output=True, text=True)
+
+        env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+        result = run_script(PRE_PUSH_CHECK, cwd=root, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("running schema drift", result.stderr)
+
+    def test_pre_push_check_blocks_schema_drift(self) -> None:
+        root = self.make_repo()
+        bin_dir = root / "bin"
+        schema = root / "frontend" / "packages" / "intric-js" / "src" / "types" / "schema.d.ts"
+        bin_dir.mkdir()
+        schema.parent.mkdir(parents=True, exist_ok=True)
+        schema.write_text("export type Schema = 'current';\n", encoding="utf-8")
+
+        uv = bin_dir / "uv"
+        uv.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+        uv.chmod(0o755)
+
+        bun = bin_dir / "bun"
+        bun.write_text(
+            "#!/usr/bin/env python3\n"
+            "import pathlib, sys\n"
+            "args = sys.argv[1:]\n"
+            "if 'openapi-typescript' in args:\n"
+            "    out = pathlib.Path(args[args.index('-o') + 1])\n"
+            "    out.write_text(\"export type Schema = 'regenerated';\\n\", encoding='utf-8')\n"
+            "sys.exit(0)\n",
+            encoding="utf-8",
+        )
+        bun.chmod(0o755)
+
+        readme = root / "README.md"
+        readme.write_text("hello\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "README.md", str(schema.relative_to(root))],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(["git", "commit", "-m", "docs: seed"], cwd=root, check=True, capture_output=True, text=True)
+
+        backend_source = root / "backend" / "src" / "intric" / "service.py"
+        backend_source.write_text("VALUE = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", str(backend_source.relative_to(root))], cwd=root, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "commit", "-m", "feat: add backend source"], cwd=root, check=True, capture_output=True, text=True)
+
+        env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+        result = run_script(PRE_PUSH_CHECK, cwd=root, env=env)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("schema.d.ts is out of sync", result.stderr)
 
     def test_pre_push_check_runs_route_metadata_for_router_changes(self) -> None:
         root = self.make_repo()
