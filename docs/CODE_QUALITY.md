@@ -43,17 +43,21 @@ dependencies** across the bun workspace. Config: `frontend/knip.json`.
 
 ```bash
 cd frontend
-bun run knip            # full report
-bun run knip:strict     # only high-confidence: files, deps, unlisted
+bun run knip
 ```
 
 Known-noise that is configured away: generated paraglide i18n
 (`**/paraglide/**`), the `@intric/icons/*` virtual module (vite plugin), the
-`apps/docs-site` workspace (separate Next/Nextra toolchain), and `tests/**`.
+build-time icon template `packages/ui/src/icons/Icon.svelte`, the SvelteKit
+`hooks.ts` reroute entry, the `apps/docs-site` workspace (separate Next/Nextra
+toolchain), and `tests/**`. `openapi-typescript` is invoked via `bun x` in
+`intric-js/update.js`, so it is ignored there too.
 
-The `Unused exports` category is large for `packages/ui` (a component library
-exposes a public API not all consumed internally) — treat it as a browsing aid,
-not a worklist.
+The `exports`/`types` rules are turned **off** (`rules` in `knip.json`): in this
+component-heavy app they are dominated by barrel / compound-component re-exports
+(e.g. `<AlertDialog.Root>`), which are intentional API surface rather than dead
+code. Knip is therefore used as a high-signal **files + dependencies** detector.
+Flip those rules back on temporarily if you want to audit exports.
 
 ### Backend — Vulture
 
@@ -68,9 +72,12 @@ uv run vulture                       # uses pyproject config
 uv run vulture --min-confidence 100  # only certain findings
 ```
 
-Known false positives: dunder-protocol params (`__aexit__`'s `exc_val`/`exc_tb`)
-and symbols referenced only inside `TYPE_CHECKING` / string annotations. Triage
-before deleting; add survivors to a whitelist if they recur.
+Known false positives are listed in `ignore_names` in `[tool.vulture]`: dunder
+protocol params (`__aexit__`'s `exc_val`/`exc_tb`), Protocol-signature params,
+and imports referenced only in string / `from __future__ import annotations`
+type hints (which ruff `F401` already validates). Add to that list when a new,
+verified false positive appears. `base_adapter.py` is `exclude`d (it keeps an
+intentional `if False: yield` typing shim that vulture cannot ignore by name).
 
 ### Backend — deptry
 
@@ -83,9 +90,12 @@ uv run deptry src
 ```
 
 Codes: `DEP001` missing, `DEP002` declared-but-unused, `DEP003` transitive,
-`DEP004` misplaced. Runtime-only deps (DB drivers, server, migrations CLI, env
-loaders, async glue) and the directly-used-but-transitive `sqlalchemy` family
-are pre-ignored in config so the remaining list is actionable.
+`DEP004` misplaced. Genuinely unused declarations were removed; what remains in
+`per_rule_ignores` is deps that are real but invisible to import analysis —
+runtime-only packages (DB drivers, server, migrations CLI, env loaders, async
+glue), plugin/CLI-resolved ones (`python-calamine`, `tiktoken`), the
+not-yet-wired `sentry-sdk`, and the directly-used-but-transitive `sqlalchemy`
+family. `example_mcp_server.py` is excluded (standalone `fastmcp` sample).
 
 ## Not yet enabled — future ratcheting
 

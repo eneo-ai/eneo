@@ -113,5 +113,10 @@ class CompletionModelAdapter(ABC):
         Yields:
             Completion: Completion objects with text chunks or error events
         """
+        # `if False: yield` keeps this abstract method an async *generator* so its
+        # return type matches the async-generator overrides in subclasses (without
+        # it, the base becomes a coroutine returning AsyncIterator — a pyright
+        # reportIncompatibleMethodOverride). vulture flags the dead branch; the
+        # file is excluded from vulture rather than dropping the typing shim.
         if False:  # pragma: no cover
             yield None  # type: ignore[misc]
