@@ -6431,6 +6431,7 @@ export interface paths {
      *     Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      *     WARNING: Deletion affects all tenants. Use with caution.
+     *     Set force=true to hard-delete (may erase historical info_blob attribution).
      */
     delete: operations["delete_embedding_model_api_v1_sysadmin_embedding_models__id__delete"];
     options?: never;
