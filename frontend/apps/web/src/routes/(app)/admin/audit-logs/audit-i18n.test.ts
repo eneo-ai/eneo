@@ -17,8 +17,18 @@ const SV = sv as Record<string, string>;
 
 const keys = (o: Record<string, string>) => Object.keys(o).filter((k) => k !== "$schema");
 
-const auditNames = (o: Record<string, string>, prefix: string) =>
-  keys(o).filter((k) => k.startsWith(prefix) && !k.endsWith("_description"));
+const NON_LABEL_KEYS_BY_PREFIX = {
+  audit_action_: new Set(["audit_action_type"]),
+  audit_category_: new Set(["audit_category_config_title", "audit_category_action_count"])
+} satisfies Record<string, Set<string>>;
+
+const auditNames = (o: Record<string, string>, prefix: keyof typeof NON_LABEL_KEYS_BY_PREFIX) =>
+  keys(o).filter(
+    (k) =>
+      k.startsWith(prefix) &&
+      !k.endsWith("_description") &&
+      !NON_LABEL_KEYS_BY_PREFIX[prefix].has(k)
+  );
 
 describe("message locale parity", () => {
   it("en.json and sv.json have identical key sets", () => {
@@ -28,10 +38,12 @@ describe("message locale parity", () => {
   });
 });
 
-describe.each([
+const AUDIT_MESSAGE_PREFIXES = [
   ["audit_action_", "actions"],
   ["audit_category_", "categories"]
-])("audit %s messages", (prefix, _label) => {
+] as const;
+
+describe.each(AUDIT_MESSAGE_PREFIXES)("audit %s messages", (prefix, _label) => {
   for (const [localeName, locale] of [
     ["en", EN],
     ["sv", SV]
