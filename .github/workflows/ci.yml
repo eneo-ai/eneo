@@ -240,9 +240,12 @@ jobs:
         working-directory: frontend
         run: bun run --filter @intric/ui build
 
+      # Pin to match apps/web's @playwright/test dependency; a bare
+      # `bun x playwright` fetches the latest and installs a browser build the
+      # pinned runner can't find ("Executable doesn't exist").
       - name: Install Playwright Chromium
         working-directory: frontend/apps/web
-        run: bun x playwright install --with-deps chromium
+        run: bun x playwright@1.58.2 install --with-deps chromium
 
       - name: Run E2E tests
         working-directory: frontend/apps/web

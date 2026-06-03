@@ -93,10 +93,10 @@ string (`E2E mock completion: pong`) — fast, free, and identical every run. No
 real provider is ever called. To keep credentials simple the stack runs with
 encryption off, so the seeded api-key is plaintext (and meaningless).
 
-> **Status:** verified working at the API layer — login, the seeded mock model,
-> and the personal-chat conversation stream all return the deterministic reply.
-> The browser specs are written and discovered; run them with a dev server
-> stopped (or in CI), since the preview build conflicts with a live `.svelte-kit`.
+> **Status:** the full suite (login, unauthenticated redirect, authenticated
+> landing, and the deterministic chat stream) runs green in CI on every PR via the
+> `Frontend E2E` job. Locally, run it with a dev server **stopped**, since the
+> preview build conflicts with a live `.svelte-kit`.
 
 ## Writing tests
 
@@ -201,23 +201,32 @@ CSS paths (brittle).
 
 ## CI
 
-The `Frontend` job in `.github/workflows/ci.yml` runs the **unit + component**
-layer on every PR: it installs the Chromium browser, then runs
-`bun run --filter @intric/web test:unit`.
+Two jobs in `.github/workflows/ci.yml` run on every PR:
 
-E2E is intentionally **not** in the default gate — it needs the full backend +
-database stack and is slower/flakier. Run it locally for now; wiring it into CI is
-a follow-up that requires standing up the stack and auth fixtures in the workflow.
+- **`Frontend`** runs the **unit + component** layer: installs the Chromium
+  browser, then runs `bun run --filter @intric/web test:unit`. This job **is**
+  part of the aggregate `CI` gate, so a failure blocks the PR.
+- **`Frontend E2E`** stands up the isolated stack (`docker-compose.e2e.ci.yml`,
+  backend built from its Dockerfile) and runs the full Playwright suite, uploading
+  the HTML report as an artifact.
+
+**`Frontend E2E` is currently non-blocking:** it is *not* in the aggregate `CI`
+job's `needs:` list, so a red E2E run does not fail the PR (it adds real CI time —
+backend image build + frontend build + browser run — and the suite is newer/more
+prone to flake). To make it blocking, add the `Frontend E2E` check to branch
+protection in repo settings.
 
 ## Gotchas / maintenance
 
 - **Keep `vitest` and `@vitest/browser` on the exact same version.** A mismatch
   triggers a "Running mixed versions" warning and can cause subtle bugs. They are
   currently pinned together at `3.2.4`.
-- **`playwright` is pinned to match `@playwright/test` (`1.58.2`).** Vitest browser
-  mode imports the `playwright` package; if its version drifts from the installed
-  browser build you get "Executable doesn't exist" — fix by reinstalling browsers
-  with the workspace-local Playwright (`./node_modules/.bin/playwright install`).
+- **`@playwright/test` and `playwright` are both pinned exactly at `1.58.2`** (no
+  caret) so they can't drift apart. Vitest browser mode imports the `playwright`
+  package; if its version drifts from the installed browser build you get
+  "Executable doesn't exist" — fix by reinstalling browsers with the
+  workspace-local Playwright (`./node_modules/.bin/playwright install`). CI installs
+  the browser with the same pinned version (`bun x playwright@1.58.2 install`).
 - Component tests need the Chromium binary present; CI installs it explicitly.
 - The two Vitest projects are configured in `apps/web/vite.config.ts` under
   `test.projects`. The `server` project excludes `*.svelte.test.ts`; the `client`

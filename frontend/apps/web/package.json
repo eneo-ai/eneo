@@ -27,7 +27,7 @@
     "@intric/intric-js": "workspace:*",
     "@lucide/svelte": "^1.11.0",
     "@melt-ui/svelte": "^0.86.5",
-    "@playwright/test": "^1.51.1",
+    "@playwright/test": "1.58.2",
     "@sveltejs/adapter-node": "^5.2.12",
     "@sveltejs/kit": "^2.20.5",
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
