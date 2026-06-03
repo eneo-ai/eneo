@@ -217,8 +217,9 @@ CSS paths (brittle).
 Two jobs in `.github/workflows/ci.yml` run on every PR:
 
 - **`Frontend`** runs the **unit + component** layer: installs the Chromium
-  browser, then runs `bun run --filter @intric/web test:unit`. This job **is**
-  part of the aggregate `CI` gate, so a failure blocks the PR.
+  browser, then runs `bun run --filter @intric/web test:coverage` (tests +
+  coverage). This job **is** part of the aggregate `CI` gate, so a failure blocks
+  the PR.
 - **`Frontend E2E`** stands up the isolated stack (`docker-compose.e2e.ci.yml`,
   backend built from its Dockerfile) and runs the full Playwright suite, uploading
   the HTML report as an artifact.
@@ -229,11 +230,46 @@ backend image build + frontend build + browser run — and the suite is newer/mo
 prone to flake). To make it blocking, add the `Frontend E2E` check to branch
 protection in repo settings.
 
+## Coverage
+
+Coverage comes from the **Vitest** layer only (unit + component) — it maps cleanly
+back to source. E2E is deliberately excluded: Playwright measures the bundled
+build, which maps back to Svelte source poorly. Backend coverage is produced
+separately by `pytest-cov`.
+
+```bash
+cd apps/web && bun run test:coverage   # runs the tests + writes coverage/
+```
+
+This writes `apps/web/coverage/`: `index.html` (browse locally), `lcov.info` and
+`coverage-summary.json` (for tooling). Config lives in `vite.config.ts` under
+`test.coverage` (v8 provider; generated i18n and `*.d.ts`/test files excluded).
+The number is **near-zero today** — there are barely any tests yet. That's the
+point: it's a baseline to grow from, not a vanity metric.
+
+**Two kinds of report in CI (both report-only, neither gates the PR):**
+
+- **Whole-project** — the `Frontend` job uploads the Vitest coverage as the
+  `frontend-coverage` artifact; the `Backend tests` job uploads `pytest-cov`'s
+  `coverage.xml` + `htmlcov` as `backend-coverage`. Download from the run page.
+- **Patch coverage** — the `Coverage diff` job runs [`diff-cover`] against the PR's
+  base branch and reports how well tests cover **the lines this PR changed**,
+  frontend and backend separately. It posts/updates a sticky PR comment and writes
+  the same report to the job summary. This is the PR-relevant signal ("did new
+  code arrive untested?"). It is **not** in the aggregate `CI` gate, so it never
+  blocks — set a `--fail-under` threshold later to make it enforcing.
+
+> Note: `diff-cover` matches coverage paths against git paths, which are
+> repo-root-relative. The reports use package-relative paths (`src/…` for lcov,
+> `src/intric/…` in the cobertura xml), so the `Coverage diff` job rewrites them to
+> repo-root-relative before running. If you move the coverage output, keep that
+> rewrite in sync or patch coverage silently reports "no lines".
+
 ## Gotchas / maintenance
 
-- **Keep `vitest` and `@vitest/browser` on the exact same version.** A mismatch
-  triggers a "Running mixed versions" warning and can cause subtle bugs. They are
-  currently pinned together at `3.2.4`.
+- **Keep `vitest`, `@vitest/browser` and `@vitest/coverage-v8` on the exact same
+  version.** A mismatch triggers a "Running mixed versions" warning and can cause
+  subtle bugs. They are currently pinned together at `3.2.4`.
 - **`@playwright/test` and `playwright` are both pinned exactly at `1.58.2`** (no
   caret) so they can't drift apart. Vitest browser mode imports the `playwright`
   package; if its version drifts from the installed browser build you get

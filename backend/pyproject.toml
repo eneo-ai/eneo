@@ -128,3 +128,18 @@ ignore = []
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+# Coverage of the shipped package only. Run via `uv run pytest --cov` (CI passes
+# the report flags); the xml report feeds diff-cover, html is the human artifact.
+[tool.coverage.run]
+source = ["src/intric"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/migrations/*",
+    "*/alembic/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

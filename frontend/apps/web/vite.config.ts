@@ -24,6 +24,21 @@ export default defineConfig({
     sveltekit() as PluginOption
   ],
   test: {
+    // Coverage merges across both projects below into one report. Source maps
+    // back to .ts/.svelte; generated and test files are excluded. lcov feeds
+    // diff-cover in CI, json-summary is the machine-readable total, html is for
+    // humans. Run via `bun run test:coverage`.
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "html", "lcov", "json-summary"],
+      reportsDirectory: "./coverage",
+      include: ["src/**/*.{ts,js,svelte}"],
+      exclude: [
+        "src/**/*.{test,spec}.{js,ts}",
+        "src/**/*.d.ts",
+        "src/lib/paraglide/**" // generated i18n catalogs
+      ]
+    },
     // Two Vitest projects share the Vite/SvelteKit setup above via `extends`:
     //   - client: component tests (*.svelte.test.ts) in a real Chromium via Playwright
     //   - server: pure unit tests (*.test.ts) in Node

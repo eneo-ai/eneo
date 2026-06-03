@@ -140,13 +140,26 @@ jobs:
         run: uv sync --python 3.11 --frozen --all-groups
 
       - name: Run unit tests
-        run: uv run pytest -v -n 2 -m "not integration" tests/
+        run: uv run pytest -v -n 2 -m "not integration" --cov=src/intric --cov-report=term:skip-covered tests/
 
       - name: Run integration tests
-        run: uv run pytest -v -n 2 -m integration tests/integration/
+        # --cov-append: add integration coverage on top of the unit run, then
+        # emit the combined xml (for diff-cover) + html (human artifact).
+        run: uv run pytest -v -n 2 -m integration --cov=src/intric --cov-append --cov-report=xml --cov-report=html --cov-report=term:skip-covered tests/integration/
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
+
+      - name: Upload backend coverage
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: |
+            backend/coverage.xml
+            backend/htmlcov
+          retention-days: 14
+          if-no-files-found: warn
 
   script-tests:
     name: Script tests
@@ -206,8 +219,17 @@ jobs:
       - name: Install Playwright Chromium
         run: bun x playwright@1.58.2 install --with-deps chromium chromium-headless-shell
 
-      - name: Run web unit & component tests
-        run: FORCE_COLOR=1 bun run --filter '@intric/web' test:unit
+      - name: Run web unit & component tests (with coverage)
+        run: FORCE_COLOR=1 bun run --filter '@intric/web' test:coverage
+
+      - name: Upload frontend coverage
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/apps/web/coverage
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Build frontend
         run: bun run build
@@ -268,6 +290,108 @@ jobs:
       - name: Stop E2E stack
         if: ${{ always() }}
         run: docker compose -f docker-compose.e2e.ci.yml down -v
+
+  # Reports how well the tests cover the lines THIS PR changed (patch coverage),
+  # for frontend and backend separately. Report-only: never fails the PR and is
+  # not part of the aggregate `CI` gate below. Posts/updates a sticky PR comment
+  # and writes the same report to the job summary.
+  coverage-diff:
+    name: Coverage diff
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    needs:
+      - frontend
+      - backend-tests
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # diff-cover needs history back to the merge base
+
+      - name: Download frontend coverage
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: frontend-coverage
+          path: frontend/apps/web/coverage
+
+      - name: Download backend coverage
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: backend-coverage
+          path: backend
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install diff-cover
+        run: pip install diff-cover
+
+      - name: Compute diff coverage
+        continue-on-error: true # report-only; never block the PR
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "$BASE"
+          : > diff-coverage.md
+
+          # The coverage reports use paths relative to their own package root
+          # (apps/web for lcov, src/intric for the cobertura xml). diff-cover
+          # matches against git paths, which are repo-root-relative — so rewrite
+          # both to repo-root-relative and run diff-cover from the repo root.
+          if [ -f frontend/apps/web/coverage/lcov.info ]; then
+            sed 's|^SF:|SF:frontend/apps/web/|' frontend/apps/web/coverage/lcov.info > fe.lcov
+            echo "## Frontend (Vitest)" >> diff-coverage.md
+            diff-cover fe.lcov --compare-branch "origin/$BASE" --fail-under 0 --format markdown:fe.md
+            cat fe.md >> diff-coverage.md 2>/dev/null || echo "_No frontend coverage data._" >> diff-coverage.md
+            printf '\n' >> diff-coverage.md
+          fi
+
+          if [ -f backend/coverage.xml ]; then
+            sed -e 's|<source>.*</source>|<source>.</source>|' \
+                -e 's|filename="|filename="backend/src/intric/|g' \
+                backend/coverage.xml > be.xml
+            echo "## Backend (pytest-cov)" >> diff-coverage.md
+            diff-cover be.xml --compare-branch "origin/$BASE" --fail-under 0 --format markdown:be.md
+            cat be.md >> diff-coverage.md 2>/dev/null || echo "_No backend coverage data._" >> diff-coverage.md
+          fi
+
+          cat diff-coverage.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload diff-coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: diff-coverage
+          path: diff-coverage.md
+          if-no-files-found: ignore
+
+      - name: Post or update PR comment
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const marker = "<!-- diff-coverage-report -->";
+            let report = "_No diff coverage produced._";
+            try { report = fs.readFileSync("diff-coverage.md", "utf8") || report; } catch {}
+            const body = `${marker}\n# 📊 Diff coverage (patch)\n\nHow well tests cover the lines this PR changed. Report-only — does not gate the PR.\n\n${report}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
 
   docker-builds:
     name: Docker builds (${{ matrix.image }})

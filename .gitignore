@@ -89,6 +89,8 @@ vendor/
 coverage/
 .coverage
 .coverage.*
+coverage.xml
+htmlcov/
 .cache/
 tmp/
 backend/celerybeat-schedule
