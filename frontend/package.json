@@ -13,6 +13,7 @@
     "test:e2e:ui": "cd apps/web && bun run test:e2e:ui",
     "test:e2e:report": "cd apps/web && bun run test:e2e:report",
     "test:all": "cd apps/web && bun run test:all",
+    "knip": "knip-bun",
     "setup": "sh setup.sh",
     "setup:github": "GITHUB=TRUE sh setup.sh"
   },
@@ -30,6 +31,7 @@
     "packages/*"
   ],
   "devDependencies": {
+    "knip": "^6.15.0",
     "prettier": "3.5.3",
     "prettier-plugin-svelte": "^3.3.3",
     "prettier-plugin-tailwindcss": "^0.6.11"
