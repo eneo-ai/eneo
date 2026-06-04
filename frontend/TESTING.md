@@ -247,6 +247,38 @@ This writes `apps/web/coverage/`: `index.html` (browse locally), `lcov.info` and
 The number is **near-zero today** — there are barely any tests yet. That's the
 point: it's a baseline to grow from, not a vanity metric.
 
+### Whole-system report — "where is the code untested?"
+
+To see frontend **and** backend coverage in one go — and a ranked list of the
+least-covered files so gaps jump out — run the repo-root script:
+
+```bash
+scripts/coverage.sh             # frontend + backend UNIT tests (fast, ~2 min)
+scripts/coverage.sh --full      # also run backend INTEGRATION tests (accurate, slower)
+scripts/coverage.sh --frontend  # frontend only (~11 s)
+scripts/coverage.sh --backend   # backend only
+scripts/coverage.sh --help
+```
+
+It runs the frontend suite on the host and the backend suite inside the
+devcontainer (`eneo_devcontainer-eneo-1`, started automatically by your dev
+setup), then prints the completely-untested and least-covered files per side and
+points at the clickable HTML reports (red lines = untested):
+
+- frontend: `frontend/apps/web/coverage/index.html`
+- backend: `backend/htmlcov/index.html` (plus `backend/coverage.json`)
+
+**Accuracy caveat:** coverage only reflects the tests you run. In the default fast
+mode the backend integration suite is skipped, so code exercised *only* by
+integration tests shows up as a gap (a false negative). Use `--full` for the
+picture you can trust — it needs the Docker socket and runs as root in the
+container (the testcontainers requirement).
+
+These reports are large (~36 MB frontend + ~42 MB backend) and regenerated every
+run, so they're **gitignored — never commit them**. CI keeps the last run's HTML
+as a downloadable artifact (below); for a tracked "what was it last time" number,
+commit a small summary, not the HTML.
+
 **Two kinds of report in CI (both report-only, neither gates the PR):**
 
 - **Whole-project** — the `Frontend` job uploads the Vitest coverage as the

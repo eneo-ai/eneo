@@ -7,6 +7,12 @@
     "lint": "FORCE_COLOR=1 bun run --filter '*' lint",
     "check": "NODE_ENV=production FORCE_COLOR=1 bun run --filter '*' check",
     "format": "FORCE_COLOR=1 bun run --filter '*' format",
+    "test": "cd apps/web && bun run test:unit",
+    "test:watch": "cd apps/web && bun run test:unit:watch",
+    "test:e2e": "cd apps/web && bun run test:e2e",
+    "test:e2e:ui": "cd apps/web && bun run test:e2e:ui",
+    "test:e2e:report": "cd apps/web && bun run test:e2e:report",
+    "test:all": "cd apps/web && bun run test:all",
     "setup": "sh setup.sh",
     "setup:github": "GITHUB=TRUE sh setup.sh"
   },

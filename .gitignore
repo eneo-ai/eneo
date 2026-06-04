@@ -90,6 +90,7 @@ coverage/
 .coverage
 .coverage.*
 coverage.xml
+coverage.json
 htmlcov/
 .cache/
 tmp/
