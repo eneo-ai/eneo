@@ -39,16 +39,16 @@ Eneo exposes a SCIM 2.0 server at `/scim/v2`, separate from the main `/api/v1/` 
 | GET | `/scim/v2/ResourceTypes` | Available resource types |
 | POST / GET / PUT / PATCH / DELETE | `/scim/v2/Users` | User CRUD |
 | POST / GET / PUT / PATCH / DELETE | `/scim/v2/Groups` | Group CRUD |
-| POST | `/scim/v2/Bulk` | Bulk operations (up to 100 ops, 1 MB payload) |
+| POST | `/scim/v2/Bulk` | Bulk operations (up to 100 ops, 1 MiB payload) |
 
-`DELETE` is a soft delete — the underlying row is marked `state=DELETED` with a `deleted_at` timestamp. The audit trail is preserved.
+`DELETE` is a soft delete — the underlying row is marked `state=DELETED` and retained (for users, a `deleted_at` timestamp is also set). The audit trail is preserved.
 
 ### Supported capabilities
 
 The server advertises the following in `ServiceProviderConfig`:
 
 - **PATCH**: supported (per RFC 7644 §3.5.2)
-- **Bulk**: up to 100 operations per request, 1 MB max payload
+- **Bulk**: up to 100 operations per request, 1 MiB max payload
 - **Filter**: supported, max 200 results
 - **Sort**: supported
 - **changePassword**: not supported (passwords are managed in the IdP)
@@ -69,12 +69,12 @@ curl -X POST https://your-domain.com/api/v1/sysadmin/tenants/{tenant-id}/scim-to
   -H "Authorization: Bearer ${ENEO_SUPER_API_KEY}"
 ```
 
-The response contains the raw token:
+The response (`201 Created`) contains the raw token:
 
 ```json
 {
-  "token": "scim_4f9c8a2b1d7e3...",
-  "created_at": "2026-05-25T09:00:00Z"
+  "tenant_id": "f1e2d3c4-...",
+  "token": "scim_4f9c8a2b1d7e3..."
 }
 ```
 
@@ -87,7 +87,7 @@ curl https://your-domain.com/api/v1/sysadmin/tenants/{tenant-id}/scim-token \
   -H "Authorization: Bearer ${ENEO_SUPER_API_KEY}"
 ```
 
-Returns `{ "active": true }` or `{ "active": false }`. The actual token is never returned.
+Returns `{ "tenant_id": "...", "is_active": true }` (or `"is_active": false`). The actual token is never returned.
 
 ### Revoke a token
 
@@ -163,6 +163,26 @@ Azure Entra ID derives the `email` claim from the user's `mail` attribute. If `m
 401 Unauthorized
 { "detail": "Email claim not found in ID token" }
 ```
+
+### Checklist for a working email claim
+
+To ensure every provisioned user can sign in, confirm both of the following in Azure:
+
+1. **The user has a `mail` attribute.** A `mail` value must be present on the directory record (synced from on-premises AD, or populated in Entra/Exchange Online). Users without it are provisioned by SCIM but cannot sign in.
+2. **The App Registration emits the `email` claim.** In the App Registration used for OIDC sign-in, go to **Token configuration → Add optional claim → ID**, add `email`, and save. Without this, the ID token omits `email` even when `mail` is set.
+
+To find assigned users who are missing `mail` before they hit the sign-in error, use Microsoft Graph PowerShell:
+
+```powershell
+Connect-MgGraph -Scopes "User.Read.All"
+
+# List users whose `mail` is empty — these will fail OIDC sign-in
+Get-MgUser -All -Property "displayName,userPrincipalName,mail" |
+  Where-Object { -not $_.Mail } |
+  Select-Object DisplayName, UserPrincipalName
+```
+
+Populate `mail` for any users the query returns, then retry sign-in.
 
 ---
 
@@ -256,11 +276,41 @@ Hard deletion is not available over SCIM by design — preserving the audit trai
 
 ## Groups
 
-Groups created via SCIM are stored in the same `user_groups` table as native Eneo groups. SCIM-managed groups can be identified by their `external_id` field.
+Groups created via SCIM are stored in the same `user_groups` table as native Eneo groups, with no separate origin marker. Eneo does not reliably distinguish SCIM-managed groups from locally-created ones: a group's `external_id` is the only hint, but it is not sent by every IdP (Okta omits it — see [Group identity](#group-identity-eneo-matches-groups-by-display-name)), is not exposed in the admin UI, and is never used to match groups.
 
 - Group membership is fully managed by the IdP. Changes made directly in Eneo to SCIM-managed groups may be overwritten by the next sync.
 - Members must belong to the same tenant. Cross-tenant memberships are rejected with `400 Bad Request`.
 - Groups support soft delete with the same semantics as users.
+
+### Group identity: Eneo matches groups by display name
+
+This is the single most important thing to get right when designing your group structure on the IdP side.
+
+Unlike users — which Eneo matches by `userName` and `email`, and for which `externalId` is enforced unique when present — **Eneo identifies a group solely by its `displayName` within a tenant.** A group's `externalId` is stored and returned, but it is **not** used to match, look up, or distinguish groups, and there is no uniqueness constraint on it. The unique key for an active group is `(displayName, tenant)`.
+
+This design is deliberate: it is the lowest common denominator that works across identity providers, because **not every IdP sends `externalId` for groups**:
+
+| IdP | Sends `externalId` for groups? | Matches groups on |
+|---|---|---|
+| **Azure Entra ID** | Yes (the group's immutable object ID) | Its own object ID, mapped to `externalId` |
+| **Okta** | No (not sent for "Push Groups" by default) | `displayName` |
+
+If Eneo matched groups on `externalId`, Okta provisioning would create a duplicate group on every sync, because there is no stable ID to match against. Matching on `displayName` works for both — but it pushes the responsibility for **unique, stable group names** onto whoever configures the provisioning scope on the IdP side.
+
+### Why this matters: two groups with the same name
+
+Because the display name *is* the identity, two groups with the same `displayName` cannot coexist in one Eneo tenant — even if the IdP considers them distinct (for example, two Entra groups with different object IDs but the same name). The outcome is **not** "last one wins"; it is one of two failure modes, and both are easy to miss:
+
+- **Both groups active** — the second group's provisioning is rejected with `409 Conflict`. The second group is **never created in Eneo**, and its members silently never receive their access. A WARNING is logged (`scim.group.conflict`).
+- **A same-named group was previously soft-deleted** — provisioning the new group **reactivates and reuses the old, deleted row** rather than creating a fresh group. The IdP receives back the *old* group's Eneo ID and inherits its audit history; only the membership is reset. This can surface as a group that appears to have "come back from the dead."
+
+### Recommendations for client-side setup
+
+Treat group naming as part of designing your provisioning structure, not an afterthought:
+
+1. **Keep group display names unique** within the set of groups you push to a single Eneo tenant. Watch especially for generic names like `Administrators` or `Users` that may exist in multiple OUs.
+2. **Keep names stable.** Entra handles a rename by sending a `PATCH` against Eneo's resource ID, so renames work there. Okta, which has no stable group ID, is more fragile — a rename can look like a new group plus an orphaned old one.
+3. **Monitor for conflicts after each provisioning run.** Because a name collision fails silently from the admin's point of view, check the backend logs for `scim.group.conflict` (see [Troubleshooting](#a-group-is-missing-or-its-members-have-no-access)) after the initial sync and after any scope change.
 
 ---
 
@@ -317,8 +367,8 @@ All SCIM mutations are recorded in the Eneo audit log alongside other administra
 - `SCIM_USER_RECONCILED` — existing user matched by email and linked to IdP
 - `SCIM_USER_REACTIVATED` — soft-deleted user restored
 - `SCIM_USER_UPDATED` — user attributes changed
-- `SCIM_USER_SOFT_DELETED` — user deactivated
-- `SCIM_GROUP_*` — analogous events for groups
+- `SCIM_USER_DEPROVISIONED` — user soft-deleted (deactivated)
+- `SCIM_GROUP_CREATED`, `SCIM_GROUP_REACTIVATED`, `SCIM_GROUP_UPDATED`, `SCIM_GROUP_DELETED` — analogous events for groups
 - `SCIM_TOKEN_CREATED`, `SCIM_TOKEN_REVOKED` — sysadmin token lifecycle
 
 Each event records the acting principal as `actor.type = "scim"` with the bearer token's tenant context. Sysadmin token operations are recorded with `actor_type = "SYSTEM"`.
@@ -362,7 +412,7 @@ Azure omits the `email` claim from the ID token if either:
 - The signing-in user has no `mail` attribute set in the directory, or
 - The App Registration is not configured to include `email` as an optional claim
 
-See [Sign-in prerequisites when paired with OIDC](#sign-in-prerequisites-when-paired-with-oidc) for the full checklist and a PowerShell snippet to bulk-fix missing `mail` attributes.
+See [Sign-in prerequisites when paired with OIDC](#sign-in-prerequisites-when-paired-with-oidc) for the full checklist and a PowerShell snippet to find users missing the `mail` attribute.
 
 ### Users are not deactivated when removed from Entra
 
@@ -378,6 +428,18 @@ See [Provisioning scope and deprovisioning triggers](#provisioning-scope-and-dep
 ### Group members are missing
 
 Group members are referenced by `externalId`. A user must have been synced and have an `externalId` set before they can be added to a group. Check the user provisioning log first — group sync runs after user sync.
+
+### A group is missing, or its members have no access
+
+Eneo identifies groups by `displayName`, not by `externalId` (see [Group identity](#group-identity-eneo-matches-groups-by-display-name)). The usual cause is a **name collision**: two groups in scope share a display name, so the second one fails to provision.
+
+This fails quietly — the IdP provisioning log may show success while Eneo rejected the group. Check the backend logs:
+
+```bash
+docker compose logs backend | grep scim.group.conflict
+```
+
+A `scim.group.conflict` entry names the `display_name` that collided. Resolve it by giving the groups distinct display names in the IdP, then re-run provisioning.
 
 ### Check backend logs
 
