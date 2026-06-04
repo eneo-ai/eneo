@@ -25,6 +25,14 @@ Fields:
 - `context` (optional): safe, non-sensitive metadata.
 - `request_id` (optional): request correlation ID for support/debugging.
 
+## Trace ID and error ID
+
+Independent of the response body shape, every HTTP response (including 4xx and 5xx) carries the OpenTelemetry trace ID in the `X-Trace-Id` response header (32 hex chars). The legacy `X-Correlation-ID` header is emitted in parallel as a same-value alias during the migration period. Both headers are exposed via CORS.
+
+For unhandled 500 errors, the response body additionally contains a short stable `error_id` (8 chars) that appears on the originating exception log line. `error_id` is the support-facing identifier safe to share with end users; `trace_id` is the operator-facing identifier used to correlate every log entry and span emitted during the request.
+
+See [OBSERVABILITY.md](../../../docs/OBSERVABILITY.md) for the full ID contract, log schema, and trace flow.
+
 ## auth_layer values
 
 - `identity`: API key is missing/invalid/expired/revoked (401).

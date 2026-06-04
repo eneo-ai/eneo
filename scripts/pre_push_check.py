@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from check_route_metadata import is_router_file_path
@@ -13,6 +14,7 @@ PREFERRED_BRANCH_RE = re.compile(
     r"^(feature|feat|fix|hotfix|security|chore|deps|docs|test|refactor|remove|ci)/"
 )
 PROTECTED_BRANCHES = {"main", "master", "develop"}
+SCHEMA_PATH = Path("frontend/packages/intric-js/src/types/schema.d.ts")
 
 
 def run_git(repo_root: Path, *args: str) -> str:
@@ -84,6 +86,79 @@ def run_check(label: str, command: list[str], cwd: Path) -> None:
         raise RuntimeError(f"{label} failed")
 
 
+def schema_drift_relevant(paths: list[str]) -> bool:
+    return str(SCHEMA_PATH) in paths or any(path.startswith("backend/src/") for path in paths)
+
+
+def run_schema_drift_check(repo: Path) -> None:
+    print("[pre-push] running schema drift...", file=sys.stderr)
+
+    with tempfile.TemporaryDirectory(prefix="eneo-schema-drift-") as tmp:
+        tmp_dir = Path(tmp)
+        openapi_path = tmp_dir / "openapi.gen.json"
+        generated_schema = tmp_dir / "schema.d.ts"
+
+        dump_result = subprocess.run(
+            [
+                "uv",
+                "run",
+                "python",
+                "-c",
+                (
+                    "import json; "
+                    "from intric.server.main import app; "
+                    f"json.dump(app.openapi(), open({str(openapi_path)!r}, 'w'))"
+                ),
+            ],
+            cwd=repo / "backend",
+            text=True,
+            check=False,
+        )
+        if dump_result.returncode != 0:
+            raise RuntimeError("schema drift failed while dumping backend OpenAPI")
+
+        gen_result = subprocess.run(
+            [
+                "bun",
+                "x",
+                "openapi-typescript",
+                str(openapi_path),
+                "-o",
+                str(generated_schema),
+                "--default-non-nullable=false",
+            ],
+            cwd=repo / "frontend" / "packages" / "intric-js",
+            text=True,
+            check=False,
+        )
+        if gen_result.returncode != 0:
+            raise RuntimeError("schema drift failed while regenerating schema.d.ts")
+
+        fmt_result = subprocess.run(
+            [
+                "bun",
+                "x",
+                "prettier",
+                "--config",
+                str(repo / "frontend" / "packages" / "intric-js" / ".prettierrc"),
+                "--write",
+                str(generated_schema),
+            ],
+            cwd=repo / "frontend" / "packages" / "intric-js",
+            text=True,
+            check=False,
+        )
+        if fmt_result.returncode != 0:
+            raise RuntimeError("schema drift failed while formatting schema.d.ts")
+
+        committed_schema = repo / SCHEMA_PATH
+        if committed_schema.read_bytes() != generated_schema.read_bytes():
+            raise RuntimeError(
+                f"{SCHEMA_PATH} is out of sync with the backend OpenAPI spec. "
+                "Regenerate and commit it before pushing."
+            )
+
+
 def main() -> int:
     try:
         root = repo_root()
@@ -130,6 +205,8 @@ def main() -> int:
                 ["python3", "scripts/check_route_metadata.py", "--repo-root", str(root), "--base", base, *router_paths],
                 root,
             )
+        if schema_drift_relevant(paths):
+            run_schema_drift_check(root)
     except RuntimeError as exc:
         print(f"[pre-push] error: {exc}", file=sys.stderr)
         return 2

@@ -3,12 +3,12 @@
 import logging
 from uuid import UUID
 
-from intric.audit.domain.action_metadata import get_action_metadata
+from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.category_mappings import (
-    CATEGORY_DESCRIPTIONS,
     CATEGORY_MAPPINGS,
     get_category_for_action,
 )
+from intric.audit.domain.category_types import CategoryType
 from intric.audit.domain.repositories.audit_config_repository import (
     ActionOverrides,
     AuditConfigRepository,
@@ -111,12 +111,14 @@ class AuditConfigService:
 
     async def get_config(self, tenant_id: UUID) -> AuditConfigResponse:
         """
-        Get all audit category configurations for a tenant with metadata.
+        Get all audit category configurations for a tenant.
 
         Enriches configuration with:
-        - Category descriptions from CATEGORY_DESCRIPTIONS
         - Action counts from CATEGORY_MAPPINGS
         - Example actions (first 3) for each category
+
+        Category display text is not included; the frontend translates the
+        ``category`` key.
 
         Args:
             tenant_id: Tenant identifier
@@ -130,20 +132,9 @@ class AuditConfigService:
             category: enabled for category, enabled in configs
         }
 
-        # All 7 categories in order
-        all_categories = [
-            "admin_actions",
-            "user_actions",
-            "security_events",
-            "file_operations",
-            "integration_events",
-            "system_actions",
-            "audit_access",
-        ]
-
-        # Build enriched category configs
+        # Build enriched category configs (CategoryType defines order)
         category_configs: list[CategoryConfig] = []
-        for category in all_categories:
+        for category in CategoryType:
             # Get enabled state (default to True if not found)
             enabled = config_dict.get(category, True)
 
@@ -156,7 +147,6 @@ class AuditConfigService:
                 CategoryConfig(
                     category=category,
                     enabled=enabled,
-                    description=CATEGORY_DESCRIPTIONS[category],
                     action_count=len(actions_in_category),
                     example_actions=actions_in_category[:3],  # First 3 examples
                 )
@@ -333,16 +323,11 @@ class AuditConfigService:
                     # No override, use category enabled state
                     enabled = category_enabled
 
-            # Get Swedish metadata
-            metadata = get_action_metadata(action_value)
-
             action_configs.append(
                 ActionConfig(
-                    action=action_value,
+                    action=ActionType(action_value),
                     enabled=enabled,
-                    category=category,
-                    name_sv=metadata["name_sv"],
-                    description_sv=metadata["description_sv"],
+                    category=CategoryType(category),
                 )
             )
 

@@ -257,6 +257,7 @@ class UserInDBBase(InDB, UserBase):
 
 class UserGroupInDBRead(InDB):
     name: str
+    state: Optional[str] = None
 
 
 class UserGroupRead(InDB):
@@ -291,7 +292,11 @@ class UserInDB(UserInDBBase):
     @computed_field
     @property
     def user_groups_ids(self) -> set[UUID]:
-        return {user_group.id for user_group in self.user_groups}
+        return {
+            user_group.id
+            for user_group in self.user_groups
+            if user_group.state != UserState.DELETED
+        }
 
     @computed_field
     @property

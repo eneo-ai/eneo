@@ -16,8 +16,32 @@ from intric.main.config import get_settings
 from intric.main.request_context import clear_request_context, set_request_context
 
 
+def _current_trace_id() -> str | None:
+    """Return the active OTEL trace_id as a 32-char hex string, or None."""
+    try:
+        from opentelemetry import trace as _otel_trace
+
+        ctx = _otel_trace.get_current_span().get_span_context()
+        if ctx.is_valid:
+            return format(ctx.trace_id, "032x")
+    except Exception:
+        # Trace correlation must never break request handling — if the OTEL
+        # SDK is in an unexpected state, fall back to no trace_id.
+        pass
+    return None
+
+
 class RequestContextMiddleware(BaseHTTPMiddleware):
-    """Ensure correlation, routing, and audit metadata are available per request."""
+    """Populate per-request logging and audit context in contextvars.
+
+    Sets ``trace_id`` (from the active OTEL span) and ``correlation_id``
+    (alias for trace_id, kept for backward compat) so that all log records
+    emitted during the request carry both IDs.
+
+    X-Trace-Id / X-Correlation-ID response headers are injected by the
+    pure-ASGI TraceIdResponseMiddleware which runs at the ASGI level where
+    the server span is guaranteed to be active.
+    """
 
     def __init__(self, app: ASGIApp):
         super().__init__(app)
@@ -29,9 +53,17 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         clear_request_context()
-        correlation_id = request.headers.get("x-correlation-id") or request.headers.get(
+
+        # trace_id comes from the OTEL span created by the outer OTEL middleware
+        trace_id = _current_trace_id()
+
+        # Legacy header: honour x-correlation-id / x-request-id from callers.
+        # Falls back to trace_id so correlation_id always equals trace_id when
+        # a span is active.
+        legacy_id = request.headers.get("x-correlation-id") or request.headers.get(
             "x-request-id"
         )
+        correlation_id = trace_id or legacy_id
 
         settings = get_settings()
         ip_address = resolve_client_ip(
@@ -52,6 +84,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
                 request_id = None
 
         set_request_context(
+            trace_id=trace_id,
             correlation_id=correlation_id,
             path=request.url.path,
             method=request.method,
@@ -64,8 +97,5 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
         finally:
             clear_request_context()
-
-        if correlation_id and "x-correlation-id" not in response.headers:
-            response.headers["X-Correlation-ID"] = correlation_id
 
         return response

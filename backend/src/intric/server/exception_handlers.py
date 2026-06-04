@@ -3,10 +3,30 @@ from typing import Protocol, cast
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 
 from intric.main.exceptions import EXCEPTION_MAP, ErrorCodes, UnauthorizedException
 from intric.main.models import GeneralError
 from intric.main.request_context import get_request_context
+
+# Partial unique indexes that guard active model display names, per
+# 20260602_unique_model_display_names. Their names all end in this suffix.
+_ACTIVE_NICKNAME_INDEX_SUFFIX = "_active_nickname"
+
+
+def is_active_display_name_violation(exc: IntegrityError) -> bool:
+    """True when an IntegrityError is a collision on a `uq_*_active_nickname`
+    index — the validate-then-insert race the display-name pre-check can't close.
+
+    Matches on the driver's reported constraint name when available, falling back
+    to the rendered error text (Postgres includes the constraint name there), so
+    it works regardless of which DBAPI surfaced the error.
+    """
+    orig = getattr(exc, "orig", None)
+    constraint_name = getattr(orig, "constraint_name", None) or ""
+    if constraint_name.endswith(_ACTIVE_NICKNAME_INDEX_SUFFIX):
+        return True
+    return _ACTIVE_NICKNAME_INDEX_SUFFIX in str(orig if orig is not None else exc)
 
 
 class ExceptionContext(Protocol):
@@ -115,3 +135,31 @@ def add_exception_handlers(app: FastAPI):
             )
 
         app.add_exception_handler(exception, handler)
+
+    async def integrity_error_handler(request: Request, exc: Exception) -> JSONResponse:
+        # Concurrent creates/renames to the same display name both pass the
+        # pre-check, then one loses at flush against the active-nickname unique
+        # index. Surface that as the same clean 409 the pre-check raises. Other
+        # integrity errors are re-raised so the catch-all 500 handler keeps its
+        # current behaviour (error_id, trace headers).
+        integrity_exc = cast(IntegrityError, exc)
+        if not is_active_display_name_violation(integrity_exc):
+            raise exc
+
+        request_id = _extract_request_id(request)
+        logger.warning(
+            "%s %s → 409: display name collision (DB index)",
+            request.method,
+            request.url.path,
+            extra={"error_code": ErrorCodes.NAME_COLLISION},
+        )
+        return JSONResponse(
+            status_code=409,
+            content=GeneralError(
+                message="A model with this display name already exists.",
+                intric_error_code=ErrorCodes.NAME_COLLISION,
+                request_id=request_id,
+            ).model_dump(exclude_none=True),
+        )
+
+    app.add_exception_handler(IntegrityError, integrity_error_handler)

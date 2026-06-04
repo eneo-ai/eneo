@@ -116,3 +116,14 @@ class ConversationRequest(_ConversationTarget):
     # the otherwise-active set (assistant's own servers, or policy-granted ones
     # for a personal assistant); it can never enable a server that isn't active.
     disabled_mcp_server_ids: list[UUID] = Field(default=[])
+
+
+class ConversationRenameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+    @model_validator(mode="after")
+    def validate_name(self) -> "ConversationRenameRequest":
+        self.name = self.name.strip()
+        if not self.name:
+            raise ValueError("name cannot be empty")
+        return self

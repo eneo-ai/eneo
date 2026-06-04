@@ -53,31 +53,36 @@ The repository uses GitHub security features and CI to prevent regressions:
   frontend, GitHub Actions, Dockerfiles, and devcontainer configuration.
 - Dependency Review runs on pull requests into `develop` and blocks newly
   introduced vulnerable dependencies at `high` severity or above.
-- CodeQL uses the repository's advanced GitHub Actions workflow so the scanned
-  languages and query suites are versioned with the code. It scans Python,
-  JavaScript/TypeScript, and GitHub Actions workflows on pushes and pull
-  requests to `develop`, plus a weekly scheduled scan.
+- CodeQL advanced setup is paused while maintainers evaluate a code-scanning
+  setup that gives developers useful feedback without high false-positive noise.
+  Re-enable code scanning only after the query set and triage process are tuned
+  enough that alerts are actionable for maintainers.
 - Release SBOMs are generated from the published backend and frontend container
   image digests and attached to GitHub Releases as CycloneDX JSON, SPDX JSON,
-  and human-readable table files. These assets provide dependency transparency
-  for each release; their authenticity currently relies on GitHub-managed
-  release asset storage and the image digests recorded in the SBOM bundle.
-  `SBOM-SHA256SUMS.txt` covers the SBOM files; container image integrity is
-  verified through the GHCR image digests recorded in `IMAGE-DIGESTS.txt`.
+  and human-readable table files. The backend release also includes a narrower
+  CycloneDX SBOM for the Python runtime installed in `/app/.venv` inside the
+  released backend image. The frontend release also includes a source dependency
+  SBOM generated with CycloneDX Generator after installing the frontend from the
+  checked-out release tag with the frozen Bun lockfile, so JavaScript
+  dependencies remain visible even when the runtime image only contains the
+  bundled build output. Release SBOM assets are attested through GitHub artifact
+  attestations, and the pushed backend and frontend images include provenance
+  attestations in GHCR.
+  `SBOM-SHA256SUMS.txt` covers the SBOM files; `IMAGE-DIGESTS.txt` records the
+  exact image digests scanned.
 - Secret scanning and push protection should remain enabled for provider keys,
   tokens, credentials, and other repository secrets.
 - The normal `CI` gate validates frozen backend and frontend installs before
   dependency update pull requests are merged.
 
-During the initial rollout, branch protection should require `CI`, `Dependency
-Review`, and `CodeQL`, but CodeQL code-scanning protection should only block
-high and critical alerts. Do not block every medium or low finding until the
-baseline is stable.
+Branch protection should require `CI` and `Dependency Review`. While code
+scanning is paused, remove `CodeQL gate` from the GitHub ruleset; otherwise pull
+requests can wait for a check that no longer runs.
 
 ## Alert Triage
 
 Use this order for existing Dependabot, malware, secret scanning, Dependency
-Review, Docker, GitHub Actions, and CodeQL alerts.
+Review, Docker, GitHub Actions, and any enabled code-scanning alerts.
 
 ### P0: Same Day
 
@@ -169,6 +174,17 @@ If a secret is exposed:
 - remove it from repository history if needed
 - add or adjust secret scanning patterns when the secret format is specific to
   Eneo
+
+## Log Redaction
+
+Eneo's structured-log path enforces redaction on both stdout log attributes and auto-instrumented span attributes:
+
+- `Authorization`, `Cookie`, and `Set-Cookie` headers are never logged.
+- Query parameters named `code`, `state`, `token`, `access_token`, `refresh_token`, `client_secret`, or matching `*token*` or `*secret*` (case-insensitive) are replaced with `[REDACTED]` in both log lines and span URL attributes.
+- Request and response bodies are not logged by default; adding body logging requires a deliberate code change and a redaction review.
+- `user_email` is logged as a deliberate carryover from existing audit behavior. It is high-cardinality PII; configure the log aggregation system not to pre-index it.
+
+The redaction policy is unit-tested across both layers (stdout logs and span attributes from FastAPI, `httpx`, and `aiohttp` instrumentation). For the full policy and verification commands, see [OBSERVABILITY.md §8](./OBSERVABILITY.md#8-redaction-policy).
 
 ## Tracking and Exceptions
 

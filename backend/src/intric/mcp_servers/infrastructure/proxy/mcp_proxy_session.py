@@ -519,7 +519,15 @@ class MCPProxySession:
                 current,
             )
 
-        for server_id, client in self._clients.items():
+        # Disconnect in reverse-connect order. Each streamablehttp_client
+        # __aenter__ pushes an anyio cancel scope onto this task's scope
+        # stack; anyio enforces strict LIFO on __aexit__. Iterating in
+        # insertion order would try to exit the first-connected client
+        # while later clients' scopes are still on top, which anyio rejects
+        # with "Attempted to exit a cancel scope that isn't the current
+        # task's current cancel scope" and silently leaks the underlying
+        # HTTP read/write TaskGroup children.
+        for server_id, client in reversed(self._clients.items()):
             try:
                 await client.disconnect()
             except Exception as e:

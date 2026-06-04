@@ -1050,7 +1050,7 @@ export interface paths {
     put?: never;
     /**
      * Update Assistant
-     * @description Omitted fields are not updated
+     * @description Update an assistant. Omitted fields are left unchanged.
      */
     post: operations["update_assistant_api_v1_assistants__id___post"];
     /** Delete Assistant */
@@ -1432,6 +1432,26 @@ export interface paths {
     options?: never;
     head?: never;
     patch?: never;
+    trace?: never;
+  };
+  "/api/v1/conversations/{session_id}/name/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Rename Conversation
+     * @description Rename a conversation (session).
+     */
+    patch: operations["rename_conversation_api_v1_conversations__session_id__name__patch"];
     trace?: never;
   };
   "/api/v1/services/": {
@@ -3213,6 +3233,146 @@ export interface paths {
     put?: never;
     /** Update Transcription Model */
     post: operations["update_transcription_model_api_v1_transcription_models__id___post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/{model_id}/usage": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Transcription Model Usage
+     * @description Count apps and spaces that would be moved by migrating this model.
+     */
+    get: operations["get_transcription_model_usage_api_v1_transcription_models__model_id__usage_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/{model_id}/usage/details": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Transcription Model Usage Details
+     * @description List apps using this transcription model (for the migrate dialog).
+     */
+    get: operations["get_transcription_model_usage_details_api_v1_transcription_models__model_id__usage_details_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/{model_id}/migration-validate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Validate Transcription Migration
+     * @description Validate transcription migration compatibility without executing.
+     */
+    get: operations["validate_transcription_migration_api_v1_transcription_models__model_id__migration_validate_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/{model_id}/migrate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Migrate Transcription Model Usage
+     * @description Migrate all usage from one transcription model to another.
+     */
+    post: operations["migrate_transcription_model_usage_api_v1_transcription_models__model_id__migrate_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/migration-history": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get All Transcription Migration History
+     * @description List all transcription migration history for the tenant.
+     */
+    get: operations["get_all_transcription_migration_history_api_v1_transcription_models_migration_history_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/migration-history/{migration_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Transcription Migration History By Id
+     * @description Get a specific transcription migration history record by ID.
+     */
+    get: operations["get_transcription_migration_history_by_id_api_v1_transcription_models_migration_history__migration_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/transcription-models/{model_id}/migration-history": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Transcription Model Migration History
+     * @description Get migration history for a specific transcription model.
+     */
+    get: operations["get_transcription_model_migration_history_api_v1_transcription_models__model_id__migration_history_get"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -6343,8 +6503,37 @@ export interface paths {
      *     Requires: X-API-Key header with ENEO_SUPER_API_KEY
      *
      *     WARNING: Deletion affects all tenants. Use with caution.
+     *     Set force=true to hard-delete (may erase historical info_blob attribution).
      */
     delete: operations["delete_embedding_model_api_v1_sysadmin_embedding_models__id__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/scim-token": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get SCIM token status for tenant
+     * @description Returns whether SCIM provisioning is active (i.e. a token hash is configured) for the given tenant. Never returns the token itself.
+     */
+    get: operations["get_scim_token_status_api_v1_sysadmin_tenants__tenant_id__scim_token_get"];
+    put?: never;
+    /**
+     * Generate SCIM bearer token for tenant
+     * @description Generates a new SCIM bearer token for the given tenant. The token is returned in plaintext exactly once and is never stored — only its SHA-256 hash is persisted. Calling this endpoint again replaces any existing token.
+     */
+    post: operations["create_scim_token_api_v1_sysadmin_tenants__tenant_id__scim_token_post"];
+    /**
+     * Revoke SCIM token for tenant
+     * @description Removes the SCIM token hash, disabling SCIM provisioning for the tenant. Any subsequent SCIM requests from the IdP will receive 401.
+     */
+    delete: operations["delete_scim_token_api_v1_sysadmin_tenants__tenant_id__scim_token_delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -6886,41 +7075,26 @@ export interface components {
     };
     /**
      * ActionConfig
-     * @description Configuration for a single action type with metadata for UI display.
+     * @description Configuration for a single action type.
+     *
+     *     Display text is intentionally omitted: the frontend translates ``action``
+     *     by key (``audit_action_{action}`` / ``_description``).
      * @example {
      *       "action": "user_created",
      *       "category": "admin_actions",
-     *       "description_sv": "Loggar när en ny användare skapas",
-     *       "enabled": true,
-     *       "name_sv": "Användare skapad"
+     *       "enabled": true
      *     }
      */
     ActionConfig: {
-      /**
-       * Action
-       * @description Action type value (e.g., 'user_created')
-       */
-      action: string;
+      /** @description Action type key (e.g., 'user_created') */
+      action: components["schemas"]["ActionType"];
       /**
        * Enabled
        * @description Whether this action is currently enabled
        */
       enabled: boolean;
-      /**
-       * Category
-       * @description Category this action belongs to
-       */
-      category: string;
-      /**
-       * Name Sv
-       * @description Swedish display name
-       */
-      name_sv: string;
-      /**
-       * Description Sv
-       * @description Swedish description
-       */
-      description_sv: string;
+      /** @description Category this action belongs to */
+      category: components["schemas"]["CategoryType"];
     };
     /**
      * ActionConfigResponse
@@ -6931,16 +7105,12 @@ export interface components {
      *         {
      *           "action": "user_created",
      *           "category": "admin_actions",
-     *           "description_sv": "Loggar när en ny användare skapas",
-     *           "enabled": true,
-     *           "name_sv": "Användare skapad"
+     *           "enabled": true
      *         },
      *         {
      *           "action": "user_deleted",
      *           "category": "admin_actions",
-     *           "description_sv": "Loggar när en användare tas bort",
-     *           "enabled": false,
-     *           "name_sv": "Användare raderad"
+     *           "enabled": false
      *         }
      *       ]
      *     }
@@ -7005,6 +7175,10 @@ export interface components {
       | "api_key_used"
       | "api_key_auth_failed"
       | "tenant_policy_updated"
+      | "governance_policy_updated"
+      | "prompt_library_entry_created"
+      | "prompt_library_entry_updated"
+      | "prompt_library_entry_deleted"
       | "module_added"
       | "module_added_to_tenant"
       | "assistant_created"
@@ -7054,6 +7228,7 @@ export interface components {
       | "transcription_model_created"
       | "transcription_model_updated"
       | "transcription_model_deleted"
+      | "transcription_model_migrated"
       | "template_created"
       | "template_updated"
       | "template_deleted"
@@ -7070,6 +7245,17 @@ export interface components {
       | "mcp_server_disabled"
       | "mcp_server_tool_enabled"
       | "mcp_server_tool_disabled"
+      | "scim_user_provisioned"
+      | "scim_user_reconciled"
+      | "scim_user_reactivated"
+      | "scim_user_deprovisioned"
+      | "scim_user_updated"
+      | "scim_group_created"
+      | "scim_group_reactivated"
+      | "scim_group_updated"
+      | "scim_group_deleted"
+      | "scim_token_created"
+      | "scim_token_revoked"
       | "retention_policy_applied"
       | "encryption_key_rotated"
       | "system_maintenance"
@@ -8626,23 +8812,21 @@ export interface components {
      *         {
      *           "action_count": 13,
      *           "category": "admin_actions",
-     *           "description": "User management, role changes, API keys, tenant settings",
      *           "enabled": true,
      *           "example_actions": [
-     *             "USER_CREATED",
-     *             "ROLE_DELETED",
-     *             "API_KEY_GENERATED"
+     *             "user_created",
+     *             "role_deleted",
+     *             "api_key_generated"
      *           ]
      *         },
      *         {
      *           "action_count": 28,
      *           "category": "user_actions",
-     *           "description": "Assistant, space, app operations, templates, model configs",
      *           "enabled": true,
      *           "example_actions": [
-     *             "ASSISTANT_CREATED",
-     *             "SPACE_DELETED",
-     *             "APP_EXECUTED"
+     *             "assistant_created",
+     *             "space_deleted",
+     *             "app_executed"
      *           ]
      *         }
      *       ]
@@ -8854,35 +9038,29 @@ export interface components {
     };
     /**
      * CategoryConfig
-     * @description Enriched category configuration with metadata for API responses.
+     * @description Category configuration for API responses.
+     *
+     *     Display text is intentionally omitted: the frontend translates ``category``
+     *     by key (``audit_category_{category}`` / ``_description``).
      * @example {
      *       "action_count": 13,
      *       "category": "admin_actions",
-     *       "description": "User management, role changes, API keys, tenant settings",
      *       "enabled": true,
      *       "example_actions": [
-     *         "USER_CREATED",
-     *         "ROLE_DELETED",
-     *         "API_KEY_GENERATED"
+     *         "user_created",
+     *         "role_deleted",
+     *         "api_key_generated"
      *       ]
      *     }
      */
     CategoryConfig: {
-      /**
-       * Category
-       * @description Category name (e.g., 'admin_actions')
-       */
-      category: string;
+      /** @description Category key (e.g., 'admin_actions') */
+      category: components["schemas"]["CategoryType"];
       /**
        * Enabled
        * @description Whether category is currently enabled
        */
       enabled: boolean;
-      /**
-       * Description
-       * @description Human-readable description of category
-       */
-      description: string;
       /**
        * Action Count
        * @description Number of action types in this category
@@ -8894,6 +9072,24 @@ export interface components {
        */
       example_actions: string[];
     };
+    /**
+     * CategoryType
+     * @description Audit categories that every action type rolls up into.
+     *
+     *     Single source of truth for the category vocabulary: CATEGORY_MAPPINGS,
+     *     the config schemas, and the config service all derive from this enum, and
+     *     it surfaces in the OpenAPI schema so the frontend can translate categories
+     *     by key (no display text crosses the API).
+     * @enum {string}
+     */
+    CategoryType:
+      | "admin_actions"
+      | "user_actions"
+      | "security_events"
+      | "file_operations"
+      | "integration_events"
+      | "system_actions"
+      | "audit_access";
     /**
      * CategoryUpdate
      * @description Represents a category configuration change request.
@@ -9390,6 +9586,11 @@ export interface components {
       /** Total Questions */
       total_questions: number;
     };
+    /** ConversationRenameRequest */
+    ConversationRenameRequest: {
+      /** Name */
+      name: string;
+    };
     /**
      * ConversationRequest
      * @description A unified model for asking questions to either assistants or group chats.
@@ -9432,6 +9633,11 @@ export interface components {
        * @default false
        */
       require_tool_approval?: boolean;
+      /**
+       * Disabled Mcp Server Ids
+       * @default []
+       */
+      disabled_mcp_server_ids?: string[];
     };
     /** Counts */
     Counts: {
@@ -10104,8 +10310,9 @@ export interface components {
      * EffectiveConfigPublic
      * @description Frontend hint surface for personal-assistant governance.
      *
-     *     Only meaningful on default assistants in personal spaces. `prompt_locked` is exposed as a
-     *     boolean — we never leak the admin-prompt text to the user-facing API.
+     *     Only meaningful on default assistants in personal spaces. `prompt_locked`
+     *     is exposed as a boolean — we never leak the admin-prompt text to the
+     *     user-facing API.
      */
     EffectiveConfigPublic: {
       /** Models Enforced */
@@ -10476,6 +10683,8 @@ export interface components {
       | "file"
       | "website"
       | "tenant_settings"
+      | "governance_policy"
+      | "prompt_library_entry"
       | "credential"
       | "federation_config"
       | "api_key"
@@ -10494,7 +10703,8 @@ export interface components {
       | "audit_log"
       | "session"
       | "mcp_server"
-      | "mcp_server_tool";
+      | "mcp_server_tool"
+      | "user_group";
     /**
      * ErrorCodes
      * @enum {integer}
@@ -12085,6 +12295,11 @@ export interface components {
        * @default false
        */
       confirm_migration?: boolean;
+      /**
+       * Force Override
+       * @default false
+       */
+      force_override?: boolean;
     };
     /**
      * ModelProviderCreate
@@ -13641,6 +13856,15 @@ export interface components {
        */
       updated_at: string;
     };
+    /** PromptLibraryEntryUpdate */
+    PromptLibraryEntryUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Description */
+      description?: string | null;
+      /** Text */
+      text?: string | null;
+    };
     /** PromptLibraryVersionPublic */
     PromptLibraryVersionPublic: {
       /**
@@ -13676,15 +13900,6 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
-    };
-    /** PromptLibraryEntryUpdate */
-    PromptLibraryEntryUpdate: {
-      /** Name */
-      name?: string | null;
-      /** Description */
-      description?: string | null;
-      /** Text */
-      text?: string | null;
     };
     /** PromptPublic */
     PromptPublic: {
@@ -13949,6 +14164,29 @@ export interface components {
        * @default []
        */
       files?: components["schemas"]["ModelId"][];
+    };
+    /** ScimTokenCreatedResponse */
+    ScimTokenCreatedResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Token
+       * @description Plaintext token — shown once, never stored
+       */
+      token: string;
+    };
+    /** ScimTokenStatusResponse */
+    ScimTokenStatusResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Is Active */
+      is_active: boolean;
     };
     /**
      * SecurityClassificationCreatePublic
@@ -15904,6 +16142,8 @@ export interface components {
       provider_type?: string | null;
       /** Deprecation Date */
       deprecation_date?: string | null;
+      /** Migrated To Model Id */
+      migrated_to_model_id?: string | null;
     };
     /** TranscriptionModelSecurityStatus */
     TranscriptionModelSecurityStatus: {
@@ -15969,6 +16209,8 @@ export interface components {
       provider_type?: string | null;
       /** Deprecation Date */
       deprecation_date?: string | null;
+      /** Migrated To Model Id */
+      migrated_to_model_id?: string | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -15980,6 +16222,71 @@ export interface components {
       is_org_default?: boolean | null;
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /** TranscriptionModelUsageDetails */
+    TranscriptionModelUsageDetails: {
+      /**
+       * Items
+       * @default []
+       */
+      items?: components["schemas"]["TranscriptionUsageEntity"][];
+      /**
+       * Total
+       * @default 0
+       */
+      total?: number;
+    };
+    /**
+     * TranscriptionModelUsageStats
+     * @description Live count of what a transcription model migration would move.
+     *
+     *     Transcription has no pre-aggregated usage-stats table (unlike completion);
+     *     these counts come straight from the migration engine's entity counters.
+     */
+    TranscriptionModelUsageStats: {
+      /**
+       * Model Id
+       * Format: uuid
+       */
+      model_id: string;
+      /**
+       * Apps Count
+       * @default 0
+       */
+      apps_count?: number;
+      /**
+       * Spaces Count
+       * @default 0
+       */
+      spaces_count?: number;
+      /**
+       * Total Count
+       * @default 0
+       */
+      total_count?: number;
+    };
+    /**
+     * TranscriptionUsageEntity
+     * @description One entity using a transcription model. Shape matches completion's
+     *     ModelUsageDetail so the migrate dialog can render both with one component.
+     */
+    TranscriptionUsageEntity: {
+      /**
+       * Entity Id
+       * Format: uuid
+       */
+      entity_id: string;
+      /** Entity Name */
+      entity_name: string;
+      /**
+       * Entity Type
+       * @default app
+       */
+      entity_type?: string;
+      /** Space Name */
+      space_name?: string | null;
+      /** Owner Name */
+      owner_name?: string | null;
     };
     /** TransferApplicationRequest */
     TransferApplicationRequest: {
@@ -16300,6 +16607,8 @@ export interface components {
       id: string;
       /** Name */
       name: string;
+      /** State */
+      state?: string | null;
     };
     /** UserGroupPublic */
     UserGroupPublic: {
@@ -22972,6 +23281,60 @@ export interface operations {
       };
     };
   };
+  rename_conversation_api_v1_conversations__session_id__name__patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConversationRenameRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_services_api_v1_services__get: {
     parameters: {
       query?: {
@@ -27886,6 +28249,326 @@ export interface operations {
       };
     };
   };
+  get_transcription_model_usage_api_v1_transcription_models__model_id__usage_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptionModelUsageStats"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_transcription_model_usage_details_api_v1_transcription_models__model_id__usage_details_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptionModelUsageDetails"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  validate_transcription_migration_api_v1_transcription_models__model_id__migration_validate_get: {
+    parameters: {
+      query: {
+        /** @description Target model ID */
+        to_model_id: string;
+      };
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ValidationResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  migrate_transcription_model_usage_api_v1_transcription_models__model_id__migrate_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModelMigrationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MigrationResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_all_transcription_migration_history_api_v1_transcription_models_migration_history_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"][];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_transcription_migration_history_by_id_api_v1_transcription_models_migration_history__migration_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        migration_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_transcription_model_migration_history_api_v1_transcription_models__model_id__migration_history_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelMigrationHistory"][];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   list_providers_api_v1_admin_model_providers__get: {
     parameters: {
       query?: never;
@@ -28902,12 +29585,30 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description File deleted successfully. No response body is returned. */
       204: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -33562,55 +34263,6 @@ export interface operations {
       };
     };
   };
-  list_prompt_library_entry_versions_api_v1_admin_prompt_library__id__versions__get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["PaginatedResponse_PromptLibraryVersionPublic_"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
   update_prompt_library_entry_api_v1_admin_prompt_library__id___put: {
     parameters: {
       query?: never;
@@ -33711,6 +34363,55 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_prompt_library_entry_versions_api_v1_admin_prompt_library__id__versions__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_PromptLibraryVersionPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };
@@ -35595,6 +36296,118 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_scim_token_status_api_v1_sysadmin_tenants__tenant_id__scim_token_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description SCIM token status */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ScimTokenStatusResponse"];
+        };
+      };
+      /** @description Tenant not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_scim_token_api_v1_sysadmin_tenants__tenant_id__scim_token_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Token created. Copy it now — it will not be shown again. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ScimTokenCreatedResponse"];
+        };
+      };
+      /** @description Tenant not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_scim_token_api_v1_sysadmin_tenants__tenant_id__scim_token_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Token revoked — SCIM disabled for this tenant */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Tenant not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Validation Error */
       422: {
