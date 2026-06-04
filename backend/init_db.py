@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     default_user_email: Optional[str] = None
     default_user_password: Optional[str] = None
 
+    public_origin: Optional[str] = None
+
 
 settings = Settings()
 
@@ -177,6 +179,67 @@ def add_tenant_user(
         conn.rollback()
 
 
+def _normalize_origin(raw_origin: Optional[str]) -> Optional[str]:
+    """Return a normalized http(s) origin, or None. Mirrors the seed migration."""
+    if not raw_origin:
+        return None
+    origin = raw_origin.strip().rstrip("/")
+    if origin.startswith(("http://", "https://")):
+        return origin
+    return None
+
+
+# Seed the configured PUBLIC_ORIGIN into allowed_origins so CORS works out of the
+# box on fresh installs. Idempotent: safe to run on every container start. The
+# unique constraint is (tenant_id, url), so ON CONFLICT must match it.
+def seed_allowed_origin(conn, public_origin, default_tenant_name):
+    origin = _normalize_origin(public_origin)
+    if origin is None:
+        print(
+            "Note! PUBLIC_ORIGIN not set or invalid. Skipping allowed_origins seed. "
+            "Frontend origins must be registered via the sysadmin allowed-origins API."
+        )
+        return
+
+    try:
+        cur = conn.cursor()
+
+        tenant = None
+        if default_tenant_name:
+            cur.execute(
+                sql.SQL("SELECT id, name FROM tenants WHERE name = %s"),
+                (default_tenant_name,),
+            )
+            tenant = cur.fetchone()
+
+        if tenant is None:
+            cur.execute(
+                sql.SQL("SELECT id, name FROM tenants ORDER BY name ASC LIMIT 1")
+            )
+            tenant = cur.fetchone()
+
+        if tenant is None:
+            print("No tenants found; skipping allowed_origins seed.")
+            cur.close()
+            return
+
+        tenant_id, tenant_name = tenant
+
+        cur.execute(
+            sql.SQL(
+                "INSERT INTO allowed_origins (url, tenant_id) VALUES (%s, %s) "
+                "ON CONFLICT (tenant_id, url) DO NOTHING"
+            ),
+            (origin, tenant_id),
+        )
+        conn.commit()
+        cur.close()
+        print(f"Allowed origin '{origin}' is registered for tenant '{tenant_name}'.")
+    except Exception as e:
+        print(f"Error seeding allowed origin: {e}")
+        conn.rollback()
+
+
 # Main script
 if __name__ == "__main__":
     # Run alembic migrations
@@ -210,6 +273,10 @@ if __name__ == "__main__":
             settings.default_user_email,
             settings.default_user_password,
         )
+
+    # Register PUBLIC_ORIGIN for CORS (idempotent; runs even when the default
+    # tenant/user block above is skipped, e.g. on upgrades of existing installs).
+    seed_allowed_origin(conn, settings.public_origin, settings.default_tenant_name)
 
     # Close the connection
     conn.close()
