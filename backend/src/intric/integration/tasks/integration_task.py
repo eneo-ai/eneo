@@ -5,6 +5,7 @@ import redis.asyncio as redis
 import sqlalchemy as sa
 
 from intric.database.tables.model_providers_table import ModelProviders
+from intric.database.tables.website_integration_table import WebsiteIntegrationConfig
 from intric.main.config import get_settings
 from intric.main.exceptions import NotFoundException
 from intric.main.logging import get_logger
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
     from intric.integration.presentation.models import (
         ConfluenceContentTaskParam,
         SharepointContentTaskParam,
+        WebsiteIntegrationSyncTaskParam,
     )
     from intric.main.container.container import Container
 
@@ -57,6 +59,23 @@ async def _get_knowledge_with_retry(
                 delay,
             )
             await asyncio.sleep(delay)
+
+
+async def _config_exists_with_retry(
+    container: "Container",
+    config_id: Any,
+    *,
+    retries: int = 20,
+    delay: float = 1.0,
+) -> bool:
+    session = cast("AsyncSession", container.session())
+    for attempt in range(1, retries + 1):
+        config = await session.get(WebsiteIntegrationConfig, config_id)
+        if config is not None:
+            return True
+        if attempt == retries:
+            return False
+        await asyncio.sleep(delay)
 
 
 async def _validate_embedding_provider(
@@ -219,3 +238,18 @@ async def sync_sharepoint_delta(
     except Exception as e:
         logger.error(f"Error in sync_sharepoint_delta: {e}")
         raise
+
+
+@worker.task(channel_type=ChannelType.SYNC_WEBSITE_INTEGRATION)
+async def sync_website_integration(
+    params: "WebsiteIntegrationSyncTaskParam", container: "Container", **kw: Any
+):
+    exists = await _config_exists_with_retry(
+        container, params.website_integration_config_id
+    )
+    if not exists:
+        raise NotFoundException(
+            f"Website integration config {params.website_integration_config_id} not found"
+        )
+    service = container.website_integration_service()
+    return await service.sync_config(config_id=params.website_integration_config_id)

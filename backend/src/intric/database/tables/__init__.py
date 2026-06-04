@@ -40,6 +40,7 @@ _TABLE_MODULES = (
     "intric.database.tables.user_groups_table",
     "intric.database.tables.users_table",
     "intric.database.tables.web_search_results_table",
+    "intric.database.tables.website_integration_table",
     "intric.database.tables.websites_spaces_table",
     "intric.database.tables.websites_table",
     "intric.database.tables.widget_table",

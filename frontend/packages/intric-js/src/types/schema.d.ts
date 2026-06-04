@@ -11450,7 +11450,7 @@ export interface components {
        * Integration Type
        * @enum {string}
        */
-      integration_type: "confluence" | "sharepoint";
+      integration_type: "confluence" | "sharepoint" | "website";
       /**
        * Enum
        * @description Create a collection of name/value pairs.
@@ -11524,7 +11524,7 @@ export interface components {
      * IntegrationType
      * @enum {string}
      */
-    IntegrationType: "confluence" | "sharepoint";
+    IntegrationType: "confluence" | "sharepoint" | "website";
     /** JobPublic */
     JobPublic: {
       /** Created At */

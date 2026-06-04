@@ -127,6 +127,9 @@ from intric.integration.application.tenant_sharepoint_app_service import (
 from intric.integration.application.user_integration_service import (
     UserIntegrationService,
 )
+from intric.integration.application.website_integration_service import (
+    WebsiteIntegrationService,
+)
 from intric.integration.infrastructure.auth_service.confluence_auth_service import (
     ConfluenceAuthService,
 )
@@ -1387,6 +1390,18 @@ class Container(containers.DeclarativeContainer):
         extractor=text_extractor,
         datastore=datastore,
         info_blob_service=info_blob_service,
+    )
+    website_integration_service = providers.Factory(
+        WebsiteIntegrationService,
+        session=session,
+        user=user,
+        space_service=space_service,
+        job_service=job_service,
+        website_crud_service=website_crud_service,
+        text_processor=text_processor,
+        datastore=datastore,
+        info_blob_repo=info_blob_repo,
+        aiohttp_session=providers.Callable(aiohttp_client),
     )
     transcriber = providers.Factory(
         Transcriber,

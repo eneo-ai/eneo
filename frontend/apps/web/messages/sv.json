@@ -1640,6 +1640,7 @@
   "no_person_dependency_description": "Tjänstekonto (Rekommenderat): Använder ett dedikerat tjänstekonto med delegerade behörigheter för detaljerad åtkomstkontroll",
   "sharepoint_integration_description": "Importera dokument och filer från SharePoint-siter och OneDrive till Eneo.",
   "confluence_integration_description": "Denna integration möjliggör import av kunskap från Confluence-utrymmen till Eneo.",
+  "website_integration_description": "Synka sidor från en eller flera sitemap-baserade webbplatser till återanvändbara webbplatsdatakällor.",
   "configure_sharepoint_app_title": "Konfigurera SharePoint-app",
   "loading_configuration": "Laddar konfiguration...",
   "sharepoint_app_config_description": "Ange dina Azure AD-applikationsuppgifter. Välj tjänstekonto (rekommenderat) för detaljerad åtkomstkontroll, eller tenant-app för full webbplatsåtkomst.",

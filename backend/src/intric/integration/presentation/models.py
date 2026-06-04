@@ -13,7 +13,7 @@ from intric.integration.infrastructure.content_service.types import (
     SyncMetadata,
 )
 from intric.jobs.task_models import ResourceTaskParams
-from intric.main.models import ResourcePermission
+from intric.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -33,6 +33,7 @@ class BaseListModel(BaseModel, Generic[T]):
 class IntegrationType(str, Enum):
     Confluence = "confluence"
     Sharepoint = "sharepoint"
+    Website = "website"
 
     @property
     def is_confluence(self) -> bool:
@@ -41,6 +42,10 @@ class IntegrationType(str, Enum):
     @property
     def is_sharepoint(self) -> bool:
         return self == IntegrationType.Sharepoint
+
+    @property
+    def is_website(self) -> bool:
+        return self == IntegrationType.Website
 
 
 class Integration(BaseModel):
@@ -88,7 +93,7 @@ class UserIntegrationList(BaseListModel[UserIntegration]):
 class IntegrationCreate(BaseModel):
     name: str
     description: str
-    integration_type: Literal["confluence", "sharepoint"]
+    integration_type: Literal["confluence", "sharepoint", "website"]
 
 
 class AuthUrlPublic(BaseModel):
@@ -115,6 +120,57 @@ class SharepointContentTaskParam(ResourceTaskParams):
     folder_id: Optional[str] = None
     folder_path: Optional[str] = None
     resource_type: str = "site"  # "site" for SharePoint, "onedrive" for OneDrive
+
+
+class WebsiteIntegrationSyncTaskParam(ResourceTaskParams):
+    website_integration_config_id: UUID
+
+
+class WebsiteIntegrationHeader(BaseModel):
+    key: str
+    value: str
+
+
+class WebsiteIntegrationConfigBase(BaseModel):
+    name: str
+    sitemap_url: str
+    markdown_endpoint_url: Optional[str] = None
+    headers: list[WebsiteIntegrationHeader] = Field(default_factory=list)
+
+
+class WebsiteIntegrationConfigCreate(WebsiteIntegrationConfigBase):
+    pass
+
+
+class WebsiteIntegrationConfigUpdate(BaseModel):
+    name: str | NotProvided = NOT_PROVIDED
+    sitemap_url: str | NotProvided = NOT_PROVIDED
+    markdown_endpoint_url: Optional[str] | NotProvided = NOT_PROVIDED
+    headers: list[WebsiteIntegrationHeader] | NotProvided = NOT_PROVIDED
+
+
+class WebsiteIntegrationConfigPublic(BaseModel):
+    id: UUID
+    tenant_integration_id: UUID
+    owner_type: Literal["tenant", "user"]
+    owner_user_id: Optional[UUID] = None
+    owner_space_id: UUID
+    created_by_user_id: UUID
+    name: str
+    sitemap_url: str
+    markdown_endpoint_url: Optional[str] = None
+    headers: list[WebsiteIntegrationHeader] = Field(default_factory=list)
+    sync_status: str
+    last_sitemap_fetched_at: Optional[datetime] = None
+    last_successful_sync_at: Optional[datetime] = None
+    last_sync_error: Optional[str] = None
+    last_sync_queued_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class WebsiteIntegrationConfigList(BaseListModel[WebsiteIntegrationConfigPublic]):
+    pass
 
 
 class ConfluenceContentProcessParam(ResourceTaskParams):

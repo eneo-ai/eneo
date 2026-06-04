@@ -1606,6 +1606,7 @@
   "no_person_dependency_description": "Service Account (Recommended): Uses a dedicated service account with delegated permissions for granular access control",
   "sharepoint_integration_description": "Import documents and files from SharePoint sites and OneDrive into Eneo.",
   "confluence_integration_description": "This integration enables the import of knowledge from Confluence spaces into Eneo.",
+  "website_integration_description": "Sync pages from one or more sitemap-backed websites into reusable website knowledge sources.",
   "configure_sharepoint_app_title": "Configure SharePoint App",
   "loading_configuration": "Loading configuration...",
   "sharepoint_app_config_description": "Enter your Azure AD application credentials. Choose Service Account (recommended) for granular access control, or Tenant App for full site access.",
