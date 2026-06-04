@@ -291,10 +291,96 @@ jobs:
         if: ${{ always() }}
         run: docker compose -f docker-compose.e2e.ci.yml down -v
 
+  schema-drift:
+    name: Schema drift
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: "0.8.22"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+        working-directory: backend
+
+      - name: Install backend dependencies
+        run: uv sync --python 3.11 --frozen --all-groups
+        working-directory: backend
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.0
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+        working-directory: frontend
+
+      # schema.d.ts is generated from the backend OpenAPI spec; nothing else keeps
+      # it in sync, so a backend model change that skips regeneration silently
+      # leaves the frontend types (and any ActionType-driven i18n guards) stale.
+      - name: Dump backend OpenAPI spec
+        run: uv run python -c "import json; from intric.server.main import app; json.dump(app.openapi(), open('/tmp/openapi.gen.json', 'w'))"
+        working-directory: backend
+
+      - name: Regenerate schema.d.ts
+        run: |
+          bun x openapi-typescript /tmp/openapi.gen.json -o src/types/schema.d.ts --default-non-nullable=false
+          bun x prettier --write src/types/schema.d.ts
+        working-directory: frontend/packages/intric-js
+
+      - name: Fail on schema drift
+        run: |
+          SCHEMA=frontend/packages/intric-js/src/types/schema.d.ts
+          if git diff --quiet -- "$SCHEMA"; then
+            echo "$SCHEMA is in sync with the backend OpenAPI spec."
+            exit 0
+          fi
+
+          echo "::error file=$SCHEMA::Out of sync with the backend OpenAPI spec — regenerate and commit it."
+
+          # Render the drift in the job Summary so it's visible without opening raw logs.
+          {
+            echo "## ❌ schema.d.ts drift detected"
+            echo ""
+            echo "\`$SCHEMA\` does not match the backend OpenAPI spec."
+            echo "Regenerate it (\`cd frontend/packages/intric-js && node update.js\` against a backend, or the offline \`app.openapi()\` regen) and commit the result."
+            echo ""
+            echo "<details><summary>Diff — committed (red) vs. regenerated/expected (green)</summary>"
+            echo ""
+            echo '```diff'
+            git diff --no-color -- "$SCHEMA"
+            echo '```'
+            echo ""
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Also surface it in the step log, collapsed.
+          echo "::group::schema.d.ts diff (committed vs. regenerated)"
+          git diff -- "$SCHEMA"
+          echo "::endgroup::"
+          exit 1
+
   # Reports how well the tests cover the lines THIS PR changed (patch coverage),
   # for frontend and backend separately. Report-only: never fails the PR and is
   # not part of the aggregate `CI` gate below. Posts/updates a sticky PR comment
-  # and writes the same report to the job summary.
+  # and writes the same compact report to the job summary.
   coverage-diff:
     name: Coverage diff
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
@@ -339,38 +425,21 @@ jobs:
           BASE: ${{ github.base_ref }}
         run: |
           git fetch --no-tags origin "$BASE"
-          : > diff-coverage.md
 
-          # The coverage reports use paths relative to their own package root
-          # (apps/web for lcov, src/intric for the cobertura xml). diff-cover
-          # matches against git paths, which are repo-root-relative — so rewrite
-          # both to repo-root-relative and run diff-cover from the repo root.
+          # diff-cover matches the git diff (repo-root-relative paths) against each
+          # coverage report. The reports use package-relative paths, so rewrite them
+          # to repo-root-relative, then emit JSON for the comment step to render.
           if [ -f frontend/apps/web/coverage/lcov.info ]; then
             sed 's|^SF:|SF:frontend/apps/web/|' frontend/apps/web/coverage/lcov.info > fe.lcov
-            echo "## Frontend (Vitest)" >> diff-coverage.md
-            diff-cover fe.lcov --compare-branch "origin/$BASE" --fail-under 0 --format markdown:fe.md
-            cat fe.md >> diff-coverage.md 2>/dev/null || echo "_No frontend coverage data._" >> diff-coverage.md
-            printf '\n' >> diff-coverage.md
+            diff-cover fe.lcov --compare-branch "origin/$BASE" --fail-under 0 --format json:fe.json || true
           fi
 
           if [ -f backend/coverage.xml ]; then
             sed -e 's|<source>.*</source>|<source>.</source>|' \
                 -e 's|filename="|filename="backend/src/intric/|g' \
                 backend/coverage.xml > be.xml
-            echo "## Backend (pytest-cov)" >> diff-coverage.md
-            diff-cover be.xml --compare-branch "origin/$BASE" --fail-under 0 --format markdown:be.md
-            cat be.md >> diff-coverage.md 2>/dev/null || echo "_No backend coverage data._" >> diff-coverage.md
+            diff-cover be.xml --compare-branch "origin/$BASE" --fail-under 0 --format json:be.json || true
           fi
-
-          cat diff-coverage.md >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload diff-coverage report
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: diff-coverage
-          path: diff-coverage.md
-          if-no-files-found: ignore
 
       - name: Post or update PR comment
         if: ${{ !cancelled() }}
@@ -380,9 +449,71 @@ jobs:
           script: |
             const fs = require("fs");
             const marker = "<!-- diff-coverage-report -->";
-            let report = "_No diff coverage produced._";
-            try { report = fs.readFileSync("diff-coverage.md", "utf8") || report; } catch {}
-            const body = `${marker}\n# 📊 Diff coverage (patch)\n\nHow well tests cover the lines this PR changed. Report-only — does not gate the PR.\n\n${report}`;
+
+            const load = (p) => {
+              try {
+                return JSON.parse(fs.readFileSync(p, "utf8"));
+              } catch {
+                return null;
+              }
+            };
+            // Show only the tail of long paths so the list stays readable.
+            const shorten = (p) => {
+              const s = p.split("/");
+              return s.length > 3 ? "…/" + s.slice(-3).join("/") : p;
+            };
+            // Collapse a sorted line list into "12, 18–20" style ranges.
+            const ranges = (nums) => {
+              const sorted = [...new Set(nums)].sort((a, b) => a - b);
+              const out = [];
+              let start = null;
+              let prev = null;
+              for (const n of sorted) {
+                if (start === null) start = prev = n;
+                else if (n === prev + 1) prev = n;
+                else {
+                  out.push([start, prev]);
+                  start = prev = n;
+                }
+              }
+              if (start !== null) out.push([start, prev]);
+              return out.map(([a, b]) => (a === b ? `${a}` : `${a}–${b}`)).join(", ");
+            };
+
+            // Drop areas with no changed lines so the comment only shows what's relevant.
+            const areas = [
+              ["Frontend", load("fe.json")],
+              ["Backend", load("be.json")],
+            ].filter(([, d]) => d && (d.total_num_lines || 0) > 0);
+
+            const rows = [];
+            const details = [];
+            for (const [label, d] of areas) {
+              const total = d.total_num_lines || 0;
+              const miss = d.total_num_violations || 0;
+              const pct = Math.round(d.total_percent_covered || 0);
+              rows.push(`| ${label} | ${total} | ${miss} | ${pct}% |`);
+              const files = Object.entries(d.src_stats || {})
+                .map(([f, st]) => [f, st.violation_lines || []])
+                .filter(([, vl]) => vl.length)
+                .map(([f, vl]) => `- \`${shorten(f)}\` — ${ranges(vl)}`);
+              if (files.length) details.push([label, files]);
+            }
+
+            let body = `${marker}\n## 📊 Patch coverage\n\nShare of this PR's new/changed lines exercised by tests. Report-only — never gates the PR.\n\n`;
+            if (rows.length) {
+              body += `| Area | Changed | Uncovered | Coverage |\n| --- | ---: | ---: | ---: |\n${rows.join("\n")}\n`;
+            } else {
+              body += "_No changed lines with coverage data in this PR._\n";
+            }
+            for (const [label, files] of details) {
+              const n = files.length;
+              body += `\n<details><summary>Uncovered lines — ${label} (${n} file${n === 1 ? "" : "s"})</summary>\n\n${files.join("\n")}\n\n</details>\n`;
+            }
+
+            fs.writeFileSync("diff-coverage.md", body);
+            await core.summary.addRaw(body).write();
+
             const { owner, repo } = context.repo;
             const issue_number = context.issue.number;
             const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
@@ -392,6 +523,17 @@ jobs:
             } else {
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
+
+      - name: Upload diff-coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: diff-coverage
+          path: |
+            diff-coverage.md
+            fe.json
+            be.json
+          if-no-files-found: ignore
 
   docker-builds:
     name: Docker builds (${{ matrix.image }})
@@ -429,6 +571,7 @@ jobs:
       - backend-tests
       - script-tests
       - frontend
+      - schema-drift
       - docker-builds
 
     steps:
@@ -439,6 +582,7 @@ jobs:
           BACKEND_TESTS_RESULT: ${{ needs.backend-tests.result }}
           SCRIPT_TESTS_RESULT: ${{ needs.script-tests.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
+          SCHEMA_DRIFT_RESULT: ${{ needs.schema-drift.result }}
           DOCKER_BUILDS_RESULT: ${{ needs.docker-builds.result }}
         run: |
           failed=0
@@ -463,6 +607,7 @@ jobs:
           check_result "Backend tests" "$BACKEND_TESTS_RESULT"
           check_result "Script tests" "$SCRIPT_TESTS_RESULT"
           check_result "Frontend" "$FRONTEND_RESULT"
+          check_result "Schema drift" "$SCHEMA_DRIFT_RESULT"
           check_result "Docker builds" "$DOCKER_BUILDS_RESULT"
 
           exit "$failed"

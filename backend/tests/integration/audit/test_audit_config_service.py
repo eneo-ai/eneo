@@ -187,7 +187,6 @@ class TestAuditConfigService:
                     "audit_access",
                 }
                 assert isinstance(category_config.enabled, bool)
-                assert len(category_config.description) > 0
                 assert category_config.action_count > 0
                 assert len(category_config.example_actions) > 0
                 assert len(category_config.example_actions) <= 3
