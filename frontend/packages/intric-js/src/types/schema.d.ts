@@ -5723,30 +5723,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/integrations/websites/{config_id}/ping/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Queue website integration sync via ping token
-     * @description Queue a sitemap-based website integration sync using the integration-specific token.
-     *
-     *         This endpoint is intended for external webhook-style triggers. It validates the
-     *         token, resolves the owning user for the integration, and queues a background job
-     *         that fetches the sitemap and syncs new or changed pages.
-     */
-    post: operations["ping_website_integration_api_v1_integrations_websites__config_id__ping__post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/integrations/websites/{config_id}/sync/": {
     parameters: {
       query?: never;
@@ -33966,48 +33942,6 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  ping_website_integration_api_v1_integrations_websites__config_id__ping__post: {
-    parameters: {
-      query: {
-        token: string;
-      };
-      header?: never;
-      path: {
-        config_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      202: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["JobPublic"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
