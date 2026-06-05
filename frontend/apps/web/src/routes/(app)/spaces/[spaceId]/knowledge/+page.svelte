@@ -11,6 +11,7 @@
   import { resolve } from "$app/paths";
   import { IconLinkExternal } from "@intric/icons/link-external";
   import { IconRefresh } from "@intric/icons/refresh";
+  import { IconTrash } from "@intric/icons/trash";
   import IntegrationsTable from "./integrations/IntegrationsTable.svelte";
   import SyncHistoryDialog from "./integrations/SyncHistoryDialog.svelte";
   import ImportKnowledgeDialog from "$lib/features/integrations/components/import/ImportKnowledgeDialog.svelte";
@@ -20,6 +21,7 @@
   import type { IntegrationKnowledge } from "@intric/intric-js";
   import { jobCompletionEvents } from "$lib/features/jobs/JobManager";
   import { untrack } from "svelte";
+  import { Dialog } from "@intric/ui";
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- page data type inferred from layout chain
   let { data } = $props<{ data: any }>();
@@ -34,7 +36,6 @@
   $effect(() => {
     const event = $jobCompletionEvents;
     if (event) {
-      console.log("Knowledge page: Job completion event received, refreshing knowledge");
       refreshCurrentSpace("knowledge");
     }
   });
@@ -47,6 +48,9 @@
   let showSyncHistoryDialog = $state(false);
   let isOrgSpace = $currentSpace.organization;
   let isPersonalSpace = $currentSpace.personal;
+  let canCreateIntegrationKnowledge = $derived(
+    $currentSpace.hasPermission("create", "integrationKnowledge")
+  );
 
   // Check if user has admin permission
   let isAdmin = untrack(
@@ -64,6 +68,8 @@
   // Website selection state (shared with WebsiteTable)
   let selectedWebsiteIds = $state.raw(writable<Set<string>>(new Set()));
   let isBulkRecrawling = $state(false);
+  let isBulkDeleting = $state(false);
+  let showBulkDeleteDialog = $state(false);
 
   // Bulk recrawl handler
   async function bulkRecrawl() {
@@ -82,9 +88,12 @@
         const errorMessages = response.errors
           .map((e: { error?: string }) => e.error)
           .filter(Boolean);
-        const detail = errorMessages.length > 0 ? `: ${errorMessages.join(", ")}` : "";
         toast.error(
-          `${response.queued} website${response.queued !== 1 ? "s" : ""} queued, ${response.failed} failed${detail}`
+          m.bulk_sync_result({
+            queued: response.queued,
+            failed: response.failed,
+            detail: errorMessages.join(", ")
+          })
         );
       }
 
@@ -96,6 +105,36 @@
       console.error(e);
     }
     isBulkRecrawling = false;
+  }
+
+  async function bulkDeleteWebsites() {
+    if ($selectedWebsiteIds.size === 0) return;
+
+    isBulkDeleting = true;
+    try {
+      const websiteIds = Array.from($selectedWebsiteIds);
+      const results = await Promise.allSettled(
+        websiteIds.map((id) => intric.websites.delete({ id }))
+      );
+
+      const failed = results.filter((result) => result.status === "rejected");
+      if (failed.length > 0) {
+        toast.error(
+          m.bulk_delete_result({
+            deleted: websiteIds.length - failed.length,
+            failed: failed.length
+          })
+        );
+      }
+
+      $selectedWebsiteIds = new Set();
+      refreshCurrentSpace();
+      showBulkDeleteDialog = false;
+    } catch (e) {
+      toastError(e);
+      console.error(e);
+    }
+    isBulkDeleting = false;
   }
 
   let userCanSeeCollections = $derived($currentSpace.hasPermission("read", "collection"));
@@ -142,10 +181,28 @@
         </p>
       {:else if $selectedTab === "websites" && $currentSpace.hasPermission("create", "website")}
         {#if $selectedWebsiteIds.size > 0}
-          <Button variant="primary" on:click={bulkRecrawl} disabled={isBulkRecrawling}>
-            <IconRefresh size="sm" />
-            {isBulkRecrawling ? m.syncing() : m.sync_selected({ count: $selectedWebsiteIds.size })}
-          </Button>
+          <div class="flex gap-2">
+            <Button
+              variant="primary"
+              on:click={bulkRecrawl}
+              disabled={isBulkRecrawling || isBulkDeleting}
+            >
+              <IconRefresh size="sm" />
+              {isBulkRecrawling
+                ? m.syncing()
+                : m.sync_selected({ count: $selectedWebsiteIds.size })}
+            </Button>
+            <Button
+              variant="destructive"
+              on:click={() => (showBulkDeleteDialog = true)}
+              disabled={isBulkRecrawling || isBulkDeleting}
+            >
+              <IconTrash size="sm" />
+              {isBulkDeleting
+                ? m.deleting()
+                : m.delete_selected({ count: $selectedWebsiteIds.size })}
+            </Button>
+          </div>
         {:else}
           <WebsiteEditor mode="create"></WebsiteEditor>
         {/if}
@@ -153,7 +210,7 @@
         <p class="text-secondary max-w-72 text-right text-xs">
           {m.knowledge_create_no_permission({ resourceType: m.websites().toLowerCase() })}
         </p>
-      {:else if $selectedTab === "integrations" && $currentSpace.hasPermission("create", "integrationKnowledge")}
+      {:else if $selectedTab === "integrations" && canCreateIntegrationKnowledge}
         {#if data.availableIntegrations.length > 0}
           <ImportKnowledgeDialog></ImportKnowledgeDialog>
         {:else if isPersonalSpace}
@@ -177,7 +234,7 @@
               : m.shared_integrations_require_admin()}
           </p>
         {/if}
-      {:else if $selectedTab === "integrations" && !$currentSpace.hasPermission("create", "integrationKnowledge")}
+      {:else if $selectedTab === "integrations" && !canCreateIntegrationKnowledge}
         <p class="text-secondary max-w-72 text-right text-xs">
           {m.knowledge_create_no_permission({ resourceType: m.integrations().toLowerCase() })}
         </p>
@@ -240,3 +297,18 @@
     {/if}
   </Page.Main>
 </Page.Root>
+
+<Dialog.Root alert bind:isOpen={showBulkDeleteDialog}>
+  <Dialog.Content width="small">
+    <Dialog.Title>{m.delete_selected_websites()}</Dialog.Title>
+    <Dialog.Description>
+      {m.delete_selected_websites_description({ count: $selectedWebsiteIds.size })}
+    </Dialog.Description>
+    <Dialog.Controls let:close>
+      <Button is={close}>{m.cancel()}</Button>
+      <Button variant="destructive" on:click={bulkDeleteWebsites} disabled={isBulkDeleting}>
+        {isBulkDeleting ? m.deleting() : m.delete_selected_websites()}
+      </Button>
+    </Dialog.Controls>
+  </Dialog.Content>
+</Dialog.Root>

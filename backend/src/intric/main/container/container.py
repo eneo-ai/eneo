@@ -1401,7 +1401,7 @@ class Container(containers.DeclarativeContainer):
         text_processor=text_processor,
         datastore=datastore,
         info_blob_repo=info_blob_repo,
-        aiohttp_session=providers.Callable(aiohttp_client),
+        aiohttp_session=providers.Callable(lambda client: client(), aiohttp_client),
     )
     transcriber = providers.Factory(
         Transcriber,

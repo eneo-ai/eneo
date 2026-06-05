@@ -131,10 +131,27 @@ class WebsiteIntegrationHeader(BaseModel):
     value: str
 
 
+class WebsiteIntegrationMarkdownMethod(str, Enum):
+    GET = "get"
+    POST = "post"
+
+
+class WebsiteIntegrationMarkdownUrlLocation(str, Enum):
+    QUERY = "query"
+    BODY = "body"
+
+
 class WebsiteIntegrationConfigBase(BaseModel):
     name: str
     sitemap_url: str
     markdown_endpoint_url: Optional[str] = None
+    markdown_endpoint_method: WebsiteIntegrationMarkdownMethod = (
+        WebsiteIntegrationMarkdownMethod.GET
+    )
+    markdown_endpoint_url_location: WebsiteIntegrationMarkdownUrlLocation = (
+        WebsiteIntegrationMarkdownUrlLocation.QUERY
+    )
+    markdown_endpoint_url_param_name: str = "url"
     headers: list[WebsiteIntegrationHeader] = Field(default_factory=list)
 
 
@@ -146,19 +163,30 @@ class WebsiteIntegrationConfigUpdate(BaseModel):
     name: str | NotProvided = NOT_PROVIDED
     sitemap_url: str | NotProvided = NOT_PROVIDED
     markdown_endpoint_url: Optional[str] | NotProvided = NOT_PROVIDED
+    markdown_endpoint_method: WebsiteIntegrationMarkdownMethod | NotProvided = (
+        NOT_PROVIDED
+    )
+    markdown_endpoint_url_location: (
+        WebsiteIntegrationMarkdownUrlLocation | NotProvided
+    ) = NOT_PROVIDED
+    markdown_endpoint_url_param_name: str | NotProvided = NOT_PROVIDED
     headers: list[WebsiteIntegrationHeader] | NotProvided = NOT_PROVIDED
 
 
 class WebsiteIntegrationConfigPublic(BaseModel):
     id: UUID
     tenant_integration_id: UUID
-    owner_type: Literal["tenant", "user"]
+    sync_url: str
+    owner_type: Literal["tenant", "user", "space"]
     owner_user_id: Optional[UUID] = None
     owner_space_id: UUID
     created_by_user_id: UUID
     name: str
     sitemap_url: str
     markdown_endpoint_url: Optional[str] = None
+    markdown_endpoint_method: WebsiteIntegrationMarkdownMethod
+    markdown_endpoint_url_location: WebsiteIntegrationMarkdownUrlLocation
+    markdown_endpoint_url_param_name: str
     headers: list[WebsiteIntegrationHeader] = Field(default_factory=list)
     sync_status: str
     last_sitemap_fetched_at: Optional[datetime] = None

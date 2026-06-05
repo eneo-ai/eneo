@@ -1081,6 +1081,7 @@ class SpaceRepository:
             )
             .options(
                 selectinload(ws.latest_crawl).selectinload(CrawlRunsTable.job),  # type: ignore[attr-defined]
+                selectinload(ws.website_integration_config),
             )
             .order_by(ws.created_at)
         )

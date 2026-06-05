@@ -1,7 +1,6 @@
 import type { Component } from "svelte";
 import { ConfluenceIntegrationData } from "./confluence/ConfluenceIntegrationData";
 import { SharepointIntegrationData } from "./sharepoint/SharepointIntegrationData";
-import { WebsiteIntegrationData } from "./website/WebsiteIntegrationData";
 import type { UserIntegration } from "@intric/intric-js";
 import type { Writable } from "svelte/store";
 
@@ -26,10 +25,13 @@ export type IntegrationImportDialogProps = {
   integration: UserIntegration;
 };
 
-export type IntegrationType = "sharepoint" | "confluence" | "website";
+export type IntegrationType = "sharepoint" | "confluence";
 
 export const integrationData: Record<IntegrationType, IntegrationData> = {
   confluence: ConfluenceIntegrationData,
-  sharepoint: SharepointIntegrationData,
-  website: WebsiteIntegrationData
+  sharepoint: SharepointIntegrationData
 };
+
+export function isSupportedIntegrationType(type: string): type is IntegrationType {
+  return type === "confluence" || type === "sharepoint";
+}

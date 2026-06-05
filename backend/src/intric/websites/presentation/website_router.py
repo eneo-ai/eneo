@@ -183,6 +183,7 @@ async def update_website(
     container: ContainerDep,
 ):
     service = container.website_crud_service()
+    website_integration_service = container.website_integration_service()
     user = container.user()
 
     # Update website
@@ -196,6 +197,11 @@ async def update_website(
         http_auth_username=website_update.http_auth_username,
         http_auth_password=website_update.http_auth_password,
     )
+    config = await website_integration_service.update_for_website(
+        website_id=id, payload=website_update
+    )
+    if config is not None:
+        website.website_integration_config = config
 
     # Audit logging
     audit_service = container.audit_service()
@@ -222,10 +228,12 @@ async def delete_website(
     container: ContainerDep,
 ):
     service = container.website_crud_service()
+    website_integration_service = container.website_integration_service()
     user = container.user()
 
     # Get website info before deletion (snapshot pattern)
     website = await service.get_website(id)
+    await website_integration_service.delete_for_website(website_id=id)
 
     # Delete website
     await service.delete_website(id)

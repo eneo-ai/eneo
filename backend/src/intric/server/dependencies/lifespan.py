@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 import sqlalchemy as sa
 from dependency_injector import providers
@@ -7,7 +8,9 @@ from sqlalchemy.exc import ProgrammingError
 
 from intric.database.database import sessionmanager
 from intric.database.tables.website_integration_table import WebsiteIntegrationConfig
+from intric.integration.presentation.models import WebsiteIntegrationSyncTaskParam
 from intric.jobs.job_manager import job_manager
+from intric.jobs.job_models import Task
 from intric.main.aiohttp_client import aiohttp_client
 from intric.main.config import get_settings
 from intric.main.container.container import Container
@@ -48,7 +51,8 @@ async def _queue_website_integration_startup_syncs() -> None:
     try:
         async with sessionmanager.session() as session, session.begin():
             stmt = sa.select(WebsiteIntegrationConfig).where(
-                WebsiteIntegrationConfig.sync_status.not_in(["queued", "in_progress"])
+                WebsiteIntegrationConfig.sync_status.not_in(["queued", "in_progress"]),
+                WebsiteIntegrationConfig.website_id.is_not(None),
             )
             configs = list((await session.execute(stmt)).scalars().all())
 
@@ -64,8 +68,19 @@ async def _queue_website_integration_startup_syncs() -> None:
                     session=providers.Object(session),
                     user=providers.Object(user),
                 )
-                await container.website_integration_service().queue_sync(
-                    config_id=config.id
+                config.sync_status = "queued"
+                config.last_sync_error = None
+                config.last_sync_queued_at = datetime.now(timezone.utc)
+                await session.flush()
+
+                await container.job_service().queue_job(
+                    task=Task.SYNC_WEBSITE_INTEGRATION,
+                    name=f"Website integration sync: {config.name}",
+                    task_params=WebsiteIntegrationSyncTaskParam(
+                        user_id=user.id,
+                        id=config.id,
+                        website_integration_config_id=config.id,
+                    ),
                 )
     except ProgrammingError as exc:
         if "website_integration_configs" not in str(exc):

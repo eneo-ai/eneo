@@ -13,6 +13,10 @@
   dayjs.extend(utc);
 
   export let website: WebsiteSparse;
+  type WebsiteIntegrationMeta = {
+    sync_status?: string;
+    last_successful_sync_at?: string | null;
+  };
 
   // Set dayjs locale based on paraglide locale
   // eslint-disable-next-line svelte/no-immutable-reactive-statements
@@ -47,6 +51,24 @@
     weekly: 7
   };
 
+  function integrationItem(): { label: string; color: Label.LabelColor; tooltip?: string } | null {
+    const integration = (website as WebsiteSparse & { integration?: WebsiteIntegrationMeta | null })
+      .integration;
+    if (!integration) {
+      return null;
+    }
+
+    return {
+      color: "blue",
+      label: m.updates_on_changes(),
+      tooltip: integration.last_successful_sync_at
+        ? m.integration_auto_updates_tooltip_with_date({
+            date: dayjs(integration.last_successful_sync_at).format("YYYY-MM-DD HH:mm")
+          })
+        : m.integration_auto_updates_tooltip()
+    };
+  }
+
   function nextCrawlTooltip(intervalKey: string): string | undefined {
     if (intervalKey === "never") {
       return undefined;
@@ -70,7 +92,7 @@
 
   $: intervalKey = website.update_interval ?? "error";
   $: intervalLabel = intervalLabels[intervalKey] ?? intervalLabels.error;
-  $: intervalItem = {
+  $: intervalItem = integrationItem() ?? {
     ...intervalLabel,
     tooltip: nextCrawlTooltip(intervalKey)
   };

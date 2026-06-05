@@ -12,8 +12,6 @@
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
   import { resolve } from "$app/paths";
-  import { writable } from "svelte/store";
-  import WebsiteIntegrationConfigDialog from "$lib/features/integrations/website/WebsiteIntegrationConfigDialog.svelte";
 
   const { data }: PageProps = $props();
 
@@ -22,13 +20,10 @@
   let integrations = $derived.by(() => {
     // Filter out integrations that are not yet ready (e.g., Confluence)
     let integrations = $state(
-      data.myIntegrations.filter(
-        (i) => i.integration_type === "sharepoint" || i.integration_type === "website"
-      )
+      data.myIntegrations.filter((i) => i.integration_type === "sharepoint")
     );
     return integrations;
   });
-  let showWebsiteConfigDialog = writable(false);
 
   const auth = new IntegrationAuthService({
     onConnected(result) {
@@ -88,10 +83,6 @@
                     {:else if integration.connected && integration.id}
                       <UserConnectedSplitButton {integration} {onDisconnect}
                       ></UserConnectedSplitButton>
-                    {:else if integration.integration_type === "website"}
-                      <Button variant="primary" onclick={() => ($showWebsiteConfigDialog = true)}
-                        >Manage integrations</Button
-                      >
                     {:else}
                       <Button
                         on:click={() => {
@@ -125,9 +116,3 @@
     </Settings.Page>
   </Page.Main>
 </Page.Root>
-
-<WebsiteIntegrationConfigDialog
-  openController={showWebsiteConfigDialog}
-  scope="me"
-  title="Manage personal website integrations"
-/>

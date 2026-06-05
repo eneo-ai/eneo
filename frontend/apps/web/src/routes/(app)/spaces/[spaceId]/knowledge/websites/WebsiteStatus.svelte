@@ -13,12 +13,50 @@
 
   export let website: WebsiteSparse;
   const SKIPPED_PREFIX = "skipped duplicate crawl";
+  type WebsiteIntegrationStatus = {
+    sync_status: string;
+    last_successful_sync_at?: string | null;
+    last_sync_error?: string | null;
+  };
 
   // Set dayjs locale based on paraglide locale
   // eslint-disable-next-line svelte/no-immutable-reactive-statements
   $: dayjs.locale(getLocale());
   /* TODO colours */
   function statusInfo(): { label: string; color: Label.LabelColor; tooltip?: string } {
+    const integration = (
+      website as WebsiteSparse & { integration?: WebsiteIntegrationStatus | null }
+    ).integration;
+    if (integration?.sync_status === "queued") {
+      return {
+        color: "blue",
+        label: m.queued(),
+        tooltip: m.website_sync_waiting()
+      };
+    }
+    if (integration?.sync_status === "in_progress") {
+      return {
+        color: "yellow",
+        label: m.sync_in_progress(),
+        tooltip: m.website_sync_fetching()
+      };
+    }
+    if (integration?.sync_status === "failed") {
+      return {
+        color: "orange",
+        label: m.sync_failed(),
+        tooltip: integration.last_sync_error ?? m.website_sync_failed_latest()
+      };
+    }
+    if (integration?.sync_status === "complete" && integration?.last_successful_sync_at) {
+      const completed = dayjs(integration.last_successful_sync_at);
+      return {
+        color: dayjs().diff(completed, "days") < 10 ? "green" : "yellow",
+        label: m.synced_ago({ timeAgo: dayjs().to(completed) }),
+        tooltip: m.sitemap_synced_on({ date: completed.format("YYYY-MM-DD HH:mm") })
+      };
+    }
+
     const skipReason = website.latest_crawl?.result_location;
     const skipTooltip = skipReason?.toLowerCase().startsWith(SKIPPED_PREFIX)
       ? m.crawl_skipped_duplicate()
@@ -100,7 +138,7 @@
     }
     return {
       color: "orange",
-      label: "error"
+      label: m.error()
     };
   }
 </script>

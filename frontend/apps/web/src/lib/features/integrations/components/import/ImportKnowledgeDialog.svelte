@@ -6,7 +6,7 @@
   import type { UserIntegration } from "@intric/intric-js";
   import ImportBackdrop from "./ImportBackdrop.svelte";
   import IntegrationVendorIcon from "../IntegrationVendorIcon.svelte";
-  import { integrationData } from "../../IntegrationData";
+  import { integrationData, isSupportedIntegrationType } from "../../IntegrationData";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
   import { resolve } from "$app/paths";
@@ -24,13 +24,25 @@
     // Subscribe to the store so we react to space changes
     const integrations = $contextIntegrations || [];
 
+    let filtered = integrations;
     if (isPersonalSpace) {
       // Personal spaces: only user_oauth integrations
-      return integrations.filter((i) => i.auth_type === "user_oauth" || !i.connected);
+      filtered = integrations.filter(
+        (i) =>
+          isSupportedIntegrationType(i.integration_type) &&
+          (i.auth_type === "user_oauth" || !i.connected)
+      );
+    } else {
+      // Organization and shared spaces: only tenant_app integrations (admin-only)
+      filtered = integrations.filter(
+        (i) =>
+          isSupportedIntegrationType(i.integration_type) &&
+          i.connected &&
+          i.auth_type === "tenant_app"
+      );
     }
 
-    // Organization and shared spaces: only tenant_app integrations (admin-only)
-    return integrations.filter((i) => i.connected && i.auth_type === "tenant_app");
+    return filtered;
   });
 
   // Check if integrations are still loading
@@ -108,15 +120,14 @@
       <div class=" border-default flex w-full flex-col px-10 pt-12 pb-10">
         <h3 class="px-4 pb-1 text-2xl font-extrabold">{m.import_knowledge()}</h3>
         <p class="text-secondary max-w-[60ch] pr-48 pl-4">
+          {m.import_knowledge_connected_providers_website_tab()}
           {#if isPersonalSpace}
-            {m.import_knowledge_from_third_party()}
             <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
             <a href={localizeHref("/account/integrations?tab=providers")} class="underline"
               >{m.personal_account()}</a
             >.
             <!-- eslint-enable svelte/no-navigation-without-resolve -->
           {:else}
-            {m.import_knowledge_from_org_integrations()}
             <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
             <a href={localizeHref("/admin/integrations?tab=providers")} class="underline"
               >{m.admin_settings()}</a
@@ -181,7 +192,7 @@
   </Dialog.Content>
 </Dialog.Root>
 
-{#if selectedIntegration}
+{#if selectedIntegration && isSupportedIntegrationType(selectedIntegration.integration_type)}
   {@const { ImportDialog } = integrationData[selectedIntegration.integration_type]}
   <ImportDialog {goBack} openController={showImportDialog} integration={selectedIntegration}
   ></ImportDialog>

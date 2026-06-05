@@ -8,6 +8,11 @@ from pydantic.networks import HttpUrl
 from intric.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
 )
+from intric.integration.presentation.models import (
+    WebsiteIntegrationHeader,
+    WebsiteIntegrationMarkdownMethod,
+    WebsiteIntegrationMarkdownUrlLocation,
+)
 from intric.main.models import (
     NOT_PROVIDED,
     BaseResponse,
@@ -59,12 +64,55 @@ class WebsiteMetadata(BaseModel):
     size: int
 
 
+class WebsiteIntegrationConfigPublic(BaseModel):
+    id: UUID
+    sync_url: str
+    sitemap_url: str
+    markdown_endpoint_url: Optional[str] = None
+    markdown_endpoint_method: WebsiteIntegrationMarkdownMethod
+    markdown_endpoint_url_location: WebsiteIntegrationMarkdownUrlLocation
+    markdown_endpoint_url_param_name: str
+    headers: list[WebsiteIntegrationHeader] = Field(default_factory=list)
+    sync_status: str
+    last_sitemap_fetched_at: Optional[datetime] = None
+    last_successful_sync_at: Optional[datetime] = None
+    last_sync_error: Optional[str] = None
+    last_sync_queued_at: Optional[datetime] = None
+
+    @classmethod
+    def from_record(cls, config: object) -> "WebsiteIntegrationConfigPublic":
+        return cls(
+            id=config.id,
+            sync_url=f"/api/v1/integrations/websites/{config.id}/sync/?token={config.ping_token}",
+            sitemap_url=config.sitemap_url,
+            markdown_endpoint_url=config.markdown_endpoint_url,
+            markdown_endpoint_method=WebsiteIntegrationMarkdownMethod(
+                config.markdown_endpoint_method
+            ),
+            markdown_endpoint_url_location=WebsiteIntegrationMarkdownUrlLocation(
+                config.markdown_endpoint_url_location
+            ),
+            markdown_endpoint_url_param_name=config.markdown_endpoint_url_param_name,
+            headers=[
+                {"key": key, "value": value}
+                for key, value in (config.headers or {}).items()
+            ],
+            sync_status=config.sync_status,
+            last_sitemap_fetched_at=config.last_sitemap_fetched_at,
+            last_successful_sync_at=config.last_successful_sync_at,
+            last_sync_error=config.last_sync_error,
+            last_sync_queued_at=config.last_sync_queued_at,
+        )
+
+
 class WebsiteSparse(ResourcePermissionsMixin, WebsiteBase, InDB):
     url: str
     latest_crawl: Optional[CrawlRunSparse] = None
     user_id: UUID
     embedding_model: IdAndName
     metadata: WebsiteMetadata
+    integration: Optional[WebsiteIntegrationConfigPublic] = None
+    reused_existing: bool = False
 
 
 class CrawlRunPublic(BaseResponse):
@@ -121,6 +169,8 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
         description="True if website was auto-disabled after 10 consecutive failures. "
         "User must manually change update_interval to re-enable."
     )
+    integration: Optional[WebsiteIntegrationConfigPublic] = None
+    reused_existing: bool = False
 
     @classmethod
     def from_domain(cls, website: Website):
@@ -148,12 +198,20 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
             consecutive_failures=website.consecutive_failures,
             next_retry_at=website.next_retry_at,
             is_auto_disabled=website.is_auto_disabled,
+            integration=(
+                WebsiteIntegrationConfigPublic.from_record(
+                    getattr(website, "website_integration_config")
+                )
+                if getattr(website, "website_integration_config", None) is not None
+                else None
+            ),
+            reused_existing=getattr(website, "reused_existing", False),
         )
 
 
 class WebsiteCreate(BaseModel):
     name: Optional[str] = None
-    url: str
+    url: Optional[str] = None
     download_files: bool = False
     crawl_type: CrawlType = CrawlType.CRAWL
     update_interval: UpdateInterval = UpdateInterval.NEVER
@@ -171,6 +229,17 @@ class WebsiteCreate(BaseModel):
         "Must be provided together with username.",
     )
     """Password for HTTP Basic Authentication. Must be provided with username."""
+
+    sitemap_url: Optional[str] = None
+    markdown_endpoint_url: Optional[str] = None
+    markdown_endpoint_method: WebsiteIntegrationMarkdownMethod = (
+        WebsiteIntegrationMarkdownMethod.GET
+    )
+    markdown_endpoint_url_location: WebsiteIntegrationMarkdownUrlLocation = (
+        WebsiteIntegrationMarkdownUrlLocation.QUERY
+    )
+    markdown_endpoint_url_param_name: str = "url"
+    headers: list[WebsiteIntegrationHeader] = Field(default_factory=list)
 
     @field_validator("http_auth_password")
     @classmethod
@@ -206,6 +275,16 @@ class WebsiteUpdate(BaseModel):
         description="Password for HTTP Basic Authentication. "
         "Set to null to remove auth. Must be provided with username.",
     )
+    sitemap_url: Union[str, None, NotProvided] = NOT_PROVIDED
+    markdown_endpoint_url: Union[str, None, NotProvided] = NOT_PROVIDED
+    markdown_endpoint_method: Union[WebsiteIntegrationMarkdownMethod, NotProvided] = (
+        NOT_PROVIDED
+    )
+    markdown_endpoint_url_location: Union[
+        WebsiteIntegrationMarkdownUrlLocation, NotProvided
+    ] = NOT_PROVIDED
+    markdown_endpoint_url_param_name: Union[str, NotProvided] = NOT_PROVIDED
+    headers: Union[list[WebsiteIntegrationHeader], NotProvided] = NOT_PROVIDED
 
     @field_validator("http_auth_password")
     @classmethod

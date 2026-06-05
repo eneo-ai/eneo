@@ -24,6 +24,7 @@ from intric.integration.presentation.assemblers.integration_knowledge_assembler 
 from intric.integration.presentation.models import IntegrationKnowledgePublic
 from intric.jobs.job_models import JobPublic
 from intric.main.container.container import Container
+from intric.main.exceptions import BadRequestException
 from intric.main.models import NOT_PROVIDED, ModelId, PaginatedResponse, is_provided
 from intric.roles.permissions import Permission, validate_permission
 from intric.server import protocol
@@ -674,22 +675,42 @@ async def create_space_websites(
     _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.website_crud_service()
+    website_integration_service = container.website_integration_service()
     user = container.user()
 
-    # Create website
-    created_website = await service.create_website(
-        space_id=id,
-        name=website.name,
-        url=website.url,
-        download_files=website.download_files,
-        crawl_type=website.crawl_type,
-        update_interval=website.update_interval,
-        embedding_model_id=(
-            website.embedding_model.id if website.embedding_model else None
-        ),
-        http_auth_username=website.http_auth_username,
-        http_auth_password=website.http_auth_password,
-    )
+    if website.sitemap_url:
+        created_website = await website_integration_service.create_or_reuse_website(
+            space_id=id,
+            name=website.name,
+            url=website.url,
+            embedding_model_id=(
+                website.embedding_model.id if website.embedding_model else None
+            ),
+            sitemap_url=website.sitemap_url,
+            markdown_endpoint_url=website.markdown_endpoint_url,
+            markdown_endpoint_method=website.markdown_endpoint_method,
+            markdown_endpoint_url_location=website.markdown_endpoint_url_location,
+            markdown_endpoint_url_param_name=website.markdown_endpoint_url_param_name,
+            headers=website.headers,
+        )
+    else:
+        if not website.url:
+            raise BadRequestException(
+                "URL is required when sitemap_url is not provided"
+            )
+        created_website = await service.create_website(
+            space_id=id,
+            name=website.name,
+            url=website.url,
+            download_files=website.download_files,
+            crawl_type=website.crawl_type,
+            update_interval=website.update_interval,
+            embedding_model_id=(
+                website.embedding_model.id if website.embedding_model else None
+            ),
+            http_auth_username=website.http_auth_username,
+            http_auth_password=website.http_auth_password,
+        )
 
     # Get space for context (graceful degradation if space fetch fails)
     space = None
@@ -706,6 +727,8 @@ async def create_space_websites(
         "update_interval": str(website.update_interval)
         if website.update_interval
         else None,
+        "sitemap_url": website.sitemap_url,
+        "reused_existing": getattr(created_website, "reused_existing", False),
     }
     if website.embedding_model:
         extra["embedding_model"] = {

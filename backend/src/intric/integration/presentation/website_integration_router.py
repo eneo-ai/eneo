@@ -1,115 +1,39 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
-from intric.integration.presentation.models import (
-    WebsiteIntegrationConfigCreate,
-    WebsiteIntegrationConfigList,
-    WebsiteIntegrationConfigPublic,
-    WebsiteIntegrationConfigUpdate,
-)
+from intric.database.tables.website_integration_table import WebsiteIntegrationConfig
 from intric.jobs.job_models import JobPublic
 from intric.main.container.container import Container
-from intric.roles.permissions import Permission
 from intric.server.dependencies.container import get_container
 
 router = APIRouter()
 
 
-def _require_admin(container: Container) -> None:
-    user = container.user()
-    if Permission.ADMIN not in user.permissions:
-        from intric.main.exceptions import UnauthorizedException
-
-        raise UnauthorizedException("Admin permission is required")
-
-
-@router.get("/websites/me/configs/", response_model=WebsiteIntegrationConfigList)
-async def list_my_website_integrations(
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-):
-    service = container.website_integration_service()
-    items = await service.list_configs(owner_type="user")
-    return WebsiteIntegrationConfigList(items=items)
-
-
-@router.post("/websites/me/configs/", response_model=WebsiteIntegrationConfigPublic)
-async def create_my_website_integration(
-    data: WebsiteIntegrationConfigCreate,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-):
-    service = container.website_integration_service()
-    return await service.create_config(owner_type="user", payload=data)
-
-
-@router.patch(
-    "/websites/me/configs/{config_id}/", response_model=WebsiteIntegrationConfigPublic
-)
-async def update_my_website_integration(
+async def _queue_website_sync_with_token(
     config_id: UUID,
-    data: WebsiteIntegrationConfigUpdate,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    token: Annotated[str, Query(min_length=1)],
+    container: Annotated[Container, Depends(get_container(with_user=False))],
 ):
+    config = await container.session().get(WebsiteIntegrationConfig, config_id)  # type: ignore[union-attr]
+    if config is None:
+        from intric.main.exceptions import NotFoundException
+
+        raise NotFoundException("Website integration not found")
+
+    user = await container.user_repo().get_user_by_id(config.created_by_user_id)
+    if user is None:
+        from intric.main.exceptions import NotFoundException
+
+        raise NotFoundException("Website integration owner not found")
+
+    from intric.main.container.container_overrides import override_user
+
+    override_user(container=container, user=user)
     service = container.website_integration_service()
-    return await service.update_config(
-        config_id=config_id, owner_type="user", payload=data
-    )
-
-
-@router.delete("/websites/me/configs/{config_id}/", status_code=204)
-async def delete_my_website_integration(
-    config_id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-):
-    service = container.website_integration_service()
-    await service.delete_config(config_id=config_id, owner_type="user")
-
-
-@router.get("/websites/tenant/configs/", response_model=WebsiteIntegrationConfigList)
-async def list_tenant_website_integrations(
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-):
-    _require_admin(container)
-    service = container.website_integration_service()
-    items = await service.list_configs(owner_type="tenant")
-    return WebsiteIntegrationConfigList(items=items)
-
-
-@router.post("/websites/tenant/configs/", response_model=WebsiteIntegrationConfigPublic)
-async def create_tenant_website_integration(
-    data: WebsiteIntegrationConfigCreate,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-):
-    _require_admin(container)
-    service = container.website_integration_service()
-    return await service.create_config(owner_type="tenant", payload=data)
-
-
-@router.patch(
-    "/websites/tenant/configs/{config_id}/",
-    response_model=WebsiteIntegrationConfigPublic,
-)
-async def update_tenant_website_integration(
-    config_id: UUID,
-    data: WebsiteIntegrationConfigUpdate,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-):
-    _require_admin(container)
-    service = container.website_integration_service()
-    return await service.update_config(
-        config_id=config_id, owner_type="tenant", payload=data
-    )
-
-
-@router.delete("/websites/tenant/configs/{config_id}/", status_code=204)
-async def delete_tenant_website_integration(
-    config_id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-):
-    _require_admin(container)
-    service = container.website_integration_service()
-    await service.delete_config(config_id=config_id, owner_type="tenant")
+    job = await service.queue_sync_for_token(config_id=config_id, ping_token=token)
+    return JobPublic.model_validate(job)
 
 
 @router.post(
@@ -119,8 +43,28 @@ async def delete_tenant_website_integration(
 )
 async def ping_website_integration(
     config_id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    token: Annotated[str, Query(min_length=1)],
+    container: Annotated[Container, Depends(get_container(with_user=False))],
 ):
-    service = container.website_integration_service()
-    job = await service.queue_sync(config_id=config_id)
-    return JobPublic.model_validate(job)
+    return await _queue_website_sync_with_token(
+        config_id=config_id,
+        token=token,
+        container=container,
+    )
+
+
+@router.post(
+    "/websites/{config_id}/sync/",
+    response_model=JobPublic,
+    status_code=202,
+)
+async def sync_website_integration_endpoint(
+    config_id: UUID,
+    token: Annotated[str, Query(min_length=1)],
+    container: Annotated[Container, Depends(get_container(with_user=False))],
+):
+    return await _queue_website_sync_with_token(
+        config_id=config_id,
+        token=token,
+        container=container,
+    )

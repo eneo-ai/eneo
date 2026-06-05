@@ -11,16 +11,13 @@
   import SharePointAppDeleteDialog from "$lib/features/integrations/sharepoint/SharePointAppDeleteDialog.svelte";
   import SharePointSubscriptions from "./SharePointSubscriptions.svelte";
   import { writable } from "svelte/store";
-  import WebsiteIntegrationConfigDialog from "$lib/features/integrations/website/WebsiteIntegrationConfigDialog.svelte";
 
   const { data }: PageProps = $props();
 
   let tenantIntegrations = $derived.by(() => {
     // Filter out integrations that are not yet ready (e.g., Confluence)
     let integrations = $state(
-      data.tenantIntegrations.filter(
-        (i) => i.integration_type === "sharepoint" || i.integration_type === "website"
-      )
+      data.tenantIntegrations.filter((i) => i.integration_type === "sharepoint")
     );
     return integrations;
   });
@@ -30,8 +27,6 @@
   let showDeleteAppDialog = writable(false);
   let sharePointConfigStatus = $state<"loading" | "configured" | "not_configured">("loading");
   let showWebhookManagement = $state(false);
-  let showWebsiteConfigDialog = writable(false);
-
   // Load SharePoint config status
   const loadSharePointStatus = createAsyncState(async () => {
     try {
@@ -140,14 +135,6 @@
                           {m.configure_azure_ad_app()}
                         </p>
                       {/if}
-                    {:else}
-                      <Button variant="primary" onclick={() => ($showWebsiteConfigDialog = true)}
-                        >Manage website integrations</Button
-                      >
-                      <p class="text-secondary mt-1 text-xs">
-                        Configure one or more sitemap-backed website integrations for the
-                        organization.
-                      </p>
                     {/if}
                   </div>
                 {/snippet}
@@ -198,8 +185,3 @@
 
 <SharePointAppConfigDialog openController={showSharePointConfigDialog} />
 <SharePointAppDeleteDialog openController={showDeleteAppDialog} />
-<WebsiteIntegrationConfigDialog
-  openController={showWebsiteConfigDialog}
-  scope="tenant"
-  title="Manage organization website integrations"
-/>

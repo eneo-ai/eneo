@@ -1,7 +1,7 @@
 """add website integration configs
 
 Revision ID: 202606041100
-Revises: 202602121000_rename_integration_permission
+Revises: 20260603_transcription_migrate
 Create Date: 2026-06-04 11:00:00.000000
 """
 
@@ -42,6 +42,24 @@ def upgrade() -> None:
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("sitemap_url", sa.Text(), nullable=False),
         sa.Column("markdown_endpoint_url", sa.Text(), nullable=True),
+        sa.Column(
+            "markdown_endpoint_method",
+            sa.Text(),
+            nullable=False,
+            server_default=sa.text("'get'"),
+        ),
+        sa.Column(
+            "markdown_endpoint_url_location",
+            sa.Text(),
+            nullable=False,
+            server_default=sa.text("'query'"),
+        ),
+        sa.Column(
+            "markdown_endpoint_url_param_name",
+            sa.Text(),
+            nullable=False,
+            server_default=sa.text("'url'"),
+        ),
         sa.Column(
             "headers",
             postgresql.JSONB(astext_type=sa.Text()),

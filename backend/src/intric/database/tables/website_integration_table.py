@@ -16,6 +16,13 @@ from intric.database.tables.websites_table import Websites
 class WebsiteIntegrationConfig(BasePublic):
     __tablename__ = "website_integration_configs"  # type: ignore[assignment]
 
+    website_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Websites.id, ondelete="CASCADE"),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+
     tenant_integration_id: Mapped[UUID] = mapped_column(
         ForeignKey(TenantIntegration.id, ondelete="CASCADE"), index=True
     )
@@ -30,9 +37,19 @@ class WebsiteIntegrationConfig(BasePublic):
     created_by_user_id: Mapped[UUID] = mapped_column(
         ForeignKey(Users.id, ondelete="CASCADE"), index=True
     )
+    ping_token: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     name: Mapped[str] = mapped_column(Text)
     sitemap_url: Mapped[str] = mapped_column(Text)
     markdown_endpoint_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    markdown_endpoint_method: Mapped[str] = mapped_column(
+        Text, server_default="get", nullable=False
+    )
+    markdown_endpoint_url_location: Mapped[str] = mapped_column(
+        Text, server_default="query", nullable=False
+    )
+    markdown_endpoint_url_param_name: Mapped[str] = mapped_column(
+        Text, server_default="url", nullable=False
+    )
     headers: Mapped[dict[str, str]] = mapped_column(JSONB, server_default="{}")
     sync_status: Mapped[str] = mapped_column(Text, server_default="idle")
     last_sitemap_fetched_at: Mapped[Optional[datetime]] = mapped_column(
@@ -50,6 +67,7 @@ class WebsiteIntegrationConfig(BasePublic):
     owner_user: Mapped[Optional[Users]] = relationship(foreign_keys=[owner_user_id])
     owner_space: Mapped[Spaces] = relationship(foreign_keys=[owner_space_id])
     created_by_user: Mapped[Users] = relationship(foreign_keys=[created_by_user_id])
+    website: Mapped[Optional[Websites]] = relationship(foreign_keys=[website_id])
 
     __table_args__ = (
         Index(

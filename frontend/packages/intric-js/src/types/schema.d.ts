@@ -16789,7 +16789,7 @@ export interface components {
       /** Name */
       name?: string | null;
       /** Url */
-      url: string;
+      url?: string | null;
       /**
        * Download Files
        * @default false
@@ -16810,6 +16810,24 @@ export interface components {
        * @description Password for HTTP Basic Authentication (optional). Must be provided together with username.
        */
       http_auth_password?: string | null;
+      /** Sitemap Url */
+      sitemap_url?: string | null;
+      /** Markdown Endpoint Url */
+      markdown_endpoint_url?: string | null;
+      /** @default get */
+      markdown_endpoint_method?: "get" | "post";
+      /** @default query */
+      markdown_endpoint_url_location?: "query" | "body";
+      /**
+       * Markdown Endpoint Url Param Name
+       * @default url
+       */
+      markdown_endpoint_url_param_name?: string;
+      /** Headers */
+      headers?: {
+        key: string;
+        value: string;
+      }[];
     };
     /** WebsiteCreateRequestDeprecated */
     WebsiteCreateRequestDeprecated: {
@@ -16928,6 +16946,33 @@ export interface components {
        * @description True if website was auto-disabled after 10 consecutive failures. User must manually change update_interval to re-enable.
        */
       is_auto_disabled: boolean;
+      integration?: {
+        /** Id */
+        id: string;
+        /** Sync Url */
+        sync_url: string;
+        /** Sitemap Url */
+        sitemap_url: string;
+        /** Markdown Endpoint Url */
+        markdown_endpoint_url?: string | null;
+        markdown_endpoint_method: "get" | "post";
+        markdown_endpoint_url_location: "query" | "body";
+        markdown_endpoint_url_param_name: string;
+        headers?: {
+          key: string;
+          value: string;
+        }[];
+        sync_status: string;
+        last_sitemap_fetched_at?: string | null;
+        last_successful_sync_at?: string | null;
+        last_sync_error?: string | null;
+        last_sync_queued_at?: string | null;
+      } | null;
+      /**
+       * Reused Existing
+       * @default false
+       */
+      reused_existing?: boolean;
     };
     /** WebsiteUpdate */
     WebsiteUpdate: {
@@ -16951,6 +16996,17 @@ export interface components {
        * @description Password for HTTP Basic Authentication. Set to null to remove auth. Must be provided with username.
        */
       http_auth_password?: string | null;
+      /** Sitemap Url */
+      sitemap_url?: string | null;
+      /** Markdown Endpoint Url */
+      markdown_endpoint_url?: string | null;
+      markdown_endpoint_method?: "get" | "post";
+      markdown_endpoint_url_location?: "query" | "body";
+      markdown_endpoint_url_param_name?: string;
+      headers?: {
+        key: string;
+        value: string;
+      }[];
     };
     /**
      * WizardType
