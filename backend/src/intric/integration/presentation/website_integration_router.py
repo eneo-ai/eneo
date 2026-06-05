@@ -7,6 +7,7 @@ from intric.database.tables.website_integration_table import WebsiteIntegrationC
 from intric.jobs.job_models import JobPublic
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 
 router = APIRouter()
 
@@ -40,6 +41,15 @@ async def _queue_website_sync_with_token(
     "/websites/{config_id}/ping/",
     response_model=JobPublic,
     status_code=202,
+    responses=responses.get_responses([404]),
+    summary="Queue website integration sync via ping token",
+    description="""
+    Queue a sitemap-based website integration sync using the integration-specific token.
+
+    This endpoint is intended for external webhook-style triggers. It validates the
+    token, resolves the owning user for the integration, and queues a background job
+    that fetches the sitemap and syncs new or changed pages.
+    """,
 )
 async def ping_website_integration(
     config_id: UUID,
@@ -57,6 +67,15 @@ async def ping_website_integration(
     "/websites/{config_id}/sync/",
     response_model=JobPublic,
     status_code=202,
+    responses=responses.get_responses([404]),
+    summary="Queue website integration sync",
+    description="""
+    Queue a sitemap-based website integration sync using the integration-specific token.
+
+    This endpoint is the primary sync webhook URL exposed in the UI. It validates the
+    token, fetches the integration config, and queues a background job that checks the
+    sitemap for new or updated pages.
+    """,
 )
 async def sync_website_integration_endpoint(
     config_id: UUID,
