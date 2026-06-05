@@ -38,7 +38,7 @@ env:
   JWT_ISSUER: test
   JWT_EXPIRY_TIME: 3600
   JWT_ALGORITHM: HS256
-  JWT_SECRET: test_secret
+  JWT_SECRET: ci-test-jwt-secret-not-for-production-0123456789
   JWT_TOKEN_PREFIX: Bearer
   URL_SIGNING_KEY: test_key
   ENCRYPTION_KEY: yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=
@@ -275,7 +275,7 @@ jobs:
           # The workflow owns the stack lifecycle, so Playwright must not manage it.
           E2E_MANAGE_STACK: "0"
           E2E_BACKEND_URL: http://localhost:8124
-          E2E_JWT_SECRET: test_secret # matches the e2e-backend JWT_SECRET
+          E2E_JWT_SECRET: ci-test-jwt-secret-not-for-production-0123456789 # matches the e2e-backend JWT_SECRET
         run: bun run test:e2e
 
       - name: Upload Playwright report

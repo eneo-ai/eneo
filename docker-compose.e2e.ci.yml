@@ -86,7 +86,7 @@ services:
       JWT_ISSUER: test
       JWT_EXPIRY_TIME: "3600"
       JWT_ALGORITHM: HS256
-      JWT_SECRET: test_secret
+      JWT_SECRET: ci-test-jwt-secret-not-for-production-0123456789
       JWT_TOKEN_PREFIX: Bearer
       URL_SIGNING_KEY: test_key
       UPLOAD_FILE_TO_SESSION_MAX_SIZE: "10485760"
