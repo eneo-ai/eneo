@@ -38,32 +38,6 @@ async def _queue_website_sync_with_token(
 
 
 @router.post(
-    "/websites/{config_id}/ping/",
-    response_model=JobPublic,
-    status_code=202,
-    responses=responses.get_responses([404]),
-    summary="Queue website integration sync via ping token",
-    description="""
-    Queue a sitemap-based website integration sync using the integration-specific token.
-
-    This endpoint is intended for external webhook-style triggers. It validates the
-    token, resolves the owning user for the integration, and queues a background job
-    that fetches the sitemap and syncs new or changed pages.
-    """,
-)
-async def ping_website_integration(
-    config_id: UUID,
-    token: Annotated[str, Query(min_length=1)],
-    container: Annotated[Container, Depends(get_container(with_user=False))],
-):
-    return await _queue_website_sync_with_token(
-        config_id=config_id,
-        token=token,
-        container=container,
-    )
-
-
-@router.post(
     "/websites/{config_id}/sync/",
     response_model=JobPublic,
     status_code=202,

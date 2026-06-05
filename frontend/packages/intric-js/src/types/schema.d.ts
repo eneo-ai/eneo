@@ -5723,6 +5723,54 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/integrations/websites/{config_id}/ping/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Queue website integration sync via ping token
+     * @description Queue a sitemap-based website integration sync using the integration-specific token.
+     *
+     *         This endpoint is intended for external webhook-style triggers. It validates the
+     *         token, resolves the owning user for the integration, and queues a background job
+     *         that fetches the sitemap and syncs new or changed pages.
+     */
+    post: operations["ping_website_integration_api_v1_integrations_websites__config_id__ping__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/integrations/websites/{config_id}/sync/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Queue website integration sync
+     * @description Queue a sitemap-based website integration sync using the integration-specific token.
+     *
+     *         This endpoint is the primary sync webhook URL exposed in the UI. It validates the
+     *         token, fetches the integration config, and queues a background job that checks the
+     *         sitemap for new or updated pages.
+     */
+    post: operations["sync_website_integration_endpoint_api_v1_integrations_websites__config_id__sync__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/sharepoint/app": {
     parameters: {
       query?: never;
@@ -11450,7 +11498,7 @@ export interface components {
        * Integration Type
        * @enum {string}
        */
-      integration_type: "confluence" | "sharepoint" | "website";
+      integration_type: "confluence" | "sharepoint";
       /**
        * Enum
        * @description Create a collection of name/value pairs.
@@ -14844,6 +14892,7 @@ export interface components {
       | "pull_confluence_content"
       | "pull_sharepoint_content"
       | "sync_sharepoint_delta"
+      | "sync_website_integration"
       | "update_model_usage_stats"
       | "analyze_conversation_insights";
     /** TemplateCreate */
@@ -16815,19 +16864,16 @@ export interface components {
       /** Markdown Endpoint Url */
       markdown_endpoint_url?: string | null;
       /** @default get */
-      markdown_endpoint_method?: "get" | "post";
+      markdown_endpoint_method?: components["schemas"]["WebsiteIntegrationMarkdownMethod"];
       /** @default query */
-      markdown_endpoint_url_location?: "query" | "body";
+      markdown_endpoint_url_location?: components["schemas"]["WebsiteIntegrationMarkdownUrlLocation"];
       /**
        * Markdown Endpoint Url Param Name
        * @default url
        */
       markdown_endpoint_url_param_name?: string;
       /** Headers */
-      headers?: {
-        key: string;
-        value: string;
-      }[];
+      headers?: components["schemas"]["WebsiteIntegrationHeader"][];
     };
     /** WebsiteCreateRequestDeprecated */
     WebsiteCreateRequestDeprecated: {
@@ -16886,6 +16932,53 @@ export interface components {
       /** Crawl Status */
       crawl_status?: string | null;
     };
+    /** WebsiteIntegrationConfigPublic */
+    WebsiteIntegrationConfigPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Sync Url */
+      sync_url: string;
+      /** Sitemap Url */
+      sitemap_url: string;
+      /** Markdown Endpoint Url */
+      markdown_endpoint_url?: string | null;
+      markdown_endpoint_method: components["schemas"]["WebsiteIntegrationMarkdownMethod"];
+      markdown_endpoint_url_location: components["schemas"]["WebsiteIntegrationMarkdownUrlLocation"];
+      /** Markdown Endpoint Url Param Name */
+      markdown_endpoint_url_param_name: string;
+      /** Headers */
+      headers?: components["schemas"]["WebsiteIntegrationHeader"][];
+      /** Sync Status */
+      sync_status: string;
+      /** Last Sitemap Fetched At */
+      last_sitemap_fetched_at?: string | null;
+      /** Last Successful Sync At */
+      last_successful_sync_at?: string | null;
+      /** Last Sync Error */
+      last_sync_error?: string | null;
+      /** Last Sync Queued At */
+      last_sync_queued_at?: string | null;
+    };
+    /** WebsiteIntegrationHeader */
+    WebsiteIntegrationHeader: {
+      /** Key */
+      key: string;
+      /** Value */
+      value: string;
+    };
+    /**
+     * WebsiteIntegrationMarkdownMethod
+     * @enum {string}
+     */
+    WebsiteIntegrationMarkdownMethod: "get" | "post";
+    /**
+     * WebsiteIntegrationMarkdownUrlLocation
+     * @enum {string}
+     */
+    WebsiteIntegrationMarkdownUrlLocation: "query" | "body";
     /** WebsiteMetadata */
     WebsiteMetadata: {
       /** Size */
@@ -16946,28 +17039,7 @@ export interface components {
        * @description True if website was auto-disabled after 10 consecutive failures. User must manually change update_interval to re-enable.
        */
       is_auto_disabled: boolean;
-      integration?: {
-        /** Id */
-        id: string;
-        /** Sync Url */
-        sync_url: string;
-        /** Sitemap Url */
-        sitemap_url: string;
-        /** Markdown Endpoint Url */
-        markdown_endpoint_url?: string | null;
-        markdown_endpoint_method: "get" | "post";
-        markdown_endpoint_url_location: "query" | "body";
-        markdown_endpoint_url_param_name: string;
-        headers?: {
-          key: string;
-          value: string;
-        }[];
-        sync_status: string;
-        last_sitemap_fetched_at?: string | null;
-        last_successful_sync_at?: string | null;
-        last_sync_error?: string | null;
-        last_sync_queued_at?: string | null;
-      } | null;
+      integration?: components["schemas"]["WebsiteIntegrationConfigPublic"] | null;
       /**
        * Reused Existing
        * @default false
@@ -17000,13 +17072,14 @@ export interface components {
       sitemap_url?: string | null;
       /** Markdown Endpoint Url */
       markdown_endpoint_url?: string | null;
-      markdown_endpoint_method?: "get" | "post";
-      markdown_endpoint_url_location?: "query" | "body";
+      /** Markdown Endpoint Method */
+      markdown_endpoint_method?: components["schemas"]["WebsiteIntegrationMarkdownMethod"];
+      /** Markdown Endpoint Url Location */
+      markdown_endpoint_url_location?: components["schemas"]["WebsiteIntegrationMarkdownUrlLocation"];
+      /** Markdown Endpoint Url Param Name */
       markdown_endpoint_url_param_name?: string;
-      headers?: {
-        key: string;
-        value: string;
-      }[];
+      /** Headers */
+      headers?: components["schemas"]["WebsiteIntegrationHeader"][];
     };
     /**
      * WizardType
@@ -33893,6 +33966,90 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  ping_website_integration_api_v1_integrations_websites__config_id__ping__post: {
+    parameters: {
+      query: {
+        token: string;
+      };
+      header?: never;
+      path: {
+        config_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["JobPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  sync_website_integration_endpoint_api_v1_integrations_websites__config_id__sync__post: {
+    parameters: {
+      query: {
+        token: string;
+      };
+      header?: never;
+      path: {
+        config_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["JobPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
