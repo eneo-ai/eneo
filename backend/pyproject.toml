@@ -20,7 +20,8 @@ dependencies = [
     "sse-starlette>=1.6.1,<2",
     "gunicorn>=23.0.0,<24",
     "pdfplumber>=0.11,<1",
-    "langchain>=0.3.30,<0.4",
+    "langchain-core>=1.2.22,<2",  # output parsers; >=1.2.22 fixes load_prompt path traversal
+    "langchain-text-splitters>=1.1.2,<2",  # RecursiveCharacterTextSplitter; >=1.1.2 clears GHSA-fv5p
     "pydantic-settings>=2.1.0,<3",
     "wrapt>=1.16.0,<2",
     "python-multipart>=0.0.27,<1",
