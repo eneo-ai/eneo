@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
+from uuid import UUID
 
 import redis.asyncio as aioredis
 
@@ -12,6 +13,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ModelKwargs,
     ResponseType,
 )
+from eneo.authentication.signed_urls import build_signed_download_url
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
@@ -141,6 +143,29 @@ class CompletionService:
             provider_type=provider.provider_type,
         )
 
+    def _build_file_reference_urls(self, files: list[File]) -> dict[UUID, str]:
+        """Map file id -> signed ``original`` download URL for files in storage.
+
+        Empty when there is no public origin or tenant context, or no file has a
+        ``storage_key`` (storage unconfigured or upload degraded gracefully).
+        """
+        base_url = self.config.public_origin
+        if not base_url or self.tenant is None:
+            return {}
+
+        expires_in = self.config.file_reference_url_expiry_seconds
+        urls: dict[UUID, str] = {}
+        for file in files:
+            if getattr(file, "storage_key", None):
+                urls[file.id] = build_signed_download_url(
+                    file_id=file.id,
+                    base_url=base_url,
+                    expires_in=expires_in,
+                    tenant_id=self.tenant.id,
+                    variant="original",
+                )
+        return urls
+
     @staticmethod
     def is_valid_arguments(arguments: str):
         try:
@@ -259,6 +284,11 @@ class CompletionService:
             use_image_generation and stream and get_settings().using_image_generation
         )
 
+        # Mint signed download URLs for attached files whose original bytes live
+        # in external storage, so the model can hand them to a URL-accepting MCP
+        # tool. Current turn only; requires a public origin to form absolute URLs.
+        file_reference_urls = self._build_file_reference_urls(files)
+
         # Create MCP proxy session before building the context, so the tool
         # definitions it will register can be counted toward the token budget.
         # Pass the chat session id + active DB session so each MCP server's
@@ -290,6 +320,7 @@ class CompletionService:
                 version=version,
                 use_image_generation=use_image_generation,
                 web_search_results=web_search_results,
+                file_reference_urls=file_reference_urls,
                 vision=model.vision,
                 extra_tool_dicts=(
                     mcp_proxy.get_tools_for_llm()

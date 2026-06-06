@@ -421,6 +421,20 @@ class Settings(BaseSettings):
     jwt_token_prefix: str
     url_signing_key: str
 
+    # External file storage (S3-compatible). When configured, original upload
+    # bytes are streamed to this object store at upload time and a signed Eneo
+    # download URL (served from public_origin) is surfaced to MCP tools so they
+    # can ingest the original file. All Optional: the feature is inert when any
+    # required value is unset, and uploads degrade gracefully (no storage key).
+    file_storage_s3_endpoint_url: Optional[str] = None
+    file_storage_s3_bucket: Optional[str] = None
+    file_storage_s3_access_key: Optional[str] = None
+    file_storage_s3_secret_key: Optional[str] = None
+    file_storage_s3_region: str = "us-east-1"
+    file_storage_s3_use_path_style: bool = True
+    # Expiry of the signed download URL surfaced to the LLM/MCP tools.
+    file_reference_url_expiry_seconds: int = 3600
+
     # Dev
     testing: bool = False
     dev: bool = False

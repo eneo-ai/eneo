@@ -59,6 +59,7 @@ dependencies = [
     "opentelemetry-instrumentation-redis>=0.41b0",
     "opentelemetry-instrumentation-httpx>=0.41b0",
     "opentelemetry-instrumentation-aiohttp-client>=0.41b0",
+    "aioboto3>=15.5.0",
 ]
 
 [project.scripts]
