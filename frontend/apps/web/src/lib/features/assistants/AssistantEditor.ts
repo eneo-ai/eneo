@@ -20,6 +20,7 @@ function initAssistantEditor(data: {
     defaults: {
       prompt: { description: "", text: "" },
       insight_enabled: false,
+      inline_file_text: true,
       mcp_tools: []
     },
     updateResource: async (resource, changes) => {
@@ -34,6 +35,7 @@ function initAssistantEditor(data: {
       name: true,
       description: true,
       insight_enabled: true,
+      inline_file_text: true,
       completion_model: { id: true },
       completion_model_kwargs: true,
       prompt: { description: true, text: true },

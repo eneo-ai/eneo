@@ -31,6 +31,10 @@ class SettingsPublic(SettingsBase):
     api_key_expiry_notifications: bool = (
         True  # Per-tenant API key expiry notifications toggle
     )
+    # Read-only: whether an S3-compatible file store is configured. Gates UI that
+    # only makes sense with external file storage (e.g. the assistant
+    # inline-file-text toggle). Computed from deployment config, never persisted.
+    file_storage_enabled: bool = False
 
 
 class GetModelsResponse(BaseModel):

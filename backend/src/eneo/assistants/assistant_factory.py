@@ -170,6 +170,7 @@ class AssistantFactory:
             is_default=assistant_in_db.is_default,
             description=assistant_in_db.description,
             insight_enabled=assistant_in_db.insight_enabled,
+            inline_file_text=assistant_in_db.inline_file_text,
             icon_id=assistant_in_db.icon_id,
         )
 
@@ -284,6 +285,7 @@ class AssistantFactory:
             is_default=assistant_in_db.is_default,
             description=assistant_in_db.description,
             insight_enabled=assistant_in_db.insight_enabled,
+            inline_file_text=assistant_in_db.inline_file_text,
             data_retention_days=assistant_in_db.data_retention_days,
             metadata_json=assistant_in_db.metadata_json,
             icon_id=assistant_in_db.icon_id,

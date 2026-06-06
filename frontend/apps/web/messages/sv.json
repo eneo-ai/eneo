@@ -811,6 +811,8 @@
   "model_disabled": "modell inaktiverad",
   "model_settings": "Modellinställningar",
   "model_settings_description": "Konfigurera modellspecifika parametrar för mer kontroll över svaret.",
+  "inline_file_text": "Infoga filtext",
+  "inline_file_text_description": "Infoga den extraherade texten från bifogade filer i prompten. Stäng av för att skicka stora filer till verktyg enbart via URL, så att de hålls utanför kontextfönstret (kräver extern fillagring).",
   "models": "Modeller",
   "monthly": "Månadsvis",
   "more": "Mer",

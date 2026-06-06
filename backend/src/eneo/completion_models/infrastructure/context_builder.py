@@ -462,13 +462,21 @@ class ContextBuilder:
         transcription_inputs: list[str] | None = None,
         model_name: str = "",
         file_reference_urls: dict[UUID, str] | None = None,
+        inline_file_text: bool = True,
     ) -> str:
         if files is None:
             files = []
         if transcription_inputs is None:
             transcription_inputs = []
-        if files:
-            files_string = build_files_string(files, model_name=model_name)
+        # When the assistant has inlining disabled, files whose original is
+        # reachable via a signed URL are represented by that URL only (skips the
+        # extracted text — e.g. a large CSV that would blow the context window).
+        # Files without a URL are always inlined so the model still sees them.
+        text_files = files
+        if not inline_file_text and file_reference_urls:
+            text_files = [f for f in files if f.id not in file_reference_urls]
+        if text_files:
+            files_string = build_files_string(text_files, model_name=model_name)
             input_str = f"{files_string}\n\n{input_str}"
 
         # Append fetchable signed URLs (current turn only — history URLs would be
@@ -572,6 +580,7 @@ class ContextBuilder:
         extra_tool_dicts: list[dict[str, Any]] | None = None,
         vision: bool = True,
         file_reference_urls: dict[UUID, str] | None = None,
+        inline_file_text: bool = True,
     ) -> Context:
         if files is None:
             files = []
@@ -596,6 +605,7 @@ class ContextBuilder:
             transcription_inputs=transcription_inputs,
             model_name=model_name,
             file_reference_urls=file_reference_urls,
+            inline_file_text=inline_file_text,
         )
         # Attachment images (prompt_files) travel with every request, the same
         # way attachment text does — they ride on the current user message.

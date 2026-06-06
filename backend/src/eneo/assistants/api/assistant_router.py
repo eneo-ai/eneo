@@ -662,6 +662,7 @@ async def update_assistant(
         mcp_tools=mcp_tool_settings,
         description=description,
         insight_enabled=assistant.insight_enabled,
+        inline_file_text=assistant.inline_file_text,
         data_retention_days=data_retention_days,
         metadata_json=metadata_json,
         icon_id=icon_id,
