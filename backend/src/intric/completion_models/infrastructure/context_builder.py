@@ -418,13 +418,22 @@ class ContextBuilder:
         files: list[File] | None = None,
         transcription_inputs: list[str] | None = None,
         file_reference_urls: dict[UUID, str] | None = None,
+        inline_file_text: bool = True,
     ) -> str:
         if files is None:
             files = []
         if transcription_inputs is None:
             transcription_inputs = []
-        if files:
-            files_string = build_files_string(files)
+
+        # When the assistant has inlining disabled, files whose original is
+        # reachable via a signed URL are represented by that URL only (skips the
+        # extracted text — e.g. a large CSV that would blow the context window).
+        # Files without a URL are always inlined so the model still sees them.
+        text_files = files
+        if not inline_file_text and file_reference_urls:
+            text_files = [f for f in files if f.id not in file_reference_urls]
+        if text_files:
+            files_string = build_files_string(text_files)
             input_str = f"{files_string}\n\n{input_str}"
 
         # Append fetchable signed URLs (current turn only — history URLs would be
@@ -516,6 +525,7 @@ class ContextBuilder:
         web_search_results: Sequence[_InformationChunkLike] | None = None,
         mcp_tools: list[FunctionDefinition] | None = None,
         file_reference_urls: dict[UUID, str] | None = None,
+        inline_file_text: bool = True,
     ) -> Context:
         if files is None:
             files = []
@@ -537,6 +547,7 @@ class ContextBuilder:
             files=self._get_files_by_type(files, FileType.TEXT),
             transcription_inputs=transcription_inputs,
             file_reference_urls=file_reference_urls,
+            inline_file_text=inline_file_text,
         )
         tokens_used_input = count_tokens(_input_string, model_name)
         tokens_used += tokens_used_input

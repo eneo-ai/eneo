@@ -114,6 +114,12 @@ class SettingService:
         )
 
         app_settings = get_app_settings()
+        file_storage_enabled = bool(
+            app_settings.file_storage_s3_endpoint_url
+            and app_settings.file_storage_s3_bucket
+            and app_settings.file_storage_s3_access_key
+            and app_settings.file_storage_s3_secret_key
+        )
 
         return SettingsPublic(
             chatbot_widget=(settings_in_db.chatbot_widget if settings_in_db else {})
@@ -123,6 +129,7 @@ class SettingService:
             tenant_credentials_enabled=app_settings.tenant_credentials_enabled,
             provisioning=provisioning,
             api_key_expiry_notifications=api_key_expiry_notifications,
+            file_storage_enabled=file_storage_enabled,
         )
 
     async def get_settings(self) -> SettingsPublic:

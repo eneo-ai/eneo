@@ -265,6 +265,7 @@ class CompletionService:
         use_image_generation: bool = False,
         mcp_servers: list["MCPServer"] | None = None,
         require_tool_approval: bool = False,
+        inline_file_text: bool = True,
     ) -> CompletionModelResponse:
         if files is None:
             files = []
@@ -308,6 +309,7 @@ class CompletionService:
             use_image_generation=use_image_generation,
             web_search_results=web_search_results,
             file_reference_urls=file_reference_urls,
+            inline_file_text=inline_file_text,
         )
 
         if extended_logging:

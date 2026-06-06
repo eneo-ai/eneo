@@ -409,6 +409,25 @@
             ></SelectModelSpecificSettings>
           </Settings.Row>
         {/if}
+
+        {#if data.settings.file_storage_enabled}
+          <Settings.Row
+            title={m.inline_file_text()}
+            description={m.inline_file_text_description()}
+            hasChanges={$currentChanges.diff.inline_file_text !== undefined}
+            revertFn={() => {
+              discardChanges("inline_file_text");
+            }}
+          >
+            <div class="border-default flex h-14 border-b py-2">
+              <Input.RadioSwitch
+                bind:value={$update.inline_file_text}
+                labelTrue={m.enable()}
+                labelFalse={m.disable()}
+              ></Input.RadioSwitch>
+            </div>
+          </Settings.Row>
+        {/if}
       </Settings.Group>
 
       <!-- Same mutual exclusivity logic as above: only disable MCP when knowledge
