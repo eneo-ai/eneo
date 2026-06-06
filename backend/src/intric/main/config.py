@@ -421,6 +421,13 @@ class Settings(BaseSettings):
     file_storage_s3_use_path_style: bool = True
     # Expiry of the signed download URL surfaced to the LLM/MCP tools.
     file_reference_url_expiry_seconds: int = 3600
+    # Base URL used to build the signed download links handed to MCP tools.
+    # Defaults to public_origin, but a remote tool (server-to-server) often needs
+    # a different, internally-reachable host than the browser-facing origin (e.g.
+    # http://host.docker.internal:8123 in dev, or an internal service URL in prod).
+    # Unlike public_origin this is NOT restricted to https/localhost. Must point
+    # at the Eneo backend's /api/v1 and be reachable from the tool's network.
+    file_reference_base_url: Optional[str] = None
 
     # Dev
     testing: bool = False
