@@ -287,6 +287,7 @@ async def create_mcp_server(
         http_auth_type=data.http_auth_type,
         description=data.description,
         http_auth_config_schema=data.http_auth_config_schema,
+        forward_identity=data.forward_identity,
         tags=data.tags,
         icon_url=str(data.icon_url) if data.icon_url else None,
         documentation_url=str(data.documentation_url)
@@ -361,6 +362,7 @@ async def update_mcp_server(
         http_auth_type=data.http_auth_type,
         description=data.description,
         http_auth_config_schema=data.http_auth_config_schema,
+        forward_identity=data.forward_identity,
         tags=data.tags,
         icon_url=str(data.icon_url) if data.icon_url else None,
         documentation_url=str(data.documentation_url)

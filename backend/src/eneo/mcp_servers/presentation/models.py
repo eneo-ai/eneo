@@ -29,6 +29,7 @@ class MCPServerPublic(BaseModel):
     http_auth_type: str  # "none", "bearer"
     has_credentials: bool
     credential_preview: Optional[str] = None  # masked token, e.g. "••••••••sk12"
+    forward_identity: bool = False
     tags: Optional[list[str]]
     icon_url: Optional[str]
     documentation_url: Optional[str]
@@ -47,6 +48,7 @@ class MCPServerCreate(BaseModel):
     http_auth_type: Literal["none", "bearer"] = "none"
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
+    forward_identity: bool = False
     tags: Optional[list[str]] = None
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None
@@ -61,6 +63,7 @@ class MCPServerUpdate(BaseModel):
     http_auth_type: Optional[Literal["none", "bearer"]] = None
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
+    forward_identity: Optional[bool] = None
     tags: Optional[list[str]] = None
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None

@@ -57,6 +57,7 @@ class ActionType(str, Enum):
     TOOL_APPROVAL_SUBMITTED = "tool_approval_submitted"
     FILE_UPLOADED = "file_uploaded"
     FILE_DELETED = "file_deleted"
+    FILE_SIGNED_URL_MINTED = "file_signed_url_minted"
     WEBSITE_CREATED = "website_created"
     WEBSITE_UPDATED = "website_updated"
     WEBSITE_DELETED = "website_deleted"

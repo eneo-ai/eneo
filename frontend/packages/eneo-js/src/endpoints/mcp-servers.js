@@ -45,6 +45,7 @@ export function initMCPServers(client) {
      * @param {string} [params.description] Description
      * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Authentication configuration
      * @param {{[key: string]: unknown} | null} [params.config_schema] JSON schema for configuration
+     * @param {boolean} [params.forward_identity] Forward acting user/tenant identity headers to this server
      * @param {string[]} [params.tags] Tags for categorization
      * @param {string} [params.icon_url] URL to icon image
      * @param {string} [params.documentation_url] URL to documentation
@@ -59,6 +60,7 @@ export function initMCPServers(client) {
       description,
       http_auth_config_schema,
       config_schema,
+      forward_identity,
       tags,
       icon_url,
       documentation_url,
@@ -73,6 +75,7 @@ export function initMCPServers(client) {
         description,
         http_auth_config_schema,
         config_schema,
+        forward_identity,
         tags,
         icon_url,
         documentation_url,
@@ -98,6 +101,7 @@ export function initMCPServers(client) {
      * @param {string} [params.description] Description
      * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Authentication configuration
      * @param {{[key: string]: unknown} | null} [params.config_schema] JSON schema for configuration
+     * @param {boolean} [params.forward_identity] Forward acting user/tenant identity headers to this server
      * @param {string[]} [params.tags] Tags for categorization
      * @param {string} [params.icon_url] URL to icon image
      * @param {string} [params.documentation_url] URL to documentation
@@ -113,6 +117,7 @@ export function initMCPServers(client) {
       description,
       http_auth_config_schema,
       config_schema,
+      forward_identity,
       tags,
       icon_url,
       documentation_url,
@@ -127,6 +132,7 @@ export function initMCPServers(client) {
         description,
         http_auth_config_schema,
         config_schema,
+        forward_identity,
         tags,
         icon_url,
         documentation_url,

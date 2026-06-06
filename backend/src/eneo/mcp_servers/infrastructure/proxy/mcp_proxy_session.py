@@ -55,6 +55,7 @@ class MCPProxySession:
         auth_credentials_map: dict[UUID, dict[str, str]] | None = None,
         chat_session_id: UUID | None = None,
         db_session: "AsyncSession | None" = None,
+        identity_headers: dict[str, str] | None = None,
     ):
         """
         Initialize proxy session.
@@ -63,6 +64,9 @@ class MCPProxySession:
             mcp_servers: List of MCP servers the assistant has access to
                         (already filtered by tenant/space/assistant hierarchy)
             auth_credentials_map: Map of server_id -> auth credentials
+            identity_headers: Acting user/tenant X-Eneo-* headers, handed to
+                every client. Each client forwards them only when its own server
+                has ``forward_identity=True`` (per-server PII opt-in).
             chat_session_id: When set with ``db_session``, the proxy resumes
                 each MCP server's persisted protocol session id on connect and
                 upserts the post-initialize value. Generic — applies to every
@@ -74,6 +78,7 @@ class MCPProxySession:
         super().__init__()
         self.mcp_servers = mcp_servers
         self.auth_credentials_map = auth_credentials_map or {}
+        self.identity_headers = identity_headers or {}
         self.chat_session_id = chat_session_id
         self._mcp_state_repo: ChatSessionMcpStateRepo | None = (
             ChatSessionMcpStateRepo(db_session)
@@ -528,6 +533,7 @@ class MCPProxySession:
                 on_tools_list_changed=lambda sid=server_id: self._dirty_server_ids.add(
                     sid
                 ),
+                identity_headers=self.identity_headers,
             )
 
             logger.debug(f"[MCPProxy] Connecting to '{server.name}'...")

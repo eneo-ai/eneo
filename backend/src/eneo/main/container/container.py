@@ -92,6 +92,7 @@ from eneo.files.file_repo import FileRepository
 from eneo.files.file_service import FileService
 from eneo.files.file_size_service import FileSizeService
 from eneo.files.image import ImageExtractor
+from eneo.files.object_storage import FileObjectStorage
 from eneo.files.text import TextExtractor
 from eneo.files.transcriber import Transcriber
 from eneo.governance_policy.application.effective_config_service import (
@@ -813,6 +814,7 @@ class Container(containers.DeclarativeContainer):
         CompletionService,
         context_builder=context_builder,
         tenant=tenant,
+        user=user,
         config=config,
         encryption_service=encryption_service,
         session=session,
@@ -1119,11 +1121,13 @@ class Container(containers.DeclarativeContainer):
         text_extractor=text_extractor,
         image_extractor=image_extractor,
     )
+    file_object_storage = providers.Factory(FileObjectStorage)
     file_service = providers.Factory(
         FileService,
         user=user,
         repo=file_repo,
         protocol=file_protocol,
+        object_storage=file_object_storage,
     )
     assistant_template_service = providers.Factory(
         AssistantTemplateService,

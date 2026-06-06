@@ -194,6 +194,7 @@ class MCPClient:
         tool_call_timeout: int | None = None,
         resume_mcp_session_id: str | None = None,
         on_tools_list_changed: Callable[[], None] | None = None,
+        identity_headers: dict[str, str] | None = None,
     ):
         """
         Initialize MCP client.
@@ -202,6 +203,9 @@ class MCPClient:
             mcp_server: MCP server configuration
             auth_credentials: Authentication credentials from tenant settings
             timeout: Connection timeout in seconds (defaults to 30s)
+            identity_headers: Acting user/tenant X-Eneo-* headers. Sent on every
+                request ONLY when this server has ``forward_identity=True`` —
+                identity is PII egress, opted into per server.
             resume_mcp_session_id: If set, sent as the initial ``Mcp-Session-Id``
                 header so the server resumes the prior logical session for state
                 that outlives a single transport connection.
@@ -219,6 +223,7 @@ class MCPClient:
         self.tool_call_timeout = tool_call_timeout or MCP_TOOL_CALL_TIMEOUT_DEFAULT
         self.resume_mcp_session_id = resume_mcp_session_id
         self._on_tools_list_changed = on_tools_list_changed
+        self.identity_headers = identity_headers or {}
         # Set when a tools/list_changed notification arrives on this session.
         # The proxy also re-lists the servers it just called, so this flag is a
         # protocol-correct optimization rather than the sole trigger.
@@ -286,6 +291,12 @@ class MCPClient:
 
         if token:
             headers["Authorization"] = f"Bearer {token}"
+
+        # Forward acting user/tenant identity only when this server opted in.
+        # Added after the bearer token; the builder never emits Authorization,
+        # so this cannot clobber it.
+        if getattr(self.mcp_server, "forward_identity", False):
+            headers.update(self.identity_headers)
 
         return headers
 
