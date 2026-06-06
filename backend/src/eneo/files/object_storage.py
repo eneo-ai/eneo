@@ -104,12 +104,10 @@ class FileObjectStorage:
         try:
             async with self._client() as client:
                 response = await client.get_object(Bucket=self._bucket, Key=key)
-                async with response["Body"] as body:
-                    while True:
-                        chunk = await body.read(_DOWNLOAD_CHUNK_SIZE)
-                        if not chunk:
-                            break
-                        yield chunk
+                # The aiobotocore streaming body exposes chunked iteration via
+                # iter_chunks(); its read() does not take a size argument.
+                async for chunk in response["Body"].iter_chunks(_DOWNLOAD_CHUNK_SIZE):
+                    yield chunk
         except ObjectStorageError:
             raise
         except Exception as exc:  # noqa: BLE001 - normalize SDK/transport errors

@@ -75,6 +75,30 @@ class TestFileObjectStorage:
         assert kwargs["Body"] == b"bytes"
 
     @pytest.mark.asyncio
+    async def test_open_stream_yields_body_chunks(self, monkeypatch):
+        # The aiobotocore streaming body is iterated via iter_chunks(size); its
+        # read() does not accept a size arg, so the generator must use iter_chunks.
+        class _FakeBody:
+            def iter_chunks(self, size):
+                async def gen():
+                    yield b"abc"
+                    yield b"def"
+
+                return gen()
+
+        storage = FileObjectStorage(_s3_settings())
+        client = AsyncMock()
+        client.get_object = AsyncMock(return_value={"Body": _FakeBody()})
+
+        @asynccontextmanager
+        async def fake_client():
+            yield client
+
+        monkeypatch.setattr(storage, "_client", fake_client)
+        out = b"".join([chunk async for chunk in storage.open_stream("k")])
+        assert out == b"abcdef"
+
+    @pytest.mark.asyncio
     async def test_upload_wraps_sdk_error(self, monkeypatch):
         storage = FileObjectStorage(_s3_settings())
         client = AsyncMock()
