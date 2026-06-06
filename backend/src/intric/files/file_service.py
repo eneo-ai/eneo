@@ -1,23 +1,34 @@
 import hashlib
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
-from uuid import UUID
+from typing import AsyncIterator, Optional
+from uuid import UUID, uuid4
 
 from fastapi import UploadFile
 
 from intric.files.file_models import File, FileBaseWithContent, FileCreate, FileType
 from intric.files.file_protocol import FileProtocol
 from intric.files.file_repo import FileRepository
+from intric.files.object_storage import FileObjectStorage, ObjectStorageError
 from intric.main.exceptions import NotFoundException, UnauthorizedException
+from intric.main.logging import get_logger
 from intric.users.user import UserInDB
+
+logger = get_logger(__name__)
 
 
 class FileService:
-    def __init__(self, user: UserInDB, repo: FileRepository, protocol: FileProtocol):
+    def __init__(
+        self,
+        user: UserInDB,
+        repo: FileRepository,
+        protocol: FileProtocol,
+        object_storage: Optional[FileObjectStorage] = None,
+    ):
         super().__init__()
         self.user = user
         self.repo = repo
         self.protocol = protocol
+        self.object_storage = object_storage
 
     @asynccontextmanager
     async def _write_transaction(self) -> AsyncIterator[None]:
@@ -31,7 +42,20 @@ class FileService:
             yield
 
     async def save_file(self, upload_file: UploadFile):
+        # Only when external storage is configured: read the raw bytes up front
+        # (the protocol consumes the upload destructively during extraction) and
+        # rewind so to_domain() still sees a fresh upload. Skipped entirely when
+        # storage is off, so the upload stream is untouched.
+        raw_bytes: bytes | None = None
+        if self.object_storage is not None and self.object_storage.is_configured():
+            raw_bytes = await upload_file.read()
+            await upload_file.seek(0)
+
         file = await self.protocol.to_domain(upload_file)
+        if raw_bytes is not None:
+            file.storage_key = await self._store_original_bytes(
+                raw_bytes=raw_bytes, filename=file.name, mimetype=file.mimetype
+            )
 
         async with self._write_transaction():
             saved_file = await self.repo.add(
@@ -45,6 +69,30 @@ class FileService:
         # Don't calculate token count here - we don't know which model will be used
         # Token counting will happen when the file is used in an assistant context
         return saved_file
+
+    async def _store_original_bytes(
+        self, raw_bytes: bytes, filename: str, mimetype: Optional[str]
+    ) -> Optional[str]:
+        """Push original upload bytes to external storage; return the key or None.
+
+        Degrades gracefully: returns None (file still saved, prompt keeps its
+        inlined text) when storage is unconfigured or the upload fails.
+        """
+        if self.object_storage is None or not self.object_storage.is_configured():
+            return None
+
+        key = f"{self.user.tenant_id}/{uuid4()}/{filename}"
+        try:
+            await self.object_storage.upload(key, raw_bytes, mimetype)
+            return key
+        except ObjectStorageError as exc:
+            logger.warning(
+                "[file-storage] storing original bytes for '%s' failed; "
+                "saving without a storage key: %s",
+                filename,
+                exc,
+            )
+            return None
 
     async def save_image_from_bytes(
         self,
@@ -128,6 +176,10 @@ class FileService:
 
         if file_deleted is None:
             raise NotFoundException()
+
+        # Best-effort cleanup of the external object so storage tracks the row.
+        if self.object_storage is not None and file_deleted.storage_key:
+            await self.object_storage.delete(file_deleted.storage_key)
 
         return file_deleted
 

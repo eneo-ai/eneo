@@ -92,6 +92,7 @@ from intric.files.file_repo import FileRepository
 from intric.files.file_service import FileService
 from intric.files.file_size_service import FileSizeService
 from intric.files.image import ImageExtractor
+from intric.files.object_storage import FileObjectStorage
 from intric.files.text import TextExtractor
 from intric.files.transcriber import Transcriber
 from intric.group_chat.application.group_chat_service import GroupChatService
@@ -734,6 +735,7 @@ class Container(containers.DeclarativeContainer):
         CompletionService,
         context_builder=context_builder,
         tenant=tenant,
+        user=user,
         config=config,
         encryption_service=encryption_service,
         session=session,
@@ -1025,11 +1027,13 @@ class Container(containers.DeclarativeContainer):
         text_extractor=text_extractor,
         image_extractor=image_extractor,
     )
+    file_object_storage = providers.Factory(FileObjectStorage)
     file_service = providers.Factory(
         FileService,
         user=user,
         repo=file_repo,
         protocol=file_protocol,
+        object_storage=file_object_storage,
     )
     assistant_template_service = providers.Factory(
         AssistantTemplateService,

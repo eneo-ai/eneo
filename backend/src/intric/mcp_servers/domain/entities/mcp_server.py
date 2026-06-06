@@ -54,6 +54,7 @@ class MCPServer(Entity):
         http_auth_type: str = "none",
         http_auth_config_schema: Optional[dict[str, Any]] = None,
         is_enabled: bool = True,
+        forward_identity: bool = False,
         env_vars: Optional[dict[str, Any]] = None,
         tags: Optional[list[str]] = None,
         icon_url: Optional[str] = None,
@@ -72,6 +73,7 @@ class MCPServer(Entity):
         self.http_auth_type = http_auth_type
         self.http_auth_config_schema = http_auth_config_schema
         self.is_enabled = is_enabled
+        self.forward_identity = forward_identity
         self.env_vars = env_vars
         self.tags = tags
         self.icon_url = icon_url

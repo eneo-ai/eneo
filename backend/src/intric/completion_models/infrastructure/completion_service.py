@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
+from uuid import UUID
 
 import redis.asyncio as aioredis
 
@@ -12,12 +13,14 @@ from intric.ai_models.completion_models.completion_model import (
     ModelKwargs,
     ResponseType,
 )
+from intric.authentication.signed_urls import build_signed_download_url
 from intric.completion_models.infrastructure.context_builder import ContextBuilder
 from intric.files.file_models import File
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.main.config import SETTINGS, Settings, get_settings
 from intric.main.exceptions import ProviderInactiveException, ProviderNotFoundException
 from intric.main.logging import get_logger
+from intric.mcp_servers.infrastructure.identity_headers import build_identity_headers
 from intric.mcp_servers.infrastructure.proxy import (
     MCPProxySession,
     MCPProxySessionFactory,
@@ -37,6 +40,7 @@ if TYPE_CHECKING:
     from intric.mcp_servers.domain.entities.mcp_server import MCPServer
     from intric.settings.encryption_service import EncryptionService
     from intric.tenants.tenant import TenantInDB
+    from intric.users.user import UserInDB
 
 logger = get_logger(__name__)
 
@@ -52,6 +56,7 @@ class CompletionService:
         self,
         context_builder: ContextBuilder,
         tenant: Optional["TenantInDB"] = None,
+        user: Optional["UserInDB"] = None,
         config: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
@@ -59,6 +64,7 @@ class CompletionService:
     ):
         self.context_builder = context_builder
         self.tenant = tenant
+        self.user = user
         self.config = config or SETTINGS
         if encryption_service is None:
             encryption_settings: Settings | None = (
@@ -157,6 +163,29 @@ class CompletionService:
             credential_resolver=credential_resolver,
             provider_type=provider_db.provider_type,
         )
+
+    def _build_file_reference_urls(self, files: list[File]) -> dict[UUID, str]:
+        """Map file id -> signed ``original`` download URL for files in storage.
+
+        Empty when there is no public origin or tenant context, or no file has a
+        ``storage_key`` (storage unconfigured or upload degraded gracefully).
+        """
+        base_url = self.config.public_origin
+        if not base_url or self.tenant is None:
+            return {}
+
+        expires_in = self.config.file_reference_url_expiry_seconds
+        urls: dict[UUID, str] = {}
+        for file in files:
+            if getattr(file, "storage_key", None):
+                urls[file.id] = build_signed_download_url(
+                    file_id=file.id,
+                    base_url=base_url,
+                    expires_in=expires_in,
+                    tenant_id=self.tenant.id,
+                    variant="original",
+                )
+        return urls
 
     @staticmethod
     def is_valid_arguments(arguments: str):
@@ -260,6 +289,11 @@ class CompletionService:
             use_image_generation and stream and get_settings().using_image_generation
         )
 
+        # Mint signed download URLs for attached files whose original bytes live
+        # in external storage, so the model can hand them to a URL-accepting MCP
+        # tool. Current turn only; requires a public origin to form absolute URLs.
+        file_reference_urls = self._build_file_reference_urls(files)
+
         context = self.context_builder.build_context(
             input_str=text_input,
             max_tokens=max_tokens,
@@ -273,6 +307,7 @@ class CompletionService:
             version=version,
             use_image_generation=use_image_generation,
             web_search_results=web_search_results,
+            file_reference_urls=file_reference_urls,
         )
 
         if extended_logging:
@@ -289,10 +324,14 @@ class CompletionService:
         # server — no per-server-kind branching.
         mcp_proxy: MCPProxySession | None = None
         if mcp_servers:
+            # Build the acting user/tenant identity headers once; each client
+            # forwards them only to its server when forward_identity is set.
+            identity_headers = build_identity_headers(self.user, self.tenant)
             mcp_proxy = self._mcp_proxy_factory.create(
                 mcp_servers,
                 chat_session_id=session.id if session is not None else None,
                 db_session=self.session,
+                identity_headers=identity_headers,
             )
             logger.debug(
                 f"[MCP] Proxy created with {mcp_proxy.get_tool_count()} tools from {len(mcp_servers)} server(s)"

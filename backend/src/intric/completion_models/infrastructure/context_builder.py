@@ -108,6 +108,41 @@ def build_files_string(files: list[File]) -> str:
     return ""
 
 
+def build_file_references_string(
+    files: list[File], file_reference_urls: dict[UUID, str]
+) -> str:
+    """Surface signed download URLs for attached files to the model.
+
+    Lets the model pass a URL to whichever MCP tool accepts a URL input so the
+    tool can fetch the original file. Only files present in
+    ``file_reference_urls`` (those with original bytes in external storage) get
+    an entry; the rest keep relying on the inlined text from
+    ``build_files_string``.
+    """
+    entries = [
+        json.dumps(
+            {
+                "filename": file.name,
+                "mimetype": file.mimetype,
+                "size_bytes": file.size,
+                "url": file_reference_urls[file.id],
+            }
+        )
+        for file in files
+        if file.id in file_reference_urls
+    ]
+    if not entries:
+        return ""
+
+    references = "\n".join(entries)
+    return (
+        "Each attached file below also has a download URL. Pass the URL to a "
+        "tool that accepts a URL input when the tool needs the original file; "
+        "the file's raw bytes are NOT in this prompt.\n\n"
+        f"{references}"
+    )
+
+
 @dataclass
 class ChunkGrouping:
     id: UUID
@@ -382,6 +417,7 @@ class ContextBuilder:
         input_str: str,
         files: list[File] | None = None,
         transcription_inputs: list[str] | None = None,
+        file_reference_urls: dict[UUID, str] | None = None,
     ) -> str:
         if files is None:
             files = []
@@ -390,6 +426,14 @@ class ContextBuilder:
         if files:
             files_string = build_files_string(files)
             input_str = f"{files_string}\n\n{input_str}"
+
+        # Append fetchable signed URLs (current turn only — history URLs would be
+        # expired). The model keeps the inlined text above and additionally gets
+        # a reference it can hand to a URL-accepting tool.
+        if file_reference_urls:
+            references_string = build_file_references_string(files, file_reference_urls)
+            if references_string:
+                input_str = f"{references_string}\n\n{input_str}"
 
         if transcription_inputs:
             # For now, transcription is only available for apps,
@@ -471,6 +515,7 @@ class ContextBuilder:
         use_image_generation: bool = False,
         web_search_results: Sequence[_InformationChunkLike] | None = None,
         mcp_tools: list[FunctionDefinition] | None = None,
+        file_reference_urls: dict[UUID, str] | None = None,
     ) -> Context:
         if files is None:
             files = []
@@ -491,6 +536,7 @@ class ContextBuilder:
             input_str=input_str,
             files=self._get_files_by_type(files, FileType.TEXT),
             transcription_inputs=transcription_inputs,
+            file_reference_urls=file_reference_urls,
         )
         tokens_used_input = count_tokens(_input_string, model_name)
         tokens_used += tokens_used_input

@@ -176,22 +176,43 @@ async def generate_signed_url(
 ):
     # Verify the file exists and the user has access to it
     service = container.file_service()
-    await service.get_file_infos(file_ids=[id])
+    current_user = container.user()
+    file = await service.get_file_by_id(file_id=id)
 
     # Calculate expiration time
     expires_at = int(time.time()) + signed_url_req.expires_in
 
-    # Generate the signed token
+    # Generate the signed token. tenant_id is bound into the signature so the
+    # download handler refuses cross-tenant replay even if the URL leaks.
     token = generate_signed_token(
         file_id=id,
         expires_at=expires_at,
         content_disposition=signed_url_req.content_disposition,
+        tenant_id=current_user.tenant_id,
     )
 
     # Build the full URL
     # Get the base URL from the request
     base_url = str(request.base_url).rstrip("/")
     url = f"{base_url}/api/v1/files/{id}/download/?token={token}"
+
+    audit_service = container.audit_service()
+    await audit_service.log_async(
+        tenant_id=current_user.tenant_id,
+        user=current_user,
+        action=ActionType.FILE_SIGNED_URL_MINTED,
+        entity_type=EntityType.FILE,
+        entity_id=id,
+        description=f"Minted signed URL for file '{file.name}' (expires {expires_at})",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=file,
+            extra={
+                "expires_at": expires_at,
+                "content_disposition": signed_url_req.content_disposition.value,
+            },
+        ),
+    )
 
     return SignedURLResponse(url=url, expires_at=expires_at)
 
@@ -239,6 +260,33 @@ async def download_file_signed(
     # Get the file without auth
     file_repo = container.file_repo()
     file = await file_repo.get_by_id(file_id=payload["file_id"])
+
+    # Tenant binding: the signing-time tenant must match the file's tenant.
+    # Defends against cross-tenant replay if a signed URL ever leaks.
+    token_tenant_id = payload.get("tenant_id")
+    if token_tenant_id is None or str(file.tenant_id) != token_tenant_id:
+        raise UnauthorizedException("Token not valid for this file")
+
+    # "original" variant: stream the original upload bytes from external storage
+    # so a downstream consumer (e.g. an MCP tool) gets the real file rather than
+    # the extracted .txt. Falls through to the text/blob behavior when the
+    # original is unavailable (storage unconfigured or no key persisted).
+    object_storage = container.file_object_storage()
+    if (
+        payload.get("variant") == "original"
+        and file.storage_key
+        and object_storage.is_configured()
+    ):
+        headers = {
+            "Content-Disposition": (
+                f'{content_disposition.value}; filename="{file.name}"'
+            )
+        }
+        return StreamingResponse(
+            object_storage.open_stream(file.storage_key),
+            media_type=file.mimetype or "application/octet-stream",
+            headers=headers,
+        )
 
     if file.text is None and file.blob is None:
         raise NotFoundException("File content not found")

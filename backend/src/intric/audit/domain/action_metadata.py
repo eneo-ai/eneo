@@ -193,6 +193,10 @@ ACTION_METADATA: dict[str, ActionMetadata] = {
         "name_sv": "Fil raderad",
         "description_sv": "Loggar när filer tas bort",
     },
+    ActionType.FILE_SIGNED_URL_MINTED.value: {
+        "name_sv": "Signerad fil-URL skapad",
+        "description_sv": "Loggar när en signerad nedladdnings-URL skapas för en fil",
+    },
     ActionType.WEBSITE_CREATED.value: {
         "name_sv": "Webbplats tillagd",
         "description_sv": "Loggar när en webbplats läggs till för crawling",

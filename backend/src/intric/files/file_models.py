@@ -31,6 +31,10 @@ class FileBaseWithContent(FileBase):
     text: Optional[str] = None
     blob: Optional[bytes] = None
     transcription: Optional[str] = None
+    # Object key in the external S3-compatible store holding the original upload
+    # bytes. NULL when storage is unconfigured, the upload failed, or the row
+    # predates the feature.
+    storage_key: Optional[str] = None
 
     @model_validator(mode="after")
     def require_one_of_text_or_image(self) -> "FileBaseWithContent":

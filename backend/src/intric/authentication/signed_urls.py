@@ -19,13 +19,29 @@ SIGNING_KEY = _get_signing_key()
 
 
 def generate_signed_token(
-    file_id: UUID, expires_at: int, content_disposition: ContentDisposition
+    file_id: UUID,
+    expires_at: int,
+    content_disposition: ContentDisposition,
+    tenant_id: UUID | None = None,
+    variant: str = "text",
 ) -> str:
-    """Generate a signed token for file access."""
+    """Generate a signed token for file access.
+
+    ``tenant_id`` is encoded in the payload (and therefore covered by the HMAC)
+    so the download handler can refuse tokens whose tenant does not match the
+    file being requested, defending against cross-tenant replay if a URL leaks.
+
+    ``variant`` selects what the download serves: ``"text"`` (the extracted
+    ``.txt``, the historical behavior) or ``"original"`` (the original upload
+    bytes streamed from external storage). Because it is inside the signed
+    payload, a ``"text"`` URL cannot be tampered into fetching the original.
+    """
     payload = {
         "file_id": str(file_id),
         "expires_at": expires_at,
         "content_disposition": content_disposition.value,
+        "tenant_id": str(tenant_id) if tenant_id is not None else None,
+        "variant": variant,
     }
 
     # Encode the payload as JSON and then base64
@@ -77,3 +93,27 @@ def verify_signed_token(token: str) -> dict[str, Any] | None:
         return payload
     except Exception:
         return None
+
+
+def build_signed_download_url(
+    file_id: UUID,
+    base_url: str,
+    expires_in: int,
+    tenant_id: UUID | None = None,
+    variant: str = "original",
+    content_disposition: ContentDisposition = ContentDisposition.ATTACHMENT,
+) -> str:
+    """Build an absolute signed download URL for a file.
+
+    Used where there is no ``Request`` object (e.g. the completion layer), so
+    ``base_url`` must be the configured public origin (no trailing slash).
+    """
+    expires_at = int(time.time()) + expires_in
+    token = generate_signed_token(
+        file_id=file_id,
+        expires_at=expires_at,
+        content_disposition=content_disposition,
+        tenant_id=tenant_id,
+        variant=variant,
+    )
+    return f"{base_url.rstrip('/')}/api/v1/files/{file_id}/download/?token={token}"
