@@ -814,6 +814,8 @@
   "model_disabled": "model disabled",
   "model_settings": "Model Settings",
   "model_settings_description": "Configure model-specific parameters for advanced control over the response.",
+  "inline_file_text": "Inline file text",
+  "inline_file_text_description": "Insert the extracted text of attached files into the prompt. Disable to pass large files to tools by URL only, keeping them out of the context window (requires external file storage).",
   "models": "Models",
   "monthly": "Monthly",
   "more": "More",

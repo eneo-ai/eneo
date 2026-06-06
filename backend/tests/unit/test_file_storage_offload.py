@@ -17,6 +17,7 @@ from eneo.authentication.signed_urls import (
     verify_signed_token,
 )
 from eneo.completion_models.infrastructure.context_builder import (
+    ContextBuilder,
     build_file_references_string,
 )
 from eneo.files.file_models import ContentDisposition, FileBaseWithContent, FileType
@@ -151,6 +152,53 @@ class TestFileReferencesString:
 
     def test_empty_when_no_file_in_map(self):
         assert build_file_references_string([self._file(uuid4())], {}) == ""
+
+
+class TestInlineFileTextToggle:
+    def _file(self, file_id, text):
+        return SimpleNamespace(
+            id=file_id,
+            name="doc.csv",
+            text=text,
+            mimetype="text/csv",
+            size=999,
+        )
+
+    def test_inline_on_keeps_text_and_adds_url(self):
+        fid = uuid4()
+        out = ContextBuilder()._build_input(
+            input_str="question",
+            files=[self._file(fid, "row1,row2")],
+            file_reference_urls={fid: "https://x/dl"},
+            inline_file_text=True,
+        )
+        assert "row1,row2" in out  # extracted text inlined
+        assert "https://x/dl" in out  # plus the fetchable URL
+
+    def test_inline_off_drops_text_for_referenced_file(self):
+        fid = uuid4()
+        out = ContextBuilder()._build_input(
+            input_str="question",
+            files=[self._file(fid, "huge-csv-body")],
+            file_reference_urls={fid: "https://x/dl"},
+            inline_file_text=False,
+        )
+        assert "huge-csv-body" not in out  # text kept out of the context window
+        assert "https://x/dl" in out  # only the URL is surfaced
+
+    def test_inline_off_still_inlines_file_without_url(self):
+        with_url, without_url = uuid4(), uuid4()
+        out = ContextBuilder()._build_input(
+            input_str="question",
+            files=[
+                self._file(with_url, "ALPHACONTENT"),
+                self._file(without_url, "BETACONTENT"),
+            ],
+            file_reference_urls={with_url: "https://x/dl"},
+            inline_file_text=False,
+        )
+        assert "ALPHACONTENT" not in out
+        assert "BETACONTENT" in out  # no URL -> still inlined so model sees it
 
 
 class TestFileServiceStorageOffload:
