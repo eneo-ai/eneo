@@ -153,7 +153,9 @@ class CompletionService:
         Empty when there is no public origin or tenant context, or no file has a
         ``storage_key`` (storage unconfigured or upload degraded gracefully).
         """
-        base_url = self.config.public_origin
+        # Prefer an explicit tool-facing base URL (reachable server-to-server by
+        # the MCP tool); fall back to the browser-facing public origin.
+        base_url = self.config.file_reference_base_url or self.config.public_origin
         if not base_url or self.tenant is None:
             return {}
 
