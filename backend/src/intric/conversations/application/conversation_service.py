@@ -13,6 +13,7 @@ from intric.completion_models.infrastructure.static_prompts import (
 )
 from intric.conversations.conversation_models import PreflightResponse
 from intric.files.file_models import FileType
+from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException
 from intric.sessions.session import SessionUpdate
 
@@ -178,7 +179,7 @@ class ConversationService:
         no stable cost to report up-front. Model name and context window are
         echoed so the caller can compute percentage fill without a round-trip.
         """
-        model, selector_tokens = await self._resolve_preflight_model(
+        model, selector_tokens, inline_file_text = await self._resolve_preflight_model(
             question=question,
             session_id=session_id,
             assistant_id=assistant_id,
@@ -198,6 +199,20 @@ class ConversationService:
             # Only text files reach the LLM via the input string; binary/image
             # files use provider-specific token accounting we can't preview here.
             text_files = [f for f in files if f.file_type == FileType.TEXT and f.text]
+
+            # When the assistant does not inline file text, a file whose original
+            # is reachable via a signed URL is sent as that URL (a tiny block),
+            # not its extracted text — so its text must not be counted here. Mirror
+            # completion_service: a URL is minted only when a base URL is set and
+            # the file has a storage_key.
+            if not inline_file_text:
+                app_settings = get_settings()
+                base_url = (
+                    app_settings.file_reference_base_url or app_settings.public_origin
+                )
+                if base_url:
+                    text_files = [f for f in text_files if not f.storage_key]
+
             excluded_file_count = len(files) - len(text_files)
             if text_files:
                 # Mirror context_builder.build_files_string: that wrapper text
@@ -219,7 +234,7 @@ class ConversationService:
         assistant_id: Optional["UUID"],
         group_chat_id: Optional["UUID"],
         tool_assistant_id: Optional["UUID"] = None,
-    ) -> "tuple[CompletionModel, int]":
+    ) -> "tuple[CompletionModel, int, bool]":
         """Resolve the completion model the next chat request would target.
 
         Mirrors ask_conversation routing rules so the preflight count uses the
@@ -227,9 +242,14 @@ class ConversationService:
         selected by an LLM at send time, so preflight uses the smallest context
         window among the candidate assistants as a conservative projection.
 
+        Also returns the resolved assistant's ``inline_file_text`` so preflight
+        can drop URL-only file text from the count. Group chat picks an assistant
+        at send time, so it conservatively reports True (keep counting).
+
         Raises BadRequestException for the same configurations that would fail
         on actual send (no assistants in group chat, no completion model set).
         """
+        inline_file_text = True
         if session_id:
             session = await self.session_service.get_session_by_uuid(session_id)
             assert session is not None
@@ -246,10 +266,12 @@ class ConversationService:
                 )
                 model = assistant.completion_model
                 selector_tokens = 0
+                inline_file_text = assistant.inline_file_text
         elif assistant_id:
             assistant, _ = await self.assistant_service.get_assistant(assistant_id)
             model = assistant.completion_model
             selector_tokens = 0
+            inline_file_text = assistant.inline_file_text
         elif group_chat_id:
             model, selector_tokens = await self._group_chat_preflight_model(
                 group_chat_id,
@@ -265,7 +287,7 @@ class ConversationService:
             raise BadRequestException(
                 "No completion model configured for this conversation."
             )
-        return model, selector_tokens
+        return model, selector_tokens, inline_file_text
 
     async def _group_chat_preflight_model(
         self,

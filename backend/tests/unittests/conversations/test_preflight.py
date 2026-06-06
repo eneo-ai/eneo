@@ -1,8 +1,10 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
+import intric.conversations.application.conversation_service as conversation_service_mod
 from intric.completion_models.infrastructure.context_builder import (
     build_files_string,
     count_tokens,
@@ -133,6 +135,40 @@ async def test_preflight_file_tokens_match_context_builder_output():
     assert result.file_tokens > 0
 
     service.file_service.get_files_by_ids.assert_awaited_once_with(file_ids=[file_id])
+
+
+@pytest.mark.asyncio
+async def test_preflight_excludes_url_only_file_text_when_inline_disabled(monkeypatch):
+    """A stored file is sent as a URL (not inlined) when the assistant disables
+    inlining, so its text must not be counted toward the context window."""
+    monkeypatch.setattr(
+        conversation_service_mod,
+        "get_settings",
+        lambda: SimpleNamespace(
+            file_reference_base_url="http://host.docker.internal:8123",
+            public_origin=None,
+        ),
+    )
+
+    text_file = MagicMock()
+    text_file.file_type = FileType.TEXT
+    text_file.text = "the quick brown fox" * 100
+    text_file.name = "big.csv"
+    text_file.storage_key = "tenant/uuid/big.csv"
+
+    assistant = _make_assistant()
+    assistant.inline_file_text = False
+
+    service = _make_service(assistant=assistant, files=[text_file])
+
+    result = await service.preflight_tokens(
+        question="summarize this",
+        file_ids=[uuid4()],
+        assistant_id=uuid4(),
+    )
+
+    assert result.file_tokens == 0
+    assert result.excluded_file_count == 1
 
 
 @pytest.mark.asyncio
