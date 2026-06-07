@@ -12,16 +12,25 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
+from intric.authentication.signed_urls import build_signed_download_url
 from intric.external_knowledge.client import provider_client_from_settings
+from intric.main.config import get_settings
 from intric.main.exceptions import BadRequestException, UnauthorizedException
 
 if TYPE_CHECKING:
     from intric.actors import ActorManager
+    from intric.files.file_service import FileService
     from intric.mcp_servers.application.mcp_server_service import MCPServerService
     from intric.mcp_servers.domain.entities.mcp_server import MCPServer
+    from intric.settings.encryption_service import EncryptionService
     from intric.spaces.space import Space
     from intric.spaces.space_service import SpaceService
     from intric.users.user import UserInDB
+
+# The retrieval-collection MCP tool Eneo calls to ingest documents. Eneo invokes
+# it directly (as an MCP client) so ingest is deterministic and never depends on
+# the model choosing the right provider tool.
+_INGEST_TOOL_NAME = "ingest_documents"
 
 
 class ExternalKnowledgeService:
@@ -33,11 +42,15 @@ class ExternalKnowledgeService:
         space_service: "SpaceService",
         mcp_server_service: "MCPServerService",
         actor_manager: "ActorManager",
+        file_service: "FileService",
+        encryption_service: "EncryptionService | None" = None,
     ):
         self.user = user
         self.space_service = space_service
         self.mcp_server_service = mcp_server_service
         self.actor_manager = actor_manager
+        self.file_service = file_service
+        self.encryption_service = encryption_service
 
     async def create_knowledge_source(
         self, *, space: "Space", name: str
@@ -90,3 +103,104 @@ class ExternalKnowledgeService:
         await self.space_service.update_space(
             id=cast(UUID, space.id), mcp_server_ids=enabled_ids
         )
+
+    async def ingest_files(
+        self, *, space: "Space", knowledge_source_id: UUID, file_ids: list[UUID]
+    ) -> int:
+        """Ingest already-uploaded files into a knowledge source, deterministically.
+
+        Eneo mints a signed download URL per file and calls the knowledge source's
+        own ``ingest_documents`` MCP tool itself (as an MCP client, using the stored
+        per-collection token); the provider fetches the bytes from the URLs. No
+        model picks the tool, no bytes are pushed by Eneo. Space-admin gated; the
+        files must be owned by the actor and have original bytes in object storage.
+        """
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+        if not actor.can_edit_space():
+            raise UnauthorizedException(
+                "Only a space admin can manage knowledge sources.",
+                code="forbidden_action",
+            )
+
+        server = await self.mcp_server_service.get_mcp_server(knowledge_source_id)
+        if not space.is_mcp_server_in_space(knowledge_source_id):
+            raise BadRequestException(
+                "That knowledge source is not enabled in this space."
+            )
+        if not server.external_collection_slug:
+            raise BadRequestException("That server is not a knowledge source.")
+        if not file_ids:
+            raise BadRequestException("No files were provided to ingest.")
+
+        files = await self.file_service.get_files_by_ids(file_ids)
+        found = {file.id for file in files}
+        missing = [fid for fid in file_ids if fid not in found]
+        if missing:
+            raise BadRequestException(
+                "Some files were not found or are not yours: "
+                + ", ".join(str(fid) for fid in missing)
+            )
+
+        settings = get_settings()
+        base_url = settings.file_reference_base_url or settings.public_origin
+        if not base_url:
+            raise BadRequestException(
+                "File ingest needs a tool-facing file URL base "
+                "(FILE_REFERENCE_BASE_URL or public_origin) and object storage."
+            )
+
+        urls: list[str] = []
+        for file in files:
+            if not getattr(file, "storage_key", None):
+                raise BadRequestException(
+                    f"File '{file.name}' has no stored original; ingest requires "
+                    "object storage to be enabled."
+                )
+            urls.append(
+                build_signed_download_url(
+                    file_id=file.id,
+                    base_url=base_url,
+                    expires_in=settings.file_reference_url_expiry_seconds,
+                    tenant_id=self.user.tenant_id,
+                    variant="original",
+                )
+            )
+
+        await self._call_ingest_tool(server=server, urls=urls)
+        return len(files)
+
+    async def _call_ingest_tool(self, *, server: "MCPServer", urls: list[str]) -> None:
+        """Call the knowledge source's ``ingest_documents`` tool with the URLs."""
+        from intric.mcp_servers.infrastructure.client.mcp_client import (
+            MCPClient,
+            MCPClientError,
+        )
+
+        token = None
+        raw_token = (server.http_auth_config_schema or {}).get("token")
+        if raw_token:
+            if self.encryption_service and self.encryption_service.is_encrypted(
+                raw_token
+            ):
+                token = self.encryption_service.decrypt(raw_token)
+            else:
+                token = raw_token
+
+        client = MCPClient(
+            mcp_server=server,
+            auth_credentials={"token": token} if token else None,
+        )
+        try:
+            await client.connect()
+            result = await client.call_tool(_INGEST_TOOL_NAME, {"urls": urls})
+        except MCPClientError as exc:
+            raise BadRequestException(
+                f"The knowledge source could not ingest the documents: {exc}"
+            )
+        finally:
+            await client.disconnect()
+
+        if result.get("is_error"):
+            raise BadRequestException(
+                "The knowledge source rejected the ingest request."
+            )

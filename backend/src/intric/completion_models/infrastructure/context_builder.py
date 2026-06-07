@@ -122,6 +122,7 @@ def build_file_references_string(
     entries = [
         json.dumps(
             {
+                "id": str(file.id),
                 "filename": file.name,
                 "mimetype": file.mimetype,
                 "size_bytes": file.size,
@@ -136,9 +137,9 @@ def build_file_references_string(
 
     references = "\n".join(entries)
     return (
-        "Each attached file below also has a download URL. Pass the URL to a "
-        "tool that accepts a URL input when the tool needs the original file; "
-        "the file's raw bytes are NOT in this prompt.\n\n"
+        "Each attached file below has an id and a download URL. Pass the id to a "
+        "tool that takes file ids, or the URL to a tool that fetches the file; the "
+        "file's raw bytes are NOT in this prompt.\n\n"
         f"{references}"
     )
 

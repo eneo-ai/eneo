@@ -18,11 +18,13 @@ import pytest
 
 from intric.config_capabilities.capabilities.knowledge_source import (
     CreateKnowledgeSourceInput,
+    IngestFilesInput,
 )
 from intric.config_capabilities.capability import CapabilityContext
 from intric.config_capabilities.context import run_capability
 from intric.config_capabilities.registry import get_capability
 from intric.external_knowledge.client import ProviderCollection
+from intric.files.file_models import FileCreate, FileType
 from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.mcp_servers.application.mcp_server_service import (
     ConnectionResult,
@@ -172,3 +174,90 @@ async def test_create_errors_when_no_provider_is_configured(
                 _ctx(container, admin_user, space),
                 CreateKnowledgeSourceInput(name="Handbook"),
             )
+
+
+class _FakeMCPClient:
+    """Captures the deterministic ingest_documents call Eneo makes."""
+
+    calls: list[tuple[str, dict]] = []
+
+    def __init__(self, *, mcp_server, auth_credentials=None):
+        self.mcp_server = mcp_server
+        self.auth_credentials = auth_credentials
+
+    async def connect(self):
+        pass
+
+    async def disconnect(self):
+        pass
+
+    async def call_tool(self, name, arguments):
+        _FakeMCPClient.calls.append((name, arguments))
+        return {"content": [], "is_error": False}
+
+
+async def test_ingest_calls_provider_ingest_documents_with_signed_urls(
+    db_container, admin_user, monkeypatch
+):
+    collection = ProviderCollection(
+        external_id="ext-1",
+        slug="handbook",
+        mcp_endpoint="https://provider.example/api/collections/handbook/mcp",
+        mcp_token="tok-123",
+        tools=[],
+    )
+    monkeypatch.setattr(
+        "intric.external_knowledge.service.provider_client_from_settings",
+        lambda: _FakeProvider(collection),
+    )
+    _stub_connection_test(monkeypatch)
+    _FakeMCPClient.calls = []
+    monkeypatch.setattr(
+        "intric.mcp_servers.infrastructure.client.mcp_client.MCPClient",
+        _FakeMCPClient,
+    )
+    # A tool-facing base URL so signed URLs can be minted.
+    from intric.main.config import get_settings
+
+    monkeypatch.setattr(
+        get_settings(), "file_reference_base_url", "http://localhost:8123"
+    )
+
+    async with db_container(user=admin_user) as container:
+        space = await container.space_service().create_space(name="ingest-space")
+        ks = await container.external_knowledge_service().create_knowledge_source(
+            space=space, name="Handbook"
+        )
+
+        repo = container.file_repo()
+        files = [
+            await repo.add(
+                FileCreate(
+                    name=name,
+                    checksum=uuid4().hex,
+                    size=len(text),
+                    mimetype="text/plain",
+                    file_type=FileType.TEXT,
+                    text=text,
+                    storage_key=f"s3/{name}",  # original retained -> signed URL exists
+                    user_id=admin_user.id,
+                    tenant_id=admin_user.tenant_id,
+                )
+            )
+            for name, text in (("a.txt", "alpha"), ("b.txt", "beta"))
+        ]
+
+        refreshed = await container.space_repo().one(space.id)
+        cap = get_capability("knowledge_source.ingest_files")
+        result = await run_capability(
+            cap,
+            _ctx(container, admin_user, refreshed),
+            IngestFilesInput(knowledge_source_id=ks.id, file_ids=[f.id for f in files]),
+        )
+
+    assert result.data == {"ingested": 2}
+    assert len(_FakeMCPClient.calls) == 1
+    name, args = _FakeMCPClient.calls[0]
+    assert name == "ingest_documents"
+    assert len(args["urls"]) == 2
+    assert all("/download/?token=" in u for u in args["urls"])

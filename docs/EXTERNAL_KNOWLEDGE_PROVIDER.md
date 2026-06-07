@@ -150,43 +150,36 @@ one collection, speaking the **Streamable HTTP** transport (MCP 2025-03-26 or la
 At chat time, when the knowledge source is granted to an assistant, Eneo connects to
 this endpoint as an MCP client and calls its tools.
 
-### Ingest tool (how operator file ingest works)
+### `ingest_documents` tool (required for file ingest)
 
-File ingest is **a tool on this MCP server**, not a byte push from Eneo. Eneo never
-uploads file bytes to the provider; it does not invent a parallel ingest API. Expose
-a tool that takes signed download URLs, for example:
+File ingest is **a tool on this MCP server**, not a byte push from Eneo and not a
+separate HTTP API. To support operator file ingest, the collection's MCP server
+**must expose a tool with this exact name and shape**:
 
 ```
-ingest_documents(urls: string[], ...)   # tool name and extra args are yours
+ingest_documents(urls: string[])
 ```
 
-The flow:
+It receives a list of signed download URLs, **fetches the bytes from each URL itself**
+(behind your SSRF guard, see Leg 3), and ingests them durably into the collection. The
+collection is implicit (this MCP server is already scoped to one collection), so the
+tool takes no collection argument. Return a normal (non-error) tool result on success.
 
-1. The operator attaches files in a chat with the assistant that has this knowledge
-   source granted.
-2. Eneo uploads each file to its own object store and surfaces a signed download URL
-   per file to the model (the same file-reference mechanism every MCP tool gets, see
-   Leg 3). The model receives one `{filename, mimetype, size_bytes, url}` entry per
-   file. No special wiring per provider.
-3. The model calls your `ingest_documents` tool with the collected URLs.
-4. Your tool **fetches the bytes from each signed URL itself** (Leg 3, behind your
-   SSRF guard) and ingests them durably into the collection.
+**Eneo calls this tool itself, deterministically.** Eneo does not rely on the model to
+pick or call your tool. When an operator adds files to a knowledge source, Eneo:
 
-So ingest reuses Legs 2 and 3 you already implement: a tool call plus a file fetch.
-The collection is implicit (this MCP server is already scoped to one collection), so
-the tool does not need a collection argument.
+1. mints a signed download URL per file (object-storage originals only, see Leg 3), then
+2. connects to this MCP server as a client using the per-collection token (Leg 2) and
+   calls `ingest_documents` with `{ "urls": [ ... ] }`.
 
-Eneo's create call (Leg 1) sends only `{ "name": ... }` and passes no ingest flag, so
-enable the ingest tool on Eneo-provisioned collections by default rather than gating
-it behind a per-collection parameter.
+So a conforming provider only needs the tool to exist with that name/signature; the
+orchestration (which files, which collection, auth, retries) lives in Eneo. Enable the
+tool on Eneo-provisioned collections by default (Eneo's create call sends only
+`{ "name": ... }` and passes no ingest flag).
 
-**Storage dependency + text fallback.** A signed URL only exists for files whose
-original bytes live in Eneo object storage. Without object storage Eneo retains only
-extracted text (no original to fetch), so there is no URL to pass. If you want to
-support that configuration, also expose a text-ingest tool (for example
-`capture_document(text, ...)`) that the model can call with the file's extracted text
-that Eneo inlines into the prompt. The URL path is the primary, durable one; the text
-path is a best-effort fallback.
+**Storage dependency.** A signed URL only exists for files whose original bytes live
+in Eneo object storage. Without object storage there is no URL and ingest is
+unavailable for that file.
 
 ## Leg 3: File access (provider calls Eneo)
 
@@ -245,8 +238,8 @@ A minimal conforming provider:
       unauthenticated).
 - [ ] The MCP endpoint is live and passes an MCP handshake the moment it is returned.
 - [ ] The MCP server speaks Streamable HTTP and exposes at least one retrieval tool.
-- [ ] (For file ingest) Exposes an ingest tool that takes signed file URLs
-      (e.g. `ingest_documents(urls)`) and fetches the bytes itself, SSRF-guarded.
+- [ ] (For file ingest) Exposes a tool named exactly `ingest_documents(urls)` that
+      fetches the bytes from each URL itself, SSRF-guarded. Eneo calls it directly.
 - [ ] (Optional) Reads `X-Eneo-*` identity headers when present.
 
 ## Reference: end-to-end happy path
@@ -263,7 +256,8 @@ chat once the source is granted.
    to the assistant.
 5. Operator turns off edit mode, attaches files in normal chat, and says "add these to
    Handbook."
-6. Eneo surfaces a signed download URL per file to the model; the model calls the
-   provider's `ingest_documents` tool with the URLs; the provider fetches and ingests.
+6. To add files, Eneo mints a signed download URL per file and calls the provider's
+   `ingest_documents` tool itself (as an MCP client with the per-collection token);
+   the provider fetches and ingests. Eneo orchestrates; the model does not call it.
 7. Retrieval: the model calls the provider's search/answer tools over the collection,
    optionally with `X-Eneo-*` identity headers.

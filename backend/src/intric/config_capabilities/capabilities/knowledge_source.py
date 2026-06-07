@@ -10,6 +10,7 @@ collection. Granting the source to an assistant is a separate step
 from __future__ import annotations
 
 from typing import cast
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -66,6 +67,55 @@ register(
         audit_entity=EntityType.MCP_SERVER,
         confirm_summary_en="create a knowledge source named '{name}'",
         confirm_summary_sv="skapa en kunskapskälla med namnet '{name}'",
+        form_renderable=True,
+    )
+)
+
+
+class IngestFilesInput(BaseModel):
+    knowledge_source_id: UUID = Field(
+        description="Id of the existing knowledge source to add the files to."
+    )
+    file_ids: list[UUID] = Field(
+        description=(
+            "Ids of already-uploaded files to add. Use the 'id' from the attached "
+            "file references in the conversation."
+        )
+    )
+
+
+async def _ingest_files(ctx: CapabilityContext, inp: BaseModel) -> CapabilityResult:
+    data = cast(IngestFilesInput, inp)
+    count = await ctx.container.external_knowledge_service().ingest_files(
+        space=ctx.space,
+        knowledge_source_id=data.knowledge_source_id,
+        file_ids=data.file_ids,
+    )
+    return CapabilityResult(
+        summary=f"Added {count} file(s) to the knowledge source.",
+        entity_id=data.knowledge_source_id,
+        data={"ingested": count},
+    )
+
+
+register(
+    ConfigCapability(
+        id="knowledge_source.ingest_files",
+        scope=Scope.SPACE,
+        input_model=IngestFilesInput,
+        permission=lambda actor: actor.can_edit_space(),
+        handler=_ingest_files,
+        title_en="Add files to knowledge source",
+        title_sv="Lägg till filer i kunskapskälla",
+        description=(
+            "Add already-uploaded files to an EXISTING knowledge source. Eneo hands "
+            "the provider signed download URLs and the provider fetches them. Do not "
+            "create a new knowledge source to hold attached files; use this instead."
+        ),
+        audit_action=ActionType.MCP_SERVER_UPDATED,
+        audit_entity=EntityType.MCP_SERVER,
+        confirm_summary_en="add the selected files to the knowledge source",
+        confirm_summary_sv="lägg till de valda filerna i kunskapskällan",
         form_renderable=True,
     )
 )

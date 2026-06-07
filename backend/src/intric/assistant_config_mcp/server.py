@@ -206,6 +206,13 @@ _PERSONA: dict[str, dict[str, str]] = {
             "itself attach it here; do both unless the user only asked to create it in "
             "the space."
         ),
+        "ingest": (
+            "\n\nTo add an attached file to an EXISTING knowledge source, call "
+            "knowledge_source_ingest_files with that source's mcp_server_id and the "
+            "file id(s) from the attached file references. Do NOT create a new "
+            "knowledge source to hold an attached file; if you are unsure which source "
+            "the user means, list them with space_list_mcp_servers or ask."
+        ),
     },
     "sv": {
         "base": (
@@ -268,6 +275,13 @@ _PERSONA: dict[str, dict[str, str]] = {
             "källa kopplar den inte automatiskt här; gör båda om inte användaren bara "
             "bad om att skapa den i utrymmet."
         ),
+        "ingest": (
+            "\n\nFör att lägga till en bifogad fil i en BEFINTLIG kunskapskälla, anropa "
+            "knowledge_source_ingest_files med den källans mcp_server_id och fil-id:t "
+            "från de bifogade filreferenserna. Skapa INTE en ny kunskapskälla för att "
+            "hålla en bifogad fil; om du är osäker på vilken källa användaren menar, "
+            "lista dem med space_list_mcp_servers eller fråga."
+        ),
     },
 }
 
@@ -299,6 +313,7 @@ def build_config_persona(language: str | None, settings: Settings) -> str:
     if external_configured:
         parts.append(blocks["naming"])
         parts.append(blocks["two_step"])
+        parts.append(blocks["ingest"])
     return "".join(parts)
 
 

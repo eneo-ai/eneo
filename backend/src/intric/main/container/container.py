@@ -1174,6 +1174,8 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         mcp_server_service=mcp_server_service,
         actor_manager=actor_manager,
+        file_service=file_service,
+        encryption_service=encryption_service,
     )
     tenant_integration_service = providers.Factory(
         TenantIntegrationService,
