@@ -62,6 +62,17 @@ def test_persona_swedish_uses_kunskapskalla():
     assert "knowledge_source_create" in persona
 
 
+def test_persona_guards_set_name_and_lists_kunskapssamling():
+    # "skapa en kunskapssamling som heter X" must not become a rename of the
+    # assistant; the guard + synonym appear in every variant via the base block.
+    for required in (True, False):
+        persona = build_config_persona(
+            "sv", _settings(url="https://p", key="k", required=required)
+        )
+        assert "set_name" in persona
+        assert "kunskapssamling" in persona
+
+
 def _server(*, knowledge_source: bool) -> MCPServer:
     return MCPServer(
         tenant_id=uuid4(),
