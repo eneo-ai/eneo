@@ -21,7 +21,7 @@ Eneo is always the server.
 | --- | --- | --- | --- | --- |
 | 1. Provisioning | Eneo | **Provider** | HTTPS/JSON | Create a collection, obtain its MCP endpoint |
 | 2. Retrieval | Eneo | **Provider** | MCP (Streamable HTTP) | Search/answer over the collection at chat time |
-| 3. File access (optional) | **Provider** | Eneo | HTTPS | Fetch original uploaded file bytes |
+| 3. File access | **Provider** | Eneo | HTTPS | Fetch original uploaded file bytes (e.g. for the ingest tool) |
 
 In Legs 1 and 2 the provider is the server and Eneo is the client. In Leg 3 the
 provider is the client and Eneo is the server.
@@ -114,20 +114,8 @@ block, this endpoint is still recommended for robustness but will rarely be hit.
   for tools is the live MCP `tools/list`, so you do not need to keep the HTTP
   response's tool list in sync.
 
-### File ingest (planned, Phase 4: not yet finalized)
-
-A later phase adds operator file ingest: an operator attaches files in chat and Eneo
-uploads their bytes into the collection. The intended shape is an ingest endpoint
-that accepts a file upload for a collection, roughly:
-
-```
-POST /api/collections/{slug}/files
-Content-Type: multipart/form-data  (filename, mimetype, bytes)
-Authorization: Bearer <provisioning-key>
-```
-
-This endpoint is **not part of the stable contract yet**. Treat the above as
-direction, not a frozen interface. This document will be updated when Phase 4 lands.
+There is deliberately **no file-ingest HTTP endpoint** here. File ingest is an MCP
+tool on the collection's server (see Leg 2), not an Eneo-to-provider byte push.
 
 ## Leg 2: MCP server (the provider implements this)
 
@@ -146,11 +134,42 @@ one collection, speaking the **Streamable HTTP** transport (MCP 2025-03-26 or la
 At chat time, when the knowledge source is granted to an assistant, Eneo connects to
 this endpoint as an MCP client and calls its tools.
 
-## Leg 3: File access (optional, provider calls Eneo)
+### Ingest tool (how operator file ingest works)
+
+File ingest is **a tool on this MCP server**, not a byte push from Eneo. Eneo never
+uploads file bytes to the provider; it does not invent a parallel ingest API. Expose
+a tool, for example:
+
+```
+ingest_file(url: string, ...)   # name and extra args are yours to define
+```
+
+The flow:
+
+1. The operator attaches files in a chat with the assistant that has this knowledge
+   source granted.
+2. Eneo uploads each file to its own object store and surfaces a signed download URL
+   for it to the model (the same file-reference mechanism every MCP tool gets, see
+   Leg 3). No special wiring per provider.
+3. The model calls your `ingest_file` tool with that signed URL.
+4. Your tool **fetches the bytes from the signed URL itself** (Leg 3) and ingests
+   them into the collection.
+
+So ingest reuses Legs 2 and 3 you already implement: a tool call plus a file fetch.
+The collection slug is implicit (this MCP server is already scoped to one
+collection). Original-file ingest requires Eneo object storage to be configured, so
+a signed URL exists; without it Eneo retains only extracted text and there is no
+original to fetch.
+
+## Leg 3: File access (provider calls Eneo)
+
+Required if you support file ingest (the ingest tool fetches here); otherwise optional.
+
 
 When Eneo invokes your MCP tools it can surface references to original uploaded
-files so your tool can fetch the bytes itself. Two mechanisms, both opt-in and both
-inherited from Eneo's general MCP integration (not specific to knowledge sources):
+files so your tool can fetch the bytes itself. This is the mechanism the ingest tool
+(Leg 2) uses. Two parts, both inherited from Eneo's general MCP integration (not
+specific to knowledge sources):
 
 ### Identity headers
 
@@ -199,16 +218,25 @@ A minimal conforming provider:
       unauthenticated).
 - [ ] The MCP endpoint is live and passes an MCP handshake the moment it is returned.
 - [ ] The MCP server speaks Streamable HTTP and exposes at least one retrieval tool.
+- [ ] (For file ingest) Exposes an ingest tool that takes a signed file URL and
+      fetches the bytes itself.
 - [ ] (Optional) Reads `X-Eneo-*` identity headers when present.
-- [ ] (Optional) Fetches original files via Eneo's signed download URLs.
 
 ## Reference: end-to-end happy path
 
-1. Operator, in assistant edit mode, says "create a knowledge source called Handbook."
+Configuration happens in edit mode; content (ingest) and retrieval happen in normal
+chat once the source is granted.
+
+1. Operator, in assistant edit mode, says "create a knowledge source called Handbook
+   and give it to this assistant."
 2. Eneo: `POST {provider}/api/collections {"name":"Handbook"}` with the provisioning key.
 3. Provider returns `{slug, mcp:{endpoint, token}}`.
-4. Eneo runs an MCP handshake against `endpoint`, discovers tools, and registers it
-   as a space-scoped MCP server (bearer = `token`), enabling it in the space.
-5. Operator grants the source to the assistant.
-6. At chat time Eneo connects to `endpoint` as an MCP client and calls its tools,
-   optionally forwarding `X-Eneo-*` headers and signed file URLs.
+4. Eneo runs an MCP handshake against `endpoint`, discovers tools, registers it as a
+   space-scoped MCP server (bearer = `token`), enables it in the space, and grants it
+   to the assistant.
+5. Operator turns off edit mode, attaches files in normal chat, and says "add these to
+   Handbook."
+6. Eneo surfaces a signed download URL per file to the model; the model calls the
+   provider's `ingest_file` tool with each URL; the provider fetches and ingests.
+7. Retrieval: the model calls the provider's search/answer tools over the collection,
+   optionally with `X-Eneo-*` identity headers.
