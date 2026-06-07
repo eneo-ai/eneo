@@ -3,6 +3,8 @@
   import MessageIntricInfoBlob from "./MessageIntricInfoBlob.svelte";
   import McpImageAttachments from "./McpImageAttachments.svelte";
   import ToolCallRow from "./ToolCallRow.svelte";
+  import MessageElicitation from "./MessageElicitation.svelte";
+  import type { ElicitationState } from "../../ChatService.svelte";
   import * as Separator from "$lib/components/ui/separator/index.js";
   import { dynamicColour } from "$lib/core/colours";
   import { IconSpeechBubble } from "@intric/icons/speech-bubble";
@@ -40,6 +42,7 @@
           result?: string | null;
           result_status?: string | null;
           mcp_tool_name?: string | null;
+          elicitation?: ElicitationState | null;
         }>
       | undefined
   );
@@ -178,6 +181,9 @@
               onApprove={handleApproveTool}
               onDeny={handleDenyTool}
             />
+            {#if call.elicitation}
+              <MessageElicitation elicitation={call.elicitation} />
+            {/if}
           {/each}
         </div>
       {/each}

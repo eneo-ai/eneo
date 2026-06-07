@@ -1454,6 +1454,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/conversations/respond-elicitation/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Respond To Elicitation
+     * @description Submit a response to a pending MCP elicitation.
+     *
+     *     When a tool calls ``ctx.elicit(...)`` mid-execution, the stream emits an
+     *     ``elicitation_required`` event with an ``elicitation_id``. Use this endpoint
+     *     to relay the user's accept/decline/cancel response back to the waiting tool.
+     */
+    post: operations["respond_to_elicitation_api_v1_conversations_respond_elicitation__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/conversations/{session_id}/name/": {
     parameters: {
       query?: never;
@@ -9453,6 +9477,17 @@ export interface components {
        * @default false
        */
       require_tool_approval?: boolean;
+      /**
+       * Edit Mode
+       * @description When true, an assistant conversation enters configuration mode: the assistant's own prompt and knowledge are set aside and it is given tools to read and change this assistant's own settings. Requires edit rights on the assistant. Ignored for group chats.
+       * @default false
+       */
+      edit_mode?: boolean;
+      /**
+       * Language
+       * @description The user's UI locale (e.g. "sv"/"en"), used to localize edit-mode configuration prompts and tool titles.
+       */
+      language?: string | null;
     };
     /** Counts */
     Counts: {
@@ -10123,6 +10158,28 @@ export interface components {
        * @description List of setting keys that were removed
        */
       deleted_keys: string[];
+    };
+    /**
+     * ElicitationResponse
+     * @description Body for submitting an elicitation response.
+     */
+    ElicitationResponse: {
+      /**
+       * Action
+       * @enum {string}
+       */
+      action: "accept" | "decline" | "cancel";
+      /** Content */
+      content?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /** ElicitationResponseResult */
+    ElicitationResponseResult: {
+      /** Status */
+      status: string;
+      /** Elicitation Id */
+      elicitation_id: string;
     };
     /** EmbeddingModelCreate */
     EmbeddingModelCreate: {
@@ -17180,6 +17237,7 @@ export interface components {
       | "tool_call"
       | "tool_approval_required"
       | "tool_approval_timeout"
+      | "elicitation_required"
       | "token_usage";
     /** SSEText */
     SSEText: {
@@ -22254,6 +22312,7 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
+                    | "elicitation_required"
                     | "token_usage";
                 };
               }
@@ -22282,6 +22341,7 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
+                    | "elicitation_required"
                     | "token_usage";
                   /**
                    * McpToolReferencePublic
@@ -22370,6 +22430,7 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
+                    | "elicitation_required"
                     | "token_usage";
                   /**
                    * ToolCallInfo
@@ -22421,6 +22482,7 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
+                    | "elicitation_required"
                     | "token_usage";
                   /**
                    * ToolCallInfo
@@ -23070,6 +23132,69 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  respond_to_elicitation_api_v1_conversations_respond_elicitation__post: {
+    parameters: {
+      query: {
+        /** @description The elicitation ID from the elicitation_required event */
+        elicitation_id: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ElicitationResponse"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ElicitationResponseResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

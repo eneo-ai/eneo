@@ -125,6 +125,8 @@ export function initConversations(client) {
      * @param {{id: string}[] | undefined} params.files Files to pass on
      * @param {boolean} [params.useWebSearch] Should the assistant search the web? Defaults to false
      * @param {boolean} [params.requireToolApproval] Should tool calls require user approval before execution? Defaults to false
+     * @param {boolean} [params.editMode] Enable conversational configuration ("edit") mode? Defaults to false
+     * @param {string} [params.language] Current UI locale code, used to localize edit-mode prompts/tool titles
      * @param {{assistants: {id: string; handle: string}[]} | undefined} [params.tools] Tool use
      * @param {Object} [params.callbacks]
      * @param {(data: import("../types/resources").SSE.FirstChunk) => void} [params.callbacks.onFirstChunk] Callback to run when the first chunk of the answer is received
@@ -134,6 +136,7 @@ export function initConversations(client) {
      * @param {(data: import("../types/resources").SSE.ToolCall) => void} [params.callbacks.onToolCall] Callback to run when MCP tools are being executed
      * @param {(data: import("../types/resources").SSE.ToolApprovalRequired) => void} [params.callbacks.onToolApprovalRequired] Callback to run when MCP tools require user approval
      * @param {(data: import("../types/resources").SSE.ToolApprovalTimeout) => void} [params.callbacks.onToolApprovalTimeout] Callback to run when a pending tool approval expires
+     * @param {(data: import("../types/resources").SSE.ElicitationRequired) => void} [params.callbacks.onElicitationRequired] Callback for a server-initiated user prompt mid-tool-call
      * @param {(response: Response) => Promise<void>} [params.callbacks.onOpen] Callback to run once the initial response of the backend is received
      * @param {AbortController} [params.abortController] Optionally pass in an AbortController that can abort the stream
      * @throws {IntricError}
@@ -146,6 +149,8 @@ export function initConversations(client) {
       tools,
       useWebSearch,
       requireToolApproval,
+      editMode,
+      language,
       abortController,
       callbacks
     }) => {
@@ -183,7 +188,9 @@ export function initConversations(client) {
               tools,
               stream: true,
               use_web_search: useWebSearch,
-              require_tool_approval: requireToolApproval
+              require_tool_approval: requireToolApproval,
+              edit_mode: editMode,
+              language
             }
           }
         },
@@ -224,6 +231,10 @@ export function initConversations(client) {
 
                 case "tool_approval_required":
                   callbacks?.onToolApprovalRequired?.(data);
+                  break;
+
+                case "elicitation_required":
+                  callbacks?.onElicitationRequired?.(data);
                   break;
 
                 case "tool_approval_timeout":
@@ -304,6 +315,29 @@ export function initConversations(client) {
         // @ts-ignore - requestBody is optional in schema but we always send decisions
         requestBody: {
           "application/json": decisions
+        }
+      });
+      return res;
+    },
+
+    /**
+     * Respond to a pending MCP elicitation (a server-initiated prompt).
+     * @param {Object} params
+     * @param {string} params.elicitationId The elicitation ID from the elicitation_required event
+     * @param {"accept" | "decline" | "cancel"} params.action The user's response
+     * @param {Record<string, unknown> | null} [params.content] Optional structured content for accept
+     * @returns {Promise<{status: string, elicitation_id: string}>}
+     * @throws {IntricError}
+     * */
+    respondElicitation: async ({ elicitationId, action, content }) => {
+      /** @type {{status: string, elicitation_id: string}} */
+      // @ts-ignore - response type is unknown in schema
+      const res = await client.fetch("/api/v1/conversations/respond-elicitation/", {
+        method: "post",
+        params: { query: { elicitation_id: elicitationId } },
+        // @ts-ignore - requestBody shape not in generated schema
+        requestBody: {
+          "application/json": { action, content: content ?? null }
         }
       });
       return res;

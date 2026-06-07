@@ -1,4 +1,5 @@
 import { browser } from "$app/environment";
+import { getLocale } from "$lib/paraglide/runtime";
 import { PAGINATION } from "$lib/core/constants";
 import { toastError } from "$lib/core/errors";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
@@ -23,6 +24,27 @@ export type PendingToolApproval = {
   tools: SSE.ToolApprovalRequired["tools"];
 };
 
+export type ElicitationState = {
+  elicitationId: string;
+  message: string;
+  // First string field in the requested schema, if the server asked for a
+  // free-text answer (vs an empty schema = pure confirm/decline).
+  answerField: string | null;
+  suggestions: string[];
+  status: "pending" | "answered" | "declined";
+  answer: string | null;
+};
+
+export type PendingElicitation = {
+  elicitationId: string;
+  message: string;
+  answerField: string | null;
+  suggestions: string[];
+  // The tool call this elicitation belongs to, when the backend could correlate
+  // it. Null -> render the standalone prompt above the input instead.
+  toolCallId: string | null;
+};
+
 export type ChatPartner = GroupChat | Assistant;
 
 export class ChatService {
@@ -44,6 +66,9 @@ export class ChatService {
 
   // Tool approval state
   pendingToolApproval = $state<PendingToolApproval | null>(null);
+
+  // MCP elicitation state (server-initiated confirm/decline mid-tool-call)
+  pendingElicitation = $state<PendingElicitation | null>(null);
 
   // Context-window usage for the most recent turn. Split into input vs output
   // so the bar can show what was sent to the LLM (system + MCP + RAG + history
@@ -394,7 +419,8 @@ export class ChatService {
       tools?: ConversationTools,
       useWebSearch?: boolean,
       requireToolApproval?: boolean,
-      abortController?: AbortController
+      abortController?: AbortController,
+      editMode?: boolean
     ) => {
       // Clear preflight estimate — the message is leaving the input
       this.#clearPreflight();
@@ -424,6 +450,8 @@ export class ChatService {
           abortController,
           useWebSearch,
           requireToolApproval,
+          editMode,
+          language: getLocale(),
           callbacks: {
             onFirstChunk: (chunk) => {
               if (isStale()) return;
@@ -625,6 +653,43 @@ export class ChatService {
                   }
                 }
               }
+            },
+            onElicitationRequired: (event) => {
+              if (isStale()) return;
+              if (!ensureCurrentSession(event)) return;
+              // A tool paused mid-execution to ask the user something. Parse the
+              // requested schema: an empty schema is a pure confirm; a string
+              // property means a free-text answer (with optional suggestions).
+              const props =
+                (event.requested_schema?.properties as
+                  | Record<string, { type?: string; suggestions?: string[] }>
+                  | undefined) ?? {};
+              const answerField =
+                Object.keys(props).find((k) => props[k]?.type === "string") ?? null;
+              const suggestions = answerField ? (props[answerField]?.suggestions ?? []) : [];
+              const toolCallId = event.tool_call_id || null;
+
+              // Attach to the originating tool call so the prompt renders in its
+              // card; otherwise fall back to the standalone prompt above the input.
+              const call = toolCallId ? this.#findToolCall(toolCallId) : undefined;
+              if (call) {
+                call.elicitation = {
+                  elicitationId: event.elicitation_id,
+                  message: event.message,
+                  answerField,
+                  suggestions,
+                  status: "pending",
+                  answer: null
+                };
+              }
+
+              this.pendingElicitation = {
+                elicitationId: event.elicitation_id,
+                message: event.message,
+                answerField,
+                suggestions,
+                toolCallId: call ? toolCallId : null
+              };
             }
           }
         });
@@ -704,6 +769,55 @@ export class ChatService {
       // Clear pending approval regardless of success/failure
       this.pendingToolApproval = null;
     }
+  }
+
+  // Respond to a pending MCP elicitation (server-initiated prompt). For a
+  // free-text/suggestion question, pass the chosen answer.
+  async submitElicitation(action: "accept" | "decline" | "cancel", answer?: string) {
+    const pending = this.pendingElicitation;
+    if (!pending) return;
+
+    // On accept the server validates content against the requested schema, so
+    // always send an object (never null) — even for a bare confirm.
+    const content =
+      action === "accept"
+        ? pending.answerField && answer !== undefined
+          ? { [pending.answerField]: answer }
+          : {}
+        : null;
+
+    // Persist the outcome on the originating tool call so it stays visible.
+    if (pending.toolCallId) {
+      const call = this.#findToolCall(pending.toolCallId);
+      if (call?.elicitation) {
+        call.elicitation.status = action === "accept" ? "answered" : "declined";
+        call.elicitation.answer = action === "accept" ? (answer ?? null) : null;
+      }
+    }
+
+    // Clear immediately so the prompt UI disappears while the request is in flight.
+    this.pendingElicitation = null;
+    try {
+      await this.#intric.conversations.respondElicitation({
+        elicitationId: pending.elicitationId,
+        action,
+        content
+      });
+    } catch (error) {
+      console.error("[ChatService] Failed to submit elicitation response:", error);
+    }
+  }
+
+  // Find a streamed tool call by id across the current conversation's messages.
+  #findToolCall(toolCallId: string): { elicitation?: ElicitationState | null } | undefined {
+    for (const message of this.currentConversation.messages ?? []) {
+      const calls = (message as Record<string, unknown>).mcp_tool_calls as
+        | Array<{ tool_call_id?: string; elicitation?: ElicitationState | null }>
+        | undefined;
+      const call = calls?.find((c) => c.tool_call_id === toolCallId);
+      if (call) return call;
+    }
+    return undefined;
   }
 
   // Helper to approve all pending tools

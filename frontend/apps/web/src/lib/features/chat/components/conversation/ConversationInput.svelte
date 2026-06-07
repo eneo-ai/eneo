@@ -14,7 +14,7 @@
   import { track } from "$lib/core/helpers/track";
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
-  import { Wrench, AlertTriangle } from "lucide-svelte";
+  import { Wrench, AlertTriangle, Settings2 } from "lucide-svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
 
   const chat = getChatService();
@@ -98,6 +98,31 @@
     else chat.newConversation();
   };
 
+  // Edit mode: only assistants the user may edit can be configured from chat.
+  const canEditAssistant = $derived(
+    chat.partner.type === "assistant" &&
+      "permissions" in chat.partner &&
+      (chat.partner.permissions?.includes("edit") ?? false)
+  );
+  let editMode = $state(false);
+
+  // Free-text answer for a standalone ask_user elicitation prompt.
+  let elicitAnswer = $state("");
+
+  function submitElicitAnswer() {
+    if (!elicitAnswer.trim()) return;
+    const answer = elicitAnswer;
+    elicitAnswer = "";
+    chat.submitElicitation("accept", answer);
+  }
+
+  function toggleEditMode(next: boolean) {
+    editMode = next;
+    // Start a fresh conversation so configuration messages aren't interleaved
+    // with normal chat history (the assistant runs a different persona here).
+    startNewConversation();
+  }
+
   function parseTokenError(errorMessage: string): { used: number; limit: number } | null {
     const match = errorMessage.match(/(\d[\d,]*)\s*tokens?\s*used.*?limit\s*(?:is\s*)?(\d[\d,]*)/i);
     if (match) {
@@ -133,7 +158,8 @@
         tools,
         webSearchEnabled,
         toolApprovalEnabled,
-        abortController
+        abortController,
+        editMode
       );
       resetMentionInput();
       clearUploads();
@@ -259,6 +285,68 @@
       </div>
     </div>
   {/if}
+  {#if editMode}
+    <div
+      class="text-accent-stronger bg-accent-dimmer border-accent-default mb-1.5 flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm"
+    >
+      <Settings2 class="h-4 w-4 flex-shrink-0" />
+      <p>{m.edit_mode_banner()}</p>
+    </div>
+  {/if}
+
+  {#if chat.pendingElicitation && !chat.pendingElicitation.toolCallId}
+    {@const elicitation = chat.pendingElicitation}
+    <div
+      class="border-default bg-secondary mb-1.5 flex flex-col gap-2 rounded-lg border px-3 py-2.5 text-sm"
+    >
+      <p class="whitespace-pre-line">{elicitation.message}</p>
+      {#if elicitation.answerField}
+        {#if elicitation.suggestions.length > 0}
+          <div class="flex flex-wrap gap-1.5">
+            {#each elicitation.suggestions as suggestion (suggestion)}
+              <button
+                type="button"
+                class="border-default hover:bg-hover-default rounded-full border px-3 py-1"
+                onclick={() => chat.submitElicitation("accept", suggestion)}
+              >
+                {suggestion}
+              </button>
+            {/each}
+          </div>
+        {/if}
+        <div class="flex gap-2">
+          <input
+            type="text"
+            bind:value={elicitAnswer}
+            placeholder={m.elicitation_answer_placeholder()}
+            class="border-default bg-primary flex-1 rounded-lg border px-3 py-1.5"
+            onkeydown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                submitElicitAnswer();
+              }
+            }}
+          />
+          <Button variant="primary" disabled={!elicitAnswer.trim()} onclick={submitElicitAnswer}>
+            {m.send()}
+          </Button>
+          <Button variant="outlined" onclick={() => chat.submitElicitation("decline")}>
+            {m.decline()}
+          </Button>
+        </div>
+      {:else}
+        <div class="flex gap-2">
+          <Button variant="primary" onclick={() => chat.submitElicitation("accept")}>
+            {m.confirm()}
+          </Button>
+          <Button variant="outlined" onclick={() => chat.submitElicitation("decline")}>
+            {m.decline()}
+          </Button>
+        </div>
+      {/if}
+    </div>
+  {/if}
+
   <div class="relative">
     <MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
     {#if chat.askQuestion.isLoading}
@@ -340,6 +428,26 @@
             <Input.Switch bind:value={autoAcceptTools} class="*:!cursor-pointer">
               <span class="-mr-2 flex items-center gap-1"
                 ><Wrench class="h-5 w-5" />{m.auto_accept_tools()}</span
+              >
+            </Input.Switch>
+          </div>
+        </Tooltip>
+      {/if}
+
+      {#if canEditAssistant}
+        <Tooltip text={m.edit_mode_description()} placement="top">
+          <div
+            class="hover:bg-accent-dimmer hover:text-accent-stronger border-default hover:border-accent-default flex items-center justify-center rounded-full border p-1.5 {editMode
+              ? 'bg-accent-dimmer text-accent-stronger border-accent-default'
+              : ''}"
+          >
+            <Input.Switch
+              value={editMode}
+              sideEffect={({ next }) => toggleEditMode(next)}
+              class="*:!cursor-pointer"
+            >
+              <span class="-mr-2 flex items-center gap-1"
+                ><Settings2 class="h-5 w-5" />{m.edit_mode()}</span
               >
             </Input.Switch>
           </div>
