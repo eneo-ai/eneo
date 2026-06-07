@@ -1465,11 +1465,7 @@ export interface paths {
     put?: never;
     /**
      * Respond To Elicitation
-     * @description Submit a response to a pending MCP elicitation.
-     *
-     *     When a tool calls ``ctx.elicit(...)`` mid-execution, the stream emits an
-     *     ``elicitation_required`` event with an ``elicitation_id``. Use this endpoint
-     *     to relay the user's accept/decline/cancel response back to the waiting tool.
+     * @description Relay a user's response to a pending MCP elicitation back to the waiting tool call.
      */
     post: operations["respond_to_elicitation_api_v1_conversations_respond_elicitation__post"];
     delete?: never;
