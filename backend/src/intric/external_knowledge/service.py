@@ -9,7 +9,8 @@ the knowledge usable; granting it to an assistant is a separate step
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+import json
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from intric.authentication.signed_urls import build_signed_download_url
@@ -31,6 +32,38 @@ if TYPE_CHECKING:
 # it directly (as an MCP client) so ingest is deterministic and never depends on
 # the model choosing the right provider tool.
 _INGEST_TOOL_NAME = "ingest_documents"
+
+
+def _first_text(result: dict[str, Any]) -> str | None:
+    """First text content from an MCP tool result, if any."""
+    content = result.get("content")
+    if not isinstance(content, list):
+        return None
+    for item in cast("list[Any]", content):
+        if isinstance(item, dict):
+            entry = cast("dict[str, Any]", item)
+            if entry.get("type") == "text":
+                text = entry.get("text")
+                return text if isinstance(text, str) else None
+    return None
+
+
+def _parse_json_object(text: str | None) -> dict[str, Any]:
+    """Parse the tool's JSON result body; {} if absent or not an object."""
+    if not text:
+        return {}
+    try:
+        data: Any = json.loads(text)
+    except (ValueError, TypeError):
+        return {}
+    return cast("dict[str, Any]", data) if isinstance(data, dict) else {}
+
+
+def _as_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 class ExternalKnowledgeService:
@@ -106,7 +139,7 @@ class ExternalKnowledgeService:
 
     async def ingest_files(
         self, *, space: "Space", knowledge_source_id: UUID, file_ids: list[UUID]
-    ) -> int:
+    ) -> dict[str, int]:
         """Ingest already-uploaded files into a knowledge source, deterministically.
 
         Eneo mints a signed download URL per file and calls the knowledge source's
@@ -166,11 +199,19 @@ class ExternalKnowledgeService:
                 )
             )
 
-        await self._call_ingest_tool(server=server, urls=urls)
-        return len(files)
+        return await self._call_ingest_tool(
+            server=server, urls=urls, expected=len(files)
+        )
 
-    async def _call_ingest_tool(self, *, server: "MCPServer", urls: list[str]) -> None:
-        """Call the knowledge source's ``ingest_documents`` tool with the URLs."""
+    async def _call_ingest_tool(
+        self, *, server: "MCPServer", urls: list[str], expected: int
+    ) -> dict[str, int]:
+        """Call the source's ``ingest_documents`` tool; return {ingested, failed}.
+
+        The provider returns per-URL results (``{ingested, failed, results}``); a
+        total failure comes back as an MCP error result. We report the provider's
+        own counts, falling back to ``expected`` when the result has no counts.
+        """
         from intric.mcp_servers.infrastructure.client.mcp_client import (
             MCPClient,
             MCPClientError,
@@ -200,7 +241,14 @@ class ExternalKnowledgeService:
         finally:
             await client.disconnect()
 
+        text = _first_text(result)
         if result.get("is_error"):
             raise BadRequestException(
-                "The knowledge source rejected the ingest request."
+                "The knowledge source rejected the ingest request"
+                + (f": {text}" if text else ".")
             )
+
+        payload = _parse_json_object(text)
+        ingested = _as_int(payload.get("ingested"), expected)
+        failed = _as_int(payload.get("failed"), 0)
+        return {"ingested": ingested, "failed": failed}

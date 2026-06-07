@@ -163,7 +163,11 @@ ingest_documents(urls: string[])
 It receives a list of signed download URLs, **fetches the bytes from each URL itself**
 (behind your SSRF guard, see Leg 3), and ingests them durably into the collection. The
 collection is implicit (this MCP server is already scoped to one collection), so the
-tool takes no collection argument. Return a normal (non-error) tool result on success.
+tool takes no collection argument.
+
+On success return a JSON result body with at least `{ "ingested": <int>, "failed":
+<int> }` (Eneo reports those counts to the operator; per-URL detail is welcome but
+optional). A total failure should be returned as an MCP error result.
 
 **Eneo calls this tool itself, deterministically.** Eneo does not rely on the model to
 pick or call your tool. When an operator adds files to a knowledge source, Eneo:

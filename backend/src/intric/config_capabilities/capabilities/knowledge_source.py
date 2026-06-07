@@ -86,15 +86,18 @@ class IngestFilesInput(BaseModel):
 
 async def _ingest_files(ctx: CapabilityContext, inp: BaseModel) -> CapabilityResult:
     data = cast(IngestFilesInput, inp)
-    count = await ctx.container.external_knowledge_service().ingest_files(
+    result = await ctx.container.external_knowledge_service().ingest_files(
         space=ctx.space,
         knowledge_source_id=data.knowledge_source_id,
         file_ids=data.file_ids,
     )
+    summary = f"Added {result['ingested']} file(s) to the knowledge source."
+    if result.get("failed"):
+        summary += f" {result['failed']} file(s) could not be added."
     return CapabilityResult(
-        summary=f"Added {count} file(s) to the knowledge source.",
+        summary=summary,
         entity_id=data.knowledge_source_id,
-        data={"ingested": count},
+        data=result,
     )
 
 

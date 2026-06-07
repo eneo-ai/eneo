@@ -255,7 +255,7 @@ async def test_ingest_calls_provider_ingest_documents_with_signed_urls(
             IngestFilesInput(knowledge_source_id=ks.id, file_ids=[f.id for f in files]),
         )
 
-    assert result.data == {"ingested": 2}
+    assert result.data == {"ingested": 2, "failed": 0}
     assert len(_FakeMCPClient.calls) == 1
     name, args = _FakeMCPClient.calls[0]
     assert name == "ingest_documents"
