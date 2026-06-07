@@ -1023,6 +1023,8 @@ class AssistantService:
         use_web_search: bool = False,
         assistant_selector_tokens: int = 0,
         require_tool_approval: bool = False,
+        edit_mode: bool = False,
+        language: "str | None" = None,
     ):
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         active_assistant = space.get_assistant(assistant_id=assistant_id)
@@ -1101,6 +1103,37 @@ class AssistantService:
         else:
             web_search_results = []
 
+        # Edit mode: hand the assistant a config persona + an ephemeral MCP server
+        # pointing at eneo's own loopback config endpoint. The token authenticates
+        # the current user and scopes the tools to this assistant's space; the
+        # actual permission check happens when a tool calls update_assistant.
+        config_mcp_server = None
+        if edit_mode:
+            if not actor.can_edit_assistants():
+                raise UnauthorizedException(
+                    "Edit mode requires permission to edit this assistant.",
+                    code="forbidden_action",
+                    context={
+                        "resource_type": "assistant",
+                        "action": "edit",
+                        "auth_layer": "domain_policy",
+                    },
+                )
+            from intric.assistant_config_mcp import build_config_mcp_server
+
+            config_token = self.auth_service.create_config_token(
+                user=self.user,
+                scope_type="space",
+                scope_id=cast("UUID", space.id),
+                assistant_id=assistant_to_ask.id,
+                language=language,
+            )
+            config_mcp_server = await build_config_mcp_server(
+                token=config_token,
+                tenant_id=self.user.tenant_id,
+                language=language,
+            )
+
         response, datastore_result = await assistant_to_ask.ask(
             question=cleaned_question,
             completion_service=self.completion_service,
@@ -1111,6 +1144,8 @@ class AssistantService:
             version=version,
             web_search_results=web_search_results,
             require_tool_approval=require_tool_approval,
+            edit_mode=edit_mode,
+            config_mcp_server=config_mcp_server,
         )
 
         # TODO: Separate the response based on stream true or false

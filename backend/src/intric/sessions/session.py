@@ -107,6 +107,7 @@ class IntricEventType(str, Enum):
     TOOL_CALL = "tool_call"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
     TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
+    ELICITATION_REQUIRED = "elicitation_required"
     TOKEN_USAGE = "token_usage"
 
 
@@ -162,6 +163,29 @@ class SSEToolApprovalTimeout(SSEBase):
     intric_event_type: IntricEventType = IntricEventType.TOOL_APPROVAL_TIMEOUT
     approval_id: str
     tools: list[ToolCallInfo]
+
+
+class SSEElicitationRequired(SSEBase):
+    """Event emitted when an MCP server asks the user for input mid-tool-call."""
+
+    intric_event_type: IntricEventType = IntricEventType.ELICITATION_REQUIRED
+    elicitation_id: str  # UUID to correlate the response
+    message: str  # Human-readable prompt from the server
+    # JSON schema describing the requested fields
+    requested_schema: dict[str, object] = {}
+    tool_call_id: str = ""  # The tool call that triggered this elicitation, if known
+
+
+class ElicitationResponse(BaseModel):
+    """Body for submitting an elicitation response."""
+
+    action: Literal["accept", "decline", "cancel"]
+    content: Optional[dict[str, object]] = None
+
+
+class ElicitationResponseResult(BaseModel):
+    status: str
+    elicitation_id: str
 
 
 class TokenUsageEvent(BaseModel):

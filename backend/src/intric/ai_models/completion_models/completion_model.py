@@ -41,6 +41,7 @@ class ResponseType(str, Enum):
     TOOL_CALL = "tool_call"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
     TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
+    ELICITATION_REQUIRED = "elicitation_required"
     FILES = "image"
     FIRST_CHUNK = "first_chunk"
     TOKEN_USAGE = "token_usage"
@@ -112,6 +113,11 @@ class Completion:
     tool_calls_metadata: Optional[list[ToolCallMetadata]] = None  # For TOOL_CALL events
     mcp_tool_references: Optional[list[McpToolReference]] = None
     approval_id: Optional[str] = None  # For TOOL_APPROVAL_REQUIRED events
+    # For ELICITATION_REQUIRED events: a server asked the user for input mid-call.
+    elicitation_id: Optional[str] = None
+    elicitation_message: Optional[str] = None
+    elicitation_schema: Optional[dict[str, Any]] = None
+    elicitation_tool_call_id: Optional[str] = None
     image_data: Optional[bytes] = None
     response_type: Optional[ResponseType] = None
     generated_file: Optional[File] = None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
 from uuid import UUID
@@ -20,6 +21,7 @@ from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.main.config import SETTINGS, Settings, get_settings
 from intric.main.exceptions import ProviderInactiveException, ProviderNotFoundException
 from intric.main.logging import get_logger
+from intric.mcp_servers.infrastructure.elicitation import ElicitationContext
 from intric.mcp_servers.infrastructure.identity_headers import build_identity_headers
 from intric.mcp_servers.infrastructure.proxy import (
     MCPProxySession,
@@ -221,6 +223,12 @@ class CompletionService:
                 yield chunk
                 continue
 
+            # Pass through MCP elicitation prompts so the streaming loop can
+            # surface them and the suspended tool can be answered.
+            if chunk.response_type == ResponseType.ELICITATION_REQUIRED:
+                yield chunk
+                continue
+
             if chunk.tool_call:
                 if chunk.tool_call.name:
                     name = chunk.tool_call.name
@@ -326,6 +334,29 @@ class CompletionService:
         # ``mcp-session-id`` resumes across user turns (persisted in
         # ``chat_session_mcp_state``). Behavior is identical for every MCP
         # server — no per-server-kind branching.
+        # When streaming with a known user, wire MCP elicitation: a queue the
+        # streaming loop drains into SSE events, plus the actor context the
+        # response endpoint authorizes against. Server-initiated ctx.elicit()
+        # calls then pause for the user mid-tool-call.
+        elicitation_queue: asyncio.Queue[Any] | None = None
+        elicitation_context: ElicitationContext | None = None
+        if (
+            mcp_servers
+            and stream
+            and session is not None
+            and session.user_id is not None
+            and self.tenant is not None
+        ):
+            elicitation_queue = asyncio.Queue()
+            elicitation_context = ElicitationContext(
+                tenant_id=self.tenant.id,
+                user_id=session.user_id,
+                session_id=session.id,
+                assistant_id=(
+                    session.assistant.id if session.assistant is not None else None
+                ),
+            )
+
         mcp_proxy: MCPProxySession | None = None
         if mcp_servers:
             # Build the acting user/tenant identity headers once; each client
@@ -336,6 +367,8 @@ class CompletionService:
                 chat_session_id=session.id if session is not None else None,
                 db_session=self.session,
                 identity_headers=identity_headers,
+                elicitation_queue=elicitation_queue,
+                elicitation_context=elicitation_context,
             )
             logger.debug(
                 f"[MCP] Proxy created with {mcp_proxy.get_tool_count()} tools from {len(mcp_servers)} server(s)"

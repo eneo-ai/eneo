@@ -158,6 +158,7 @@ class MCPClient:
         resume_mcp_session_id: str | None = None,
         on_tools_list_changed: Callable[[], None] | None = None,
         identity_headers: dict[str, str] | None = None,
+        elicitation_callback: Any | None = None,
     ):
         """
         Initialize MCP client.
@@ -187,6 +188,10 @@ class MCPClient:
         self.resume_mcp_session_id = resume_mcp_session_id
         self._on_tools_list_changed = on_tools_list_changed
         self.identity_headers = identity_headers or {}
+        # Invoked by the SDK when the server sends an elicitation/create request
+        # (e.g. a tool calling ctx.elicit). The proxy wires this to surface the
+        # prompt to the user and await their response. None => client can't elicit.
+        self._elicitation_callback = elicitation_callback
         # Set when a tools/list_changed notification arrives on this session.
         # The proxy also re-lists the servers it just called, so this flag is a
         # protocol-correct optimization rather than the sole trigger.
@@ -368,7 +373,10 @@ class MCPClient:
         )
 
         session_context = ClientSession(
-            read, write, message_handler=self._handle_session_message
+            read,
+            write,
+            message_handler=self._handle_session_message,
+            elicitation_callback=self._elicitation_callback,
         )
         try:
             session = await session_context.__aenter__()

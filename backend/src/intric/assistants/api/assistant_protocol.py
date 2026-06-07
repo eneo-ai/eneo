@@ -26,6 +26,7 @@ from intric.sessions.session import (
     AskResponse,
     IntricEventType,
     SessionInDB,
+    SSEElicitationRequired,
     SSEError,
     SSEFiles,
     SSEFirstChunk,
@@ -241,6 +242,15 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                 )
                 for tc in tool_calls
             ],
+        )
+
+    elif chunk.response_type == ResponseType.ELICITATION_REQUIRED:
+        data = SSEElicitationRequired(
+            session_id=session_id,
+            elicitation_id=chunk.elicitation_id or "",
+            message=chunk.elicitation_message or "",
+            requested_schema=chunk.elicitation_schema or {},
+            tool_call_id=chunk.elicitation_tool_call_id or "",
         )
 
     elif chunk.response_type == ResponseType.TOOL_APPROVAL_TIMEOUT:
