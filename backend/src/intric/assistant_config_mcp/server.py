@@ -179,10 +179,13 @@ _PERSONA: dict[str, dict[str, str]] = {
         ),
         "route_prefer_external": (
             "\n\nKnowledge routing: both native collections and external knowledge "
-            "sources exist. Prefer the external knowledge source: map a request for a "
-            "collection, knowledge, or source (English collection/knowledge/source; "
-            "Swedish samling/kunskap/källa/kunskapskälla) to knowledge_source_create, "
-            "unless the user explicitly asks for a native collection."
+            "sources exist, but the external knowledge source is the default. When the "
+            "user asks to create a collection, knowledge, or source (English "
+            "collection/knowledge/source; Swedish samling/kunskap/källa/kunskapskälla), "
+            "including the bare word 'samling' or 'collection', use "
+            "knowledge_source_create. Do NOT use collection_create (the 'Skapa "
+            "samling'/'Create collection' tool); it is the native, embedding-backed "
+            "path, reserved for when the user explicitly says 'native' or 'inbyggd'."
         ),
         "route_native_only": (
             "\n\nKnowledge routing: no external knowledge provider is configured. A "
@@ -237,10 +240,14 @@ _PERSONA: dict[str, dict[str, str]] = {
         ),
         "route_prefer_external": (
             "\n\nKunskapsrouting: både inbyggda samlingar och externa kunskapskällor "
-            "finns. Föredra den externa kunskapskällan: mappa en begäran om en samling, "
-            "kunskap eller källa (engelska collection/knowledge/source; svenska "
-            "samling/kunskap/källa/kunskapskälla) till knowledge_source_create, om inte "
-            "användaren uttryckligen ber om en inbyggd samling."
+            "finns, men den externa kunskapskällan är standard. När användaren ber att "
+            "skapa en samling, kunskap eller källa (engelska "
+            "collection/knowledge/source; svenska samling/kunskap/källa/kunskapskälla), "
+            "även enbart ordet 'samling' eller 'collection', använd "
+            "knowledge_source_create. Använd INTE collection_create (verktyget 'Skapa "
+            "samling'/'Create collection'); det är den inbyggda, embedding-baserade "
+            "vägen, reserverad för när användaren uttryckligen säger 'native' eller "
+            "'inbyggd'."
         ),
         "route_native_only": (
             "\n\nKunskapsrouting: ingen extern kunskapsleverantör är konfigurerad. En "

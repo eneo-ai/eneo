@@ -40,8 +40,10 @@ def test_persona_prefer_external_when_both_available():
     persona = build_config_persona(
         "en", _settings(url="https://p", key="k", required=False)
     )
-    assert "Prefer the external knowledge source" in persona
     assert "knowledge_source_create" in persona
+    # bare 'samling'/'collection' should route to the knowledge source, and the
+    # native collection_create tool is explicitly held back in prefer mode
+    assert "Do NOT use collection_create" in persona
 
 
 def test_persona_native_only_omits_knowledge_source():
