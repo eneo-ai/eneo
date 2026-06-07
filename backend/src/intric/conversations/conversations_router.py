@@ -811,6 +811,7 @@ async def approve_tools(
     "/respond-elicitation/",
     response_model=ElicitationResponseResult,
     responses=responses.get_responses([400, 403, 404]),
+    description="Relay a user's response to a pending MCP elicitation back to the waiting tool call.",
 )
 async def respond_to_elicitation(
     elicitation_id: Annotated[
