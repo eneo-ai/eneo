@@ -40,6 +40,22 @@ The URL must be reachable from the Eneo backend's network. When either value is
 unset, knowledge-source creation returns a clear "no provider configured" error and
 nothing is called.
 
+### Disabling native collections
+
+To make the provider the *only* way to create knowledge, set:
+
+```bash
+COLLECTIONS_REQUIRE_EXTERNAL_PROVIDER=true
+```
+
+When true, the builtin (embedding-backed) collection path is rejected at its
+service chokepoint: the `POST /spaces/{id}/knowledge/groups/` endpoint and the
+`collection.create` edit-mode capability both return a clear error, while the
+`knowledge_source.*` path stays available. Reading, renaming, and deleting
+existing native collections is unaffected. Pair this with the provider settings
+above so an external path actually exists; with the flag on and no provider
+configured, no collections can be created at all.
+
 ## Credentials
 
 Two distinct credentials are in play. Do not conflate them.

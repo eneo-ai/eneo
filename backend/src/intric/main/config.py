@@ -442,6 +442,15 @@ class Settings(BaseSettings):
     external_knowledge_provider_url: Optional[str] = None
     external_knowledge_provider_api_key: Optional[str] = None
 
+    # When True, native (builtin) collections cannot be created: every knowledge
+    # collection must be provisioned through the external knowledge provider via
+    # the knowledge_source.* path. The builtin create_collection chokepoint
+    # rejects with a clear error, and the collection.create edit-mode capability
+    # surfaces the same message. GET/PUT/DELETE on existing native collections are
+    # unaffected. Pair with external_knowledge_provider_* so an external path
+    # actually exists; otherwise no collections can be created at all.
+    collections_require_external_provider: bool = False
+
     # Dev
     testing: bool = False
     dev: bool = False

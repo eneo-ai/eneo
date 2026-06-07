@@ -2,7 +2,8 @@ from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 from intric.collections.domain.collection import Collection
-from intric.main.exceptions import UnauthorizedException
+from intric.main.config import get_settings
+from intric.main.exceptions import BadRequestException, UnauthorizedException
 
 if TYPE_CHECKING:
     from intric.actors.actor_manager import ActorManager
@@ -34,6 +35,12 @@ class CollectionCRUDService:
         name: str,
         embedding_model_id: Optional["UUID"] = None,
     ) -> Collection:
+        if get_settings().collections_require_external_provider:
+            raise BadRequestException(
+                "Native collections are disabled on this deployment; create a "
+                "knowledge source through the external knowledge provider instead."
+            )
+
         space = await self.space_service.get_space(space_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
         if not actor.can_create_collections():
