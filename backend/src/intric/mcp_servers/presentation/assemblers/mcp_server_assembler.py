@@ -78,6 +78,7 @@ class MCPServerAssembler:
             "tags": mcp_server.tags,
             "icon_url": mcp_server.icon_url,
             "security_classification": sc_dict,
+            "is_knowledge_source": mcp_server.is_knowledge_source,
             "tools": [
                 {
                     "id": str(tool.id),
@@ -110,6 +111,7 @@ class MCPServerAssembler:
             security_classification=SecurityClassificationPublic.from_domain(
                 mcp_server.security_classification,
             ),
+            is_knowledge_source=mcp_server.is_knowledge_source,
         )
 
     def to_paginated_response(self, mcp_servers: list[MCPServer]) -> MCPServerList:
@@ -169,6 +171,7 @@ class MCPServerSettingsAssembler:
             security_classification=SecurityClassificationPublic.from_domain(
                 mcp_server.security_classification,
             ),
+            is_knowledge_source=mcp_server.is_knowledge_source,
         )
 
     def to_paginated_response(

@@ -34,6 +34,9 @@ class MCPServerPublic(BaseModel):
     icon_url: Optional[str]
     documentation_url: Optional[str]
     security_classification: Optional[SecurityClassificationPublic] = None
+    # True for servers provisioned as an external knowledge source (vs a regular
+    # MCP tool server). Lets the UI group them separately.
+    is_knowledge_source: bool = False
 
 
 class MCPServerList(BaseListModel[MCPServerPublic]):

@@ -88,6 +88,7 @@ class MCPServerPublicDict(TypedDict):
     tags: list[str] | None
     icon_url: str | None
     security_classification: dict[str, object] | None
+    is_knowledge_source: bool
     tools: list[dict[str, object]]
 
 

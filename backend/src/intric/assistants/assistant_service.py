@@ -1117,6 +1117,7 @@ class AssistantService:
         # the current user and scopes the tools to this assistant's space; the
         # actual permission check happens when a tool calls update_assistant.
         config_mcp_server = None
+        config_persona = None
         if edit_mode:
             if not actor.can_edit_assistants():
                 raise UnauthorizedException(
@@ -1128,7 +1129,11 @@ class AssistantService:
                         "auth_layer": "domain_policy",
                     },
                 )
-            from intric.assistant_config_mcp import build_config_mcp_server
+            from intric.assistant_config_mcp import (
+                build_config_mcp_server,
+                build_config_persona,
+            )
+            from intric.main.config import get_settings
 
             config_token = self.auth_service.create_config_token(
                 user=self.user,
@@ -1142,6 +1147,7 @@ class AssistantService:
                 tenant_id=self.user.tenant_id,
                 language=language,
             )
+            config_persona = build_config_persona(language, get_settings())
 
         response, datastore_result = await assistant_to_ask.ask(
             question=cleaned_question,
@@ -1155,6 +1161,7 @@ class AssistantService:
             require_tool_approval=require_tool_approval,
             edit_mode=edit_mode,
             config_mcp_server=config_mcp_server,
+            config_persona=config_persona,
         )
 
         # TODO: Separate the response based on stream true or false

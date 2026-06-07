@@ -40,7 +40,8 @@ async def _create_knowledge_source(
         summary=(
             f"Created knowledge source '{server.name}' "
             f"(mcp_server_id={server.id}) and enabled it in the space. "
-            "Grant it to an assistant with set_knowledge."
+            "To use it on this assistant, enable it with set_mcp_server "
+            "(enabled=true)."
         ),
         entity_id=server.id,
         data={"mcp_server_id": str(server.id), "name": server.name},

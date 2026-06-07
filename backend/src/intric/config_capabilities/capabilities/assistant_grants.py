@@ -173,13 +173,13 @@ register(
         title_en="Enable/disable MCP server",
         title_sv="Aktivera/inaktivera MCP-server",
         description=(
-            "Enable or disable a single MCP server (e.g. a knowledge source) on this "
-            "assistant, leaving its other knowledge untouched."
+            "Enable or disable a single knowledge source (or other MCP server) on this "
+            "assistant by id, leaving its other knowledge untouched."
         ),
         audit_action=ActionType.ASSISTANT_UPDATED,
         audit_entity=EntityType.ASSISTANT,
-        confirm_summary_en="change an MCP server on the assistant",
-        confirm_summary_sv="ändra en MCP-server på assistenten",
+        confirm_summary_en="enable or disable a knowledge source on the assistant",
+        confirm_summary_sv="aktivera eller inaktivera en kunskapskälla på assistenten",
         form_renderable=True,
     )
 )

@@ -348,6 +348,7 @@ class Assistant(Entity):
         require_tool_approval: bool = False,
         edit_mode: bool = False,
         config_mcp_server: Optional["MCPServer"] = None,
+        config_persona: Optional[str] = None,
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
         if self.completion_model is None:
             raise NoModelSelectedException()
@@ -369,7 +370,7 @@ class Assistant(Entity):
             datastore_result = DatastoreResult(
                 chunks=[], no_duplicate_chunks=[], info_blobs=[]
             )
-            prompt_text = CONFIG_PERSONA_PROMPT
+            prompt_text = config_persona or CONFIG_PERSONA_PROMPT
             mcp_servers = [config_mcp_server] if config_mcp_server is not None else []
         else:
             # Fill half the context
