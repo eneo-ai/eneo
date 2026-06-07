@@ -10,24 +10,30 @@ carries scope claims (``scope_type``/``scope_id`` and a focused ``assistant_id``
 identifying what is being configured. Tools therefore need no scope argument and
 cannot be pointed at another resource than the one in the token.
 
-Phase 1 substrate: two capability tools (``get_assistant_settings`` read,
-``set_name`` mutating + confirm) plus ``ask_user``. Later phases generate tools
-from the capability registry instead of hand-writing them here.
+Tools are generated from the shared capability registry
+(``intric.config_capabilities``): one FastMCP tool per capability, plus the
+``ask_user`` interaction. Each tool confirms mutating changes via elicitation,
+then runs the capability in a user-bound, permission-checked, audited context.
 """
 
 from __future__ import annotations
 
+import inspect
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID, uuid4
 
 import jwt
-from dependency_injector import providers
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import BaseModel, Field, create_model
 
-from intric.database.database import sessionmanager
+from intric.config_capabilities import (
+    CAPABILITY_REGISTRY,
+    capability_context,
+    run_capability,
+)
+from intric.config_capabilities.capability import ConfigCapability
 from intric.main.config import get_settings
 from intric.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 
@@ -39,21 +45,25 @@ CONFIG_SERVER_NAME = "assistant-config"
 
 CONFIG_PERSONA_PROMPT = (
     "You are the configuration assistant for one specific Eneo assistant. "
-    "The user is an administrator editing that assistant's settings. Treat every "
-    "message as an instruction to inspect or change THIS assistant's "
-    "configuration, and use the provided tools to do so.\n\n"
-    "Call get_assistant_settings first when you need the current values. When a "
-    "request is ambiguous or underspecified, do NOT guess and do NOT just write a "
-    "question as text: call ask_user with a single specific question and a few "
-    "concrete suggestions.\n\n"
-    "Every changing tool (e.g. set_name) asks the user to confirm before it "
-    "applies, so you do not need a separate yes/no message first: state plainly "
-    "what you are about to change (old value and new value), then call the tool. "
-    "The user is shown a confirmation dialog; if they decline, the tool reports "
-    "the change was cancelled, so relay that and do not retry unless asked. Change "
-    "only what the user asked for, one thing at a time. After a change applies, "
-    "briefly confirm what changed. If a change is rejected because the user lacks "
-    "permission, relay that plainly. Do not invent settings or values."
+    "The user is an administrator editing that assistant and its space. Treat "
+    "every message as an instruction to inspect or change this assistant's "
+    "configuration or its space's knowledge, and use the provided tools to do so. "
+    "Available actions include reading the assistant's settings, renaming it, "
+    "creating knowledge collections and websites in the space, and attaching "
+    "knowledge to the assistant.\n\n"
+    "Read the current settings (assistant_get_settings) or list space knowledge "
+    "(space_list_collections) first when you need current values. When a request "
+    "is ambiguous or underspecified, do NOT guess and do NOT just write a question "
+    "as text: call ask_user with a single specific question and a few concrete "
+    "suggestions.\n\n"
+    "Every changing tool asks the user to confirm before it applies, so you do not "
+    "need a separate yes/no message first: state plainly what you are about to "
+    "change (old value and new value), then call the tool. The user is shown a "
+    "confirmation dialog; if they decline, the tool reports the change was "
+    "cancelled, so relay that and do not retry unless asked. Change only what the "
+    "user asked for, one thing at a time. After a change applies, briefly confirm "
+    "what changed. If a change is rejected because the user lacks permission, relay "
+    "that plainly. Do not invent settings or values."
 )
 
 mcp = FastMCP(
@@ -77,20 +87,6 @@ def _bearer_from_ctx(ctx: Context) -> str:
     return header.split(" ", 1)[1].strip()
 
 
-def _assistant_id_from_token(token: str) -> UUID:
-    settings = get_settings()
-    claims = jwt.decode(
-        token,
-        key=str(settings.jwt_secret),
-        audience=settings.jwt_audience,
-        algorithms=[settings.jwt_algorithm],
-    )
-    raw = claims.get("assistant_id")
-    if not raw:
-        raise ValueError("Access token is not scoped to an assistant.")
-    return UUID(str(raw))
-
-
 def _normalize_lang(raw: str | None) -> str:
     return "sv" if (raw or "").lower().startswith("sv") else "en"
 
@@ -111,10 +107,8 @@ def _lang_from_ctx(ctx: Context) -> str:
         return "en"
 
 
-# Human-readable tool titles per locale (English keys mirror the @mcp.tool titles).
+# Localized titles for non-capability tools (capability tools carry their own).
 _TITLES: dict[str, dict[str, str]] = {
-    "Read assistant settings": {"sv": "Läs assistentinställningar"},
-    "Set name": {"sv": "Sätt namn"},
     "Ask the user": {"sv": "Fråga användaren"},
 }
 
@@ -136,7 +130,6 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "(The user submitted an empty answer.)",
         "sv": "(Användaren skickade ett tomt svar.)",
     },
-    "sum_name": {"en": "set the name to '{v}'", "sv": "ändra namnet till '{v}'"},
 }
 
 
@@ -146,43 +139,29 @@ def _t(lang: str, key: str, value: Any = "") -> str:
     return template.format(v=value)
 
 
-@asynccontextmanager
-async def _config_context(ctx: Context):
-    """Bootstrap a user-bound container for the token's user + assistant.
-
-    Yields ``(container, assistant_id)``. The container is bound to the
-    authenticated user, so every ``assistant_service`` call runs the normal
-    ``SpaceActor`` permission checks. The surrounding transaction commits on
-    clean exit and rolls back on error (e.g. a permission failure).
-    """
-    # Imported lazily: the Container pulls in the whole service graph (including
-    # assistant_service, which imports this module), so a top-level import would
-    # create a cycle.
-    from intric.main.container.container import Container
-    from intric.main.container.container_overrides import override_user
-
-    token = _bearer_from_ctx(ctx)
-    assistant_id = _assistant_id_from_token(token)
-    async with sessionmanager.session() as session:
-        async with session.begin():
-            container = Container(session=providers.Object(session))
-            user = await container.user_service().authenticate(token=token)
-            override_user(container=container, user=user)
-            yield container, assistant_id
-
-
 class _ConfirmChange(BaseModel):
     """Empty schema: the elicitation is a pure confirm (accept/decline)."""
 
 
-async def _confirm(ctx: Context, summary_key: str, value: Any = "") -> bool:
-    """Ask the user to confirm a change via MCP elicitation (localized).
+async def _confirm_capability(
+    ctx: Context, capability: "ConfigCapability", inp: BaseModel
+) -> bool:
+    """Ask the user to confirm a mutating capability via MCP elicitation.
 
     Returns True only if the user explicitly accepts. Runs before any DB work so
     we never hold a transaction open while waiting on the user.
     """
     lang = _lang_from_ctx(ctx)
-    message = f"{_t(lang, 'confirm_q')}\n\n{_t(lang, summary_key, value)}"
+    template = (
+        capability.confirm_summary_sv
+        if lang == "sv" and capability.confirm_summary_sv
+        else capability.confirm_summary_en
+    ) or capability.title(lang)
+    try:
+        summary = template.format(**inp.model_dump())
+    except Exception:
+        summary = template
+    message = f"{_t(lang, 'confirm_q')}\n\n{summary}"
     result = await ctx.elicit(message=message, schema=_ConfirmChange)
     return getattr(result, "action", None) == "accept"
 
@@ -211,38 +190,8 @@ async def _ask(ctx: Context, question: str, suggestions: list[str]) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Tools
+# Tools — one generated per registered capability, plus the ask_user interaction
 # --------------------------------------------------------------------------- #
-@mcp.tool(title="Read assistant settings")
-async def get_assistant_settings(ctx: Context) -> dict:
-    """Return the current configurable settings of this assistant."""
-    async with _config_context(ctx) as (container, assistant_id):
-        assistant, _ = await container.assistant_service().get_assistant(assistant_id)
-        model = assistant.completion_model
-        return {
-            "name": assistant.name,
-            "prompt": assistant.get_prompt_text(),
-            "completion_model": (
-                {"id": str(model.id), "name": model.name} if model is not None else None
-            ),
-            "description": assistant.description,
-            "insight_enabled": assistant.insight_enabled,
-            "published": assistant.published,
-        }
-
-
-@mcp.tool(title="Set name")
-async def set_name(name: str, ctx: Context) -> str:
-    """Set the assistant's display name."""
-    if not await _confirm(ctx, "sum_name", name):
-        return _cancelled(ctx)
-    async with _config_context(ctx) as (container, assistant_id):
-        assistant, _ = await container.assistant_service().update_assistant(
-            assistant_id=assistant_id, name=name
-        )
-        return f"Name set to '{assistant.name}'."
-
-
 @mcp.tool(title="Ask the user")
 async def ask_user(
     question: str,
@@ -251,6 +200,63 @@ async def ask_user(
 ) -> str:
     """Ask the user a clarifying question when their request is ambiguous."""
     return await _ask(ctx, question, suggestions or [])
+
+
+def _register_capability_tool(capability: "ConfigCapability") -> None:
+    """Register one FastMCP tool that drives a registry capability.
+
+    The tool's schema is derived from the capability's Pydantic input model
+    (the single source of truth shared with the future form plane). The body
+    confirms mutating changes via elicitation, then runs the capability inside a
+    user-bound, permission-checked, audited context.
+    """
+    model = capability.input_model
+    tool_name = capability.id.replace(".", "_")
+
+    async def _impl(ctx: Context, **kwargs: Any):
+        inp = model(**kwargs)
+        if capability.mutating and capability.confirm:
+            if not await _confirm_capability(ctx, capability, inp):
+                return _cancelled(ctx)
+        async with capability_context(_bearer_from_ctx(ctx)) as cctx:
+            result = await run_capability(capability, cctx, inp)
+        if result.summary:
+            return result.summary
+        return result.data if result.data is not None else "Done."
+
+    # Build the visible signature from the input model so FastMCP derives the
+    # tool's JSON schema; ctx is injected by the SDK and excluded from the schema.
+    params = [
+        inspect.Parameter(
+            "ctx", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Context
+        )
+    ]
+    for fname, finfo in model.model_fields.items():
+        if finfo.is_required():
+            params.append(
+                inspect.Parameter(
+                    fname, inspect.Parameter.KEYWORD_ONLY, annotation=finfo.annotation
+                )
+            )
+        else:
+            params.append(
+                inspect.Parameter(
+                    fname,
+                    inspect.Parameter.KEYWORD_ONLY,
+                    annotation=finfo.annotation,
+                    default=finfo.default,
+                )
+            )
+    _impl.__signature__ = inspect.Signature(params)  # type: ignore[attr-defined]
+    _impl.__name__ = tool_name
+    _impl.__doc__ = capability.description
+    mcp.tool(
+        name=tool_name, title=capability.title_en, description=capability.description
+    )(_impl)
+
+
+for _capability in CAPABILITY_REGISTRY.values():
+    _register_capability_tool(_capability)
 
 
 # --------------------------------------------------------------------------- #
@@ -288,17 +294,28 @@ async def _config_tool_entities(server_id: UUID, lang: str) -> list[MCPServerToo
     them from ``mcp.list_tools()`` keeps the two in sync automatically.
     """
     tools = await mcp.list_tools()
-    return [
-        MCPServerTool(
-            mcp_server_id=server_id,
-            name=tool.name,
-            title=_localized_title(getattr(tool, "title", None), lang),
-            description=tool.description,
-            input_schema=tool.inputSchema,
-            is_enabled_by_default=True,
+    cap_by_tool = {
+        cap.id.replace(".", "_"): cap for cap in CAPABILITY_REGISTRY.values()
+    }
+    entities: list[MCPServerTool] = []
+    for tool in tools:
+        cap = cap_by_tool.get(tool.name)
+        title = (
+            cap.title(lang)
+            if cap is not None
+            else _localized_title(getattr(tool, "title", None), lang)
         )
-        for tool in tools
-    ]
+        entities.append(
+            MCPServerTool(
+                mcp_server_id=server_id,
+                name=tool.name,
+                title=title,
+                description=tool.description,
+                input_schema=tool.inputSchema,
+                is_enabled_by_default=True,
+            )
+        )
+    return entities
 
 
 async def build_config_mcp_server(
