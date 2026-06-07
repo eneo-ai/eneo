@@ -22,6 +22,7 @@
     description?: string | null;
     tags?: string[] | null;
     security_classification?: { security_level: number; name?: string } | null;
+    is_knowledge_source?: boolean;
     tools: MCPTool[];
   }
 
@@ -47,6 +48,12 @@
   };
 
   const { selectableServers }: Props = $props();
+
+  // Group external knowledge sources separately from regular MCP tool servers.
+  const knowledgeSources = $derived(
+    selectableServers.filter((s) => s.is_knowledge_source ?? false)
+  );
+  const toolServers = $derived(selectableServers.filter((s) => !(s.is_knowledge_source ?? false)));
 
   // Track expanded servers
   const expandedServers = new SvelteSet<string>();
@@ -156,88 +163,114 @@
     {/if}
   </svelte:fragment>
 
-  {#each selectableServers as server (server.id)}
-    {@const serverTools = getServerTools(server.id)}
-    {@const hasTools = $currentlySelectedServers.includes(server.id) && serverTools.length > 0}
-    {@const isExpanded = expandedServers.has(server.id)}
-    {@const meetsClassification = meetsSecurityClassification(
-      server,
-      $currentSpace.security_classification
-    )}
-    <Tooltip
-      text={meetsClassification ? undefined : m.mcp_server_does_not_meet_security_classification()}
-    >
-      <div
-        class="border-default border-b last:border-b-0"
-        class:pointer-events-none={!meetsClassification}
-        class:opacity-60={!meetsClassification}
+  <div class="contents">
+    {#snippet serverRow(server: SelectableMCPServer)}
+      {@const serverTools = getServerTools(server.id)}
+      {@const hasTools = $currentlySelectedServers.includes(server.id) && serverTools.length > 0}
+      {@const isExpanded = expandedServers.has(server.id)}
+      {@const meetsClassification = meetsSecurityClassification(
+        server,
+        $currentSpace.security_classification
+      )}
+      <Tooltip
+        text={meetsClassification
+          ? undefined
+          : m.mcp_server_does_not_meet_security_classification()}
       >
-        <!-- Server Row -->
-        <div class="hover:bg-hover-dimmer flex items-center">
-          <!-- Expand Button -->
-          <button
-            type="button"
-            class="flex h-full w-10 shrink-0 items-center justify-center p-2 disabled:opacity-30"
-            disabled={!hasTools}
-            onclick={() => toggleExpanded(server.id)}
-          >
-            <ChevronRight class="h-4 w-4 transition-transform {isExpanded ? 'rotate-90' : ''}" />
-          </button>
-
-          <!-- Server Toggle -->
-          <div class="flex-1 py-4 pr-4">
-            <Input.Switch
-              value={$currentlySelectedServers.includes(server.id)}
-              sideEffect={() => {
-                if (meetsClassification) {
-                  toggleServer(server);
-                }
-              }}
+        <div
+          class="border-default border-b last:border-b-0"
+          class:pointer-events-none={!meetsClassification}
+          class:opacity-60={!meetsClassification}
+        >
+          <!-- Server Row -->
+          <div class="hover:bg-hover-dimmer flex items-center">
+            <!-- Expand Button -->
+            <button
+              type="button"
+              class="flex h-full w-10 shrink-0 items-center justify-center p-2 disabled:opacity-30"
+              disabled={!hasTools}
+              onclick={() => toggleExpanded(server.id)}
             >
-              <div class="flex flex-col gap-1">
-                <div class="flex items-center gap-2">
-                  <span class="font-medium">{server.name}</span>
-                  {#if hasTools}
-                    <span class="text-muted text-xs">({serverTools.length} {m.tools()})</span>
-                  {/if}
-                </div>
-                {#if server.description}
-                  <div class="text-muted text-sm">{server.description}</div>
-                {/if}
-                {#if server.tags && server.tags.length > 0}
-                  <div class="text-muted flex gap-2 text-xs">
-                    {#each server.tags as tag (tag)}
-                      <span
-                        class="inline-flex items-center rounded-full border border-gray-300 px-2 py-0.5 text-xs font-medium text-gray-700 dark:border-gray-600 dark:text-gray-300"
-                        >{tag}</span
-                      >
-                    {/each}
-                  </div>
-                {/if}
-              </div>
-            </Input.Switch>
-          </div>
-        </div>
+              <ChevronRight class="h-4 w-4 transition-transform {isExpanded ? 'rotate-90' : ''}" />
+            </button>
 
-        <!-- Tools List (only show if expanded) -->
-        {#if hasTools && isExpanded}
-          <div class="pr-4 pb-2 pl-10">
-            <div class="text-muted mb-2 text-xs font-medium">{m.tools()}</div>
-            {#each serverTools as tool (tool.id)}
-              <div class="border-dimmer hover:bg-hover-dimmer border-b py-2 last:border-b-0">
-                <Input.Switch value={tool.is_enabled} sideEffect={() => toggleTool(tool)}>
-                  <div class="flex flex-col">
-                    <div class="text-sm font-medium">{tool.name}</div>
-                    {#if tool.description}
-                      <div class="text-muted line-clamp-2 text-xs">{tool.description}</div>
+            <!-- Server Toggle -->
+            <div class="flex-1 py-4 pr-4">
+              <Input.Switch
+                value={$currentlySelectedServers.includes(server.id)}
+                sideEffect={() => {
+                  if (meetsClassification) {
+                    toggleServer(server);
+                  }
+                }}
+              >
+                <div class="flex flex-col gap-1">
+                  <div class="flex items-center gap-2">
+                    <span class="font-medium">{server.name}</span>
+                    {#if hasTools}
+                      <span class="text-muted text-xs">({serverTools.length} {m.tools()})</span>
                     {/if}
                   </div>
-                </Input.Switch>
-              </div>
-            {/each}
+                  {#if server.description}
+                    <div class="text-muted text-sm">{server.description}</div>
+                  {/if}
+                  {#if server.tags && server.tags.length > 0}
+                    <div class="text-muted flex gap-2 text-xs">
+                      {#each server.tags as tag (tag)}
+                        <span
+                          class="inline-flex items-center rounded-full border border-gray-300 px-2 py-0.5 text-xs font-medium text-gray-700 dark:border-gray-600 dark:text-gray-300"
+                          >{tag}</span
+                        >
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              </Input.Switch>
+            </div>
           </div>
-        {/if}
-      </div>
-    </Tooltip>
-  {/each}
+
+          <!-- Tools List (only show if expanded) -->
+          {#if hasTools && isExpanded}
+            <div class="pr-4 pb-2 pl-10">
+              <div class="text-muted mb-2 text-xs font-medium">{m.tools()}</div>
+              {#each serverTools as tool (tool.id)}
+                <div class="border-dimmer hover:bg-hover-dimmer border-b py-2 last:border-b-0">
+                  <Input.Switch value={tool.is_enabled} sideEffect={() => toggleTool(tool)}>
+                    <div class="flex flex-col">
+                      <div class="text-sm font-medium">{tool.name}</div>
+                      {#if tool.description}
+                        <div class="text-muted line-clamp-2 text-xs">{tool.description}</div>
+                      {/if}
+                    </div>
+                  </Input.Switch>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      </Tooltip>
+    {/snippet}
+
+    {#snippet serverGroup(label: string, group: SelectableMCPServer[])}
+      {#if group.length > 0}
+        <div
+          class="text-muted border-default bg-secondary/20 border-b px-4 py-2 text-[11px] font-medium tracking-wider uppercase"
+        >
+          {label}
+        </div>
+        {#each group as server (server.id)}
+          {@render serverRow(server)}
+        {/each}
+      {/if}
+    {/snippet}
+
+    {#if knowledgeSources.length > 0}
+      {@render serverGroup(m.mcp_external_knowledge_sources(), knowledgeSources)}
+      {@render serverGroup(m.mcp_tool_servers(), toolServers)}
+    {:else}
+      {#each toolServers as server (server.id)}
+        {@render serverRow(server)}
+      {/each}
+    {/if}
+  </div>
 </Settings.Row>

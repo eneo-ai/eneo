@@ -11624,6 +11624,11 @@ export interface components {
       /** Documentation Url */
       documentation_url: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /**
+       * Is Knowledge Source
+       * @default false
+       */
+      is_knowledge_source?: boolean;
     };
     /** MCPServerPublicDict */
     MCPServerPublicDict: {
@@ -11645,6 +11650,8 @@ export interface components {
       security_classification: {
         [key: string]: unknown;
       } | null;
+      /** Is Knowledge Source */
+      is_knowledge_source: boolean;
       /** Tools */
       tools: {
         [key: string]: unknown;
@@ -11694,6 +11701,11 @@ export interface components {
       /** Documentation Url */
       documentation_url: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /**
+       * Is Knowledge Source
+       * @default false
+       */
+      is_knowledge_source?: boolean;
       /**
        * Mcp Server Id
        * Format: uuid

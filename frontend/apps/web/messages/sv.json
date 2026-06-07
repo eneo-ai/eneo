@@ -1712,6 +1712,8 @@
   "try_different_search_term": "Försök med ett annat sökord",
   "mcp": "MCP",
   "mcp_servers": "MCP-servrar",
+  "mcp_external_knowledge_sources": "Externa kunskapskällor",
+  "mcp_tool_servers": "MCP-verktygsservrar",
   "add_mcp_server": "Lägg till MCP-server",
   "edit_mcp_server": "Redigera MCP-server",
   "delete_mcp_server": "Ta bort MCP-server",

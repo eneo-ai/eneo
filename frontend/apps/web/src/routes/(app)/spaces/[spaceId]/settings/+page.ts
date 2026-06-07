@@ -25,6 +25,7 @@ export const load = async (event) => {
       tags: server.tags,
       icon_url: server.icon_url,
       security_classification: server.security_classification ?? null,
+      is_knowledge_source: server.is_knowledge_source ?? false,
       tools: server.tools ?? []
     }));
 

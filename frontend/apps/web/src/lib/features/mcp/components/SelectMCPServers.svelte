@@ -25,6 +25,7 @@
     description?: string;
     tags?: string[];
     tools?: MCPTool[];
+    is_knowledge_source?: boolean;
     [key: string]: unknown;
   }
 
@@ -262,128 +263,154 @@
       </div>
     </div>
   {:else}
-    <div class="divide-dimmer border-default divide-y overflow-hidden rounded-xl border">
-      {#each availableServers as server (server.id)}
-        {@const isSelected = isServerSelected(server.id)}
-        {@const hasTools = isSelected && server.tools && server.tools.length > 0}
-        {@const isExpanded = expandedServers.has(server.id)}
-        {@const toolCount = server.tools?.length ?? 0}
-        {@const enabledToolCount =
-          server.tools?.filter((t) => isToolEnabled(server, t.id)).length ?? 0}
-        <div class="transition-colors {isSelected ? 'bg-accent-dimmer/20' : ''}">
-          <!-- Server Row -->
-          <div class="flex items-center">
-            <!-- Expand Button -->
-            <button
-              type="button"
-              class="text-muted hover:text-default disabled:hover:text-muted flex h-full w-10 shrink-0 items-center justify-center p-2.5 transition-colors disabled:opacity-20"
-              disabled={!hasTools}
-              onclick={() => toggleExpanded(server.id)}
-              aria-label={isExpanded ? "Dölj verktyg" : "Visa verktyg"}
-              aria-expanded={isExpanded}
-            >
-              <ChevronRight
-                class="h-4 w-4 transition-transform duration-200 {isExpanded ? 'rotate-90' : ''}"
-              />
-            </button>
+    {@const knowledgeSources = availableServers.filter((s) => s.is_knowledge_source ?? false)}
+    {@const toolServers = availableServers.filter((s) => !(s.is_knowledge_source ?? false))}
 
-            <!-- Server Toggle -->
-            <div class="flex-1 py-2.5 pr-4">
-              <Input.Switch value={isSelected} sideEffect={() => toggleServer(server)}>
-                <div class="flex flex-col gap-0.5">
-                  <div class="flex items-center gap-2">
-                    <span class="text-default font-medium">{server.name}</span>
-                    {#if hasTools}
-                      <span
-                        class="bg-secondary text-muted inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
-                      >
-                        <span class="text-positive-default">{enabledToolCount}</span>
-                        <span class="text-dimmer">/</span>
-                        <span>{toolCount}</span>
-                      </span>
-                    {/if}
-                  </div>
-                  {#if server.description}
-                    <p class="text-muted line-clamp-1 text-xs leading-snug">{server.description}</p>
+    {#snippet serverRow(server: MCPServer)}
+      {@const isSelected = isServerSelected(server.id)}
+      {@const hasTools = isSelected && server.tools && server.tools.length > 0}
+      {@const isExpanded = expandedServers.has(server.id)}
+      {@const toolCount = server.tools?.length ?? 0}
+      {@const enabledToolCount =
+        server.tools?.filter((t) => isToolEnabled(server, t.id)).length ?? 0}
+      <div class="transition-colors {isSelected ? 'bg-accent-dimmer/20' : ''}">
+        <!-- Server Row -->
+        <div class="flex items-center">
+          <!-- Expand Button -->
+          <button
+            type="button"
+            class="text-muted hover:text-default disabled:hover:text-muted flex h-full w-10 shrink-0 items-center justify-center p-2.5 transition-colors disabled:opacity-20"
+            disabled={!hasTools}
+            onclick={() => toggleExpanded(server.id)}
+            aria-label={isExpanded ? "Dölj verktyg" : "Visa verktyg"}
+            aria-expanded={isExpanded}
+          >
+            <ChevronRight
+              class="h-4 w-4 transition-transform duration-200 {isExpanded ? 'rotate-90' : ''}"
+            />
+          </button>
+
+          <!-- Server Toggle -->
+          <div class="flex-1 py-2.5 pr-4">
+            <Input.Switch value={isSelected} sideEffect={() => toggleServer(server)}>
+              <div class="flex flex-col gap-0.5">
+                <div class="flex items-center gap-2">
+                  <span class="text-default font-medium">{server.name}</span>
+                  {#if hasTools}
+                    <span
+                      class="bg-secondary text-muted inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
+                    >
+                      <span class="text-positive-default">{enabledToolCount}</span>
+                      <span class="text-dimmer">/</span>
+                      <span>{toolCount}</span>
+                    </span>
                   {/if}
                 </div>
-              </Input.Switch>
+                {#if server.description}
+                  <p class="text-muted line-clamp-1 text-xs leading-snug">{server.description}</p>
+                {/if}
+              </div>
+            </Input.Switch>
+          </div>
+        </div>
+
+        <!-- Tools List (only show if expanded) -->
+        {#if hasTools && isExpanded}
+          <div
+            class="border-dimmer bg-secondary/20 border-l-accent-default/70 mr-3 mb-2 ml-10 rounded-lg border-t border-l-[3px]"
+            role="group"
+            aria-label={m.mcp_tools_for_server_aria({ name: server.name })}
+          >
+            <!-- Tools header with bulk actions -->
+            <div class="border-dimmer/50 flex items-center justify-between border-b px-3 py-1.5">
+              <span class="text-muted text-[11px] font-medium tracking-wider uppercase"
+                >{m.tools()} ({toolCount})</span
+              >
+              <div class="flex items-center gap-1">
+                <button
+                  type="button"
+                  class="text-muted hover:text-default hover:bg-hover-dimmer rounded px-2 py-1 text-[10px] font-medium transition-colors"
+                  onclick={() => {
+                    server.tools?.forEach((tool) => {
+                      if (!isToolEnabled(server, tool.id)) toggleTool(server, tool);
+                    });
+                  }}
+                >
+                  {m.mcp_all_on()}
+                </button>
+                <span class="text-dimmer">|</span>
+                <button
+                  type="button"
+                  class="text-muted hover:text-default hover:bg-hover-dimmer rounded px-2 py-1 text-[10px] font-medium transition-colors"
+                  onclick={() => {
+                    server.tools?.forEach((tool) => {
+                      if (isToolEnabled(server, tool.id)) toggleTool(server, tool);
+                    });
+                  }}
+                >
+                  {m.mcp_all_off()}
+                </button>
+              </div>
+            </div>
+
+            <!-- Scrollable tools list -->
+            <div class="max-h-[240px] overflow-y-auto">
+              <div class="divide-dimmer divide-y">
+                {#each getServerTools(server) as tool (tool.id)}
+                  {@const toolEnabled = isToolEnabled(server, tool.id)}
+                  <div
+                    class="hover:bg-hover-dimmer flex items-center gap-3 px-3 py-2.5 transition-all {toolEnabled
+                      ? ''
+                      : 'opacity-40 grayscale-[30%]'}"
+                  >
+                    <div class="min-w-0 flex-1">
+                      <span class="text-default block truncate font-mono text-xs font-medium"
+                        >{tool.name}</span
+                      >
+                      {#if tool.description}
+                        <Tooltip text={tool.description} placement="bottom">
+                          <p class="text-muted cursor-help truncate text-xs leading-snug">
+                            {tool.description}
+                          </p>
+                        </Tooltip>
+                      {/if}
+                    </div>
+                    <Input.Switch value={toolEnabled} sideEffect={() => toggleTool(server, tool)} />
+                  </div>
+                {/each}
+              </div>
             </div>
           </div>
+        {/if}
+      </div>
+    {/snippet}
 
-          <!-- Tools List (only show if expanded) -->
-          {#if hasTools && isExpanded}
-            <div
-              class="border-dimmer bg-secondary/20 border-l-accent-default/70 mr-3 mb-2 ml-10 rounded-lg border-t border-l-[3px]"
-              role="group"
-              aria-label={m.mcp_tools_for_server_aria({ name: server.name })}
-            >
-              <!-- Tools header with bulk actions -->
-              <div class="border-dimmer/50 flex items-center justify-between border-b px-3 py-1.5">
-                <span class="text-muted text-[11px] font-medium tracking-wider uppercase"
-                  >{m.tools()} ({toolCount})</span
-                >
-                <div class="flex items-center gap-1">
-                  <button
-                    type="button"
-                    class="text-muted hover:text-default hover:bg-hover-dimmer rounded px-2 py-1 text-[10px] font-medium transition-colors"
-                    onclick={() => {
-                      server.tools?.forEach((tool) => {
-                        if (!isToolEnabled(server, tool.id)) toggleTool(server, tool);
-                      });
-                    }}
-                  >
-                    {m.mcp_all_on()}
-                  </button>
-                  <span class="text-dimmer">|</span>
-                  <button
-                    type="button"
-                    class="text-muted hover:text-default hover:bg-hover-dimmer rounded px-2 py-1 text-[10px] font-medium transition-colors"
-                    onclick={() => {
-                      server.tools?.forEach((tool) => {
-                        if (isToolEnabled(server, tool.id)) toggleTool(server, tool);
-                      });
-                    }}
-                  >
-                    {m.mcp_all_off()}
-                  </button>
-                </div>
-              </div>
-
-              <!-- Scrollable tools list -->
-              <div class="max-h-[240px] overflow-y-auto">
-                <div class="divide-dimmer divide-y">
-                  {#each getServerTools(server) as tool (tool.id)}
-                    {@const toolEnabled = isToolEnabled(server, tool.id)}
-                    <div
-                      class="hover:bg-hover-dimmer flex items-center gap-3 px-3 py-2.5 transition-all {toolEnabled
-                        ? ''
-                        : 'opacity-40 grayscale-[30%]'}"
-                    >
-                      <div class="min-w-0 flex-1">
-                        <span class="text-default block truncate font-mono text-xs font-medium"
-                          >{tool.name}</span
-                        >
-                        {#if tool.description}
-                          <Tooltip text={tool.description} placement="bottom">
-                            <p class="text-muted cursor-help truncate text-xs leading-snug">
-                              {tool.description}
-                            </p>
-                          </Tooltip>
-                        {/if}
-                      </div>
-                      <Input.Switch
-                        value={toolEnabled}
-                        sideEffect={() => toggleTool(server, tool)}
-                      />
-                    </div>
-                  {/each}
-                </div>
-              </div>
-            </div>
-          {/if}
+    {#snippet serverGroup(label: string, group: MCPServer[])}
+      {#if group.length > 0}
+        <div>
+          <h3 class="text-muted mb-1.5 px-1 text-[11px] font-medium tracking-wider uppercase">
+            {label}
+          </h3>
+          <div class="divide-dimmer border-default divide-y overflow-hidden rounded-xl border">
+            {#each group as server (server.id)}
+              {@render serverRow(server)}
+            {/each}
+          </div>
         </div>
-      {/each}
-    </div>
+      {/if}
+    {/snippet}
+
+    {#if knowledgeSources.length > 0}
+      <div class="space-y-3">
+        {@render serverGroup(m.mcp_external_knowledge_sources(), knowledgeSources)}
+        {@render serverGroup(m.mcp_tool_servers(), toolServers)}
+      </div>
+    {:else}
+      <div class="divide-dimmer border-default divide-y overflow-hidden rounded-xl border">
+        {#each toolServers as server (server.id)}
+          {@render serverRow(server)}
+        {/each}
+      </div>
+    {/if}
   {/if}
 </div>

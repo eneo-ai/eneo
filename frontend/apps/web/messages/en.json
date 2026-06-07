@@ -1678,6 +1678,8 @@
   "try_different_search_term": "Try a different search term",
   "mcp": "MCP",
   "mcp_servers": "MCP Servers",
+  "mcp_external_knowledge_sources": "External knowledge sources",
+  "mcp_tool_servers": "MCP tool servers",
   "add_mcp_server": "Add MCP Server",
   "edit_mcp_server": "Edit MCP Server",
   "delete_mcp_server": "Delete MCP Server",
