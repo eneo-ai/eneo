@@ -429,6 +429,11 @@ class Settings(BaseSettings):
     # at the Eneo backend's /api/v1 and be reachable from the tool's network.
     file_reference_base_url: Optional[str] = None
 
+    # Base URL Eneo uses to reach its OWN loopback config-MCP (mounted at
+    # /internal-mcp) during conversational "edit mode". Must be reachable from
+    # within the backend process/container. Dev default is the local server.
+    internal_mcp_base_url: str = "http://localhost:8123"
+
     # Dev
     testing: bool = False
     dev: bool = False

@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from intric.assistant_config_mcp import config_mcp_lifespan
 from intric.database.database import sessionmanager
 from intric.jobs.job_manager import job_manager
 from intric.main.aiohttp_client import aiohttp_client
@@ -14,7 +15,14 @@ from intric.server.websockets.websocket_manager import websocket_manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await startup()
-    yield
+    # The loopback config-MCP is a mounted sub-app; Starlette does not run a
+    # mounted app's lifespan, so the parent must drive its session manager. Skip
+    # in OpenAPI-only mode (no startup deps, no requests served).
+    if get_settings().openapi_only_mode:
+        yield
+    else:
+        async with config_mcp_lifespan():
+            yield
     await shutdown()
 
 
