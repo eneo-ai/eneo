@@ -128,6 +128,55 @@ class AuthService:
         )
         return access_token
 
+    def create_config_token(
+        self,
+        user: UserInDB,
+        scope_type: str,
+        scope_id: UUID,
+        assistant_id: UUID | None = None,
+        language: str | None = None,
+        expires_in: int = 15,
+    ) -> str:
+        """Mint a short-lived access token for conversational "edit mode".
+
+        Eneo attaches an ephemeral MCP server pointing at its own loopback config
+        endpoint, authenticated with this token. The token authenticates as
+        ``user`` exactly like a normal access token (so the loopback endpoint
+        reuses ``authenticate``), and additionally carries scope claims so the
+        endpoint knows what is being configured without trusting a tool argument:
+
+        - ``scope_type`` / ``scope_id``: the resource the session may configure
+          (e.g. ``space`` + space id). Capabilities broader than this are refused.
+        - ``assistant_id``: the assistant in focus, so grant tools need no id and
+          cannot be redirected to another assistant.
+        - ``lang``: the user's UI locale, for localized tool titles/confirmations.
+
+        Unknown claims ride through ``JWTPayload`` (which ignores them on decode)
+        untouched and are read out separately by the loopback endpoint.
+        """
+        secret_key = str(JWT_SECRET)
+
+        jwt_meta = JWTMeta(
+            aud=JWT_AUDIENCE,
+            iat=datetime.timestamp(datetime.now(timezone.utc) - timedelta(seconds=2)),
+            exp=datetime.timestamp(
+                datetime.now(timezone.utc) + timedelta(minutes=expires_in)
+            ),
+        )
+        jwt_creds = JWTCreds(sub=user.email, username=user.username)
+        payload = {
+            **JWTPayload(
+                **jwt_meta.model_dump(),
+                **jwt_creds.model_dump(),
+            ).model_dump(),
+            "scope_type": scope_type,
+            "scope_id": str(scope_id),
+            "lang": (language or "en"),
+        }
+        if assistant_id is not None:
+            payload["assistant_id"] = str(assistant_id)
+        return jwt.encode(payload, secret_key, algorithm=JWT_ALGORITHM)
+
     def _generate_api_key(self) -> str:
         return secrets.token_hex(get_settings().api_key_length)
 

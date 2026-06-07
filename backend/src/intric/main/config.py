@@ -408,6 +408,11 @@ class Settings(BaseSettings):
     jwt_token_prefix: str
     url_signing_key: str
 
+    # Base URL Eneo uses to reach its OWN loopback config-MCP (mounted at
+    # /internal-mcp) during conversational "edit mode". Must be reachable from
+    # within the backend process/container. Dev default is the local server.
+    internal_mcp_base_url: str = "http://localhost:8123"
+
     # Dev
     testing: bool = False
     dev: bool = False

@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from intric.allowed_origins.get_origin_callback import get_origin
+from intric.assistant_config_mcp import config_mcp_app
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 from intric.main.observability import init_observability, instrument_fastapi
@@ -249,6 +250,9 @@ def get_application():
 
     app.include_router(api_router, prefix=get_settings().api_prefix)
     app.mount("/scim/v2", scim_app)
+    # Loopback config-MCP for conversational "edit mode" (its session manager is
+    # driven by the parent lifespan in dependencies/lifespan.py).
+    app.mount("/internal-mcp", config_mcp_app)
 
     # Add handlers of all errors except 500
     add_exception_handlers(app)
