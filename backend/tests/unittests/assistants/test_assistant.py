@@ -262,9 +262,12 @@ def assistant_with_model():
 
 
 @pytest.mark.asyncio
-async def test_ask_skips_mcp_when_knowledge_present(assistant_with_model):
+async def test_ask_uses_both_mcp_and_knowledge_when_present(assistant_with_model):
+    """Knowledge and MCP servers coexist: knowledge is retrieved as context AND
+    MCP servers are exposed as tools (the prior exclusivity has been lifted)."""
     embedding_model = MagicMock(id=1)
-    assistant_with_model.mcp_servers = [MagicMock()]
+    mcp_servers = [MagicMock()]
+    assistant_with_model.mcp_servers = mcp_servers
     assistant_with_model.collections = [MagicMock(embedding_model=embedding_model)]
     assistant_with_model.websites = [MagicMock(embedding_model=embedding_model)]
 
@@ -281,11 +284,11 @@ async def test_ask_skips_mcp_when_knowledge_present(assistant_with_model):
         version=2,
     )
 
-    # Knowledge retrieval should be called
+    # Knowledge retrieval still runs
     references_service.get_references.assert_called_once()
-    # MCP servers should be excluded from completion call
+    # AND MCP servers are still passed to the completion call
     call_kwargs = completion_service.get_response.call_args.kwargs
-    assert call_kwargs["mcp_servers"] == []
+    assert call_kwargs["mcp_servers"] == mcp_servers
 
 
 @pytest.mark.asyncio

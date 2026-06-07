@@ -491,24 +491,15 @@ class AssistantService:
             icon_id=icon_id,
         )
 
-        # Validate mutual exclusivity: knowledge and MCP servers cannot both be active.
-        # Only check when either side is being updated to avoid false positives on
-        # unrelated updates (e.g. renaming an assistant).
+        # Knowledge and MCP servers may both be active on an assistant; the prior
+        # mutual-exclusivity restriction has been lifted. Knowledge is retrieved as
+        # context and MCP servers are exposed as tools — the completion loop sends
+        # both.
         knowledge_changing = (
             groups is not None
             or websites is not None
             or integration_knowledge_ids is not None
         )
-        mcp_changing = mcp_server_ids is not None
-        if knowledge_changing or mcp_changing:
-            will_have_mcp = (
-                mcp_server_ids is not None and len(mcp_server_ids) > 0
-            ) or (mcp_server_ids is None and assistant.has_mcp())
-            if assistant.has_knowledge() and will_have_mcp:
-                raise BadRequestException(
-                    "Knowledge and MCP servers cannot both be active on an assistant. "
-                    "Remove one before enabling the other."
-                )
 
         # Only validate space references when the relevant fields are actually changing
         self.validate_space_assistant(
