@@ -59,6 +59,8 @@ class MCPServer(Entity):
         tags: Optional[list[str]] = None,
         icon_url: Optional[str] = None,
         documentation_url: Optional[str] = None,
+        external_collection_slug: Optional[str] = None,
+        external_collection_id: Optional[str] = None,
         tools: Optional[list[MCPServerTool]] = None,
         security_classification: Optional["SecurityClassification"] = None,
         id: Optional[UUID] = None,
@@ -78,8 +80,15 @@ class MCPServer(Entity):
         self.tags = tags
         self.icon_url = icon_url
         self.documentation_url = documentation_url
+        self.external_collection_slug = external_collection_slug
+        self.external_collection_id = external_collection_id
         self.tools = tools or []
         self.security_classification = security_classification
+
+    @property
+    def is_knowledge_source(self) -> bool:
+        """A server provisioned from the external knowledge provider."""
+        return self.external_collection_slug is not None
 
 
 class MCPServerSettings(Entity):

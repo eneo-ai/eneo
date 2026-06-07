@@ -30,8 +30,8 @@ class SetKnowledgeInput(BaseModel):
     mcp_server_ids: Optional[list[UUID]] = Field(
         default=None,
         description=(
-            "MCP server ids to attach (e.g. a Ladan knowledge source); omit to "
-            "leave unchanged, [] to clear. May coexist with collections/websites."
+            "MCP server ids to attach (e.g. a knowledge source); omit to leave "
+            "unchanged, [] to clear. May coexist with collections/websites."
         ),
     )
 
@@ -78,7 +78,7 @@ register(
         title_sv="Ange kunskap",
         description=(
             "Attach knowledge to this assistant: native collections/websites and/or "
-            "MCP servers (e.g. a Ladan knowledge source). They may be combined."
+            "MCP servers (e.g. a knowledge source). They may be combined."
         ),
         audit_action=ActionType.ASSISTANT_UPDATED,
         audit_entity=EntityType.ASSISTANT,

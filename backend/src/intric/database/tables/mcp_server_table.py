@@ -56,6 +56,13 @@ class MCPServers(BasePublic):
     icon_url: Mapped[Optional[str]] = mapped_column(String)
     documentation_url: Mapped[Optional[str]] = mapped_column(String)
 
+    # External-knowledge link. Set only for servers provisioned as a "knowledge
+    # source" backed by the external knowledge provider; their presence marks the
+    # server as a knowledge source (no separate kind discriminator). Carries the
+    # provider's collection reference so later ingest can target the collection.
+    external_collection_slug: Mapped[Optional[str]] = mapped_column(String)
+    external_collection_id: Mapped[Optional[str]] = mapped_column(String)
+
     # Security classification
     security_classification_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("security_classifications.id", ondelete="SET NULL"), nullable=True

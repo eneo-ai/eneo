@@ -98,6 +98,8 @@ class MCPServerMapper:
             tags=db_model.tags,
             icon_url=db_model.icon_url,
             documentation_url=db_model.documentation_url,
+            external_collection_slug=db_model.external_collection_slug,
+            external_collection_id=db_model.external_collection_id,
             tools=tools,
             security_classification=security_classification,
         )
@@ -124,6 +126,8 @@ class MCPServerMapper:
             "tags": entity.tags,
             "icon_url": entity.icon_url,
             "documentation_url": entity.documentation_url,
+            "external_collection_slug": entity.external_collection_slug,
+            "external_collection_id": entity.external_collection_id,
             "security_classification_id": (
                 entity.security_classification.id
                 if entity.security_classification

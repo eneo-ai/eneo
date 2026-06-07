@@ -84,6 +84,7 @@ from intric.embedding_models.infrastructure.create_embeddings_service import (
     CreateEmbeddingsService,
 )
 from intric.embedding_models.infrastructure.datastore import Datastore
+from intric.external_knowledge.service import ExternalKnowledgeService
 from intric.feature_flag.feature_flag_factory import FeatureFlagFactory
 from intric.feature_flag.feature_flag_repo import FeatureFlagRepository
 from intric.feature_flag.feature_flag_service import FeatureFlagService
@@ -1166,6 +1167,13 @@ class Container(containers.DeclarativeContainer):
         mcp_server_repo=mcp_server_repo,
         user=user,
         encryption_service=encryption_service,
+    )
+    external_knowledge_service = providers.Factory(
+        ExternalKnowledgeService,
+        user=user,
+        space_service=space_service,
+        mcp_server_service=mcp_server_service,
+        actor_manager=actor_manager,
     )
     tenant_integration_service = providers.Factory(
         TenantIntegrationService,

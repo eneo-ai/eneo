@@ -4,8 +4,15 @@ from intric.config_capabilities.capabilities import (
     assistant_grants,
     assistant_settings,
     collections,
+    knowledge_source,
     websites,
 )
 
 # Re-export so the side-effect imports (which trigger register()) count as used.
-__all__ = ["assistant_grants", "assistant_settings", "collections", "websites"]
+__all__ = [
+    "assistant_grants",
+    "assistant_settings",
+    "collections",
+    "knowledge_source",
+    "websites",
+]

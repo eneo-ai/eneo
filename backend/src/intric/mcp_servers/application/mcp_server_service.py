@@ -193,6 +193,20 @@ class MCPServerService:
             security_classification=security_classification,
         )
 
+        return await self._create_validated_mcp_server(
+            mcp_server, http_auth_config_schema
+        )
+
+    async def _create_validated_mcp_server(
+        self,
+        mcp_server: MCPServer,
+        http_auth_config_schema: dict[str, Any] | None,
+    ) -> MCPServerCreateResult:
+        """Test the connection, then (only on success) encrypt + save + discover tools.
+
+        Shared by the admin-gated ``create_mcp_server`` and the knowledge-source
+        provisioning path; it performs no authorization of its own.
+        """
         # Test connection FIRST with plaintext credentials before saving to database
         auth_credentials = http_auth_config_schema if http_auth_config_schema else None
         tools, connection_result = await self._test_connection_and_discover_tools(
@@ -207,7 +221,7 @@ class MCPServerService:
             )
 
         # Encrypt credentials before saving to database (skip if auth type is "none")
-        if http_auth_type != "none" and http_auth_config_schema:
+        if mcp_server.http_auth_type != "none" and http_auth_config_schema:
             mcp_server.http_auth_config_schema = self._encrypt_auth_config(
                 http_auth_config_schema
             )
@@ -231,6 +245,35 @@ class MCPServerService:
 
         connection_result.tools_discovered = len(tools)
         return MCPServerCreateResult(server=mcp_server, connection=connection_result)
+
+    async def provision_knowledge_source_server(
+        self,
+        *,
+        name: str,
+        http_url: str,
+        token: str | None,
+        external_collection_slug: str,
+        external_collection_id: str | None = None,
+    ) -> MCPServerCreateResult:
+        """Provision a knowledge-source MCP server backed by the knowledge provider.
+
+        Deliberately NOT tenant-ADMIN gated: authorization is enforced upstream by
+        the ``knowledge_source.create`` capability's space-admin (``can_edit_space``)
+        check. The ADMIN gate on ``create_mcp_server`` guards against non-admins
+        injecting arbitrary endpoints/secrets; here the URL + token come from Eneo's
+        trusted provider config (not user input), so that risk is absent.
+        """
+        auth_config = {"token": token} if token else None
+        mcp_server = MCPServer(
+            tenant_id=self.user.tenant_id,
+            name=name,
+            http_url=str(http_url),
+            http_auth_type="bearer" if token else "none",
+            http_auth_config_schema=auth_config,
+            external_collection_slug=external_collection_slug,
+            external_collection_id=external_collection_id,
+        )
+        return await self._create_validated_mcp_server(mcp_server, auth_config)
 
     @validate_permissions(Permission.ADMIN)
     async def update_mcp_server(

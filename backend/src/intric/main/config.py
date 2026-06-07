@@ -434,6 +434,14 @@ class Settings(BaseSettings):
     # within the backend process/container. Dev default is the local server.
     internal_mcp_base_url: str = "http://localhost:8123"
 
+    # External knowledge provider (generic, provider-agnostic). When configured,
+    # edit mode can create a "knowledge source": Eneo calls the provider to spin
+    # up a collection, then registers the collection's MCP endpoint as a
+    # space-scoped MCP server. Both Optional: the feature is inert when either
+    # value is unset (knowledge_source.* capabilities raise a clear error).
+    external_knowledge_provider_url: Optional[str] = None
+    external_knowledge_provider_api_key: Optional[str] = None
+
     # Dev
     testing: bool = False
     dev: bool = False
