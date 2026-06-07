@@ -786,6 +786,15 @@ class AssistantService:
                                     )
                             yield chunk
 
+                        if chunk.response_type == ResponseType.ELICITATION_REQUIRED:
+                            # Forward server-initiated elicitations (e.g. a mutating
+                            # config-capability confirm) to the SSE layer so the
+                            # frontend can prompt the user. Without this branch the
+                            # chunk falls through the response-type allowlist and is
+                            # dropped, so the suspended tool call hangs until the
+                            # elicitation times out.
+                            yield chunk
+
                         if chunk.response_type == ResponseType.TOOL_APPROVAL_TIMEOUT:
                             if chunk.tool_calls_metadata:
                                 for tc in chunk.tool_calls_metadata:
