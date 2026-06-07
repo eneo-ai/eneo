@@ -172,6 +172,14 @@ export namespace SSE {
       result_status?: string;
     }>;
   };
+  export type ElicitationRequired = {
+    session_id: string;
+    intric_event_type: "elicitation_required";
+    elicitation_id: string;
+    message: string;
+    requested_schema?: Record<string, unknown>;
+    tool_call_id?: string;
+  };
   export type TokenUsage = Omit<components["schemas"]["SSETokenUsage"], "$defs">;
   export type Error = Omit<components["schemas"]["SSEError"], "$defs">;
   export type Event =
@@ -182,6 +190,7 @@ export namespace SSE {
     | ToolCall
     | ToolApprovalRequired
     | ToolApprovalTimeout
+    | ElicitationRequired
     | TokenUsage
     | Error;
 }

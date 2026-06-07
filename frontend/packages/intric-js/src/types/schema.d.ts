@@ -1454,6 +1454,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/conversations/respond-elicitation/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Respond To Elicitation
+     * @description Submit a response to a pending MCP elicitation.
+     *
+     *     When a tool calls ``ctx.elicit(...)`` mid-execution, the stream emits an
+     *     ``elicitation_required`` event with an ``elicitation_id``. Use this endpoint
+     *     to relay the user's accept/decline/cancel response back to the waiting tool.
+     */
+    post: operations["respond_to_elicitation_api_v1_conversations_respond_elicitation__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/conversations/{session_id}/name/": {
     parameters: {
       query?: never;
@@ -1467,7 +1491,10 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
-    /** Rename Conversation */
+    /**
+     * Rename Conversation
+     * @description Rename a conversation (session).
+     */
     patch: operations["rename_conversation_api_v1_conversations__session_id__name__patch"];
     trace?: never;
   };
@@ -6315,6 +6342,34 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/sysadmin/tenants/{tenant_id}/scim-token": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get SCIM token status for tenant
+     * @description Returns whether SCIM provisioning is active (i.e. a token hash is configured) for the given tenant. Never returns the token itself.
+     */
+    get: operations["get_scim_token_status_api_v1_sysadmin_tenants__tenant_id__scim_token_get"];
+    put?: never;
+    /**
+     * Generate SCIM bearer token for tenant
+     * @description Generates a new SCIM bearer token for the given tenant. The token is returned in plaintext exactly once and is never stored — only its SHA-256 hash is persisted. Calling this endpoint again replaces any existing token.
+     */
+    post: operations["create_scim_token_api_v1_sysadmin_tenants__tenant_id__scim_token_post"];
+    /**
+     * Revoke SCIM token for tenant
+     * @description Removes the SCIM token hash, disabling SCIM provisioning for the tenant. Any subsequent SCIM requests from the IdP will receive 401.
+     */
+    delete: operations["delete_scim_token_api_v1_sysadmin_tenants__tenant_id__scim_token_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}": {
     parameters: {
       query?: never;
@@ -6993,6 +7048,7 @@ export interface components {
       | "tool_approval_submitted"
       | "file_uploaded"
       | "file_deleted"
+      | "file_signed_url_minted"
       | "website_created"
       | "website_updated"
       | "website_deleted"
@@ -7035,6 +7091,17 @@ export interface components {
       | "mcp_server_disabled"
       | "mcp_server_tool_enabled"
       | "mcp_server_tool_disabled"
+      | "scim_user_provisioned"
+      | "scim_user_reconciled"
+      | "scim_user_reactivated"
+      | "scim_user_deprovisioned"
+      | "scim_user_updated"
+      | "scim_group_created"
+      | "scim_group_reactivated"
+      | "scim_group_updated"
+      | "scim_group_deleted"
+      | "scim_token_created"
+      | "scim_token_revoked"
       | "retention_policy_applied"
       | "encryption_key_rotated"
       | "system_maintenance"
@@ -8316,6 +8383,11 @@ export interface components {
        */
       insight_enabled: boolean;
       /**
+       * Inline File Text
+       * @description Whether attached file text is inlined into the prompt (True) or the file is surfaced to the model as a signed URL only (False).
+       */
+      inline_file_text: boolean;
+      /**
        * Data Retention Days
        * @description Number of days to retain data for this assistant
        */
@@ -9358,6 +9430,11 @@ export interface components {
       /** Total Questions */
       total_questions: number;
     };
+    /** ConversationRenameRequest */
+    ConversationRenameRequest: {
+      /** Name */
+      name: string;
+    };
     /**
      * ConversationRequest
      * @description A unified model for asking questions to either assistants or group chats.
@@ -9400,10 +9477,17 @@ export interface components {
        * @default false
        */
       require_tool_approval?: boolean;
-    };
-    ConversationRenameRequest: {
-      /** Name */
-      name: string;
+      /**
+       * Edit Mode
+       * @description When true, an assistant conversation enters configuration mode: the assistant's own prompt and knowledge are set aside and it is given tools to read and change this assistant's own settings. Requires edit rights on the assistant. Ignored for group chats.
+       * @default false
+       */
+      edit_mode?: boolean;
+      /**
+       * Language
+       * @description The user's UI locale (e.g. "sv"/"en"), used to localize edit-mode configuration prompts and tool titles.
+       */
+      language?: string | null;
     };
     /** Counts */
     Counts: {
@@ -9989,6 +10073,11 @@ export interface components {
        */
       insight_enabled?: boolean;
       /**
+       * Inline File Text
+       * @default true
+       */
+      inline_file_text?: boolean;
+      /**
        * Data Retention Days
        * @description Number of days to retain data for this assistant
        */
@@ -10069,6 +10158,28 @@ export interface components {
        * @description List of setting keys that were removed
        */
       deleted_keys: string[];
+    };
+    /**
+     * ElicitationResponse
+     * @description Body for submitting an elicitation response.
+     */
+    ElicitationResponse: {
+      /**
+       * Action
+       * @enum {string}
+       */
+      action: "accept" | "decline" | "cancel";
+      /** Content */
+      content?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /** ElicitationResponseResult */
+    ElicitationResponseResult: {
+      /** Status */
+      status: string;
+      /** Elicitation Id */
+      elicitation_id: string;
     };
     /** EmbeddingModelCreate */
     EmbeddingModelCreate: {
@@ -10443,7 +10554,8 @@ export interface components {
       | "audit_log"
       | "session"
       | "mcp_server"
-      | "mcp_server_tool";
+      | "mcp_server_tool"
+      | "user_group";
     /**
      * ErrorCodes
      * @enum {integer}
@@ -11461,6 +11573,11 @@ export interface components {
       http_auth_config_schema?: {
         [key: string]: unknown;
       } | null;
+      /**
+       * Forward Identity
+       * @default false
+       */
+      forward_identity?: boolean;
       /** Tags */
       tags?: string[] | null;
       /** Icon Url */
@@ -11499,6 +11616,11 @@ export interface components {
       has_credentials: boolean;
       /** Credential Preview */
       credential_preview?: string | null;
+      /**
+       * Forward Identity
+       * @default false
+       */
+      forward_identity?: boolean;
       /** Tags */
       tags: string[] | null;
       /** Icon Url */
@@ -11564,6 +11686,11 @@ export interface components {
       has_credentials: boolean;
       /** Credential Preview */
       credential_preview?: string | null;
+      /**
+       * Forward Identity
+       * @default false
+       */
+      forward_identity?: boolean;
       /** Tags */
       tags: string[] | null;
       /** Icon Url */
@@ -11711,6 +11838,8 @@ export interface components {
       http_auth_config_schema?: {
         [key: string]: unknown;
       } | null;
+      /** Forward Identity */
+      forward_identity?: boolean | null;
       /** Tags */
       tags?: string[] | null;
       /** Icon Url */
@@ -13103,6 +13232,11 @@ export interface components {
        * @description Whether insights are enabled for this assistant. If enabled, users with appropriate permissions can see all sessions for this assistant.
        */
       insight_enabled?: boolean | null;
+      /**
+       * Inline File Text
+       * @description Whether to inline attached file text into the prompt. When False, a file whose original is available via signed URL is surfaced as that URL only (e.g. to avoid large files blowing the context window).
+       */
+      inline_file_text?: boolean | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
       /**
@@ -13691,6 +13825,29 @@ export interface components {
        */
       files?: components["schemas"]["ModelId"][];
     };
+    /** ScimTokenCreatedResponse */
+    ScimTokenCreatedResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Token
+       * @description Plaintext token — shown once, never stored
+       */
+      token: string;
+    };
+    /** ScimTokenStatusResponse */
+    ScimTokenStatusResponse: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /** Is Active */
+      is_active: boolean;
+    };
     /**
      * SecurityClassificationCreatePublic
      * @description Base model for security classification data.
@@ -14172,6 +14329,11 @@ export interface components {
        * @default true
        */
       api_key_expiry_notifications?: boolean;
+      /**
+       * File Storage Enabled
+       * @default false
+       */
+      file_storage_enabled?: boolean;
     };
     /**
      * SharePointSubscriptionPublic
@@ -16059,6 +16221,8 @@ export interface components {
       id: string;
       /** Name */
       name: string;
+      /** State */
+      state?: string | null;
     };
     /** UserGroupPublic */
     UserGroupPublic: {
@@ -17073,6 +17237,7 @@ export interface components {
       | "tool_call"
       | "tool_approval_required"
       | "tool_approval_timeout"
+      | "elicitation_required"
       | "token_usage";
     /** SSEText */
     SSEText: {
@@ -22147,6 +22312,7 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
+                    | "elicitation_required"
                     | "token_usage";
                 };
               }
@@ -22175,6 +22341,7 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
+                    | "elicitation_required"
                     | "token_usage";
                   /**
                    * McpToolReferencePublic
@@ -22263,6 +22430,7 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
+                    | "elicitation_required"
                     | "token_usage";
                   /**
                    * ToolCallInfo
@@ -22314,6 +22482,7 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
+                    | "elicitation_required"
                     | "token_usage";
                   /**
                    * ToolCallInfo
@@ -22886,60 +23055,6 @@ export interface operations {
       };
     };
   };
-  rename_conversation_api_v1_conversations__session_id__name__patch: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description The UUID of the conversation/session */
-        session_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ConversationRenameRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["SessionPublic"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
   approve_tools_api_v1_conversations_approve_tools__post: {
     parameters: {
       query: {
@@ -23017,6 +23132,123 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  respond_to_elicitation_api_v1_conversations_respond_elicitation__post: {
+    parameters: {
+      query: {
+        /** @description The elicitation ID from the elicitation_required event */
+        elicitation_id: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ElicitationResponse"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ElicitationResponseResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  rename_conversation_api_v1_conversations__session_id__name__patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConversationRenameRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -35286,6 +35518,118 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_scim_token_status_api_v1_sysadmin_tenants__tenant_id__scim_token_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description SCIM token status */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ScimTokenStatusResponse"];
+        };
+      };
+      /** @description Tenant not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_scim_token_api_v1_sysadmin_tenants__tenant_id__scim_token_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Token created. Copy it now — it will not be shown again. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ScimTokenCreatedResponse"];
+        };
+      };
+      /** @description Tenant not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_scim_token_api_v1_sysadmin_tenants__tenant_id__scim_token_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Token revoked — SCIM disabled for this tenant */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Tenant not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Validation Error */
       422: {
