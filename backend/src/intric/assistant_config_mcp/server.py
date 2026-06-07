@@ -130,6 +130,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "en": "(The user submitted an empty answer.)",
         "sv": "(Användaren skickade ett tomt svar.)",
     },
+    "capability_failed": {
+        "en": "The change could not be completed: {v}",
+        "sv": "Ändringen kunde inte slutföras: {v}",
+    },
 }
 
 
@@ -169,6 +173,19 @@ async def _confirm_capability(
 def _cancelled(ctx: Context) -> str:
     """Localized 'change cancelled' message returned by a declined tool."""
     return _t(_lang_from_ctx(ctx), "cancelled")
+
+
+def _failure_reason(exc: Exception) -> str:
+    """Concise, human-readable reason from a capability/provider failure.
+
+    Keeps the message short and free of stack noise: domain exceptions already
+    carry a clear message; for everything else fall back to the type so the user
+    sees something actionable rather than an empty string.
+    """
+    reason = str(exc).strip()
+    if not reason:
+        return exc.__class__.__name__
+    return reason.splitlines()[0][:300]
 
 
 async def _ask(ctx: Context, question: str, suggestions: list[str]) -> str:
@@ -214,12 +231,20 @@ def _register_capability_tool(capability: "ConfigCapability") -> None:
     tool_name = capability.id.replace(".", "_")
 
     async def _impl(ctx: Context, **kwargs: Any):
-        inp = model(**kwargs)
-        if capability.mutating and capability.confirm:
-            if not await _confirm_capability(ctx, capability, inp):
-                return _cancelled(ctx)
-        async with capability_context(_bearer_from_ctx(ctx)) as cctx:
-            result = await run_capability(capability, cctx, inp)
+        # Any failure here (bad args, permission, a downstream/provider error)
+        # must come back as a normal tool result. If it escaped, the proxy would
+        # surface a generic "Error executing tool." at best, and the edit-mode
+        # stream could be left spinning with no actionable message at worst.
+        try:
+            inp = model(**kwargs)
+            if capability.mutating and capability.confirm:
+                if not await _confirm_capability(ctx, capability, inp):
+                    return _cancelled(ctx)
+            async with capability_context(_bearer_from_ctx(ctx)) as cctx:
+                result = await run_capability(capability, cctx, inp)
+        except Exception as exc:  # noqa: BLE001 - surface, never escape
+            logger.warning("Config capability %s failed: %s", capability.id, exc)
+            return _t(_lang_from_ctx(ctx), "capability_failed", _failure_reason(exc))
         if result.summary:
             return result.summary
         return result.data if result.data is not None else "Done."
