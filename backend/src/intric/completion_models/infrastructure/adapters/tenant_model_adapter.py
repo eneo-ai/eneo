@@ -1,5 +1,6 @@
 """Minimal adapter for tenant models using LiteLLM."""
 
+import asyncio
 import base64
 import json
 import re
@@ -1542,10 +1543,50 @@ class TenantModelAdapter(CompletionModelAdapter):
                             )
                             for tc in approved_tcs
                         ]
-                        results = cast(
-                            list[dict[str, Any]],
-                            await mcp_proxy.call_tools_parallel(proxy_calls),
+                        # Run the tool calls while concurrently draining any
+                        # server-initiated elicitations (e.g. ctx.elicit asking the
+                        # user to confirm a change). The proxy's elicitation_callback
+                        # blocks the tool until the user replies; we surface each
+                        # prompt as an SSE event so the frontend can answer it.
+                        elicitation_queue = getattr(
+                            mcp_proxy, "elicitation_queue", None
                         )
+                        # Correlate an elicitation to its tool call only when there
+                        # is exactly one tool in flight (otherwise it's ambiguous).
+                        elicit_tool_call_id = (
+                            approved_tcs[0]["id"] if len(approved_tcs) == 1 else None
+                        )
+                        tool_task = asyncio.create_task(
+                            mcp_proxy.call_tools_parallel(proxy_calls)
+                        )
+                        if elicitation_queue is None:
+                            results = cast(list[dict[str, Any]], await tool_task)
+                        else:
+                            queue_task = asyncio.create_task(elicitation_queue.get())
+                            try:
+                                while not tool_task.done():
+                                    done, _ = await asyncio.wait(
+                                        {tool_task, queue_task},
+                                        return_when=asyncio.FIRST_COMPLETED,
+                                    )
+                                    if queue_task in done:
+                                        prompt = queue_task.result()
+                                        yield Completion(
+                                            response_type=ResponseType.ELICITATION_REQUIRED,
+                                            elicitation_id=prompt["elicitation_id"],
+                                            elicitation_message=prompt["message"],
+                                            elicitation_schema=prompt[
+                                                "requested_schema"
+                                            ],
+                                            elicitation_tool_call_id=elicit_tool_call_id,
+                                        )
+                                        queue_task = asyncio.create_task(
+                                            elicitation_queue.get()
+                                        )
+                            finally:
+                                if not queue_task.done():
+                                    queue_task.cancel()
+                            results = cast(list[dict[str, Any]], tool_task.result())
                         execution_metadata: list[ToolCallMetadata] = []
                         captured_refs: list[McpToolReference] = []
                         seen_prefixes: set[str] = set()

@@ -29,6 +29,7 @@ from intric.main.container.container import Container
 from intric.main.exceptions import NotFoundException
 from intric.main.logging import get_logger
 from intric.main.models import CursorPaginatedResponse
+from intric.mcp_servers.infrastructure.elicitation import get_elicitation_manager
 from intric.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     get_approval_manager,
@@ -36,6 +37,8 @@ from intric.mcp_servers.infrastructure.tool_approval import (
 from intric.server.dependencies.container import get_container
 from intric.server.protocol import responses
 from intric.sessions.session import (
+    ElicitationResponse,
+    ElicitationResponseResult,
     SessionFeedback,
     SessionMetadataPublic,
     SessionPublic,
@@ -332,6 +335,8 @@ async def chat(
             version=version,
             use_web_search=request.use_web_search,
             require_tool_approval=request.require_tool_approval,
+            edit_mode=request.edit_mode,
+            language=request.language,
         )
 
     return await to_conversation_response(response=response, stream=request.stream)
@@ -799,6 +804,55 @@ async def approve_tools(
         decisions_received=submit_result.decisions_received,
         decisions_remaining=submit_result.decisions_remaining,
         unrecognized_tool_call_ids=submit_result.unrecognized_tool_call_ids,
+    )
+
+
+@router.post(
+    "/respond-elicitation/",
+    response_model=ElicitationResponseResult,
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def respond_to_elicitation(
+    elicitation_id: Annotated[
+        UUID,
+        Query(description="The elicitation ID from the elicitation_required event"),
+    ],
+    body: ElicitationResponse,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    """Submit a response to a pending MCP elicitation.
+
+    When a tool calls ``ctx.elicit(...)`` mid-execution, the stream emits an
+    ``elicitation_required`` event with an ``elicitation_id``. Use this endpoint
+    to relay the user's accept/decline/cancel response back to the waiting tool.
+    """
+    current_user = container.user()
+    manager = get_elicitation_manager()
+    status = manager.submit(
+        elicitation_id=str(elicitation_id),
+        action=body.action,
+        content=body.content,
+        actor_tenant_id=current_user.tenant_id,
+        actor_user_id=current_user.id,
+    )
+    if status == "not_found":
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": "Elicitation not found or already resolved.",
+            },
+        )
+    if status == "forbidden":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "forbidden",
+                "message": "Elicitation does not belong to this actor.",
+            },
+        )
+    return ElicitationResponseResult(
+        status="accepted", elicitation_id=str(elicitation_id)
     )
 
 

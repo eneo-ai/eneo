@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from intric.mcp_servers.domain.entities.mcp_server import MCPServer
+    from intric.mcp_servers.infrastructure.elicitation import ElicitationContext
     from intric.settings.encryption_service import EncryptionService
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,8 @@ class MCPProxySessionFactory:
         mcp_servers: list["MCPServer"],
         chat_session_id: UUID | None = None,
         db_session: "AsyncSession | None" = None,
+        elicitation_queue: "Any | None" = None,
+        elicitation_context: "ElicitationContext | None" = None,
     ) -> MCPProxySession:
         """
         Create a new MCPProxySession for the given servers.
@@ -96,4 +99,6 @@ class MCPProxySessionFactory:
             auth_credentials_map=auth_map,
             chat_session_id=chat_session_id,
             db_session=db_session,
+            elicitation_queue=elicitation_queue,
+            elicitation_context=elicitation_context,
         )

@@ -112,6 +112,22 @@ class ConversationRequest(_ConversationTarget):
     tools: Optional[UseTools] = None
     use_web_search: bool = False
     require_tool_approval: bool = False
+    edit_mode: bool = Field(
+        default=False,
+        description=(
+            "When true, an assistant conversation enters configuration mode: the "
+            "assistant's own prompt and knowledge are set aside and it is given "
+            "tools to read and change this assistant's own settings. Requires edit "
+            "rights on the assistant. Ignored for group chats."
+        ),
+    )
+    language: Optional[str] = Field(
+        default=None,
+        description=(
+            'The user\'s UI locale (e.g. "sv"/"en"), used to localize edit-mode '
+            "configuration prompts and tool titles."
+        ),
+    )
 
 
 class ConversationRenameRequest(BaseModel):

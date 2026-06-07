@@ -339,6 +339,8 @@ class Assistant(Entity):
         version: int = 1,
         web_search_results: Sequence["WebSearchResult"] | None = None,
         require_tool_approval: bool = False,
+        edit_mode: bool = False,
+        config_mcp_server: Optional["MCPServer"] = None,
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
         if self.completion_model is None:
             raise NoModelSelectedException()
@@ -351,41 +353,57 @@ class Assistant(Entity):
                     f"Completion model {self.completion_model.name} do not support vision."
                 )
 
-        # Fill half the context
-        num_chunks = (
-            self.completion_model.max_input_tokens // 200 // 2 if version == 2 else 30
-        )
+        # Edit mode replaces the assistant's persona with a configuration prompt
+        # and swaps its normal tools/knowledge for the loopback config server, so
+        # the whole conversation is about configuring this assistant.
+        if edit_mode:
+            from intric.assistant_config_mcp import CONFIG_PERSONA_PROMPT
 
-        if self.has_knowledge():
-            datastore_result = await references_service.get_references(
-                question=question,
-                session=session,
-                collections=self.collections,
-                websites=self.websites,
-                integration_knowledge_list=self.integration_knowledge_list,
-                num_chunks=num_chunks,
-                version=version,
-            )
-        else:
             datastore_result = DatastoreResult(
                 chunks=[], no_duplicate_chunks=[], info_blobs=[]
             )
+            prompt_text = CONFIG_PERSONA_PROMPT
+            mcp_servers = [config_mcp_server] if config_mcp_server is not None else []
+        else:
+            # Fill half the context
+            num_chunks = (
+                self.completion_model.max_input_tokens // 200 // 2
+                if version == 2
+                else 30
+            )
+
+            if self.has_knowledge():
+                datastore_result = await references_service.get_references(
+                    question=question,
+                    session=session,
+                    collections=self.collections,
+                    websites=self.websites,
+                    integration_knowledge_list=self.integration_knowledge_list,
+                    num_chunks=num_chunks,
+                    version=version,
+                )
+            else:
+                datastore_result = DatastoreResult(
+                    chunks=[], no_duplicate_chunks=[], info_blobs=[]
+                )
+            prompt_text = self.get_prompt_text()
+            mcp_servers = self.mcp_servers
 
         response = await completion_service.get_response(
             model=completion_model,
             text_input=question,
             files=files or [],
-            prompt=self.get_prompt_text(),
-            prompt_files=self.attachments,
+            prompt=prompt_text,
+            prompt_files=[] if edit_mode else self.attachments,
             info_blob_chunks=datastore_result.chunks,
             session=session,
             stream=stream,
             extended_logging=self.logging_enabled,
             model_kwargs=self.completion_model_kwargs,
             version=version,
-            use_image_generation=self.is_default,
+            use_image_generation=False if edit_mode else self.is_default,
             web_search_results=list(web_search_results or []),
-            mcp_servers=self.mcp_servers,
+            mcp_servers=mcp_servers,
             require_tool_approval=require_tool_approval,
         )
 

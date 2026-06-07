@@ -30,6 +30,8 @@ from intric.mcp_servers.infrastructure.repo_impl.chat_session_mcp_state_repo_imp
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from intric.mcp_servers.infrastructure.elicitation import ElicitationContext
+
 logger = get_logger(__name__)
 
 _settings = get_settings()
@@ -55,6 +57,8 @@ class MCPProxySession:
         auth_credentials_map: dict[UUID, dict[str, str]] | None = None,
         chat_session_id: UUID | None = None,
         db_session: "AsyncSession | None" = None,
+        elicitation_queue: "asyncio.Queue[Any] | None" = None,
+        elicitation_context: "ElicitationContext | None" = None,
     ):
         """
         Initialize proxy session.
@@ -74,6 +78,13 @@ class MCPProxySession:
         super().__init__()
         self.mcp_servers = mcp_servers
         self.auth_credentials_map = auth_credentials_map or {}
+        # When set, the proxy wires an elicitation_callback into each MCP client.
+        # On a server-initiated elicitation the callback puts a prompt on this
+        # queue (drained by the streaming loop) and blocks until the user replies
+        # via the global elicitation manager. None for non-streaming callers,
+        # which decline elicitations automatically.
+        self.elicitation_queue = elicitation_queue
+        self.elicitation_context = elicitation_context
         self.chat_session_id = chat_session_id
         self._mcp_state_repo: ChatSessionMcpStateRepo | None = (
             ChatSessionMcpStateRepo(db_session)
@@ -461,6 +472,51 @@ class MCPProxySession:
                 "refusing to connect to avoid anyio cancel-scope leak."
             )
 
+    def _make_elicitation_callback(self, server: MCPServer) -> Any | None:
+        """Build the SDK elicitation callback for one server.
+
+        Returns None when elicitation isn't wired (non-streaming callers), which
+        tells the SDK the client can't elicit. When wired, the callback surfaces
+        the prompt to the user (via the queue the streaming loop drains) and
+        blocks on their response through the global elicitation manager.
+        """
+        if self.elicitation_queue is None or self.elicitation_context is None:
+            return None
+
+        from uuid import uuid4
+
+        from mcp.types import ElicitResult
+
+        from intric.mcp_servers.infrastructure.elicitation import (
+            get_elicitation_manager,
+        )
+
+        queue = self.elicitation_queue
+        context = self.elicitation_context
+        manager = get_elicitation_manager()
+
+        async def _callback(request_context: Any, params: Any) -> "ElicitResult":
+            elicitation_id = str(uuid4())
+            manager.request(elicitation_id, context)
+            await queue.put(
+                {
+                    "elicitation_id": elicitation_id,
+                    "message": getattr(params, "message", "") or "",
+                    "requested_schema": getattr(params, "requestedSchema", {}) or {},
+                    "server_name": server.name,
+                }
+            )
+            result = await manager.wait(elicitation_id)
+            # On accept the server validates content against the requested schema;
+            # None fails that validation (even for an empty/confirm schema), so
+            # coerce to an empty object. decline/cancel carry no content.
+            content = result.content
+            if result.action == "accept" and content is None:
+                content = {}
+            return ElicitResult(action=result.action, content=content)
+
+        return _callback
+
     async def _get_or_create_client(self, server: MCPServer) -> MCPClient:
         """
         Get existing client or create new connection (lazy).
@@ -521,6 +577,7 @@ class MCPProxySession:
                 on_tools_list_changed=lambda sid=server_id: self._dirty_server_ids.add(
                     sid
                 ),
+                elicitation_callback=self._make_elicitation_callback(server),
             )
 
             logger.debug(f"[MCPProxy] Connecting to '{server.name}'...")
