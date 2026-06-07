@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+
 from intric.assistants.api.assistant_models import (
     AssistantBase,
     AssistantCreatePublic,
@@ -275,8 +276,9 @@ async def test_create_from_template_keeps_fallback_when_template_has_no_model(
     )
 
 
-async def test_update_rejects_adding_mcp_when_knowledge_exists(setup: Setup):
-    """Cannot add MCP servers when assistant already has knowledge."""
+async def test_update_allows_knowledge_and_mcp_together(setup: Setup):
+    """Knowledge and MCP servers may coexist on an assistant (the prior
+    mutual-exclusivity restriction has been lifted)."""
     assistant = MagicMock()
     assistant.has_knowledge.return_value = True
     assistant.has_mcp.return_value = False
@@ -287,106 +289,15 @@ async def test_update_rejects_adding_mcp_when_knowledge_exists(setup: Setup):
     setup.service.space_repo.get_space_by_assistant.return_value = space
 
     mcp_id = uuid4()
-    # Mock DB to return the MCP server as tenant-enabled and space-assigned
+    # DB returns the MCP server as tenant-enabled and space-assigned.
     mock_result = MagicMock()
     mock_result.fetchall.return_value = [(mcp_id,)]
     setup.service.repo.session.execute = AsyncMock(return_value=mock_result)
 
-    with pytest.raises(
-        BadRequestException, match="Knowledge and MCP servers cannot both be active"
-    ):
-        await setup.service.update_assistant(
-            assistant_id=TEST_UUID,
-            mcp_server_ids=[mcp_id],
-        )
-
-
-async def test_update_rejects_adding_knowledge_when_mcp_exists(setup: Setup):
-    """Cannot add knowledge when assistant already has MCP servers."""
-    assistant = MagicMock()
-    assistant.has_knowledge.return_value = False
-    assistant.has_mcp.return_value = True
-    assistant.mcp_servers = [MagicMock()]
-
-    # After update() is called with groups, has_knowledge should return True
-    assistant.update.side_effect = lambda **kwargs: setattr(
-        assistant, "has_knowledge", MagicMock(return_value=True)
-    )
-
-    space = MagicMock()
-    space.get_assistant.return_value = assistant
-    setup.service.space_repo.get_space_by_assistant.return_value = space
-
-    with pytest.raises(
-        BadRequestException, match="Knowledge and MCP servers cannot both be active"
-    ):
-        await setup.service.update_assistant(
-            assistant_id=TEST_UUID,
-            groups=[uuid4()],
-        )
-
-
-async def test_update_rejects_keeping_both_when_legacy_assistant(setup: Setup):
-    """Legacy edge case: assistant has both, updating MCP with non-empty list is still rejected."""
-    assistant = MagicMock()
-    assistant.has_knowledge.return_value = True
-    assistant.has_mcp.return_value = True
-    assistant.mcp_servers = [MagicMock()]
-
-    space = MagicMock()
-    space.get_assistant.return_value = assistant
-    setup.service.space_repo.get_space_by_assistant.return_value = space
-
-    mcp_id = uuid4()
-    mock_result = MagicMock()
-    mock_result.fetchall.return_value = [(mcp_id,)]
-    setup.service.repo.session.execute = AsyncMock(return_value=mock_result)
-
-    with pytest.raises(
-        BadRequestException, match="Knowledge and MCP servers cannot both be active"
-    ):
-        await setup.service.update_assistant(
-            assistant_id=TEST_UUID,
-            mcp_server_ids=[mcp_id],
-        )
-
-
-async def test_update_allows_removing_mcp_when_both_exist(setup: Setup):
-    """Legacy edge case: assistant has both, user removes MCP to resolve conflict."""
-    assistant = MagicMock()
-    assistant.has_knowledge.return_value = True
-    assistant.has_mcp.return_value = True
-
-    space = MagicMock()
-    space.get_assistant.return_value = assistant
-    setup.service.space_repo.get_space_by_assistant.return_value = space
-
-    # Removing all MCP servers should succeed
+    # Adding MCP servers to an assistant that already has knowledge must NOT raise.
     await setup.service.update_assistant(
         assistant_id=TEST_UUID,
-        mcp_server_ids=[],
-    )
-
-
-async def test_update_allows_removing_knowledge_when_both_exist(setup: Setup):
-    """Legacy edge case: assistant has both, user removes knowledge to resolve conflict."""
-    assistant = MagicMock()
-    assistant.has_knowledge.return_value = True
-    assistant.has_mcp.return_value = True
-
-    space = MagicMock()
-    space.get_assistant.return_value = assistant
-    setup.service.space_repo.get_space_by_assistant.return_value = space
-
-    # Removing all knowledge should succeed (has_knowledge returns False after update)
-    assistant.update.side_effect = lambda **kwargs: setattr(
-        assistant, "has_knowledge", MagicMock(return_value=False)
-    )
-    await setup.service.update_assistant(
-        assistant_id=TEST_UUID,
-        groups=[],
-        websites=[],
-        integration_knowledge_ids=[],
+        mcp_server_ids=[mcp_id],
     )
 
 

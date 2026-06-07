@@ -392,7 +392,7 @@ class Assistant(Entity):
             version=version,
             use_image_generation=self.is_default,
             web_search_results=list(web_search_results or []),
-            mcp_servers=[] if self.has_knowledge() else self.mcp_servers,
+            mcp_servers=self.mcp_servers,
             require_tool_approval=require_tool_approval,
             inline_file_text=self.inline_file_text,
         )
