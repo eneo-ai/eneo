@@ -1465,11 +1465,7 @@ export interface paths {
     put?: never;
     /**
      * Respond To Elicitation
-     * @description Submit a response to a pending MCP elicitation.
-     *
-     *     When a tool calls ``ctx.elicit(...)`` mid-execution, the stream emits an
-     *     ``elicitation_required`` event with an ``elicitation_id``. Use this endpoint
-     *     to relay the user's accept/decline/cancel response back to the waiting tool.
+     * @description Relay a user's response to a pending MCP elicitation back to the waiting tool call.
      */
     post: operations["respond_to_elicitation_api_v1_conversations_respond_elicitation__post"];
     delete?: never;
@@ -7048,7 +7044,6 @@ export interface components {
       | "tool_approval_submitted"
       | "file_uploaded"
       | "file_deleted"
-      | "file_signed_url_minted"
       | "website_created"
       | "website_updated"
       | "website_deleted"
@@ -8382,11 +8377,6 @@ export interface components {
        * @description Whether insights are enabled for this assistant. If enabled, users with appropriate permissions can see all sessions for this assistant.
        */
       insight_enabled: boolean;
-      /**
-       * Inline File Text
-       * @description Whether attached file text is inlined into the prompt (True) or the file is surfaced to the model as a signed URL only (False).
-       */
-      inline_file_text: boolean;
       /**
        * Data Retention Days
        * @description Number of days to retain data for this assistant
@@ -10073,11 +10063,6 @@ export interface components {
        */
       insight_enabled?: boolean;
       /**
-       * Inline File Text
-       * @default true
-       */
-      inline_file_text?: boolean;
-      /**
        * Data Retention Days
        * @description Number of days to retain data for this assistant
        */
@@ -11573,11 +11558,6 @@ export interface components {
       http_auth_config_schema?: {
         [key: string]: unknown;
       } | null;
-      /**
-       * Forward Identity
-       * @default false
-       */
-      forward_identity?: boolean;
       /** Tags */
       tags?: string[] | null;
       /** Icon Url */
@@ -11616,11 +11596,6 @@ export interface components {
       has_credentials: boolean;
       /** Credential Preview */
       credential_preview?: string | null;
-      /**
-       * Forward Identity
-       * @default false
-       */
-      forward_identity?: boolean;
       /** Tags */
       tags: string[] | null;
       /** Icon Url */
@@ -11686,11 +11661,6 @@ export interface components {
       has_credentials: boolean;
       /** Credential Preview */
       credential_preview?: string | null;
-      /**
-       * Forward Identity
-       * @default false
-       */
-      forward_identity?: boolean;
       /** Tags */
       tags: string[] | null;
       /** Icon Url */
@@ -11838,8 +11808,6 @@ export interface components {
       http_auth_config_schema?: {
         [key: string]: unknown;
       } | null;
-      /** Forward Identity */
-      forward_identity?: boolean | null;
       /** Tags */
       tags?: string[] | null;
       /** Icon Url */
@@ -13232,11 +13200,6 @@ export interface components {
        * @description Whether insights are enabled for this assistant. If enabled, users with appropriate permissions can see all sessions for this assistant.
        */
       insight_enabled?: boolean | null;
-      /**
-       * Inline File Text
-       * @description Whether to inline attached file text into the prompt. When False, a file whose original is available via signed URL is surfaced as that URL only (e.g. to avoid large files blowing the context window).
-       */
-      inline_file_text?: boolean | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
       /**
@@ -14329,11 +14292,6 @@ export interface components {
        * @default true
        */
       api_key_expiry_notifications?: boolean;
-      /**
-       * File Storage Enabled
-       * @default false
-       */
-      file_storage_enabled?: boolean;
     };
     /**
      * SharePointSubscriptionPublic
