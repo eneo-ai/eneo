@@ -75,6 +75,7 @@ class Space:
         data_retention_days: Optional[int] = None,
         icon_id: Optional[UUID] = None,
         group_members: dict[UUID, SpaceGroupMember] | None = None,
+        default_assistant_load_failed: bool = False,
     ):
         super().__init__()
         self.id = id
@@ -88,6 +89,11 @@ class Space:
         self._transcription_models = transcription_models
         self._mcp_servers = mcp_servers
         self.default_assistant = default_assistant
+        # True when a default-assistant row existed in the DB but failed to
+        # build (e.g. skipped by the space-load validation belt). Lets callers
+        # distinguish "no default exists" from "default exists but unloadable"
+        # so they don't auto-create a duplicate default. See SpaceInitService.
+        self.default_assistant_load_failed = default_assistant_load_failed
         self.assistants = assistants or []
         self.group_chats = group_chats or []
         self.apps = apps or []

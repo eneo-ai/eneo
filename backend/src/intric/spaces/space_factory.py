@@ -362,6 +362,12 @@ class SpaceFactory:
         default_assistant = next(
             (assistant for assistant in all_assistants if assistant.is_default), None
         )
+        # A default row may exist in the DB yet have been dropped by the
+        # validation belt above. Distinguish that from "no default exists" so
+        # SpaceInitService doesn't auto-create a duplicate default on read.
+        default_assistant_load_failed = default_assistant is None and any(
+            getattr(assistant, "is_default", False) for assistant in assistants_in_db
+        )
         space_assistants = [
             assistant
             for assistant in all_assistants
@@ -445,6 +451,7 @@ class SpaceFactory:
             completion_models=space_completion_models,
             mcp_servers=space_mcp_servers,
             default_assistant=default_assistant,
+            default_assistant_load_failed=default_assistant_load_failed,
             assistants=space_assistants,
             group_chats=space_group_chats,
             apps=space_apps,
