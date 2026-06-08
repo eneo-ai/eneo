@@ -197,7 +197,7 @@ async def get_user(
     "/users/{user_id}/",
     response_model=DeleteResponse,
     description="Delete a user by id.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([400, 404]),
 )
 async def delete_user(
     user_id: UUID,
@@ -240,7 +240,7 @@ async def delete_user(
     "/users/{user_id}/",
     response_model=UserInDB,
     description="Update a user by id; omitted fields are left unchanged.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([400, 404]),
 )
 async def update_user(
     user_id: UUID,
@@ -386,7 +386,7 @@ async def create_tenant(
     "/tenants/{id}/",
     response_model=TenantWithMaskedCredentials,
     description="Update a tenant by id and return it with masked credentials.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([400, 404]),
 )
 async def update_tenant(
     id: UUID,
@@ -627,7 +627,7 @@ async def get_completion_models(
     "/tenants/{id}/completion-models/{completion_model_id}/",
     response_model=CompletionModelPublic,
     description="Enable or disable a completion model for a specific tenant.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([400, 404]),
 )
 async def enable_completion_model(
     id: UUID,
@@ -680,7 +680,7 @@ async def enable_completion_model(
     "/tenants/{id}/embedding-models/{embedding_model_id}/",
     response_model=EmbeddingModelPublicLegacy,
     description="Enable or disable an embedding model for a specific tenant.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([400, 404]),
 )
 async def enable_embedding_model(
     id: UUID,
@@ -817,7 +817,7 @@ async def delete_origin(
     "/tenants/{tenant_id}/usage-stats/recalculate",
     response_model=dict[str, str | bool],
     description="Recalculate usage statistics for a specific tenant.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([404, 500]),
 )
 async def recalculate_tenant_usage_statistics(
     tenant_id: UUID,
