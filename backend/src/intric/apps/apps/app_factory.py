@@ -162,7 +162,7 @@ class AppFactory:
         attachments = [
             File.model_validate(attachment.file) for attachment in app_in_db.attachments
         ]
-        if model_kwargs is not None and completion_model is not None:
+        if completion_model is not None:
             model_kwargs = model_kwargs.filter_unsupported(
                 completion_model.supported_model_kwargs
             )
@@ -235,7 +235,7 @@ class AppFactory:
             ),
             None,
         )
-        if model_kwargs is not None and completion_model is not None:
+        if completion_model is not None:
             model_kwargs = model_kwargs.filter_unsupported(
                 completion_model.get_supported_model_kwargs()
             )
