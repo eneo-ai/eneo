@@ -84,7 +84,7 @@ def _service(
     "/",
     description="Create a new tenant-specific transcription model.",
     response_model=TranscriptionModelPublic,
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def create_tenant_transcription_model(
     model_create: TenantTranscriptionModelCreate,

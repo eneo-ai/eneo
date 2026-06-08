@@ -26,7 +26,7 @@ router = APIRouter()
     "/",
     response_model=PaginatedResponse[EmbeddingModelPublic],
     description="List all embedding models for the tenant.",
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([403]),
 )
 async def get_embedding_models(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
@@ -45,7 +45,7 @@ async def get_embedding_models(
 @router.get(
     "/{id}/",
     response_model=EmbeddingModelPublic,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_embedding_model(
     id: UUID,
@@ -64,7 +64,7 @@ async def get_embedding_model(
     "/{id}/",
     response_model=EmbeddingModelPublic,
     description="Update an embedding model's settings.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def update_embedding_model(
     id: UUID,

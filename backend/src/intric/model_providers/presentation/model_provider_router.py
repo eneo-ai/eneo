@@ -374,7 +374,7 @@ async def get_model_defaults(
 @router.get(
     "/{provider_id}/",
     response_model=ModelProviderPublic,
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_provider(
     provider_id: UUID,
@@ -391,7 +391,7 @@ async def get_provider(
     "/",
     response_model=ModelProviderPublic,
     description="Create a new model provider.",
-    responses=responses.get_responses([409]),
+    responses=responses.get_responses([403, 409]),
 )
 async def create_provider(
     data: ModelProviderCreate,
@@ -415,7 +415,7 @@ async def create_provider(
     "/{provider_id}/",
     response_model=ModelProviderPublic,
     description="Update an existing model provider.",
-    responses=responses.get_responses([404, 409]),
+    responses=responses.get_responses([403, 404, 409]),
 )
 async def update_provider(
     provider_id: UUID,
@@ -497,7 +497,7 @@ async def validate_model(
     "/{provider_id}/",
     response_model=dict[str, str],
     description="Delete a model provider.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def delete_provider(
     provider_id: UUID,
