@@ -21,7 +21,7 @@ from intric.authentication.api_key_notification_auto_follow import (
     auto_follow_on_publish,
 )
 from intric.authentication.auth_models import ApiKeyNotificationTargetType
-from intric.files.file_models import FileInfo
+from intric.files.file_models import File
 from intric.main.container.container import Container
 from intric.main.models import NOT_PROVIDED, PaginatedResponse, is_provided
 from intric.prompts.api.prompt_models import PromptSparse
@@ -128,8 +128,8 @@ async def update_app(
 
     # Helper function to track attachment changes
     def get_attachment_changes(
-        old_attachments: list[FileInfo] | None,
-        new_attachments: list[FileInfo] | None,
+        old_attachments: list[File] | None,
+        new_attachments: list[File] | None,
     ) -> tuple[list[AttachmentChange], list[AttachmentChange]]:
         """Compare attachment lists and return added/removed items."""
         old_items: dict[str, str] = {
@@ -211,18 +211,13 @@ async def update_app(
 
     # Model behavior parameters (temperature, top_p)
     if update_service_req.completion_model_kwargs is not None:
-        old_kwargs = cast(
-            dict[str, object],
-            old_app.completion_model_kwargs or {},
-        )
-        new_kwargs = cast(
-            dict[str, object],
-            update_service_req.completion_model_kwargs or {},
-        )
-
         # Temperature
-        old_temperature = old_kwargs.get("temperature")
-        new_temperature = new_kwargs.get("temperature")
+        old_temperature = (
+            old_app.completion_model_kwargs.temperature
+            if old_app.completion_model_kwargs
+            else None
+        )
+        new_temperature = update_service_req.completion_model_kwargs.temperature
 
         if old_temperature != new_temperature and new_temperature is not None:
             changes["temperature"] = {"old": old_temperature, "new": new_temperature}
@@ -230,8 +225,12 @@ async def update_app(
                 change_summary.append("parameters")
 
         # Top-p
-        old_top_p = old_kwargs.get("top_p")
-        new_top_p = new_kwargs.get("top_p")
+        old_top_p = (
+            old_app.completion_model_kwargs.top_p
+            if old_app.completion_model_kwargs
+            else None
+        )
+        new_top_p = update_service_req.completion_model_kwargs.top_p
 
         if old_top_p != new_top_p and new_top_p is not None:
             changes["top_p"] = {"old": old_top_p, "new": new_top_p}
@@ -322,7 +321,7 @@ async def update_app(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.APP_UPDATED,
         entity_type=EntityType.APP,
         entity_id=id,
@@ -378,7 +377,7 @@ async def delete_app(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.APP_DELETED,
         entity_type=EntityType.APP,
         entity_id=id,
@@ -432,7 +431,7 @@ async def run_app(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.APP_EXECUTED,
         entity_type=EntityType.APP,
         entity_id=id,
@@ -524,7 +523,7 @@ async def publish_app(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.APP_PUBLISHED,
         entity_type=EntityType.APP,
         entity_id=id,

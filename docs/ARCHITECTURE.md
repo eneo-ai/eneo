@@ -519,6 +519,10 @@ Configure via: `PUT /api/v1/sysadmin/tenants/{tenant_id}/credentials/{provider}`
 
 ### Observability & Debugging
 
+**Structured logs and distributed tracing:**
+
+Eneo emits OpenTelemetry-shaped NDJSON logs to STDOUT with `trace_id` / `span_id` / `severity_number` per the OTel Logs Data Model. FastAPI, SQLAlchemy, Redis, `httpx`, and `aiohttp` are auto-instrumented; the W3C `traceparent` header is honored on inbound requests and propagated on outbound backend-to-backend calls. `X-Trace-Id` is set on every HTTP response (including 4xx and 5xx) for end-to-end support correlation. See [OBSERVABILITY.md](./OBSERVABILITY.md) for the full schema, ID contract, and Kubernetes log-collection reference setup.
+
 **OIDC Debug Toggle:**
 
 Enable verbose authentication logging without redeployment for troubleshooting:
@@ -532,9 +536,11 @@ POST /api/v1/sysadmin/observability/oidc-debug/
 }
 ```
 
-**Workflow:** Enable toggle → Reproduce issue → Capture `correlationId` from UI → Filter logs: `journalctl | jq 'select(.correlation_id=="abc123")'` → Identify misconfiguration → Disable toggle
+**Workflow:** Enable toggle → Reproduce issue → Capture `trace_id` from `X-Trace-Id` response header (or legacy `X-Correlation-ID`) → Filter logs: `journalctl | jq 'select(.trace_id=="abc123")'` → Identify misconfiguration → Disable toggle
 
-**See Also:** [Multi-Tenant OIDC Setup Guide](./MULTITENANT_OIDC_SETUP_GUIDE.md#3-runtime-debugging-correlation-id-based)
+**See Also:**
+- [OBSERVABILITY.md](./OBSERVABILITY.md) for trace flow, log format, and redaction policy
+- [Multi-Tenant OIDC Setup Guide](./MULTITENANT_OIDC_SETUP_GUIDE.md#3-runtime-debugging-correlation-id-based)
 
 ---
 

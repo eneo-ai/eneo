@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from intric.database.database import AsyncSession
 from intric.database.repositories.base import BaseRepositoryDelegate
+from intric.database.tables.api_keys_v2_table import ApiKeysV2
 from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.database.tables.questions_table import (
@@ -64,6 +65,21 @@ class SessionRepository:
 
         return stmt
 
+    @staticmethod
+    def _filter_by_tenant(query: sa.Select[Any], tenant_id: UUID) -> sa.Select[Any]:
+        """Restrict a sessions query to a single tenant.
+
+        Sessions.user_id is NULL for service-key sessions (the principal is on
+        api_key_id instead), so an INNER JOIN on Users would silently drop
+        them. We LEFT JOIN both principal tables and match against whichever
+        tenant_id is present.
+        """
+        return (
+            query.outerjoin(Users, Sessions.user_id == Users.id)
+            .outerjoin(ApiKeysV2, Sessions.api_key_id == ApiKeysV2.id)
+            .where(sa.func.coalesce(Users.tenant_id, ApiKeysV2.tenant_id) == tenant_id)
+        )
+
     async def add(self, session: SessionAdd) -> SessionInDB:
         return await self.delegate.add(session)
 
@@ -90,6 +106,7 @@ class SessionRepository:
         self,
         assistant_id: UUID | None = None,
         user_id: UUID | None = None,
+        api_key_id: UUID | None = None,
         group_chat_id: UUID | None = None,
         name_filter: str | None = None,
         start_date: datetime | None = None,
@@ -99,17 +116,19 @@ class SessionRepository:
         query = sa.select(sa.func.count()).select_from(Sessions)
 
         if tenant_id is not None:
-            query = query.join(Users, Sessions.user_id == Users.id).where(
-                Users.tenant_id == tenant_id
-            )
+            query = self._filter_by_tenant(query, tenant_id)
 
         if assistant_id is not None:
             query = query.where(Sessions.assistant_id == assistant_id)
         if group_chat_id is not None:
             query = query.where(Sessions.group_chat_id == group_chat_id)
 
+        # Principal scoping: user_id and api_key_id are mutually exclusive in
+        # session_service callers (exactly one is non-None per request).
         if user_id is not None:
             query = query.where(Sessions.user_id == user_id)
+        if api_key_id is not None:
+            query = query.where(Sessions.api_key_id == api_key_id)
 
         if name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{name_filter}%"))
@@ -127,6 +146,7 @@ class SessionRepository:
         self,
         assistant_id: UUID,
         user_id: UUID | None = None,
+        api_key_id: UUID | None = None,
         limit: int | None = None,
         cursor: datetime | None = None,
         previous: bool = False,
@@ -139,12 +159,12 @@ class SessionRepository:
         query = sa.select(Sessions).where(Sessions.assistant_id == assistant_id)
 
         if tenant_id is not None:
-            query = query.join(Users, Sessions.user_id == Users.id).where(
-                Users.tenant_id == tenant_id
-            )
+            query = self._filter_by_tenant(query, tenant_id)
 
         if user_id is not None:
             query = query.where(Sessions.user_id == user_id)
+        if api_key_id is not None:
+            query = query.where(Sessions.api_key_id == api_key_id)
 
         if normalized_name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
@@ -158,6 +178,7 @@ class SessionRepository:
         total_count = await self._get_total_count(
             assistant_id=assistant_id,
             user_id=user_id,
+            api_key_id=api_key_id,
             name_filter=normalized_name_filter,
             start_date=start_date,
             end_date=end_date,
@@ -207,6 +228,7 @@ class SessionRepository:
         self,
         assistant_id: UUID,
         user_id: UUID | None = None,
+        api_key_id: UUID | None = None,
         limit: int | None = None,
         cursor: datetime | None = None,
         previous: bool = False,
@@ -221,12 +243,12 @@ class SessionRepository:
         ).where(Sessions.assistant_id == assistant_id)
 
         if tenant_id is not None:
-            query = query.join(Users, Sessions.user_id == Users.id).where(
-                Users.tenant_id == tenant_id
-            )
+            query = self._filter_by_tenant(query, tenant_id)
 
         if user_id is not None:
             query = query.where(Sessions.user_id == user_id)
+        if api_key_id is not None:
+            query = query.where(Sessions.api_key_id == api_key_id)
 
         if normalized_name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
@@ -240,6 +262,7 @@ class SessionRepository:
         total_count = await self._get_total_count(
             assistant_id=assistant_id,
             user_id=user_id,
+            api_key_id=api_key_id,
             name_filter=normalized_name_filter,
             start_date=start_date,
             end_date=end_date,
@@ -277,6 +300,7 @@ class SessionRepository:
         self,
         group_chat_id: UUID,
         user_id: UUID | None = None,
+        api_key_id: UUID | None = None,
         limit: int | None = None,
         cursor: datetime | None = None,
         previous: bool = False,
@@ -289,12 +313,12 @@ class SessionRepository:
         query = sa.select(Sessions).where(Sessions.group_chat_id == group_chat_id)
 
         if tenant_id is not None:
-            query = query.join(Users, Sessions.user_id == Users.id).where(
-                Users.tenant_id == tenant_id
-            )
+            query = self._filter_by_tenant(query, tenant_id)
 
         if user_id is not None:
             query = query.where(Sessions.user_id == user_id)
+        if api_key_id is not None:
+            query = query.where(Sessions.api_key_id == api_key_id)
 
         if normalized_name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
@@ -308,6 +332,7 @@ class SessionRepository:
         total_count = await self._get_total_count(
             group_chat_id=group_chat_id,
             user_id=user_id,
+            api_key_id=api_key_id,
             name_filter=normalized_name_filter,
             start_date=start_date,
             end_date=end_date,
@@ -343,6 +368,7 @@ class SessionRepository:
         self,
         group_chat_id: UUID,
         user_id: UUID | None = None,
+        api_key_id: UUID | None = None,
         limit: int | None = None,
         cursor: datetime | None = None,
         previous: bool = False,
@@ -357,12 +383,12 @@ class SessionRepository:
         ).where(Sessions.group_chat_id == group_chat_id)
 
         if tenant_id is not None:
-            query = query.join(Users, Sessions.user_id == Users.id).where(
-                Users.tenant_id == tenant_id
-            )
+            query = self._filter_by_tenant(query, tenant_id)
 
         if user_id is not None:
             query = query.where(Sessions.user_id == user_id)
+        if api_key_id is not None:
+            query = query.where(Sessions.api_key_id == api_key_id)
 
         if normalized_name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
@@ -376,6 +402,7 @@ class SessionRepository:
         total_count = await self._get_total_count(
             group_chat_id=group_chat_id,
             user_id=user_id,
+            api_key_id=api_key_id,
             name_filter=normalized_name_filter,
             start_date=start_date,
             end_date=end_date,
@@ -415,7 +442,7 @@ class SessionRepository:
         start_date: datetime | None = None,
         end_date: datetime | None = None,
     ) -> list[SessionInDB]:
-        query = sa.select(Sessions).join(Users).where(Users.tenant_id == tenant_id)
+        query = self._filter_by_tenant(sa.select(Sessions), tenant_id)
 
         if start_date is not None:
             query = query.filter(Sessions.created_at >= start_date)

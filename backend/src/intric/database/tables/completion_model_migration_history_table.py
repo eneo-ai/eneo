@@ -23,16 +23,20 @@ class CompletionModelMigrationHistory(BasePublic):
     )
     from_model_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("completion_models.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("completion_models.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     to_model_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("completion_models.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("completion_models.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
+    from_model_name = Column(String(255), nullable=True)
+    to_model_name = Column(String(255), nullable=True)
+    from_provider_type = Column(String(255), nullable=True)
+    to_provider_type = Column(String(255), nullable=True)
     initiated_by = Column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )

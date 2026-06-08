@@ -12,13 +12,21 @@ export const load: PageLoad = async (event) => {
 
   const partnerId =
     partnerType === "default-assistant"
-      ? currentSpace.default_assistant.id
+      ? (currentSpace.default_assistant?.id ?? null)
       : event.url.searchParams.get("id");
   const selectedSessionId = event.url.searchParams.get("session_id");
 
   if (!partnerId) {
     throw new Error("Not working");
   }
+
+  // The personal chat (default assistant) is gated by the personal_chat
+  // permission. Without read access we render a no-access state instead of
+  // firing conversation calls that would 403 — and this is the default landing
+  // page, so a user with no permissions must land here gracefully, not crash.
+  const accessDenied =
+    partnerType === "default-assistant" &&
+    !(currentSpace.default_assistant?.permissions?.includes("read") ?? false);
 
   const getPartner = async () => {
     switch (partnerType) {
@@ -32,16 +40,22 @@ export const load: PageLoad = async (event) => {
         });
       // instead of case "default-assistant"
       default:
+        if (!currentSpace.default_assistant) {
+          throw new Error("No default assistant available for this space");
+        }
         return currentSpace.default_assistant;
     }
   };
 
   const loadSession = async () => {
-    if (!selectedSessionId) return null;
+    if (accessDenied || !selectedSessionId) return null;
     return intric.conversations.get({ id: selectedSessionId });
   };
 
   const listSessions = async () => {
+    if (accessDenied) {
+      return { items: [], total_count: 0, count: 0, next_cursor: null };
+    }
     return (
       intric.conversations
         .list({
@@ -61,6 +75,7 @@ export const load: PageLoad = async (event) => {
 
   return {
     chatPartner: partner,
+    accessDenied,
     initialHistory: historyPromise,
     initialConversation: initialSessionPromise
   };

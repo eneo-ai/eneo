@@ -403,11 +403,30 @@ DEFAULT_USER_PASSWORD=Password1!
 MIGRATION_AUTO_RECALC_THRESHOLD=30
 
 # ----------------------------------------------------------------------------
-# Logging
+# Logging & Observability
 # ----------------------------------------------------------------------------
+# Eneo writes structured logs to STDOUT as newline-delimited JSON (NDJSON)
+# mapped to the OpenTelemetry Logs Data Model. See docs/OBSERVABILITY.md
+# for the full log schema, ID contract, and a Kubernetes reference setup.
+
 # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
 # Recommended for production: INFO
 LOGLEVEL=INFO
+
+# Output format. true = NDJSON (recommended for production), false = plain text
+JSON_LOGS=true
+
+# OTel resource attributes. These appear in the `resource` block of every log line.
+# OTEL_SERVICE_NAME is the primary low-cardinality label most aggregators index on.
+OTEL_SERVICE_NAME=eneo
+
+# Set OTEL_SERVICE_VERSION at build time to your git SHA or release tag.
+# Leaving this as "unknown" makes incident triage materially harder.
+OTEL_SERVICE_VERSION=unknown
+
+# Deployment environment label. Use "development", "staging", "production", etc.
+# Mapped to resource.deployment.environment.name (OTel semconv >= 1.24).
+OTEL_DEPLOYMENT_ENVIRONMENT=production
 
 # ----------------------------------------------------------------------------
 # DEPRECATED: MobilityGuard and Zitadel variables are no longer used.

@@ -3,7 +3,7 @@ from typing import Annotated, cast
 from uuid import UUID
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends, Query, Security
+from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from pydantic import BaseModel, Field
 
 from intric.ai_models.completion_models.completion_model import (
@@ -16,6 +16,7 @@ from intric.ai_models.completion_models.completion_model import (
 from intric.ai_models.completion_models.completion_models_repo import (
     CompletionModelsRepository,
 )
+from intric.ai_models.display_name_validation import validate_unique_display_name
 from intric.ai_models.embedding_models.embedding_model import (
     EmbeddingModelCreate,
     EmbeddingModelLegacy,
@@ -39,21 +40,31 @@ from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.actor_types import ActorType
 from intric.audit.domain.entity_types import EntityType
 from intric.authentication import auth
-from intric.authentication.api_key_policy import ApiKeyPolicyService
 from intric.completion_models.presentation.completion_model_models import (
     MigrationResult,
     ModelMigrationRequest,
 )
 from intric.database.database import AsyncSession
+from intric.database.tables.ai_models_table import (
+    CompletionModels,
+    EmbeddingModels,
+)
 from intric.database.tables.collections_table import CollectionsTable
+from intric.database.tables.info_blobs_table import InfoBlobs
 from intric.database.tables.integration_table import IntegrationKnowledge
+from intric.database.tables.spaces_table import SpacesEmbeddingModels
 from intric.database.tables.websites_table import Websites
 from intric.main.container.container import Container
 from intric.main.container.container_overrides import override_user
-from intric.main.exceptions import BadRequestException
+from intric.main.exceptions import (
+    BadRequestException,
+    ModelInUseException,
+    ValidationException,
+)
 from intric.main.logging import get_logger
 from intric.main.models import DeleteResponse, PaginatedResponse
 from intric.observability.debug_toggle import DebugFlag, get_debug_flag, set_debug_flag
+from intric.scim.schemas.token import ScimTokenCreatedResponse, ScimTokenStatusResponse
 from intric.server import protocol
 from intric.server.dependencies.container import (
     get_container,
@@ -73,15 +84,6 @@ from intric.worker.usage_stats_tasks import recalculate_tenant_usage_stats_direc
 logger = get_logger(__name__)
 
 router = APIRouter(dependencies=[Security(auth.authenticate_super_api_key)])
-
-
-def _invalidate_api_key_origin_cache(container: Container, tenant_id: UUID) -> None:
-    policy_service = ApiKeyPolicyService(
-        allowed_origin_repo=container.allowed_origin_repo(),
-        space_service=None,
-        user=None,
-    )
-    policy_service.invalidate_tenant_origin_cache(tenant_id)
 
 
 class OIDCDebugToggleRequest(BaseModel):
@@ -131,7 +133,7 @@ async def register_new_user(
     user_service = container.user_service()
 
     # Create user
-    created_user, access_token, api_key = await user_service.register(new_user)
+    created_user, access_token = await user_service.register(new_user)
 
     # Audit logging (system action since no authenticated user for sysadmin)
     audit_service = container.audit_service()
@@ -158,7 +160,6 @@ async def register_new_user(
     return UserCreated(
         **created_user.model_dump(exclude={"api_key"}),
         access_token=access_token,
-        api_key=api_key,
     )
 
 
@@ -447,10 +448,12 @@ async def delete_tenant_by_id(
 
 
 @router.get("/predefined-roles/")
-async def get_predefined_roles(
-    container: Annotated[Container, Depends(get_container())],
-):
-    return await container.predefined_role_service().get_predefined_roles()
+async def get_predefined_roles():
+    from intric.server.dependencies.predefined_roles import (
+        load_predefined_roles_from_config,
+    )
+
+    return load_predefined_roles_from_config()
 
 
 @router.post("/crawl-all-weekly-websites/")
@@ -688,7 +691,6 @@ async def add_origin(
     created = await allowed_origin_repo.add_origin(
         origin=origin.url, tenant_id=origin.tenant_id
     )
-    _invalidate_api_key_origin_cache(container, origin.tenant_id)
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=origin.tenant_id,
@@ -732,7 +734,6 @@ async def delete_origin(
     await allowed_origin_repo.delete(id)
     if origin is None:
         return
-    _invalidate_api_key_origin_cache(container, origin.tenant_id)
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=origin.tenant_id,
@@ -849,7 +850,7 @@ async def migrate_completion_model_for_tenant(
     tenant_id: UUID,
     model_id: UUID,
     migration_request: ModelMigrationRequest,
-    container: Annotated[Container, Depends(get_container())],
+    container: Annotated[Container, Depends(get_container(with_transaction=False))],
 ):
     """
     Migrate completion model usage for a specific tenant.
@@ -880,65 +881,74 @@ async def migrate_completion_model_for_tenant(
         tenant_repo = container.tenant_repo()
         user_repo = container.user_repo()
 
-        # Verify tenant exists and is active (without starting a transaction)
         session = cast(AsyncSession, container.session())
-        tenant = await tenant_repo.get(tenant_id)
-        if not tenant:
-            from fastapi import HTTPException
+        migration_error: ValidationException | None = None
+        result: MigrationResult | None = None
 
-            raise HTTPException(status_code=404, detail=f"Tenant {tenant_id} not found")
+        async with session.begin():
+            tenant = await tenant_repo.get(tenant_id)
+            if not tenant:
+                raise HTTPException(
+                    status_code=404, detail=f"Tenant {tenant_id} not found"
+                )
 
-        from intric.tenants.tenant import TenantState
+            from intric.tenants.tenant import TenantState
 
-        if tenant.state != TenantState.ACTIVE:
-            from fastapi import HTTPException
+            if tenant.state != TenantState.ACTIVE:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Tenant {tenant_id} is not active (state: {tenant.state})"
+                    ),
+                )
 
-            raise HTTPException(
-                status_code=400,
-                detail=f"Tenant {tenant_id} is not active (state: {tenant.state})",
-            )
+            # Get a user from this tenant to set the context (needed for domain repo)
+            from sqlalchemy import select
 
-        # Get a user from this tenant to set the context (needed for domain repo)
-        from sqlalchemy import select
+            from intric.database.tables.users_table import Users
 
-        from intric.database.tables.users_table import Users
+            stmt = select(Users.id).where(Users.tenant_id == tenant_id).limit(1)
+            user_result = await session.execute(stmt)
+            user_id = user_result.scalar_one_or_none()
 
-        stmt = select(Users.id).where(Users.tenant_id == tenant_id).limit(1)
-        result = await session.execute(stmt)
-        user_id = result.scalar_one_or_none()
+            if user_id is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"No users found for tenant {tenant_id}, "
+                        "cannot perform migration"
+                    ),
+                )
 
-        if user_id is None:
-            from fastapi import HTTPException
+            # Get the user object
+            user = await user_repo.get_user_by_id(user_id)
+            if user is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"User {user_id} not found for tenant {tenant_id}",
+                )
 
-            raise HTTPException(
-                status_code=400,
-                detail=f"No users found for tenant {tenant_id}, cannot perform migration",
-            )
+            # Override container context with this user and tenant
+            override_user(container, user)
 
-        # Get the user object
-        user = await user_repo.get_user_by_id(user_id)
-        if user is None:
-            from fastapi import HTTPException
+            # Get the migration service with proper context
+            migration_service = container.completion_model_migration_service()
 
-            raise HTTPException(
-                status_code=400,
-                detail=f"User {user_id} not found for tenant {tenant_id}",
-            )
+            try:
+                result = await migration_service.migrate_model_usage(
+                    from_model_id=model_id,
+                    to_model_id=migration_request.to_model_id,
+                    entity_types=migration_request.entity_types,
+                    user=user,
+                    confirm_migration=migration_request.confirm_migration,
+                )
+            except ValidationException as exc:
+                migration_error = exc
 
-        # Override container context with this user and tenant
-        override_user(container, user)
+        if migration_error is not None:
+            raise migration_error
 
-        # Get the migration service with proper context
-        migration_service = container.completion_model_migration_service()
-
-        # Execute the migration (service will handle its own transaction)
-        result = await migration_service.migrate_model_usage(
-            from_model_id=model_id,
-            to_model_id=migration_request.to_model_id,
-            entity_types=migration_request.entity_types,
-            user=user,
-            confirm_migration=migration_request.confirm_migration,
-        )
+        assert result is not None
 
         logger.info(
             f"Completed completion model migration for tenant {tenant_id}",
@@ -952,6 +962,8 @@ async def migrate_completion_model_for_tenant(
 
         return result
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(
             f"Error migrating completion model for tenant {tenant_id}",
@@ -964,7 +976,6 @@ async def migrate_completion_model_for_tenant(
             },
             exc_info=True,
         )
-        from fastapi import HTTPException
 
         raise HTTPException(
             status_code=500,
@@ -980,7 +991,7 @@ async def migrate_completion_model_for_tenant(
 async def migrate_completion_model_for_all_tenants(
     model_id: UUID,
     migration_request: ModelMigrationRequest,
-    container: Annotated[Container, Depends(get_container())],
+    container: Annotated[Container, Depends(get_container(with_transaction=False))],
 ) -> dict[str, object]:
     """
     Migrate completion model usage for all active tenants.
@@ -1008,9 +1019,11 @@ async def migrate_completion_model_for_all_tenants(
         # Get required services
         tenant_repo = container.tenant_repo()
         user_repo = container.user_repo()
+        session = cast(AsyncSession, container.session())
 
         # Get all active tenants (using a separate session scope)
-        tenants = await tenant_repo.get_all_tenants()
+        async with session.begin():
+            tenants = await tenant_repo.get_all_tenants()
 
         from intric.tenants.tenant import TenantState
 
@@ -1038,7 +1051,6 @@ async def migrate_completion_model_for_all_tenants(
         successful_migrations = 0
         failed_migrations = 0
         migration_results: list[dict[str, object]] = []
-        session = cast(AsyncSession, container.session())
 
         for tenant in active_tenants:
             try:
@@ -1047,6 +1059,8 @@ async def migrate_completion_model_for_all_tenants(
                 )
 
                 # Process each tenant in its own transaction
+                migration_error: ValidationException | None = None
+                migration_result: MigrationResult | None = None
                 async with session.begin():
                     # Get a user from this tenant to set the context
                     from sqlalchemy import select
@@ -1054,8 +1068,8 @@ async def migrate_completion_model_for_all_tenants(
                     from intric.database.tables.users_table import Users
 
                     stmt = select(Users.id).where(Users.tenant_id == tenant.id).limit(1)
-                    result = await session.execute(stmt)
-                    user_id = result.scalar_one_or_none()
+                    user_result = await session.execute(stmt)
+                    user_id = user_result.scalar_one_or_none()
 
                     if user_id is None:
                         logger.warning(
@@ -1105,37 +1119,44 @@ async def migrate_completion_model_for_all_tenants(
                     # Get the migration service with proper context
                     migration_service = container.completion_model_migration_service()
 
-                    # Execute the migration
-                    result = await migration_service.migrate_model_usage(
-                        from_model_id=model_id,
-                        to_model_id=migration_request.to_model_id,
-                        entity_types=migration_request.entity_types,
-                        user=user,
-                        confirm_migration=migration_request.confirm_migration,
-                    )
+                    try:
+                        migration_result = await migration_service.migrate_model_usage(
+                            from_model_id=model_id,
+                            to_model_id=migration_request.to_model_id,
+                            entity_types=migration_request.entity_types,
+                            user=user,
+                            confirm_migration=migration_request.confirm_migration,
+                        )
+                    except ValidationException as exc:
+                        migration_error = exc
 
-                    successful_migrations += 1
-                    migration_results.append(
-                        {
-                            "tenant_id": str(tenant.id),
-                            "tenant_name": tenant.name,
-                            "success": True,
-                            "migration_id": str(result.migration_id),
-                            "migrated_count": result.migrated_count,
-                            "duration": result.duration,
-                            "warnings": result.warnings,
-                        }
-                    )
+                if migration_error is not None:
+                    raise migration_error
 
-                    logger.info(
-                        f"Successfully completed migration for tenant {tenant.id}",
-                        extra={
-                            "tenant_id": str(tenant.id),
-                            "tenant_name": tenant.name,
-                            "migration_id": str(result.migration_id),
-                            "migrated_count": result.migrated_count,
-                        },
-                    )
+                assert migration_result is not None
+
+                successful_migrations += 1
+                migration_results.append(
+                    {
+                        "tenant_id": str(tenant.id),
+                        "tenant_name": tenant.name,
+                        "success": True,
+                        "migration_id": str(migration_result.migration_id),
+                        "migrated_count": migration_result.migrated_count,
+                        "duration": migration_result.duration,
+                        "warnings": migration_result.warnings,
+                    }
+                )
+
+                logger.info(
+                    f"Successfully completed migration for tenant {tenant.id}",
+                    extra={
+                        "tenant_id": str(tenant.id),
+                        "tenant_name": tenant.name,
+                        "migration_id": str(migration_result.migration_id),
+                        "migrated_count": migration_result.migrated_count,
+                    },
+                )
 
             except Exception as e:
                 logger.error(
@@ -1190,8 +1211,6 @@ async def migrate_completion_model_for_all_tenants(
             },
             exc_info=True,
         )
-        from fastapi import HTTPException
-
         raise HTTPException(
             status_code=500,
             detail=f"Error migrating completion model for all tenants: {str(e)}",
@@ -1229,8 +1248,22 @@ async def create_completion_model(
     This creates the model metadata only. To enable it for a tenant,
     use POST /api/v1/completion-models/{id}/ with tenant credentials.
     """
+    # AUDIT GAP: sysadmin model lifecycle does not emit audit_log rows.
+    # audit_logs.tenant_id is NOT NULL but a global model has no owning
+    # tenant at create time. The tenant-scoped /tenant-models/ routes
+    # already audit COMPLETION_MODEL_CREATED via tenant_model_service;
+    # this path is reachable only by ENEO_SUPER_API_KEY (cross-tenant
+    # operator), and observability lives in app logs for now. A clean
+    # fix needs either a system-tenant convention or a separate
+    # sysadmin_audit store; tracked as follow-up.
     session = cast(AsyncSession, container.session())
     async with session.begin():
+        await validate_unique_display_name(
+            session,
+            CompletionModels,
+            tenant_id=None,
+            nickname=getattr(model_data, "nickname", None),
+        )
         repo = CompletionModelsRepository(session=session)
         model = await repo.create_model(model_data)
 
@@ -1260,6 +1293,14 @@ async def update_completion_model_metadata(
     async with session.begin():
         repo = CompletionModelsRepository(session=session)
 
+        await validate_unique_display_name(
+            session,
+            CompletionModels,
+            tenant_id=None,
+            nickname=getattr(model_data, "nickname", None),
+            exclude_id=id,
+        )
+
         # Ensure model_data has the id
         update_with_id = CompletionModelUpdate(
             id=id, **model_data.model_dump(exclude={"id"}, exclude_unset=True)
@@ -1282,17 +1323,38 @@ async def delete_completion_model(
     force: Annotated[bool, Query(description="Force delete even if in use")] = False,
 ):
     """
-    Delete a completion model (system-wide operation).
+    Soft-delete a completion model (system-wide operation).
 
     Requires: X-API-Key header with ENEO_SUPER_API_KEY
 
-    WARNING: Deletion affects all tenants. Use with caution.
-    Set force=true to delete even if model is in use (may break references).
+    WARNING: Affects all tenants. Use with caution.
+    Set force=true to hard-delete (may break references).
     """
+    # AUDIT GAP: same constraint as create_completion_model — no tenant
+    # to attach the audit row to. App logs are the only trace today.
     session = cast(AsyncSession, container.session())
     async with session.begin():
         repo = CompletionModelsRepository(session=session)
-        await repo.delete_model(id)
+        if force:
+            # Hard-delete: 20260402_lifecycle changed questions.completion_model_id
+            # from SET NULL → RESTRICT so historical attribution can't be silently
+            # erased. If any question references this model the DELETE will fail
+            # with IntegrityError; surface it as MODEL_IN_USE (400) so operators
+            # see a useful error instead of a 500.
+            import sqlalchemy as sa
+            from sqlalchemy.exc import IntegrityError
+
+            from intric.database.tables.ai_models_table import CompletionModels
+
+            stmt = sa.delete(CompletionModels).where(CompletionModels.id == id)
+            try:
+                await session.execute(stmt)
+            except IntegrityError as exc:
+                raise ModelInUseException() from exc
+        else:
+            if await repo.has_active_references(id):
+                raise ModelInUseException()
+            await repo.delete_model(id)
 
     return {"success": True, "message": f"Model {id} deleted successfully"}
 
@@ -1317,8 +1379,16 @@ async def create_embedding_model(
     This creates the model metadata only. To enable it for a tenant,
     use POST /api/v1/embedding-models/{id}/ with tenant credentials.
     """
+    # AUDIT GAP: see create_completion_model — no owning tenant for a
+    # global model row, so no audit_log entry is emitted today.
     session = cast(AsyncSession, container.session())
     async with session.begin():
+        await validate_unique_display_name(
+            session,
+            EmbeddingModels,
+            tenant_id=None,
+            nickname=getattr(model_data, "nickname", None),
+        )
         repo = AdminEmbeddingModelsService(session=session)
         model = await repo.create_model(model_data)
 
@@ -1348,6 +1418,14 @@ async def update_embedding_model_metadata(
     async with session.begin():
         repo = AdminEmbeddingModelsService(session=session)
 
+        await validate_unique_display_name(
+            session,
+            EmbeddingModels,
+            tenant_id=None,
+            nickname=getattr(model_data, "nickname", None),
+            exclude_id=id,
+        )
+
         # Ensure model_data has the id
         update_with_id = EmbeddingModelMetadataUpdate(
             id=id, **model_data.model_dump(exclude={"id"}, exclude_unset=True)
@@ -1375,25 +1453,143 @@ async def delete_embedding_model(
     Requires: X-API-Key header with ENEO_SUPER_API_KEY
 
     WARNING: Deletion affects all tenants. Use with caution.
+    Set force=true to hard-delete (may erase historical info_blob attribution).
     """
+    # AUDIT GAP: see create_embedding_model — no owning tenant to attach
+    # the audit row to. App logs are the only trace today.
     session = cast(AsyncSession, container.session())
 
     async with session.begin():
-        if not force:
-            usage_counts = await session.execute(
-                sa.select(
-                    sa.func.count().filter(CollectionsTable.embedding_model_id == id),
-                    sa.func.count().filter(Websites.embedding_model_id == id),
-                    sa.func.count().filter(
-                        IntegrationKnowledge.embedding_model_id == id
-                    ),
+        if force:
+            # Hard-delete remains an explicit operator escape hatch. Historical
+            # info_blobs use ON DELETE SET NULL, so this can erase attribution;
+            # the normal path below soft-deletes instead.
+            from sqlalchemy.exc import IntegrityError
+
+            repo = AdminEmbeddingModelsService(session=session)
+            try:
+                await repo.delete_model(id)
+            except IntegrityError as exc:
+                raise ModelInUseException() from exc
+        else:
+            model = await session.scalar(
+                sa.select(EmbeddingModels).where(
+                    EmbeddingModels.id == id,
+                    EmbeddingModels.deleted_at.is_(None),
                 )
             )
-            collections_count, websites_count, integrations_count = usage_counts.one()
-            if collections_count > 0 or websites_count > 0 or integrations_count > 0:
-                raise BadRequestException("MODEL_IN_USE")
+            if model is None:
+                # Idempotent, matching delete_completion_model: a missing or
+                # already-soft-deleted model is a no-op success, not a 404.
+                return {
+                    "success": True,
+                    "message": f"Model {id} deleted successfully",
+                }
 
-        repo = AdminEmbeddingModelsService(session=session)
-        await repo.delete_model(id)
+            # Three separate counts — combining them in one SELECT pulls all three
+            # tables into the FROM clause, producing a cartesian product.
+            collections_count = await session.scalar(
+                sa.select(sa.func.count()).where(
+                    CollectionsTable.embedding_model_id == id
+                )
+            )
+            websites_count = await session.scalar(
+                sa.select(sa.func.count()).where(Websites.embedding_model_id == id)
+            )
+            integrations_count = await session.scalar(
+                sa.select(sa.func.count()).where(
+                    IntegrationKnowledge.embedding_model_id == id
+                )
+            )
+            if collections_count or websites_count or integrations_count:
+                raise ModelInUseException()
+
+            info_blobs_count = await session.scalar(
+                sa.select(sa.func.count()).where(InfoBlobs.embedding_model_id == id)
+            )
+            if info_blobs_count:
+                logger.info(
+                    "sysadmin.embedding_model.soft_deleted_with_info_blobs",
+                    extra={
+                        "embedding_model_id": str(id),
+                        "info_blobs_count": info_blobs_count,
+                    },
+                )
+
+            await session.execute(
+                sa.delete(SpacesEmbeddingModels).where(
+                    SpacesEmbeddingModels.embedding_model_id == id
+                )
+            )
+            model.deleted_at = sa.func.now()
+            await session.flush()
 
     return {"success": True, "message": f"Model {id} deleted successfully"}
+
+
+@router.post(
+    "/tenants/{tenant_id}/scim-token",
+    response_model=ScimTokenCreatedResponse,
+    status_code=201,
+    summary="Generate SCIM bearer token for tenant",
+    description=(
+        "Generates a new SCIM bearer token for the given tenant. "
+        "The token is returned in plaintext exactly once and is never stored — only its SHA-256 hash is persisted. "
+        "Calling this endpoint again replaces any existing token."
+    ),
+    responses={
+        201: {
+            "description": "Token created. Copy it now — it will not be shown again."
+        },
+        404: {"description": "Tenant not found"},
+    },
+)
+async def create_scim_token(
+    tenant_id: UUID,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> ScimTokenCreatedResponse:
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        token = await container.scim_token_service().create_token(tenant_id)
+    logger.info("scim.token.created", extra={"tenant_id": str(tenant_id)})
+    return ScimTokenCreatedResponse(tenant_id=tenant_id, token=token)
+
+
+@router.get(
+    "/tenants/{tenant_id}/scim-token",
+    response_model=ScimTokenStatusResponse,
+    summary="Get SCIM token status for tenant",
+    description="Returns whether SCIM provisioning is active (i.e. a token hash is configured) for the given tenant. Never returns the token itself.",
+    responses={
+        200: {"description": "SCIM token status"},
+        404: {"description": "Tenant not found"},
+    },
+)
+async def get_scim_token_status(
+    tenant_id: UUID,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> ScimTokenStatusResponse:
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        is_active = await container.scim_token_service().get_status(tenant_id)
+    return ScimTokenStatusResponse(tenant_id=tenant_id, is_active=is_active)
+
+
+@router.delete(
+    "/tenants/{tenant_id}/scim-token",
+    status_code=204,
+    summary="Revoke SCIM token for tenant",
+    description="Removes the SCIM token hash, disabling SCIM provisioning for the tenant. Any subsequent SCIM requests from the IdP will receive 401.",
+    responses={
+        204: {"description": "Token revoked — SCIM disabled for this tenant"},
+        404: {"description": "Tenant not found"},
+    },
+)
+async def delete_scim_token(
+    tenant_id: UUID,
+    container: Annotated[Container, Depends(get_container_for_sysadmin())],
+) -> None:
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        await container.scim_token_service().revoke_token(tenant_id)
+    logger.info("scim.token.revoked", extra={"tenant_id": str(tenant_id)})

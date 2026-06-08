@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from intric.audit.application.audit_metadata import AuditMetadata
 from intric.audit.domain.action_types import ActionType
 from intric.audit.domain.entity_types import EntityType
+from intric.authentication.auth_dependencies import require_user_for_creation
 from intric.authentication.signed_urls import generate_signed_token, verify_signed_token
 from intric.files.file_models import (
     ContentDisposition,
@@ -40,6 +41,7 @@ router = APIRouter()
 async def upload_file(
     upload_file: UploadFile,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.file_service()
     current_user = container.user()
@@ -60,7 +62,7 @@ async def upload_file(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.FILE_UPLOADED,
         entity_type=EntityType.FILE,
         entity_id=file.id,
@@ -104,7 +106,17 @@ async def get_file(
     return await service.get_file_by_id(file_id=id)
 
 
-@router.delete("/{id}/", status_code=204)
+@router.delete(
+    "/{id}/",
+    status_code=204,
+    response_class=Response,
+    responses={
+        204: {
+            "description": "File deleted successfully. No response body is returned."
+        },
+        **responses.get_responses([403, 404]),
+    },
+)
 async def delete_file(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -112,8 +124,8 @@ async def delete_file(
     service = container.file_service()
     current_user = container.user()
 
-    # Get file details BEFORE deletion (snapshot pattern)
-    file = await service.get_file_by_id(file_id=id)
+    # Delete atomically by owner; the returned row is kept for audit metadata.
+    file = await service.delete_file(id)
 
     # Build extra context capturing what was deleted
     extra = {
@@ -127,14 +139,11 @@ async def delete_file(
         else None,
     }
 
-    # Delete file
-    await service.delete_file(id)
-
     # Audit logging
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.FILE_DELETED,
         entity_type=EntityType.FILE,
         entity_id=id,

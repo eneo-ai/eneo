@@ -253,8 +253,6 @@ from intric.mcp_servers.presentation.assemblers.mcp_server_tool_assembler import
     MCPServerToolAssembler,
 )
 from intric.modules.module_repo import ModuleRepository
-from intric.predefined_roles.predefined_role_service import PredefinedRolesService
-from intric.predefined_roles.predefined_roles_repo import PredefinedRolesRepository
 from intric.prompts.api.prompt_assembler import PromptAssembler
 from intric.prompts.prompt_factory import PromptFactory
 from intric.prompts.prompt_repo import PromptRepository
@@ -263,6 +261,8 @@ from intric.questions.questions_repo import QuestionRepository
 from intric.redis.connection import build_redis_pool_kwargs
 from intric.roles.roles_repo import RolesRepository
 from intric.roles.roles_service import RolesService
+from intric.scim.repositories.token_repository import ScimTokenRepository
+from intric.scim.services.token_service import ScimTokenService
 from intric.security_classifications.application.security_classification_service import (
     SecurityClassificationService,
 )
@@ -316,6 +316,12 @@ from intric.token_usage.infrastructure.user_token_usage_analyzer import (
     UserTokenUsageAnalyzer,
 )
 from intric.transcription_models.application import TranscriptionModelCRUDService
+from intric.transcription_models.application.transcription_model_migration_history_service import (  # noqa: E501
+    TranscriptionModelMigrationHistoryService,
+)
+from intric.transcription_models.application.transcription_model_migration_service import (  # noqa: E501
+    TranscriptionModelMigrationService,
+)
 from intric.transcription_models.domain import TranscriptionModelRepository
 from intric.transcription_models.domain.transcription_model_service import (
     TranscriptionModelService,
@@ -585,9 +591,6 @@ class Container(containers.DeclarativeContainer):
     info_blob_repo = providers.Factory(InfoBlobRepository, session=session)
     job_repo = providers.Factory(JobRepository, session=session)
     allowed_origin_repo = providers.Factory(AllowedOriginRepository, session=session)
-    predefined_roles_repo = providers.Factory(
-        PredefinedRolesRepository, session=session
-    )
     role_repo = providers.Factory(RolesRepository, session=session)
     completion_model_repo = providers.Factory(
         CompletionModelsRepository, session=session
@@ -810,6 +813,15 @@ class Container(containers.DeclarativeContainer):
         CompletionModelMigrationHistoryService,
         session=session,
     )
+    transcription_model_migration_service = providers.Factory(
+        TranscriptionModelMigrationService,
+        session=session,
+        transcription_model_repo=transcription_model_repo,
+    )
+    transcription_model_migration_history_service = providers.Factory(
+        TranscriptionModelMigrationHistoryService,
+        session=session,
+    )
     transcription_model_service = providers.Factory(
         TranscriptionModelService,
         transcription_model_repo=transcription_model_repo,
@@ -818,19 +830,6 @@ class Container(containers.DeclarativeContainer):
         AuthService,
         api_key_repo=api_key_repo,
         api_key_v2_repo=api_key_v2_repo,
-    )
-    tenant_service = providers.Factory(
-        TenantService,
-        repo=tenant_repo,
-        completion_model_repo=completion_model_repo,
-        embedding_model_repo=embedding_model_repo,
-        transcription_model_enable_service=transcription_model_enable_service,
-    )
-    security_classification_service = providers.Factory(
-        SecurityClassificationService,
-        user=user,
-        repo=security_classification_repo,
-        tenant_service=tenant_service,
     )
     # Feature flag service for audit logging and other toggles
     feature_flag_service = providers.Factory(
@@ -842,6 +841,30 @@ class Container(containers.DeclarativeContainer):
         repository=audit_log_repo,
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
+    )
+    scim_token_repository = providers.Factory(
+        ScimTokenRepository,
+        session=session,
+    )
+    scim_token_service = providers.Factory(
+        ScimTokenService,
+        repository=scim_token_repository,
+        audit_service=audit_service,
+    )
+    tenant_service = providers.Factory(
+        TenantService,
+        repo=tenant_repo,
+        completion_model_repo=completion_model_repo,
+        embedding_model_repo=embedding_model_repo,
+        transcription_model_enable_service=transcription_model_enable_service,
+        role_repo=role_repo,
+        audit_service=audit_service,
+    )
+    security_classification_service = providers.Factory(
+        SecurityClassificationService,
+        user=user,
+        repo=security_classification_repo,
+        tenant_service=tenant_service,
     )
     api_key_scope_revoker = providers.Factory(
         ApiKeyScopeRevoker,
@@ -886,7 +909,6 @@ class Container(containers.DeclarativeContainer):
     )
     api_key_policy_service = providers.Factory(
         ApiKeyPolicyService,
-        allowed_origin_repo=allowed_origin_repo,
         space_service=space_service,
         user=user,
     )
@@ -959,10 +981,9 @@ class Container(containers.DeclarativeContainer):
         user=user,
         repo=allowed_origin_repo,
     )
-    predefined_role_service = providers.Factory(
-        PredefinedRolesService, repo=predefined_roles_repo
+    role_service = providers.Factory(
+        RolesService, user=user, repo=role_repo, user_repo=user_repo
     )
-    role_service = providers.Factory(RolesService, user=user, repo=role_repo)
     settings_service = providers.Factory(
         SettingService,
         user=user,
@@ -1111,11 +1132,9 @@ class Container(containers.DeclarativeContainer):
         auth_service=auth_service,
         api_key_auth_resolver=api_key_auth_resolver,
         api_key_v2_repo=api_key_v2_repo,
-        allowed_origin_repo=allowed_origin_repo,
         audit_service=audit_service,
         settings_repo=settings_repo,
         tenant_repo=tenant_repo,
-        predefined_roles_repo=predefined_roles_repo,
         info_blob_repo=info_blob_repo,
         api_key_rate_limiter=api_key_rate_limiter,
         feature_flag_service=feature_flag_service,
@@ -1337,6 +1356,7 @@ class Container(containers.DeclarativeContainer):
         session_service=session_service,
         completion_service=completion_service,
         space_service=space_service,
+        file_service=file_service,
     )
 
     # Token Usage

@@ -1,13 +1,16 @@
 roles:
   - name: 'User'
     permissions:
+      - personal_chat
       - assistants
       - group_chats
       - apps
       - collections
+      - shared_spaces
 
   - name: 'AI Configurator'
     permissions:
+      - personal_chat
       - assistants
       - group_chats
       - apps
@@ -16,10 +19,12 @@ roles:
       - AI
       - websites
       - integrations
+      - shared_spaces
 
   - name: 'Owner'
     permissions:
       - admin
+      - personal_chat
       - assistants
       - group_chats
       - apps
@@ -29,3 +34,5 @@ roles:
       - AI
       - websites
       - integrations
+      - shared_spaces
+      - api_keys

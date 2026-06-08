@@ -8,7 +8,7 @@ from intric.assistants.api.assistant_models import AssistantType
 from intric.base.base_entity import Entity
 from intric.completion_models.domain.completion_model import CompletionModel
 from intric.completion_models.infrastructure.completion_service import CompletionService
-from intric.files.file_models import File, FileInfo, FileType
+from intric.files.file_models import File, FileType
 from intric.files.text import TextMimeTypes
 from intric.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from intric.main.exceptions import (
@@ -59,7 +59,7 @@ class Assistant(Entity):
         logging_enabled: bool,
         websites: list["Website"],
         collections: list["Collection"],
-        attachments: list[FileInfo],
+        attachments: list[File],
         published: bool,
         integration_knowledge_list: list["IntegrationKnowledge"] | None = None,
         mcp_servers: list["MCPServer"] | None = None,
@@ -164,7 +164,7 @@ class Assistant(Entity):
         return self._attachments
 
     @attachments.setter
-    def attachments(self, attachments: list[FileInfo]):
+    def attachments(self, attachments: list[File]):
         for attachment in attachments:
             mimetype = attachment.mimetype or ""
             if mimetype.split(";")[0].strip() not in TextMimeTypes.values():
@@ -236,7 +236,7 @@ class Assistant(Entity):
         prompt: Prompt | None = None,
         completion_model: CompletionModel | None = None,
         completion_model_kwargs: ModelKwargs | None = None,
-        attachments: list[FileInfo] | None = None,
+        attachments: list[File] | None = None,
         logging_enabled: bool | None = None,
         collections: list["Collection"] | None = None,
         websites: list["Website"] | None = None,
@@ -320,7 +320,7 @@ class Assistant(Entity):
             text_input=question,
             files=files or [],
             prompt=prompt or self.get_prompt_text(),
-            prompt_files=cast(list[File], self.attachments),
+            prompt_files=self.attachments,
             info_blob_chunks=info_blob_chunks or [],
             session=session,
             stream=stream,
@@ -376,7 +376,7 @@ class Assistant(Entity):
             text_input=question,
             files=files or [],
             prompt=self.get_prompt_text(),
-            prompt_files=cast(list[File], self.attachments),
+            prompt_files=self.attachments,
             info_blob_chunks=datastore_result.chunks,
             session=session,
             stream=stream,

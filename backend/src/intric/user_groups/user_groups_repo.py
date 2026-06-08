@@ -3,6 +3,7 @@
 from typing import List, Optional
 from uuid import UUID
 
+import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -18,7 +19,12 @@ from intric.main.exceptions import UniqueException
 from intric.user_groups.user_group import (
     UserGroupCreate,
     UserGroupInDB,
+    UserGroupState,
     UserGroupUpdate,
+)
+
+_NOT_DELETED = sa.or_(
+    UserGroups.state.is_(None), UserGroups.state != UserGroupState.DELETED
 )
 
 
@@ -37,7 +43,6 @@ class UserGroupsRepository:
     def _get_options(self):
         return [
             selectinload(UserGroups.users).selectinload(Users.roles),
-            selectinload(UserGroups.users).selectinload(Users.predefined_roles),
             selectinload(UserGroups.users)
             .selectinload(Users.tenant)
             .selectinload(Tenants.modules),
@@ -45,7 +50,12 @@ class UserGroupsRepository:
         ]
 
     async def get_user_group(self, id: UUID) -> UserGroupInDB | None:
-        return await self.delegate.get(id)
+        query = (
+            sa.select(UserGroups)
+            .where(UserGroups.id == id, _NOT_DELETED)
+            .options(*self._get_options())
+        )
+        return await self.delegate.get_model_from_query(query)
 
     async def create_user_group(self, user_group: UserGroupCreate) -> UserGroupInDB:
         try:
@@ -61,7 +71,6 @@ class UserGroupsRepository:
                 table=Users,
                 options=[
                     selectinload(Users.roles),
-                    selectinload(Users.predefined_roles),
                     selectinload(Users.tenant).selectinload(Tenants.modules),
                     selectinload(Users.api_key),
                 ],
@@ -86,6 +95,9 @@ class UserGroupsRepository:
     async def get_all_user_groups(
         self, tenant_id: Optional[UUID] = None
     ) -> List[UserGroupInDB]:
-        return await self.delegate.filter_by(
-            conditions={UserGroups.tenant_id: tenant_id}
+        query = (
+            sa.select(UserGroups)
+            .where(UserGroups.tenant_id == tenant_id, _NOT_DELETED)
+            .options(*self._get_options())
         )
+        return await self.delegate.get_models_from_query(query)

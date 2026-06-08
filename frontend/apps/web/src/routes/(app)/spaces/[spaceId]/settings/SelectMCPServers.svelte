@@ -145,17 +145,13 @@
   }
 </script>
 
-<Settings.Row
-  title="MCP Servers"
-  description="Select which MCP servers are available in this space"
->
+<Settings.Row title={m.mcp_servers()} description={m.mcp_settings_row_description()}>
   <svelte:fragment slot="description">
     {#if ($currentSpace.mcp_servers?.length ?? 0) === 0}
       <p
         class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
       >
-        <span class="font-bold">{m.hint()}:&nbsp;</span>Enable at least one MCP server to make tools
-        available to assistants.
+        <span class="font-bold">{m.hint()}:&nbsp;</span>{m.mcp_enable_server_hint()}
       </p>
     {/if}
   </svelte:fragment>

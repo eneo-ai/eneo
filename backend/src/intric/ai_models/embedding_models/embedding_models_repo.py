@@ -31,6 +31,7 @@ class AdminEmbeddingModelsService:
                 EmbeddingModels.tenant_id.is_(None),
                 EmbeddingModels.tenant_id == tenant_id,
             ),
+            EmbeddingModels.deleted_at.is_(None),
         )
         result = await self.session.execute(stmt)
         db_model = result.scalar_one_or_none()
@@ -64,7 +65,11 @@ class AdminEmbeddingModelsService:
         with_deprecated: bool = False,
         id_list: list[UUID] | None = None,
     ) -> list[EmbeddingModelLegacy]:
-        stmt = sa.select(EmbeddingModels).order_by(EmbeddingModels.created_at)
+        stmt = (
+            sa.select(EmbeddingModels)
+            .where(EmbeddingModels.deleted_at.is_(None))
+            .order_by(EmbeddingModels.created_at)
+        )
 
         if not with_deprecated:
             stmt = stmt.where(EmbeddingModels.is_deprecated == False)  # noqa

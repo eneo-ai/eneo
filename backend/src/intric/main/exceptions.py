@@ -53,6 +53,12 @@ class ErrorCodes(int, Enum):
     # MCP upstream errors
     MCP_UPSTREAM_ERROR = 9036
     MCP_UPSTREAM_AUTH_ERROR = 9037
+    # Resource readiness
+    RESOURCE_NOT_READY = 9038
+    # Model lifecycle — soft-delete blocked because the model is still
+    # referenced by an active resource (assistants, apps, services,
+    # assistant/app templates). Space membership alone does not block.
+    MODEL_IN_USE = 9039
 
 
 class NotFoundException(Exception):
@@ -126,6 +132,18 @@ class BadRequestException(Exception):
     pass
 
 
+class ModelInUseException(Exception):
+    """Raised when trying to soft-delete a model that is still referenced.
+
+    Surfaced as 400 with a dedicated error code so the frontend can show a
+    localized "Model is in use" message and offer the migration flow as a
+    follow-up action — the generic BAD_REQUEST code can't carry that
+    context.
+    """
+
+    pass
+
+
 class QuotaExceededException(Exception):
     pass
 
@@ -135,7 +153,18 @@ class UniqueException(Exception):
 
 
 class OpenAIException(Exception):
-    pass
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+        details: dict[str, object] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.context = context
+        self.details = details
 
 
 class ClaudeException(Exception):
@@ -378,6 +407,11 @@ EXCEPTION_MAP = {
         ErrorCodes.USER_NOT_CREATED,
     ),
     BadRequestException: (400, None, ErrorCodes.BAD_REQUEST),
+    ModelInUseException: (
+        400,
+        "Model is currently in use and cannot be deleted.",
+        ErrorCodes.MODEL_IN_USE,
+    ),
     QuotaExceededException: (403, None, ErrorCodes.QUOTA_EXCEEDED),
     UniqueException: (400, None, ErrorCodes.UNIQUE_ERROR),
     OpenAIException: (503, None, ErrorCodes.OPENAI_ERROR),
@@ -439,5 +473,10 @@ EXCEPTION_MAP = {
         502,
         "MCP upstream authentication failed.",
         ErrorCodes.MCP_UPSTREAM_AUTH_ERROR,
+    ),
+    NotReadyException: (
+        503,
+        "Resource is not ready yet.",
+        ErrorCodes.RESOURCE_NOT_READY,
     ),
 }

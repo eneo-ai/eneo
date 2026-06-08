@@ -23,6 +23,7 @@ from starlette.datastructures import State
 from intric.authentication.api_key_resolver import ApiKeyValidationError
 from intric.authentication.auth_dependencies import require_api_key_scope_check
 from intric.authentication.auth_models import (
+    ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
 )
@@ -654,7 +655,6 @@ class TestResolveApiKeyScopeWiring:
                 )
             )
         )
-        svc.allowed_origin_repo = AsyncMock()
         svc.space_service = AsyncMock()
         svc.api_key_rate_limiter = None
         svc._session = None
@@ -887,7 +887,14 @@ class TestScopeRouteGuardCoverage:
         )
 
     def test_user_admin_endpoints_have_router_level_admin_guards(self):
-        """User admin endpoints should have router-level admin scope + key guards."""
+        """User admin-mutation endpoints should have admin guards for API keys.
+
+        Includes GET /users/ (get_tenant_users): mounted on the non-admin
+        `router` but with *route-level* `_scope_check_dep` +
+        `_api_key_permission_dep` so scoped API keys cannot enumerate the
+        tenant directory. Those guards are no-ops for bearer tokens — see
+        TestUserListingEndpointSplitGate in test_api_key_contract_matrix.py.
+        """
         from intric.server.routers import router
 
         admin_routes = []
@@ -916,7 +923,7 @@ class TestScopeRouteGuardCoverage:
                 )
 
         assert len(admin_routes) >= 5, (
-            f"Expected at least 5 user admin routes, found {len(admin_routes)}"
+            f"Expected at least 5 user admin-gated routes, found {len(admin_routes)}"
         )
         for path, methods, has_scope_dep, has_admin_key_dep in admin_routes:
             assert has_scope_dep, (
@@ -1536,15 +1543,15 @@ class TestPromptScopeResolver:
 
 
 # ---------------------------------------------------------------------------
-# TestRequireTenantScopeForDelete — file DELETE restriction
+# TestRequireFileDeleteScopeGuard — file DELETE restriction
 # ---------------------------------------------------------------------------
 
 
-class TestRequireTenantScopeForDelete:
-    """Tests for require_tenant_scope_for_delete() config-stashing dependency.
+class TestRequireFileDeleteScopeGuard:
+    """Tests for require_file_delete_scope_guard() config-stashing dependency.
 
     The dependency uses deferred enforcement: it stashes a marker on
-    ``request.state._require_tenant_scope_for_delete`` for DELETE requests.
+    ``request.state._require_file_delete_scope_guard`` for DELETE requests.
     The actual enforcement runs inside ``_resolve_api_key`` after auth populates
     ``api_key_scope_type``.
     """
@@ -1553,51 +1560,51 @@ class TestRequireTenantScopeForDelete:
     async def test_stashes_marker_on_delete_request(self):
         """DELETE request → marker stashed on request.state."""
         from intric.authentication.auth_dependencies import (
-            require_tenant_scope_for_delete,
+            require_file_delete_scope_guard,
         )
 
-        dep = require_tenant_scope_for_delete()
+        dep = require_file_delete_scope_guard()
         state = State()
         request = SimpleNamespace(method="DELETE", state=state)
         await dep(request)
-        assert getattr(request.state, "_require_tenant_scope_for_delete", False) is True
+        assert getattr(request.state, "_require_file_delete_scope_guard", False) is True
 
     @pytest.mark.asyncio
     async def test_no_marker_on_get_request(self):
         """GET request → no marker stashed."""
         from intric.authentication.auth_dependencies import (
-            require_tenant_scope_for_delete,
+            require_file_delete_scope_guard,
         )
 
-        dep = require_tenant_scope_for_delete()
+        dep = require_file_delete_scope_guard()
         state = State()
         request = SimpleNamespace(method="GET", state=state)
         await dep(request)
         assert (
-            getattr(request.state, "_require_tenant_scope_for_delete", False) is False
+            getattr(request.state, "_require_file_delete_scope_guard", False) is False
         )
 
     @pytest.mark.asyncio
     async def test_no_marker_on_post_request(self):
         """POST request → no marker stashed."""
         from intric.authentication.auth_dependencies import (
-            require_tenant_scope_for_delete,
+            require_file_delete_scope_guard,
         )
 
-        dep = require_tenant_scope_for_delete()
+        dep = require_file_delete_scope_guard()
         state = State()
         request = SimpleNamespace(method="POST", state=state)
         await dep(request)
         assert (
-            getattr(request.state, "_require_tenant_scope_for_delete", False) is False
+            getattr(request.state, "_require_file_delete_scope_guard", False) is False
         )
 
 
-class TestTenantScopeForDeleteEnforcement:
-    """Tests for the deferred enforcement of tenant-scope-for-delete.
+class TestFileDeleteScopeEnforcement:
+    """Tests for the deferred enforcement of file DELETE scope handling.
 
     Exercises the enforcement path inside ``_resolve_api_key`` that checks
-    ``_require_tenant_scope_for_delete`` after auth has set scope_type.
+    ``_require_file_delete_scope_guard`` after auth has set scope_type.
     Uses the full ``_resolve_api_key`` flow with mocked dependencies.
     """
 
@@ -1612,7 +1619,7 @@ class TestTenantScopeForDeleteEnforcement:
             url=SimpleNamespace(path="/api/v1/files/some-id"),
         )
         if marker:
-            request.state._require_tenant_scope_for_delete = True
+            request.state._require_file_delete_scope_guard = True
         return request
 
     @staticmethod
@@ -1633,11 +1640,19 @@ class TestTenantScopeForDeleteEnforcement:
                 )
             )
         )
-        svc.allowed_origin_repo = AsyncMock()
         svc.space_service = AsyncMock()
         svc.api_key_rate_limiter = None
         svc._session = None
         svc.api_key_v2_repo = SimpleNamespace(update_last_used_at=AsyncMock())
+        svc._build_service_user = AsyncMock(
+            return_value=SimpleNamespace(
+                id=key.id,
+                tenant_id=key.tenant_id,
+                permissions={Permission.ADMIN},
+                state=UserState.ACTIVE,
+                active_api_key=key,
+            )
+        )
         svc._log_api_key_auth_failed = AsyncMock()
         svc._maybe_log_api_key_used = AsyncMock()
         svc._enforce_api_key_scope = AsyncMock()
@@ -1667,9 +1682,32 @@ class TestTenantScopeForDeleteEnforcement:
         )
 
     @pytest.mark.asyncio
-    async def test_non_tenant_scoped_key_delete_blocked(self, monkeypatch):
-        """Non-tenant keys should be blocked for DELETE."""
-        key = _make_key(scope_type="assistant", scope_id=uuid4())
+    async def test_non_tenant_user_owned_key_delete_allowed(self, monkeypatch):
+        """User-owned scoped keys may reach FileService owner-bound DELETE."""
+        key = _make_key(
+            scope_type="assistant",
+            scope_id=uuid4(),
+            permission=ApiKeyPermission.ADMIN,
+        )
+        svc = self._build_service(key)
+        self._patch_policy(monkeypatch)
+        self._patch_settings(monkeypatch)
+        request = self._build_request(marker=True)
+
+        _, returned_key = await svc._resolve_api_key("sk_test", request=request)
+        assert returned_key is key
+        svc._log_api_key_auth_failed.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_non_tenant_service_key_delete_blocked(self, monkeypatch):
+        """Service keys cannot delete user-owned files."""
+        key = _make_key(
+            ownership=ApiKeyOwnership.SERVICE,
+            owner_user_id=None,
+            scope_type="assistant",
+            scope_id=uuid4(),
+            permission=ApiKeyPermission.ADMIN,
+        )
         svc = self._build_service(key)
         self._patch_policy(monkeypatch)
         self._patch_settings(monkeypatch)
@@ -1677,7 +1715,35 @@ class TestTenantScopeForDeleteEnforcement:
 
         with pytest.raises(ApiKeyValidationError) as exc_info:
             await svc._resolve_api_key("sk_test", request=request)
-        assert exc_info.value.code == "insufficient_scope"
+        assert exc_info.value.code == "service_key_cannot_delete_files"
+        assert "Use a user-owned API key" in exc_info.value.message
+        assert exc_info.value.context == {
+            "resource_type": "file",
+            "action": "delete",
+            "auth_layer": "api_key_scope",
+            "required_capability": "user_owned_api_key",
+            "scope_type": "assistant",
+            "ownership": "service",
+        }
+        svc._log_api_key_auth_failed.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_tenant_service_key_delete_blocked(self, monkeypatch):
+        """Tenant scope does not make service keys owners of user-owned files."""
+        key = _make_key(
+            ownership=ApiKeyOwnership.SERVICE,
+            owner_user_id=None,
+            scope_type="tenant",
+            permission=ApiKeyPermission.ADMIN,
+        )
+        svc = self._build_service(key)
+        self._patch_policy(monkeypatch)
+        self._patch_settings(monkeypatch)
+        request = self._build_request(marker=True)
+
+        with pytest.raises(ApiKeyValidationError) as exc_info:
+            await svc._resolve_api_key("sk_test", request=request)
+        assert exc_info.value.code == "service_key_cannot_delete_files"
         svc._log_api_key_auth_failed.assert_awaited_once()
 
     @pytest.mark.asyncio

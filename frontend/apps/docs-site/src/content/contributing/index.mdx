@@ -68,6 +68,12 @@ All UI contributions must follow Eneo's established design system and use existi
 - **Follow existing conventions** — code style, project structure, commit message format
 - **Update documentation** if your change affects user-facing behavior
 
+## Security Checks
+
+Pull requests run CI and Dependency Review before merge. These checks make dependency updates reviewable and prevent known high-severity vulnerable dependencies from entering `develop`. Code scanning is paused while maintainers evaluate a setup that gives developers useful feedback without high false-positive noise.
+
+See [Security for Contributors](/contributing/security) for the required checks, alert triage order, and how to handle dependency or security check failures.
+
 ### Commit Message Format
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/):

@@ -1,4 +1,5 @@
-from unittest.mock import AsyncMock
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -101,6 +102,51 @@ async def test_user_can_not_access_completion_models(service: AIModelsService):
         assert not model.can_access
 
 
+async def test_completion_models_use_effective_deprecation(
+    service: AIModelsService,
+):
+    service.user = TEST_ADMIN_USER
+    model = TEST_MODEL_CHATGPT.model_copy(
+        update={
+            "name": "gpt-4-0613",
+            "is_org_enabled": True,
+            "is_deprecated": False,
+            "provider_type": "openai",
+        }
+    )
+    service.completion_model_repo.get_models.return_value = [model]
+
+    with patch(
+        "litellm.model_cost",
+        {"openai/gpt-4-0613": {"deprecation_date": "2025-06-13"}},
+    ):
+        models = await service.get_completion_models()
+
+    assert models[0].is_deprecated is True
+    assert models[0].can_access is False
+
+
+async def test_embedding_models_use_effective_deprecation(service: AIModelsService):
+    service.user = TEST_ADMIN_USER
+    model = TEST_EMBEDDING_MODEL.model_copy(
+        update={
+            "name": "text-embedding-ada-002",
+            "is_org_enabled": True,
+            "is_deprecated": False,
+        }
+    )
+    service.embedding_model_repo.get_models.return_value = [model]
+
+    with patch(
+        "litellm.model_cost",
+        {"text-embedding-ada-002": {"deprecation_date": "2025-06-13"}},
+    ):
+        models = await service.get_embedding_models()
+
+    assert models[0].is_deprecated is True
+    assert models[0].can_access is False
+
+
 async def test_completion_models_flags_settings_not_exists(service: AIModelsService):
     service.user = TEST_NO_ADMIN_USER
 
@@ -158,3 +204,46 @@ async def test_azure_models_with_feature_flag_on(service: AIModelsService):
 
     assert len(models) == 3
     assert "azure" in [model.family for model in models]
+
+
+async def test_tenant_azure_models_shown_when_flag_off(service: AIModelsService):
+    # A tenant that explicitly configures an Azure provider gets family="azure"
+    # on its completion models. Those are deliberate config and must stay
+    # visible even when the global `using_azure_models` flag (which only gates
+    # the predefined global Azure models) is off. Regression for Azure
+    # completion models 200-ing on create yet never appearing in the admin
+    # list / chat picker.
+    get_settings().using_azure_models = False
+    tenant_azure = TEST_MODEL_AZURE.model_copy(update={"tenant_id": TEST_TENANT.id})
+    service.completion_model_repo.get_models.return_value = [
+        TEST_MODEL_GPT4,
+        TEST_MODEL_AZURE,  # global → hidden
+        tenant_azure,  # tenant-owned → shown
+    ]
+
+    models = await service.get_completion_models()
+
+    families = [model.family for model in models]
+    assert families.count("azure") == 1
+    assert any(model.tenant_id == TEST_TENANT.id for model in models)
+
+
+def test_get_latest_available_model_handles_missing_created_at(
+    service: AIModelsService,
+):
+    latest = service._get_latest_available_model(
+        [
+            TEST_MODEL_CHATGPT.model_copy(
+                update={"created_at": None, "can_access": True}
+            ),
+            TEST_MODEL_GPT4.model_copy(
+                update={
+                    "created_at": datetime(2024, 1, 1, tzinfo=timezone.utc),
+                    "can_access": True,
+                }
+            ),
+        ]
+    )
+
+    assert latest is not None
+    assert latest.id == TEST_MODEL_GPT4.id

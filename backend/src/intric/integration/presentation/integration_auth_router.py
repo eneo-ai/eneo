@@ -54,7 +54,7 @@ async def on_auth_callback(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.INTEGRATION_CONNECTED,
         entity_type=EntityType.INTEGRATION,
         entity_id=integration.id,

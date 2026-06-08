@@ -17,18 +17,15 @@ export function initAuth(client) {
      * Initiate OIDC authentication for a tenant
      * @param {Object} params
      * @param {string} params.tenant - Tenant slug
-     * @param {string} params.redirectUri - Redirect URI after authentication
      * @param {string} [params.state] - Optional state parameter
      * @returns {Promise<import("../types/resources").InitiateAuthResponse>}
      */
-    initiateAuth: async ({ tenant, redirectUri, state }) => {
+    initiateAuth: async ({ tenant, state }) => {
       return await client.fetch("/api/v1/auth/initiate", {
         method: "get",
         params: {
           query: {
             tenant,
-            // @ts-ignore - redirect_uri is accepted by the backend but not in the generated schema
-            redirect_uri: redirectUri,
             ...(state && { state })
           }
         }

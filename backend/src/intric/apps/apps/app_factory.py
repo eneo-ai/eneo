@@ -2,14 +2,19 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Sequence, cast
 from uuid import UUID
 
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.orm.base import NO_VALUE
+from sqlalchemy.orm.state import InstanceState
+
 from intric.ai_models.completion_models.completion_model import (
     CompletionModelSparse,
     ModelKwargs,
 )
 from intric.apps.apps.api.app_models import InputField, InputFieldType
 from intric.apps.apps.app import App
+from intric.database.tables.ai_models_table import CompletionModels
 from intric.database.tables.app_table import Apps
-from intric.files.file_models import FileInfo
+from intric.files.file_models import File
 from intric.prompts.prompt import Prompt
 from intric.prompts.prompt_factory import PromptFactory
 from intric.spaces.space import Space
@@ -32,29 +37,34 @@ class AppFactory:
 
     @staticmethod
     def _create_model_kwargs(
-        completion_model_kwargs: dict[str, object] | None,
-    ) -> ModelKwargs | None:
+        completion_model_kwargs: object | None,
+    ) -> ModelKwargs:
+        # Delegating to model_validate (instead of a manual `.get(...)` walk)
+        # is deliberate: a corrupt non-dict JSONB value raises ValidationError,
+        # which `_build_or_skip` in space_factory can catch and isolate per-row.
+        # A `.get` walk would raise AttributeError, bypass that belt and crash
+        # the whole space load.
         if completion_model_kwargs is None:
-            return None
+            return ModelKwargs()
+        return ModelKwargs.model_validate(completion_model_kwargs)
 
-        return ModelKwargs(
-            temperature=cast(float | None, completion_model_kwargs.get("temperature")),
-            top_p=cast(float | None, completion_model_kwargs.get("top_p")),
-            reasoning_effort=cast(
-                str | None, completion_model_kwargs.get("reasoning_effort")
-            ),
-            verbosity=cast(str | None, completion_model_kwargs.get("verbosity")),
-            response_format=cast(
-                dict[str, object] | None, completion_model_kwargs.get("response_format")
-            ),
-            presence_penalty=cast(
-                float | None, completion_model_kwargs.get("presence_penalty")
-            ),
-            frequency_penalty=cast(
-                float | None, completion_model_kwargs.get("frequency_penalty")
-            ),
-            top_k=cast(int | None, completion_model_kwargs.get("top_k")),
+    @staticmethod
+    def _create_completion_model_sparse(
+        completion_model: CompletionModels,
+    ) -> CompletionModelSparse:
+        sparse_model = CompletionModelSparse.model_validate(completion_model)
+        model_state = cast(
+            InstanceState[CompletionModels], sa_inspect(completion_model)
         )
+        provider_state = model_state.attrs.provider
+        if provider_state.loaded_value is NO_VALUE:
+            return sparse_model
+
+        provider = provider_state.value
+        if provider is None:
+            return sparse_model
+
+        return sparse_model.model_copy(update={"provider_type": provider.provider_type})
 
     def create_app(
         self,
@@ -83,7 +93,9 @@ class AppFactory:
             description=None,
             prompt=None,
             completion_model=completion_model,
-            completion_model_kwargs=None,
+            # ModelKwargs is required on the domain object; reads, .model_dump
+            # writes and the AppPublic response all rely on it being present.
+            completion_model_kwargs=ModelKwargs(),
             input_fields=input_fields,
             attachments=[],
             published=False,
@@ -99,7 +111,7 @@ class AppFactory:
         input_fields: list[InputField],
         name: str | None = None,
         prompt: Prompt | None = None,
-        attachments: Sequence["FileInfo"] | None = None,
+        attachments: Sequence["File"] | None = None,
         transcription_model: TranscriptionModel | None = None,
     ) -> App:
         space_id = space.id
@@ -138,27 +150,22 @@ class AppFactory:
         transcription_model: TranscriptionModel | None = None,
     ) -> App:
         completion_model = (
-            CompletionModelSparse.model_validate(app_in_db.completion_model)
+            self._create_completion_model_sparse(app_in_db.completion_model)
             if app_in_db.completion_model is not None
             else None
         )
-        raw_completion_model_kwargs = cast(
-            dict[object, object] | None, app_in_db.completion_model_kwargs
-        )
-        completion_model_kwargs = (
-            {str(key): value for key, value in raw_completion_model_kwargs.items()}
-            if raw_completion_model_kwargs is not None
-            else None
-        )
+        model_kwargs = self._create_model_kwargs(app_in_db.completion_model_kwargs)
         input_fields = [
             InputField.model_validate(input_field)
             for input_field in app_in_db.input_fields
         ]
         attachments = [
-            FileInfo.model_validate(attachment.file)
-            for attachment in app_in_db.attachments
+            File.model_validate(attachment.file) for attachment in app_in_db.attachments
         ]
-        model_kwargs = self._create_model_kwargs(completion_model_kwargs)
+        if completion_model is not None:
+            model_kwargs = model_kwargs.filter_unsupported(
+                completion_model.supported_model_kwargs
+            )
 
         source_template = (
             self.app_template_factory.create_app_template(app_in_db.template)
@@ -209,19 +216,10 @@ class AppFactory:
             InputField.model_validate(input_field)
             for input_field in app_in_db.input_fields
         ]
-        raw_completion_model_kwargs = cast(
-            dict[object, object] | None, app_in_db.completion_model_kwargs
-        )
-        completion_model_kwargs = (
-            {str(key): value for key, value in raw_completion_model_kwargs.items()}
-            if raw_completion_model_kwargs is not None
-            else None
-        )
+        model_kwargs = self._create_model_kwargs(app_in_db.completion_model_kwargs)
         attachments = [
-            FileInfo.model_validate(attachment.file)
-            for attachment in app_in_db.attachments
+            File.model_validate(attachment.file) for attachment in app_in_db.attachments
         ]
-        model_kwargs = self._create_model_kwargs(completion_model_kwargs)
 
         source_template = (
             self.app_template_factory.create_app_template(app_in_db.template)
@@ -237,6 +235,10 @@ class AppFactory:
             ),
             None,
         )
+        if completion_model is not None:
+            model_kwargs = model_kwargs.filter_unsupported(
+                completion_model.get_supported_model_kwargs()
+            )
 
         transcription_model = next(
             (

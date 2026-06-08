@@ -73,9 +73,9 @@
     <button
       on:click={openPreview}
       class="h-12 w-12 overflow-hidden rounded-lg transition-opacity hover:opacity-80"
-      aria-label="View avatar"
+      aria-label={m.upload_view_avatar()}
     >
-      <img src={iconUrl} alt="Avatar" class="h-full w-full object-cover" />
+      <img src={iconUrl} alt={m.upload_avatar_alt()} class="h-full w-full object-cover" />
     </button>
 
     <div class="flex-grow">
@@ -89,11 +89,11 @@
 
   <Dialog.Root alert openController={showPreview}>
     <Dialog.Content width="medium">
-      <Dialog.Title>Avatar</Dialog.Title>
+      <Dialog.Title>{m.upload_avatar_alt()}</Dialog.Title>
 
       <Dialog.Section>
         <div class="flex justify-center p-4">
-          <img src={iconUrl} alt="Avatar preview" class="max-h-96 rounded-lg" />
+          <img src={iconUrl} alt={m.upload_avatar_preview_alt()} class="max-h-96 rounded-lg" />
         </div>
       </Dialog.Section>
 

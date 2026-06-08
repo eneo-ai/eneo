@@ -1,147 +1,101 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
+<!--
+  Step 2 — provide credentials for a brand-new provider and create it.
+
+  Field metadata (which fields, required, secret, in credentials/config) comes
+  from `capabilities.providers[providerType].fields`. Labels, placeholders and
+  hints come from the shared `modelProviderCapabilities` helpers so they stay
+  in sync with the standalone ProviderDialog.
+-->
+
 <script lang="ts">
-  import { Button, Input } from "@intric/ui";
-  import { createEventDispatcher, onMount } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
+  import { ArrowLeft, Loader2 } from "lucide-svelte";
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
+
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+
   import ProviderGlyph from "../components/ProviderGlyph.svelte";
-  import { ArrowLeft, Loader2 } from "lucide-svelte";
+  import {
+    formatProviderLabel,
+    formatFieldLabel,
+    getFieldPlaceholder,
+    getFieldHint,
+    resolveProviderFields,
+    type ModelProviderCapabilities
+  } from "../modelProviderCapabilities";
 
-  export let providerType: string;
-
-  /** Dynamic field definitions from capabilities (passed by AddWizard) */
-  export let providerFields: Array<{
-    name: string;
-    required: boolean;
-    secret: boolean;
-    in: "credentials" | "config";
-  }> | null = null;
-
-  const dispatch = createEventDispatcher<{
-    complete: { providerId: string };
-    back: void;
-  }>();
+  let {
+    providerType,
+    capabilities = null,
+    onComplete,
+    onBack
+  }: {
+    providerType: string;
+    capabilities?: ModelProviderCapabilities | null;
+    onComplete: (detail: { providerId: string }) => void;
+    onBack: () => void;
+  } = $props();
 
   const intric = getIntric();
 
-  // Dynamic field values — keyed by field name
-  let fieldValues: Record<string, string> = {};
+  // Field definitions resolve eagerly even before capabilities load — the
+  // helper provides a sensible fallback so the form mounts immediately.
+  const fields = $derived(resolveProviderFields(capabilities, providerType));
 
-  // Provider name (always shown, not part of providerFields)
-  let providerName = "";
+  // Seed the editable name once from the provider type. Subsequent changes
+  // to providerType would only happen via a remount (the wizard rekeys steps),
+  // so we explicitly untrack the read to silence the "captures initial value"
+  // warning that $state would otherwise emit.
+  let providerName = $state(untrack(() => formatProviderLabel(providerType)));
+  let fieldValues = $state<Record<string, string>>({});
 
-  // State
-  let isSubmitting = false;
-  let error: string | null = null;
+  let isSubmitting = $state(false);
+  let error = $state<string | null>(null);
 
-  // Fallback fields when capabilities haven't loaded yet
-  const fallbackFields: typeof providerFields = [
-    { name: "api_key", required: true, secret: true, in: "credentials" },
-    { name: "endpoint", required: false, secret: false, in: "config" }
-  ];
-
-  $: fields = providerFields ?? fallbackFields;
-
-  // Initialize field values when fields change
-  $: {
+  // Seed any new fields the resolved schema introduces. We never delete keys
+  // here — switching provider types is impossible at this step (the wizard
+  // doesn't go back-and-forth between credentials and provider type), so
+  // dangling values would only matter on rapid edits and have no effect on
+  // submission since we only read keys present in `fields`.
+  $effect(() => {
     for (const field of fields) {
       if (!(field.name in fieldValues)) {
         fieldValues[field.name] = "";
       }
     }
-  }
-
-  // Validation: name must be filled + all required fields
-  $: isValid =
-    providerName.trim() !== "" &&
-    fields.every((f) => !f.required || (fieldValues[f.name] ?? "").trim() !== "");
-
-  // Auto-focus first input and prefill provider name on mount
-  onMount(() => {
-    if (!providerName) {
-      providerName = formatProviderLabel(providerType);
-    }
-    setTimeout(() => {
-      const input = document.getElementById("cred-provider-name") as HTMLInputElement;
-      input?.focus();
-      input?.select();
-    }, 100);
   });
 
-  function formatProviderLabel(type: string): string {
-    // Known display names for common providers
-    const knownLabels: Record<string, string> = {
-      openai: "OpenAI",
-      azure: "Azure OpenAI",
-      anthropic: "Anthropic",
-      gemini: "Google Gemini",
-      cohere: "Cohere",
-      mistral: "Mistral AI",
-      hosted_vllm: "vLLM"
-    };
-    return knownLabels[type] ?? type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  }
+  const isValid = $derived(
+    providerName.trim() !== "" &&
+      fields.every((f) => !f.required || (fieldValues[f.name] ?? "").trim() !== "")
+  );
 
-  function formatFieldLabel(name: string): string {
-    const labels: Record<string, string> = {
-      api_key: m.api_key(),
-      endpoint: m.endpoint_url(),
-      api_version: m.api_version(),
-      deployment_name: m.deployment_name()
-    };
-    return labels[name] ?? name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  }
+  onMount(async () => {
+    await tick();
+    document.getElementById("cred-provider-name")?.focus();
+  });
 
-  function getFieldPlaceholder(name: string): string {
-    const placeholders: Record<string, string> = {
-      api_key: m.enter_api_key(),
-      endpoint:
-        providerType === "azure"
-          ? "https://your-resource.openai.azure.com"
-          : providerType === "hosted_vllm"
-            ? "https://your-vllm-server.com"
-            : "https://api.example.com/v1",
-      api_version: m.api_version_placeholder(),
-      deployment_name: m.deployment_name_placeholder()
-    };
-    return placeholders[name] ?? "";
-  }
-
-  function getFieldHint(name: string, required: boolean): string {
-    if (name === "api_key") return m.will_be_encrypted();
-    if (name === "endpoint") {
-      if (providerType === "azure") return m.endpoint_required_azure();
-      if (providerType === "hosted_vllm") return m.endpoint_required_vllm();
-      if (!required) return m.endpoint_optional_generic();
-    }
-    if (name === "api_version") return m.api_version_required();
-    if (name === "deployment_name") return m.deployment_name_required();
-    return required ? "" : "";
-  }
-
-  async function handleSubmit() {
-    if (!isValid) return;
+  async function submit() {
+    if (!isValid || isSubmitting) return;
 
     isSubmitting = true;
     error = null;
 
     try {
-      // Build credentials and config from field values based on field.in
       const credentials: Record<string, string> = {};
       const config: Record<string, string> = {};
-
       for (const field of fields) {
         const value = (fieldValues[field.name] ?? "").trim();
-        if (value) {
-          if (field.in === "credentials") {
-            credentials[field.name] = value;
-          } else {
-            config[field.name] = value;
-          }
-        }
+        if (!value) continue;
+        if (field.in === "credentials") credentials[field.name] = value;
+        else config[field.name] = value;
       }
 
       const provider = await intric.modelProviders.create({
@@ -153,7 +107,7 @@
       });
 
       toast.success(m.provider_created_success());
-      dispatch("complete", { providerId: provider.id });
+      onComplete({ providerId: provider.id });
     } catch (e: unknown) {
       error = e instanceof Error ? e.message : m.failed_to_create_provider();
       toastError(e, m.failed_to_create_provider());
@@ -162,88 +116,74 @@
     }
   }
 
-  function handleBack() {
-    dispatch("back");
+  function handleFormSubmit(event: SubmitEvent) {
+    event.preventDefault();
+    void submit();
   }
 </script>
 
 <div class="flex flex-col gap-6">
-  <!-- Header with Provider Type -->
-  <div class="bg-surface-dimmer flex items-center gap-4 rounded-lg p-4">
-    <ProviderGlyph type={providerType} size="lg" />
+  <div class="border-border flex items-center gap-4 rounded-lg border p-4">
+    <ProviderGlyph {providerType} size="lg" />
     <div>
-      <h3 class="text-primary font-medium">{formatProviderLabel(providerType)}</h3>
-      <p class="text-muted text-sm">{m.enter_provider_credentials()}</p>
+      <h3 class="text-foreground font-medium">{formatProviderLabel(providerType)}</h3>
+      <p class="text-muted-foreground text-sm">{m.enter_provider_credentials()}</p>
     </div>
   </div>
 
   {#if error}
-    <div class="border-error bg-error-dimmer text-error-stronger border-l-2 px-4 py-2 text-sm">
+    <div
+      class="border-destructive bg-destructive/10 text-destructive border-l-2 px-4 py-2 text-sm"
+      role="alert"
+    >
       {error}
     </div>
   {/if}
 
-  <form
-    on:submit|preventDefault={handleSubmit}
-    class="border-dimmer bg-surface-dimmer/30 flex flex-col gap-4 rounded-lg border p-4"
-  >
-    <!-- Provider Name (always first) -->
-    <div class="flex flex-col gap-2">
-      <label for="cred-provider-name" class="text-sm font-medium">{m.provider_name()}</label>
-      <Input.Text
+  <form onsubmit={handleFormSubmit} class="flex flex-col gap-4">
+    <Field.Field>
+      <Field.Label for="cred-provider-name">{m.provider_name()}</Field.Label>
+      <Input
         id="cred-provider-name"
         bind:value={providerName}
         placeholder={m.provider_name_placeholder()}
         required
       />
-      <p class="text-muted-foreground text-xs">
-        {m.provider_name_hint()}
-      </p>
-    </div>
+      <Field.Description>{m.provider_name_hint()}</Field.Description>
+    </Field.Field>
 
-    <!-- Dynamic fields -->
     {#each fields as field (field.name)}
-      {@const hint = getFieldHint(field.name, field.required)}
-      <div class="flex flex-col gap-2">
-        <label for="cred-{field.name}" class="text-sm font-medium">
+      {@const hint = getFieldHint(field.name, field.required, providerType, "create")}
+      <Field.Field>
+        <Field.Label for="cred-{field.name}">
           {formatFieldLabel(field.name)}
           {#if !field.required}
-            <span class="text-muted ml-1 text-xs font-normal">(optional)</span>
+            <span class="text-muted-foreground ml-1 text-xs font-normal">({m.optional()})</span>
           {/if}
-        </label>
-        <Input.Text
+        </Field.Label>
+        <Input
           id="cred-{field.name}"
           type={field.secret ? "password" : "text"}
           bind:value={fieldValues[field.name]}
-          placeholder={getFieldPlaceholder(field.name)}
+          placeholder={getFieldPlaceholder(field.name, providerType)}
           required={field.required}
         />
         {#if hint}
-          <p class="text-muted-foreground text-xs">{hint}</p>
+          <Field.Description>{hint}</Field.Description>
         {/if}
-      </div>
+      </Field.Field>
     {/each}
   </form>
 
-  <!-- Navigation -->
-  <div class="border-dimmer flex items-center justify-between border-t pt-4">
-    <Button
-      variant="outlined"
-      on:click={handleBack}
-      class="focus-visible:ring-accent-default/70 focus-visible:ring-offset-surface gap-2 focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:!outline-none"
-    >
-      <ArrowLeft class="h-4 w-4" />
+  <div class="border-border flex items-center justify-between border-t pt-4">
+    <Button type="button" variant="outline" onclick={onBack}>
+      <ArrowLeft aria-hidden="true" />
       {m.back()}
     </Button>
 
-    <Button
-      variant="primary"
-      on:click={handleSubmit}
-      disabled={!isValid || isSubmitting}
-      class="focus-visible:ring-accent-default/50 focus-visible:ring-offset-surface focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:!outline-none"
-    >
+    <Button type="button" onclick={() => void submit()} disabled={!isValid || isSubmitting}>
       {#if isSubmitting}
-        <Loader2 class="mr-2 h-4 w-4 animate-spin" />
+        <Loader2 class="animate-spin" aria-hidden="true" />
         {m.creating()}
       {:else}
         {m.create_and_continue()}

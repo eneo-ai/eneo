@@ -11,7 +11,10 @@
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import SelectBehaviourV2 from "$lib/features/ai-models/components/SelectBehaviourV2.svelte";
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
-  import { supportsTemperature } from "$lib/features/ai-models/supportsTemperature.js";
+  import {
+    filterSupportedModelKwargs,
+    hasModelSpecificSettings
+  } from "$lib/features/ai-models/ModelKwargCapabilities";
   import ImprovedCategorySelector from "$lib/features/templates/components/admin/ImprovedCategorySelector.svelte";
   import LucideIconPicker from "$lib/features/templates/components/LucideIconPicker.svelte";
   import HelpTooltip from "../../../models/components/HelpTooltip.svelte";
@@ -114,7 +117,7 @@
         category,
         prompt: promptText, // Backend expects string, not object
         completion_model_id: completionModel?.id,
-        completion_model_kwargs: completionModelKwargs,
+        completion_model_kwargs: filterSupportedModelKwargs(completionModelKwargs, completionModel),
         input_type: inputType, // Single string, not array
         input_description: inputDescription || undefined,
         wizard, // Always send wizard object, never undefined
@@ -310,15 +313,15 @@
           <SelectBehaviourV2
             bind:kwArgs={completionModelKwargs}
             selectedModel={completionModel}
-            isDisabled={!supportsTemperature(completionModel?.name)}
+            isDisabled={!completionModel}
             {aria}
           />
         </Settings.Row>
 
-        {#if completionModel?.reasoning || completionModel?.litellm_model_name}
+        {#if hasModelSpecificSettings(completionModel)}
           <Settings.Row
-            title="Model settings"
-            description="Configure model-specific parameters for advanced control over the response."
+            title={m.model_settings()}
+            description={m.model_settings_description()}
             hasChanges={false}
           >
             <SelectModelSpecificSettings

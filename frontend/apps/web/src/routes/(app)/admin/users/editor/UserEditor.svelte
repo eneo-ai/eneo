@@ -19,14 +19,13 @@
 
   const intric = getIntric();
 
-  const { defaultRoles, customRoles, userGroups } = getAdminUserCtx();
+  const { roles: allRoles, userGroups } = getAdminUserCtx();
 
   const createEmptyUser = () => {
     return {
       id: "",
       email: "",
       username: "",
-      predefined_roles: [],
       roles: [],
       user_groups: []
     };
@@ -39,7 +38,6 @@
       id: string;
       username?: string | null | undefined;
       email: string;
-      predefined_roles: Role[];
       roles: Role[];
       user_groups: UserGroup[];
     };
@@ -55,35 +53,16 @@
 
   let userPassword = $state("");
   let username = $state(user.username ?? "");
-  let userRoles = $state(user.predefined_roles.concat(user.roles));
-  let defaultRolesIds = $derived(defaultRoles.flatMap((role) => role.id));
+  let userRoles = $state([...user.roles]);
 
   let editableUser = $state(makeEditable(user));
 
   // Reinitialize state when user prop changes (e.g., when selecting different row in table)
   $effect(() => {
     username = user.username ?? "";
-    userRoles = user.predefined_roles.concat(user.roles);
+    userRoles = [...user.roles];
     editableUser = makeEditable(user);
   });
-
-  function getRolesUpdate() {
-    const updatedRoles = userRoles.reduce(
-      (prev, curr) => {
-        if (defaultRolesIds.includes(curr.id)) {
-          prev.predefined_roles.push(curr);
-        } else {
-          prev.roles.push(curr);
-        }
-        return prev;
-      },
-      {
-        roles: [] as Role[],
-        predefined_roles: [] as Role[]
-      }
-    );
-    return updatedRoles;
-  }
 
   async function updateUser() {
     if (!user.username) {
@@ -94,7 +73,7 @@
       ...editableUser.getEdits(),
       password: userPassword === "" ? undefined : userPassword,
       username: username === user.username || username === "" ? undefined : username,
-      ...getRolesUpdate()
+      roles: userRoles
     };
     try {
       await intric.users.update({
@@ -118,7 +97,7 @@
     const newUser = {
       ...editableUser,
       password: userPassword,
-      ...getRolesUpdate(),
+      roles: userRoles,
       username
     };
     try {
@@ -193,7 +172,7 @@
         class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
       ></Input.Text>
 
-      <SelectRole {customRoles} {defaultRoles} bind:value={userRoles}></SelectRole>
+      <SelectRole roles={allRoles} bind:value={userRoles}></SelectRole>
 
       {#if mode === "update"}
         <SelectUserGroups bind:selectedGroups={editableUser.user_groups} {userGroups} {user}

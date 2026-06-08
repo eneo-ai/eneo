@@ -15,6 +15,7 @@ _F = TypeVar("_F", bound=Callable[..., Coroutine[Any, Any, Any]])
 
 class Permission(str, Enum):
     ASSISTANTS = "assistants"
+    PERSONAL_CHAT = "personal_chat"
     GROUP_CHATS = "group_chats"
     APPS = "apps"
     SERVICES = "services"
@@ -25,6 +26,8 @@ class Permission(str, Enum):
     ADMIN = "admin"
     WEBSITES = "websites"
     INTEGRATIONS = "integrations"
+    SHARED_SPACES = "shared_spaces"
+    API_KEYS = "api_keys"
 
 
 def validate_permissions(permission: Permission) -> Callable[[_F], _F]:

@@ -99,15 +99,6 @@ class FileService:
             include_transcription=include_transcription,
         )
 
-    async def get_files_for_token_estimate(
-        self, file_ids: list[UUID], include_transcription: bool = True
-    ):
-        return await self.repo.get_list_by_id_and_tenant(
-            ids=file_ids,
-            tenant_id=self.user.tenant_id,
-            include_transcription=include_transcription,
-        )
-
     async def get_files(self) -> list[File]:
         return await self.repo.get_list_by_user(user_id=self.user.id)
 
@@ -129,7 +120,11 @@ class FileService:
         return files
 
     async def delete_file(self, id: UUID):
-        file_deleted = await self.repo.delete_by_owner(id=id, user_id=self.user.id)
+        file_deleted = await self.repo.delete_by_owner(
+            id=id,
+            user_id=self.user.id,
+            tenant_id=self.user.tenant_id,
+        )
 
         if file_deleted is None:
             raise NotFoundException()

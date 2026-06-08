@@ -1,9 +1,6 @@
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
-from intric.ai_models.completion_models.completion_model import (
-    ModelKwargs,
-)
 from intric.apps.apps.api.app_models import (
     AppPublic,
     InputField,
@@ -147,11 +144,10 @@ class AppAssembler:
             if app.completion_model is not None
             else None
         )
-        model_kwargs = (
-            app.completion_model_kwargs
-            if app.completion_model_kwargs is not None
-            else ModelKwargs()
-        )
+        # No defensive coalesce: the App constructor enforces non-None, so
+        # falling back to `ModelKwargs()` here would silently hide an
+        # upstream regression instead of letting it surface.
+        model_kwargs = app.completion_model_kwargs
         settings = get_settings()
         allowed_attachments = FileRestrictions(
             accepted_file_types=[

@@ -9,6 +9,10 @@ from intric.integration.infrastructure.content_service.utils import (
     process_sharepoint_response,
 )
 from intric.libs.clients import BaseClient
+from intric.libs.clients.throttle_retry import (
+    THROTTLE_AND_OVERLOAD_STATUS_CODES,
+    retry_on_throttle,
+)
 from intric.main.config import get_settings
 from intric.main.logging import get_logger
 
@@ -129,33 +133,47 @@ class SharePointContentClient(BaseClient):
         download_url: str,
         file_name: str,
     ) -> tuple[str, str]:
-        async with self.client.client.get(
-            download_url, headers=self.headers
-        ) as response:
-            response.raise_for_status()
-            content_type = response.headers.get("Content-Type", "")
-            content_type_lower = content_type.lower()
-            payload = await self._read_response_with_size_limit(response, file_name)
+        # Streams the body directly off the raw session to enforce the size
+        # limit, bypassing WrappedAiohttpClient — so throttling retry must be
+        # applied here explicitly.
+        async def _download() -> tuple[str, str]:
+            async with self.client.client.get(
+                download_url, headers=self.headers
+            ) as response:
+                response.raise_for_status()
+                content_type = response.headers.get("Content-Type", "")
+                content_type_lower = content_type.lower()
+                payload = await self._read_response_with_size_limit(response, file_name)
 
-            if "application/json" in content_type_lower:
-                decoded = payload.decode(response.charset or "utf-8", errors="replace")
-                try:
-                    return str(json.loads(decoded)), content_type
-                except json.JSONDecodeError:
-                    return decoded, content_type
+                if "application/json" in content_type_lower:
+                    decoded = payload.decode(
+                        response.charset or "utf-8", errors="replace"
+                    )
+                    try:
+                        return str(json.loads(decoded)), content_type
+                    except json.JSONDecodeError:
+                        return decoded, content_type
 
-            if "text/" in content_type_lower or "application/xml" in content_type_lower:
-                return (
-                    payload.decode(response.charset or "utf-8", errors="replace"),
-                    content_type,
+                if (
+                    "text/" in content_type_lower
+                    or "application/xml" in content_type_lower
+                ):
+                    return (
+                        payload.decode(response.charset or "utf-8", errors="replace"),
+                        content_type,
+                    )
+
+                text, detected_content_type = process_sharepoint_response(
+                    response_content=payload,
+                    content_type=content_type,
+                    filename=file_name,
                 )
+                return text, detected_content_type
 
-            text, detected_content_type = process_sharepoint_response(
-                response_content=payload,
-                content_type=content_type,
-                filename=file_name,
-            )
-            return text, detected_content_type
+        return await retry_on_throttle(
+            _download,
+            retryable_status_codes=THROTTLE_AND_OVERLOAD_STATUS_CODES,
+        )
 
     async def get_sites(self) -> dict[str, Any]:
         endpoint = "v1.0/sites?search=*"

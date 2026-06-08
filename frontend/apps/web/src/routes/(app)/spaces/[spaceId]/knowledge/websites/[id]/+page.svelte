@@ -27,8 +27,9 @@
 
 <svelte:head>
   <title
-    >Eneo.ai – {data.currentSpace.personal ? m.personal() : data.currentSpace.name} – {m.crawls()} for
-    {formatWebsiteName(data.website)}</title
+    >Eneo.ai – {data.currentSpace.personal ? m.personal() : data.currentSpace.name} – {m.space_crawls_for_website(
+      { websiteName: formatWebsiteName(data.website) }
+    )}</title
   >
 </svelte:head>
 

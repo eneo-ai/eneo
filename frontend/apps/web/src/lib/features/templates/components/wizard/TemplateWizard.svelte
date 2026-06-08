@@ -1,5 +1,5 @@
 <script lang="ts">
-  import SelectKnowledgeV2 from "$lib/features/knowledge/components/SelectKnowledgeV2.svelte";
+  import SelectKnowledge from "$lib/features/knowledge/components/select/SelectKnowledge.svelte";
   import AttachmentUploadTextButton from "$lib/features/attachments/components/AttachmentUploadTextButton.svelte";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { getIntric } from "$lib/core/Intric";
@@ -58,8 +58,8 @@
             </p>
 
             {#if $selectedTemplate.wizard.collections.required}
-              <SelectKnowledgeV2 bind:selectedCollections={$selectedCollections} inDialog
-              ></SelectKnowledgeV2>
+              <SelectKnowledge bind:selectedCollections={$selectedCollections} inDialog
+              ></SelectKnowledge>
             {:else}
               <p class="text-secondary pl-7 text-sm italic">{m.knowledge_add_later_hint()}</p>
             {/if}

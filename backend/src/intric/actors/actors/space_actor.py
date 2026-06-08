@@ -1,6 +1,7 @@
 from enum import Enum
 from typing import TYPE_CHECKING, Optional, Union
 
+from intric.authentication.auth_models import is_service_api_key
 from intric.main.models import ResourcePermission
 from intric.modules.module import Modules
 from intric.roles.permissions import Permission
@@ -416,70 +417,61 @@ class SpaceActor:
         return permission_map.get(resource_type)
 
     def _get_role(self):
-        # 0. Service API key — derive role from key scope, no membership needed
-        service_role = self._get_service_key_role()
-        if service_role is not None:
-            return service_role
+        # Service keys have no user membership — the key is the only access
+        # path into any space.
+        if self._is_service_api_key():
+            return self._get_api_key_role()
 
-        # 1. Personal space → OWNER
+        # User-owned API key whose scope does not cover this space: deny.
+        # The credential used to authenticate this request does not extend
+        # to this space, so the user's membership here is irrelevant.
+        key = getattr(self.user, "active_api_key", None)
+        if key is not None and self._get_api_key_role() is None:
+            return None
+
+        # Personal space → OWNER for the owning user.
         if self.space.is_personal():
             if self.user.id == self.space.user_id:
                 return SpaceRole.OWNER
             return None
 
-        # 2. Check direct membership
         direct_role = self._get_direct_role()
-
-        # 3. Check group membership
         group_role = self._get_highest_group_role()
-
-        # 4. Return the highest role
         return self._get_highest_role(direct_role, group_role)
 
-    def _get_service_key_role(self) -> SpaceRole | None:
-        """Derive a space role from a service API key's scope.
+    def _is_service_api_key(self) -> bool:
+        return is_service_api_key(self.user)
 
-        Service keys are not tied to a real user, so there's no membership row.
-        Instead, the key's scope determines whether — and with what role — the
-        synthetic user can act within this space:
+    def _get_api_key_role(self) -> SpaceRole | None:
+        """Derive a space role from the active API key's scope and permission.
 
-        - tenant-scoped key  → access to every space in the tenant
-        - space-scoped key   → access only to the matching space
-        - assistant/app-scoped key → access only to the parent space
+        Applies to both service and user-owned keys. Returns None when no
+        key is active, or when the key's scope does not cover this space.
 
-        The key's permission level maps to a space role:
-          read  → VIEWER
-          write → EDITOR
-          admin → ADMIN
+        Scope → access:
+          - tenant-scoped     → every space in the tenant
+          - space-scoped      → only the matching space
+          - assistant/app     → only the parent space of that resource
+
+        Permission → role:
+          - read  → VIEWER
+          - write → EDITOR
+          - admin → ADMIN
         """
         key = getattr(self.user, "active_api_key", None)
         if key is None:
-            return None
-
-        # Only service keys need synthetic role derivation —
-        # user keys authenticate as a real user who has actual membership.
-        ownership_raw = getattr(key, "ownership", "user")
-        ownership = (
-            ownership_raw.value
-            if isinstance(ownership_raw, Enum)
-            else str(ownership_raw)
-        )
-        if ownership != "service":
             return None
 
         scope_type = key.scope_type
         if hasattr(scope_type, "value"):
             scope_type = scope_type.value
 
-        # Check if the key's scope covers this space
         if scope_type == "tenant":
             pass  # tenant keys cover every space
         elif scope_type == "space":
             if key.scope_id != self.space.id:
                 return None
         elif scope_type in ("assistant", "app"):
-            # The key is scoped to a single resource — allow access to its
-            # parent space so the resource can actually be reached.
             resource_ids: set[object] = set()
             if scope_type == "assistant":
                 resource_ids = {a.id for a in (self.space.assistants or [])}
@@ -520,6 +512,30 @@ class SpaceActor:
 
         return highest
 
+    _ROLE_PRIORITY = {
+        SpaceRole.OWNER: 4,
+        SpaceRole.ADMIN: 3,
+        SpaceRole.EDITOR: 2,
+        SpaceRole.VIEWER: 1,
+    }
+
+    # Actions a user-owned API key is allowed to exercise, per key permission
+    # level. Aligned with the HTTP method→permission map: ``read`` covers
+    # GET-equivalent actions, ``write`` covers POST/PUT/PATCH-equivalent, and
+    # ``admin`` lifts the constraint entirely (DELETE included). Applied on
+    # top of the user's role so the effective permissions are the intersection.
+    _KEY_PERMISSION_ACTIONS: dict[str, set[SpaceAction]] = {
+        "read": {SpaceAction.READ, SpaceAction.INSIGHT_VIEW},
+        "write": {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.PUBLISH,
+            SpaceAction.INSIGHT_VIEW,
+            SpaceAction.INSIGHT_TOGGLE,
+        },
+    }
+
     def _get_highest_role(
         self, role1: SpaceRole | None, role2: SpaceRole | None
     ) -> SpaceRole | None:
@@ -532,18 +548,27 @@ class SpaceActor:
         if role2 is None:
             return role1
 
-        role_priority = {
-            SpaceRole.OWNER: 4,
-            SpaceRole.ADMIN: 3,
-            SpaceRole.EDITOR: 2,
-            SpaceRole.VIEWER: 1,
-        }
-
         return (
             role1
-            if role_priority.get(role1, 0) >= role_priority.get(role2, 0)
+            if self._ROLE_PRIORITY.get(role1, 0) >= self._ROLE_PRIORITY.get(role2, 0)
             else role2
         )
+
+    def _get_api_key_action_constraint(self) -> set[SpaceAction] | None:
+        """Return the action set a user-owned API key permits, or None for
+        no constraint (service key, admin key, or no active key)."""
+        key = getattr(self.user, "active_api_key", None)
+        if key is None:
+            return None
+        if self._is_service_api_key():
+            return None
+
+        permission = key.permission
+        if hasattr(permission, "value"):
+            permission = permission.value
+        if permission == "admin":
+            return None
+        return self._KEY_PERMISSION_ACTIONS.get(permission, set())
 
     def _get_permissions(
         self, role: SpaceRole | None
@@ -551,10 +576,16 @@ class SpaceActor:
         if role is None:
             return {}
         if self.space.is_personal():
-            return self._personal_space_permissions.get(role, {})
-        if self.space.is_organization():
-            return self._org_space_permissions.get(role, {})
-        return self._shared_space_permissions.get(role, {})
+            base = self._personal_space_permissions.get(role, {})
+        elif self.space.is_organization():
+            base = self._org_space_permissions.get(role, {})
+        else:
+            base = self._shared_space_permissions.get(role, {})
+
+        allowed = self._get_api_key_action_constraint()
+        if allowed is None:
+            return base
+        return {resource: actions & allowed for resource, actions in base.items()}
 
     def can_perform_action(
         self,
@@ -565,7 +596,10 @@ class SpaceActor:
         role = self._get_role()
         permissions = self._get_permissions(role=role)
 
-        if self.space.is_personal() and resource_type in PERMISSION_RESOURCES:
+        # Check tenant-level permissions for all spaces (personal and shared).
+        # Service API keys authorize via scope+permission, not user roles —
+        # their synthetic user has no roles, so skip this gate for them.
+        if resource_type in PERMISSION_RESOURCES and not self._is_service_api_key():
             permission = self._to_permisson(resource_type=resource_type)
             has_permission = (
                 permission in self.user.permissions if permission else False
@@ -576,6 +610,18 @@ class SpaceActor:
                 and action == SpaceAction.READ
             ):
                 return False
+
+        # The personal chat (personal space default assistant) is gated by its
+        # own tenant permission, decoupled from ASSISTANTS so a baseline role can
+        # grant chat without management of assistants. Service keys authorize via
+        # scope, not user roles, so they bypass this gate (as above).
+        if (
+            resource_type == SpaceResourceType.DEFAULT_ASSISTANT
+            and self.space.is_personal()
+            and not self._is_service_api_key()
+            and Permission.PERSONAL_CHAT not in self.user.permissions
+        ):
+            return False
 
         if (
             resource_type == SpaceResourceType.SERVICE

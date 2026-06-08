@@ -54,7 +54,7 @@
     <span
       class="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium {authConfig.classes}"
       role="status"
-      aria-label="Autentiseringstyp: {authConfig.label}"
+      aria-label={m.mcp_auth_type_aria({ label: authConfig.label })}
     >
       <AuthIcon class="h-3 w-3" aria-hidden="true" />
       {authConfig.label}
@@ -75,7 +75,7 @@
   {/if}
   <span
     class="text-dimmer inline-flex items-center gap-1.5 truncate font-mono text-xs"
-    aria-label="Server URL"
+    aria-label={m.mcp_server_url_aria()}
   >
     <span
       class="bg-positive-default inline-block h-1.5 w-1.5 animate-pulse rounded-full"

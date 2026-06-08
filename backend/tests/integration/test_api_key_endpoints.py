@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
+
 import pytest
 import sqlalchemy as sa
 
+from intric.database.tables.api_keys_v2_table import ApiKeysV2 as ApiKeysV2Table
 from intric.database.tables.audit_log_table import AuditLog as AuditLogTable
-from intric.spaces.api.space_models import SpaceRoleValue
 from intric.main.config import get_settings, set_settings
+from intric.spaces.api.space_models import SpaceRoleValue
 from intric.users.user import UserAdd, UserState
 
 # Authenticated endpoint for guardrail/enforcement tests.
@@ -249,81 +251,68 @@ async def test_pk_origin_guardrail(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_pk_localhost_origin_denied_when_allow_localhost_origin_false(
-    client, db_container, default_user, default_user_token
+async def test_pk_localhost_origin_rejected_when_not_listed_on_key(
+    client, default_user_token
 ):
-    """When localhost bypass is disabled, localhost must follow normal pattern matching."""
-    settings = get_settings()
-    patched = settings.model_copy(update={"api_key_allow_localhost_origin": False})
-    set_settings(patched)
-    try:
-        allowed_origin = f"https://app-{uuid4().hex[:8]}.example.com"
-        await _add_allowed_origin(db_container, default_user.tenant_id, allowed_origin)
+    """A pk_ key whose allowed_origins doesn't include localhost rejects localhost requests.
 
-        create_response = await client.post(
-            "/api/v1/api-keys",
-            json={
-                "name": "PK Localhost Disabled",
-                "key_type": "pk_",
-                "permission": "read",
-                "scope_type": "tenant",
-                "allowed_origins": [allowed_origin],
-            },
-            headers={"Authorization": f"Bearer {default_user_token}"},
-        )
-        assert create_response.status_code == 201, create_response.text
-        secret = create_response.json()["secret"]
+    Localhost is no longer magic — it must be explicitly listed on the key.
+    """
+    allowed_origin = f"https://app-{uuid4().hex[:8]}.example.com"
 
-        localhost_response = await client.get(
-            _AUTH_ENDPOINT,
-            headers={
-                "X-API-Key": secret,
-                "Origin": "http://localhost:3000",
-            },
-        )
-        assert localhost_response.status_code == 403
-        assert localhost_response.json()["code"] == "origin_not_allowed"
-    finally:
-        set_settings(settings)
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "PK No Localhost",
+            "key_type": "pk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "allowed_origins": [allowed_origin],
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    secret = create_response.json()["secret"]
+
+    localhost_response = await client.get(
+        _AUTH_ENDPOINT,
+        headers={
+            "X-API-Key": secret,
+            "Origin": "http://localhost:3000",
+        },
+    )
+    assert localhost_response.status_code == 403
+    assert localhost_response.json()["code"] == "origin_not_allowed"
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_pk_localhost_origin_allowed_when_allow_localhost_origin_true(
-    client, db_container, default_user, default_user_token
+async def test_pk_localhost_origin_allowed_when_listed_on_key(
+    client, default_user_token
 ):
-    """When localhost bypass is enabled, localhost should pass even without matching patterns."""
-    settings = get_settings()
-    patched = settings.model_copy(update={"api_key_allow_localhost_origin": True})
-    set_settings(patched)
-    try:
-        allowed_origin = f"https://app-{uuid4().hex[:8]}.example.com"
-        await _add_allowed_origin(db_container, default_user.tenant_id, allowed_origin)
+    """Localhost works iff the key creator put it on the per-key allowed_origins list."""
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "PK With Localhost",
+            "key_type": "pk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "allowed_origins": ["http://localhost:3000"],
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    secret = create_response.json()["secret"]
 
-        create_response = await client.post(
-            "/api/v1/api-keys",
-            json={
-                "name": "PK Localhost Enabled",
-                "key_type": "pk_",
-                "permission": "read",
-                "scope_type": "tenant",
-                "allowed_origins": [allowed_origin],
-            },
-            headers={"Authorization": f"Bearer {default_user_token}"},
-        )
-        assert create_response.status_code == 201, create_response.text
-        secret = create_response.json()["secret"]
-
-        localhost_response = await client.get(
-            _AUTH_ENDPOINT,
-            headers={
-                "X-API-Key": secret,
-                "Origin": "http://localhost:3000",
-            },
-        )
-        assert localhost_response.status_code == 200, localhost_response.text
-    finally:
-        set_settings(settings)
+    localhost_response = await client.get(
+        _AUTH_ENDPOINT,
+        headers={
+            "X-API-Key": secret,
+            "Origin": "http://localhost:3000",
+        },
+    )
+    assert localhost_response.status_code == 200, localhost_response.text
 
 
 @pytest.mark.integration
@@ -441,7 +430,7 @@ async def test_creation_constraints_reflect_tenant_policy(
     assert update_response.status_code == 200, update_response.text
 
     admin_constraints = await client.get(
-        "/api/v1/api-keys/creation-constraints",
+        "/api/v1/api-keys/policy-constraints",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert admin_constraints.status_code == 200, admin_constraints.text
@@ -451,7 +440,7 @@ async def test_creation_constraints_reflect_tenant_policy(
     assert admin_payload["max_rate_limit"] == 123
 
     user_constraints = await client.get(
-        "/api/v1/api-keys/creation-constraints",
+        "/api/v1/api-keys/policy-constraints",
         headers={"Authorization": f"Bearer {regular_user_token}"},
     )
     assert user_constraints.status_code == 200, user_constraints.text
@@ -1347,6 +1336,271 @@ async def test_rotate_preserves_resource_permissions(client, default_user_token)
     assert rotate_response.status_code == 200, rotate_response.text
     rotated_payload = rotate_response.json()
     assert rotated_payload["api_key"]["resource_permissions"] == requested_permissions
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_extend_expiration_changes_date(client, default_user_token):
+    initial = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Extend Target",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "expires_at": initial,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    new_expiry = (datetime.now(timezone.utc) + timedelta(days=90)).isoformat()
+    extend_response = await client.post(
+        f"/api/v1/api-keys/{key_id}/extend",
+        json={"expires_at": new_expiry},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert extend_response.status_code == 200, extend_response.text
+    assert extend_response.json()["expires_at"].startswith(new_expiry[:10])
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_extend_expiration_rejects_past_date(client, default_user_token):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Extend Past Date",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    response = await client.post(
+        f"/api/v1/api-keys/{key_id}/extend",
+        json={"expires_at": past},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_request"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_extend_expiration_rejects_revoked_key(client, default_user_token):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Extend Revoked",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    revoke_response = await client.post(
+        f"/api/v1/api-keys/{key_id}/revoke",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert revoke_response.status_code == 200, revoke_response.text
+
+    new_expiry = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    response = await client.post(
+        f"/api/v1/api-keys/{key_id}/extend",
+        json={"expires_at": new_expiry},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_request"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_purge_revoked_key(client, default_user_token):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Purge Target",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    revoke = await client.post(
+        f"/api/v1/api-keys/{key_id}/revoke",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert revoke.status_code == 200, revoke.text
+
+    purge = await client.post(
+        f"/api/v1/api-keys/{key_id}/purge",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert purge.status_code == 204, purge.text
+
+    get_after = await client.get(
+        f"/api/v1/api-keys/{key_id}",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert get_after.status_code == 404
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_purge_active_key_rejected(client, default_user_token):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Active No Purge",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    purge = await client.post(
+        f"/api/v1/api-keys/{key_id}/purge",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert purge.status_code == 400
+    assert purge.json()["code"] == "invalid_request"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_rotate_disable_grace_period_revokes_old_key_immediately(
+    client, db_container, default_user_token
+):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Rotate Disable Grace",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    old_key_id = UUID(create_response.json()["api_key"]["id"])
+    old_secret = create_response.json()["secret"]
+
+    # Sanity check: the secret authenticates before rotation.
+    pre_response = await client.get(
+        _AUTH_ENDPOINT,
+        headers={"X-API-Key": old_secret},
+    )
+    assert pre_response.status_code == 200, pre_response.text
+
+    rotate_response = await client.post(
+        f"/api/v1/api-keys/{old_key_id}/rotate",
+        json={"disable_grace_period": True},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert rotate_response.status_code == 200, rotate_response.text
+    new_key_id = UUID(rotate_response.json()["api_key"]["id"])
+    assert new_key_id != old_key_id
+
+    async with db_container() as container:
+        session = container.session()
+        grace_until = await session.scalar(
+            sa.select(ApiKeysV2Table.rotation_grace_until).where(
+                ApiKeysV2Table.id == old_key_id
+            )
+        )
+        assert grace_until is not None
+        assert grace_until <= datetime.now(timezone.utc)
+
+    # End-to-end: the old secret must now be rejected. Verifying the DB field
+    # alone left a strict-less-than race in compute_effective_state where a
+    # request arriving on the same microsecond as grace_until could still
+    # authenticate.
+    post_response = await client.get(
+        _AUTH_ENDPOINT,
+        headers={"X-API-Key": old_secret},
+    )
+    assert post_response.status_code == 401, post_response.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_rotate_default_grace_period_keeps_old_key_active(
+    client, db_container, default_user_token
+):
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Rotate Default Grace",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    old_key_id = UUID(create_response.json()["api_key"]["id"])
+
+    rotate_response = await client.post(
+        f"/api/v1/api-keys/{old_key_id}/rotate",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert rotate_response.status_code == 200, rotate_response.text
+
+    async with db_container() as container:
+        session = container.session()
+        grace_until = await session.scalar(
+            sa.select(ApiKeysV2Table.rotation_grace_until).where(
+                ApiKeysV2Table.id == old_key_id
+            )
+        )
+        assert grace_until is not None
+        assert grace_until > datetime.now(timezone.utc)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_rotate_can_update_expiration(client, default_user_token):
+    initial = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    create_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Rotate With Extend",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "expires_at": initial,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    key_id = create_response.json()["api_key"]["id"]
+
+    new_expiry = (datetime.now(timezone.utc) + timedelta(days=180)).isoformat()
+    rotate_response = await client.post(
+        f"/api/v1/api-keys/{key_id}/rotate",
+        json={"update_expiration": True, "expires_at": new_expiry},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert rotate_response.status_code == 200, rotate_response.text
+    rotated = rotate_response.json()["api_key"]
+    assert rotated["expires_at"].startswith(new_expiry[:10])
 
 
 @pytest.mark.integration

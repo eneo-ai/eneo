@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { writable } from "svelte/store";
   import { resolve } from "$app/paths";
   import { Page, Settings } from "$lib/components/layout";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -12,13 +11,16 @@
   import { getIntric } from "$lib/core/Intric";
   import { m } from "$lib/paraglide/messages";
   import { IntricError } from "@intric/intric-js";
-  import type { ApiKeyCreatedResponse, ApiKeyV2, SpaceSparse, UserSparse } from "@intric/intric-js";
+  import type { ApiKeyCreatedResponse, SpaceSparse, UserSparse } from "@intric/intric-js";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
+  import type { AdminApiKey } from "$lib/features/api-keys/apiKeyTableUtils";
   import AdminApiKeyTable from "./AdminApiKeyTable.svelte";
   import ApiKeyPolicyPanel from "./ApiKeyPolicyPanel.svelte";
   import SuperKeyStatusPanel from "./SuperKeyStatusPanel.svelte";
-  import ScopeResourceSelector from "../../account/api-keys/ScopeResourceSelector.svelte";
-  import ApiKeySecretDialog from "../../account/api-keys/ApiKeySecretDialog.svelte";
+  import ScopeResourceSelector from "$lib/features/api-keys/ScopeResourceSelector.svelte";
+  import ApiKeySecretDialog from "$lib/features/api-keys/ApiKeySecretDialog.svelte";
+  import ApiKeyStateFilter from "$lib/features/api-keys/ApiKeyStateFilter.svelte";
+  import type { ApiKeyStateFilterValue } from "$lib/features/api-keys/apiKeyTableUtils";
   import {
     Filter,
     X,
@@ -39,12 +41,6 @@
 
   const intric = getIntric();
 
-  type AdminApiKey = ApiKeyV2 & {
-    owner_user?: { id: string; email?: string | null; username?: string | null } | null;
-    created_by_user?: { id: string; email?: string | null; username?: string | null } | null;
-    search_match_reasons?: string[] | null;
-  };
-
   let keys = $state<AdminApiKey[]>([]);
   let loading = $state(false);
   let loadingMore = $state(false);
@@ -58,7 +54,7 @@
 
   // Filter states
   let scopeType = $state("");
-  let stateFilter = $state("");
+  let stateFilter = $state<ApiKeyStateFilterValue>("active");
   let keyType = $state("");
   let scopeId = $state<string | null>(null);
   let createdByUserId = $state("");
@@ -77,7 +73,7 @@
 
   // UI states
   let showFilters = $state(true);
-  const secretDialogOpen = writable(false);
+  let secretDialogOpen = $state(false);
   let latestSecret = $state<string | null>(null);
   let secretSource = $state<"created" | "rotated">("created");
   let trackingConfigLoading = $state(false);
@@ -98,30 +94,10 @@
   let notificationPolicyDaysInput = $state("30");
   let notificationPolicyMaxDaysInput = $state("365");
 
-  // Quick filter chips
+  // Quick filter chips — state lives in <ApiKeyStateFilter>; key class stays here
   const quickFilters = $derived([
-    {
-      label: m.api_keys_admin_quick_active(),
-      filter: { state: "active" },
-      color: "green" as const
-    },
-    {
-      label: m.api_keys_admin_quick_suspended(),
-      filter: { state: "suspended" },
-      color: "yellow" as const
-    },
-    {
-      label: m.api_keys_admin_quick_expired(),
-      filter: { state: "expired" },
-      color: "gray" as const
-    },
-    {
-      label: m.api_keys_admin_quick_revoked(),
-      filter: { state: "revoked" },
-      color: "red" as const
-    },
-    { label: m.api_keys_admin_quick_secret(), filter: { keyType: "sk_" }, color: "blue" as const },
-    { label: m.api_keys_admin_quick_public(), filter: { keyType: "pk_" }, color: "orange" as const }
+    { label: m.api_keys_admin_quick_secret(), filter: { keyType: "sk_" } },
+    { label: m.api_keys_admin_quick_public(), filter: { keyType: "pk_" } }
   ]);
 
   const scopeOptions = $derived([
@@ -130,14 +106,6 @@
     { value: "space", label: m.api_keys_admin_scope_space() },
     { value: "assistant", label: m.api_keys_admin_scope_assistant() },
     { value: "app", label: m.api_keys_admin_scope_app() }
-  ]);
-
-  const stateOptions = $derived([
-    { value: "", label: m.api_keys_admin_state_all() },
-    { value: "active", label: m.api_keys_admin_state_active() },
-    { value: "suspended", label: m.api_keys_admin_state_suspended() },
-    { value: "revoked", label: m.api_keys_admin_state_revoked() },
-    { value: "expired", label: m.api_keys_admin_state_expired() }
   ]);
 
   const keyTypeOptions = $derived([
@@ -457,27 +425,26 @@
     }, 300);
   }
 
+  let searchScopeContainerRef: HTMLDivElement | undefined = $state();
+  let userSearchContainerRef: HTMLDivElement | undefined = $state();
+
   function handleClickOutside(event: MouseEvent) {
     const target = event.target as HTMLElement;
     if (
       showSearchScopeDropdown &&
-      !target.closest(".api-keys-search-scope-container") &&
-      !target.closest(".scope-dropdown-container")
+      searchScopeContainerRef &&
+      !searchScopeContainerRef.contains(target)
     ) {
       showSearchScopeDropdown = false;
     }
-    if (
-      showUserDropdown &&
-      !target.closest(".api-keys-user-search-container") &&
-      !target.closest(".user-dropdown-container")
-    ) {
+    if (showUserDropdown && userSearchContainerRef && !userSearchContainerRef.contains(target)) {
       showUserDropdown = false;
     }
   }
 
   function resetFilters() {
     scopeType = "";
-    stateFilter = "";
+    stateFilter = "active";
     keyType = "";
     scopeId = null;
     expiresWithinDays = "";
@@ -490,20 +457,13 @@
     void loadKeys({ reset: true });
   }
 
-  function applyQuickFilter(filter: { state?: string; keyType?: string }) {
-    if (filter.state) {
-      stateFilter = stateFilter === filter.state ? "" : filter.state;
-    }
-    if (filter.keyType) {
-      keyType = keyType === filter.keyType ? "" : filter.keyType;
-    }
+  function applyQuickFilter(filter: { keyType: string }) {
+    keyType = keyType === filter.keyType ? "" : filter.keyType;
     void loadKeys({ reset: true });
   }
 
-  function isQuickFilterActive(filter: { state?: string; keyType?: string }): boolean {
-    if (filter.state) return stateFilter === filter.state;
-    if (filter.keyType) return keyType === filter.keyType;
-    return false;
+  function isQuickFilterActive(filter: { keyType: string }): boolean {
+    return keyType === filter.keyType;
   }
 
   function handleSecret(
@@ -512,7 +472,7 @@
   ) {
     latestSecret = response.secret;
     secretSource = source;
-    secretDialogOpen.set(true);
+    secretDialogOpen = true;
     void loadKeys({ reset: true });
   }
 
@@ -723,69 +683,69 @@
               class="border-default space-y-5 border-t px-6 py-5"
             >
               <!-- Search -->
-              <div
-                class="api-keys-user-search-container scope-dropdown-container user-dropdown-container relative min-w-[280px] flex-1"
-              >
+              <div bind:this={userSearchContainerRef} class="relative min-w-[280px] flex-1">
                 <div class="absolute top-1/2 left-2 z-10 flex -translate-y-1/2 items-center">
-                  <button
-                    type="button"
-                    onclick={() => (showSearchScopeDropdown = !showSearchScopeDropdown)}
-                    aria-haspopup="listbox"
-                    aria-expanded={showSearchScopeDropdown}
-                    class="text-muted bg-subtle/80 border-default/40 hover:bg-hover hover:text-default hover:border-default/60 focus-visible:ring-accent-default flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition-all duration-150 focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
-                  >
-                    {searchScope === "entity"
-                      ? m.audit_search_scope_entity()
-                      : m.audit_search_scope_user()}
-                    <ChevronDown
-                      class="h-3 w-3 transition-transform duration-150 {showSearchScopeDropdown
-                        ? 'rotate-180'
-                        : ''}"
-                    />
-                  </button>
-
-                  {#if showSearchScopeDropdown}
-                    <div
-                      role="listbox"
-                      class="bg-primary border-default absolute top-full left-0 z-30 mt-1.5 min-w-[140px] overflow-hidden rounded-lg border py-1 shadow-lg"
-                      transition:slide={{ duration: 150 }}
+                  <div bind:this={searchScopeContainerRef} class="relative">
+                    <button
+                      type="button"
+                      onclick={() => (showSearchScopeDropdown = !showSearchScopeDropdown)}
+                      aria-haspopup="listbox"
+                      aria-expanded={showSearchScopeDropdown}
+                      class="text-muted bg-subtle/80 border-default/40 hover:bg-hover hover:text-default hover:border-default/60 focus-visible:ring-accent-default flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition-all duration-150 focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
                     >
-                      <button
-                        role="option"
-                        aria-selected={searchScope === "entity"}
-                        type="button"
-                        onclick={() => handleSearchScopeChange("entity")}
-                        class="w-full px-3 py-2 text-left text-sm transition-colors {searchScope ===
-                        'entity'
-                          ? 'bg-accent-default/5 text-accent-default font-medium'
-                          : 'text-default hover:bg-subtle'}"
+                      {searchScope === "entity"
+                        ? m.audit_search_scope_entity()
+                        : m.audit_search_scope_user()}
+                      <ChevronDown
+                        class="h-3 w-3 transition-transform duration-150 {showSearchScopeDropdown
+                          ? 'rotate-180'
+                          : ''}"
+                      />
+                    </button>
+
+                    {#if showSearchScopeDropdown}
+                      <div
+                        role="listbox"
+                        class="bg-primary border-default absolute top-full left-0 z-30 mt-1.5 min-w-[140px] overflow-hidden rounded-lg border py-1 shadow-lg"
+                        transition:slide={{ duration: 150 }}
                       >
-                        <span class="flex items-center justify-between gap-2">
-                          {m.audit_search_scope_entity()}
-                          {#if searchScope === "entity"}
-                            <Check class="text-accent-default h-4 w-4" />
-                          {/if}
-                        </span>
-                      </button>
-                      <button
-                        role="option"
-                        aria-selected={searchScope === "user"}
-                        type="button"
-                        onclick={() => handleSearchScopeChange("user")}
-                        class="w-full px-3 py-2 text-left text-sm transition-colors {searchScope ===
-                        'user'
-                          ? 'bg-accent-default/5 text-accent-default font-medium'
-                          : 'text-default hover:bg-subtle'}"
-                      >
-                        <span class="flex items-center justify-between gap-2">
-                          {m.audit_search_scope_user()}
-                          {#if searchScope === "user"}
-                            <Check class="text-accent-default h-4 w-4" />
-                          {/if}
-                        </span>
-                      </button>
-                    </div>
-                  {/if}
+                        <button
+                          role="option"
+                          aria-selected={searchScope === "entity"}
+                          type="button"
+                          onclick={() => handleSearchScopeChange("entity")}
+                          class="w-full px-3 py-2 text-left text-sm transition-colors {searchScope ===
+                          'entity'
+                            ? 'bg-accent-default/5 text-accent-default font-medium'
+                            : 'text-default hover:bg-subtle'}"
+                        >
+                          <span class="flex items-center justify-between gap-2">
+                            {m.audit_search_scope_entity()}
+                            {#if searchScope === "entity"}
+                              <Check class="text-accent-default h-4 w-4" />
+                            {/if}
+                          </span>
+                        </button>
+                        <button
+                          role="option"
+                          aria-selected={searchScope === "user"}
+                          type="button"
+                          onclick={() => handleSearchScopeChange("user")}
+                          class="w-full px-3 py-2 text-left text-sm transition-colors {searchScope ===
+                          'user'
+                            ? 'bg-accent-default/5 text-accent-default font-medium'
+                            : 'text-default hover:bg-subtle'}"
+                        >
+                          <span class="flex items-center justify-between gap-2">
+                            {m.audit_search_scope_user()}
+                            {#if searchScope === "user"}
+                              <Check class="text-accent-default h-4 w-4" />
+                            {/if}
+                          </span>
+                        </button>
+                      </div>
+                    {/if}
+                  </div>
 
                   <div class="bg-default/40 ml-2 h-6 w-px"></div>
                 </div>
@@ -949,18 +909,8 @@
                   >
                     {#if qf.filter.keyType === "sk_"}
                       <Lock class="h-3 w-3" />
-                    {:else if qf.filter.keyType === "pk_"}
-                      <Globe class="h-3 w-3" />
                     {:else}
-                      <span
-                        class="h-2 w-2 rounded-full
-                             {qf.color === 'green' ? 'bg-positive-default' : ''}
-                             {qf.color === 'yellow' ? 'bg-warning-default' : ''}
-                             {qf.color === 'gray' ? 'bg-tertiary' : ''}
-                             {qf.color === 'red' ? 'bg-negative-default' : ''}
-                             {qf.color === 'blue' ? 'bg-accent-default' : ''}
-                             {qf.color === 'orange' ? 'bg-warning-default' : ''}"
-                      ></span>
+                      <Globe class="h-3 w-3" />
                     {/if}
                     {qf.label}
                     {#if isActive}
@@ -1004,19 +954,9 @@
                 />
 
                 <!-- Row 2: lifecycle state + key class -->
-                <Field.Field>
-                  <Field.Label for="filter-state">{m.api_keys_admin_label_state()}</Field.Label>
-                  <Select.Root type="single" bind:value={stateFilter}>
-                    <Select.Trigger id="filter-state">
-                      {stateOptions.find((o) => o.value === stateFilter)?.label ??
-                        m.api_keys_admin_state_all()}
-                    </Select.Trigger>
-                    <Select.Content>
-                      {#each stateOptions as opt (opt.value)}
-                        <Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
-                      {/each}
-                    </Select.Content>
-                  </Select.Root>
+                <Field.Field class="md:col-span-2">
+                  <Field.Label>{m.api_keys_admin_label_state()}</Field.Label>
+                  <ApiKeyStateFilter bind:value={stateFilter} />
                 </Field.Field>
                 <Field.Field>
                   <Field.Label for="filter-key-type">
@@ -1331,6 +1271,10 @@
   </Page.Main>
 </Page.Root>
 
-<svelte:window onclick={handleClickOutside} />
+<svelte:window
+  onclick={(e) => {
+    if (showSearchScopeDropdown || showUserDropdown) handleClickOutside(e);
+  }}
+/>
 
-<ApiKeySecretDialog openController={secretDialogOpen} secret={latestSecret} source={secretSource} />
+<ApiKeySecretDialog bind:open={secretDialogOpen} secret={latestSecret} source={secretSource} />

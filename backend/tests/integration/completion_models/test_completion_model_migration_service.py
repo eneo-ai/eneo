@@ -12,8 +12,8 @@ These tests verify end-to-end migration functionality including:
 import pytest
 from sqlalchemy import select
 
-from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.app_table import Apps
+from intric.database.tables.assistant_table import Assistants
 from intric.database.tables.service_table import Services
 from intric.database.tables.spaces_table import SpacesCompletionModels
 from intric.main.exceptions import ValidationException
@@ -676,6 +676,108 @@ class TestCompletionModelMigration:
             updated_assistant = (await session.execute(stmt)).scalar_one()
             assert updated_assistant.completion_model_id == target_model.id
 
+    async def test_reject_migration_when_security_classification_insufficient(
+        self,
+        db_container,
+        completion_model_factory,
+        space_factory,
+        admin_user,
+    ):
+        """A target with a lower security classification is a hard blocker that
+        confirm_migration cannot override."""
+        from intric.database.tables.security_classifications_table import (
+            SecurityClassification,
+        )
+
+        async with db_container() as container:
+            session = container.session()
+
+            # Same family so the security classification is the only issue.
+            source_model = await completion_model_factory(
+                session, "gpt-4", provider="openai", family="openai"
+            )
+            target_model = await completion_model_factory(
+                session, "gpt-4o", provider="openai", family="openai"
+            )
+
+            classification = SecurityClassification(
+                tenant_id=admin_user.tenant_id,
+                name="confidential",
+                security_level=1,
+            )
+            session.add(classification)
+            await session.flush()
+
+            # A classified space that still uses the source model.
+            await space_factory(
+                session,
+                "Classified Space",
+                [source_model.id],
+                security_classification_id=classification.id,
+            )
+
+            migration_service = container.completion_model_migration_service()
+
+            # confirm_migration alone must NOT bypass the blocker.
+            with pytest.raises(ValidationException) as exc_info:
+                await migration_service.migrate_model_usage(
+                    from_model_id=source_model.id,
+                    to_model_id=target_model.id,
+                    user=admin_user,
+                    confirm_migration=True,
+                    force_override=False,
+                )
+
+            assert "security classification" in str(exc_info.value).lower()
+
+    async def test_force_override_bypasses_security_classification_blocker(
+        self,
+        db_container,
+        completion_model_factory,
+        space_factory,
+        admin_user,
+    ):
+        """force_override is the explicit escape hatch for the security blocker."""
+        from intric.database.tables.security_classifications_table import (
+            SecurityClassification,
+        )
+
+        async with db_container() as container:
+            session = container.session()
+
+            source_model = await completion_model_factory(
+                session, "gpt-4", provider="openai", family="openai"
+            )
+            target_model = await completion_model_factory(
+                session, "gpt-4o", provider="openai", family="openai"
+            )
+
+            classification = SecurityClassification(
+                tenant_id=admin_user.tenant_id,
+                name="confidential",
+                security_level=1,
+            )
+            session.add(classification)
+            await session.flush()
+
+            await space_factory(
+                session,
+                "Classified Space",
+                [source_model.id],
+                security_classification_id=classification.id,
+            )
+
+            migration_service = container.completion_model_migration_service()
+            result = await migration_service.migrate_model_usage(
+                from_model_id=source_model.id,
+                to_model_id=target_model.id,
+                user=admin_user,
+                confirm_migration=True,
+                force_override=True,
+            )
+
+            assert result.success is True
+
     async def test_warn_about_different_model_families(
         self,
         db_container,
@@ -952,9 +1054,10 @@ class TestCompletionModelMigration:
         completion_model_factory,
         assistant_factory,
         app_factory,
+        space_factory,
         admin_user,
     ):
-        """Test that migration defaults to all entity types when entity_types is None."""
+        """Test that migration defaults to all migratable entity types when entity_types is None."""
         async with db_container() as container:
             session = container.session()
 
@@ -968,20 +1071,33 @@ class TestCompletionModelMigration:
             # Create entities of different types
             await assistant_factory(session, "Test Assistant", source_model.id)
             await app_factory(session, "Test App", source_model.id)
+            space = await space_factory(session, "Test Space", [source_model.id])
 
-            # Act: Migrate with entity_types=None (should default to all types)
+            # Act: Migrate with entity_types=None (should default to all migratable types)
             migration_service = container.completion_model_migration_service()
             result = await migration_service.migrate_model_usage(
                 from_model_id=source_model.id,
                 to_model_id=target_model.id,
-                entity_types=None,  # Should default to all entity types
+                entity_types=None,  # Should default to all migratable entity types
                 user=admin_user,
                 confirm_migration=True,
             )
 
-            # Assert: Should migrate all entity types
+            # Assert: Should migrate all entity types, including spaces
             assert result.success is True
-            assert result.migrated_count == 2  # 1 assistant + 1 app
-            # Verify both entity types were migrated
+            assert result.migrated_count == 3  # 1 assistant + 1 app + 1 space
+            # Verify all expected entity types were migrated
             assert "assistants" in result.details
             assert "apps" in result.details
+            assert "spaces" in result.details
+
+            # Verify the source model was removed from spaces as part of the default migration
+            stmt = select(SpacesCompletionModels).where(
+                SpacesCompletionModels.space_id == space.id
+            )
+            updated_space_models = (await session.execute(stmt)).scalars().all()
+            updated_space_model_ids = [
+                m.completion_model_id for m in updated_space_models
+            ]
+            assert target_model.id in updated_space_model_ids
+            assert source_model.id not in updated_space_model_ids

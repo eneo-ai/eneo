@@ -2,6 +2,7 @@
 node_modules
 /build
 /.svelte-kit
+/.svelte-kit-e2e
 /.vercel
 /package
 .env
@@ -10,3 +11,11 @@ node_modules
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vercel
+
+# Playwright E2E artifacts
+/test-results
+/playwright-report
+/playwright/.auth
+
+# Coverage reports
+/coverage

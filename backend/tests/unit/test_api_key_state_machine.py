@@ -57,3 +57,31 @@ def test_effective_state_handles_naive_expiry_timestamp() -> None:
         now=now,
     )
     assert state == ApiKeyState.EXPIRED
+
+
+def test_effective_state_revoked_when_grace_ends_exactly_at_now() -> None:
+    """disable_grace_period sets rotation_grace_until to datetime.now(); the
+    next request must see REVOKED even if it arrives on the same microsecond.
+    A strict < comparison would let the old secret authenticate one more time."""
+    now = datetime(2026, 2, 1, 12, 0, 0, tzinfo=timezone.utc)
+    state = compute_effective_state(
+        revoked_at=None,
+        suspended_at=None,
+        expires_at=None,
+        rotation_grace_until=now,
+        now=now,
+    )
+    assert state == ApiKeyState.REVOKED
+
+
+def test_effective_state_active_during_grace_window() -> None:
+    """Grace still in the future keeps the key ACTIVE."""
+    now = datetime(2026, 2, 1, 12, 0, 0, tzinfo=timezone.utc)
+    state = compute_effective_state(
+        revoked_at=None,
+        suspended_at=None,
+        expires_at=None,
+        rotation_grace_until=now + timedelta(hours=1),
+        now=now,
+    )
+    assert state == ApiKeyState.ACTIVE

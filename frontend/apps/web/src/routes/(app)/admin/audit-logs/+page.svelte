@@ -32,6 +32,7 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import AuditConfigTab from "./AuditConfigTab.svelte";
   import AccessJustificationForm from "./AccessJustificationForm.svelte";
+  import { getActionLabel, getActionOptions } from "./audit-action-labels";
 
   type AuditLogResponse = components["schemas"]["AuditLogResponse"];
   type ActionType = components["schemas"]["ActionType"];
@@ -168,382 +169,7 @@
   // Track active quick filter preset (7, 30, 90 days, or null)
   let activePreset = $state<7 | 30 | 90 | null>(null);
 
-  // Get translated label for action type
-  function getActionLabel(action: ActionType | "all"): string {
-    const labels: Partial<Record<ActionType | "all", () => string>> = {
-      all: m.audit_all_actions,
-      user_created: m.audit_action_user_created,
-      user_updated: m.audit_action_user_updated,
-      user_deleted: m.audit_action_user_deleted,
-      role_modified: m.audit_action_role_modified,
-      permission_changed: m.audit_action_permission_changed,
-      tenant_settings_updated: m.audit_action_tenant_settings_updated,
-      credentials_updated: m.audit_action_credentials_updated,
-      federation_updated: m.audit_action_federation_updated,
-      assistant_created: m.audit_action_assistant_created,
-      assistant_updated: m.audit_action_assistant_updated,
-      assistant_deleted: m.audit_action_assistant_deleted,
-      space_created: m.audit_action_space_created,
-      space_updated: m.audit_action_space_updated,
-      space_member_added: m.audit_action_space_member_added,
-      space_member_removed: m.audit_action_space_member_removed,
-      app_created: m.audit_action_app_created,
-      app_updated: m.audit_action_app_updated,
-      app_deleted: m.audit_action_app_deleted,
-      app_executed: m.audit_action_app_executed,
-      session_started: m.audit_action_session_started,
-      session_ended: m.audit_action_session_ended,
-      file_uploaded: m.audit_action_file_uploaded,
-      file_deleted: m.audit_action_file_deleted,
-      website_crawled: m.audit_action_website_crawled,
-      website_created: m.audit_action_website_created,
-      website_updated: m.audit_action_website_updated,
-      website_deleted: m.audit_action_website_deleted,
-      website_transferred: m.audit_action_website_transferred,
-      api_key_generated: m.audit_action_api_key_generated,
-      retention_policy_applied: m.audit_action_retention_policy_applied,
-      role_created: m.audit_action_role_created,
-      role_deleted: m.audit_action_role_deleted,
-      assistant_transferred: m.audit_action_assistant_transferred,
-      assistant_published: m.audit_action_assistant_published,
-      app_published: m.audit_action_app_published,
-      app_run_deleted: m.audit_action_app_run_deleted,
-      space_deleted: m.audit_action_space_deleted,
-      group_chat_created: m.audit_action_group_chat_created,
-      collection_created: m.audit_action_collection_created,
-      template_created: m.audit_action_template_created,
-      template_updated: m.audit_action_template_updated,
-      template_deleted: m.audit_action_template_deleted,
-      module_added: m.audit_action_module_added,
-      module_added_to_tenant: m.audit_action_module_added_to_tenant,
-      security_classification_created: m.audit_action_security_classification_created,
-      security_classification_updated: m.audit_action_security_classification_updated,
-      security_classification_deleted: m.audit_action_security_classification_deleted,
-      security_classification_levels_updated: m.audit_action_security_classification_levels_updated,
-      security_classification_enabled: m.audit_action_security_classification_enabled,
-      security_classification_disabled: m.audit_action_security_classification_disabled,
-      collection_updated: m.audit_action_collection_updated,
-      collection_deleted: m.audit_action_collection_deleted,
-      integration_added: m.audit_action_integration_added,
-      integration_removed: m.audit_action_integration_removed,
-      integration_connected: m.audit_action_integration_connected,
-      integration_disconnected: m.audit_action_integration_disconnected,
-      integration_knowledge_created: m.audit_action_integration_knowledge_created,
-      integration_knowledge_deleted: m.audit_action_integration_knowledge_deleted,
-      completion_model_updated: m.audit_action_completion_model_updated,
-      embedding_model_updated: m.audit_action_embedding_model_updated,
-      transcription_model_updated: m.audit_action_transcription_model_updated,
-      audit_log_viewed: m.audit_action_audit_log_viewed,
-      audit_log_exported: m.audit_action_audit_log_exported,
-      audit_session_created: m.audit_action_audit_session_created
-    };
-    return labels[action]?.() || action;
-  }
-
-  // Action type options with better categorization
-  const actionOptions = $derived([
-    { value: "all" as const, label: m.audit_all_actions() },
-    {
-      value: "user_created" as ActionType,
-      label: m.audit_action_user_created(),
-      category: "admin"
-    },
-    {
-      value: "user_updated" as ActionType,
-      label: m.audit_action_user_updated(),
-      category: "admin"
-    },
-    {
-      value: "user_deleted" as ActionType,
-      label: m.audit_action_user_deleted(),
-      category: "admin"
-    },
-    {
-      value: "role_modified" as ActionType,
-      label: m.audit_action_role_modified(),
-      category: "admin"
-    },
-    {
-      value: "permission_changed" as ActionType,
-      label: m.audit_action_permission_changed(),
-      category: "admin"
-    },
-    {
-      value: "tenant_settings_updated" as ActionType,
-      label: m.audit_action_tenant_settings_updated(),
-      category: "admin"
-    },
-    {
-      value: "credentials_updated" as ActionType,
-      label: m.audit_action_credentials_updated(),
-      category: "admin"
-    },
-    {
-      value: "federation_updated" as ActionType,
-      label: m.audit_action_federation_updated(),
-      category: "admin"
-    },
-    {
-      value: "api_key_generated" as ActionType,
-      label: m.audit_action_api_key_generated(),
-      category: "admin"
-    },
-    {
-      value: "assistant_created" as ActionType,
-      label: m.audit_action_assistant_created(),
-      category: "user"
-    },
-    {
-      value: "assistant_updated" as ActionType,
-      label: m.audit_action_assistant_updated(),
-      category: "user"
-    },
-    {
-      value: "assistant_deleted" as ActionType,
-      label: m.audit_action_assistant_deleted(),
-      category: "user"
-    },
-    {
-      value: "space_created" as ActionType,
-      label: m.audit_action_space_created(),
-      category: "user"
-    },
-    {
-      value: "space_updated" as ActionType,
-      label: m.audit_action_space_updated(),
-      category: "user"
-    },
-    {
-      value: "space_member_added" as ActionType,
-      label: m.audit_action_space_member_added(),
-      category: "user"
-    },
-    {
-      value: "space_member_removed" as ActionType,
-      label: m.audit_action_space_member_removed(),
-      category: "user"
-    },
-    { value: "app_created" as ActionType, label: m.audit_action_app_created(), category: "user" },
-    { value: "app_updated" as ActionType, label: m.audit_action_app_updated(), category: "user" },
-    { value: "app_deleted" as ActionType, label: m.audit_action_app_deleted(), category: "user" },
-    { value: "app_executed" as ActionType, label: m.audit_action_app_executed(), category: "user" },
-    {
-      value: "session_started" as ActionType,
-      label: m.audit_action_session_started(),
-      category: "user"
-    },
-    {
-      value: "session_ended" as ActionType,
-      label: m.audit_action_session_ended(),
-      category: "user"
-    },
-    {
-      value: "file_uploaded" as ActionType,
-      label: m.audit_action_file_uploaded(),
-      category: "user"
-    },
-    { value: "file_deleted" as ActionType, label: m.audit_action_file_deleted(), category: "user" },
-    {
-      value: "website_crawled" as ActionType,
-      label: m.audit_action_website_crawled(),
-      category: "system"
-    },
-    {
-      value: "website_created" as ActionType,
-      label: m.audit_action_website_created(),
-      category: "user"
-    },
-    {
-      value: "website_updated" as ActionType,
-      label: m.audit_action_website_updated(),
-      category: "user"
-    },
-    {
-      value: "website_deleted" as ActionType,
-      label: m.audit_action_website_deleted(),
-      category: "user"
-    },
-    {
-      value: "website_transferred" as ActionType,
-      label: m.audit_action_website_transferred(),
-      category: "user"
-    },
-    {
-      value: "role_created" as ActionType,
-      label: m.audit_action_role_created(),
-      category: "admin"
-    },
-    {
-      value: "role_deleted" as ActionType,
-      label: m.audit_action_role_deleted(),
-      category: "admin"
-    },
-    {
-      value: "assistant_transferred" as ActionType,
-      label: m.audit_action_assistant_transferred(),
-      category: "user"
-    },
-    {
-      value: "assistant_published" as ActionType,
-      label: m.audit_action_assistant_published(),
-      category: "user"
-    },
-    {
-      value: "app_published" as ActionType,
-      label: m.audit_action_app_published(),
-      category: "user"
-    },
-    {
-      value: "app_run_deleted" as ActionType,
-      label: m.audit_action_app_run_deleted(),
-      category: "user"
-    },
-    {
-      value: "space_deleted" as ActionType,
-      label: m.audit_action_space_deleted(),
-      category: "user"
-    },
-    {
-      value: "group_chat_created" as ActionType,
-      label: m.audit_action_group_chat_created(),
-      category: "user"
-    },
-    {
-      value: "collection_created" as ActionType,
-      label: m.audit_action_collection_created(),
-      category: "user"
-    },
-    {
-      value: "collection_updated" as ActionType,
-      label: m.audit_action_collection_updated(),
-      category: "user"
-    },
-    {
-      value: "collection_deleted" as ActionType,
-      label: m.audit_action_collection_deleted(),
-      category: "user"
-    },
-    {
-      value: "integration_added" as ActionType,
-      label: m.audit_action_integration_added(),
-      category: "admin"
-    },
-    {
-      value: "integration_removed" as ActionType,
-      label: m.audit_action_integration_removed(),
-      category: "admin"
-    },
-    {
-      value: "integration_connected" as ActionType,
-      label: m.audit_action_integration_connected(),
-      category: "user"
-    },
-    {
-      value: "integration_disconnected" as ActionType,
-      label: m.audit_action_integration_disconnected(),
-      category: "user"
-    },
-    {
-      value: "integration_knowledge_created" as ActionType,
-      label: m.audit_action_integration_knowledge_created(),
-      category: "user"
-    },
-    {
-      value: "integration_knowledge_deleted" as ActionType,
-      label: m.audit_action_integration_knowledge_deleted(),
-      category: "user"
-    },
-    {
-      value: "completion_model_updated" as ActionType,
-      label: m.audit_action_completion_model_updated(),
-      category: "admin"
-    },
-    {
-      value: "embedding_model_updated" as ActionType,
-      label: m.audit_action_embedding_model_updated(),
-      category: "admin"
-    },
-    {
-      value: "transcription_model_updated" as ActionType,
-      label: m.audit_action_transcription_model_updated(),
-      category: "admin"
-    },
-    {
-      value: "template_created" as ActionType,
-      label: m.audit_action_template_created(),
-      category: "admin"
-    },
-    {
-      value: "template_updated" as ActionType,
-      label: m.audit_action_template_updated(),
-      category: "admin"
-    },
-    {
-      value: "template_deleted" as ActionType,
-      label: m.audit_action_template_deleted(),
-      category: "admin"
-    },
-    {
-      value: "module_added" as ActionType,
-      label: m.audit_action_module_added(),
-      category: "system"
-    },
-    {
-      value: "module_added_to_tenant" as ActionType,
-      label: m.audit_action_module_added_to_tenant(),
-      category: "system"
-    },
-    {
-      value: "security_classification_created" as ActionType,
-      label: m.audit_action_security_classification_created(),
-      category: "admin"
-    },
-    {
-      value: "security_classification_updated" as ActionType,
-      label: m.audit_action_security_classification_updated(),
-      category: "admin"
-    },
-    {
-      value: "security_classification_deleted" as ActionType,
-      label: m.audit_action_security_classification_deleted(),
-      category: "admin"
-    },
-    {
-      value: "security_classification_levels_updated" as ActionType,
-      label: m.audit_action_security_classification_levels_updated(),
-      category: "admin"
-    },
-    {
-      value: "security_classification_enabled" as ActionType,
-      label: m.audit_action_security_classification_enabled(),
-      category: "admin"
-    },
-    {
-      value: "security_classification_disabled" as ActionType,
-      label: m.audit_action_security_classification_disabled(),
-      category: "admin"
-    },
-    {
-      value: "retention_policy_applied" as ActionType,
-      label: m.audit_action_retention_policy_applied(),
-      category: "system"
-    },
-    {
-      value: "audit_log_viewed" as ActionType,
-      label: m.audit_action_audit_log_viewed(),
-      category: "system"
-    },
-    {
-      value: "audit_log_exported" as ActionType,
-      label: m.audit_action_audit_log_exported(),
-      category: "system"
-    },
-    {
-      value: "audit_session_created" as ActionType,
-      label: m.audit_action_audit_session_created(),
-      category: "system"
-    }
-  ]);
+  const actionOptions = $derived(getActionOptions());
 
   const filteredActionOptions = $derived(
     actionSearchQuery.length > 0
@@ -1212,7 +838,7 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Admin – Audit Logs</title>
+  <title>Eneo.ai – {m.admin()} – {m.audit_logs()}</title>
 </svelte:head>
 
 <svelte:window onclick={handleClickOutside} />
@@ -1273,7 +899,7 @@
             class="!rounded-r-none"
           >
             <IconDownload class="h-4 w-4" />
-            Export ({totalCount})
+            {m.audit_export_with_count({ count: totalCount })}
           </Button>
           <Dropdown.Root gutter={2} arrowSize={0} placement="bottom-end">
             <Dropdown.Trigger asFragment let:trigger>
@@ -1290,11 +916,11 @@
             <Dropdown.Menu let:item>
               <Button is={item} onclick={() => exportLogs("csv")}>
                 <IconDownload size="sm"></IconDownload>
-                Download as CSV
+                {m.audit_download_csv()}
               </Button>
               <Button is={item} onclick={() => exportLogs("json")}>
                 <IconDownload size="sm"></IconDownload>
-                Download as JSON
+                {m.audit_download_json()}
               </Button>
             </Dropdown.Menu>
           </Dropdown.Root>
@@ -1360,7 +986,7 @@
                 <div>
                   <h3 class="text-default text-sm font-semibold">{m.audit_retention_policy()}</h3>
                   <p class="text-muted mt-0.5 text-xs">
-                    Automatisk borttagning av gamla granskningsloggar
+                    {m.audit_retention_subtitle()}
                   </p>
                 </div>
               </div>
@@ -1448,7 +1074,7 @@
                         size="sm"
                         class="w-full text-sm font-medium"
                       >
-                        3 mån
+                        {m.audit_preset_3_months()}
                       </Button>
                       <Button
                         onclick={() => (retentionInputValue = "365")}
@@ -1456,7 +1082,7 @@
                         size="sm"
                         class="w-full text-sm font-medium"
                       >
-                        1 år
+                        {m.audit_preset_1_year()}
                       </Button>
                       <Button
                         onclick={() => (retentionInputValue = "730")}
@@ -1464,7 +1090,7 @@
                         size="sm"
                         class="w-full text-sm font-medium"
                       >
-                        2 år
+                        {m.audit_preset_2_years()}
                       </Button>
                       <Button
                         onclick={() => (retentionInputValue = "2555")}
@@ -1472,7 +1098,7 @@
                         size="sm"
                         class="w-full text-sm font-medium"
                       >
-                        7 år
+                        {m.audit_preset_7_years()}
                       </Button>
                     </div>
                   </div>
@@ -1593,7 +1219,12 @@
                     onclick={() => (showScopeDropdown = !showScopeDropdown)}
                     aria-haspopup="listbox"
                     aria-expanded={showScopeDropdown}
-                    aria-label="Search scope: {searchScope === 'entity' ? 'Entity' : 'User'}"
+                    aria-label={m.audit_search_scope_aria({
+                      scope:
+                        searchScope === "entity"
+                          ? m.audit_search_scope_entity()
+                          : m.audit_search_scope_user()
+                    })}
                     class="text-muted bg-subtle/80 border-default/40 hover:bg-hover hover:text-default hover:border-default/60 focus-visible:ring-accent-default flex h-7 items-center
                     gap-1.5 rounded-md border px-2.5
                     text-xs font-semibold transition-all
@@ -1611,7 +1242,7 @@
                   {#if showScopeDropdown}
                     <div
                       role="listbox"
-                      aria-label="Select search scope"
+                      aria-label={m.audit_select_search_scope()}
                       class="bg-primary border-default absolute top-full left-0 z-30 mt-1.5 min-w-[140px] overflow-hidden rounded-lg border py-1 shadow-lg"
                       transition:slide={{ duration: 150 }}
                     >
@@ -1697,7 +1328,7 @@
                 {#if searchScope === "user" && showUserDropdown && userSearchResults.length > 0}
                   <div
                     role="listbox"
-                    aria-label="User search results"
+                    aria-label={m.audit_user_search_results()}
                     class="border-default bg-primary absolute top-full right-0 left-0 z-20 mt-2 max-h-64 overflow-y-auto rounded-lg border shadow-xl"
                     transition:slide={{ duration: 150 }}
                   >
@@ -1733,8 +1364,8 @@
                       <div class="bg-muted/20 rounded-full p-2">
                         <IconXMark class="text-muted h-5 w-5" />
                       </div>
-                      <p class="text-muted text-sm">Inga användare hittades</p>
-                      <p class="text-muted/70 text-xs">Försök med en annan sökning</p>
+                      <p class="text-muted text-sm">{m.audit_no_users_found()}</p>
+                      <p class="text-muted/70 text-xs">{m.audit_try_different_search()}</p>
                     </div>
                   </div>
                 {/if}
@@ -1748,7 +1379,7 @@
                 <div
                   class="border-default/60 bg-subtle/50 flex h-10 flex-shrink-0 items-center overflow-hidden rounded-lg border"
                   role="group"
-                  aria-label="Quick date presets"
+                  aria-label={m.audit_quick_date_presets()}
                 >
                   <button
                     onclick={() => setDatePreset(7)}
@@ -1759,7 +1390,7 @@
                         : "text-muted hover:bg-hover hover:text-default active:scale-95"
                     }`}
                   >
-                    7d
+                    {m.audit_date_7d()}
                   </button>
                   <button
                     onclick={() => setDatePreset(30)}
@@ -1770,7 +1401,7 @@
                         : "text-muted hover:bg-hover hover:text-default active:scale-95"
                     }`}
                   >
-                    30d
+                    {m.audit_date_30d()}
                   </button>
                   <button
                     onclick={() => setDatePreset(90)}
@@ -1781,7 +1412,7 @@
                         : "text-muted hover:bg-hover hover:text-default active:scale-95"
                     }`}
                   >
-                    90d
+                    {m.audit_date_90d()}
                   </button>
                 </div>
 
@@ -1825,7 +1456,7 @@
                           <input
                             type="text"
                             bind:value={actionSearchQuery}
-                            placeholder="Sök åtgärder..."
+                            placeholder={m.audit_search_actions_placeholder()}
                             class="border-default bg-subtle text-default placeholder:text-muted focus:ring-accent-default/30 focus:border-accent-default h-8 w-full rounded-md border
                             px-3 text-sm transition-all duration-150 focus:ring-2 focus:outline-none"
                             onclick={(e) => e.stopPropagation()}
@@ -1845,7 +1476,7 @@
                               onclick={() => {
                                 selectedActions = [];
                               }}
-                              aria-label="Clear all selected actions"
+                              aria-label={m.audit_clear_selected_actions()}
                             >
                               {m.audit_clear_all()}
                             </button>
@@ -1862,7 +1493,7 @@
                           <!-- Items list -->
                           {#if filteredActionOptions.length === 0}
                             <div class="text-muted px-3 py-4 text-center text-sm">
-                              Inga åtgärder hittades
+                              {m.audit_no_actions_found()}
                             </div>
                           {:else}
                             {#each filteredActionOptions as option (option.value)}
@@ -1902,7 +1533,7 @@
                                   {option.label}
                                 </span>
                                 {#if isSelected}
-                                  <span class="sr-only">(selected)</span>
+                                  <span class="sr-only">{m.audit_option_selected()}</span>
                                 {/if}
                               </button>
                             {/each}
@@ -1931,10 +1562,10 @@
                       <div
                         class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
                       ></div>
-                      Tillämpar...
+                      {m.audit_applying()}
                     </div>
                   {:else}
-                    Tillämpa
+                    {m.audit_apply_filters()}
                   {/if}
                 </Button>
               </div>
@@ -2229,6 +1860,35 @@
                                     {log.outcome === "success"
                                       ? m.audit_success()
                                       : m.audit_failure()}
+                                  </p>
+                                </div>
+                                <div class="border-default bg-primary rounded-lg border p-3">
+                                  <p class="text-muted mb-1 text-xs font-medium">
+                                    {m.audit_ip_address()}
+                                  </p>
+                                  <p class="text-default font-mono text-sm">
+                                    {log.ip_address ?? m.audit_not_recorded()}
+                                  </p>
+                                </div>
+                                <div class="border-default bg-primary rounded-lg border p-3">
+                                  <p class="text-muted mb-1 text-xs font-medium">
+                                    {m.audit_request_id()}
+                                  </p>
+                                  <p
+                                    class="text-default font-mono text-sm break-all"
+                                    title={log.request_id ?? undefined}
+                                  >
+                                    {log.request_id ?? m.audit_not_recorded()}
+                                  </p>
+                                </div>
+                                <div
+                                  class="border-default bg-primary rounded-lg border p-3 md:col-span-2"
+                                >
+                                  <p class="text-muted mb-1 text-xs font-medium">
+                                    {m.audit_user_agent()}
+                                  </p>
+                                  <p class="text-default text-sm break-all">
+                                    {log.user_agent ?? m.audit_not_recorded()}
                                   </p>
                                 </div>
                               </div>

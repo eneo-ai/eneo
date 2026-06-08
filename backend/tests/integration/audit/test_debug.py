@@ -129,8 +129,8 @@ async def test_debug_full_trace(client, admin_user_api_key, admin_user, db_conta
 @pytest.mark.asyncio
 async def test_debug_api_key_header_extraction(client, admin_user_api_key):
     """Test API key header extraction at different endpoints."""
-    from intric.server.dependencies.auth_definitions import API_KEY_HEADER
     from intric.main.config import get_settings
+    from intric.server.dependencies.auth_definitions import API_KEY_HEADER
 
     print("\n=== API KEY HEADER CONFIGURATION ===")
     print(f"API_KEY_HEADER.model.name: {API_KEY_HEADER.model.name}")
@@ -170,7 +170,6 @@ async def test_debug_user_permissions(admin_user, db_container):
     print(f"User ID: {admin_user.id}")
     print(f"User email: {admin_user.email}")
     print(f"User roles: {getattr(admin_user, 'roles', 'N/A')}")
-    print(f"User predefined_roles: {getattr(admin_user, 'predefined_roles', 'N/A')}")
     print(f"User permissions: {getattr(admin_user, 'permissions', 'N/A')}")
     print(f"User is_superuser: {getattr(admin_user, 'is_superuser', 'N/A')}")
 
@@ -234,8 +233,8 @@ async def test_debug_direct_service_call(admin_user_api_key, db_container):
 @pytest.mark.asyncio
 async def test_debug_container_dependencies(client, admin_user_api_key):
     """Check how API key is extracted in different dependencies."""
-    from intric.server.dependencies.auth_definitions import API_KEY_HEADER
     from intric.authentication.auth_dependencies import _get_api_key_from_header
+    from intric.server.dependencies.auth_definitions import API_KEY_HEADER
 
     print("\n=== DEPENDENCY ANALYSIS ===")
     print(f"API_KEY_HEADER type: {type(API_KEY_HEADER)}")
@@ -277,9 +276,10 @@ async def test_debug_container_dependencies(client, admin_user_api_key):
 @pytest.mark.asyncio
 async def test_debug_full_container_flow(client, admin_user_api_key):
     """Check full container flow with API key."""
-    from fastapi import FastAPI, Depends
-    from intric.server.dependencies.container import get_container
+    from fastapi import Depends, FastAPI
+
     from intric.main.container.container import Container
+    from intric.server.dependencies.container import get_container
 
     print("\n=== FULL CONTAINER FLOW TEST ===")
 
@@ -422,8 +422,8 @@ async def test_debug_trace_authenticate(client, admin_user_api_key, monkeypatch)
 @pytest.mark.asyncio
 async def test_debug_api_key_header_actual(client, admin_user_api_key):
     """Check what header API_KEY_HEADER actually looks for."""
-    from intric.server.dependencies.auth_definitions import API_KEY_HEADER
     from intric.main.config import get_settings
+    from intric.server.dependencies.auth_definitions import API_KEY_HEADER
 
     print("\n=== API_KEY_HEADER DETAILS ===")
     print(f"API_KEY_HEADER: {API_KEY_HEADER}")

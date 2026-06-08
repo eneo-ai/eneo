@@ -11,6 +11,7 @@ from intric.group_chat.presentation.models import (
     GroupChatPublic,
     GroupChatTools,
 )
+from intric.main.datetime_utils import datetime_or_utc_min
 
 if TYPE_CHECKING:
     from intric.group_chat.domain.entities.group_chat import (
@@ -58,8 +59,8 @@ class GroupChatAssembler:
 
         # Entity stores Optional[datetime]; GroupChatPublic expects datetime.
         # At runtime, persisted entities always have these set.
-        created_at: datetime = group_chat.created_at or datetime.min
-        updated_at: datetime = group_chat.updated_at or datetime.min
+        created_at: datetime = datetime_or_utc_min(group_chat.created_at)
+        updated_at: datetime = datetime_or_utc_min(group_chat.updated_at)
 
         # Entity stores type as plain str; GroupChatPublic expects Literal["group-chat"].
         group_chat_type: Literal["group-chat"] = "group-chat"

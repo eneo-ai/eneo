@@ -30,7 +30,7 @@
 
   type Props = {
     /** Array of MCP server objects that are selected. Uses index signature for schema compatibility. */
-    selectedMCPServers: { [key: string]: unknown }[];
+    selectedMCPServers: { [key: string]: unknown }[] | undefined;
     /** Optional: MCP tool settings to track tool-level overrides */
     selectedMCPTools?: Array<{ tool_id: string; is_enabled: boolean }>;
     /** Optional: Currently selected completion model to check tool calling support */
@@ -44,7 +44,7 @@
   }: Props = $props();
 
   /** Type-safe view of selectedMCPServers */
-  let servers = $derived(selectedMCPServers as unknown as MCPServer[]);
+  let servers = $derived((selectedMCPServers ?? []) as unknown as MCPServer[]);
 
   let modelSupportsTools = $derived(selectedModel?.supports_tool_calling !== false);
 
@@ -208,7 +208,7 @@
   }
 </script>
 
-<div class="space-y-1" role="group" aria-label="MCP-servrar">
+<div class="space-y-1" role="group" aria-label={m.mcp_servers()}>
   {#if !modelSupportsTools}
     <p
       class="label-warning border-label-default bg-label-dimmer text-label-stronger mb-2 rounded-md border px-2 py-1 text-sm"
@@ -316,7 +316,7 @@
             <div
               class="border-dimmer bg-secondary/20 border-l-accent-default/70 mr-3 mb-2 ml-10 rounded-lg border-t border-l-[3px]"
               role="group"
-              aria-label="Verktyg för {server.name}"
+              aria-label={m.mcp_tools_for_server_aria({ name: server.name })}
             >
               <!-- Tools header with bulk actions -->
               <div class="border-dimmer/50 flex items-center justify-between border-b px-3 py-1.5">
@@ -333,7 +333,7 @@
                       });
                     }}
                   >
-                    Alla på
+                    {m.mcp_all_on()}
                   </button>
                   <span class="text-dimmer">|</span>
                   <button
@@ -345,7 +345,7 @@
                       });
                     }}
                   >
-                    Alla av
+                    {m.mcp_all_off()}
                   </button>
                 </div>
               </div>

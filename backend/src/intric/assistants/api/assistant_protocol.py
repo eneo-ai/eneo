@@ -62,6 +62,12 @@ class _SupportsToolCallMetadata(Protocol):
     result_status: str | None
 
 
+def _require_approval_id(chunk: Completion) -> str:
+    if chunk.approval_id is None:
+        raise ValueError("Expected approval_id for tool approval SSE event")
+    return chunk.approval_id
+
+
 def to_ask_response(
     question: str,
     files: Sequence[File],
@@ -188,7 +194,7 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                     server_name=tc.server_name,
                     tool_name=tc.tool_name,
                     arguments=tc.arguments,
-                    tool_call_id=tc.tool_call_id or "",
+                    tool_call_id=tc.tool_call_id,
                     approved=tc.approved,
                     result_status=tc.result_status,
                 )
@@ -202,13 +208,13 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
         )
         data = SSEToolApprovalRequired(
             session_id=session_id,
-            approval_id=chunk.approval_id or "",
+            approval_id=_require_approval_id(chunk),
             tools=[
                 ToolCallInfo(
                     server_name=tc.server_name,
                     tool_name=tc.tool_name,
                     arguments=tc.arguments,
-                    tool_call_id=tc.tool_call_id or "",
+                    tool_call_id=tc.tool_call_id,
                     approved=tc.approved,
                     result_status=tc.result_status,
                 )
@@ -222,13 +228,13 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
         )
         data = SSEToolApprovalTimeout(
             session_id=session_id,
-            approval_id=chunk.approval_id or "",
+            approval_id=_require_approval_id(chunk),
             tools=[
                 ToolCallInfo(
                     server_name=tc.server_name,
                     tool_name=tc.tool_name,
                     arguments=tc.arguments,
-                    tool_call_id=tc.tool_call_id or "",
+                    tool_call_id=tc.tool_call_id,
                     approved=tc.approved,
                     result_status=tc.result_status,
                 )
