@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query
 
 from intric.main.container.container import Container
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 from intric.token_usage.presentation.token_usage_models import (
     TokenUsageSummary,
     UserSortBy,
@@ -35,7 +36,12 @@ EndDateQuery = Annotated[
 ]
 
 
-@router.get("/", response_model=TokenUsageSummary)
+@router.get(
+    "/",
+    response_model=TokenUsageSummary,
+    description="Get aggregate token usage statistics for the specified date range.",
+    responses=responses.get_responses([]),
+)
 async def get_token_usage(
     container: ContainerDep,
     start_date: StartDateQuery = None,
@@ -55,7 +61,12 @@ async def get_token_usage(
     return TokenUsageSummary.from_domain(usage_summary)
 
 
-@router.get("/users", response_model=UserTokenUsageSummary)
+@router.get(
+    "/users",
+    response_model=UserTokenUsageSummary,
+    description="Get token usage statistics aggregated by user for the specified date range.",
+    responses=responses.get_responses([]),
+)
 async def get_user_token_usage(
     container: ContainerDep,
     start_date: StartDateQuery = None,
@@ -86,7 +97,12 @@ async def get_user_token_usage(
     return UserTokenUsageSummary.from_domain(user_usage_summary)
 
 
-@router.get("/users/{user_id}/summary", response_model=UserTokenUsageSummaryDetail)
+@router.get(
+    "/users/{user_id}/summary",
+    response_model=UserTokenUsageSummaryDetail,
+    description="Get token usage summary for a specific user without fetching all users.",
+    responses=responses.get_responses([404]),
+)
 async def get_user_summary(
     user_id: UUID,
     container: ContainerDep,
@@ -113,7 +129,12 @@ async def get_user_summary(
         raise
 
 
-@router.get("/users/{user_id}", response_model=TokenUsageSummary)
+@router.get(
+    "/users/{user_id}",
+    response_model=TokenUsageSummary,
+    description="Get model breakdown for a specific user within the specified date range.",
+    responses=responses.get_responses([404]),
+)
 async def get_user_model_breakdown(
     user_id: UUID,
     container: ContainerDep,

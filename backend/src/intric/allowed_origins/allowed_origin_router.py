@@ -7,11 +7,17 @@ from intric.main.container.container import Container
 from intric.main.models import PaginatedResponse
 from intric.server import protocol
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 
 router = APIRouter()
 
 
-@router.get("/", response_model=PaginatedResponse[AllowedOriginPublic])
+@router.get(
+    "/",
+    response_model=PaginatedResponse[AllowedOriginPublic],
+    description="List the tenant's allowed CORS origins.",
+    responses=responses.get_responses([]),
+)
 async def get_origins(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):

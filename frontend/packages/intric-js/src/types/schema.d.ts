@@ -1548,7 +1548,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Logging Details */
+    /**
+     * Get Logging Details
+     * @description Get the logging details for a single message by id.
+     */
     get: operations["get_logging_details_api_v1_logging__message_id___get"];
     put?: never;
     post?: never;
@@ -2102,7 +2105,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Update Privacy Policy */
+    /**
+     * Update Privacy Policy
+     * @description Update the tenant's privacy policy URL (admin only).
+     */
     post: operations["update_privacy_policy_api_v1_admin_privacy_policy__post"];
     delete?: never;
     options?: never;
@@ -2961,7 +2967,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Origins */
+    /**
+     * Get Origins
+     * @description List the tenant's allowed CORS origins.
+     */
     get: operations["get_origins_api_v1_allowed_origins__get"];
     put?: never;
     post?: never;
@@ -3830,7 +3839,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Limits */
+    /**
+     * Get Limits
+     * @description Get the configured size and count limits for uploads and crawls.
+     */
     get: operations["get_limits_api_v1_limits__get"];
     put?: never;
     post?: never;
@@ -4655,9 +4667,7 @@ export interface paths {
     };
     /**
      * Get Token Usage
-     * @description Get token usage statistics for the specified date range.
-     *     If no dates are provided, returns token usage for the last 30 days.
-     *     Note: If no time is provided in datetime parameters, time components default to 00:00:00.
+     * @description Get aggregate token usage statistics for the specified date range.
      */
     get: operations["get_token_usage_api_v1_token_usage__get"];
     put?: never;
@@ -4678,8 +4688,6 @@ export interface paths {
     /**
      * Get User Token Usage
      * @description Get token usage statistics aggregated by user for the specified date range.
-     *     If no dates are provided, returns token usage for the last 30 days.
-     *     Note: If no time is provided in datetime parameters, time components default to 00:00:00.
      */
     get: operations["get_user_token_usage_api_v1_token_usage_users_get"];
     put?: never;
@@ -4699,9 +4707,7 @@ export interface paths {
     };
     /**
      * Get User Summary
-     * @description Get summary for a specific user without fetching all users.
-     *     If no dates are provided, returns summary for the last 30 days.
-     *     Note: If no time is provided in datetime parameters, time components default to 00:00:00.
+     * @description Get token usage summary for a specific user without fetching all users.
      */
     get: operations["get_user_summary_api_v1_token_usage_users__user_id__summary_get"];
     put?: never;
@@ -4722,8 +4728,6 @@ export interface paths {
     /**
      * Get User Model Breakdown
      * @description Get model breakdown for a specific user within the specified date range.
-     *     If no dates are provided, returns model breakdown for the last 30 days.
-     *     Note: If no time is provided in datetime parameters, time components default to 00:00:00.
      */
     get: operations["get_user_model_breakdown_api_v1_token_usage_users__user_id__get"];
     put?: never;
@@ -4754,12 +4758,6 @@ export interface paths {
     /**
      * Create Security Classification
      * @description Create a new security classification for the current tenant.
-     *     Args:
-     *         request: The security classification creation request.
-     *     Returns:
-     *         The created security classification.
-     *     Raises:
-     *         400: If the request is invalid. Names must be unique.
      */
     post: operations["create_security_classification_api_v1_security_classifications__post"];
     delete?: never;
@@ -4767,15 +4765,7 @@ export interface paths {
     head?: never;
     /**
      * Update Security Classification Levels
-     * @description Update the security levels of security classifications.
-     *     Args:
-     *         request: Security classifications to update.
-     *     Returns:
-     *         The updated security classifications.
-     *     Raises:
-     *         400: If the request is invalid.
-     *         403: If the user doesn't have permission to update the security classification.
-     *         404: If the security classification doesn't exist or belongs to a different tenant.
+     * @description Update the security levels (ordering) of security classifications.
      */
     patch: operations["update_security_classification_levels_api_v1_security_classifications__patch"];
     trace?: never;
@@ -4803,21 +4793,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Security Classification
-     * @description Delete a security classification.
-     *
-     *     Refuses if any model, space or MCP server still references it — the
-     *     FK is `ON DELETE SET NULL`, so dropping a referenced classification
-     *     would silently downgrade every dependent row to "no classification".
-     *     Pass `?force=true` to override after reviewing the usage report.
-     *
-     *     Args:
-     *         id: The ID of the security classification to delete.
-     *         force: When true, delete even if rows still reference this
-     *             classification. Those rows will be downgraded to NULL.
-     *     Raises:
-     *         400: If the classification is referenced and `force` is false.
-     *         403: If the user doesn't have permission to delete the security classification.
-     *         404: If the security classification doesn't exist.
+     * @description Delete a security classification, optionally forcing if still referenced.
      */
     delete: operations["delete_security_classification_api_v1_security_classifications__id___delete"];
     options?: never;
@@ -4825,21 +4801,6 @@ export interface paths {
     /**
      * Update Security Classification
      * @description Update a single security classification's name and/or description.
-     *
-     *     This endpoint allows updating just the name and description of a security classification
-     *     without changing its security level.
-     *
-     *     Args:
-     *         id: The ID of the security classification to update
-     *         request: The update request containing new name and/or description
-     *
-     *     Returns:
-     *         The updated security classification
-     *
-     *     Raises:
-     *         400: If the request is invalid or security is disabled. Names must be unique.
-     *         403: If the user doesn't have permission to update the classification
-     *         404: If the security classification doesn't exist
      */
     patch: operations["update_security_classification_api_v1_security_classifications__id___patch"];
     trace?: never;
@@ -4856,16 +4817,6 @@ export interface paths {
     /**
      * Toggle Security Classifications
      * @description Enable or disable security classifications for the current tenant.
-     *
-     *     Args:
-     *         request: Contains a flag to enable or disable security classifications.
-     *
-     *     Returns:
-     *         The updated tenant information with security_enabled status.
-     *
-     *     Raises:
-     *         400: If the request is invalid.
-     *         403: If the user doesn't have permission to update tenant settings.
      */
     post: operations["toggle_security_classifications_api_v1_security_classifications_enable__post"];
     delete?: never;
@@ -6598,10 +6549,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Modules */
+    /**
+     * Get Modules
+     * @description List all globally registered modules.
+     */
     get: operations["get_modules_api_v1_modules__get"];
     put?: never;
-    /** Add Module */
+    /**
+     * Add Module
+     * @description Register a new global module.
+     */
     post: operations["add_module_api_v1_modules__post"];
     delete?: never;
     options?: never;
@@ -6620,7 +6577,7 @@ export interface paths {
     put?: never;
     /**
      * Add Module To Tenant
-     * @description Value is a list of module `id`'s to add to the `tenant_id`.
+     * @description Assign a list of modules to a tenant.
      */
     post: operations["add_module_to_tenant_api_v1_modules__tenant_id___post"];
     delete?: never;
@@ -6995,11 +6952,6 @@ export interface components {
       access_token: string;
       /** Token Type */
       token_type: string;
-    };
-    /** AccessTokenResponse */
-    AccessTokenResponse: {
-      /** Access Token */
-      access_token: string;
     };
     /**
      * ActionConfig
@@ -23351,6 +23303,24 @@ export interface operations {
           "application/json": components["schemas"]["MessageLogging"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -24376,6 +24346,33 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TenantPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -25861,13 +25858,22 @@ export interface operations {
           "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__SetCredentialResponse"];
         };
       };
-      /** @description Validation Error */
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unprocessable Entity */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -25888,6 +25894,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["intric__tenants__presentation__tenant_self_credentials_router__ListCredentialsResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -31774,6 +31789,15 @@ export interface operations {
           "application/json": components["schemas"]["UserTokenUsageSummaryDetail"];
         };
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -31808,6 +31832,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TokenUsageSummary"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -35726,6 +35759,24 @@ export interface operations {
           "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__SetCredentialResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -35756,6 +35807,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["DeleteCredentialResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -35789,6 +35858,24 @@ export interface operations {
           "application/json": components["schemas"]["intric__tenants__presentation__tenant_credentials_router__ListCredentialsResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -35818,6 +35905,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CrawlerSettingsResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -35855,13 +35951,22 @@ export interface operations {
           "application/json": components["schemas"]["CrawlerSettingsResponse"];
         };
       };
-      /** @description Validation Error */
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unprocessable Entity */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -35884,6 +35989,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["DeleteSettingsResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -35915,6 +36029,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FederationInfo"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -35952,6 +36075,24 @@ export interface operations {
           "application/json": components["schemas"]["SetFederationResponse"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -35981,6 +36122,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["DeleteFederationResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -36018,13 +36168,31 @@ export interface operations {
           "application/json": components["schemas"]["SetFederationResponse"];
         };
       };
-      /** @description Validation Error */
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unprocessable Entity */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -36049,6 +36217,24 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -36056,6 +36242,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -36135,6 +36330,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TenantInDB"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -36264,7 +36468,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["AccessTokenResponse"];
+          "application/json": unknown;
         };
       };
       /** @description Invalid or expired state */

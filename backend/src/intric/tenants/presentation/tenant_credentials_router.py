@@ -17,6 +17,7 @@ from intric.main.config import Settings, get_settings
 from intric.main.container.container import Container
 from intric.main.exceptions import NotFoundException
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 from intric.tenants.provider_field_config import PROVIDER_REQUIRED_FIELDS
 
 
@@ -230,6 +231,7 @@ class ListCredentialsResponse(BaseModel):
     "System admin only. Provider-specific fields are validated: "
     "OpenAI/Anthropic require api_key only; vLLM requires api_key and endpoint; "
     "Azure requires api_key, endpoint, and api_version.",
+    responses=responses.get_responses([403, 404]),
 )
 async def set_tenant_credential(
     tenant_id: UUID,
@@ -317,6 +319,7 @@ async def set_tenant_credential(
     summary="Delete tenant API credential",
     description="Delete API credentials for a specific LLM provider for a tenant. "
     "System admin only.",
+    responses=responses.get_responses([403, 404]),
 )
 async def delete_tenant_credential(
     tenant_id: UUID,
@@ -365,6 +368,7 @@ async def delete_tenant_credential(
     description="List all configured API credentials for a tenant with masked keys and encryption status. "
     "Shows last 4 characters of API key for verification and encryption state for security auditing. "
     "System admin only.",
+    responses=responses.get_responses([403, 404]),
 )
 async def list_tenant_credentials(
     tenant_id: UUID,

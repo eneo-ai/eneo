@@ -22,6 +22,7 @@ from intric.main.config import (
 from intric.main.container.container import Container
 from intric.main.logging import get_logger
 from intric.server.dependencies.container import get_container
+from intric.server.protocol import responses
 
 logger = get_logger(__name__)
 
@@ -467,6 +468,7 @@ async def _log_federation_update(
         "This replaces the current setup and requires all required fields. "
         "System admin only."
     ),
+    responses=responses.get_responses([400, 404]),
 )
 async def set_tenant_federation(
     tenant_id: UUID,
@@ -561,6 +563,7 @@ async def set_tenant_federation(
         "Only provided fields are changed; omitted fields stay unchanged. "
         "PATCH requires an existing federation config. System admin only."
     ),
+    responses=responses.get_responses([400, 404, 422]),
 )
 async def patch_tenant_federation(
     tenant_id: UUID,
@@ -680,6 +683,7 @@ async def patch_tenant_federation(
     status_code=status.HTTP_200_OK,
     summary="Delete tenant federation config",
     description="Remove custom identity provider for tenant. System admin only.",
+    responses=responses.get_responses([404]),
 )
 async def delete_tenant_federation(
     tenant_id: UUID,
@@ -730,6 +734,7 @@ async def delete_tenant_federation(
     status_code=status.HTTP_200_OK,
     summary="Get tenant federation config",
     description="View federation config with masked secrets. System admin only.",
+    responses=responses.get_responses([404]),
 )
 async def get_tenant_federation(
     tenant_id: UUID,
@@ -771,9 +776,11 @@ async def get_tenant_federation(
 
 @router.post(
     "/{tenant_id}/federation/test",
+    response_model=None,
     status_code=status.HTTP_200_OK,
     summary="Test tenant federation config",
     description="Test connection to tenant's IdP. System admin only.",
+    responses=responses.get_responses([400, 404, 500]),
 )
 async def test_tenant_federation(
     tenant_id: UUID,
