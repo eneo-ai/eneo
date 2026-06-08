@@ -208,11 +208,13 @@
     }
   }
 
-  function getPaginatedBlobs(id: string, blobs: InfoBlob[] | undefined) {
+  // `page` must be passed in (not read from currentPages here) so that the
+  // {@const} call sites depend on it textually — legacy reactivity only
+  // recomputes a derived value when an identifier it references is invalidated,
+  // and a read hidden inside this function body is invisible to the compiler.
+  function getPaginatedBlobs(blobs: InfoBlob[] | undefined, page: number) {
     if (!blobs) return [];
 
-    // Always use pagination for all types
-    const page = currentPages.get(id) || 1;
     const start = (page - 1) * ITEMS_PER_PAGE;
     const end = start + ITEMS_PER_PAGE;
     return blobs.slice(start, end);
@@ -678,9 +680,9 @@
       {@const isExpanded = expandedItems.has(collection.id)}
       {@const isLoading = loadingBlobs.has(collection.id)}
       {@const allBlobs = blobCache.get(collection.id)}
-      {@const blobs = getPaginatedBlobs(collection.id, allBlobs)}
-      {@const totalPages = getTotalPages(allBlobs)}
       {@const currentPage = currentPages.get(collection.id) || 1}
+      {@const blobs = getPaginatedBlobs(allBlobs, currentPage)}
+      {@const totalPages = getTotalPages(allBlobs)}
       <div class="knowledge-item-container">
         <div class="knowledge-item" class:text-negative-default={!isItemModelEnabled}>
           {#if collection.metadata.num_info_blobs > 0}
@@ -790,9 +792,9 @@
       {@const isExpanded = expandedItems.has(website.id)}
       {@const isLoading = loadingBlobs.has(website.id)}
       {@const allBlobs = blobCache.get(website.id)}
-      {@const blobs = getPaginatedBlobs(website.id, allBlobs)}
-      {@const totalPages = getTotalPages(allBlobs)}
       {@const currentPage = currentPages.get(website.id) || 1}
+      {@const blobs = getPaginatedBlobs(allBlobs, currentPage)}
+      {@const totalPages = getTotalPages(allBlobs)}
       {@const pagesCrawled = website.latest_crawl?.pages_crawled}
       {@const pagesFailed = website.latest_crawl?.pages_failed ?? 0}
       {@const hasFailures = pagesFailed > 0}
@@ -994,9 +996,9 @@
         {@const isExpanded = expandedItems.has(collection.id)}
         {@const isLoading = loadingBlobs.has(collection.id)}
         {@const allBlobs = blobCache.get(collection.id)}
-        {@const blobs = getPaginatedBlobs(collection.id, allBlobs)}
-        {@const totalPages = getTotalPages(allBlobs)}
         {@const currentPage = currentPages.get(collection.id) || 1}
+        {@const blobs = getPaginatedBlobs(allBlobs, currentPage)}
+        {@const totalPages = getTotalPages(allBlobs)}
         <div class="knowledge-item-container">
           <div class="knowledge-item" class:text-negative-default={!isItemModelEnabled}>
             {#if collection.metadata.num_info_blobs > 0}
@@ -1104,9 +1106,9 @@
         {@const isExpanded = expandedItems.has(website.id)}
         {@const isLoading = loadingBlobs.has(website.id)}
         {@const allBlobs = blobCache.get(website.id)}
-        {@const blobs = getPaginatedBlobs(website.id, allBlobs)}
-        {@const totalPages = getTotalPages(allBlobs)}
         {@const currentPage = currentPages.get(website.id) || 1}
+        {@const blobs = getPaginatedBlobs(allBlobs, currentPage)}
+        {@const totalPages = getTotalPages(allBlobs)}
         {@const pagesCrawled = website.latest_crawl?.pages_crawled}
         {@const pagesFailed = website.latest_crawl?.pages_failed ?? 0}
         {@const hasFailures = pagesFailed > 0}
