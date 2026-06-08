@@ -164,7 +164,9 @@ export function initAssistants(client) {
         streamArgs.endpoint,
         {
           params: { path: streamArgs.path, query: { version: 2 } },
-          requestBody: { "application/json": { question, files, stream: true } }
+          requestBody: {
+            "application/json": { question, files, stream: true }
+          }
         },
         {
           onOpen: async (response) => {

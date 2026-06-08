@@ -1,6 +1,6 @@
-from datetime import datetime
 from typing import Optional
 
+from intric.main.datetime_utils import datetime_or_utc_min
 from intric.transcription_models.domain.transcription_model import TranscriptionModel
 from intric.transcription_models.domain.transcription_model_repo import (
     TranscriptionModelRepository,
@@ -24,7 +24,7 @@ class TranscriptionModelService:
         # Otherwise get the latest model
         sorted_models: list[TranscriptionModel] = sorted(
             available_models,
-            key=lambda model: model.created_at or datetime.min,
+            key=lambda model: datetime_or_utc_min(model.created_at),
             reverse=True,
         )
 

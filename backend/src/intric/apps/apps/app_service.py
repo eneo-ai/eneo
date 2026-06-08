@@ -133,7 +133,7 @@ class AppService:
         if (
             template.completion_model
             and template.completion_model.id
-            and space.is_completion_model_in_space(template.completion_model.id)
+            and space.is_completion_model_available(template.completion_model.id)
         ):
             completion_model = space.get_completion_model(template.completion_model.id)
 
@@ -253,7 +253,7 @@ class AppService:
 
         completion_model = None
         if completion_model_id is not None:
-            if not space.is_completion_model_in_space(
+            if not space.is_completion_model_available(
                 completion_model_id=completion_model_id
             ):
                 raise BadRequestException(
@@ -290,8 +290,14 @@ class AppService:
 
         prompt = None
         if prompt_text is not None:
+            # Attribute the prompt to the app's owner, not the caller.
+            # Keeps service-key edits FK-safe (synthetic id has no `users`
+            # row) and makes admin edits to others' apps attribute
+            # correctly.
             prompt = await self.prompt_service.create_prompt(
-                text=prompt_text, description=prompt_description
+                text=prompt_text,
+                description=prompt_description,
+                owner_user_id=app.user_id,
             )
 
         app.update(

@@ -2,12 +2,17 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Sequence, cast
 from uuid import UUID
 
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.orm.base import NO_VALUE
+from sqlalchemy.orm.state import InstanceState
+
 from intric.ai_models.completion_models.completion_model import (
     CompletionModelSparse,
     ModelKwargs,
 )
 from intric.apps.apps.api.app_models import InputField, InputFieldType
 from intric.apps.apps.app import App
+from intric.database.tables.ai_models_table import CompletionModels
 from intric.database.tables.app_table import Apps
 from intric.files.file_models import File
 from intric.prompts.prompt import Prompt
@@ -42,6 +47,24 @@ class AppFactory:
         if completion_model_kwargs is None:
             return ModelKwargs()
         return ModelKwargs.model_validate(completion_model_kwargs)
+
+    @staticmethod
+    def _create_completion_model_sparse(
+        completion_model: CompletionModels,
+    ) -> CompletionModelSparse:
+        sparse_model = CompletionModelSparse.model_validate(completion_model)
+        model_state = cast(
+            InstanceState[CompletionModels], sa_inspect(completion_model)
+        )
+        provider_state = model_state.attrs.provider
+        if provider_state.loaded_value is NO_VALUE:
+            return sparse_model
+
+        provider = provider_state.value
+        if provider is None:
+            return sparse_model
+
+        return sparse_model.model_copy(update={"provider_type": provider.provider_type})
 
     def create_app(
         self,
@@ -127,7 +150,7 @@ class AppFactory:
         transcription_model: TranscriptionModel | None = None,
     ) -> App:
         completion_model = (
-            CompletionModelSparse.model_validate(app_in_db.completion_model)
+            self._create_completion_model_sparse(app_in_db.completion_model)
             if app_in_db.completion_model is not None
             else None
         )
@@ -139,6 +162,10 @@ class AppFactory:
         attachments = [
             File.model_validate(attachment.file) for attachment in app_in_db.attachments
         ]
+        if model_kwargs is not None and completion_model is not None:
+            model_kwargs = model_kwargs.filter_unsupported(
+                completion_model.supported_model_kwargs
+            )
 
         source_template = (
             self.app_template_factory.create_app_template(app_in_db.template)
@@ -208,6 +235,10 @@ class AppFactory:
             ),
             None,
         )
+        if model_kwargs is not None and completion_model is not None:
+            model_kwargs = model_kwargs.filter_unsupported(
+                completion_model.get_supported_model_kwargs()
+            )
 
         transcription_model = next(
             (

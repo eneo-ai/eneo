@@ -25,8 +25,7 @@
 
   untrack(() =>
     setAdminUserCtx({
-      customRoles: data.customRoles,
-      defaultRoles: data.defaultRoles,
+      roles: data.roles,
       userGroups: data.userGroups
     })
   );

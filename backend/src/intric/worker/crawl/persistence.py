@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import sqlalchemy as sa
 from dependency_injector import providers
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from typing_extensions import TypedDict
 
 from intric.completion_models.infrastructure.context_builder import count_tokens

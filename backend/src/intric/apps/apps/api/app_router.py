@@ -211,14 +211,13 @@ async def update_app(
 
     # Model behavior parameters (temperature, top_p)
     if update_service_req.completion_model_kwargs is not None:
-        # Materialise both sides as dicts so the `.get(...)` lookups below
-        # work uniformly on the audit-diff path.
-        old_kwargs = old_app.completion_model_kwargs.model_dump()
-        new_kwargs = update_service_req.completion_model_kwargs.model_dump()
-
         # Temperature
-        old_temperature = old_kwargs.get("temperature")
-        new_temperature = new_kwargs.get("temperature")
+        old_temperature = (
+            old_app.completion_model_kwargs.temperature
+            if old_app.completion_model_kwargs
+            else None
+        )
+        new_temperature = update_service_req.completion_model_kwargs.temperature
 
         if old_temperature != new_temperature and new_temperature is not None:
             changes["temperature"] = {"old": old_temperature, "new": new_temperature}
@@ -226,8 +225,12 @@ async def update_app(
                 change_summary.append("parameters")
 
         # Top-p
-        old_top_p = old_kwargs.get("top_p")
-        new_top_p = new_kwargs.get("top_p")
+        old_top_p = (
+            old_app.completion_model_kwargs.top_p
+            if old_app.completion_model_kwargs
+            else None
+        )
+        new_top_p = update_service_req.completion_model_kwargs.top_p
 
         if old_top_p != new_top_p and new_top_p is not None:
             changes["top_p"] = {"old": old_top_p, "new": new_top_p}
@@ -318,7 +321,7 @@ async def update_app(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.APP_UPDATED,
         entity_type=EntityType.APP,
         entity_id=id,
@@ -374,7 +377,7 @@ async def delete_app(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.APP_DELETED,
         entity_type=EntityType.APP,
         entity_id=id,
@@ -428,7 +431,7 @@ async def run_app(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=current_user.tenant_id,
-        actor_id=current_user.id,
+        user=current_user,
         action=ActionType.APP_EXECUTED,
         entity_type=EntityType.APP,
         entity_id=id,
@@ -520,7 +523,7 @@ async def publish_app(
     audit_service = container.audit_service()
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.APP_PUBLISHED,
         entity_type=EntityType.APP,
         entity_id=id,

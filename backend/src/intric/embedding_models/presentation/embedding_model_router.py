@@ -116,7 +116,7 @@ async def update_embedding_model(
         audit_service = container.audit_service()
         await audit_service.log_async(
             tenant_id=user.tenant_id,
-            actor_id=user.id,
+            user=user,
             action=ActionType.EMBEDDING_MODEL_UPDATED,
             entity_type=EntityType.EMBEDDING_MODEL,
             entity_id=id,

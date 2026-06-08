@@ -36,6 +36,7 @@ const ERROR_CODE_MESSAGES: Record<number, () => string> = {
   9035: () => m.eneo_error_9035(), // SECURITY_CLASSIFICATION_MISMATCH
   9036: () => m.eneo_error_9036(), // MCP_UPSTREAM_ERROR
   9037: () => m.eneo_error_9037(), // MCP_UPSTREAM_AUTH_ERROR
+  9017: () => m.eneo_error_9017(), // NAME_COLLISION (duplicate display name)
 
   // --- AI service errors ---
   9008: () => m.eneo_error_9008(), // QUOTA_EXCEEDED
@@ -44,7 +45,10 @@ const ERROR_CODE_MESSAGES: Record<number, () => string> = {
 
   // --- Internal errors ---
   9024: () => m.eneo_error_9024(), // INTERNAL_SERVER_ERROR
-  9038: () => m.eneo_error_9038() // RESOURCE_NOT_READY
+  9038: () => m.eneo_error_9038(), // RESOURCE_NOT_READY
+
+  // --- Model lifecycle ---
+  9039: () => m.eneo_error_9039() // MODEL_IN_USE
 };
 
 /**

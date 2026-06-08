@@ -1210,7 +1210,7 @@ def _build_probes(resource_ids: dict) -> list[dict]:
         {
             "name": "api-key-constraints",
             "method": "GET",
-            "path": "/api/v1/api-keys/creation-constraints",
+            "path": "/api/v1/api-keys/policy-constraints",
             "resource_type": None,
             "scope_resource": "admin",
             "is_admin_scope": True,
@@ -1240,9 +1240,15 @@ def _build_probes(resource_ids: dict) -> list[dict]:
         # =================================================================
         # SPECIAL: USERS ROUTER (split: admin vs user-facing)
         # =================================================================
-        # users_admin_router: TENANT_ADMIN_API_KEY_GUARDS → /users
+        # users_router (route-level API-key admin guards on GET /):
+        # member-picker listing. Returns UserSparse (id, email, username,
+        # timestamps); tenant-scoped at the repo layer. Bearer-token tenant
+        # members (including space-admins without tenant ADMIN) pass
+        # through because the deferred-enforcement guards only run for API
+        # keys. Scoped API keys stay admin-gated to prevent cross-scope
+        # directory enumeration.
         {
-            "name": "users-admin-list",
+            "name": "users-list",
             "method": "GET",
             "path": "/api/v1/users/",
             "resource_type": None,
@@ -1251,9 +1257,11 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
             "description": (
-                "users_admin_router GET / mounted with "
-                "TENANT_ADMIN_API_KEY_GUARDS. Note: also has "
-                "users_router GET /me/ and /tenant/ without guards."
+                "users_router GET / carries route-level "
+                "require_api_key_scope_check('admin') + "
+                "require_api_key_permission(ADMIN). For API keys: admin "
+                "scope + admin permission required. For bearer tokens: "
+                "no-op (any authenticated tenant member passes through)."
             ),
         },
         # users_router (no API key guards): /users/me/
@@ -1643,15 +1651,24 @@ async def test_tenant_key_revoked_after_admin_role_removed(
     )
 
     # ---- 3. Revoke admin role (downgrade to "User") ----
-    # Look up the "User" predefined role and the current user's username
+    # Look up the tenant-scoped "User" default role and the current user's username
     async with db_container() as container:
-        predefined_roles_repo = container.predefined_roles_repo()
-        user_role = await predefined_roles_repo.get_predefined_role_by_name("User")
+        role_repo = container.role_repo()
+        tenant_roles = await role_repo.get_by_tenant(default_user.tenant_id)
+        user_role = next(
+            (
+                role
+                for role in tenant_roles
+                if role.predefined_source == "User" or role.name == "User"
+            ),
+            None,
+        )
+        assert user_role is not None, "Expected tenant-scoped User role to exist"
 
     # Use the admin API to downgrade the user's role
     resp = await api_client.post(
         f"/api/v1/admin/users/{default_user.username}/",
-        json={"predefined_roles": [{"id": str(user_role.id)}]},
+        json={"roles": [{"id": str(user_role.id)}]},
         headers={"Authorization": f"Bearer {bearer_token}"},
     )
     assert resp.status_code == 200, f"Role downgrade failed: {resp.text}"

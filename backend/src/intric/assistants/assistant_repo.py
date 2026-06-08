@@ -66,7 +66,6 @@ class AssistantRepository:
         return [
             selectinload(Assistants.user).selectinload(Users.tenant),
             selectinload(Assistants.user).selectinload(Users.roles),
-            selectinload(Assistants.user).selectinload(Users.predefined_roles),
             selectinload(Assistants.websites)
             .selectinload(Websites.latest_crawl)  # type: ignore[attr-defined]
             .selectinload(CrawlRuns.job),

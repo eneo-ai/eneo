@@ -3,12 +3,18 @@ from typing import TYPE_CHECKING, Optional
 from typing_extensions import override
 
 from intric.ai_models.ai_model import AIModel
+from intric.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+    coerce_model_kwargs_capabilities,
+    resolve_supported_model_kwargs,
+)
 from intric.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
 
 if TYPE_CHECKING:
     from datetime import datetime
+    from decimal import Decimal
     from uuid import UUID
 
     from intric.database.tables.ai_models_table import CompletionModels
@@ -43,11 +49,18 @@ class CompletionModel(AIModel):
         supports_tool_calling: bool = False,
         base_url: Optional[str] = None,
         litellm_model_name: Optional[str] = None,
+        model_kwargs_capabilities: SupportedModelKwargs
+        | dict[str, object]
+        | None = None,
+        input_cost_per_token: Optional["Decimal"] = None,
+        output_cost_per_token: Optional["Decimal"] = None,
         security_classification: Optional[SecurityClassification] = None,
         tenant_id: Optional["UUID"] = None,
         provider_id: Optional["UUID"] = None,
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
+        migrated_to_model_id: Optional["UUID"] = None,
+        deleted_at: Optional["datetime"] = None,
     ):
         super().__init__(
             user=user,
@@ -70,6 +83,11 @@ class CompletionModel(AIModel):
 
         self.base_url = base_url
         self.litellm_model_name = litellm_model_name
+        self.model_kwargs_capabilities = coerce_model_kwargs_capabilities(
+            model_kwargs_capabilities,
+            completion_model_id=id,
+            tenant_id=tenant_id,
+        )
         self.is_org_default = is_org_default
         self.reasoning = reasoning
         self.vision = vision
@@ -78,15 +96,37 @@ class CompletionModel(AIModel):
         self.max_output_tokens = max_output_tokens
         self.deployment_name = deployment_name
         self.nr_billion_parameters = nr_billion_parameters
+        self.input_cost_per_token = input_cost_per_token
+        self.output_cost_per_token = output_cost_per_token
         self.tenant_id = tenant_id
         self.provider_id = provider_id
         self.provider_name = provider_name
         self.provider_type = provider_type
+        self.migrated_to_model_id = migrated_to_model_id
+        self.deleted_at = deleted_at
+
+    @property
+    def can_access(self):
+        return (
+            super().can_access
+            and self.migrated_to_model_id is None
+            and self.deleted_at is None
+        )
 
     @property
     def token_limit(self) -> int:
         """Backward-compat alias: returns max_input_tokens."""
         return self.max_input_tokens
+
+    def get_supported_model_kwargs(self) -> SupportedModelKwargs:
+        return resolve_supported_model_kwargs(
+            model_kwargs_capabilities=self.model_kwargs_capabilities,
+            reasoning=self.reasoning,
+            provider_type=self.provider_type,
+            litellm_model_name=self.litellm_model_name,
+            completion_model_id=self.id,
+            tenant_id=self.tenant_id,
+        )
 
     @override
     def get_credential_provider_name(self) -> str:
@@ -133,6 +173,9 @@ class CompletionModel(AIModel):
             supports_tool_calling=completion_model_db.supports_tool_calling,
             base_url=completion_model_db.base_url,
             litellm_model_name=completion_model_db.litellm_model_name,
+            model_kwargs_capabilities=completion_model_db.model_kwargs_capabilities,
+            input_cost_per_token=completion_model_db.input_cost_per_token,
+            output_cost_per_token=completion_model_db.output_cost_per_token,
             security_classification=SecurityClassification.to_domain(
                 db_security_classification=completion_model_db.security_classification
             ),
@@ -140,4 +183,6 @@ class CompletionModel(AIModel):
             provider_id=completion_model_db.provider_id,
             provider_name=provider_name,
             provider_type=provider_type,
+            migrated_to_model_id=completion_model_db.migrated_to_model_id,
+            deleted_at=completion_model_db.deleted_at,
         )

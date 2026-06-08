@@ -77,20 +77,23 @@ export const handle = sequence(paraglideHandle, authHandle, headerFilterHandle);
 
 export const handleError: HandleServerError = async ({ error, status, message }) => {
   let code: IntricErrorCode = 0;
+  let traceId: string | undefined;
   if (error instanceof IntricError) {
     status = error.status;
     message = error.getReadableMessage();
     code = error.code;
+    traceId = error.getTraceId();
   }
 
   if (dev) {
-    console.error("server error", error);
+    console.error("server error", { status, code, traceId, error });
   }
 
   return {
     status,
     message,
-    code
+    code,
+    traceId
   };
 };
 

@@ -11,6 +11,7 @@ import crochet
 import sqlalchemy as sa
 from arq.cron import cron
 from dependency_injector import providers
+from opentelemetry import trace
 
 from intric.database.database import AsyncSession, sessionmanager
 from intric.jobs.task_models import ResourceTaskParams
@@ -38,6 +39,36 @@ def _job_id_from_ctx(ctx: ARQContext) -> UUID | None:
         return UUID(str(job_id))
     except ValueError:
         return None
+
+
+_tracer = trace.get_tracer("intric.worker")
+
+
+def _traced_job(kind: str, wrapper_fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap an ARQ job coroutine in a root span.
+
+    All log lines and auto-instrumented child spans produced while the job runs
+    inherit the span's trace_id, so a job's output is correlatable in a log
+    aggregation system. v1 decision: jobs start their OWN root trace, with no
+    link to the HTTP request that enqueued them (ARQ has no metadata envelope
+    separate from job kwargs). ``kind`` is "job" for queued jobs and "cron" for
+    scheduled ones, yielding span names "arq.job <name>" / "arq.cron <name>".
+
+    Applied at registration so it preserves the wrapped function's __name__ /
+    __qualname__ — ARQ identifies jobs by name, so this must not change them.
+    """
+    job_name = getattr(wrapper_fn, "__name__", kind)
+
+    @wraps(wrapper_fn)
+    async def traced(ctx: ARQContext, *args: Any, **kwargs: Any) -> Any:
+        job_id = _job_id_from_ctx(ctx)
+        attrs: dict[str, str] = {"arq.job_name": job_name}
+        if job_id is not None:
+            attrs["arq.job_id"] = str(job_id)
+        with _tracer.start_as_current_span(f"arq.{kind} {job_name}", attributes=attrs):
+            return await wrapper_fn(ctx, *args, **kwargs)
+
+    return traced
 
 
 def _log_startup_diagnostics(settings: Settings) -> None:
@@ -230,6 +261,13 @@ class Worker:
         return kwargs
 
     async def startup(self, ctx: ARQContext) -> None:
+        # OTEL must be initialised before lifespan.startup() so that
+        # SQLAlchemy, Redis, and aiohttp auto-instrumentation patches are
+        # active before those engines/pools are created.
+        from intric.main.observability import init_observability
+
+        init_observability()
+
         await lifespan.startup()
         crochet.setup()
 
@@ -306,7 +344,7 @@ class Worker:
                     assert job_id is not None
                     return await func(job_id, params, container=container)
 
-            self.functions.append(wrapper)
+            self.functions.append(_traced_job("job", wrapper))
             return wrapper
 
         return decorator
@@ -366,7 +404,6 @@ class Worker:
                                 .where(Users.deleted_at.is_(None))  # Soft-delete safety
                                 .options(
                                     selectinload(Users.roles),
-                                    selectinload(Users.predefined_roles),
                                     selectinload(Users.tenant).selectinload(
                                         Tenants.modules
                                     ),
@@ -407,7 +444,7 @@ class Worker:
                 assert job_id is not None
                 return await func(job_id, params, container=container)
 
-            self.functions.append(wrapper)
+            self.functions.append(_traced_job("job", wrapper))
             return wrapper
 
         return decorator
@@ -444,23 +481,43 @@ class Worker:
 
                     return task_manager.successful()
 
-            self.functions.append(wrapper)
+            self.functions.append(_traced_job("job", wrapper))
             return wrapper
 
         return decorator
 
-    def cron_job(self, **decorator_kwargs: Any):
+    def cron_job(self, *, manages_own_session: bool = False, **decorator_kwargs: Any):
+        """Register a cron job.
+
+        By default the wrapper opens one session and one transaction around
+        the job — fine for short jobs that mutate a few rows. Long-running
+        jobs that need many small transactions (e.g. cleanup loops that
+        delete or migrate one row at a time so locks don't pile up) should
+        set ``manages_own_session=True``: the wrapper then provides the
+        session for container DI but does not open a transaction, leaving
+        the job to call ``async with session.begin():`` per batch. The old
+        workaround for this — opening a second session and overriding the
+        container's session provider with a ``cast(Any, ...)`` — was easy
+        to copy wrong and left the outer transaction doing nothing.
+        """
+
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
             async def wrapper(ctx: ARQContext) -> Any:
                 logger.debug(f"Executing {func.__name__}")
 
-                async with sessionmanager.session() as session, session.begin():
-                    container = await self._create_container(session)
+                if manages_own_session:
+                    async with sessionmanager.session() as session:
+                        container = await self._create_container(session)
+                        return await func(container=container)
+                else:
+                    async with sessionmanager.session() as session, session.begin():
+                        container = await self._create_container(session)
+                        return await func(container=container)
 
-                    return await func(container=container)
-
-            self.cron_jobs.append(cron(wrapper, **decorator_kwargs))
+            self.cron_jobs.append(
+                cron(_traced_job("cron", wrapper), **decorator_kwargs)
+            )
             return wrapper
 
         return decorator

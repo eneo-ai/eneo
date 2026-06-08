@@ -10,6 +10,7 @@ from intric.apps.apps.api.app_models import InputField
 from intric.apps.apps.app import App
 from intric.apps.apps.app_factory import AppFactory
 from intric.database.database import AsyncSession
+from intric.database.tables.ai_models_table import CompletionModels
 from intric.database.tables.app_table import Apps, AppsFiles, AppsPrompts, InputFields
 from intric.files.file_models import File
 from intric.prompts.prompt import Prompt
@@ -35,7 +36,7 @@ class AppRepository:
 
     def _options(self) -> list[ExecutableOption]:
         return [
-            selectinload(Apps.completion_model),
+            selectinload(Apps.completion_model).selectinload(CompletionModels.provider),
             selectinload(Apps.input_fields),
             selectinload(Apps.attachments).selectinload(AppsFiles.file),
             selectinload(Apps.template),

@@ -221,6 +221,29 @@ class TestMethodAwarePermissionCheck:
             "resource_type": "apps",
             "read_override_endpoints": ASSISTANTS_READ_OVERRIDES,
         }
+        assert request.state._resource_perm_configs == [
+            {
+                "resource_type": "apps",
+                "read_override_endpoints": ASSISTANTS_READ_OVERRIDES,
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_guard_accumulates_multiple_resource_configs(self):
+        """Routes can require a router-level and endpoint-level resource check."""
+        request = SimpleNamespace(state=SimpleNamespace())
+
+        await require_resource_permission_for_method("assistants")(request)
+        await require_resource_permission_for_method("conversations")(request)
+
+        assert request.state._resource_perm_config == {
+            "resource_type": "assistants",
+            "read_override_endpoints": None,
+        }
+        assert request.state._resource_perm_configs == [
+            {"resource_type": "assistants", "read_override_endpoints": None},
+            {"resource_type": "conversations", "read_override_endpoints": None},
+        ]
 
     def test_post_override_endpoint_treated_as_read(self, monkeypatch):
         """9. POST hitting override endpoint name → read (pass for read key)."""
@@ -354,7 +377,6 @@ class TestPolicyMaxRateLimit:
         tenant = SimpleNamespace(api_key_policy={"max_rate_limit_override": 100})
         user = SimpleNamespace(tenant=tenant, permissions=[])
         service = ApiKeyPolicyService(
-            allowed_origin_repo=SimpleNamespace(),
             space_service=SimpleNamespace(),
             user=user,
         )
@@ -620,7 +642,6 @@ class TestAuthFailureAuditEnrichment:
             auth_service=AsyncMock(),
             api_key_auth_resolver=AsyncMock(),
             api_key_v2_repo=AsyncMock(),
-            allowed_origin_repo=AsyncMock(),
             audit_service=audit,
             settings_repo=AsyncMock(),
             tenant_repo=AsyncMock(),

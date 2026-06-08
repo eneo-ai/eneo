@@ -138,10 +138,16 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                 )
                 return []
 
-            # Prepare the parameters for the embeddings
+            # Prepare the parameters for the embeddings.
+            # Set encoding_format explicitly: LiteLLM otherwise defaults it to
+            # null for OpenAI-compatible providers, which strict APIs (e.g.
+            # Berget.ai) reject with "Expected 'float' | 'base64', received
+            # null". "float" is the universal default and matches our expected
+            # list-of-floats output.
             params: dict[str, object] = {
                 "input": texts,
                 "model": self.litellm_model,
+                "encoding_format": "float",
             }
 
             # If dimensions exists on the model, add it to the parameters

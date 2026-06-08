@@ -1,13 +1,20 @@
 <script lang="ts">
-  import { Calendar, Clock, AlertTriangle, Infinity as InfinityIcon } from "lucide-svelte";
+  import {
+    Calendar as CalendarIcon,
+    AlertTriangle,
+    Infinity as InfinityIcon,
+    ChevronDown
+  } from "lucide-svelte";
   import { fly } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { SvelteDate } from "svelte/reactivity";
+  import { type DateValue, parseDate, today, getLocalTimeZone } from "@internationalized/date";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { Input } from "$lib/components/ui/input/index.js";
+  import { Calendar } from "$lib/components/ui/calendar/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
+  import * as Popover from "$lib/components/ui/popover/index.js";
 
   let {
     value = $bindable<string | null>(null),
@@ -23,7 +30,37 @@
 
   let showCustom = $state(false);
   let customDate = $state("");
-  let customTime = $state("23:59");
+  let datePopoverOpen = $state(false);
+
+  const dateValue = $derived<DateValue | undefined>(
+    customDate ? safeParseDate(customDate) : undefined
+  );
+  const minDateValue = $derived(today(getLocalTimeZone()).add({ days: 1 }));
+  const maxDateValue = $derived(maxDays ? minDateValue.add({ days: maxDays - 1 }) : undefined);
+
+  const locale = $derived(getLocale() === "sv" ? "sv-SE" : "en-US");
+
+  function safeParseDate(iso: string): DateValue | undefined {
+    try {
+      return parseDate(iso);
+    } catch {
+      return undefined;
+    }
+  }
+
+  function setDateFromPicker(next: DateValue | undefined) {
+    if (!next) return;
+    customDate = next.toString();
+    datePopoverOpen = false;
+  }
+
+  function formatDateOnly(iso: string): string {
+    return new Date(`${iso}T00:00:00`).toLocaleDateString(locale, {
+      year: "numeric",
+      month: "short",
+      day: "numeric"
+    });
+  }
 
   // Preset options with their days (using getter for translations)
   const getPresets = () => [
@@ -43,21 +80,6 @@
     date.setDate(date.getDate() + days);
     return date.toISOString();
   }
-
-  // Get minimum date for custom picker (tomorrow)
-  const minDate = $derived(() => {
-    const tomorrow = new SvelteDate();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    return tomorrow.toISOString().split("T")[0];
-  });
-
-  // Get maximum date for custom picker
-  const maxDate = $derived(() => {
-    if (!maxDays) return null;
-    const max = new SvelteDate();
-    max.setDate(max.getDate() + maxDays);
-    return max.toISOString().split("T")[0];
-  });
 
   // Check if a preset is selected
   function isPresetSelected(days: number): boolean {
@@ -89,25 +111,21 @@
   // Show custom date picker
   function showCustomPicker() {
     showCustom = true;
-    // Initialize with current value or a sensible default
     if (value) {
-      const date = new Date(value);
-      customDate = date.toISOString().split("T")[0];
-      customTime = date.toTimeString().slice(0, 5);
+      customDate = new Date(value).toISOString().split("T")[0];
     } else {
-      // Default to 30 days from now
       const defaultDate = new SvelteDate();
       defaultDate.setDate(defaultDate.getDate() + 30);
       customDate = defaultDate.toISOString().split("T")[0];
-      customTime = "23:59";
     }
   }
 
-  // Apply custom date
+  // Keys expire at end-of-day local time. The worker re-checks status at
+  // 01:00 UTC daily, but auth itself compares expires_at in real time —
+  // 23:59:59 keeps the key usable through the chosen calendar day.
   function applyCustomDate() {
     if (!customDate) return;
-    const dateTime = new Date(`${customDate}T${customTime}:00`);
-    value = dateTime.toISOString();
+    value = new Date(`${customDate}T23:59:59`).toISOString();
   }
 
   // Format display date
@@ -168,7 +186,7 @@
       {disabled}
       aria-pressed={showCustom}
     >
-      <Calendar />
+      <CalendarIcon />
       {m.api_keys_exp_custom()}
     </Button>
 
@@ -190,45 +208,41 @@
   <!-- Custom date picker -->
   {#if showCustom}
     <div
-      class="border-default bg-subtle space-y-3 rounded-lg border p-4"
+      class="border-default bg-primary space-y-3 rounded-lg border p-4 shadow-sm"
       transition:fly={{ y: -4, duration: 150 }}
     >
-      <div class="grid gap-3 sm:grid-cols-2">
-        <div class="flex flex-col gap-1.5">
-          <Label for="expiration-date" class="text-muted text-xs">
-            {m.api_keys_exp_date()}
-          </Label>
-          <Input
-            id="expiration-date"
-            type="date"
-            bind:value={customDate}
-            min={minDate()}
-            max={maxDate()}
+      <div class="flex flex-col gap-1.5">
+        <Label for="expiration-date-trigger" class="text-default text-xs font-medium">
+          {m.api_keys_exp_date()}
+        </Label>
+        <Popover.Root bind:open={datePopoverOpen}>
+          <Popover.Trigger
+            id="expiration-date-trigger"
             {disabled}
-          />
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <Label for="expiration-time" class="text-muted text-xs">
-            {m.api_keys_exp_time()}
-          </Label>
-          <div class="relative">
-            <Clock
-              class="text-muted pointer-events-none absolute top-1/2 left-3 z-10 h-4 w-4 -translate-y-1/2"
-              aria-hidden="true"
+            class="border-default bg-primary text-default hover:bg-subtle focus-visible:border-ring focus-visible:ring-ring/50 inline-flex h-10 w-full items-center justify-between rounded-md border px-3 text-sm transition-colors focus-visible:ring-3 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span class="flex items-center gap-2">
+              <CalendarIcon class="text-secondary h-4 w-4" aria-hidden="true" />
+              {dateValue ? formatDateOnly(customDate) : m.api_keys_exp_pick_date()}
+            </span>
+            <ChevronDown class="text-secondary h-4 w-4" aria-hidden="true" />
+          </Popover.Trigger>
+          <Popover.Content class="w-auto p-0" align="start">
+            <Calendar
+              type="single"
+              value={dateValue}
+              onValueChange={setDateFromPicker}
+              minValue={minDateValue}
+              maxValue={maxDateValue}
+              captionLayout="dropdown"
+              {locale}
             />
-            <Input
-              id="expiration-time"
-              type="time"
-              bind:value={customTime}
-              {disabled}
-              class="pl-9"
-            />
-          </div>
-        </div>
+          </Popover.Content>
+        </Popover.Root>
       </div>
 
       {#if maxDays}
-        <p class="text-muted flex items-center gap-1.5 text-xs">
+        <p class="text-secondary flex items-center gap-1.5 text-xs">
           <AlertTriangle class="h-3.5 w-3.5" aria-hidden="true" />
           {m.api_keys_exp_max_days({ days: maxDays })}
         </p>
@@ -245,7 +259,7 @@
     >
       <div class="flex items-center gap-3">
         <div class="bg-accent-default/15 flex h-8 w-8 items-center justify-center rounded-lg">
-          <Calendar class="text-accent-default h-4 w-4" />
+          <CalendarIcon class="text-accent-default h-4 w-4" />
         </div>
         <div>
           <p class="text-default text-sm font-medium">

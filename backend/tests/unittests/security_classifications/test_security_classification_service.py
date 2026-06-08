@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from intric.main.exceptions import NotFoundException, UnauthorizedException
+from intric.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from intric.roles.permissions import Permission
 from intric.security_classifications.application.security_classification_service import (
     SecurityClassificationService,
@@ -221,3 +225,45 @@ class TestSecurityClassificationService:
 
         # And no tenant update should have been attempted
         tenant_service.toggle_security.assert_not_called()
+
+    async def test_delete_blocks_when_in_use(self, service, security_repo):
+        # The classification has 3 completion models + 1 space referencing it.
+        security_repo.count_usages.return_value = {
+            "completion_models": 3,
+            "embedding_models": 0,
+            "transcription_models": 0,
+            "spaces": 1,
+            "mcp_servers": 0,
+        }
+
+        with pytest.raises(BadRequestException) as excinfo:
+            await service.delete_security_classification(uuid.uuid4())
+
+        # The error should list the dependent resource counts so the admin
+        # can act on it without an extra round-trip.
+        assert "3 completion_models" in str(excinfo.value)
+        assert "1 space" in str(excinfo.value)
+        # And the actual delete must not have run.
+        security_repo.delete.assert_not_called()
+
+    async def test_delete_passes_through_when_unused(self, service, security_repo):
+        security_repo.count_usages.return_value = {
+            "completion_models": 0,
+            "embedding_models": 0,
+            "transcription_models": 0,
+            "spaces": 0,
+            "mcp_servers": 0,
+        }
+        security_repo.all.return_value = []
+
+        await service.delete_security_classification(uuid.uuid4())
+        security_repo.delete.assert_awaited_once()
+
+    async def test_delete_with_force_skips_usage_check(self, service, security_repo):
+        # Even with usages > 0, force=True bypasses the guard. We don't
+        # call count_usages at all on this path — verify that.
+        security_repo.all.return_value = []
+
+        await service.delete_security_classification(uuid.uuid4(), force=True)
+        security_repo.count_usages.assert_not_called()
+        security_repo.delete.assert_awaited_once()

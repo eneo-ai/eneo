@@ -30,3 +30,4 @@ class EntityType(str, Enum):
     SESSION = "session"
     MCP_SERVER = "mcp_server"
     MCP_SERVER_TOOL = "mcp_server_tool"
+    USER_GROUP = "user_group"

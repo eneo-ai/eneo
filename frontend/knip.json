@@ -1,0 +1,26 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignore": ["**/paraglide/**", "src/paraglide/**", "**/tests/**"],
+  "ignoreDependencies": ["@intric/icons.*", "prettier", "prettier-plugin-.*"],
+  "ignoreWorkspaces": ["apps/docs-site"],
+  "rules": {
+    "exports": "off",
+    "nsExports": "off",
+    "types": "off",
+    "nsTypes": "off",
+    "enumMembers": "off"
+  },
+  "workspaces": {
+    "apps/web": {
+      "entry": ["src/hooks.ts"],
+      "ignore": ["src/lib/paraglide/**"]
+    },
+    "packages/ui": {
+      "ignore": ["src/icons/Icon.svelte"]
+    },
+    "packages/intric-js": {
+      "ignoreDependencies": ["openapi-typescript"]
+    },
+    "packages/eslint-plugin": {}
+  }
+}

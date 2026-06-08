@@ -47,7 +47,11 @@ class TranscriptionModelRepository:
                 sa.or_(
                     TranscriptionModels.tenant_id.is_(None),
                     TranscriptionModels.tenant_id == self.user.tenant_id,
-                )
+                ),
+                # Soft-deleted models are tombstones kept only so migration
+                # history and lingering app references resolve; never surface
+                # them to readers.
+                TranscriptionModels.deleted_at.is_(None),
             )
             .order_by(
                 TranscriptionModels.org,
@@ -94,6 +98,9 @@ class TranscriptionModelRepository:
                     TranscriptionModels.tenant_id.is_(None),
                     TranscriptionModels.tenant_id == self.user.tenant_id,
                 ),
+                # Soft-deleted models are invisible to all callers (including the
+                # migration engine, which must not migrate from/to a tombstone).
+                TranscriptionModels.deleted_at.is_(None),
             )
         )
 

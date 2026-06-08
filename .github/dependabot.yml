@@ -1,0 +1,185 @@
+version: 2
+
+# Dependabot version updates are intentionally paused while we stabilize the
+# initial security rollout and close the noisy first batch of generated PRs.
+#
+# Re-enable one ecosystem at a time by raising its open-pull-requests-limit
+# from 0 to 1. Do not raise all ecosystems together.
+updates:
+  - package-ecosystem: "uv"
+    directory: "/backend"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Stockholm"
+    open-pull-requests-limit: 0
+    rebase-strategy: "disabled"
+    labels:
+      - "dependencies"
+      - "backend"
+      - "python:uv"
+    commit-message:
+      prefix: "deps(backend)"
+    groups:
+      backend-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "bun"
+    directory: "/frontend"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:30"
+      timezone: "Europe/Stockholm"
+    open-pull-requests-limit: 0
+    rebase-strategy: "disabled"
+    labels:
+      - "dependencies"
+      - "frontend"
+    commit-message:
+      prefix: "deps(frontend)"
+    groups:
+      frontend-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Europe/Stockholm"
+    open-pull-requests-limit: 0
+    rebase-strategy: "disabled"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "deps(actions)"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "docker"
+    directory: "/backend"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:30"
+      timezone: "Europe/Stockholm"
+    open-pull-requests-limit: 0
+    rebase-strategy: "disabled"
+    labels:
+      - "dependencies"
+      - "docker"
+      - "backend"
+    commit-message:
+      prefix: "deps(docker)"
+    groups:
+      backend-docker-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Eneo currently runs Python 3.11 in CI, Docker, devcontainer, and pyright.
+      # Runtime upgrades should be deliberate PRs, not automatic dependency noise.
+      - dependency-name: "python"
+        versions:
+          - ">=3.12"
+
+  - package-ecosystem: "docker"
+    directory: "/frontend"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:45"
+      timezone: "Europe/Stockholm"
+    open-pull-requests-limit: 0
+    rebase-strategy: "disabled"
+    labels:
+      - "dependencies"
+      - "docker"
+      - "frontend"
+    commit-message:
+      prefix: "deps(docker)"
+    groups:
+      frontend-docker-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Keep Node runtime upgrades explicit until the frontend runtime is reviewed.
+      - dependency-name: "node"
+        versions:
+          - ">=21"
+
+  - package-ecosystem: "docker"
+    directory: "/.devcontainer"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Europe/Stockholm"
+    open-pull-requests-limit: 0
+    rebase-strategy: "disabled"
+    labels:
+      - "dependencies"
+      - "docker"
+      - "devcontainer"
+    commit-message:
+      prefix: "deps(devcontainer)"
+    groups:
+      devcontainer-docker-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Match the backend runtime until the team intentionally upgrades Python.
+      - dependency-name: "devcontainers/python"
+        versions:
+          - ">=3.12"
+
+  - package-ecosystem: "devcontainers"
+    directory: "/"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:15"
+      timezone: "Europe/Stockholm"
+    open-pull-requests-limit: 0
+    rebase-strategy: "disabled"
+    labels:
+      - "dependencies"
+      - "devcontainer"
+    commit-message:
+      prefix: "deps(devcontainer)"
+    groups:
+      devcontainer-features-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"

@@ -54,7 +54,9 @@
 {#if appError !== undefined}
   <div class="bg-secondary absolute inset-0 flex flex-col items-center justify-center">
     <div class="flex flex-col justify-center pb-12 text-center">
-      <div class="pb-4 text-2xl">Error {appError.status}: {appError.message}</div>
+      <div class="pb-4 text-2xl">
+        {m.error_status_message({ status: appError.status, message: appError.message })}
+      </div>
       <p class="text-lg">{m.were_experiencing_difficulties()}</p>
       <div class="flex items-center justify-center gap-2 text-lg">
         <p>{m.if_error_persists()}</p>
@@ -65,7 +67,7 @@
           >{m.delete_cookies()}</Button
         >
       </div>
-      <p class="pt-4">(Code: {appError.code})</p>
+      <p class="pt-4">{m.error_code({ code: appError.code })}</p>
     </div>
   </div>
 {/if}

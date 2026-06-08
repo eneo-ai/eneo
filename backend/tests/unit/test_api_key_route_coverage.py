@@ -61,6 +61,22 @@ def _route_has_dep_name(route, dep_name: str) -> bool:
     )
 
 
+def _route_resource_permission_types(route) -> set[str]:
+    resource_types: set[str] = set()
+    for dep in getattr(route, "dependencies", []):
+        fn = getattr(dep, "dependency", None)
+        if getattr(fn, "__name__", "") != "_resource_permission_dep":
+            continue
+        code = getattr(fn, "__code__", None)
+        closure = getattr(fn, "__closure__", None)
+        if code is None or closure is None:
+            continue
+        for name, cell in zip(code.co_freevars, closure):
+            if name == "resource_type":
+                resource_types.add(str(cell.cell_contents))
+    return resource_types
+
+
 def _find_route_by_method_and_paths(method: str, *paths: str):
     router = _get_router()
     for route in router.routes:
@@ -106,7 +122,7 @@ def _get_intric_src_path() -> pathlib.Path:
 # Each entry has a rationale — no silent omissions.
 INTENTIONALLY_UNGUARDED = {
     "/settings": "Admin settings endpoints are mounted on a dedicated router with admin scope + admin key guards",
-    "/users": "Admin user endpoints are mounted on users_admin_router with admin scope + admin key guards; /me/ and /tenant/ safe for any scoped key",
+    "/users": "Admin mutation endpoints (POST /admin/invite/, PATCH /admin/{id}/, DELETE /admin/{id}/, /api-keys/) are on users_admin_router with admin scope + admin key guards. GET / carries route-level admin scope + admin key guards (no-op for bearer tokens) so scoped API keys cannot enumerate the tenant directory while space-admin bearer users still populate member pickers. /me/ and /tenant/ safe for any scoped key.",
     "/admin": "Admin endpoints are mounted with admin scope + admin key guards",
     "/dashboard": "Read-only aggregation endpoint with scope guard",
     "/icons": "Public static assets",
@@ -573,7 +589,7 @@ class TestHighRiskExactRouteGuards:
             f"{label} should not require _api_key_permission_dep"
         )
 
-    def test_files_routes_have_scope_resource_and_delete_stash_guards(self):
+    def test_files_routes_have_scope_resource_and_delete_scope_guards(self):
         list_route = _find_route_by_method_and_paths("GET", "/files/", "/files")
         post_route = _find_route_by_method_and_paths("POST", "/files/", "/files")
         detail_get_route = _find_route_by_method_and_paths(
@@ -597,19 +613,33 @@ class TestHighRiskExactRouteGuards:
             )
 
         assert _route_has_dep_name(detail_delete_route, "_stash"), (
-            "DELETE /files/{id}/ missing deferred tenant-scope delete guard (_stash)"
+            "DELETE /files/{id}/ missing deferred file delete scope guard (_stash)"
         )
 
-    def test_prompts_route_has_scope_guard_without_resource_permission_guard(self):
+    def test_prompts_route_has_scope_and_resource_permission_guard(self):
         route = _find_route_by_method_and_paths(
             "GET", "/prompts/{id}/", "/prompts/{id}"
         )
         assert _route_has_dep_name(route, "_scope_check_dep"), (
             "GET /prompts/{id}/ missing _scope_check_dep"
         )
-        assert not _route_has_dep_name(route, "_resource_permission_dep"), (
-            "GET /prompts/{id}/ should not require resource-permission guard"
+        assert _route_has_dep_name(route, "_resource_permission_dep"), (
+            "GET /prompts/{id}/ missing _resource_permission_dep"
         )
+
+    def test_conversation_history_routes_require_conversation_permission(self):
+        for method, path in (
+            ("GET", "/conversations/"),
+            ("GET", "/conversations/{session_id}/"),
+            ("DELETE", "/conversations/{session_id}/"),
+            ("GET", "/assistants/{id}/sessions/"),
+            ("GET", "/assistants/{id}/sessions/{session_id}/"),
+            ("DELETE", "/assistants/{id}/sessions/{session_id}/"),
+        ):
+            route = _find_route_by_method_and_paths(method, path, path.rstrip("/"))
+            assert "conversations" in _route_resource_permission_types(route), (
+                f"{method} {path} missing conversations resource permission guard"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -879,7 +909,16 @@ class TestMutatingRoutesArePerRouteGuarded:
 # Closed vocabularies for resource_type values.
 # Fine-grained resource permissions map to Pydantic ResourcePermissions fields.
 RESOURCE_PERM_VOCABULARY: frozenset[str] = frozenset(
-    {"assistants", "apps", "spaces", "knowledge"}
+    {
+        "assistants",
+        "apps",
+        "spaces",
+        "knowledge",
+        "conversations",
+        "files",
+        "jobs",
+        "prompts",
+    }
 )
 
 # Scope-check vocabulary is different — it names specific resource kinds used
@@ -970,8 +1009,9 @@ class TestScopeCheckPathParamSafety:
             "DELETE",
             "/files/{id}/",
         ): "Files are owner-scoped: file_service.delete_file() calls "
-        "repo.delete_by_owner(id, user_id=self.user.id). The require_tenant_scope_for_delete "
-        "dep also blocks DELETE for non-tenant-scoped keys.",
+        "repo.delete_by_owner(id, user_id=self.user.id, tenant_id=self.user.tenant_id). "
+        "The file delete scope guard "
+        "blocks service keys because files are user-owned.",
         (
             "POST",
             "/files/{id}/signed-url/",

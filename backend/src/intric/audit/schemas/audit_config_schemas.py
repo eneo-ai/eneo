@@ -1,21 +1,12 @@
 """Pydantic schemas for audit category configuration."""
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from intric.audit.domain.action_types import ActionType
+from intric.audit.domain.category_types import CategoryType
 
-# Valid category names - must match CATEGORY_DESCRIPTIONS in category_mappings.py
-VALID_CATEGORIES = frozenset(
-    {
-        "admin_actions",
-        "user_actions",
-        "security_events",
-        "file_operations",
-        "integration_events",
-        "system_actions",
-        "audit_access",
-    }
-)
+# Valid category names - derived from CategoryType enum
+VALID_CATEGORIES = frozenset(category.value for category in CategoryType)
 
 # Valid action names - derived from ActionType enum
 VALID_ACTIONS = frozenset(action.value for action in ActionType)
@@ -23,12 +14,16 @@ VALID_ACTIONS = frozenset(action.value for action in ActionType)
 
 class CategoryConfig(BaseModel):
     """
-    Enriched category configuration with metadata for API responses.
+    Category configuration for API responses.
+
+    Display text is intentionally omitted: the frontend translates ``category``
+    by key (``audit_category_{category}`` / ``_description``).
     """
 
-    category: str = Field(..., description="Category name (e.g., 'admin_actions')")
+    category: CategoryType = Field(
+        ..., description="Category key (e.g., 'admin_actions')"
+    )
     enabled: bool = Field(..., description="Whether category is currently enabled")
-    description: str = Field(..., description="Human-readable description of category")
     action_count: int = Field(
         ..., description="Number of action types in this category"
     )
@@ -36,20 +31,20 @@ class CategoryConfig(BaseModel):
         ..., description="Sample action types (max 3) for UI display"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "category": "admin_actions",
                 "enabled": True,
-                "description": "User management, role changes, API keys, tenant settings",
                 "action_count": 13,
                 "example_actions": [
-                    "USER_CREATED",
-                    "ROLE_DELETED",
-                    "API_KEY_GENERATED",
+                    "user_created",
+                    "role_deleted",
+                    "api_key_generated",
                 ],
             }
         }
+    )
 
 
 class CategoryUpdate(BaseModel):
@@ -69,8 +64,9 @@ class CategoryUpdate(BaseModel):
             raise ValueError(f"Invalid category '{v}'. Must be one of: {valid_list}")
         return v
 
-    class Config:
-        json_schema_extra = {"example": {"category": "admin_actions", "enabled": False}}
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"category": "admin_actions", "enabled": False}}
+    )
 
 
 class AuditConfigResponse(BaseModel):
@@ -83,35 +79,34 @@ class AuditConfigResponse(BaseModel):
         ..., description="List of all audit categories with configuration and metadata"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "categories": [
                     {
                         "category": "admin_actions",
                         "enabled": True,
-                        "description": "User management, role changes, API keys, tenant settings",
                         "action_count": 13,
                         "example_actions": [
-                            "USER_CREATED",
-                            "ROLE_DELETED",
-                            "API_KEY_GENERATED",
+                            "user_created",
+                            "role_deleted",
+                            "api_key_generated",
                         ],
                     },
                     {
                         "category": "user_actions",
                         "enabled": True,
-                        "description": "Assistant, space, app operations, templates, model configs",
                         "action_count": 28,
                         "example_actions": [
-                            "ASSISTANT_CREATED",
-                            "SPACE_DELETED",
-                            "APP_EXECUTED",
+                            "assistant_created",
+                            "space_deleted",
+                            "app_executed",
                         ],
                     },
                 ]
             }
         }
+    )
 
 
 class AuditConfigUpdateRequest(BaseModel):
@@ -127,8 +122,8 @@ class AuditConfigUpdateRequest(BaseModel):
         max_length=7,
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "updates": [
                     {"category": "admin_actions", "enabled": False},
@@ -136,29 +131,32 @@ class AuditConfigUpdateRequest(BaseModel):
                 ]
             }
         }
+    )
 
 
 class ActionConfig(BaseModel):
     """
-    Configuration for a single action type with metadata for UI display.
+    Configuration for a single action type.
+
+    Display text is intentionally omitted: the frontend translates ``action``
+    by key (``audit_action_{action}`` / ``_description``).
     """
 
-    action: str = Field(..., description="Action type value (e.g., 'user_created')")
+    action: ActionType = Field(
+        ..., description="Action type key (e.g., 'user_created')"
+    )
     enabled: bool = Field(..., description="Whether this action is currently enabled")
-    category: str = Field(..., description="Category this action belongs to")
-    name_sv: str = Field(..., description="Swedish display name")
-    description_sv: str = Field(..., description="Swedish description")
+    category: CategoryType = Field(..., description="Category this action belongs to")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "action": "user_created",
                 "enabled": True,
                 "category": "admin_actions",
-                "name_sv": "Användare skapad",
-                "description_sv": "Loggar när en ny användare skapas",
             }
         }
+    )
 
 
 class ActionConfigResponse(BaseModel):
@@ -171,27 +169,24 @@ class ActionConfigResponse(BaseModel):
         ..., description="List of all actions with configuration and Swedish metadata"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "actions": [
                     {
                         "action": "user_created",
                         "enabled": True,
                         "category": "admin_actions",
-                        "name_sv": "Användare skapad",
-                        "description_sv": "Loggar när en ny användare skapas",
                     },
                     {
                         "action": "user_deleted",
                         "enabled": False,
                         "category": "admin_actions",
-                        "name_sv": "Användare raderad",
-                        "description_sv": "Loggar när en användare tas bort",
                     },
                 ]
             }
         }
+    )
 
 
 class ActionUpdate(BaseModel):
@@ -213,8 +208,9 @@ class ActionUpdate(BaseModel):
             )
         return v
 
-    class Config:
-        json_schema_extra = {"example": {"action": "user_created", "enabled": False}}
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"action": "user_created", "enabled": False}}
+    )
 
 
 class ActionConfigUpdateRequest(BaseModel):
@@ -230,8 +226,8 @@ class ActionConfigUpdateRequest(BaseModel):
         max_length=65,
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "updates": [
                     {"action": "user_created", "enabled": False},
@@ -239,3 +235,4 @@ class ActionConfigUpdateRequest(BaseModel):
                 ]
             }
         }
+    )

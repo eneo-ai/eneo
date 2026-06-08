@@ -24,7 +24,12 @@ from intric.icons.icon_repo import IconRepository
 from intric.logging.logging import LoggingDetails
 from intric.main.exceptions import BadRequestException, UnauthorizedException
 from intric.main.logging import get_logger
-from intric.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
+from intric.main.models import (
+    NOT_PROVIDED,
+    NotProvided,
+    ResourcePermission,
+    is_provided,
+)
 from intric.prompts.api.prompt_models import PromptCreate
 from intric.prompts.prompt import Prompt
 from intric.prompts.prompt_service import PromptService
@@ -250,7 +255,7 @@ class AssistantService:
         if (
             template.completion_model
             and template.completion_model.id
-            and space.is_completion_model_in_space(template.completion_model.id)
+            and space.is_completion_model_available(template.completion_model.id)
         ):
             completion_model = space.get_completion_model(template.completion_model.id)
 
@@ -359,9 +364,62 @@ class AssistantService:
 
         assistant = space.get_assistant(assistant_id=assistant_id)
 
-        if not actor.can_edit_assistants():
+        # Access to the personal default assistant requires PERSONAL_CHAT.
+        # That permission permits model selection only; broader configuration
+        # changes additionally require ASSISTANTS below.
+        is_personal_default = (
+            space.is_personal()
+            and space.default_assistant is not None
+            and assistant.id == space.default_assistant.id
+        )
+
+        can_edit_default = (
+            actor.can_edit_default_assistant() if is_personal_default else False
+        )
+        can_edit_assistants = actor.can_edit_assistants()
+        if not (can_edit_default if is_personal_default else can_edit_assistants):
             raise UnauthorizedException(
                 "You do not have permission to edit assistants in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "update",
+                    "auth_layer": "domain_policy",
+                },
+            )
+
+        extended_update_requested = any(
+            value is not None
+            for value in (
+                name,
+                prompt,
+                completion_model_kwargs,
+                logging_enabled,
+                groups,
+                websites,
+                integration_knowledge_ids,
+                mcp_server_ids,
+                mcp_tools,
+                attachment_ids,
+                insight_enabled,
+            )
+        ) or any(
+            is_provided(value)
+            for value in (
+                description,
+                data_retention_days,
+                metadata_json,
+                icon_id,
+            )
+        )
+        if (
+            is_personal_default
+            and extended_update_requested
+            and not can_edit_assistants
+        ):
+            raise UnauthorizedException(
+                "The personal_chat permission only allows changing the "
+                "personal assistant's completion model.",
                 code="forbidden_action",
                 context={
                     "resource_type": "assistant",
@@ -375,12 +433,25 @@ class AssistantService:
             # Create the prompt if the prompt contains text
             # Update the description if the prompt contains description
             if prompt.text:
+                # Attribute the prompt to the assistant's owner, not the
+                # caller. Keeps service-key edits FK-safe (synthetic id has
+                # no `users` row) and makes admin edits to others'
+                # assistants attribute correctly.
+                prompt_owner_id = (
+                    assistant.user.id if assistant.user is not None else self.user.id
+                )
                 prompt_obj = await self.prompt_service.create_prompt(
-                    prompt.text, prompt.description
+                    prompt.text,
+                    prompt.description,
+                    owner_user_id=prompt_owner_id,
                 )
 
         completion_model = None
         if completion_model_id is not None:
+            if not space.is_completion_model_available(completion_model_id):
+                raise BadRequestException(
+                    "The completion model is not enabled in the space."
+                )
             completion_model = space.get_completion_model(completion_model_id)
 
         attachments = None
@@ -521,7 +592,20 @@ class AssistantService:
         assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
-        if not actor.can_read_assistants():
+        # The personal chat is the personal space's default assistant — it is
+        # gated by PERSONAL_CHAT (via can_read_default_assistant), not ASSISTANTS,
+        # so a baseline role can use the chat without managing assistants.
+        is_personal_default = (
+            space.is_personal()
+            and space.default_assistant is not None
+            and assistant.id == space.default_assistant.id
+        )
+        can_read = (
+            actor.can_read_default_assistant()
+            if is_personal_default
+            else actor.can_read_assistants()
+        )
+        if not can_read:
             raise UnauthorizedException(
                 "You do not have permission to read assistants in this space.",
                 code="forbidden_action",
@@ -658,10 +742,14 @@ class AssistantService:
         session: "SessionInDB",
         stream: bool,
         assistant_id: UUID,
+        question_id: UUID,
         version: int = 1,
         web_search_results: Sequence["WebSearchResult"] | None = None,
         assistant_selector_tokens: int = 0,
     ) -> str | AsyncGenerator[Completion, None]:
+        # Capture tenant_id outside the generator so the abort-path background save
+        # doesn't depend on self.user being safely accessible during teardown.
+        tenant_id = self.user.tenant_id
         if stream:
 
             async def response_stream() -> AsyncGenerator[Completion, None]:
@@ -670,193 +758,231 @@ class AssistantService:
                 generated_files: list[File] = []
                 tool_calls: list[ToolCallInfo] = []
                 stream_usage: TokenUsage | None = None
+                completed = False
 
-                completion = response.completion
-                if isinstance(completion, str):
-                    raise TypeError("Expected streaming completion response")
+                try:
+                    completion = response.completion
+                    if isinstance(completion, str):
+                        raise TypeError("Expected streaming completion response")
 
-                async for chunk in completion:
-                    reasoning_token_count = chunk.reasoning_token_count
-                    if chunk.usage:
-                        stream_usage = chunk.usage
+                    async for chunk in completion:
+                        reasoning_token_count = chunk.reasoning_token_count
+                        if chunk.usage:
+                            stream_usage = chunk.usage
 
-                    if chunk.response_type == ResponseType.TEXT:
-                        response_string = f"{response_string}{chunk.text}"
-                        chunk.reference_chunks = get_references(
-                            response_string=response_string,
-                            info_blobs=datastore_result.info_blobs,
-                            version=version,
-                        )
-                        yield chunk
+                        if chunk.response_type == ResponseType.TEXT:
+                            response_string = f"{response_string}{chunk.text}"
+                            chunk.reference_chunks = get_references(
+                                response_string=response_string,
+                                info_blobs=datastore_result.info_blobs,
+                                version=version,
+                            )
+                            yield chunk
 
-                    if chunk.response_type == ResponseType.FILES:
-                        image_file = await self.file_service.save_image_from_bytes(
-                            chunk.image_data
-                        )
+                        if chunk.response_type == ResponseType.FILES:
+                            image_file = await self.file_service.save_image_from_bytes(
+                                chunk.image_data
+                            )
 
-                        generated_files.append(image_file)
-                        chunk.generated_file = image_file
-                        yield chunk
+                            generated_files.append(image_file)
+                            chunk.generated_file = image_file
+                            yield chunk
 
-                    if chunk.response_type == ResponseType.INTRIC_EVENT:
-                        yield chunk
+                        if chunk.response_type == ResponseType.INTRIC_EVENT:
+                            yield chunk
 
-                    if chunk.response_type == ResponseType.TOOL_CALL:
-                        if chunk.tool_calls_metadata:
-                            for tc in chunk.tool_calls_metadata:
-                                # Check if this tool_call already exists (from TOOL_APPROVAL_REQUIRED)
-                                existing = next(
-                                    (
-                                        t
-                                        for t in tool_calls
-                                        if t.tool_call_id
-                                        and t.tool_call_id == tc.tool_call_id
-                                    ),
-                                    None,
-                                )
-                                if existing:
-                                    # Update existing entry with approval status
-                                    existing.approved = tc.approved
-                                    existing.result_status = tc.result_status
-                                    # The TOOL_CALL chunk after execution carries the
-                                    # tool output; keep it so later turns can replay.
-                                    if tc.result is not None:
-                                        existing.result = tc.result
-                                else:
-                                    # Add new tool call
-                                    tool_calls.append(
-                                        ToolCallInfo(
-                                            server_name=tc.server_name,
-                                            tool_name=tc.tool_name,
-                                            arguments=cast(
-                                                dict[str, object] | None,
-                                                tc.arguments,
-                                            ),
-                                            tool_call_id=tc.tool_call_id or "",
-                                            approved=tc.approved,
-                                            result_status=tc.result_status,
-                                            result=tc.result,
-                                            mcp_tool_name=tc.mcp_tool_name,
-                                        )
-                                    )
-                        yield chunk
-
-                    if chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
-                        # Collect tool calls for approval flow (approval status will be updated later)
-                        if chunk.tool_calls_metadata:
-                            for tc in chunk.tool_calls_metadata:
-                                tool_calls.append(
-                                    ToolCallInfo(
-                                        server_name=tc.server_name,
-                                        tool_name=tc.tool_name,
-                                        arguments=cast(
-                                            dict[str, object] | None, tc.arguments
+                        if chunk.response_type == ResponseType.TOOL_CALL:
+                            if chunk.tool_calls_metadata:
+                                for tc in chunk.tool_calls_metadata:
+                                    # Check if this tool_call already exists (from TOOL_APPROVAL_REQUIRED)
+                                    existing = next(
+                                        (
+                                            t
+                                            for t in tool_calls
+                                            if t.tool_call_id
+                                            and t.tool_call_id == tc.tool_call_id
                                         ),
-                                        tool_call_id=tc.tool_call_id or "",
-                                        approved=None,
-                                        result_status=tc.result_status,
-                                        mcp_tool_name=tc.mcp_tool_name,
+                                        None,
                                     )
-                                )
-                        yield chunk
+                                    if existing:
+                                        # Update existing entry with approval status
+                                        existing.approved = tc.approved
+                                        existing.result_status = tc.result_status
+                                        # The TOOL_CALL chunk after execution carries the
+                                        # tool output; keep it so later turns can replay.
+                                        if tc.result is not None:
+                                            existing.result = tc.result
+                                    else:
+                                        # Add new tool call
+                                        tool_calls.append(
+                                            ToolCallInfo(
+                                                server_name=tc.server_name,
+                                                tool_name=tc.tool_name,
+                                                arguments=cast(
+                                                    dict[str, object] | None,
+                                                    tc.arguments,
+                                                ),
+                                                tool_call_id=tc.tool_call_id,
+                                                approved=tc.approved,
+                                                result_status=tc.result_status,
+                                                result=tc.result,
+                                                mcp_tool_name=tc.mcp_tool_name,
+                                            )
+                                        )
+                            yield chunk
 
-                    if chunk.response_type == ResponseType.TOOL_APPROVAL_TIMEOUT:
-                        if chunk.tool_calls_metadata:
-                            for tc in chunk.tool_calls_metadata:
-                                existing = next(
-                                    (
-                                        t
-                                        for t in tool_calls
-                                        if t.tool_call_id
-                                        and t.tool_call_id == tc.tool_call_id
-                                    ),
-                                    None,
-                                )
-                                if existing:
-                                    existing.approved = False
-                                    existing.result_status = (
-                                        tc.result_status or "timeout_denied"
-                                    )
-                                else:
+                        if chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
+                            # Collect tool calls for approval flow (approval status will be updated later)
+                            if chunk.tool_calls_metadata:
+                                for tc in chunk.tool_calls_metadata:
                                     tool_calls.append(
                                         ToolCallInfo(
                                             server_name=tc.server_name,
                                             tool_name=tc.tool_name,
                                             arguments=cast(
-                                                dict[str, object] | None,
-                                                tc.arguments,
+                                                dict[str, object] | None, tc.arguments
                                             ),
-                                            tool_call_id=tc.tool_call_id or "",
-                                            approved=False,
-                                            result_status=tc.result_status
-                                            or "timeout_denied",
+                                            tool_call_id=tc.tool_call_id,
+                                            approved=None,
+                                            result_status=tc.result_status,
                                             mcp_tool_name=tc.mcp_tool_name,
                                         )
                                     )
-                        yield chunk
+                            yield chunk
 
-                # Get the references for the whole response
-                reference_chunks = get_references(
-                    response_string=response_string,
-                    info_blobs=datastore_result.no_duplicate_chunks,
-                    version=version,
-                    get_id_func=lambda chunk: chunk.info_blob_id,
-                )
-                # Prefer actual provider token counts, fall back to litellm estimates
-                if stream_usage and stream_usage.prompt_tokens is not None:
-                    num_tokens_question = (
-                        stream_usage.prompt_tokens + assistant_selector_tokens
+                        if chunk.response_type == ResponseType.TOOL_APPROVAL_TIMEOUT:
+                            if chunk.tool_calls_metadata:
+                                for tc in chunk.tool_calls_metadata:
+                                    existing = next(
+                                        (
+                                            t
+                                            for t in tool_calls
+                                            if t.tool_call_id
+                                            and t.tool_call_id == tc.tool_call_id
+                                        ),
+                                        None,
+                                    )
+                                    if existing:
+                                        existing.approved = False
+                                        existing.result_status = (
+                                            tc.result_status or "timeout_denied"
+                                        )
+                                    else:
+                                        tool_calls.append(
+                                            ToolCallInfo(
+                                                server_name=tc.server_name,
+                                                tool_name=tc.tool_name,
+                                                arguments=cast(
+                                                    dict[str, object] | None,
+                                                    tc.arguments,
+                                                ),
+                                                tool_call_id=tc.tool_call_id,
+                                                approved=False,
+                                                result_status=tc.result_status
+                                                or "timeout_denied",
+                                                mcp_tool_name=tc.mcp_tool_name,
+                                            )
+                                        )
+                            yield chunk
+
+                    # Get the references for the whole response
+                    reference_chunks = get_references(
+                        response_string=response_string,
+                        info_blobs=datastore_result.no_duplicate_chunks,
+                        version=version,
+                        get_id_func=lambda chunk: chunk.info_blob_id,
                     )
-                    input_source = "provider"
-                else:
-                    num_tokens_question = (
-                        response.total_token_count + assistant_selector_tokens
+                    # Prefer actual provider token counts, fall back to litellm estimates
+                    if stream_usage and stream_usage.prompt_tokens is not None:
+                        num_tokens_question = (
+                            stream_usage.prompt_tokens + assistant_selector_tokens
+                        )
+                        input_source = "provider"
+                    else:
+                        num_tokens_question = (
+                            response.total_token_count + assistant_selector_tokens
+                        )
+                        input_source = "litellm"
+
+                    if stream_usage and stream_usage.completion_tokens is not None:
+                        num_tokens_answer = stream_usage.completion_tokens
+                        output_source = "provider"
+                    else:
+                        assert completion_model is not None
+                        num_tokens_answer = (
+                            count_tokens(response_string, completion_model.name)
+                            + reasoning_token_count
+                        )
+                        output_source = "litellm"
+
+                    logger.info(
+                        f"[TokenUsage] assistant={assistant_id} streaming — "
+                        f"input={num_tokens_question} ({input_source}), "
+                        f"output={num_tokens_answer} ({output_source})"
                     )
-                    input_source = "litellm"
 
-                if stream_usage and stream_usage.completion_tokens is not None:
-                    num_tokens_answer = stream_usage.completion_tokens
-                    output_source = "provider"
-                else:
-                    assert completion_model is not None
-                    num_tokens_answer = (
-                        count_tokens(response_string, completion_model.name)
-                        + reasoning_token_count
+                    await self.session_service.complete_question_with_answer(
+                        question_id=question_id,
+                        answer=response_string,
+                        num_tokens_question=num_tokens_question,
+                        num_tokens_answer=num_tokens_answer,
+                        completion_model=cast("AICompletionModel", completion_model),
+                        info_blob_chunks=reference_chunks,
+                        generated_files=generated_files,
+                        logging_details=response.extended_logging
+                        or LoggingDetails(model_kwargs={}),
+                        web_search_results=list(web_search_results or []),
+                        tool_calls=tool_calls if tool_calls else None,
                     )
-                    output_source = "litellm"
+                    completed = True
 
-                logger.info(
-                    f"[TokenUsage] assistant={assistant_id} streaming — "
-                    f"input={num_tokens_question} ({input_source}), "
-                    f"output={num_tokens_answer} ({output_source})"
-                )
+                    # Send token usage event to frontend
+                    yield Completion(
+                        text="",
+                        response_type=ResponseType.TOKEN_USAGE,
+                        usage=TokenUsage(
+                            prompt_tokens=num_tokens_question,
+                            completion_tokens=num_tokens_answer,
+                        ),
+                    )
+                finally:
+                    # Stream did not reach normal completion: client abort, LLM
+                    # error, network drop, etc. The placeholder row already captures
+                    # the user's question, so an empty `response_string` means there
+                    # is nothing further to persist — skip the redundant UPDATE.
+                    # Anything else (partial answer streamed before abort) must be
+                    # saved via a fresh DB session because the request-scoped
+                    # AsyncSession may already be torn down and `await` across
+                    # GeneratorExit is fragile.
+                    if not completed and response_string:
+                        from intric.sessions.session_service import (
+                            persist_partial_question_answer,
+                            safe_count_tokens,
+                            schedule_background_save,
+                        )
 
-                await self.session_service.add_question_to_session(
-                    question=question,
-                    answer=response_string,
-                    num_tokens_question=num_tokens_question,
-                    num_tokens_answer=num_tokens_answer,
-                    session=session,
-                    completion_model=cast("AICompletionModel", completion_model),
-                    info_blob_chunks=reference_chunks,
-                    files=list(files),
-                    generated_files=generated_files,
-                    logging_details=response.extended_logging
-                    or LoggingDetails(model_kwargs={}),
-                    assistant_id=assistant_id,
-                    web_search_results=list(web_search_results or []),
-                    tool_calls=tool_calls if tool_calls else None,
-                )
-
-                # Send token usage event to frontend
-                yield Completion(
-                    text="",
-                    response_type=ResponseType.TOKEN_USAGE,
-                    usage=TokenUsage(
-                        prompt_tokens=num_tokens_question,
-                        completion_tokens=num_tokens_answer,
-                    ),
-                )
+                        model_name = (
+                            completion_model.name
+                            if completion_model is not None
+                            else None
+                        )
+                        partial_tokens_answer = (
+                            safe_count_tokens(response_string, model_name)
+                            + reasoning_token_count
+                        )
+                        schedule_background_save(
+                            persist_partial_question_answer(
+                                tenant_id=tenant_id,
+                                question_id=question_id,
+                                answer=response_string,
+                                num_tokens_answer=partial_tokens_answer,
+                            )
+                        )
+                        logger.info(
+                            "Scheduled partial chat answer save on stream abort: "
+                            f"assistant={assistant_id} question_id={question_id} "
+                            f"answer_chars={len(response_string)}"
+                        )
 
             return response_stream()
         else:
@@ -907,19 +1033,16 @@ class AssistantService:
                 f"output={num_tokens_answer} ({output_source})"
             )
 
-            await self.session_service.add_question_to_session(
-                question=question,
+            await self.session_service.complete_question_with_answer(
+                question_id=question_id,
                 answer=final_answer,
                 num_tokens_question=num_tokens_question,
                 num_tokens_answer=num_tokens_answer,
-                files=list(files),
                 generated_files=generated_files,
                 completion_model=cast("AICompletionModel", completion_model),
                 info_blob_chunks=reference_chunks,
-                session=session,
                 logging_details=response.extended_logging
                 or LoggingDetails(model_kwargs={}),
-                assistant_id=assistant_id,
                 web_search_results=list(web_search_results or []),
             )
 
@@ -962,7 +1085,20 @@ class AssistantService:
         active_assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
-        if not actor.can_read_assistant(assistant=active_assistant):
+        # The personal chat is the personal space's default assistant — gated by
+        # PERSONAL_CHAT (via can_read_default_assistant), not ASSISTANTS, so a
+        # baseline role can chat without managing assistants.
+        is_personal_default = (
+            space.is_personal()
+            and space.default_assistant is not None
+            and active_assistant.id == space.default_assistant.id
+        )
+        can_use = (
+            actor.can_read_default_assistant()
+            if is_personal_default
+            else actor.can_read_assistant(assistant=active_assistant)
+        )
+        if not can_use:
             raise UnauthorizedException(
                 "You do not have permission to use this assistant.",
                 code="forbidden_action",
@@ -1016,6 +1152,19 @@ class AssistantService:
         for _question in session.questions:
             _question.question = clean_intric_tag(_question.question)
 
+        # Persist a placeholder Question row BEFORE the LLM stream begins. This commits
+        # with the router's setup transaction (conversations_router.py line 300/328), so
+        # the user's message is durable even if the stream is aborted mid-flight.
+        question_id = await self.session_service.create_question_placeholder(
+            question=question,
+            session=session,
+            files=files,
+            assistant_id=assistant_to_ask.id,
+            completion_model=cast(
+                "AICompletionModel | None", assistant_to_ask.completion_model
+            ),
+        )
+
         if use_web_search and version == 2:
             web_search = await self.web_search
             web_search_results = await web_search.search(search_query=question)
@@ -1046,6 +1195,7 @@ class AssistantService:
             session=session,
             stream=stream,
             assistant_id=assistant_to_ask.id,
+            question_id=question_id,
             version=version,
             web_search_results=web_search_results,
             assistant_selector_tokens=assistant_selector_tokens,
@@ -1071,6 +1221,7 @@ class AssistantService:
             ),
             description=assistant_to_ask.description,
             web_search_results=web_search_results,
+            question_id=question_id,
         )
 
         return final_response

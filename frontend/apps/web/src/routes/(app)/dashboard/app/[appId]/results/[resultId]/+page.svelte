@@ -110,7 +110,7 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Dashboard – {data.app.name}</title>
+  <title>Eneo.ai – {m.dashboard()} – {data.app.name}</title>
 </svelte:head>
 
 {#snippet downloadButtons(type: "output" | "transcription", text?: string)}

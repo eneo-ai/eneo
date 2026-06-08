@@ -53,7 +53,7 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Account – {m.my_integrations()}</title>
+  <title>Eneo.ai – {m.account()} – {m.my_integrations()}</title>
 </svelte:head>
 
 <Page.Root>

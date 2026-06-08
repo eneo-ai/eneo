@@ -684,7 +684,7 @@
                               class="flex items-center gap-1.5 text-[10px] text-[var(--text-muted)] opacity-70"
                             >
                               <Clock class="h-2.5 w-2.5" />
-                              <span>Uppdaterad {formattedLastUpdated}</span>
+                              <span>{m.updated_at({ time: formattedLastUpdated })}</span>
                             </span>
                           {/if}
                         </div>
@@ -978,7 +978,7 @@
                             >
                               <div class="flex min-w-[130px] flex-col gap-1.5 text-[11px]">
                                 <div class="flex items-center justify-between gap-4">
-                                  <span class="text-[var(--text-muted)]">Inmatning</span>
+                                  <span class="text-[var(--text-muted)]">{m.insights_input()}</span>
                                   <span
                                     class="font-medium text-[var(--text-secondary)] tabular-nums"
                                   >
@@ -986,7 +986,8 @@
                                   </span>
                                 </div>
                                 <div class="flex items-center justify-between gap-4">
-                                  <span class="text-[var(--text-muted)]">Utmatning</span>
+                                  <span class="text-[var(--text-muted)]">{m.insights_output()}</span
+                                  >
                                   <span
                                     class="font-medium text-[var(--text-secondary)] tabular-nums"
                                   >
@@ -997,7 +998,9 @@
                                   <div
                                     class="mt-0.5 flex items-center justify-between gap-4 border-t border-[var(--border-dimmer)] pt-1.5"
                                   >
-                                    <span class="text-[var(--text-muted)]">Per konv</span>
+                                    <span class="text-[var(--text-muted)]"
+                                      >{m.insights_per_conv()}</span
+                                    >
                                     <span class="text-[var(--text-muted)] tabular-nums">
                                       ~{formatNumber(tokensPerConversation, "compact")}
                                     </span>

@@ -22,7 +22,7 @@
   } = getSpacesManager();
 
   const {
-    elements: { menu, input, option },
+    elements: { menu, input, option, label },
     states: { open, inputValue, selected }
   } = createCombobox<UserGroup>({
     portal: null,
@@ -65,12 +65,12 @@
   }
 
   const addGroupMember = createAsyncState(async () => {
-    const id = $selected?.value.id;
-    if (!id) return;
+    const selectedGroup = $selected?.value;
+    if (!selectedGroup) return;
     try {
       await intric.spaces.groupMembers.add({
         spaceId: $currentSpace.id,
-        group: { id, role: selectedRole.value }
+        group: { id: selectedGroup.id, role: selectedRole.value }
       });
       refreshCurrentSpace();
       $showDialog = false;
@@ -94,7 +94,7 @@
       <div class="hover:bg-hover-dimmer flex items-center rounded-md">
         <div class="flex flex-grow flex-col gap-1 rounded-md pt-2 pr-2 pb-4 pl-4">
           <div>
-            <span class="pl-3 font-medium">{m.user_group()}</span>
+            <label use:label {...$label} class="pl-3 font-medium">{m.user_group()}</label>
           </div>
 
           <div class="relative flex flex-grow">

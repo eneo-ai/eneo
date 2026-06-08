@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Literal, Optional
+from typing import TYPE_CHECKING, Literal, Optional
 from uuid import UUID
 
 from pydantic import (
@@ -9,10 +9,15 @@ from pydantic import (
     EmailStr,
     Field,
     ValidationInfo,
+    field_serializer,
     field_validator,
 )
 
+from intric.audit.domain.actor_types import ActorType
 from intric.main.config import get_settings
+
+if TYPE_CHECKING:
+    from intric.users.user import UserInDB
 
 
 class JWTMeta(BaseModel):
@@ -47,6 +52,37 @@ class AccessToken(BaseModel):
 class ApiKeyOwnership(str, Enum):
     USER = "user"
     SERVICE = "service"
+
+
+def is_service_api_key(user: "UserInDB") -> bool:
+    """Single source of truth: is the request authenticated via a service API key?
+
+    Service keys resolve to a synthetic UserInDB with no roles. Callers that
+    need to bypass role-based gates (because service keys authorize via
+    scope+permission instead) should use this check.
+
+    Accepts any user-like object — raw SQLAlchemy `Users` rows (e.g. from
+    test fixtures constructing a SpaceActor directly) lack `active_api_key`
+    entirely, so the getattr guard avoids AttributeError and correctly
+    reports "not a service key" for those paths.
+    """
+    key = getattr(user, "active_api_key", None)
+    if key is None:
+        return False
+    return key.ownership == ApiKeyOwnership.SERVICE
+
+
+def audit_actor_for(user: "UserInDB") -> tuple[UUID | None, ActorType]:
+    """Resolve (actor_id, actor_type) for an audit_log entry on this request.
+
+    Service keys have no real user row — passing the synthetic user.id into
+    audit_log.actor_id (FK to users.id) would FK-violate. Mirror the gating
+    pattern used by user_service._log_api_key_used: emit (None, SYSTEM) for
+    service keys, (user.id, USER) for real users.
+    """
+    if is_service_api_key(user):
+        return None, ActorType.SYSTEM
+    return user.id, ActorType.USER
 
 
 class ApiKeyType(str, Enum):
@@ -101,20 +137,39 @@ class ResourcePermissionLevel(str, Enum):
 
 
 class ResourcePermissions(BaseModel):
-    """Per-resource-type permission overrides for sk_ keys.
+    """Per-resource-type permission overrides for API keys.
 
     For sk_ keys, the top-level ``permission`` field is derived automatically
-    as ``max(assistants, apps, spaces, knowledge)`` by
-    :func:`derive_permission_from_resource_permissions`.  pk_ keys do not
-    support fine-grained permissions.
+    as the maximum configured level by
+    :func:`derive_permission_from_resource_permissions`.  pk_ keys may use the
+    same shape, but policy validation caps each resource at ``read``.
     """
 
     assistants: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     apps: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     spaces: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     knowledge: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    conversations: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    files: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    jobs: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    prompts: ResourcePermissionLevel = ResourcePermissionLevel.NONE
 
     model_config = ConfigDict(extra="forbid")
+
+
+RESOURCE_PERMISSION_FIELDS: tuple[str, ...] = (
+    "assistants",
+    "apps",
+    "spaces",
+    "knowledge",
+    "conversations",
+    "files",
+    "jobs",
+    "prompts",
+)
+
+
+PK_FORBIDDEN_RESOURCE_FIELDS: tuple[str, ...] = ("jobs", "prompts")
 
 
 _LEVEL_TO_PERMISSION: dict[int, ApiKeyPermission] = {
@@ -134,12 +189,18 @@ def derive_permission_from_resource_permissions(
     If all resource types are ``none``, defaults to ``read``.
     """
     max_level = max(
-        PERMISSION_LEVEL_ORDER.get(rp.assistants.value, 0),
-        PERMISSION_LEVEL_ORDER.get(rp.apps.value, 0),
-        PERMISSION_LEVEL_ORDER.get(rp.spaces.value, 0),
-        PERMISSION_LEVEL_ORDER.get(rp.knowledge.value, 0),
+        PERMISSION_LEVEL_ORDER.get(getattr(rp, field).value, 0)
+        for field in RESOURCE_PERMISSION_FIELDS
     )
     return _LEVEL_TO_PERMISSION.get(max_level, ApiKeyPermission.READ)
+
+
+def default_public_resource_permissions() -> ResourcePermissions:
+    """Safe default allowlist for newly created browser/public keys."""
+    return ResourcePermissions(
+        assistants=ResourcePermissionLevel.READ,
+        apps=ResourcePermissionLevel.READ,
+    )
 
 
 class ApiKeyScopeType(str, Enum):
@@ -202,7 +263,7 @@ def compute_effective_state(
     if rotation_grace_until is not None:
         if rotation_grace_until.tzinfo is None:
             rotation_grace_until = rotation_grace_until.replace(tzinfo=timezone.utc)
-        if rotation_grace_until < comparison_time:
+        if rotation_grace_until <= comparison_time:
             return ApiKeyState.REVOKED
     if suspended_at is not None:
         return ApiKeyState.SUSPENDED
@@ -242,6 +303,16 @@ class ApiKeyUpdateRequest(BaseModel):
 
 class ApiKeyExactLookupRequest(BaseModel):
     secret: str
+
+
+class ApiKeyExtendRequest(BaseModel):
+    expires_at: Optional[datetime] = None
+
+
+class ApiKeyRotateRequest(BaseModel):
+    update_expiration: bool = False
+    expires_at: Optional[datetime] = None
+    disable_grace_period: bool = False
 
 
 class ApiKeyUserSnapshot(BaseModel):
@@ -287,6 +358,14 @@ class ApiKeyV2(BaseModel):
     search_match_reasons: Optional[list[ApiKeySearchMatchReason]] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("resource_permissions")
+    def _serialize_resource_permissions(
+        self, resource_permissions: ResourcePermissions | None
+    ) -> dict[str, str] | None:
+        if resource_permissions is None:
+            return None
+        return resource_permissions.model_dump(mode="json", exclude_unset=True)
 
 
 class ApiKeyV2InDB(ApiKeyV2):

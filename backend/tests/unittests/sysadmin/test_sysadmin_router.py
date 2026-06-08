@@ -14,13 +14,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from intric.allowed_origins.allowed_origin_models import AllowedOriginCreate
 from intric.main.exceptions import NotFoundException
+from intric.scim.services.token_service import ScimTokenService
 from intric.sysadmin.sysadmin_router import (
-    add_origin,
-    delete_origin as delete_allowed_origin,
-    get_access_token,
+    create_scim_token,
+    delete_scim_token,
     delete_user,
+    get_access_token,
+    get_scim_token_status,
     get_user,
     update_user,
 )
@@ -186,119 +187,115 @@ class TestUpdateUser:
         user_service.update_user.assert_not_called()
 
 
-class TestAllowedOriginCacheInvalidation:
-    """Allowed-origin mutations should invalidate API-key origin cache immediately."""
+# ---------------------------------------------------------------------------
+# SCIM token endpoints
+# ---------------------------------------------------------------------------
 
-    async def test_add_origin_builds_policy_service_without_user_dependency(
-        self, monkeypatch
-    ):
+
+def _scim_session():
+    """Session mock that supports `async with session.begin():` (transaction
+    control only — DB access is mocked at the repository layer below)."""
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=None)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.begin = MagicMock(return_value=cm)
+    return session
+
+
+def _scim_container(repo, audit=None):
+    audit = audit or AsyncMock()
+    container = MagicMock()
+    container.session.return_value = _scim_session()
+    container.scim_token_service.return_value = ScimTokenService(
+        repository=repo, audit_service=audit
+    )
+    return container, audit
+
+
+class TestCreateScimToken:
+    async def test_returns_token_for_existing_tenant(self):
         tenant_id = uuid.uuid4()
-        origin = AllowedOriginCreate(
-            url="https://app.example.com",
-            tenant_id=tenant_id,
-        )
+        repo = AsyncMock()
+        repo.tenant_exists.return_value = True
+        container, _ = _scim_container(repo)
 
-        container = MagicMock()
-        allowed_origin_repo = AsyncMock()
-        allowed_origin_repo.add_origin = AsyncMock(
-            return_value=MagicMock(url=origin.url, tenant_id=tenant_id)
-        )
-        container.allowed_origin_repo.return_value = allowed_origin_repo
-        container.audit_service.return_value = AsyncMock(log_async=AsyncMock())
+        result = await create_scim_token(tenant_id=tenant_id, container=container)
 
-        captured_kwargs = {}
-        policy_service = MagicMock()
+        assert result.tenant_id == tenant_id
+        assert isinstance(result.token, str) and len(result.token) > 0
 
-        class _PolicyService:
-            def __init__(self, **kwargs):
-                nonlocal captured_kwargs
-                captured_kwargs = kwargs
-
-            def invalidate_tenant_origin_cache(self, tenant_id: uuid.UUID):
-                policy_service.invalidate_tenant_origin_cache(tenant_id)
-
-        monkeypatch.setattr(
-            "intric.sysadmin.sysadmin_router.ApiKeyPolicyService",
-            _PolicyService,
-        )
-
-        await add_origin(origin=origin, container=container)
-
-        assert (
-            captured_kwargs["allowed_origin_repo"]
-            is container.allowed_origin_repo.return_value
-        )
-        assert captured_kwargs["space_service"] is None
-        assert captured_kwargs["user"] is None
-        policy_service.invalidate_tenant_origin_cache.assert_called_once_with(tenant_id)
-
-    async def test_add_origin_invalidates_api_key_origin_cache(self, monkeypatch):
+    async def test_writes_to_db_and_logs_audit(self):
         tenant_id = uuid.uuid4()
-        origin = AllowedOriginCreate(
-            url="https://app.example.com",
-            tenant_id=tenant_id,
-        )
+        repo = AsyncMock()
+        repo.tenant_exists.return_value = True
+        container, audit = _scim_container(repo)
 
-        container = MagicMock()
-        allowed_origin_repo = AsyncMock()
-        allowed_origin_repo.add_origin = AsyncMock(
-            return_value=MagicMock(url=origin.url, tenant_id=tenant_id)
-        )
-        container.allowed_origin_repo.return_value = allowed_origin_repo
-        container.audit_service.return_value = AsyncMock(log_async=AsyncMock())
-        policy_service = MagicMock()
-        monkeypatch.setattr(
-            "intric.sysadmin.sysadmin_router.ApiKeyPolicyService",
-            MagicMock(return_value=policy_service),
-        )
+        await create_scim_token(tenant_id=tenant_id, container=container)
 
-        await add_origin(origin=origin, container=container)
+        repo.set_token_hash.assert_awaited_once()
+        audit.log.assert_called_once()
 
-        policy_service.invalidate_tenant_origin_cache.assert_called_once_with(tenant_id)
-
-    async def test_delete_origin_invalidates_api_key_origin_cache(self, monkeypatch):
+    async def test_raises_404_for_unknown_tenant(self):
         tenant_id = uuid.uuid4()
-        origin_id = uuid.uuid4()
+        repo = AsyncMock()
+        repo.tenant_exists.return_value = False
+        container, _ = _scim_container(repo)
 
-        container = MagicMock()
-        allowed_origin_repo = AsyncMock()
-        allowed_origin_repo.get_by_id = AsyncMock(
-            return_value=MagicMock(
-                id=origin_id,
-                url="https://app.example.com",
-                tenant_id=tenant_id,
-            )
-        )
-        allowed_origin_repo.delete = AsyncMock(return_value=None)
-        container.allowed_origin_repo.return_value = allowed_origin_repo
-        container.audit_service.return_value = AsyncMock(log_async=AsyncMock())
-        policy_service = MagicMock()
-        monkeypatch.setattr(
-            "intric.sysadmin.sysadmin_router.ApiKeyPolicyService",
-            MagicMock(return_value=policy_service),
-        )
+        with pytest.raises(NotFoundException):
+            await create_scim_token(tenant_id=tenant_id, container=container)
 
-        await delete_allowed_origin(id=origin_id, container=container)
 
-        policy_service.invalidate_tenant_origin_cache.assert_called_once_with(tenant_id)
+class TestGetScimTokenStatus:
+    async def test_returns_active_when_hash_present(self):
+        tenant_id = uuid.uuid4()
+        repo = AsyncMock()
+        repo.get_token_hash.return_value = (True, "abc123hash")
+        container, _ = _scim_container(repo)
 
-    async def test_delete_origin_missing_record_does_not_invalidate_cache(
-        self, monkeypatch
-    ):
-        origin_id = uuid.uuid4()
+        status = await get_scim_token_status(tenant_id=tenant_id, container=container)
 
-        container = MagicMock()
-        allowed_origin_repo = AsyncMock()
-        allowed_origin_repo.get_by_id = AsyncMock(return_value=None)
-        allowed_origin_repo.delete = AsyncMock(return_value=None)
-        container.allowed_origin_repo.return_value = allowed_origin_repo
-        container.audit_service.return_value = AsyncMock(log_async=AsyncMock())
-        policy_service = MagicMock()
-        monkeypatch.setattr(
-            "intric.sysadmin.sysadmin_router.ApiKeyPolicyService",
-            MagicMock(return_value=policy_service),
-        )
+        assert status.tenant_id == tenant_id
+        assert status.is_active is True
 
-        await delete_allowed_origin(id=origin_id, container=container)
+    async def test_returns_inactive_when_no_hash(self):
+        tenant_id = uuid.uuid4()
+        repo = AsyncMock()
+        repo.get_token_hash.return_value = (True, None)
+        container, _ = _scim_container(repo)
 
-        policy_service.invalidate_tenant_origin_cache.assert_not_called()
+        status = await get_scim_token_status(tenant_id=tenant_id, container=container)
+
+        assert status.is_active is False
+
+    async def test_raises_404_for_unknown_tenant(self):
+        tenant_id = uuid.uuid4()
+        repo = AsyncMock()
+        repo.get_token_hash.return_value = (False, None)
+        container, _ = _scim_container(repo)
+
+        with pytest.raises(NotFoundException):
+            await get_scim_token_status(tenant_id=tenant_id, container=container)
+
+
+class TestDeleteScimToken:
+    async def test_revokes_token_for_existing_tenant(self):
+        tenant_id = uuid.uuid4()
+        repo = AsyncMock()
+        repo.tenant_exists.return_value = True
+        container, audit = _scim_container(repo)
+
+        result = await delete_scim_token(tenant_id=tenant_id, container=container)
+
+        assert result is None
+        repo.set_token_hash.assert_awaited_once_with(tenant_id, None)
+        audit.log.assert_called_once()
+
+    async def test_raises_404_for_unknown_tenant(self):
+        tenant_id = uuid.uuid4()
+        repo = AsyncMock()
+        repo.tenant_exists.return_value = False
+        container, _ = _scim_container(repo)
+
+        with pytest.raises(NotFoundException):
+            await delete_scim_token(tenant_id=tenant_id, container=container)

@@ -5,6 +5,7 @@
   import DashboardTile from "./DashboardTile.svelte";
   import DashboardAppTile from "./DashboardAppTile.svelte";
   import type { Dashboard } from "@intric/intric-js";
+  import { m } from "$lib/paraglide/messages";
 
   type SpaceDashboard = Dashboard["spaces"]["items"][number];
 
@@ -40,7 +41,7 @@
         {...$trigger(`${space.id}-assistants`)}
         use:trigger
       >
-        <span>Assistants ({allAssistants.length})</span>
+        <span>{m.dashboard_assistants_count({ count: allAssistants.length })}</span>
         <IconChevronRight
           class={$isSelected(`${space.id}-assistants`)
             ? "h-4 w-4 rotate-90 transition-all"
@@ -71,7 +72,7 @@
         {...$trigger(`${space.id}-apps`)}
         use:trigger
       >
-        <span>Apps ({space.applications?.apps.count ?? 0})</span>
+        <span>{m.dashboard_apps_count({ count: space.applications?.apps.count ?? 0 })}</span>
         <IconChevronRight
           class={$isSelected(`${space.id}-apps`)
             ? "h-4 w-4 rotate-90 transition-all"

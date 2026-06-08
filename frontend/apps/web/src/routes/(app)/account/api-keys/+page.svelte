@@ -12,6 +12,8 @@
   import { Key, AlertCircle, RefreshCw, Search, X, ShieldAlert } from "lucide-svelte";
   import ExpiringKeysBanner from "$lib/features/api-keys/ExpiringKeysBanner.svelte";
   import NotificationPreferences from "$lib/features/api-keys/NotificationPreferences.svelte";
+  import ApiKeyStateFilter from "$lib/features/api-keys/ApiKeyStateFilter.svelte";
+  import type { ApiKeyStateFilterValue } from "$lib/features/api-keys/apiKeyTableUtils";
   import type { ExpiringKeyDisplayItem } from "$lib/features/api-keys/expirationUtils";
   import { getExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -26,11 +28,13 @@
   } = getAppContext();
   const intric = getIntric();
   const { forceRefresh: forceRefreshExpiringStore } = getExpiringKeysStore();
+  const canCreateApiKeys = user.hasPermission("api_keys");
 
   let keys = $state<ApiKeyV2[]>([]);
   let loading = $state(true);
   let errorMessage = $state<string | null>(null);
   let searchQuery = $state("");
+  let stateFilter = $state<ApiKeyStateFilterValue>("active");
   let secretDialogOpen = $state(false);
   let latestSecret = $state<string | null>(null);
   let secretSource = $state<"created" | "rotated">("created");
@@ -63,7 +67,10 @@
     loading = true;
     errorMessage = null;
     try {
-      const response = await intric.apiKeys.list({ limit: 100 });
+      const response = await intric.apiKeys.list({
+        limit: 100,
+        state: stateFilter || null
+      });
       keys = response.items ?? [];
       nextCursor = response.next_cursor ?? null;
     } catch (error: unknown) {
@@ -78,7 +85,11 @@
     if (!nextCursor || loadingMore) return;
     loadingMore = true;
     try {
-      const response = await intric.apiKeys.list({ limit: 100, cursor: nextCursor });
+      const response = await intric.apiKeys.list({
+        limit: 100,
+        cursor: nextCursor,
+        state: stateFilter || null
+      });
       keys = [...keys, ...(response.items ?? [])];
       nextCursor = response.next_cursor ?? null;
     } catch (error: unknown) {
@@ -178,7 +189,7 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Account – {$userInfo.firstName}</title>
+  <title>Eneo.ai – {m.account()} – {$userInfo.firstName}</title>
 </svelte:head>
 
 <Page.Root>
@@ -214,6 +225,14 @@
               <CreateApiKeyDialog onCreated={handleCreated} />
             </div>
           </div>
+        {/if}
+
+        <!-- Permission notice -->
+        {#if !canCreateApiKeys}
+          <Alert.Root>
+            <ShieldAlert />
+            <Alert.Description>{m.api_keys_no_create_permission()}</Alert.Description>
+          </Alert.Root>
         {/if}
 
         <!-- Error Message -->
@@ -309,6 +328,11 @@
                 <CreateApiKeyDialog onCreated={handleCreated} />
               </div>
             </div>
+            <ApiKeyStateFilter
+              bind:value={stateFilter}
+              onChange={() => void loadKeys()}
+              class="mt-3"
+            />
           </div>
 
           <div class="p-4">

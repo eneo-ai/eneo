@@ -32,6 +32,7 @@
 <script lang="ts">
   import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@intric/intric-js";
   import { Tooltip } from "@intric/ui";
+  import { IconInfo } from "@intric/icons/info";
   import { m } from "$lib/paraglide/messages";
 
   export let model:
@@ -40,41 +41,57 @@
     | TranscriptionModel
     | { org: string; nickname: string; name: string; description: string };
   export let size: "card" | "table" = "table";
-  export let showTokenLimit: boolean = true;
+  /** Controls the description info-button next to the model name.
+   *
+   *  - `interactive` (default): show a tabbable button with the description.
+   *  - `non-tabbable`: show the button but skip it in tab order. Use inside
+   *    listbox/combobox options so it does not interrupt arrow-key navigation;
+   *    the description is still reachable via hover/click.
+   *  - `hidden`: omit the button entirely. Use when this component is rendered
+   *    inside another interactive element (e.g. a `<button>`) to avoid
+   *    nested-interactive-content accessibility issues.
+   */
+  export let descriptionMode: "interactive" | "non-tabbable" | "hidden" = "interactive";
 
-  // Format token limit for display (e.g., 128000 -> "128K", 1000000 -> "1M")
-  function formatTokenLimit(limit: number): string {
-    if (limit >= 1_000_000 || (limit >= 1_000 && Math.round(limit / 1_000) >= 1_000)) {
-      const val = limit / 1_000_000;
-      return `${val % 1 === 0 ? val.toFixed(0) : val.toFixed(1)}M`;
-    }
-    if (limit >= 1_000) return `${Math.round(limit / 1_000)}K`;
-    return limit.toString();
-  }
+  $: showDescriptionButton = descriptionMode !== "hidden";
+  $: descriptionTabbable = descriptionMode === "interactive";
+
+  $: displayName = "nickname" in model ? model.nickname : model.name;
+  // Description is only worth surfacing when it adds something the visible
+  // name doesn't already say.
+  $: descriptionText =
+    model.description && model.description.trim() && model.description !== displayName
+      ? model.description
+      : null;
 </script>
 
 {#if size === "card"}
   <div class="flex items-center justify-start gap-4">
     <h4 class="text-primary text-2xl leading-6 font-extrabold">
-      {"nickname" in model ? model.nickname : model.name}
+      {displayName}
     </h4>
   </div>
 {:else}
-  <div class="flex flex-col gap-0.5">
-    <Tooltip text={model.description ?? model.name}>
-      <h4 class="text-primary leading-tight">
-        {"nickname" in model ? model.nickname : model.name}
-      </h4>
-    </Tooltip>
-    {#if "nickname" in model && model.name !== model.nickname}
-      <span class="text-muted max-w-48 truncate text-xs leading-tight" title={model.name}>
-        {model.name}
-      </span>
-    {/if}
-    {#if showTokenLimit && "token_limit" in model && model.token_limit}
-      <span class="text-muted/70 text-[11px] leading-none tabular-nums">
-        {m.token_limit_context({ limit: formatTokenLimit(model.token_limit) })}
-      </span>
+  <div class="flex items-center gap-1.5">
+    <h4 class="text-primary leading-tight">
+      {displayName}
+    </h4>
+    {#if showDescriptionButton && descriptionText}
+      <Tooltip text={descriptionText} asFragment let:trigger>
+        {@const tooltipTrigger = trigger[0]}
+        <button
+          type="button"
+          {...tooltipTrigger}
+          use:tooltipTrigger.action
+          aria-label={m.show_model_info()}
+          tabindex={descriptionTabbable ? 0 : -1}
+          on:click|stopPropagation
+          on:pointerdown|stopPropagation
+          class="text-secondary hover:text-primary focus-visible:ring-default focus-visible:ring-offset-primary inline-flex shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+        >
+          <IconInfo class="size-4" />
+        </button>
+      </Tooltip>
     {/if}
   </div>
 {/if}

@@ -46,7 +46,7 @@
 </script>
 
 <svelte:head>
-  <title>Eneo.ai – Admin – {data.assistant.name} – {m.insights()}</title>
+  <title>Eneo.ai – {m.admin()} – {data.assistant.name} – {m.insights()}</title>
 </svelte:head>
 
 <Page.Root>
