@@ -23,6 +23,7 @@ from intric.scim.domain.errors import (
     ScimUserNotFoundError,
     ScimValidationError,
 )
+from intric.scim.openapi import scim_responses
 from intric.scim.schemas.bulk import (
     BulkOperation,
     BulkOperationResponse,
@@ -90,7 +91,12 @@ def _scim_error_response(
     )
 
 
-@router.post("/Bulk")
+@router.post(
+    "/Bulk",
+    description="Process multiple SCIM provisioning operations in one request.",
+    responses=scim_responses(400, 401, 413, 500),
+    response_model=BulkResponse,
+)
 async def bulk_operations(
     request: Request,
     payload: BulkRequest,

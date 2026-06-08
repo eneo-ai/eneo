@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from check_route_metadata import is_router_file_path
+from check_route_metadata import contains_route_decorator
 
 ENV_PATH_RE = re.compile(r"(^|/)\.env(\.[^/]+)?$")
 SAFE_ENV_TEMPLATE_RE = re.compile(
@@ -119,7 +119,11 @@ def main() -> int:
             )
             break
 
-    if any(path.startswith("backend/src/") and is_router_file_path(path) for path in paths):
+    if any(
+        path.startswith("backend/src/")
+        and contains_route_decorator(repo_root / path)
+        for path in paths
+    ):
         warnings.append(
             "Backend route files are staged. Verify OpenAPI docs (`description=`, `responses=`, `response_model=`) before push."
         )

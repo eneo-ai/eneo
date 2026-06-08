@@ -196,6 +196,17 @@ jobs:
       - name: Run developer-tooling tests
         run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 
+  route-metadata:
+    name: Route metadata
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check all HTTP route decorators
+        run: python3 scripts/check_route_metadata.py --repo-root . --all
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
@@ -622,6 +633,7 @@ jobs:
       - backend-quality
       - backend-tests
       - script-tests
+      - route-metadata
       - frontend
       - schema-drift
       - docker-builds
@@ -633,6 +645,7 @@ jobs:
           BACKEND_QUALITY_RESULT: ${{ needs.backend-quality.result }}
           BACKEND_TESTS_RESULT: ${{ needs.backend-tests.result }}
           SCRIPT_TESTS_RESULT: ${{ needs.script-tests.result }}
+          ROUTE_METADATA_RESULT: ${{ needs.route-metadata.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           SCHEMA_DRIFT_RESULT: ${{ needs.schema-drift.result }}
           DOCKER_BUILDS_RESULT: ${{ needs.docker-builds.result }}
@@ -658,6 +671,7 @@ jobs:
           check_result "Backend quality" "$BACKEND_QUALITY_RESULT"
           check_result "Backend tests" "$BACKEND_TESTS_RESULT"
           check_result "Script tests" "$SCRIPT_TESTS_RESULT"
+          check_result "Route metadata" "$ROUTE_METADATA_RESULT"
           check_result "Frontend" "$FRONTEND_RESULT"
           check_result "Schema drift" "$SCHEMA_DRIFT_RESULT"
           check_result "Docker builds" "$DOCKER_BUILDS_RESULT"

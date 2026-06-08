@@ -6858,7 +6858,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Healthz */
+    /**
+     * Get Healthz
+     * @description Report backend and worker health for deployment probes.
+     */
     get: operations["get_healthz_api_healthz_get"];
     put?: never;
     post?: never;
@@ -6877,12 +6880,7 @@ export interface paths {
     };
     /**
      * Crawler Health
-     * @description Detailed crawler diagnostics. NOT for K8s probes.
-     *
-     *     Public endpoint - no auth required. Shows only job counts and tenant IDs.
-     *
-     *     Args:
-     *         include_all: If True, return all tenant queue lengths instead of top-10.
+     * @description Get detailed crawler queue and worker diagnostics.
      */
     get: operations["crawler_health_api_healthz_crawler_get"];
     put?: never;
@@ -6900,7 +6898,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Version */
+    /**
+     * Get Version
+     * @description Get the running backend version.
+     */
     get: operations["get_version_version_get"];
     put?: never;
     post?: never;
@@ -32190,6 +32191,15 @@ export interface operations {
           "application/json": components["schemas"]["AuditConfigResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   update_audit_config_api_v1_audit_config_patch: {
@@ -32212,6 +32222,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AuditConfigResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -32243,6 +32271,15 @@ export interface operations {
           "application/json": components["schemas"]["ActionConfigResponse"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   update_action_config_api_v1_audit_config_actions_patch: {
@@ -32265,6 +32302,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ActionConfigResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -36308,7 +36363,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description OpenAPI specification */
       200: {
         headers: {
           [name: string]: unknown;
@@ -36663,7 +36718,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Backend and worker are healthy */
       200: {
         headers: {
           [name: string]: unknown;
@@ -36671,6 +36726,13 @@ export interface operations {
         content: {
           "application/json": unknown;
         };
+      };
+      /** @description Worker health check failed */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };
@@ -36685,7 +36747,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Crawler diagnostics */
       200: {
         headers: {
           [name: string]: unknown;
@@ -36714,7 +36776,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Successful Response */
+      /** @description Backend version */
       200: {
         headers: {
           [name: string]: unknown;
