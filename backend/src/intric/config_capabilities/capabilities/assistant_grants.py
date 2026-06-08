@@ -34,6 +34,10 @@ class SetKnowledgeInput(BaseModel):
             "leave unchanged, [] to clear. May coexist with collections/websites."
         ),
     )
+    integration_knowledge_ids: Optional[list[UUID]] = Field(
+        default=None,
+        description="Integration-knowledge ids to attach; omit to leave unchanged.",
+    )
 
 
 async def _set_knowledge(ctx: CapabilityContext, inp: BaseModel) -> CapabilityResult:
@@ -42,9 +46,11 @@ async def _set_knowledge(ctx: CapabilityContext, inp: BaseModel) -> CapabilityRe
         data.collection_ids is None
         and data.website_ids is None
         and data.mcp_server_ids is None
+        and data.integration_knowledge_ids is None
     ):
         raise ValueError(
-            "Provide at least one of collections, websites, or MCP servers."
+            "Provide at least one of collections, websites, MCP servers, or "
+            "integration knowledge."
         )
 
     update_kwargs: dict[str, Any] = {}
@@ -58,6 +64,9 @@ async def _set_knowledge(ctx: CapabilityContext, inp: BaseModel) -> CapabilityRe
     if data.mcp_server_ids is not None:
         update_kwargs["mcp_server_ids"] = data.mcp_server_ids
         parts.append(f"{len(data.mcp_server_ids)} MCP server(s)")
+    if data.integration_knowledge_ids is not None:
+        update_kwargs["integration_knowledge_ids"] = data.integration_knowledge_ids
+        parts.append(f"{len(data.integration_knowledge_ids)} integration source(s)")
 
     await ctx.container.assistant_service().update_assistant(
         assistant_id=ctx.assistant_id, **update_kwargs
@@ -84,5 +93,6 @@ register(
         audit_entity=EntityType.ASSISTANT,
         confirm_summary_en="update the assistant's knowledge",
         confirm_summary_sv="uppdatera assistentens kunskap",
+        form_renderable=True,
     )
 )
