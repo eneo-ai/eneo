@@ -13465,6 +13465,7 @@ export interface components {
      */
     Permission:
       | "assistants"
+      | "personal_chat"
       | "group_chats"
       | "apps"
       | "services"

@@ -959,6 +959,8 @@
   "personal_assistant_welcome": "Välkommen till Eneo. Jag är din personliga assistent och redo att hjälpa. Ställ en fråga för att komma igång.",
   "hi_firstname": "Hej, {firstName}!",
   "personal_assistant": "Personlig assistent",
+  "personal_chat_no_access_title": "Du har inte åtkomst till den personliga chatten",
+  "personal_chat_no_access_description": "Ditt konto saknar behörighet att använda den personliga chatten ännu. Kontakta din administratör för att få åtkomst.",
   "edit_file": "Redigera fil",
   "enter_new_file_name": "Ange nytt filnamn:",
   "could_not_change_title_to": "Kunde inte ändra titel till {title}",

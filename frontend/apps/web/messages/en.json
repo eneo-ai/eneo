@@ -976,6 +976,8 @@
   "personal_assistant_welcome": "Welcome to Eneo. I'm your personal assistant and ready to help. Ask me a question to get started.",
   "hi_firstname": "Hi, {firstName}!",
   "personal_assistant": "Personal assistant",
+  "personal_chat_no_access_title": "You don't have access to the personal chat",
+  "personal_chat_no_access_description": "Your account doesn't have permission to use the personal chat yet. Contact your administrator to get access.",
   "edit_file": "Edit file",
   "enter_new_file_name": "Enter new file name:",
   "could_not_change_title_to": "Could not change title to {title}",

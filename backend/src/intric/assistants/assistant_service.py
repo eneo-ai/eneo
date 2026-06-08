@@ -359,7 +359,20 @@ class AssistantService:
 
         assistant = space.get_assistant(assistant_id=assistant_id)
 
-        if not actor.can_edit_assistants():
+        # The personal chat is the personal space's default assistant — editing it
+        # (e.g. the global model picker) is gated by PERSONAL_CHAT via
+        # can_edit_default_assistant, not ASSISTANTS, matching the read/use paths.
+        is_personal_default = (
+            space.is_personal()
+            and space.default_assistant is not None
+            and assistant.id == space.default_assistant.id
+        )
+        can_edit = (
+            actor.can_edit_default_assistant()
+            if is_personal_default
+            else actor.can_edit_assistants()
+        )
+        if not can_edit:
             raise UnauthorizedException(
                 "You do not have permission to edit assistants in this space.",
                 code="forbidden_action",
@@ -534,7 +547,20 @@ class AssistantService:
         assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
-        if not actor.can_read_assistants():
+        # The personal chat is the personal space's default assistant — it is
+        # gated by PERSONAL_CHAT (via can_read_default_assistant), not ASSISTANTS,
+        # so a baseline role can use the chat without managing assistants.
+        is_personal_default = (
+            space.is_personal()
+            and space.default_assistant is not None
+            and assistant.id == space.default_assistant.id
+        )
+        can_read = (
+            actor.can_read_default_assistant()
+            if is_personal_default
+            else actor.can_read_assistants()
+        )
+        if not can_read:
             raise UnauthorizedException(
                 "You do not have permission to read assistants in this space.",
                 code="forbidden_action",
@@ -1014,7 +1040,20 @@ class AssistantService:
         active_assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
-        if not actor.can_read_assistant(assistant=active_assistant):
+        # The personal chat is the personal space's default assistant — gated by
+        # PERSONAL_CHAT (via can_read_default_assistant), not ASSISTANTS, so a
+        # baseline role can chat without managing assistants.
+        is_personal_default = (
+            space.is_personal()
+            and space.default_assistant is not None
+            and active_assistant.id == space.default_assistant.id
+        )
+        can_use = (
+            actor.can_read_default_assistant()
+            if is_personal_default
+            else actor.can_read_assistant(assistant=active_assistant)
+        )
+        if not can_use:
             raise UnauthorizedException(
                 "You do not have permission to use this assistant.",
                 code="forbidden_action",
