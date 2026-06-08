@@ -258,7 +258,7 @@ async def _authorize_session_access(container: Container, session: SessionInDB) 
     "/",
     description="Chat with an assistant or group chat; starts or continues a conversation and streams the response as Server-Sent Events when stream is true.",
     responses=responses.streaming_response(
-        response_codes=[400, 404],
+        response_codes=[400, 403, 404],
         models=[
             SSEText,
             SSEIntricEvent,

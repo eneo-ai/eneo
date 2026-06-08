@@ -1253,7 +1253,7 @@ async def publish_assistant(
     "/{id}/mcp-servers/",
     response_model=None,
     description="Get all MCP servers associated with an assistant.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def get_assistant_mcp_servers(
     id: UUID,
@@ -1282,7 +1282,7 @@ async def get_assistant_mcp_servers(
     "/{id}/mcp-servers/{mcp_server_id}/",
     response_model=None,
     description="Add an MCP server to an assistant.",
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def add_mcp_to_assistant(
     id: UUID,
@@ -1326,7 +1326,7 @@ async def add_mcp_to_assistant(
     "/{id}/mcp-servers/{mcp_server_id}/",
     status_code=204,
     description="Remove an MCP server from an assistant.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def remove_mcp_from_assistant(
     id: UUID,
