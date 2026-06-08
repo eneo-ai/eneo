@@ -113,6 +113,27 @@ export function initAssistants(client) {
     },
 
     /**
+     * Commit several assistant-config capabilities atomically. Routes the edit through
+     * the SAME capability handlers the chat plane runs via the loopback config-MCP, so
+     * permission + audit are shared. Any failure rolls back the whole batch.
+     * @param {Object} params
+     * @param {{id: string} | Assistant} params.assistant The assistant to configure
+     * @param {Array<{capability_id: string, input: Record<string, unknown>}>} params.items Ordered capability calls
+     * @param {string} [params.language] UI locale (e.g. "sv"/"en")
+     * @returns {Promise<Assistant>} The assistant after all changes are applied
+     * @throws {IntricError}
+     * */
+    commitConfigCapabilities: async ({ assistant, items, language }) => {
+      const { id } = assistant;
+      const res = await client.fetch("/api/v1/assistants/{id}/config/capabilities/batch/", {
+        method: "post",
+        params: { path: { id } },
+        requestBody: { "application/json": { items, language } }
+      });
+      return res;
+    },
+
+    /**
      * Delete a specific assistant.
      * @param  {{id: string} | Assistant} assistant assistant
      * @returns {Promise<true>} true on success, otherwise throws
