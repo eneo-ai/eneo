@@ -674,7 +674,11 @@ async def get_user_logs(
 @router.get(
     "/logs/export",
     response_model=None,
-    description="Export audit logs to CSV or JSON Lines format.",
+    description=(
+        "Export audit logs to CSV or JSON Lines format. Default limit is 50,000 "
+        "records (configurable via max_records, max 100,000); the response includes "
+        "an X-Records-Truncated header when the limit is hit."
+    ),
     responses=responses.get_responses([403, 413]),
 )
 async def export_audit_logs(
@@ -906,8 +910,12 @@ async def export_audit_logs(
 @router.post(
     "/logs/export/async",
     response_model=ExportJobResponse,
-    description="Request an async background export of audit logs and receive a job ID.",
-    responses=responses.get_responses([403, 422, 429]),
+    description=(
+        "Request an async background export of audit logs and receive a job ID. "
+        "Limited to 2 concurrent exports per tenant; generated files are "
+        "auto-deleted after 24 hours."
+    ),
+    responses=responses.get_responses([403, 429]),
 )
 async def request_async_export(
     request: ExportJobRequest,
@@ -1091,7 +1099,10 @@ async def get_export_status(
 @router.get(
     "/logs/export/{job_id}/download",
     response_model=None,
-    description="Download the completed export file for an async export job.",
+    description=(
+        "Download the completed export file for an async export job. "
+        "Files are auto-deleted after 24 hours."
+    ),
     responses=responses.get_responses([400, 403, 404]),
 )
 async def download_export(

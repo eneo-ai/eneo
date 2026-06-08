@@ -5047,7 +5047,7 @@ export interface paths {
     };
     /**
      * Export Audit Logs
-     * @description Export audit logs to CSV or JSON Lines format.
+     * @description Export audit logs to CSV or JSON Lines format. Default limit is 50,000 records (configurable via max_records, max 100,000); the response includes an X-Records-Truncated header when the limit is hit.
      */
     get: operations["export_audit_logs_api_v1_audit_logs_export_get"];
     put?: never;
@@ -5069,7 +5069,7 @@ export interface paths {
     put?: never;
     /**
      * Request Async Export
-     * @description Request an async background export of audit logs and receive a job ID.
+     * @description Request an async background export of audit logs and receive a job ID. Limited to 2 concurrent exports per tenant; generated files are auto-deleted after 24 hours.
      */
     post: operations["request_async_export_api_v1_audit_logs_export_async_post"];
     delete?: never;
@@ -5107,7 +5107,7 @@ export interface paths {
     };
     /**
      * Download Export
-     * @description Download the completed export file for an async export job.
+     * @description Download the completed export file for an async export job. Files are auto-deleted after 24 hours.
      */
     get: operations["download_export_api_v1_audit_logs_export__job_id__download_get"];
     put?: never;
@@ -27137,6 +27137,24 @@ export interface operations {
           "application/json": components["schemas"]["UserGroupPublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -27212,6 +27230,33 @@ export interface operations {
           "application/json": components["schemas"]["UserGroupPublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -27250,6 +27295,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["UserGroupPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -27293,6 +27347,24 @@ export interface operations {
           "application/json": components["schemas"]["UserGroupPublic"];
         };
       };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
         headers: {
@@ -27332,6 +27404,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["UserGroupPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -32613,13 +32694,13 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Validation Error */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["GeneralError"];
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
       /** @description Too Many Requests */

@@ -51,7 +51,7 @@ async def get_user_group_by_uuid(
     "/",
     response_model=UserGroupPublic,
     description="Create a new user group.",
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([400, 403]),
 )
 async def create_user_group(
     user_group: UserGroupCreateRequest,
@@ -65,7 +65,7 @@ async def create_user_group(
     "/{id}/",
     response_model=UserGroupPublic,
     description="Update an existing user group by id.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([400, 401, 403, 404]),
 )
 async def update_user_group(
     id: UUID,
@@ -82,7 +82,7 @@ async def update_user_group(
     "/{id}/",
     response_model=UserGroupPublic,
     description="Delete a user group by id.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def delete_user_group_by_uuid(
     id: UUID,
@@ -96,7 +96,7 @@ async def delete_user_group_by_uuid(
     "/{id}/users/{user_id}/",
     response_model=UserGroupPublic,
     description="Add a user to a user group.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([401, 403, 404]),
 )
 async def add_user_to_user_group(
     id: UUID,
@@ -111,7 +111,7 @@ async def add_user_to_user_group(
     "/{id}/users/{user_id}/",
     response_model=UserGroupPublic,
     description="Remove a user from a user group.",
-    responses=responses.get_responses([404]),
+    responses=responses.get_responses([403, 404]),
 )
 async def delete_user_from_user_group(
     id: UUID,
