@@ -11,7 +11,7 @@ from intric.main.logging import get_logger
 from intric.main.models import PaginatedResponse
 from intric.roles.permissions import Permission, validate_permission
 from intric.server.dependencies.container import get_container
-from intric.server.protocol import to_paginated_response
+from intric.server.protocol import responses, to_paginated_response
 from intric.settings import settings_factory
 from intric.settings.setting_service import SettingService
 from intric.settings.settings import (
@@ -240,6 +240,7 @@ async def update_api_key_expiry_notifications_setting(
 @settings_admin_router.patch(
     "/edit-mode",
     response_model=SettingsPublic,
+    responses=responses.get_responses([403]),
     summary="Toggle the edit-mode (configure-by-chat) feature",
     description="""
 Enable or disable edit mode for your tenant — configuring an assistant by chatting

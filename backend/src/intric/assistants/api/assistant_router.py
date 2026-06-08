@@ -685,6 +685,12 @@ class ConfigCapabilityBatch(BaseModel):
     "/{id}/config/capabilities/batch/",
     response_model=AssistantPublic,
     responses=responses.get_responses([400, 403, 404]),
+    summary="Commit assistant-config capabilities atomically",
+    description=(
+        "Apply several form-renderable config capabilities in one transaction "
+        "(shared permission + audit with the chat plane); any failure rolls back "
+        "the whole batch. Returns the assistant after all changes are applied."
+    ),
 )
 async def commit_config_capabilities(
     id: UUID,
