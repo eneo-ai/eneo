@@ -86,6 +86,7 @@ class MCPProxySession:
         self.elicitation_queue = elicitation_queue
         self.elicitation_context = elicitation_context
         self.chat_session_id = chat_session_id
+        self._db_session = db_session
         self._mcp_state_repo: ChatSessionMcpStateRepo | None = (
             ChatSessionMcpStateRepo(db_session)
             if chat_session_id is not None and db_session is not None
@@ -603,11 +604,23 @@ class MCPProxySession:
                 and assigned_id != resume_id
             ):
                 try:
-                    await self._mcp_state_repo.upsert(
-                        chat_session_id=self.chat_session_id,
-                        mcp_server_id=server_id,
-                        mcp_session_id=assigned_id,
-                    )
+                    # Savepoint so a failed best-effort persist (e.g. the ephemeral
+                    # edit-mode config server has no mcp_servers row, so its FK
+                    # upsert violates the constraint) rolls back only here and does
+                    # not poison the request transaction.
+                    if self._db_session is not None:
+                        async with self._db_session.begin_nested():
+                            await self._mcp_state_repo.upsert(
+                                chat_session_id=self.chat_session_id,
+                                mcp_server_id=server_id,
+                                mcp_session_id=assigned_id,
+                            )
+                    else:
+                        await self._mcp_state_repo.upsert(
+                            chat_session_id=self.chat_session_id,
+                            mcp_server_id=server_id,
+                            mcp_session_id=assigned_id,
+                        )
                 except Exception as exc:
                     logger.warning(
                         "[MCPProxy] Failed to persist mcp_session_id for "
