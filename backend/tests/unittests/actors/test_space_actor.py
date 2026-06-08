@@ -1084,3 +1084,82 @@ def test_viewer_without_shared_spaces_has_no_org_space_access(
         )
         is False
     )
+
+
+# Resource tenant-permission gate applies to shared spaces too — regression
+# guard for the bug where the gate was scoped to `is_personal()` only, letting
+# any EDITOR/ADMIN member create websites in a shared space even when their
+# role lacked the `websites` tenant permission (fixed in #348). READ stays
+# exempt so distributed knowledge remains visible.
+
+
+def _permissions_without_websites():
+    return {p for p in ALL_PERMISSIONS if p != Permission.WEBSITES}
+
+
+def test_editor_without_websites_cannot_create_website_in_shared_space(
+    shared_space: MockSpace,
+):
+    user = MockUser(
+        id=50,
+        role=MockSpaceRole.EDITOR,
+        permissions=_permissions_without_websites(),
+    )
+    shared_space.members = {user.id: user}
+    actor = SpaceActor(user, shared_space)
+    assert actor.can_create_websites() is False
+
+
+def test_admin_without_websites_cannot_create_website_in_shared_space(
+    shared_space: MockSpace,
+):
+    user = MockUser(
+        id=51,
+        role=MockSpaceRole.ADMIN,
+        permissions=_permissions_without_websites(),
+    )
+    shared_space.members = {user.id: user}
+    actor = SpaceActor(user, shared_space)
+    assert actor.can_create_websites() is False
+    assert actor.can_edit_websites() is False
+    assert actor.can_delete_websites() is False
+
+
+def test_editor_without_websites_can_still_read_websites_in_shared_space(
+    shared_space: MockSpace,
+):
+    """READ is exempt from the tenant gate so members keep seeing distributed
+    web knowledge even when their role omits the `websites` permission."""
+    user = MockUser(
+        id=52,
+        role=MockSpaceRole.EDITOR,
+        permissions=_permissions_without_websites(),
+    )
+    shared_space.members = {user.id: user}
+    actor = SpaceActor(user, shared_space)
+    assert actor.can_read_websites() is True
+
+
+def test_editor_with_websites_can_create_website_in_shared_space(
+    shared_space: MockSpace,
+):
+    """Counterpart: the gate must not over-block — an EDITOR member whose role
+    includes `websites` retains full CRUD."""
+    user = MockUser(
+        id=53,
+        role=MockSpaceRole.EDITOR,
+        permissions=ALL_PERMISSIONS,
+    )
+    shared_space.members = {user.id: user}
+    actor = SpaceActor(user, shared_space)
+    assert actor.can_create_websites() is True
+
+
+def test_owner_without_websites_cannot_create_website_in_personal_space(
+    personal_space: MockSpace,
+):
+    """The same tenant gate also covers personal spaces."""
+    owner = MockUser(id=54, permissions=_permissions_without_websites())
+    personal_space.user_id = owner.id
+    actor = SpaceActor(owner, personal_space)
+    assert actor.can_create_websites() is False
