@@ -22,7 +22,12 @@ from intric.users.user import UserInDB
 router = APIRouter()
 
 
-@router.get("/", response_model=PaginatedResponse[EmbeddingModelPublic])
+@router.get(
+    "/",
+    response_model=PaginatedResponse[EmbeddingModelPublic],
+    description="List all embedding models for the tenant.",
+    responses=responses.get_responses([]),
+)
 async def get_embedding_models(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -58,6 +63,7 @@ async def get_embedding_model(
 @router.post(
     "/{id}/",
     response_model=EmbeddingModelPublic,
+    description="Update an embedding model's settings.",
     responses=responses.get_responses([404]),
 )
 async def update_embedding_model(

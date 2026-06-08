@@ -2978,7 +2978,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Completion Models */
+    /**
+     * Get Completion Models
+     * @description List all completion models available to the organization.
+     */
     get: operations["get_completion_models_api_v1_completion_models__get"];
     put?: never;
     post?: never;
@@ -2997,7 +3000,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Update Completion Model */
+    /**
+     * Update Completion Model
+     * @description Update org-level settings for a completion model.
+     */
     post: operations["update_completion_model_api_v1_completion_models__id___post"];
     delete?: never;
     options?: never;
@@ -3076,12 +3082,7 @@ export interface paths {
     put?: never;
     /**
      * Migrate Model Usage
-     * @description Migrate all usage from one model to another.
-     *
-     *     Source/target validity, same-model rejection, tenant ownership and
-     *     entity-type whitelisting all live in
-     *     `CompletionModelMigrationService.migrate_model_usage` — the router
-     *     only enforces admin permission and persists the audit log on success.
+     * @description Migrate all usage from one completion model to another.
      */
     post: operations["migrate_model_usage_api_v1_completion_models__model_id__migrate_post"];
     delete?: never;
@@ -3099,7 +3100,7 @@ export interface paths {
     };
     /**
      * Get All Models Usage Summary
-     * @description Get usage summary for all models (optimized with pre-aggregation).
+     * @description Get a usage summary for all completion models in the tenant.
      */
     get: operations["get_all_models_usage_summary_api_v1_completion_models_usage_summary_get"];
     put?: never;
@@ -3139,7 +3140,7 @@ export interface paths {
     };
     /**
      * Get All Migration History
-     * @description Get all migration history for the tenant
+     * @description Get all completion model migration history for the tenant.
      */
     get: operations["get_all_migration_history_api_v1_completion_models_migration_history_get"];
     put?: never;
@@ -3177,7 +3178,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Embedding Models */
+    /**
+     * Get Embedding Models
+     * @description List all embedding models for the tenant.
+     */
     get: operations["get_embedding_models_api_v1_embedding_models__get"];
     put?: never;
     post?: never;
@@ -3197,7 +3201,10 @@ export interface paths {
     /** Get Embedding Model */
     get: operations["get_embedding_model_api_v1_embedding_models__id___get"];
     put?: never;
-    /** Update Embedding Model */
+    /**
+     * Update Embedding Model
+     * @description Update an embedding model's settings.
+     */
     post: operations["update_embedding_model_api_v1_embedding_models__id___post"];
     delete?: never;
     options?: never;
@@ -3212,7 +3219,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Transcription Models */
+    /**
+     * Get Transcription Models
+     * @description List all transcription models for the tenant.
+     */
     get: operations["get_transcription_models_api_v1_transcription_models__get"];
     put?: never;
     post?: never;
@@ -3231,7 +3241,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Update Transcription Model */
+    /**
+     * Update Transcription Model
+     * @description Update org settings for a transcription model.
+     */
     post: operations["update_transcription_model_api_v1_transcription_models__id___post"];
     delete?: never;
     options?: never;
@@ -3413,10 +3426,6 @@ export interface paths {
     /**
      * Get Provider Capabilities
      * @description Get supported model types and top models per provider type from LiteLLM.
-     *
-     *     Returns a structured response with:
-     *     - providers: dict of canonical provider types, each with modes, models, and fields
-     *     - default_fields: fallback field definitions for providers without custom fields
      */
     get: operations["get_provider_capabilities_api_v1_admin_model_providers_capabilities__get"];
     put?: never;
@@ -3492,8 +3501,6 @@ export interface paths {
     /**
      * Delete Provider
      * @description Delete a model provider.
-     *
-     *     Will fail if the provider has models attached to it.
      */
     delete: operations["delete_provider_api_v1_admin_model_providers__provider_id___delete"];
     options?: never;
@@ -3511,12 +3518,6 @@ export interface paths {
     /**
      * List Provider Models
      * @description List available models from the provider's API using its credentials.
-     *
-     *     Each entry has at least ``name`` and ``mode``. Completion entries also
-     *     include ``max_input_tokens``, ``max_output_tokens`` and ``supports_*``
-     *     flags; embedding entries include ``max_input_tokens`` and
-     *     ``output_vector_size``. When ``mode`` is supplied the server returns
-     *     only matching entries — consumers don't need to filter client-side.
      */
     get: operations["list_provider_models_api_v1_admin_model_providers__provider_id__models__get"];
     put?: never;
@@ -28242,6 +28243,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ModelProviderPublic"][];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

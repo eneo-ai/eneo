@@ -70,7 +70,9 @@ def get_pagination_query(request: Request) -> PaginationQuery:
 
 @router.get(
     "/",
+    description="List all completion models available to the organization.",
     response_model=PaginatedResponse[CompletionModelPublic],
+    responses=responses.get_responses([]),
 )
 async def get_completion_models(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
@@ -88,6 +90,7 @@ async def get_completion_models(
 
 @router.post(
     "/{id}/",
+    description="Update org-level settings for a completion model.",
     response_model=CompletionModelPublic,
     responses=responses.get_responses([404]),
 )
@@ -230,6 +233,7 @@ async def validate_migration(
 
 @router.post(
     "/{model_id}/migrate",
+    description="Migrate all usage from one completion model to another.",
     response_model=MigrationResult,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -323,7 +327,9 @@ async def migrate_model_usage(
 
 @router.get(
     "/usage-summary",
+    description="Get a usage summary for all completion models in the tenant.",
     response_model=list[ModelUsageSummary],
+    responses=responses.get_responses([]),
 )
 async def get_all_models_usage_summary(
     user: Annotated[UserInDB, Depends(get_current_active_user)],
@@ -356,7 +362,9 @@ async def get_model_migration_history(
 
 @router.get(
     "/migration-history",
+    description="Get all completion model migration history for the tenant.",
     response_model=list[ModelMigrationHistory],
+    responses=responses.get_responses([]),
 )
 async def get_all_migration_history(
     query: Annotated[PaginationQuery, Depends(get_pagination_query)],

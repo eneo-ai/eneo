@@ -45,6 +45,8 @@ router = APIRouter()
 @router.get(
     "/",
     response_model=PaginatedResponse[TranscriptionModelPublic],
+    responses=responses.get_responses([]),
+    description="List all transcription models for the tenant.",
 )
 async def get_transcription_models(
     user: CurrentUser,
@@ -65,6 +67,7 @@ async def get_transcription_models(
     "/{id}/",
     response_model=TranscriptionModelPublic,
     responses=responses.get_responses([404]),
+    description="Update org settings for a transcription model.",
 )
 async def update_transcription_model(
     id: UUID,

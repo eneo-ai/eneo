@@ -81,6 +81,7 @@ def _service(
 @router.post(
     "/",
     response_model=CompletionModelPublic,
+    description="Create a new tenant-specific completion model.",
     responses=responses.get_responses([400, 404]),
 )
 async def create_tenant_completion_model(
@@ -103,6 +104,7 @@ async def create_tenant_completion_model(
 @router.put(
     "/{model_id}/",
     response_model=CompletionModelPublic,
+    description="Update a tenant-specific completion model.",
     responses=responses.get_responses([403, 404]),
 )
 async def update_tenant_completion_model(
@@ -125,6 +127,8 @@ async def update_tenant_completion_model(
 
 @router.delete(
     "/{model_id}/",
+    response_model=None,
+    description="Soft-delete a tenant-specific completion model.",
     responses=responses.get_responses([403, 404]),
 )
 async def delete_tenant_completion_model(
