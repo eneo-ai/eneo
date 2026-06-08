@@ -888,6 +888,14 @@ class AssistantService:
                                         )
                             yield chunk
 
+                        if chunk.response_type == ResponseType.ELICITATION_REQUIRED:
+                            # Surface MCP elicitation prompts (e.g. edit-mode change
+                            # confirmations) to the SSE stream. Without this the
+                            # tool's ctx.elicit() blocks forever because the user
+                            # never sees the prompt. Pure pass-through — no
+                            # accumulation needed.
+                            yield chunk
+
                     # Get the references for the whole response
                     reference_chunks = get_references(
                         response_string=response_string,
