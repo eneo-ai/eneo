@@ -33,7 +33,7 @@ ContainerDep = Annotated[Container, Depends(get_container(with_user=True))]
 @router.get(
     "/",
     response_model=PaginatedResponse[WebsitePublic],
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([410]),
     description="Deprecated: list websites. Always returns 410 Gone.",
     deprecated=True,
 )
@@ -50,7 +50,7 @@ async def get_websites(
 @router.post(
     "/",
     response_model=WebsitePublic,
-    responses=responses.get_responses([]),
+    responses=responses.get_responses([410]),
     description="Deprecated: create a website. Always returns 410 Gone.",
     deprecated=True,
 )

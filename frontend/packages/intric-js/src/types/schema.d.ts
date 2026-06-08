@@ -31059,6 +31059,15 @@ export interface operations {
           "application/json": components["schemas"]["PaginatedResponse_WebsitePublic_"];
         };
       };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -31090,6 +31099,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["WebsitePublic"];
+        };
+      };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
