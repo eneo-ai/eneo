@@ -497,7 +497,7 @@ async def validate_model(
     "/{provider_id}/",
     response_model=dict[str, str],
     description="Delete a model provider.",
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 async def delete_provider(
     provider_id: UUID,
